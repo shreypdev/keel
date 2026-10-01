@@ -177,6 +177,14 @@ a.pill:hover { color: var(--text); border-color: var(--accent-line); }
 .tok-kw { color: var(--s-kw); } .tok-str { color: var(--s-str); } .tok-num { color: var(--s-num); } .tok-ty { color: var(--s-ty); }
 .tok-attr { color: var(--s-attr); } .tok-fn { color: var(--s-fn); } .tok-com { color: var(--s-com); } .tok-dim { color: var(--text-3); } .tok-acc { color: var(--accent); }
 
+/* a collapsed block of code: a closed <details> with a button-like summary (the landing page and the reference pages) */
+.reveal-code { margin-top: 18px; }
+.reveal-code > summary { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; padding: 10px 16px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--text); font-weight: 500; font-size: .95rem; transition: border-color .15s, background .15s; }
+.reveal-code > summary::-webkit-details-marker { display: none; }
+.reveal-code > summary::before { content: ""; width: 7px; height: 7px; border-right: 1.6px solid var(--accent); border-bottom: 1.6px solid var(--accent); transform: rotate(-45deg); transition: transform .2s; }
+.reveal-code[open] > summary::before { transform: rotate(45deg); }
+.reveal-code > summary:hover { border-color: var(--accent-line); background: var(--surface-2); }
+
 /* tabs: pills, roving tabindex (markup built by site.js) */
 .tablist { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .tablist::-webkit-scrollbar { display: none; }

@@ -1,0 +1,931 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swift reference · Undra docs</title>
+<meta name="description" content="Every declaration Undra generates for Swift from the playground: types, errors, objects, stores, queries and ports, with their docs.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/reference/swift.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Swift reference · Undra docs">
+<meta property="og:description" content="Every declaration Undra generates for Swift from the playground: types, errors, objects, stores, queries and ports, with their docs.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/reference/swift.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Swift reference · Undra docs">
+<meta name="twitter:description" content="Every declaration Undra generates for Swift from the playground: types, errors, objects, stores, queries and ports, with their docs.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/reference/swift.html#article","headline":"Swift reference · Undra docs","description":"Every declaration Undra generates for Swift from the playground: types, errors, objects, stores, queries and ports, with their docs.","url":"https://shreypdev.github.io/undra/reference/swift.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Swift reference","item":"https://shreypdev.github.io/undra/reference/swift.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+<!-- reference:start -->
+<p class="crumb">API reference</p>
+<h1>Swift reference</h1>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x04d2adf769c58b9f</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
+<p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
+<h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">A struct for each record, an enum for each enum, with the wire codec beside it.</p>
+<p class="ref-names"><code>Composite</code> <code>Item</code> <code>Primitives</code> <code>ProbeCounters</code> <code>RemoteConfig</code> <code>RemoteTodo</code> <code>Todo</code> <code>Figure</code> <code>Filter</code> <code>Parity</code> <code>StressMode</code> <code>QueryStatus</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>240 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Types.swift" rel="noopener">Types.swift</a></span></div><pre><code data-lang="swift">/// A record that nests the other kinds: lists, options, maps, enums with data and a map with
+/// integer keys.
+public struct Composite: UndraRecord, Sendable, Hashable {
+    /// A name.
+    public var name: String
+    /// Several strings.
+    public var tags: [String]
+    /// Maybe a figure.
+    public var figure: Figure?
+    /// Figures, in order.
+    public var history: [Figure]
+    /// A map keyed by string.
+    public var scores: [String: Int32]
+    /// A map keyed by integer.
+    public var names: [UInt32: String]
+    /// Maybe a number.
+    public var limit: UInt32?
+
+    public init(
+        name: String,
+        tags: [String],
+        figure: Figure?,
+        history: [Figure],
+        scores: [String: Int32],
+        names: [UInt32: String],
+        limit: UInt32?
+    )
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; Composite
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// One row of a list, identified by `id`.
+public struct Item: UndraRecord, Sendable, Hashable, Codable {
+    /// Identity of the row; lists are patched by it, never by position.
+    public var id: UInt32
+    /// The text of the row.
+    public var label: String
+    /// How many times the row was updated.
+    public var version: UInt32
+
+    public init(id: UInt32, label: String, version: UInt32)
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; Item
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// One value of every primitive the wire has, so a single call covers them all.
+public struct Primitives: UndraRecord, Sendable, Hashable {
+    /// A boolean.
+    public var flag: Bool
+    /// An `i8`.
+    public var tiny: Int8
+    /// An `i16`.
+    public var small: Int16
+    /// An `i32`.
+    public var int: Int32
+    /// An `i64`: a `bigint` in TypeScript.
+    public var long: Int64
+    /// A `u8`.
+    public var byte: UInt8
+    /// A `u16`.
+    public var word: UInt16
+    /// A `u32`.
+    public var dword: UInt32
+    /// A `u64`: a `bigint` in TypeScript.
+    public var qword: UInt64
+    /// An `f32`.
+    public var single: Float
+    /// An `f64`.
+    public var double: Double
+    /// A string, UTF-8 on the wire.
+    public var text: String
+    /// Raw bytes.
+    public var blob: [UInt8]
+    /// A span of time, whole nanoseconds on the wire.
+    public var span: Duration
+    /// A moment, milliseconds since the Unix epoch on the wire.
+    public var at: Date
+    /// A UUID, sixteen bytes on the wire.
+    public var id: UUID
+
+    public init(
+        flag: Bool,
+        tiny: Int8,
+        small: Int16,
+        int: Int32,
+        long: Int64,
+        byte: UInt8,
+        word: UInt16,
+        dword: UInt32,
+        qword: UInt64,
+        single: Float,
+        double: Double,
+        text: String,
+        blob: [UInt8],
+        span: Duration,
+        at: Date,
+        id: UUID
+    )
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; Primitives
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// What a [`Probe`] has seen.
+public struct ProbeCounters: UndraRecord, Sendable, Hashable, Codable {
+    /// Calls that started running in the core.
+    public var started: UInt32
+    /// Calls that ran to the end.
+    public var completed: UInt32
+    /// Calls the core dropped before they ended, because the platform cancelled them.
+    public var cancelled: UInt32
+    /// Items the core produced for streams (whether or not the platform has read them yet).
+    public var produced: UInt32
+
+    public init(started: UInt32, completed: UInt32, cancelled: UInt32, produced: UInt32)
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; ProbeCounters
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// Where the server is: what an app supplies once, at start-up.
+public struct RemoteConfig: UndraRecord, Sendable, Hashable, Codable {
+    /// The server's address without a trailing slash, such as `https://api.example.com`.
+    public var baseUrl: String
+
+    public init(baseUrl: String)
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; RemoteConfig
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// One to-do item on the server.
+public struct RemoteTodo: UndraRecord, Sendable, Hashable, Codable {
+    /// The server's identity of the item. An item that is only shown optimistically, and that the
+    /// server has not answered for yet, has an identity counting down from `u32::MAX`.
+    public var id: UInt32
+    /// What has to be done.
+    public var title: String
+    /// Whether it is finished.
+    public var done: Bool
+
+    public init(id: UInt32, title: String, done: Bool)
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; RemoteTodo
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// One item of the to-do list.
+public struct Todo: UndraRecord, Sendable, Hashable, Codable {
+    /// Identity of the item; the list is updated by key, so the UI diffs by it.
+    public var id: UUID
+    /// What has to be done.
+    public var title: String
+    /// Whether it is finished.
+    public var done: Bool
+
+    public init(id: UUID, title: String, done: Bool)
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; Todo
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// A shape: an enum with named fields, a tuple variant and a unit variant.
+public enum Figure: UndraEnum, Sendable, Hashable {
+    /// A circle.
+    case circle(radius: Double)
+    /// A rectangle.
+    case rect(width: Double, height: Double)
+    /// A shape that is only a name.
+    case label(String)
+    /// No shape at all.
+    case empty
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; Figure
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// Which items the list shows.
+public enum Filter: UInt16, UndraEnum, CaseIterable, Sendable, Codable {
+    /// Every item.
+    case all = 0
+    /// Items that are not finished.
+    case active = 1
+    /// Items that are finished.
+    case done = 2
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; Filter
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// Whether the count is even or odd: a value derived from `count` in the core.
+public enum Parity: UInt16, UndraEnum, CaseIterable, Sendable, Codable {
+    /// The count is divisible by two.
+    case even = 0
+    /// The count is not divisible by two.
+    case odd = 1
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; Parity
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// Which signal `burst` and `start` write.
+public enum StressMode: UInt16, UndraEnum, CaseIterable, Sendable, Codable {
+    /// `value` + 1 per transaction: a firehose the platforms apply once per frame.
+    case firehose = 0
+    /// `progress` + 1 per transaction: a `no_coalesce` signal the platforms apply step by step.
+    case progress = 1
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; StressMode
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// The fetch state of a query (SPEC section 9).
+public enum QueryStatus: UInt16, UndraEnum, CaseIterable, Sendable, Codable {
+    /// No fetch has started.
+    case idle = 0
+    /// A fetch is in flight.
+    case fetching = 1
+    /// The latest fetch succeeded.
+    case success = 2
+    /// The latest fetch failed.
+    case error = 3
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; QueryStatus
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+</code></pre></div>
+</details>
+<h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">An enum for each <code>#[undra::error]</code>, conforming to <code>Error</code>.</p>
+<p class="ref-names"><code>LabError</code> <code>ListError</code> <code>RemoteError</code> <code>StressError</code> <code>TodoError</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>91 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Errors.swift" rel="noopener">Errors.swift</a></span></div><pre><code data-lang="swift">/// Why a lab call failed.
+public enum LabError: UndraError, Error, Sendable, Hashable {
+    /// Nothing was given.
+    case empty
+    /// The text is longer than `max` characters.
+    case tooLong(max: UInt32)
+    /// The text is not a number.
+    case notANumber(String)
+    /// A failure chosen by the caller.
+    case rejected(code: Int32, reason: String)
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; LabError
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+extension LabError: CustomStringConvertible, LocalizedError {
+    public var description: String
+
+    public var errorDescription: String?
+}
+
+/// Why an operation on a list was refused.
+public enum ListError: UndraError, Error, Sendable, Hashable {
+    /// A position is not in the list.
+    case outOfRange(index: UInt32, len: UInt32)
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; ListError
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+extension ListError: CustomStringConvertible, LocalizedError {
+    public var description: String
+
+    public var errorDescription: String?
+}
+
+/// Why a request to the server failed.
+public enum RemoteError: UndraError, Error, Sendable, Hashable {
+    /// [`configure_remote`] was not called.
+    case notConfigured
+    /// The `Http` port failed: no network, a timeout, a bad URL, or a cancelled request.
+    case http(HttpError)
+    /// The server answered with a status that is not a success.
+    case status(code: UInt16)
+    /// The server's answer is not the JSON this core expects.
+    case badBody(String)
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; RemoteError
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+extension RemoteError: CustomStringConvertible, LocalizedError {
+    public var description: String
+
+    public var errorDescription: String?
+}
+
+/// Why `start` refused to start.
+public enum StressError: UndraError, Error, Sendable, Hashable {
+    /// The rate is zero or above the fastest generator there is (1,000,000 updates a second).
+    case rateOutOfRange(rate: UInt32, max: UInt32)
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; StressError
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+extension StressError: CustomStringConvertible, LocalizedError {
+    public var description: String
+
+    public var errorDescription: String?
+}
+
+/// Why an item could not be added.
+public enum TodoError: UndraError, Error, Sendable, Hashable {
+    /// The title is empty once spaces are trimmed.
+    case emptyTitle
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; TodoError
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+extension TodoError: CustomStringConvertible, LocalizedError {
+    public var description: String
+
+    public var errorDescription: String?
+}
+</code></pre></div>
+</details>
+<h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
+<p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>greet</code> <code>parseCount</code> <code>ping</code> <code>setRemoteDone</code> <code>version</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>125 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Objects.swift" rel="noopener">Objects.swift</a></span></div><pre><code data-lang="swift">public final class Probe: UndraObject, @unchecked Sendable {
+    /// A probe with every counter at zero.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public convenience init(ctx: UndraCore = .shared) throws
+
+    /// What the probe has seen so far.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func counters() throws -&gt; ProbeCounters
+
+    /// Waits forever. The only way it ends is cancellation, which the `cancelled` counter shows.
+    /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public func hang() async throws -&gt; UInt32
+
+    /// Sets every counter back to zero.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func reset()
+
+    /// A stream of the numbers `0..count`, produced one per poll. The runtime sends an item only
+    /// against credit the platform granted and polls at most one item ahead of it, so `produced`
+    /// stays within one of what the platform has asked for, however large `count` is.
+    /// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
+    public func ticks(count: UInt32) -&gt; AsyncThrowingStream&lt;UInt32, Error&gt;
+
+    /// Waits `ms` milliseconds and returns it. Cancelled before that, it counts as cancelled.
+    /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public func wait(ms: UInt32) async throws -&gt; UInt32
+}
+
+/// Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments.
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func add(a: Int32, b: Int32, ctx: UndraCore = .shared) throws -&gt; Int32
+
+/// Adds two numbers after `delay_ms` milliseconds: an asynchronous call that waits on the `Timer`
+/// port.
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func addLater(
+    a: Int32,
+    b: Int32,
+    delayMs: UInt32,
+    ctx: UndraCore = .shared
+) async throws -&gt; Int32
+
+/// The area of a circle or a rectangle. A label and an empty figure have none.
+/// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func area(_ figure: Figure, ctx: UndraCore = .shared) throws -&gt; Double
+
+/// Tells the core where the server is. Call it once at start-up, before anything observes
+/// [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
+/// stale).
+/// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = .shared)
+
+/// Adds an item to `list` the way a UI wants it: the list shows it at once (an optimistic placeholder), the
+/// server is asked, and the placeholder is taken back if the server refuses. On success the cached
+/// list is refetched, so the placeholder gives way to the server's item.
+///
+/// While the device is offline the request is queued (the mutation is idempotent) and the call
+/// keeps waiting; the placeholder stays visible until the network returns and the request is
+/// replayed.
+/// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func createRemoteTodo(
+    list: String,
+    title: String,
+    ctx: UndraCore = .shared
+) async throws -&gt; RemoteTodo
+
+/// Returns `value` unchanged.
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func echoComposite(_ value: Composite, ctx: UndraCore = .shared) throws -&gt; Composite
+
+/// Returns `value` unchanged.
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func echoFigure(_ value: Figure, ctx: UndraCore = .shared) throws -&gt; Figure
+
+/// Returns `value` unchanged.
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func echoPrimitives(_ value: Primitives, ctx: UndraCore = .shared) throws -&gt; Primitives
+
+/// Panics with `reason`. The boundary turns the panic into a reply (status 2), never into a
+/// crash, on the platforms that can unwind (R6).
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func explode(reason: String, ctx: UndraCore = .shared) throws -&gt; UInt32
+
+/// Panics with `reason` after `delay_ms` milliseconds, inside an asynchronous call.
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func explodeLater(
+    delayMs: UInt32,
+    reason: String,
+    ctx: UndraCore = .shared
+) async throws -&gt; UInt32
+
+/// Fails with `LabError::Rejected { code, .. }` after `delay_ms` milliseconds: an asynchronous
+/// call with a typed error.
+/// - Throws: ``LabError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func failLater(
+    delayMs: UInt32,
+    code: Int32,
+    ctx: UndraCore = .shared
+) async throws -&gt; UInt32
+
+/// A greeting.
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func greet(name: String, ctx: UndraCore = .shared) throws -&gt; String
+
+/// Reads an unsigned number of at most nine digits.
+/// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func parseCount(text: String, ctx: UndraCore = .shared) throws -&gt; UInt32
+
+/// Does nothing and returns nothing: a call with neither arguments nor a result.
+/// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+public func ping(ctx: UndraCore = .shared)
+
+/// Marks an item of `list` finished or not, showing the change at once and taking it back if the server
+/// refuses.
+/// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func setRemoteDone(
+    list: String,
+    id: UInt32,
+    done: Bool,
+    ctx: UndraCore = .shared
+) async throws -&gt; RemoteTodo
+
+/// The name and version of the core.
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func version(ctx: UndraCore = .shared) throws -&gt; String
+</code></pre></div>
+</details>
+<h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">An <code>@Observable</code> class for each <code>#[undra::store]</code>: its signals, then its methods.</p>
+<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Stress</code> <code>Todos</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>179 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Stores.swift" rel="noopener">Stores.swift</a></span></div><pre><code data-lang="swift">/// The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
+/// exercise the boundary.
+@MainActor @Observable
+public final class Bench: UndraStore, @unchecked Sendable {
+    public private(set) var rows: [Item]
+    public private(set) var s000: UInt32
+    // … 126 more with the same shape …
+    public private(set) var s127: UInt32
+
+    /// A store with every counter at zero and [`ROWS`] rows numbered from 1.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public convenience init(ctx: UndraCore = .shared) throws
+
+    /// Adds two numbers: the cheapest call there is, for the handle-call row.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func benchAdd(a: UInt32, b: UInt32) throws -&gt; UInt32
+
+    /// Returns `data` unchanged: a payload of `data.len()` bytes crosses the boundary
+    /// twice.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func benchEchoBytes(data: [UInt8]) throws -&gt; [UInt8]
+
+    /// Inserts one new row so that it ends at position `i` (a position past the end
+    /// appends): one keyed `Insert` on a list of about 10,000 rows. The list grows by
+    /// one row per call; `bench_list_reset` starts over.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func benchListInsert(i: UInt32)
+
+    /// Puts the list back to its [`ROWS`] starting rows and writes zero to every counter,
+    /// in one transaction: one change-set with the list and all [`SIGNALS`] counters.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func benchListReset()
+
+    /// Updates `n` rows of the list, **one transaction each**: `n` change-sets, each a
+    /// keyed patch of a single `Update` (the row's `version` goes up by one), the way a
+    /// socket or a sensor feed that writes a row at a time reaches the platform. The rows
+    /// are spread over the list (consecutive updates are far apart) and the same
+    /// positions come out for the same list length, so a run is repeatable. This is what
+    /// the device benchmarks drain (ADR-031: 100,000 patches a second is 1,667 a frame).
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func benchListUpdateBurst(n: UInt32)
+
+    /// Adds one to the first `k` counters (at most [`SIGNALS`]) inside one transaction:
+    /// `k` dirty signals, one change-set.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func benchTouchSignals(k: UInt32)
+}
+
+/// A list of [`LIST_LEN`] items with operations that change one item at a time.
+@MainActor @Observable
+public final class BigList: UndraStore, @unchecked Sendable {
+    public private(set) var items: [Item]
+    /// Computed by the core; read-only.
+    public private(set) var count: UInt32
+
+    /// A list of [`LIST_LEN`] items numbered from 1.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public convenience init(ctx: UndraCore = .shared) throws
+
+    /// Inserts a new row with `label` so that it ends at `index` (`index == len` appends), and
+    /// returns its identity. One keyed `Insert`.
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func insertAt(index: UInt32, label: String) throws -&gt; UInt32
+
+    /// Moves the row at `from` so that it ends at `to`. One keyed `Move`.
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func moveItem(from: UInt32, to: UInt32) throws
+
+    /// Removes the row at `index`. One keyed `Remove`.
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func removeAt(index: UInt32) throws
+
+    /// Replaces the list with a fresh one of [`LIST_LEN`] items. The platform receives the keyed
+    /// patch that turns the old list into the new one (a full value if they have little in
+    /// common).
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func reset()
+
+    /// Changes the label of the row at `index` and bumps its version. One keyed `Update`.
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func updateAt(index: UInt32, label: String) throws
+}
+
+/// A counter with a change tally and a computed parity.
+@MainActor @Observable
+public final class Counter: UndraStore, @unchecked Sendable {
+    public private(set) var count: Int32
+    public private(set) var changes: UInt32
+    /// Computed by the core; read-only.
+    public private(set) var parity: Parity
+
+    /// A counter at zero with no changes made.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public convenience init(ctx: UndraCore = .shared) throws
+
+    /// Adds `amount` (which may be negative) and counts the change: one transaction, so one
+    /// change-set for `count`, `changes` and `parity` together. The count saturates instead of
+    /// overflowing.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func add(amount: Int32)
+
+    /// Subtracts one.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func decrement()
+
+    /// Adds one.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func increment()
+
+    /// Sets the count back to zero and forgets the changes, in one transaction.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func reset()
+}
+
+/// A store that commits many transactions, for the coalesced-delivery scenarios and the
+/// playground's stress screen.
+@MainActor @Observable
+public final class Stress: UndraStore, @unchecked Sendable {
+    public private(set) var value: UInt64
+    public private(set) var progress: UInt32
+    public private(set) var generated: UInt64
+    public private(set) var running: Bool
+
+    /// A store with every signal at its start: zeros, and no generator running.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public convenience init(ctx: UndraCore = .shared) throws
+
+    /// Commits `transactions` transactions now, each one write of the signal `mode` names: one
+    /// change-set per transaction, the way data that arrives in the core on its own does.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func burst(mode: StressMode, transactions: UInt32)
+
+    /// Starts generating updates of the signal the mode names, at the given number a second,
+    /// each its own transaction, until `stop`. Called while a generator runs, it retunes that
+    /// generator (new mode, new rate) instead of starting a second one. Fails, starting
+    /// nothing, when the rate is zero or above 1,000,000.
+    /// - Throws: ``StressError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func start(mode: StressMode, perSecond: UInt32) throws
+
+    /// Stops the generator: no update is committed after this returns. `generated` keeps its
+    /// count. Does nothing when no generator runs.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func stop()
+}
+
+/// The to-do list: what the UI observes (`todos`, `filter`, `visible`, `remaining`) and calls.
+@MainActor @Observable
+public final class Todos: UndraStore, @unchecked Sendable {
+    public private(set) var todos: [Todo]
+    public private(set) var filter: Filter
+    /// Computed by the core; read-only.
+    public private(set) var visible: [Todo]
+    /// Computed by the core; read-only.
+    public private(set) var remaining: UInt32
+
+    /// An empty list showing every item.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public convenience init(ctx: UndraCore = .shared) throws
+
+    /// Adds an item at the end of the list.
+    /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public func add(title: String) async throws -&gt; Todo
+
+    /// Removes every finished item.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func clearDone()
+
+    /// Removes the item with `id`; unknown ids are ignored.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func remove(id: UUID)
+
+    /// Chooses which items `visible` holds.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func setFilter(_ filter: Filter)
+
+    /// Flips the `done` flag of the item with `id`; unknown ids are ignored.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func toggle(id: UUID)
+}
+</code></pre></div>
+</details>
+<h2 id="ports">Ports<a class="anchor" href="#ports" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">The playground declares no port of its own, so <code>Ports.swift</code> holds none. Your own port becomes a protocol that your app implements; the ten standard ports are implemented by <code>UndraRuntime</code>. <a href="../docs/ports.html">Ports &amp; adapters</a> shows both.</p>
+<h2 id="queries">Queries<a class="anchor" href="#queries" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.</p>
+<p class="ref-names"><code>RemoteTodosQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>43 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Queries.swift" rel="noopener">Queries.swift</a></span></div><pre><code data-lang="swift">/// Observes the `remote_todos` query (cache key `remote-todos:{list}`).
+/// Constructing it registers an observer and fetches when the data is stale or missing.
+@MainActor @Observable
+public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
+    /// The latest successful result, if any.
+    public private(set) var data: [RemoteTodo]?
+    /// Where the query is in its fetch lifecycle.
+    public private(set) var status: QueryStatus
+    /// The error of the latest failed fetch, cleared by the next success.
+    public private(set) var error: RemoteError?
+    /// Whether a fetch is in flight (also true while refetching stale data).
+    public private(set) var fetching: Bool
+    /// When `data` was last updated.
+    public private(set) var updatedAt: Date?
+
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public convenience init(list: String, ctx: UndraCore = .shared) throws
+
+    /// Fetches again now, even if the data is fresh.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func refetch()
+
+    /// Marks the cached entry stale; it refetches while observed.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func invalidate()
+}
+
+/// Runs the `patch_remote_todo` mutation.
+/// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func patchRemoteTodo(
+    list: String,
+    id: UInt32,
+    done: Bool,
+    ctx: UndraCore = .shared
+) async throws -&gt; RemoteTodo
+
+/// Runs the `post_remote_todo` mutation.
+/// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func postRemoteTodo(
+    list: String,
+    title: String,
+    ctx: UndraCore = .shared
+) async throws -&gt; RemoteTodo
+</code></pre></div>
+</details>
+<h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
+<p class="ref-names"><code>UndraIds</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>93 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift" rel="noopener">Ids.swift</a></span></div><pre><code data-lang="swift">/// Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
+/// hash to pass to `UndraCore.load` as the expected schema hash.
+public enum UndraIds {
+    public static let schemaHash: UInt64 = 0x04d2adf769c58b9f
+
+    public enum Objects {
+        public enum Probe {
+            public static let typeId: UInt32 = 0x4fdd3051
+            public static let new: UInt32 = 0xb843ab99
+            public static let counters: UInt32 = 0xc3958518
+            public static let hang: UInt32 = 0x98f10ca1
+            public static let reset: UInt32 = 0xce3a32f8
+            public static let ticks: UInt32 = 0x9ea5858d
+            public static let wait: UInt32 = 0x6bab3fb8
+        }
+        public enum Bench {
+            public static let typeId: UInt32 = 0x346ad459
+            public static let new: UInt32 = 0x36809c61
+            public static let benchAdd: UInt32 = 0xe6f91ad9
+            public static let benchEchoBytes: UInt32 = 0x677eb967
+            public static let benchListInsert: UInt32 = 0x914b8e82
+            public static let benchListReset: UInt32 = 0x0c07aab2
+            public static let benchListUpdateBurst: UInt32 = 0x7411fd03
+            public static let benchTouchSignals: UInt32 = 0x3fc0389f
+        }
+        public enum BigList {
+            public static let typeId: UInt32 = 0x3b9271c5
+            public static let new: UInt32 = 0xf5e4a11d
+            public static let insertAt: UInt32 = 0x8f234904
+            public static let moveItem: UInt32 = 0x58a6cbde
+            public static let removeAt: UInt32 = 0x1237d7af
+            public static let reset: UInt32 = 0x65063b1c
+            public static let updateAt: UInt32 = 0x0e5ff480
+        }
+        public enum Counter {
+            public static let typeId: UInt32 = 0xfc0f33c3
+            public static let new: UInt32 = 0xcff00e37
+            public static let add: UInt32 = 0x8adcbf02
+            public static let decrement: UInt32 = 0xe6593ac4
+            public static let increment: UInt32 = 0x0584c6ac
+            public static let reset: UInt32 = 0x0c5ad256
+        }
+        public enum Stress {
+            public static let typeId: UInt32 = 0xafa58985
+            public static let new: UInt32 = 0x6799185d
+            public static let burst: UInt32 = 0xf4b7ad05
+            public static let start: UInt32 = 0xb710bb83
+            public static let stop: UInt32 = 0xb5c8e111
+        }
+        public enum Todos {
+            public static let typeId: UInt32 = 0xf5e31faa
+            public static let new: UInt32 = 0x35935dea
+            public static let add: UInt32 = 0xd13d7ad7
+            public static let clearDone: UInt32 = 0x27ffa842
+            public static let remove: UInt32 = 0xa977479c
+            public static let setFilter: UInt32 = 0x07781993
+            public static let toggle: UInt32 = 0x1cc45d38
+        }
+        public enum RemoteTodosQueryHandle {
+            public static let typeId: UInt32 = 0x2a794167
+            public static let new: UInt32 = 0x2a794167
+            public static let refetch: UInt32 = 0x21d1b9e2
+            public static let invalidate: UInt32 = 0x44cec2fa
+        }
+    }
+
+    public enum Functions {
+        public static let add: UInt32 = 0x65b4cd58
+        public static let addLater: UInt32 = 0xc5ca16e9
+        public static let area: UInt32 = 0x293fbad8
+        public static let configureRemote: UInt32 = 0xa991dd26
+        public static let createRemoteTodo: UInt32 = 0x3f635105
+        public static let echoComposite: UInt32 = 0x769db4ec
+        public static let echoFigure: UInt32 = 0xeeb27e01
+        public static let echoPrimitives: UInt32 = 0x59ba77e7
+        public static let explode: UInt32 = 0x4b8e88d2
+        public static let explodeLater: UInt32 = 0xe5a63d4b
+        public static let failLater: UInt32 = 0x977e4974
+        public static let greet: UInt32 = 0x0594d9ae
+        public static let parseCount: UInt32 = 0x1c438944
+        public static let ping: UInt32 = 0x60e670d5
+        public static let setRemoteDone: UInt32 = 0xa1e08a5f
+        public static let version: UInt32 = 0xceb9168b
+    }
+
+    public enum Ports {}
+
+    public enum Queries {
+        public static let patchRemoteTodo: UInt32 = 0x77fe653e
+        public static let postRemoteTodo: UInt32 = 0x5c84eed2
+        public static let remoteTodos: UInt32 = 0x2a794167
+    }
+}
+</code></pre></div>
+</details>
+<p class="tok-dim">Generated by <code>site/scripts/build-reference.mjs</code> from <code>examples/playground/generated/swift</code>, with the declarations read by <code>site/scripts/decls.mjs</code>. To change this page, change the core's code or comments and run <code>undra bindgen -C examples/playground --docs</code>.</p>
+<!-- reference:end -->
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p>
+<!-- reference-toc:start -->
+<ul><li><a href="#types">Types</a></li><li><a href="#errors">Errors</a></li><li><a href="#objects">Objects</a></li><li><a href="#stores">Stores</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries">Queries</a></li><li><a href="#ids">Wire ids</a></li></ul>
+<!-- reference-toc:end -->
+</aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>
