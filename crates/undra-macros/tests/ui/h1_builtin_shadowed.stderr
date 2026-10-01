@@ -1,0 +1,66 @@
+error[E0277]: error[undra::E0060]: `Bytes` is spelled like the built-in Undra type `undra::prelude::Bytes`, but it is a different type
+                = note: the schema records this position as the built-in type, so the platforms would read the bytes of `undra::prelude::Bytes` where the generated code writes `Bytes`
+                = help: rename your type, or import the built-in one (`undra::prelude::Bytes`) where it is used
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0060
+  --> tests/ui/h1_builtin_shadowed.rs:16:18
+   |
+16 |     pub payload: Bytes,
+   |                  ^^^^^ this is not `undra::prelude::Bytes`
+   |
+help: the trait `_::__UndraSameAs<undra::prelude::Bytes>` is not implemented for `Bytes`
+  --> tests/ui/h1_builtin_shadowed.rs:9:1
+   |
+ 9 | pub struct Bytes {
+   | ^^^^^^^^^^^^^^^^
+note: required by a bound in `_::__undra_same`
+  --> tests/ui/h1_builtin_shadowed.rs:14:1
+   |
+14 | #[k::api]
+   | ^^^^^^^^^ required by this bound in `__undra_same`
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: error[undra::E0001]: `Uuid` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Uuid` with `#[undra::api]`, or return a record with the data the platform needs
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/h1_builtin_shadowed.rs:24:19
+   |
+24 | pub fn lookup(id: Uuid) -> String {
+   |                   ^^^^ not a type that can cross the boundary
+   |
+help: the trait `undra::undra_wire::Decode` is not implemented for `Uuid`
+  --> tests/ui/h1_builtin_shadowed.rs:21:1
+   |
+21 | pub struct Uuid(pub u128);
+   | ^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `undra::undra_wire::Decode`:
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             AppState
+             BTreeMap<K, V>
+             Box<T>
+           and $N others
+
+error[E0277]: error[undra::E0060]: `Uuid` is spelled like the built-in Undra type `undra::prelude::Uuid`, but it is a different type
+                = note: the schema records this position as the built-in type, so the platforms would read the bytes of `undra::prelude::Uuid` where the generated code writes `Uuid`
+                = help: rename your type, or import the built-in one (`undra::prelude::Uuid`) where it is used
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0060
+  --> tests/ui/h1_builtin_shadowed.rs:24:19
+   |
+24 | pub fn lookup(id: Uuid) -> String {
+   |                   ^^^^ this is not `undra::prelude::Uuid`
+   |
+help: the trait `_::__UndraSameAs<undra::prelude::Uuid>` is not implemented for `Uuid`
+  --> tests/ui/h1_builtin_shadowed.rs:21:1
+   |
+21 | pub struct Uuid(pub u128);
+   | ^^^^^^^^^^^^^^^
+note: required by a bound in `_::__undra_same`
+  --> tests/ui/h1_builtin_shadowed.rs:23:1
+   |
+23 | #[k::api]
+   | ^^^^^^^^^ required by this bound in `__undra_same`
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -16,13 +16,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use keel::meta::ids;
-use keel::runtime::testing::{call_payload, drive_from_this_thread};
-use keel::runtime::{Runtime, RuntimeConfig};
-use keel::signals::{ALL_SIGNALS, ChangeSink, Computed, Signal, StoreCell, txn, with_sink};
-use keel::wire::payload::{CallTarget, ChangeSetRef};
-use keel::wire::{Bytes, Decode, Encode, Handle, KeyedPatch, Reader, Timestamp, Uuid, Writer};
-use keel_bench::workload::{Bench, Workload, plain, with_reset};
+use undra::meta::ids;
+use undra::runtime::testing::{call_payload, drive_from_this_thread};
+use undra::runtime::{Runtime, RuntimeConfig};
+use undra::signals::{ALL_SIGNALS, ChangeSink, Computed, Signal, StoreCell, txn, with_sink};
+use undra::wire::payload::{CallTarget, ChangeSetRef};
+use undra::wire::{Bytes, Decode, Encode, Handle, KeyedPatch, Reader, Timestamp, Uuid, Writer};
+use undra_bench::workload::{Bench, Workload, plain, with_reset};
 
 use super::fixtures::{self, Item, Shape};
 use super::host::{Core, CountingHost, call_ok, construct, method_call, runtime};
@@ -78,7 +78,7 @@ fn wire_types(halves: bool) -> Vec<Workload> {
     add_wire(out, halves, "u32", || 0x1234_5678_u32);
     add_wire(out, halves, "i64", || -1_234_567_890_123_i64);
     add_wire(out, halves, "f64", || 1234.5678_f64);
-    add_wire(out, halves, "string_short", || "hello, keel".to_owned());
+    add_wire(out, halves, "string_short", || "hello, undra".to_owned());
     add_wire(out, halves, "string_1kb", || "k".repeat(1024));
     add_wire(out, halves, "bytes_1kb", || {
         Bytes((0..1024_u32).map(|i| (i * 31) as u8).collect())
@@ -125,7 +125,7 @@ fn wire_types(halves: bool) -> Vec<Workload> {
     list
 }
 
-/// The keyed patch (`keel-wire`) on its own, for a 10,000-row list that gains one row in the
+/// The keyed patch (`undra-wire`) on its own, for a 10,000-row list that gains one row in the
 /// middle: the diff with a cheap key and `PartialEq` (the fallback that a raw `set` / `update`
 /// takes, see `signals/keyed_10k/raw_update_diff`; recorded list operations do not run it), the
 /// patch's own round trip, and the host-side replay.
@@ -250,7 +250,7 @@ where
 // dispatch
 // ---------------------------------------------------------------------------------------------
 
-/// `keel_call_sync`'s path without the C ABI: payload decode, handle lookup, the guarded
+/// `undra_call_sync`'s path without the C ABI: payload decode, handle lookup, the guarded
 /// generated dispatcher, reply encode.
 pub fn dispatch() -> Vec<Workload> {
     vec![
@@ -704,7 +704,7 @@ pub fn snapshot() -> Vec<Workload> {
 
 /// A new runtime that restores the 100 KB snapshot: what launching the app pays in the core
 /// before the first screen. `core_threads == 1` also starts (and, in the untimed reset, joins)
-/// the `keel-core` thread, as a platform does; 0 is the wasm shape.
+/// the `undra-core` thread, as a platform does; 0 is the wasm shape.
 fn cold_start(core_threads: u8) -> Box<dyn Bench> {
     let (_rt, _host, snapshot) = snapshot_fixture(4);
     let slot: std::rc::Rc<std::cell::RefCell<Option<Core>>> = Default::default();

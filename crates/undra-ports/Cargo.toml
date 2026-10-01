@@ -1,0 +1,24 @@
+[package]
+name = "undra-ports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Undra standard ports: Clock, Rng, Log, Http, Kv, SecureStore, Fs, Timer, Connectivity, Lifecycle, their records, and deterministic fakes"
+readme = "README.md"
+keywords = ["undra", "ports", "testing", "fakes", "cross-platform"]
+categories = ["development-tools::testing", "asynchronous"]
+
+[dependencies]
+undra-macros = { workspace = true }
+undra-meta = { workspace = true }
+undra-wire = { workspace = true }
+undra-runtime = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+# Only to prove the standard schema generates Swift, Kotlin and TypeScript (tests/schema.rs).
+undra-bindgen = { workspace = true }

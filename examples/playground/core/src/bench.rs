@@ -15,7 +15,7 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use keel::prelude::*;
+use undra::prelude::*;
 
 use crate::biglist::Item;
 
@@ -37,16 +37,16 @@ macro_rules! bench_store {
     ($($counter:ident)*) => {
         /// The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
         /// exercise the boundary.
-        #[keel::store(restore = "Self::assemble")]
+        #[undra::store(restore = "Self::assemble")]
         pub struct Bench {
             ctx: Ctx,
             next_id: AtomicU32,
-            #[keel(key = "id")]
+            #[undra(key = "id")]
             rows: Signal<Vec<Item>>,
             $($counter: Signal<u32>,)*
         }
 
-        #[keel::api(store)]
+        #[undra::api(store)]
         impl Bench {
             /// A store with every counter at zero and [`ROWS`] rows numbered from 1.
             pub fn new(ctx: Ctx) -> Self {
@@ -141,11 +141,11 @@ bench_store! {
 
 #[cfg(test)]
 mod tests {
-    use keel::meta::ids;
-    use keel::runtime::testing::TestRuntime;
-    use keel::signals::ALL_SIGNALS;
-    use keel::wire::payload::{CallTarget, ChangeOp, ChangeSet, ReplyStatus};
-    use keel::wire::{Decode, Encode, KeyedPatch, PatchOp, Reader};
+    use undra::meta::ids;
+    use undra::runtime::testing::TestRuntime;
+    use undra::signals::ALL_SIGNALS;
+    use undra::wire::payload::{CallTarget, ChangeOp, ChangeSet, ReplyStatus};
+    use undra::wire::{Decode, Encode, KeyedPatch, PatchOp, Reader};
 
     use super::*;
 

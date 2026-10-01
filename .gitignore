@@ -15,10 +15,13 @@ dist
 *.bundle
 *.xcframework
 .claude/
-# The playground project: what `keel build` writes, and the apps' build output.
+# The playground project: what `undra build` writes, and the apps' build output.
 /examples/playground/build
 /examples/playground/web/dist
 /contract-tests/ts/node_modules
 /contract-tests/**/build
 /contract-tests/swift/.build
 /contract-tests/.logs
+
+# The staged site (site/ + the playground build): site/scripts/build-local.sh.
+/_site/

@@ -1,0 +1,12 @@
+# Product decisions — index
+
+Cross-cutting:
+
+* The audience is platform engineers (SwiftUI, Compose, React) who are sceptical of
+  "cross-platform". Every page answers their objection before their delight.
+* Developer-obsessed means: copy buttons, ⌘K search, real commands that work, one-line
+  install, honest numbers, and never a placeholder.
+
+Active features:
+
+* [launch-v2](launch-v2.md) — site v2 scope, blog, roadmap, install experience.

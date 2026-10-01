@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Undra blog</title>
+    <link>https://shreypdev.github.io/undra/blog/</link>
+    <description>Comparisons, architecture and design notes from the Undra team.</description>
+    <language>en</language>
+    <atom:link href="https://shreypdev.github.io/undra/feed.xml" rel="self" type="application/rss+xml"/>
+    <lastBuildDate>Wed, 30 Sep 2026 00:00:00 GMT</lastBuildDate>
+    <item>
+      <title>Reads never cross the boundary: how Undra's state model works</title>
+      <link>https://shreypdev.github.io/undra/blog/reads-never-cross-the-boundary/</link>
+      <guid isPermaLink="true">https://shreypdev.github.io/undra/blog/reads-never-cross-the-boundary/</guid>
+      <pubDate>Wed, 30 Sep 2026 00:00:00 GMT</pubDate>
+      <category>Architecture</category>
+      <description>How Undra mirrors Rust state into SwiftUI, Compose and React: change-sets, keyed lists as recorded operations, a schema-hash gate, and what it all costs.</description>
+    </item>
+    <item>
+      <title>Undra vs Kotlin Multiplatform: sharing logic without leaving your platform</title>
+      <link>https://shreypdev.github.io/undra/blog/undra-vs-kotlin-multiplatform/</link>
+      <guid isPermaLink="true">https://shreypdev.github.io/undra/blog/undra-vs-kotlin-multiplatform/</guid>
+      <pubDate>Wed, 30 Sep 2026 00:00:00 GMT</pubDate>
+      <category>Comparison</category>
+      <description>Undra and Kotlin Multiplatform both share logic and keep the UI native. A dated, sourced comparison: iOS, web, reads, tooling, ecosystem and team fit.</description>
+    </item>
+    <item>
+      <title>Undra vs UniFFI and Crux: three ways to put Rust under a native app</title>
+      <link>https://shreypdev.github.io/undra/blog/undra-vs-uniffi-and-crux/</link>
+      <guid isPermaLink="true">https://shreypdev.github.io/undra/blog/undra-vs-uniffi-and-crux/</guid>
+      <pubDate>Wed, 30 Sep 2026 00:00:00 GMT</pubDate>
+      <category>Comparison</category>
+      <description>Three ways to put a Rust core under SwiftUI, Compose and React: UniFFI bindings, Crux's Elm-style core, and Undra's mirrored state. Dated and sourced.</description>
+    </item>
+    <item>
+      <title>Why Undra keeps your UI native</title>
+      <link>https://shreypdev.github.io/undra/blog/why-undra-keeps-your-ui-native/</link>
+      <guid isPermaLink="true">https://shreypdev.github.io/undra/blog/why-undra-keeps-your-ui-native/</guid>
+      <pubDate>Wed, 30 Sep 2026 00:00:00 GMT</pubDate>
+      <category>Thesis</category>
+      <description>Shared UI and shared logic are different bets. What Flutter, React Native and Compose Multiplatform trade, who should pick which, and where Undra stops.</description>
+    </item>
+  </channel>
+</rss>

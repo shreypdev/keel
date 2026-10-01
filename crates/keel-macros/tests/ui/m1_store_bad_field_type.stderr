@@ -1,8 +1,0 @@
-error: error[keel::E0003]: lifetime `'static` in `&'static str`
-         = note: everything crosses the boundary by value; a borrow cannot outlive the call that made it
-         = help: use an owned type such as `String` or `Vec<T>`
-         = docs: https://keel.dev/errors/E0003
-  --> tests/ui/m1_store_bad_field_type.rs:11:18
-   |
-11 |     note: Signal<&'static str>,
-   |                  ^^^^^^^^^^^^

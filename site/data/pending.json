@@ -1,0 +1,4 @@
+{
+  "note": "Pages the site links to before they are merged. check-links reports a link to one of these as pending instead of broken, and warns once the page exists so the entry can be removed.",
+  "pages": []
+}

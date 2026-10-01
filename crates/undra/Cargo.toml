@@ -1,0 +1,24 @@
+[package]
+name = "undra"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Undra: write app logic once in Rust, get native Swift, Kotlin and TypeScript APIs. The facade crate users depend on."
+readme = "README.md"
+keywords = ["undra", "cross-platform", "ios", "android", "wasm"]
+categories = ["development-tools::ffi", "asynchronous"]
+
+[dependencies]
+undra-macros = { workspace = true }
+undra-meta = { workspace = true }
+undra-wire = { workspace = true }
+undra-signals = { workspace = true }
+undra-runtime = { workspace = true }
+undra-query = { workspace = true }
+undra-ports = { workspace = true }
+
+[dev-dependencies]
+undra-bindgen = { workspace = true }

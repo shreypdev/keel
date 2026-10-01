@@ -7,10 +7,10 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use keel::prelude::*;
+use undra::prelude::*;
 
 /// One item of the to-do list.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Todo {
     /// Identity of the item; the list is updated by key, so the UI diffs by it.
@@ -22,7 +22,7 @@ pub struct Todo {
 }
 
 /// Which items the list shows.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Filter {
     /// Every item.
@@ -45,7 +45,7 @@ impl Filter {
 }
 
 /// Why an item could not be added.
-#[keel::error]
+#[undra::error]
 #[derive(Clone, Debug, PartialEq)]
 pub enum TodoError {
     /// The title is empty once spaces are trimmed.
@@ -54,17 +54,17 @@ pub enum TodoError {
 }
 
 /// The to-do list: what the UI observes (`todos`, `filter`, `visible`, `remaining`) and calls.
-#[keel::store(restore = "Self::assemble")]
+#[undra::store(restore = "Self::assemble")]
 pub struct Todos {
     next: AtomicU64,
-    #[keel(key = "id")]
+    #[undra(key = "id")]
     todos: Signal<Vec<Todo>>,
     filter: Signal<Filter>,
     visible: Computed<Vec<Todo>>,
     remaining: Computed<u32>,
 }
 
-#[keel::api(store)]
+#[undra::api(store)]
 impl Todos {
     /// An empty list showing every item.
     pub fn new(ctx: Ctx) -> Self {
@@ -156,11 +156,11 @@ fn counter_of(id: Uuid) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use keel::meta::ids;
-    use keel::runtime::testing::TestRuntime;
-    use keel::signals::ALL_SIGNALS;
-    use keel::wire::payload::{CallTarget, ChangeOp, ChangeSet, ReplyStatus};
-    use keel::wire::{Decode, Encode, KeyedPatch, Reader};
+    use undra::meta::ids;
+    use undra::runtime::testing::TestRuntime;
+    use undra::signals::ALL_SIGNALS;
+    use undra::wire::payload::{CallTarget, ChangeOp, ChangeSet, ReplyStatus};
+    use undra::wire::{Decode, Encode, KeyedPatch, Reader};
 
     use super::*;
 

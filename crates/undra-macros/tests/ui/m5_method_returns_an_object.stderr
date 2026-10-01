@@ -1,0 +1,59 @@
+error[E0277]: error[undra::E0001]: `Child` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Child` with `#[undra::api]`, or return a record with the data the platform needs
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/m5_method_returns_an_object.rs:21:1
+   |
+21 | #[k::api]
+   | ^^^^^^^^^ not a type that can cross the boundary
+   |
+help: the trait `Encode` is not implemented for `Child`
+  --> tests/ui/m5_method_returns_an_object.rs:6:1
+   |
+ 6 | pub struct Child;
+   | ^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `Encode`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             AppState
+             Arc<T>
+           and $N others
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: error[undra::E0001]: `Child` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Child` with `#[undra::api]`, or return a record with the data the platform needs
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/m5_method_returns_an_object.rs:31:32
+   |
+31 |     pub fn adopt(&self, child: Child) {}
+   |                                ^^^^^ not a type that can cross the boundary
+   |
+help: the trait `undra::undra_wire::Decode` is not implemented for `Child`
+  --> tests/ui/m5_method_returns_an_object.rs:6:1
+   |
+ 6 | pub struct Child;
+   | ^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `undra::undra_wire::Decode`:
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             AppState
+             BTreeMap<K, V>
+             Box<T>
+           and $N others
+
+error[E0080]: evaluation panicked: error[undra::E0064]: `Child` is an object and cannot be used as a value
+                = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value
+                = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064
+  --> tests/ui/m5_method_returns_an_object.rs:27:28
+   |
+27 |     pub fn child(&self) -> Child {
+   |                            ^^^^^ evaluation of `_::_` failed here

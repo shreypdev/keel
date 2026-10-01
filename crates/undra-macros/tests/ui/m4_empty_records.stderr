@@ -1,0 +1,26 @@
+error: error[undra::E0007]: unit struct `Marker` cannot be a record
+         = note: a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a `Vec` of them would accept any count from a four-byte message
+         = help: add a field, or use an enum with a unit variant if you need a marker
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+ --> tests/ui/m4_empty_records.rs:7:12
+  |
+7 | pub struct Marker;
+  |            ^^^^^^
+
+error: error[undra::E0007]: record `Braces` has no fields
+         = note: a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a `Vec` of them would accept any count from a four-byte message
+         = help: add a field, or use an enum with a unit variant if you need a marker
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/m4_empty_records.rs:10:12
+   |
+10 | pub struct Braces {}
+   |            ^^^^^^
+
+error: error[undra::E0007]: tuple struct `Parens` cannot be a record
+         = note: the schema names every field so the other languages can generate properties; tuple fields have no names
+         = help: use named fields: `struct Meters { value: f64 }`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/m4_empty_records.rs:13:18
+   |
+13 | pub struct Parens();
+   |                  ^^

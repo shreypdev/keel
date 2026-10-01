@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Worktree helper for parallel work on Keel (humans and agents).
+# Worktree helper for parallel work on Undra (humans and agents).
 #
 #   scripts/wt.sh new <slug>      create <repo-parent>/.work/<slug> on branch wt/<slug> from main
 #   scripts/wt.sh merge <slug>    from the main checkout: merge wt/<slug> (--no-ff), keep the branch

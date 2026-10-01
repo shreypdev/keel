@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { CallTarget, KeelReplyError, ReplyStatus } from "@keel/runtime";
-import { BigList, KeelIds, LabError, ListError, TodoError, Todos, add, failLater, parseCount } from "@playground/core";
+import { CallTarget, UndraReplyError, ReplyStatus } from "@undra/runtime";
+import { BigList, UndraIds, LabError, ListError, TodoError, Todos, add, failLater, parseCount } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { counters } from "../src/stats.js";
 import { step } from "../src/wait.js";
@@ -23,9 +23,9 @@ async function failure(run: () => Promise<unknown>): Promise<unknown> {
 
 /** Expects `error` to be a bad-request reply that says why. */
 function expectBadRequest(error: unknown): void {
-  expect(error).toBeInstanceOf(KeelReplyError);
-  expect((error as KeelReplyError).status).toBe(ReplyStatus.BadRequest);
-  expect((error as KeelReplyError).reason, "the bad request carries a reason").toBeTruthy();
+  expect(error).toBeInstanceOf(UndraReplyError);
+  expect((error as UndraReplyError).status).toBe(ReplyStatus.BadRequest);
+  expect((error as UndraReplyError).reason, "the bad request carries a reason").toBeTruthy();
 }
 
 test("S05 error propagation", async () => {
@@ -40,12 +40,12 @@ test("S05 error propagation", async () => {
     const args = new Uint8Array([1, 0, 0, 0, ...w]);
     let thrown: unknown;
     try {
-      core.callSync(CallTarget.FreeFunction, KeelIds.Functions.parseCount, args);
+      core.callSync(CallTarget.FreeFunction, UndraIds.Functions.parseCount, args);
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(KeelReplyError);
-    expect((thrown as KeelReplyError).status).toBe(ReplyStatus.Error);
+    expect(thrown).toBeInstanceOf(UndraReplyError);
+    expect((thrown as UndraReplyError).status).toBe(ReplyStatus.Error);
     expect(LabError.fromReply(thrown)).toBeInstanceOf(LabError.NotANumber);
   });
 
@@ -88,12 +88,12 @@ test("S05 error propagation", async () => {
     const released = todos.handle;
     todos.close();
     expectBadRequest(
-      await failure(() => core.call({ target: CallTarget.ObjectMethod, handle: released }, KeelIds.Objects.Todos.clearDone, NO_ARGS)),
+      await failure(() => core.call({ target: CallTarget.ObjectMethod, handle: released }, UndraIds.Objects.Todos.clearDone, NO_ARGS)),
     );
 
     // A constructor given arguments it cannot decode: RemoteTodosQueryHandle needs a list name; it gets nothing.
     expectBadRequest(
-      await failure(() => core.construct(KeelIds.Objects.RemoteTodosQueryHandle.typeId, KeelIds.Objects.RemoteTodosQueryHandle.new, NO_ARGS)),
+      await failure(() => core.construct(UndraIds.Objects.RemoteTodosQueryHandle.typeId, UndraIds.Objects.RemoteTodosQueryHandle.new, NO_ARGS)),
     );
   });
 

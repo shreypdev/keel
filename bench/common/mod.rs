@@ -1,7 +1,7 @@
 //! The pieces every bench and the budgets test share: fixtures, a counting host and the
 //! workload list. Included by path (`#[path = "../common/mod.rs"] mod common;`) rather than
 //! compiled into the library, so the macro-generated registrations live in each binary's own
-//! crate and can never be dropped by the linker (the same arrangement as `keel-ffi`'s
+//! crate and can never be dropped by the linker (the same arrangement as `undra-ffi`'s
 //! boundary bench).
 #![allow(missing_docs, dead_code)]
 
@@ -13,7 +13,7 @@ pub mod workloads;
 use std::time::{Duration, Instant};
 
 use criterion::Criterion;
-use keel_bench::workload::Workload;
+use undra_bench::workload::Workload;
 
 /// A criterion configuration that keeps the whole suite to a few minutes: the operations are
 /// stable enough that a short warm-up and two seconds of samples give tight medians.

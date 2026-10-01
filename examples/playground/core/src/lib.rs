@@ -1,11 +1,11 @@
-//! The Keel playground core: the one Rust core every playground app and every contract test runs.
+//! The Undra playground core: the one Rust core every playground app and every contract test runs.
 //!
-//! It is written the way an application writes its core, with nothing but the public `keel` API
+//! It is written the way an application writes its core, with nothing but the public `undra` API
 //! (constitution R10: we ship on it first), and it is deliberately broad, because it has three
 //! jobs at once:
 //!
 //! 1. **A reference app.** The web, iOS and Android apps in `examples/playground/` are three UIs
-//!    over this crate, through the Swift, Kotlin and TypeScript bindings `keel bindgen` generates
+//!    over this crate, through the Swift, Kotlin and TypeScript bindings `undra bindgen` generates
 //!    from its schema. They show the to-do list, the counter, a 10,000-row list, and a cached
 //!    server list with optimistic updates.
 //! 2. **The contract tests' subject.** `contract-tests/` drives every public item from all three
@@ -24,7 +24,7 @@
 //!
 //! The core reads no clock and no random source and starts no thread (R12): identities come from
 //! counters, time from the `Clock` port, delays from `Ctx::sleep` and the network from the
-//! `Http` port, so every test can drive it with `keel::ports::fakes`.
+//! `Http` port, so every test can drive it with `undra::ports::fakes`.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]

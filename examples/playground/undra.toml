@@ -1,0 +1,46 @@
+# undra.toml: makes examples/playground an Undra project (`undra --help` for the commands).
+#
+# The playground is the reference app of Undra v1 (constitution R10: we ship on it first). One Rust
+# core (core/) is the whole app logic; web/, ios/ and android/ are three UIs over the bindings
+# `undra bindgen` generates from it (generated/), and ../../contract-tests runs the same core from
+# all three platform runtimes.
+
+[project]
+name = "playground"
+# The Android applicationId, the iOS bundle identifier and the base of the Kotlin package.
+id = "dev.undra.playground"
+platforms = ["ios", "android", "web"]
+
+[core]
+# The crate `undra bindgen`, `undra build` and `undra dev` work on.
+path = "core"
+
+[paths]
+# Written by `undra bindgen` (Swift package, Gradle module, npm package). Committed, and checked
+# in CI with `undra bindgen --check`.
+generated = "generated"
+# Written by `undra build` (XCFramework, jniLibs, wasm). Not committed.
+build = "build"
+
+[undra]
+# The playground lives inside the Undra repository, so the crates and the three platform runtimes
+# are used from this checkout.
+version = "0.1"
+path = "../.."
+
+[bindings]
+swift_module = "PlaygroundCore"
+kotlin_package = "dev.undra.playground.core"
+ts_scope = "playground"
+ts_package = "core"
+
+[ios]
+deployment_target = "17.0"
+simulator_archs = ["arm64"]
+
+[android]
+abis = ["arm64-v8a", "x86_64"]
+min_sdk = 26
+
+[web]
+opt_level = "z"

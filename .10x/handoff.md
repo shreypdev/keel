@@ -1,21 +1,35 @@
-# Handoff — v1 complete
+# Handoff — launch v2 in progress (2026-09-30, late evening)
 
-v1 shipped on branch `claude/keel-framework-takeover-66c4ea` (2026-09-30). The tree is
-green across every gate; see status.md for the matrix and docs/HANDOFF.md §5 for the
-definition it meets. `main` can fast-forward to this branch.
+The product is **Undra** (renamed from the working name Keel today, ADR-030). `main` is
+`shreypdev/undra`; the site is https://shreypdev.github.io/undra/. CI was fully green twice
+before the rename merged; the post-rename and post-site runs are being watched.
 
-For whoever picks this up next:
-1. Read status.md (the "Landed since takeover" ledger is the project history) and the
-   four review files under .10x/reviews/ — every re-review verdict is recorded there.
-2. ADRs 018–028 cover every decision made since the takeover.
-3. The v1.x queue, in rough priority: device-measured bench rows (run the playground
-   Bench hooks on an iPhone + Android device + Chromium and fill bench/RESULTS.md's
-   device section); macros diagnostic polish (query-in-impl, split-impl follow-ons,
-   NF1/NF2 wording); WeakCtx so long-lived tasks don't pin a dropped runtime; the L3
-   release-build silent drop of off-runtime writes; keel_schema_json full-JSON variant so
-   dlopen bindgen keeps docs; Swift runtime Port* types public (drops the bindgen
-   fallback, ADR-024); Android remote (`keel dev`) mode; dev-client auto-reconnect;
-   per-signal isolation of a panicking computed (ADR-019 note).
-4. How to run everything locally: source scripts/env.sh, then the commands in
-   status.md's table; contract-tests/run-all.sh for the scenario matrix;
-   examples/playground/{web/npm run smoke, ios/smoke.sh, android/README.md} for apps.
+## Landed today, after v1
+1. ADR-029 — the loaded host cdylib keeps its schema and JNI exports (non-incremental shim,
+   private target dir); the contract jobs went green on CI.
+2. Test-harness truth: `contract-tests/run-all.sh` reports which runner failed and why; S04's
+   delays are 150 ms apart; the fixed keel-query finding is a regression test; the C-ABI
+   allocation claim is asserted per call.
+3. ADR-030 — the rename, as an idempotent script (`scripts/rename-keel-to-undra.sh`, takes paths;
+   `docs/AGENT_WORKFLOW.md` has the "bringing a branch across" recipe).
+4. Site v2 with Amendment A (the founder's v1 palette and structure; 350-word budget enforced),
+   four comparison posts with a 95-row claims ledger and a fable fact-check, roadmap page,
+   SEO/JSON-LD/sitemap/RSS/llms.txt/IndexNow, live wasm demo with measured counters, error-codes page.
+5. Docs truth pass from the fact-check.
+
+## In flight (one worktree each; see status.md)
+`stress` → `magic` → `dist` → `swift-errors` → `coalesce` is the intended merge order. Each:
+adversarial review, full local matrix, CI green, `state(<piece>)` commit, `scripts/wt.sh rm`.
+
+## Next after those
+* Playground stress screen (S1b) and the harsh-conditions rows in `site/data/bench.json`.
+* Founder steps (docs/RELEASING.md once `dist` lands): npm org `undra`, `shreypdev/homebrew-undra`,
+  `NPM_TOKEN` / `HOMEBREW_TAP_TOKEN`, optionally `undra.rs` and a GitHub org, then `v1.0.0`.
+* An AVD named `undra` on the dev machine (docs say `undra`; the machine still has `keel`).
+* v1.x queue, unchanged: device-measured bench rows; Android `undra dev` remote mode; dev-client
+  auto-reconnect; `WeakCtx`; macro diagnostic polish; Swift `Port*` public; full-JSON
+  `undra_schema_json`; crates.io publishing under `undra-*` (ADR first).
+
+## How to run everything
+`source scripts/env.sh`, then the commands in status.md's matrix table and `docs/ONBOARDING.md`;
+`bash contract-tests/run-all.sh` for the scenario grid.

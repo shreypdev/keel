@@ -1,22 +1,22 @@
 import Foundation
-import KeelRuntime
+import UndraRuntime
 
 // The wire layout of the standard `Http` port (docs/SPEC.md section 8), for an app that answers the
-// port itself. `KeelRuntime` keeps these records internal (its README explains why) and the
+// port itself. `UndraRuntime` keeps these records internal (its README explains why) and the
 // generated bindings only declare the standard types the app's schema refers to, which for this
 // app is `HttpError`: the request and the response are written out here. Every field is the
 // encoding of docs/SPEC.md section 3.1, in declaration order.
 
 /// `Header { name: String, value: String }`.
-struct WireHeader: KeelCodec {
+struct WireHeader: UndraCodec {
     var name: String
     var value: String
 
-    static func keelDecode(_ r: inout KeelReader) throws -> WireHeader {
+    static func undraDecode(_ r: inout UndraReader) throws -> WireHeader {
         return WireHeader(name: try r.readString(), value: try r.readString())
     }
 
-    func keelEncode(_ w: inout KeelWriter) {
+    func undraEncode(_ w: inout UndraWriter) {
         w.writeString(name)
         w.writeString(value)
     }
@@ -35,15 +35,15 @@ struct WireHttpRequest {
 
     /// Reads the arguments of `Http.request`.
     static func decode(_ arguments: [UInt8]) throws -> WireHttpRequest {
-        var reader = KeelReader(arguments)
+        var reader = UndraReader(arguments)
         let index = Int(try reader.readU16())
         guard index < methods.count else {
             throw WireError.invalidTag(tag: UInt32(index), at: 0, type: "HttpMethod")
         }
         let url = try reader.readString()
-        let headers = try [WireHeader].keelDecode(&reader)
-        let body = try Optional<KeelBytes>.keelDecode(&reader)
-        _ = try Optional<UInt32>.keelDecode(&reader)
+        let headers = try [WireHeader].undraDecode(&reader)
+        let body = try Optional<UndraBytes>.undraDecode(&reader)
+        _ = try Optional<UInt32>.undraDecode(&reader)
         try reader.finish()
         return WireHttpRequest(method: methods[index], url: url, headers: headers, body: body.map { Data($0.bytes) })
     }
@@ -62,9 +62,9 @@ struct WireHttpResponse {
 
     /// The reply of `Http.request`.
     func encoded() -> [UInt8] {
-        var writer = KeelWriter()
+        var writer = UndraWriter()
         writer.writeU16(status)
-        headers.keelEncode(&writer)
+        headers.undraEncode(&writer)
         writer.writeBytes([UInt8](body))
         return writer.finish()
     }
@@ -79,7 +79,7 @@ enum WireConnectivity {
 
     /// `NetKind` is a `u16` index: `Wifi` 0, `Cellular` 1, `Wired` 2, `Unknown` 3, `None` 4.
     static func changed(online: Bool) -> [UInt8] {
-        var writer = KeelWriter()
+        var writer = UndraWriter()
         writer.writeBool(online)
         writer.writeU16(online ? 0 : 4)
         return writer.finish()

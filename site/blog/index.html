@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Undra blog: comparisons and design notes</title>
+<meta name="description" content="Comparisons with Kotlin Multiplatform, UniFFI and Crux, and design notes on keeping UI native while sharing business logic in Rust.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/blog/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Undra blog: comparisons and design notes">
+<meta property="og:description" content="Comparisons and design notes on sharing business logic in Rust while keeping UI native.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/blog/">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Undra blog: comparisons and design notes">
+<meta name="twitter:description" content="Comparisons and design notes on sharing business logic in Rust while keeping UI native.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<!-- blog-ld:start -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Blog","name":"Undra blog","description":"Comparisons, architecture and design notes from the Undra team.","url":"https://shreypdev.github.io/undra/blog/","inLanguage":"en","dateModified":"2026-09-30","publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"blogPost":[{"@type":"BlogPosting","headline":"Reads never cross the boundary: how Undra's state model works","url":"https://shreypdev.github.io/undra/blog/reads-never-cross-the-boundary/","datePublished":"2026-09-30","description":"How Undra mirrors Rust state into SwiftUI, Compose and React: change-sets, keyed lists as recorded operations, a schema-hash gate, and what it all costs."},{"@type":"BlogPosting","headline":"Undra vs Kotlin Multiplatform: sharing logic without leaving your platform","url":"https://shreypdev.github.io/undra/blog/undra-vs-kotlin-multiplatform/","datePublished":"2026-09-30","description":"Undra and Kotlin Multiplatform both share logic and keep the UI native. A dated, sourced comparison: iOS, web, reads, tooling, ecosystem and team fit."},{"@type":"BlogPosting","headline":"Undra vs UniFFI and Crux: three ways to put Rust under a native app","url":"https://shreypdev.github.io/undra/blog/undra-vs-uniffi-and-crux/","datePublished":"2026-09-30","description":"Three ways to put a Rust core under SwiftUI, Compose and React: UniFFI bindings, Crux's Elm-style core, and Undra's mirrored state. Dated and sourced."},{"@type":"BlogPosting","headline":"Why Undra keeps your UI native","url":"https://shreypdev.github.io/undra/blog/why-undra-keeps-your-ui-native/","datePublished":"2026-09-30","description":"Shared UI and shared logic are different bets. What Flutter, React Native and Compose Multiplatform trade, who should pick which, and where Undra stops."}]}
+</script>
+<!-- blog-ld:end -->
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/blog.css">
+</head>
+<body data-page="blog">
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/">Docs</a>
+      <a href="../blog/" aria-current="page">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<main id="main" class="blog-index">
+  <div class="wrap">
+    <header class="page-head">
+      <p class="eyebrow">Blog</p>
+      <h1>Notes from the Undra team</h1>
+      <p class="lede">Comparisons, architecture and the reasoning behind Undra's design. <a class="rss-link" href="../feed.xml">RSS feed</a></p>
+    </header>
+    <!-- blog:start -->
+    <div class="post-grid">
+    <article class="post-card reveal"><a href="reads-never-cross-the-boundary/"><p class="eyebrow">Architecture</p><h2>Reads never cross the boundary: how Undra's state model works</h2><p>How Undra mirrors Rust state into SwiftUI, Compose and React: change-sets, keyed lists as recorded operations, a schema-hash gate, and what it all costs.</p><p class="post-meta"><time datetime="2026-09-30">30 Sep 2026</time> · 13 min read</p></a></article>
+    <article class="post-card reveal"><a href="undra-vs-kotlin-multiplatform/"><p class="eyebrow">Comparison</p><h2>Undra vs Kotlin Multiplatform: sharing logic without leaving your platform</h2><p>Undra and Kotlin Multiplatform both share logic and keep the UI native. A dated, sourced comparison: iOS, web, reads, tooling, ecosystem and team fit.</p><p class="post-meta"><time datetime="2026-09-30">30 Sep 2026</time> · 12 min read</p></a></article>
+    <article class="post-card reveal"><a href="undra-vs-uniffi-and-crux/"><p class="eyebrow">Comparison</p><h2>Undra vs UniFFI and Crux: three ways to put Rust under a native app</h2><p>Three ways to put a Rust core under SwiftUI, Compose and React: UniFFI bindings, Crux's Elm-style core, and Undra's mirrored state. Dated and sourced.</p><p class="post-meta"><time datetime="2026-09-30">30 Sep 2026</time> · 11 min read</p></a></article>
+    <article class="post-card reveal"><a href="why-undra-keeps-your-ui-native/"><p class="eyebrow">Thesis</p><h2>Why Undra keeps your UI native</h2><p>Shared UI and shared logic are different bets. What Flutter, React Native and Compose Multiplatform trade, who should pick which, and where Undra stops.</p><p class="post-meta"><time datetime="2026-09-30">30 Sep 2026</time> · 9 min read</p></a></article>
+    </div>
+    <!-- blog:end -->
+  </div>
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

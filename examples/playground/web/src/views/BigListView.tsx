@@ -1,4 +1,4 @@
-import { useSignal } from "@keel/runtime/react";
+import { useSignal } from "@undra/runtime/react";
 import { type BigList, ListError } from "@playground/core";
 import { useEffect, useRef, useState } from "react";
 
@@ -16,12 +16,15 @@ const STREAM_INTERVAL_MS = 100;
  * one-row operation, which reaches this view as a keyed patch of a single operation (the core
  * never sends the list again), and the rows are keyed by `id`, so React moves and updates the
  * few nodes that changed.
+ *
+ * With `autoStream` the stream starts on its own, as if "Stream updates" had been switched on
+ * (`?stream=1` in the page URL).
  */
-export function BigListView({ bigList }: { readonly bigList: BigList }) {
+export function BigListView({ bigList, autoStream = false }: { readonly bigList: BigList; readonly autoStream?: boolean }) {
   const items = useSignal(bigList.items);
   const count = useSignal(bigList.count);
   const [scrollTop, setScrollTop] = useState(0);
-  const [streaming, setStreaming] = useState(false);
+  const [streaming, setStreaming] = useState(autoStream);
   const [readout, setReadout] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 

@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Error codes · Undra docs</title>
+<meta name="description" content="Every Undra macro diagnostic by code: what triggers it, why the rule exists and how to fix it, with the real messages from the test suite.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/errors.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Error codes · Undra docs">
+<meta property="og:description" content="Every Undra macro diagnostic by code: what triggers it, why the rule exists and how to fix it, with the real messages from the test suite.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/errors.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Error codes · Undra docs">
+<meta name="twitter:description" content="Every Undra macro diagnostic by code: what triggers it, why the rule exists and how to fix it, with the real messages from the test suite.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/errors.html#article","headline":"Error codes · Undra docs","description":"Every Undra macro diagnostic by code: what triggers it, why the rule exists and how to fix it, with the real messages from the test suite.","url":"https://shreypdev.github.io/undra/docs/errors.html","inLanguage":"en","dateModified":"2026-09-30","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Error codes","item":"https://shreypdev.github.io/undra/docs/errors.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html" aria-current="page">Error codes</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html" aria-current="page">Error codes</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+<!-- errors:start -->
+<p class="crumb">Reference</p>
+<h1>Error codes</h1>
+<p class="lede">Every compile error the macros raise has a stable code, a fixed shape and a fix. The link at the end of each message lands on its code below.</p>
+<h2 id="how-to-read-one">How to read one</h2>
+<p>A diagnostic says what is wrong, why the rule exists and how to fix it. This one is verbatim from the macro test suite:</p>
+<div class="code"><div class="code-bar"><span><span class="lang">text</span></span></div><pre><code>error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
+  = note: trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript
+  = help: use a concrete `#[undra::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[undra::port]`)
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004</code></pre></div>
+<h2 id="all-codes">All codes</h2>
+<div class="table-wrap"><table><thead><tr><th>Code</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><a href="#E0001"><code>E0001</code></a></td><td>unsupported type in a public position</td></tr>
+<tr><td><a href="#E0002"><code>E0002</code></a></td><td>generic parameter</td></tr>
+<tr><td><a href="#E0003"><code>E0003</code></a></td><td>lifetime in a public signature</td></tr>
+<tr><td><a href="#E0004"><code>E0004</code></a></td><td>trait object, <code>dyn</code>, <code>impl Trait</code></td></tr>
+<tr><td><a href="#E0005"><code>E0005</code></a></td><td><code>Result</code> / <code>Stream</code> outside return position</td></tr>
+<tr><td><a href="#E0006"><code>E0006</code></a></td><td>map key type not allowed</td></tr>
+<tr><td><a href="#E0007"><code>E0007</code></a></td><td>unsupported item shape</td></tr>
+<tr><td><a href="#E0008"><code>E0008</code></a></td><td>unknown or misplaced <code>#[undra(..)]</code> attribute or macro argument</td></tr>
+<tr><td><a href="#E0010"><code>E0010</code></a></td><td>invalid <code>#[undra::error]</code> variant</td></tr>
+<tr><td><a href="#E0011"><code>E0011</code></a></td><td>store and <code>#[undra::api(store)]</code> impl block disagree</td></tr>
+<tr><td><a href="#E0012"><code>E0012</code></a></td><td>trait object in a record field</td></tr>
+<tr><td><a href="#E0013"><code>E0013</code></a></td><td>store cannot be restored automatically</td></tr>
+<tr><td><a href="#E0020"><code>E0020</code></a></td><td><code>&amp;mut self</code> receiver</td></tr>
+<tr><td><a href="#E0021"><code>E0021</code></a></td><td><code>self</code> by value</td></tr>
+<tr><td><a href="#E0022"><code>E0022</code></a></td><td>non-<code>Send</code> future in an async method: <code>rustc</code>'s own error, pointed at the method by a generated <code>Send</code> assertion (it cannot carry an Undra code)</td></tr>
+<tr><td><a href="#E0030"><code>E0030</code></a></td><td>port method with a non-wire parameter</td></tr>
+<tr><td><a href="#E0031"><code>E0031</code></a></td><td>event port method that is not a plain <code>fn(..)</code> returning <code>()</code></td></tr>
+<tr><td><a href="#E0032"><code>E0032</code></a></td><td>invalid port trait shape</td></tr>
+<tr><td><a href="#E0033"><code>E0033</code></a></td><td>the error type of a port method has no <code>From&lt;PortError&gt;</code></td></tr>
+<tr><td><a href="#E0040"><code>E0040</code></a></td><td>query without <code>key</code>, mutation with <code>stale</code>, or another invalid query argument</td></tr>
+<tr><td><a href="#E0041"><code>E0041</code></a></td><td>query or mutation function with an invalid signature</td></tr>
+<tr><td><a href="#E0042"><code>E0042</code></a></td><td>query whose success value is <code>()</code> or an <code>Option</code></td></tr>
+<tr><td><a href="#E0050"><code>E0050</code></a></td><td>duplicate type name</td></tr>
+<tr><td><a href="#E0051"><code>E0051</code></a></td><td>a name that collides after case conversion</td></tr>
+<tr><td><a href="#E0052"><code>E0052</code></a></td><td>a record, enum, error, object or port named like a standard library item</td></tr>
+<tr><td><a href="#E0060"><code>E0060</code></a></td><td>a spelling that looks like a built-in Undra type is another type</td></tr>
+<tr><td><a href="#E0061"><code>E0061</code></a></td><td>the schema names a different type than the one spelled, or a type that is not an Undra type</td></tr>
+<tr><td><a href="#E0062"><code>E0062</code></a></td><td>a port call had no adapter</td></tr>
+<tr><td><a href="#E0063"><code>E0063</code></a></td><td>nested <code>Option&lt;Option&lt;T&gt;&gt;</code></td></tr>
+<tr><td><a href="#E0064"><code>E0064</code></a></td><td>an object (<code>#[undra::api] impl</code>) used where a value is expected</td></tr>
+</tbody></table></div>
+<h2 id="types-and-shapes">Types and shapes<a class="anchor" href="#types-and-shapes" aria-label="Link to this section">#</a></h2>
+<h3 id="E0001"><code>E0001</code> unsupported type in a public position<a class="anchor" href="#E0001" aria-label="Link to E0001">#</a></h3>
+<p>unsupported type in a public position (lists the type and the allowed set); includes <code>Lazy&lt;T&gt;</code> (lazy lists are not available in v1), <code>Handle</code> (no schema type; objects cross through constructors), a <code>Result</code> whose error type is not a <code>#[undra::error]</code> enum, and a type used as a value that cannot cross (an <code>Encode</code>/<code>Decode</code> bound that is not met)</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td><code>Lazy&lt;Row&gt;</code> is not available in v1: lazy lists cannot be mirrored yet</td><td>a <code>Lazy&lt;T&gt;</code> signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it</td><td>expose the items as a <code>Signal&lt;Vec&lt;T&gt;&gt;</code> (keyed with <code>#[undra(key = &quot;..&quot;)]</code> if they have an id) or as a paged method that takes an offset and a limit</td></tr>
+<tr><td><code>&amp;str</code> cannot cross the boundary</td><td>references have no wire representation; every value crosses by copy</td><td>use an owned <code>String</code></td></tr>
+<tr><td><code>usize</code> cannot cross the boundary</td><td>its width differs between platforms (32-bit wasm, 64-bit iOS and Android), so the wire layout would too</td><td>use a fixed-width integer such as <code>u32</code> or <code>u64</code></td></tr>
+<tr><td><code>Ctx</code> parameter on method <code>touch</code></td><td>methods reach the runtime through the object: <code>Ctx</code> is only injected into constructors, free functions, queries and mutations</td><td>store a <code>Ctx</code> in the object when it is constructed, or use <code>Ctx::current()</code></td></tr>
+<tr><td><code>Instant</code> cannot cross the boundary</td><td>monotonic instants are meaningless outside their process</td><td>use <code>Duration</code> for spans and <code>Timestamp</code> for points in time; if <code>Instant</code> is a type of your own, rename it: Undra recognises this name wherever it is written</td></tr>
+<tr><td><code>Handle</code> cannot be used in a public signature</td><td>a handle is how the runtime refers to an object instance; the schema has no handle type, because an object crosses the boundary through its constructors, never as a value in a signature</td><td>use the object's own methods from the platform (it holds the handle), or return a record with the data the platform needs; if <code>Handle</code> is a type of your own, rename it: Undra recognises this name wherever it is written</td></tr>
+</tbody></table></div>
+<h3 id="E0002"><code>E0002</code> generic parameter<a class="anchor" href="#E0002" aria-label="Link to E0002">#</a></h3>
+<p>generic parameter on a <code>#[undra::api]</code> item</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>generic parameter <code>T</code> on <code>Page</code></td><td>the schema describes concrete types; every target language would need one instantiation per use</td><td>remove the parameter, and declare one concrete <code>#[undra::api]</code> type per instantiation</td></tr>
+</tbody></table></div>
+<h3 id="E0003"><code>E0003</code> lifetime in a public signature<a class="anchor" href="#E0003" aria-label="Link to E0003">#</a></h3>
+<p>lifetime in a public signature</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>lifetime <code>'a</code> on <code>Label</code></td><td>everything crosses the boundary by value; a borrow cannot outlive the call that made it</td><td>remove the lifetime parameter and use owned types</td></tr>
+</tbody></table></div>
+<h3 id="E0004"><code>E0004</code> trait object, <code>dyn</code>, <code>impl Trait</code><a class="anchor" href="#E0004" aria-label="Link to E0004">#</a></h3>
+<p>trait object / <code>dyn</code> / <code>Box&lt;dyn Fn&gt;</code></p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>trait object <code>dyn Fn(u32)</code> cannot cross the boundary</td><td>trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript</td><td>use a concrete <code>#[undra::api]</code> type or an enum listing the cases you need; callbacks into the platform are ports (<code>#[undra::port]</code>)</td></tr>
+<tr><td><code>impl std::fmt::Display</code> cannot cross the boundary</td><td><code>impl Trait</code> has no wire representation; the only one the schema understands is <code>impl Stream&lt;Item = T&gt;</code> in a return type</td><td>use a concrete type, or <code>impl Stream&lt;Item = T&gt;</code> for a sequence of values over time</td></tr>
+<tr><td>boxed stream <code>Pin&lt;Box&lt;dyn undra::runtime::Stream&lt;Item = u32&gt; + Send&gt;&gt;</code> cannot cross the boundary</td><td>a stream is described to the platforms as <code>impl Stream&lt;Item = T&gt;</code> in a return type; a boxed or <code>dyn</code> stream has no schema representation</td><td>return <code>impl Stream&lt;Item = T&gt; + Send + 'static</code> (box it inside the function if the branches differ)</td></tr>
+</tbody></table></div>
+<h3 id="E0005"><code>E0005</code> <code>Result</code> / <code>Stream</code> outside return position<a class="anchor" href="#E0005" aria-label="Link to E0005">#</a></h3>
+<p><code>Result</code> or <code>Stream</code> outside return position</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td><code>Result&lt;u32, String&gt;</code> cannot be used as a field</td><td><code>Result&lt;T, E&gt;</code> is how a method reports a typed error; it is only legal as the outermost type of a return</td><td>return the <code>Result</code> from the method and keep only plain values in fields, parameters and nested types</td></tr>
+</tbody></table></div>
+<h3 id="E0006"><code>E0006</code> map key type not allowed<a class="anchor" href="#E0006" aria-label="Link to E0006">#</a></h3>
+<p>map key type not allowed</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td><code>f64</code> cannot be a map key</td><td>map keys must be <code>String</code>, an integer, <code>bool</code> or <code>Uuid</code>: those compare and hash identically on every platform (floats and composite keys do not)</td><td>use one of those key types, or a <code>Vec</code> of records with an explicit key field</td></tr>
+</tbody></table></div>
+<h3 id="E0007"><code>E0007</code> unsupported item shape<a class="anchor" href="#E0007" aria-label="Link to E0007">#</a></h3>
+<p>unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not <code>&amp;self</code>, a store that is not a struct with named fields, the reserved field name <code>__undra_cell</code>, <code>#[undra::port]</code> on an inherent impl, <code>#[undra::api]</code> on a method, <code>#[undra::query]</code> or <code>#[undra::mutation]</code> inside an <code>impl</code> block)</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>tuple struct <code>Meters</code> cannot be a record</td><td>the schema names every field so the other languages can generate properties; tuple fields have no names</td><td>use named fields: <code>struct Meters { value: f64 }</code></td></tr>
+<tr><td>enum <code>Nothing</code> has no variants</td><td>an enum without variants has no values, so it can never be sent</td><td>add at least one variant</td></tr>
+<tr><td>constructor <code>new</code> is <code>async</code></td><td>a constructor inserts the new object into the object table before it replies, so it must finish synchronously</td><td>construct synchronously and start asynchronous work with <code>ctx.spawn(..)</code></td></tr>
+<tr><td><code>helper</code> is neither a method nor a constructor</td><td>a <code>pub fn</code> in a <code>#[undra::api] impl</code> block must take <code>&amp;self</code> (a method) or return <code>Self</code> / <code>Result&lt;Self, E&gt;</code> (a constructor); the return type is read as written, so an alias such as <code>type R&lt;T&gt; = Result&lt;T, E&gt;</code> is not followed</td><td>add <code>&amp;self</code>, make it return <code>Self</code> or spell out <code>Result&lt;Self, E&gt;</code>, or make it private / move it to a free <code>#[undra::api] fn</code></td></tr>
+<tr><td>the receiver <code>self: &amp;Arc&lt;Self&gt;</code> of method <code>by_arc</code> is not supported</td><td>the dispatcher resolves the object from its handle and calls the method with <code>&amp;Type</code>; a receiver such as <code>Arc&lt;Self&gt;</code>, <code>Box&lt;Self&gt;</code> or <code>Pin&lt;&amp;Self&gt;</code> needs a different call</td><td>write <code>&amp;self</code>; clone an <code>Arc</code> of the object inside the method if you need one</td></tr>
+<tr><td>unit struct <code>Marker</code> cannot be a record</td><td>a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a <code>Vec</code> of them would accept any count from a four-byte message</td><td>add a field, or use an enum with a unit variant if you need a marker</td></tr>
+</tbody></table></div>
+<h3 id="E0008"><code>E0008</code> unknown or misplaced <code>#[undra(..)]</code> attribute or macro argument<a class="anchor" href="#E0008" aria-label="Link to E0008">#</a></h3>
+<p>unknown or misplaced <code>#[undra(..)]</code> attribute or macro argument (an unknown key, a value of the wrong kind or a value on a flag, <code>key</code> on a signal that is not a <code>Signal&lt;Vec&lt;T&gt;&gt;</code>, <code>#[cfg]</code> on a public item, an invalid <code>crate = &quot;..&quot;</code> path); a <code>cfg_attr</code> whose attributes are all documentation or lint levels is accepted</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>unknown option <code>defualt</code> in <code>#[undra(..)]</code></td><td>the options are <code>crate = &quot;path&quot;</code> (items), <code>default</code> (record fields), <code>key = &quot;field&quot;</code> and <code>no_coalesce</code> (store signal fields)</td><td>remove or correct the option</td></tr>
+<tr><td><code>#[undra(key)]</code> is not valid on a record or variant field</td><td><code>key = &quot;field&quot;</code> turns a store's <code>Signal&lt;Vec&lt;T&gt;&gt;</code> into a keyed list that ships patches</td><td>remove the option, or move it to where it applies</td></tr>
+<tr><td>unknown argument <code>colour</code> for <code>#[undra::api]</code></td><td><code>#[undra::api]</code> accepts: <code>crate = &quot;path&quot;</code>, and <code>store</code> on an impl block of a <code>#[undra::store]</code> struct</td><td>remove or correct the argument</td></tr>
+<tr><td><code>default</code> takes no value</td><td><code>default</code> switches a behaviour on by being present; there is nothing to set it to</td><td>write <code>default</code> alone</td></tr>
+<tr><td><code>key</code> must be a string literal naming a field</td><td><code>key</code> takes a string literal naming a field; anything else cannot be read at compile time</td><td>write <code>key = &quot;id&quot;</code></td></tr>
+<tr><td><code>no_coalesce</code> takes no value</td><td><code>no_coalesce</code> switches a behaviour on by being present; there is nothing to set it to</td><td>write <code>no_coalesce</code> alone</td></tr>
+</tbody></table></div>
+<h2 id="errors-and-stores">Errors and stores<a class="anchor" href="#errors-and-stores" aria-label="Link to this section">#</a></h2>
+<h3 id="E0010"><code>E0010</code> invalid <code>#[undra::error]</code> variant<a class="anchor" href="#E0010" aria-label="Link to E0010">#</a></h3>
+<p><code>#[undra::error]</code> variant without <code>#[error(..)]</code>, a message with an implicit <code>{}</code> (write <code>{0}</code> or <code>{name}</code>), <code>#[error]</code>, <code>#[from]</code> or <code>#[source]</code> on a plain <code>#[undra::api]</code> enum</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>variant <code>NotFound</code> has no <code>#[error(..)]</code> message</td><td>every variant of a <code>#[undra::error]</code> enum needs a message, because the platforms show it to users and logs</td><td>add <code>#[error(&quot;what went wrong&quot;)]</code>, or <code>#[error(transparent)]</code> to forward to the inner error</td></tr>
+<tr><td>invalid message for variant <code>Missing</code>: <code>{1}</code> refers to field 1, but the variant has 1</td><td>the message is a template over the variant's fields</td><td>use <code>{0}</code>, <code>{1}</code>, .. for tuple fields and <code>{name}</code> for named fields</td></tr>
+<tr><td><code>#[error(transparent)]</code> on variant <code>Both</code> needs exactly one field, found 2</td><td><code>transparent</code> forwards <code>Display</code> and <code>source()</code> to the variant's only field</td><td>give the variant a single field holding the inner error</td></tr>
+<tr><td><code>#[error]</code> on the variant <code>A</code> belongs to <code>#[undra::error]</code>, not <code>#[undra::api]</code></td><td><code>#[error(..)]</code>, <code>#[from]</code> and <code>#[source]</code> are the helper attributes of error enums; a plain <code>#[undra::api]</code> enum has no messages, <code>Display</code> or <code>From</code> impls</td><td>change the enum's attribute to <code>#[undra::error]</code>, or remove the helper attribute</td></tr>
+</tbody></table></div>
+<h3 id="E0011"><code>E0011</code> store and <code>#[undra::api(store)]</code> impl block disagree<a class="anchor" href="#E0011" aria-label="Link to E0011">#</a></h3>
+<p><code>#[undra::store]</code> and its <code>#[undra::api(store)]</code> impl block disagree, including a store with no impl block (macros); a store without a constructor (meta, bindgen)</p>
+<p class="tok-dim">No compile-fail example: this code comes from the generators or the runtime, not from the macros.</p>
+<h3 id="E0012"><code>E0012</code> trait object in a record field<a class="anchor" href="#E0012" aria-label="Link to E0012">#</a></h3>
+<p>trait object in a record field (the blueprint example)</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td><code>Vec&lt;Box&lt;dyn Any&gt;&gt;</code> cannot cross the boundary</td><td>trait objects have no wire representation</td><td>make <code>items</code> a concrete <code>#[undra::api]</code> type, or an enum listing the cases you need</td></tr>
+</tbody></table></div>
+<h3 id="E0013"><code>E0013</code> store cannot be restored automatically<a class="anchor" href="#E0013" aria-label="Link to E0013">#</a></h3>
+<p>store cannot be restored automatically: it has a <code>Computed</code> field, or a field that is neither a signal, a <code>Ctx</code> nor <code>Default</code>, and no <code>#[undra::store(restore = &quot;..&quot;)]</code> hook</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>store <code>Todos</code> cannot be restored automatically: <code>count</code> is computed</td><td>restoring a snapshot decodes the plain signals and rebuilds the store, but only your code knows how to derive computed signals from them</td><td>add <code>#[undra::store(restore = &quot;Self::rebuild&quot;)]</code> with <code>fn rebuild(ctx: Ctx, &lt;one Signal&lt;T&gt; per plain signal, in order&gt;) -&gt; Self</code>, the same code <code>new</code> uses to build the store</td></tr>
+</tbody></table></div>
+<h2 id="methods">Methods<a class="anchor" href="#methods" aria-label="Link to this section">#</a></h2>
+<h3 id="E0020"><code>E0020</code> <code>&amp;mut self</code> receiver<a class="anchor" href="#E0020" aria-label="Link to E0020">#</a></h3>
+<p><code>&amp;mut self</code> receiver</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td><code>&amp;mut self</code> receiver on method <code>increment</code></td><td>objects are shared as <code>Arc&lt;Type&gt;</code> across calls and threads, so methods only ever get <code>&amp;self</code></td><td>take <code>&amp;self</code> and mutate through signals (<code>Signal&lt;T&gt;</code>), a <code>Mutex</code> or another form of interior mutability</td></tr>
+</tbody></table></div>
+<h3 id="E0021"><code>E0021</code> <code>self</code> by value<a class="anchor" href="#E0021" aria-label="Link to E0021">#</a></h3>
+<p><code>self</code> by value</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td><code>self</code> by value on method <code>finish</code></td><td>an object is shared across calls; a method cannot consume it</td><td>take <code>&amp;self</code> and clone whatever you need to keep</td></tr>
+</tbody></table></div>
+<h3 id="E0022"><code>E0022</code> non-<code>Send</code> future in an async method: <code>rustc</code>'s own error, pointed at the method by a generated <code>Send</code> assertion (it cannot carry an Undra code)<a class="anchor" href="#E0022" aria-label="Link to E0022">#</a></h3>
+<p>non-<code>Send</code> future in an async method</p>
+<p class="tok-dim">No compile-fail example: this code comes from the generators or the runtime, not from the macros.</p>
+<h2 id="ports">Ports<a class="anchor" href="#ports" aria-label="Link to this section">#</a></h2>
+<h3 id="E0030"><code>E0030</code> port method with a non-wire parameter<a class="anchor" href="#E0030" aria-label="Link to E0030">#</a></h3>
+<p>port method with a non-wire parameter</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>parameter <code>url</code> of port method <code>request</code> is not a wire type</td><td><code>&amp;str</code> cannot cross the boundary (references have no wire representation; every value crosses by copy)</td><td>use an owned <code>String</code></td></tr>
+<tr><td>parameter <code>on_progress</code> of port method <code>request</code> is not a wire type</td><td>trait object <code>dyn Fn(u8)</code> cannot cross the boundary (trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript)</td><td>use a concrete <code>#[undra::api]</code> type or an enum listing the cases you need; callbacks into the platform are ports (<code>#[undra::port]</code>)</td></tr>
+</tbody></table></div>
+<h3 id="E0031"><code>E0031</code> event port method that is not a plain <code>fn(..)</code> returning <code>()</code><a class="anchor" href="#E0031" aria-label="Link to E0031">#</a></h3>
+<p>event port method with a return type</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>event port method <code>changed</code> returns a value</td><td>events are fire-and-forget notifications from the host; there is no reply to carry a value</td><td>remove the return type, or drop <code>event</code> from <code>#[undra::port(event)]</code> to make it a request/reply port</td></tr>
+<tr><td>event port method <code>resumed</code> is <code>async</code></td><td>events are fire-and-forget notifications from the host; nothing waits for them</td><td>make it a plain <code>fn</code> returning <code>()</code></td></tr>
+</tbody></table></div>
+<h3 id="E0032"><code>E0032</code> invalid port trait shape<a class="anchor" href="#E0032" aria-label="Link to E0032">#</a></h3>
+<p>invalid port trait shape (an <code>async</code> method on a <code>sync</code> port, a parameter that is not a plain name, an associated type or const, no <code>&amp;self</code> receiver)</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td><code>#[undra::port(sync)]</code> port has the <code>async</code> method <code>now_ms</code></td><td><code>sync</code> promises that every method answers immediately, so the core can call it without yielding</td><td>remove <code>async</code>, or remove <code>sync</code> from the attribute</td></tr>
+<tr><td>port trait <code>Kv</code> has an associated item that is not a method</td><td>a port is a list of methods the platform implements; associated types and constants have no wire representation</td><td>remove it, or move it to a separate trait</td></tr>
+</tbody></table></div>
+<h3 id="E0033"><code>E0033</code> the error type of a port method has no <code>From&lt;PortError&gt;</code><a class="anchor" href="#E0033" aria-label="Link to E0033">#</a></h3>
+<p>the error type of a <code>Result</code> port method has no <code>From&lt;PortError&gt;</code> (an unavailable port cannot be reported)</p>
+<p class="tok-dim">No compile-fail example: this code comes from the generators or the runtime, not from the macros.</p>
+<h2 id="queries-and-mutations">Queries and mutations<a class="anchor" href="#queries-and-mutations" aria-label="Link to this section">#</a></h2>
+<h3 id="E0040"><code>E0040</code> query without <code>key</code>, mutation with <code>stale</code>, or another invalid query argument<a class="anchor" href="#E0040" aria-label="Link to E0040">#</a></h3>
+<p>query without <code>key</code> / mutation with <code>stale</code> / a query argument of the wrong kind</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>query <code>todos</code> has no <code>key</code></td><td>the cache is addressed by key: two calls share a cached result only if their keys are equal</td><td>add <code>key = &quot;todos&quot;</code>, with <code>{param}</code> placeholders for the parameters that distinguish results</td></tr>
+<tr><td>mutation <code>add_todo</code> has <code>stale</code></td><td><code>stale</code> is how long a cached *read* stays fresh; a mutation writes and caches nothing</td><td>remove <code>stale</code>; put it on the query the mutation invalidates</td></tr>
+<tr><td><code>{pgae}</code> in <code>key</code> is not a parameter of the function</td><td>each placeholder is replaced by the encoded parameter of that name</td><td>the parameters are: page</td></tr>
+<tr><td><code>key</code> must be a string literal</td><td><code>key</code> takes a string literal; anything else cannot be read at compile time</td><td>write <code>key = &quot;todos:{page}&quot;</code></td></tr>
+<tr><td><code>retry</code> must be a whole number</td><td><code>retry</code> takes a whole number; anything else cannot be read at compile time</td><td>write <code>retry = 3</code></td></tr>
+<tr><td><code>stale</code> must be a string literal with a unit</td><td><code>stale</code> takes a string literal with a unit; anything else cannot be read at compile time</td><td>write <code>stale = &quot;30s&quot;</code></td></tr>
+</tbody></table></div>
+<h3 id="E0041"><code>E0041</code> query or mutation function with an invalid signature<a class="anchor" href="#E0041" aria-label="Link to E0041">#</a></h3>
+<p>query or mutation function with an invalid signature (not <code>async</code>, no <code>ctx: &amp;Ctx</code> first parameter, not returning <code>Result&lt;T, E&gt;</code>, a stream result, <code>self</code>)</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td><code>sync_query</code> must be <code>async</code></td><td><code>#[undra::query]</code> functions fetch or write through ports, which are asynchronous</td><td>write <code>async fn</code></td></tr>
+<tr><td><code>no_ctx</code> must take <code>ctx: &amp;Ctx</code> as its first parameter</td><td>the runtime hands every query and mutation a context to reach ports and other queries</td><td>add <code>ctx: &amp;Ctx</code> (or <code>ctx: Ctx</code>) before the other parameters</td></tr>
+<tr><td><code>plain</code> must return <code>Result&lt;T, E&gt;</code></td><td>the cache stores the success value and the error separately, and the platforms show both</td><td>return <code>Result&lt;T, E&gt;</code> where <code>E</code> is a <code>#[undra::error]</code> enum</td></tr>
+</tbody></table></div>
+<h3 id="E0042"><code>E0042</code> query whose success value is <code>()</code> or an <code>Option</code><a class="anchor" href="#E0042" aria-label="Link to E0042">#</a></h3>
+<p>query whose success value is <code>()</code> or an <code>Option</code> (a query caches a value; use a mutation for effects)</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>query <code>ping</code> returns <code>()</code></td><td>a query caches the value it returns; a query with nothing to return has nothing to cache</td><td>use <code>#[undra::mutation]</code> for a call that only has effects, or return the data the platform needs</td></tr>
+<tr><td>query <code>find</code> returns an <code>Option</code></td><td>the handle's <code>data</code> signal is already optional (no result yet), so an optional result would be ambiguous: <code>None</code> could mean &quot;not loaded&quot; or &quot;loaded, absent&quot;</td><td>return a record or a list (an empty <code>Vec</code> says &quot;nothing&quot;), or an enum naming the cases</td></tr>
+</tbody></table></div>
+<h2 id="names">Names in the generators<a class="anchor" href="#names" aria-label="Link to this section">#</a></h2>
+<h3 id="E0050"><code>E0050</code> duplicate type name<a class="anchor" href="#E0050" aria-label="Link to E0050">#</a></h3>
+<p>duplicate type name (bindgen)</p>
+<p class="tok-dim">No compile-fail example: this code comes from the generators or the runtime, not from the macros.</p>
+<h3 id="E0051"><code>E0051</code> a name that collides after case conversion<a class="anchor" href="#E0051" aria-label="Link to E0051">#</a></h3>
+<p>a name that collides after case conversion (<code>a_b</code> and <code>aB</code>) or is not an identifier in a target language (bindgen)</p>
+<p class="tok-dim">No compile-fail example: this code comes from the generators or the runtime, not from the macros.</p>
+<h3 id="E0052"><code>E0052</code> a record, enum, error, object or port named like a standard library item<a class="anchor" href="#E0052" aria-label="Link to E0052">#</a></h3>
+<p>a record, enum, error, object or port named like a standard library item (section 8) but with another id: the runtimes implement the standard items under those names and ids (bindgen)</p>
+<p class="tok-dim">No compile-fail example: this code comes from the generators or the runtime, not from the macros.</p>
+<h2 id="type-identity">Type identity and the schema<a class="anchor" href="#type-identity" aria-label="Link to this section">#</a></h2>
+<h3 id="E0060"><code>E0060</code> a spelling that looks like a built-in Undra type is another type<a class="anchor" href="#E0060" aria-label="Link to E0060">#</a></h3>
+<p>a spelling that looks like a built-in Undra type (<code>Bytes</code>, <code>Uuid</code>, <code>String</code>, <code>Vec</code>, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit</p>
+<p class="tok-dim">No compile-fail example: this code comes from the generators or the runtime, not from the macros.</p>
+<h3 id="E0061"><code>E0061</code> the schema names a different type than the one spelled, or a type that is not an Undra type<a class="anchor" href="#E0061" aria-label="Link to E0061">#</a></h3>
+<p>the schema records a name that the type written there does not have: an alias (<code>type Todo = Item</code>), a renamed import (<code>use m::Item as Todo</code>) or a type that is not declared with <code>#[undra::api]</code>; reported by a const assertion comparing <code>UNDRA_TYPE_ID</code></p>
+<p class="tok-dim">No compile-fail example: this code comes from the generators or the runtime, not from the macros.</p>
+<h3 id="E0062"><code>E0062</code> a port call had no adapter<a class="anchor" href="#E0062" aria-label="Link to E0062">#</a></h3>
+<p>a port call had no adapter (runtime message of a method without an error channel; a typed error for one with a <code>Result</code>)</p>
+<p class="tok-dim">No compile-fail example: this code comes from the generators or the runtime, not from the macros.</p>
+<h3 id="E0063"><code>E0063</code> nested <code>Option&lt;Option&lt;T&gt;&gt;</code><a class="anchor" href="#E0063" aria-label="Link to E0063">#</a></h3>
+<p><code>Option&lt;Option&lt;T&gt;&gt;</code> in a public position</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>nested option <code>Option&lt;Option&lt;i32&gt;&gt;</code> cannot cross the boundary</td><td>Kotlin and TypeScript cannot express nested optionality: <code>Some(None)</code> and <code>None</code> would both arrive as <code>null</code></td><td>wrap the inner option in a record or an enum that names the two cases</td></tr>
+</tbody></table></div>
+<h3 id="E0064"><code>E0064</code> an object (<code>#[undra::api] impl</code>) used where a value is expected<a class="anchor" href="#E0064" aria-label="Link to E0064">#</a></h3>
+<p>an object (<code>#[undra::api] impl</code>) used as a field, parameter or return value: objects cross by handle</p>
+<p class="tok-dim">No compile-fail example: this code comes from the generators or the runtime, not from the macros.</p>
+<p class="tok-dim">Generated by <code>site/scripts/build-errors.mjs</code> from <code>docs/SPEC.md</code> section 12 and the compile-fail tests of the macros crate. To change a message, change the macro; to change the catalogue, change the specification.</p>
+<!-- errors:end -->
+<p class="edit"><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md#12-diagnostics" rel="noopener">Generated from the specification and the macro tests: edit those, not this page.</a></p>
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="architecture.html"><span>Previous</span><b>Architecture</b></a>
+    <a class="next" href="api-swift.html"><span>Next</span><b>API overview, Swift</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p>
+<!-- errors-toc:start -->
+<ul><li><a href="#how-to-read-one">How to read one</a></li><li><a href="#all-codes">All codes</a></li><li><a href="#types-and-shapes">Types and shapes</a></li><li><a href="#errors-and-stores">Errors and stores</a></li><li><a href="#methods">Methods</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries-and-mutations">Queries and mutations</a></li><li><a href="#names">Names in the generators</a></li><li><a href="#type-identity">Type identity and the schema</a></li></ul>
+<!-- errors-toc:end -->
+</aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

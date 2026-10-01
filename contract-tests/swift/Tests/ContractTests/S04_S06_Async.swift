@@ -1,5 +1,5 @@
 import Foundation
-import KeelRuntime
+import UndraRuntime
 import PlaygroundCore
 import XCTest
 
@@ -21,7 +21,7 @@ extension ContractScenarios {
             // 2. Three concurrent calls resolve in the order of their delays, with the right values.
             let finished = Locked<[Int32]>([])
             let values = try await withThrowingTaskGroup(of: Int32.self) { (group: inout ThrowingTaskGroup<Int32, any Error>) -> [Int32] in
-                for (i, delay) in [(Int32(1), UInt32(60)), (2, 20), (3, 40)] {
+                for (i, delay) in [(Int32(1), UInt32(400)), (2, 50), (3, 200)] {
                     group.addTask {
                         let value = try await addLater(a: i, b: 0, delayMs: delay, ctx: core)
                         finished.withLock { (current: inout [Int32]) -> Void in current.append(value) }
@@ -34,7 +34,7 @@ extension ContractScenarios {
                 }
                 return all
             }
-            try checkEqual(finished.snapshot, [2, 3, 1], "completion order of delays 60, 20, 40")
+            try checkEqual(finished.snapshot, [2, 3, 1], "completion order of delays 400, 50, 200")
             try checkEqual(values.sorted(), [1, 2, 3], "values of the three calls")
 
             // 3. A call on an object.
@@ -51,7 +51,7 @@ extension ContractScenarios {
             try checkEqual(chained, 12, "a call started from another call's completion")
 
             // ... and a change observer calls into the core, synchronously and asynchronously.
-            let counter = try RawStore(core: core, type: KeelIds.Objects.Counter.typeId, method: KeelIds.Objects.Counter.new)
+            let counter = try RawStore(core: core, type: UndraIds.Objects.Counter.typeId, method: UndraIds.Objects.Counter.new)
             defer { counter.close() }
             counter.observe()
             counter.clear()
@@ -66,13 +66,13 @@ extension ContractScenarios {
                     return
                 }
                 // A sync write from inside the observer: the mirror applies outside the core's lock.
-                _ = try? counter.callSync(KeelIds.Objects.Counter.increment)
+                _ = try? counter.callSync(UndraIds.Objects.Counter.increment)
                 Task {
                     let value = try? await addLater(a: 40, b: 2, delayMs: 10, ctx: core)
                     observed.withLock { (current: inout (reentered: Bool, later: Int32?)) -> Void in current.later = value }
                 }
             }
-            try counter.callSync(KeelIds.Objects.Counter.add, encoded { (w: inout KeelWriter) in w.writeI32(1) })
+            try counter.callSync(UndraIds.Objects.Counter.add, encoded { (w: inout UndraWriter) in w.writeI32(1) })
             try await waitUntil("the async call started from inside the observer") {
                 observed.snapshot.later == 42
             }
@@ -120,19 +120,19 @@ extension ContractScenarios {
             try self.checkBadRequest("an unknown method id") {
                 _ = try core.callSync(.freeFunction(methodId: 0xDEAD_BEEF), method: 0xDEAD_BEEF, args: [])
             }
-            let stale = try core.construct(type: KeelIds.Objects.Probe.typeId, method: KeelIds.Objects.Probe.new, args: [])
+            let stale = try core.construct(type: UndraIds.Objects.Probe.typeId, method: UndraIds.Objects.Probe.new, args: [])
             core.release(stale)
             try self.checkBadRequest("a call on a released handle") {
                 _ = try core.callSync(
-                    .objectMethod(handle: stale, methodId: KeelIds.Objects.Probe.counters),
-                    method: KeelIds.Objects.Probe.counters,
+                    .objectMethod(handle: stale, methodId: UndraIds.Objects.Probe.counters),
+                    method: UndraIds.Objects.Probe.counters,
                     args: []
                 )
             }
             try self.checkBadRequest("a constructor with undecodable arguments") {
                 _ = try core.construct(
-                    type: KeelIds.Objects.RemoteTodosQueryHandle.typeId,
-                    method: KeelIds.Objects.RemoteTodosQueryHandle.new,
+                    type: UndraIds.Objects.RemoteTodosQueryHandle.typeId,
+                    method: UndraIds.Objects.RemoteTodosQueryHandle.new,
                     args: []
                 )
             }
@@ -148,7 +148,7 @@ extension ContractScenarios {
         do {
             try body()
             throw ScenarioFailure(description: "\(what) was accepted")
-        } catch let error as KeelReplyError {
+        } catch let error as UndraReplyError {
             try checkEqual(error.status, .badRequest, "status of \(what)")
             try check(!(error.message ?? "").isEmpty, "\(what) carries no reason")
         }
