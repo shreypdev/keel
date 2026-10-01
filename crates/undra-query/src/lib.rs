@@ -112,7 +112,7 @@ mod status;
 mod storage;
 mod walk;
 
-pub use client::{CtxQuery, QueryClient};
+pub use client::{CtxQuery, PersistStats, QueryClient};
 pub use defs::{BoxFuture, CacheValue, MutationDef, QueryDef};
 pub use dispatch::{INVALIDATE_METHOD_ID, REFETCH_METHOD_ID};
 pub use erased::{MutationRegistration, MutationVTable, QueryRegistration, QueryVTable};

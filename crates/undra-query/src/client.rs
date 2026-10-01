@@ -143,6 +143,31 @@ impl QueryClient {
     pub fn discard_dead_letter(&self, key: Uuid) -> bool {
         self.shared.discard_dead_letter(&self.ctx, key)
     }
+
+    /// The persistence counters and whether the stored queue has been read (what `stats_json`
+    /// reports as `query.persist` and `query.queue`).
+    pub fn persist_stats(&self) -> PersistStats {
+        self.shared.persist_stats()
+    }
+}
+
+/// What the client's persistence did so far ([`QueryClient::persist_stats`]; ADR-037, ADR-049).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PersistStats {
+    /// Writes to the `Kv` store that failed (each is tried again later).
+    pub write_failed: u64,
+    /// Reads from the `Kv` store that failed.
+    pub read_failed: u64,
+    /// Persisted cache entries deleted because they could not be migrated (they can be fetched
+    /// again).
+    pub dropped: u64,
+    /// Cache entries and queued mutations an older build wrote that were migrated.
+    pub migrated: u64,
+    /// Queued mutations moved to the dead-letter queue.
+    pub dead_lettered: u64,
+    /// Whether the stored offline queue has been read. `false` before start-up finished and
+    /// while a read fails (the queue is then neither replayed nor written).
+    pub queue_readable: bool,
 }
 
 /// `ctx.query()` and `ctx.mutate(..)` on [`Ctx`] (SPEC 5.3).

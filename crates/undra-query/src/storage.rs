@@ -695,6 +695,19 @@ impl Shared {
         }
     }
 
+    /// The counters, for [`QueryClient::persist_stats`](crate::QueryClient::persist_stats).
+    pub(crate) fn persist_stats(&self) -> crate::client::PersistStats {
+        let c = &self.counters;
+        crate::client::PersistStats {
+            write_failed: c.write_failed.load(Ordering::Relaxed),
+            read_failed: c.read_failed.load(Ordering::Relaxed),
+            dropped: c.dropped.load(Ordering::Relaxed),
+            migrated: c.migrated.load(Ordering::Relaxed),
+            dead_lettered: c.dead_lettered.load(Ordering::Relaxed),
+            queue_readable: self.state.lock().queue.hydration_name() == "hydrated",
+        }
+    }
+
     /// The `query` section of `stats_json`.
     pub(crate) fn stats_json(&self) -> String {
         let c = &self.counters;
