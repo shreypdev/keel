@@ -16,7 +16,7 @@ use undra_meta::{DispatchCall, DispatchFn, DispatchOutcome, Schema};
 use undra_signals::ChangeSink;
 use undra_wire::payload::{
     Call, CallTarget, PortReply, PortStatus, Reply, ReplyStatus, Snapshot, StoreSnapshot,
-    StreamFlag, StreamItem,
+    StreamFailure, StreamFlag, StreamItem,
 };
 use undra_wire::{Handle, Reader, Writer};
 
@@ -646,8 +646,9 @@ impl Runtime {
     /// Stops the runtime and releases everything it holds (ADR-023, findings L1 and L5):
     ///
     /// 1. every call still in flight is answered with status 3 and every open stream ends with
-    ///    an error item (`"cancelled: the runtime shut down"`), each exactly once, before
-    ///    anything slow is waited for, so a host that is waiting on a reply is released at once;
+    ///    a failed item (flag 3, status 3, `"the runtime shut down"`; ADR-036), each exactly once,
+    ///    before anything slow is waited for, so a host that is waiting on a reply is released at
+    ///    once;
     /// 2. the `undra-core`, timer and blocking threads are stopped and joined;
     /// 3. pending port calls fail with [`PortError::Cancelled`], event subscribers and
     ///    Rust port bindings are cleared (closures that hold a [`Ctx`] would keep the runtime
@@ -953,6 +954,21 @@ impl Runtime {
         self.guard_host("Host::stream_item", || {
             self.host.stream_item(call_id, &payload);
         });
+    }
+
+    /// Ends stream `call_id` with a [`StreamFlag::Failed`] item (ADR-036): the call failed with
+    /// `status` (2 panicked, 3 cancelled by the core), in the reply-failure vocabulary, so the
+    /// host maps it exactly as a failed reply. Never a flag-2 item, which carries only the
+    /// stream's own `E`.
+    fn send_stream_failure(&self, call_id: u32, status: ReplyStatus, message: &str, detail: &str) {
+        let mut body = Writer::with_capacity(9 + message.len() + detail.len());
+        StreamFailure {
+            status,
+            message,
+            detail,
+        }
+        .encode(&mut body);
+        self.send_stream_item(call_id, StreamFlag::Failed, body.as_slice());
     }
 
     pub(crate) fn deliver_change_set(&self, payload: &[u8]) {
@@ -1564,9 +1580,9 @@ impl Runtime {
 
     /// Ends in-flight call `call_id` from the runtime's side: drops its task and tells the host,
     /// exactly once (a call already answered, or cancelled by the host, is left alone). A plain
-    /// call gets status 3 (cancelled); a stream gets an error item with a `String` body, the
-    /// shape of a stream panic, because the host did not ask for the end and a clean end would
-    /// read as success. The caller holds the core lock.
+    /// call gets status 3 (cancelled); a stream gets a failed item (flag 3) with status 3 and
+    /// `why` as its message (ADR-036), because the host did not ask for the end and a clean end
+    /// would read as success. The caller holds the core lock (or is `Drop`).
     fn abort_call(&self, call_id: u32, why: &str) {
         let Some(entry) = self.calls.lock().remove(&call_id) else {
             return;
@@ -1576,11 +1592,7 @@ impl Runtime {
             self.drop_guarded_logged("a call cancelled by the runtime", future);
         }
         if entry.stream.is_some() {
-            self.send_stream_item(
-                call_id,
-                StreamFlag::Error,
-                &string_body(&format!("cancelled: {why}")),
-            );
+            self.send_stream_failure(call_id, ReplyStatus::Cancelled, why, "");
         } else {
             self.send_reply(call_id, ReplyStatus::Cancelled, &[]);
         }
@@ -1914,10 +1926,11 @@ impl Runtime {
             TaskKind::Stream { call_id, handle } => {
                 self.note_panic("stream", handle, report);
                 if self.calls.lock().remove(&call_id).is_some() {
-                    self.send_stream_item(
+                    self.send_stream_failure(
                         call_id,
-                        StreamFlag::Error,
-                        &string_body(&format!("the stream panicked: {}", report.message)),
+                        ReplyStatus::Panic,
+                        &report.message,
+                        &report.backtrace,
                     );
                 }
             }
@@ -2234,8 +2247,8 @@ impl Runtime {
     /// re-observes what it mirrors. Detached tasks keep the objects they already hold; those
     /// stores are detached and no longer deliver change-sets. **In-flight calls and streams
     /// whose receiver the restore replaced or invalidated are cancelled** (ADR-023): a plain
-    /// call is answered with status 3, exactly once, a stream ends with an error item
-    /// (`"cancelled: ..."`), and their tasks are dropped, so none can report success for a write
+    /// call is answered with status 3, exactly once, a stream ends with a failed item (flag 3,
+    /// status 3; ADR-036), and their tasks are dropped, so none can report success for a write
     /// the restored store never saw. Calls without a receiver (free functions, constructors)
     /// carry on.
     ///

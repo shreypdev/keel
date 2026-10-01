@@ -1,7 +1,7 @@
 # ADR-036: a stream ends with its own `E` or with a typed failure, never with a bare string
 
-Status: **Proposed** (2026-10-01, from the v1.x gap audit `.10x/specs/2026-10-01-v1x-gaps.md`, gaps SE-1…SE-3
-and TY-14; Track A, piece A4). **Changes the wire** before publication, like ADR-033: SPEC 3.7 (the
+Status: **Accepted** (2026-10-01; implemented on `wt/runtime-lifecycle`, Track A, piece A4. Proposed the same day
+from the v1.x gap audit `.10x/specs/2026-10-01-v1x-gaps.md`, gaps SE-1…SE-3 and TY-14). **Changes the wire** before publication, like ADR-033: SPEC 3.7 (the
 `StreamItem` flags and bodies), `undra-wire` (`StreamFlag`, `StreamItem`), `undra-runtime` (who sends what),
 `undra-macros` (`impl Stream<Item = Result<T, E>>`), the three platform runtimes' stream decoders, the shared
 contract vectors and two contract scenarios. **No C ABI or wasm ABI change** (`undra_stream_cb` and the

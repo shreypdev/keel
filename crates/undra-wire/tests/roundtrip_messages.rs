@@ -11,7 +11,8 @@ use proptest::prelude::*;
 use undra_wire::payload::{
     Call, CallOwned, CallTarget, Cancel, ChangeEntry, ChangeOp, ChangeSet, ChangeSetBuilder,
     ChangeSetRef, Event, Hello, Log, Observe, PortCall, PortReply, PortStatus, Release, Reply,
-    ReplyStatus, Snapshot, StoreSnapshot, StreamCredit, StreamFlag, StreamItem, TimerFired,
+    ReplyStatus, Snapshot, StoreSnapshot, StreamCredit, StreamFailure, StreamFlag, StreamItem,
+    TimerFired,
 };
 use undra_wire::{
     Decode, Encode, Envelope, Handle, KeyedPatch, Kind, PatchOp, Reader, WireError, Writer,
@@ -139,7 +140,7 @@ proptest! {
     #[test]
     fn fixed_size_payloads(
         call_id in any::<u32>(), credit in any::<u32>(), signal_id in any::<u32>(),
-        on in any::<bool>(), h in handle(), flag in 0_u8..3, body in body(),
+        on in any::<bool>(), h in handle(), flag in 0_u8..4, body in body(),
         timer_id in any::<u32>(), port_id in any::<u32>(), method_id in any::<u32>(),
     ) {
         check_payload!(Cancel { call_id }, 4, Cancel);
@@ -153,6 +154,19 @@ proptest! {
             StreamItem
         );
         check_payload!(Event { port_id, method_id, payload: &body }, 8, Event);
+    }
+
+    #[test]
+    fn stream_failures(
+        status in prop_oneof![
+            Just(ReplyStatus::Panic),
+            Just(ReplyStatus::Cancelled),
+            Just(ReplyStatus::BadRequest),
+        ],
+        message in any::<String>(), detail in any::<String>(),
+    ) {
+        // Entirely length-delimited after the status byte, so every strict prefix must fail.
+        check_payload!(StreamFailure { status, message: &message, detail: &detail }, usize::MAX, StreamFailure);
     }
 
     #[test]

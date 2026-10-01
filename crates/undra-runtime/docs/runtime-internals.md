@@ -232,9 +232,11 @@ The runtime also cancels calls itself (`Runtime::abort_call`, same gate: whoever
 `calls` entry owns the terminal message): on `restore`, every call whose receiver the restore
 replaced or invalidated (ADR-023, finding M3), and on `shutdown`, every call that is still in
 flight (finding L1). A plain call is answered with status 3; a stream gets a `StreamItem` with
-flag 2 (error) and a `String` body that starts with `"cancelled: "` (the host did not ask for
-the end, so flag 1 would read as a clean completion, and all three platform runtimes end the
-stream on flag 2). The task is dropped under the panic guard. A call that has no receiver (a free
+flag 3 (failed, ADR-036): `status 3` (cancelled by the core) and the reason as its message (the
+host did not ask for the end, so flag 1 would read as a clean completion; and flag 2 carries only
+the stream's own `E`). A stream task that panics ends the same way with `status 2`, the panic
+message and its backtrace. Every platform maps a flag-3 item exactly as a failed reply with that
+status. The task is dropped under the panic guard. A call that has no receiver (a free
 function or a constructor) is not touched by a restore.
 
 ## 8. Streams and credit
@@ -479,7 +481,7 @@ that remain, in this order (ADR-023, L1):
    sets `closed` under the `tasks` lock, so a racing `spawn` is refused instead of landing after
    the final `clear`);
 2. **under the core lock, before anything slow is joined**: `cancel_all_calls`, which for every
-   entry of the call table sends status 3 (a stream: a flag 2 item, `"cancelled: the runtime shut
+   entry of the call table sends status 3 (a stream: a flag 3 item, status 3, `"the runtime shut
    down"`) and drops its task (`abort_call`, the same exactly-once gate as cancel). Taking the
    lock here means no poll is running and no `call` is half way through its dispatch: a call
    either registered before (and is answered) or sees the flag and is refused;
@@ -494,8 +496,8 @@ that remain, in this order (ADR-023, L1):
 After `shutdown` a runtime that nothing else references is freed. Without it, a runtime is
 freed when its owner drops the last `Arc` and no app code keeps a strong `Ctx` (ADR-034): its
 `Drop` closes the lifeline with `Gone::Dropped`, **answers what is in flight** exactly as step 2
-does (the tasks no longer pin the runtime, so a host may still be waiting; `"cancelled: the
-runtime was dropped"`), then joins the threads it does not run on and tears down. It runs on
+does (the tasks no longer pin the runtime, so a host may still be waiting; a stream's flag-3 item
+says `"the runtime was dropped"`), then joins the threads it does not run on and tears down. It runs on
 whichever thread released the last reference: the owner's, the `undra-core` thread at the end of
 a turn (it then skips joining itself; the loop sees the closed queue and exits), or a blocking
 worker whose job held the last `Ctx`. Nothing else can reach the runtime by then, so it takes no

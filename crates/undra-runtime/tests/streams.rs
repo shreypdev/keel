@@ -153,16 +153,21 @@ fn cancel_closes_a_stream_without_another_message() {
 }
 
 #[test]
-fn a_panicking_stream_becomes_an_error_item_and_poisons_the_store() {
+fn a_panicking_stream_becomes_a_failed_item_and_poisons_the_store() {
     let t = TestRuntime::new();
     let handle = open(&t, TICKS_PANIC, 4, 7); // panics at item 2
     t.runtime().stream_credit(7, 10);
     t.run_pending();
     let got = t.host().take_stream_items();
     assert_eq!(items(&got[..2]), [item(0), item(1)]);
-    assert_eq!(got[2].flag, StreamFlag::Error);
-    let message = String::decode(&mut Reader::new(&got[2].body)).unwrap();
-    assert!(message.contains("stream kaboom"), "{message}");
+    // ADR-036: flag 3, status 2 with the panic message and its backtrace (the body of a status 2
+    // reply), not a String under flag 2.
+    assert_eq!(got[2].flag, StreamFlag::Failed);
+    let failure =
+        undra_wire::payload::StreamFailure::decode(&mut Reader::new(&got[2].body)).unwrap();
+    assert_eq!(failure.status, ReplyStatus::Panic);
+    assert_eq!(failure.message, "stream kaboom");
+    assert!(failure.detail.contains("panicked at"), "{failure:?}");
     // The runtime and the store keep working.
     assert_eq!(
         call_counter(&t, handle, GET, 8, &[]).status,

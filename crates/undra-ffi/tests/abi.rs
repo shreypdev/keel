@@ -977,7 +977,7 @@ fn streams_honor_credit_and_end() {
         match item.flag {
             StreamFlag::Item => seen.push(u32::decode_exact(item.body).unwrap()),
             StreamFlag::End => break,
-            StreamFlag::Error => panic!("stream failed"),
+            StreamFlag::Error | StreamFlag::Failed => panic!("stream failed"),
         }
     }
     assert_eq!(seen, [0, 1, 2, 3]);

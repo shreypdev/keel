@@ -374,13 +374,12 @@ fn lc1_an_open_endless_stream_does_not_pin_a_dropped_runtime_and_ends_with_one_c
     let items = host.take_stream_items();
     assert_eq!(items.len(), 1, "exactly one terminal item: {items:?}");
     assert_eq!(items[0].call_id, 7);
-    assert_eq!(items[0].flag, StreamFlag::Error);
-    let mut r = Reader::new(&items[0].body);
-    assert_eq!(
-        r.read_str().unwrap(),
-        "cancelled: the runtime was dropped",
-        "the host is told the stream did not end cleanly"
-    );
+    // Told the stream did not end cleanly: a failed item, cancelled by the core (ADR-036).
+    assert_eq!(items[0].flag, StreamFlag::Failed);
+    let failure =
+        undra_wire::payload::StreamFailure::decode(&mut Reader::new(&items[0].body)).unwrap();
+    assert_eq!(failure.status, ReplyStatus::Cancelled);
+    assert_eq!(failure.message, "the runtime was dropped");
 }
 
 #[test]
