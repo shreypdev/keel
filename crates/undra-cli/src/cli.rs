@@ -139,7 +139,10 @@ process's memory, never on disk) and the new core is restored from it, so the ap
 they were on; a changed schema, or --no-keep-state, starts the new core fresh and says so.\n\n\
 Logs, including the development records of docs/SPEC.md 5.10 (a line per transaction commit, port call and \
 panic), are printed here, with a line for each client that connects, reconnects or leaves. Clocks, randomness and \
-logging are answered by this machine because a remote client cannot answer a synchronous port.",
+logging are answered by this machine because a remote client cannot answer a synchronous port.\n\n\
+The banner also prints the address of the devtools page (behind a per-run token, on a loopback address): the \
+stores and their live values, a timeline of every change-set with its diff, a scrubber that restores the core to \
+an earlier step (the app follows), the port-call and query-cache logs and the counters. docs/DEV_LOOP.md has it.",
         after_long_help = "\
 EXAMPLES
     undra dev                               listen on 127.0.0.1:7443
@@ -147,6 +150,7 @@ EXAMPLES
     undra dev --addr 0.0.0.0:7443           reachable from a phone on your network (no authentication!)
     undra dev --no-watch                    build once and serve
     undra dev --no-keep-state               every rebuilt core starts fresh, as before the state was carried over
+    undra dev --devtools off                do not serve the devtools page (auto: loopback addresses only)
 
 CONNECTING
     web       UndraCore.load({ mode: \"remote\", url: \"ws://127.0.0.1:7443\", expectedSchemaHash })   (or ?undra=ws://... in the page URL)

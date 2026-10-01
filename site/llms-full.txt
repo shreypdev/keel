@@ -859,7 +859,7 @@ undra dev --no-watch               # build once and serve
 undra dev --no-keep-state          # every rebuilt core starts fresh
 ```
 
-Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport and uses this core instead of a built-in one: edit Rust, save, and the core is rebuilt and restarted. The apps reconnect by themselves, with backoff, whenever the connection drops (a rebuild, a phone that slept, a restarted adb); the core's state is carried across a rebuild (it is snapshotted in this process's memory, never on disk, and restored into the new core), so an app comes back to the screen it was on and its dev bar says "Reloaded, state kept"; a changed schema, or `--no-keep-state`, starts the new core fresh and says so. Logs, including the development records (a line per transaction commit, port call and panic) and a line for each client that connects, reconnects or leaves, print here. Clocks, randomness and logging are answered by this machine, because a remote client cannot answer a synchronous port.
+Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport and uses this core instead of a built-in one: edit Rust, save, and the core is rebuilt and restarted. The apps reconnect by themselves, with backoff, whenever the connection drops (a rebuild, a phone that slept, a restarted adb); the core's state is carried across a rebuild (it is snapshotted in this process's memory, never on disk, and restored into the new core), so an app comes back to the screen it was on and its dev bar says "Reloaded, state kept"; a changed schema, or `--no-keep-state`, starts the new core fresh and says so. Logs, including the development records (a line per transaction commit, port call and panic) and a line for each client that connects, reconnects or leaves, print here. Clocks, randomness and logging are answered by this machine, because a remote client cannot answer a synchronous port. The banner also prints the address of the devtools page (behind a per-run token): the stores and their live values, a timeline of every change-set with its diff, a scrubber that restores the core to an earlier step (the app follows, and its dev bar says `time travel: step 3`), the port-call and query-cache logs, and the counters.
 
 | Flag | Meaning |
 | --- | --- |
@@ -868,6 +868,7 @@ Runs the core on this machine and serves it over a WebSocket. A simulator, a pho
 | `--log-level <n>` | log records below this level (0 trace to 5 fatal) are not printed; default 1 |
 | `--android` | run `adb reverse` for the server's port on every attached Android device or emulator (only the one in `ANDROID_SERIAL`, when set) |
 | `--no-keep-state` | start every rebuilt core from fresh state instead of carrying the running core's state over |
+| `--devtools <auto\|on\|off>` | serve the devtools page at `/devtools`: `auto` (default) on a loopback address only, `on` always, `off` never |
 
 How each platform connects (the banner prints these with the real port):
 

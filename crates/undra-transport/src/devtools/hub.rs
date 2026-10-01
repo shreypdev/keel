@@ -238,7 +238,8 @@ impl Hub {
             ring_steps: u32::try_from(self.cfg.max_steps).unwrap_or(u32::MAX),
             ring_bytes: self.cfg.max_bytes as u64,
             ring_step_bytes: self.cfg.max_step_bytes as u64,
-            schema_json: self.rt.schema().to_json(),
+            // The page reads names and types, not doc comments: the schema without them is a fraction of the size.
+            schema_json: self.rt.schema().without_docs().to_json(),
         })
     }
 
@@ -622,7 +623,6 @@ impl Hub {
             stores.iter().map(|s| s.handle).filter(|h| held.contains(h)).collect()
         };
         send_msg(&conn, &ServerMsg::Stores(stores.clone()));
-        *self.announced.lock() = stores.clone();
         for handle in known {
             let _initial = RouteGuard::set(Route::Initial { only: Some(id) });
             self.rt.observe(handle, u32::MAX, true);
