@@ -34,6 +34,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      - name: The write rule in release (ADR-035; the audit's off-core writes were release-only)
+        run: cargo test --release -p undra-runtime --test write_context -p undra-signals --test write_checker
       - name: Clippy (undra-ffi on wasm32)
         run: cargo clippy -p undra-ffi --target wasm32-unknown-unknown -- -D warnings
       - name: C ABI acceptance (undra.h with -Werror; the host contract under ASan)

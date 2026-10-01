@@ -91,7 +91,7 @@ pub use ports::{
     EventHandler, Events, MAX_ABANDONED, Port, PortDispatch, PortDispatcher, PortError, PortFuture,
     Subscription, port_call_sync,
 };
-pub use runtime::Runtime;
+pub use runtime::{Reentrant, Runtime};
 pub use undra_meta::{DispatchCall, DispatchOutcome};
 pub use undra_wire::Handle;
 

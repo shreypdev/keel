@@ -6,8 +6,10 @@
 //!
 //! Everything is `Send + Sync`, and concurrent writes from several threads are memory-safe and
 //! deadlock-free. The Undra runtime additionally serialises all mutation under its core lock
-//! (SPEC 5.1), and signal writes are only meant to happen on the core (see
-//! [`set_write_checker`]). A transaction belongs to the thread that opened it: it is committed
+//! (SPEC 5.1), and a signal of a store may only be written on its owning runtime's core: every
+//! build asks the embedder's [`set_write_checker`] and refuses any other write with E0065, or
+//! returns it as a [`WriteError`] from [`Signal::try_set`] (ADR-035). Each store's change-sets go
+//! to its owner ([`ChangeSink::deliver_from`], [`StoreCell::set_owner`]). A transaction belongs to the thread that opened it: it is committed
 //! by that thread, and the sink, effects and computed closures it triggers run on that thread.
 //!
 //! What this crate guarantees on its own, without the core lock: the change-sets of **one
@@ -53,7 +55,7 @@ pub use computed::Computed;
 pub use context::{clear_write_checker, set_write_checker};
 pub use deps::{Dep, Deps};
 pub use effect::Effect;
-pub use error::SignalsError;
+pub use error::{SignalsError, WriteError};
 pub use signal::Signal;
 pub use sink::{ChangeSink, clear_sink, set_sink, with_sink};
 pub use store::{ALL_SIGNALS, CellSlot, StoreCell};

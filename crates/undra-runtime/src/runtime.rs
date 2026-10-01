@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Once, Weak};
 use std::time::Duration;
 
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::{Mutex, MutexGuard, RwLock};
 use undra_meta::{DispatchCall, DispatchFn, DispatchOutcome, Schema};
 use undra_signals::ChangeSink;
 use undra_wire::payload::{
@@ -46,6 +46,29 @@ use crate::timer::{Sleep, Timers, delay_ms};
 
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
 static GLOBAL: Mutex<Option<Arc<Runtime>>> = Mutex::new(None);
+
+/// Every live runtime of the process by id (ADR-035): how a change-set finds the runtime that
+/// owns its store, whichever thread committed it. Registered when a runtime is built, removed in
+/// its `Drop`; weak, so the registry never keeps one alive.
+static RUNTIMES: RwLock<Option<HashMap<u64, Weak<Runtime>>>> = RwLock::new(None);
+
+fn register_runtime(id: u64, runtime: Weak<Runtime>) {
+    RUNTIMES
+        .write()
+        .get_or_insert_with(HashMap::new)
+        .insert(id, runtime);
+}
+
+fn unregister_runtime(id: u64) {
+    if let Some(map) = RUNTIMES.write().as_mut() {
+        map.remove(&id);
+    }
+}
+
+/// The live runtime with id `id`, if any.
+fn runtime_by_id(id: u64) -> Option<Arc<Runtime>> {
+    RUNTIMES.read().as_ref()?.get(&id)?.upgrade()
+}
 
 thread_local! {
     /// Ids of the runtimes whose core lock this thread currently holds.
@@ -131,14 +154,38 @@ pub(crate) fn log_fatal_current(target: &str, message: &str) {
     }
 }
 
-/// Routes every change-set committed by `undra-signals` to the runtime executing on the
-/// committing thread (else the global one), whose host receives it.
+/// Routes every change-set committed by `undra-signals` to the runtime that **owns the store**
+/// (ADR-035), whose host receives it: never to whichever runtime the committing thread happens to
+/// be inside, and never to the global one by default. A store no runtime published (owner `0`)
+/// delivers nothing.
 struct RuntimeSink;
 
 impl ChangeSink for RuntimeSink {
-    fn deliver(&self, change_set: &[u8]) {
-        if let Some(rt) = current_or_global() {
+    /// Every commit names its owner ([`deliver_from`](ChangeSink::deliver_from)); a change-set
+    /// without one has no runtime to go to.
+    fn deliver(&self, _change_set: &[u8]) {}
+
+    fn deliver_from(&self, owner: u64, change_set: &[u8]) {
+        if owner == 0 {
+            return;
+        }
+        if let Some(rt) = runtime_by_id(owner) {
             rt.deliver_change_set(change_set);
+        }
+    }
+
+    /// A write the checker refused: logged at error level through the owning runtime (else the
+    /// one the thread is in, else the global one) before the writer panics, so the host hears of
+    /// it even when the panicking thread is not one the runtime watches.
+    fn off_core_write(&self, owner: u64, message: &str) {
+        let rt = if owner == 0 {
+            current_or_global()
+        } else {
+            runtime_by_id(owner)
+        };
+        if let Some(rt) = rt {
+            Stats::inc(&rt.stats.off_core_writes);
+            rt.log(ERROR, "undra::signals", message);
         }
     }
 
@@ -158,24 +205,32 @@ impl ChangeSink for RuntimeSink {
     }
 }
 
-/// The write-context check installed into `undra-signals`: may the calling thread write signals?
+/// The write-context check installed into `undra-signals`: may the calling thread write a signal
+/// of a store owned by runtime `owner` (`0`: a signal of no published store)?
 ///
-/// An allowlist (ADR-023): yes on a thread that holds a runtime's core lock (a dispatched call,
-/// a task poll, an event subscriber, `observe`, `restore`: everything entered through the
-/// runtime's entry points), on a `TestRuntime`'s driver thread (the test's own direct writes) and
-/// inside `testing::unchecked_writes`. No on every other thread: a blocking-pool worker, a host
-/// or embedder thread, a thread inside no runtime at all. Such a write would be delivered
-/// without the core lock, unordered against the core's transactions (and, with no runtime
-/// scope, dropped or misrouted). Signal writes belong on the core: send the result back to a
-/// task or a dispatched call instead. Debug builds assert this on every write that has
-/// consequences (`undra_signals::set_write_checker`); release builds never evaluate it, so the
-/// lock-level guarantees (the store's delivery lock) are what protects them.
-fn write_allowed() -> bool {
+/// An allowlist (ADR-023, ADR-035), evaluated **in every build**: yes on a thread that holds
+/// **that** runtime's core lock (a dispatched call, a task poll, an event subscriber, `observe`,
+/// `restore`, `Ctx::with_core`: everything entered through the runtime's entry points), on a
+/// thread that holds any core lock when `owner` is `0`, on a `TestRuntime`'s driver thread (the
+/// test's own direct writes) and inside `testing::unchecked_writes`. No on every other thread: a
+/// blocking-pool worker, a host or embedder thread, a thread inside no runtime at all, the core of
+/// another runtime. Such a write would be delivered without the core lock, unordered against the
+/// core's transactions, to the wrong host, or not at all; it is refused before the value changes
+/// (E0065). Signal writes belong on the core: send the result back to a task or a dispatched call,
+/// or use `Ctx::with_core` on a host thread.
+fn write_allowed(owner: u64) -> bool {
     UNCHECKED_WRITES
         .try_with(|depth| depth.get() > 0)
         .unwrap_or(false)
         || HELD
-            .try_with(|held| !held.borrow().is_empty())
+            .try_with(|held| {
+                let held = held.borrow();
+                if owner == 0 {
+                    !held.is_empty()
+                } else {
+                    held.contains(&owner)
+                }
+            })
             .unwrap_or(false)
         || TEST_DRIVER.try_with(Cell::get).unwrap_or(false)
 }
@@ -198,9 +253,20 @@ pub(crate) struct CoreState {
     turns: u64,
 }
 
-/// Marker error: the calling thread already holds this runtime's core lock.
-#[derive(Debug)]
-pub(crate) struct Reentrant;
+/// The calling thread may not enter the runtime: it already holds this runtime's core lock, or it
+/// is inside one of this runtime's host callbacks (`E_REENTRANT`, SPEC 5.1). Waiting for the lock
+/// there would deadlock, so the entry is refused instead. Returned by
+/// [`Ctx::with_core`](crate::Ctx::with_core).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Reentrant;
+
+impl core::fmt::Display for Reentrant {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(E_REENTRANT)
+    }
+}
+
+impl std::error::Error for Reentrant {}
 
 /// Holds the core lock and makes the runtime current on this thread. Whoever holds one *is*
 /// the core loop.
@@ -488,6 +554,8 @@ impl Runtime {
             lifeline: Arc::new(Lifeline::default()),
         });
 
+        register_runtime(rt.id, Arc::downgrade(&rt));
+        rt.objects.set_owner(rt.id);
         for (id, first, second) in &rt.table.collisions {
             rt.log(
                 ERROR,
@@ -815,6 +883,16 @@ impl Runtime {
             id: self.id,
             scope: Some(CtxScope::enter(self.me())),
         })
+    }
+
+    /// Runs `f` as the core on the calling thread: takes the core lock, makes the runtime
+    /// current, runs `f` in one transaction and releases the lock. See [`Ctx::with_core`].
+    pub(crate) fn with_core<R>(&self, f: impl FnOnce() -> R) -> Result<R, Reentrant> {
+        let guard = self.enter_core()?;
+        let out = undra_signals::txn(f);
+        // The transaction committed (and delivered) inside the lock: in order with the core's.
+        drop(guard);
+        Ok(out)
     }
 
     /// Like [`enter_core`](Runtime::enter_core) but never waits: `None` if the thread may not
@@ -2291,7 +2369,7 @@ impl Runtime {
         out.push_str(",\"mode\":");
         push_json_string(&mut out, &self.config.mode);
         out.push_str(&format!(
-            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"transactions\":{},\"panics\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}}}",
+            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"transactions\":{},\"panics\":{},\"off_core_writes\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}}}",
             self.schema_hash,
             strong_refs,
             self.objects.live(),
@@ -2307,6 +2385,7 @@ impl Runtime {
             max,
             Stats::get(&s.change_sets),
             Stats::get(&s.panics),
+            Stats::get(&s.off_core_writes),
             Stats::get(&s.turns),
             Stats::get(&s.polls),
             Stats::get(&s.calls),
@@ -2386,6 +2465,7 @@ impl Drop for Runtime {
         self.release_user_references();
         let _held = HeldMark::enter(self.id);
         self.teardown();
+        unregister_runtime(self.id);
         // The global slot holds a strong reference, so a registered runtime is never dropped.
     }
 }

@@ -54,7 +54,7 @@ use slab::Slab;
 use crate::blocking::BlockingTask;
 use crate::executor::TaskId;
 use crate::ports::{Events, PortError, PortFuture};
-use crate::runtime::Runtime;
+use crate::runtime::{Reentrant, Runtime};
 use crate::timer::Sleep;
 
 thread_local! {
@@ -122,8 +122,10 @@ impl Ctx {
         current_runtime().map(Ctx)
     }
 
-    /// Makes this runtime the current one on this thread until the returned scope is
-    /// dropped. Signal writes made meanwhile are delivered through this runtime's host.
+    /// Makes this runtime the current one on this thread until the returned scope is dropped:
+    /// [`Ctx::current`] answers it. It does not make the thread the core: signal writes still need
+    /// the owning runtime's core lock ([`with_core`](Ctx::with_core), ADR-035), and their
+    /// change-sets go to the store's owner whatever is current.
     pub fn enter(&self) -> CtxScope {
         CtxScope::enter(self.0.clone())
     }
@@ -134,8 +136,10 @@ impl Ctx {
     }
 
     /// Batches every signal write made inside `f` into one transaction (one change-set per
-    /// store). Nested calls join the outer transaction. Delegates to `undra_signals::txn`
-    /// with this runtime current, so the change-set reaches this runtime's host.
+    /// store). Nested calls join the outer transaction. Delegates to `undra_signals::txn` with
+    /// this runtime current; each change-set goes to its store's owner. On a thread that is not
+    /// the core already, use [`with_core`](Ctx::with_core), which also takes the core lock the
+    /// writes need (ADR-035).
     pub fn txn<R>(&self, f: impl FnOnce() -> R) -> R {
         let _scope = self.enter();
         undra_signals::txn(f)
@@ -229,6 +233,37 @@ impl Ctx {
     /// [`Gone::Dropped`] while one exists; see [`WeakCtx::closed`].)
     pub fn closed(&self) -> Closed {
         Closed::new(self.0.lifeline().clone())
+    }
+
+    /// Runs `f` on the calling thread **as the core**: takes the runtime's core lock, makes the
+    /// runtime current, runs `f` inside one transaction and releases the lock (ADR-035).
+    ///
+    /// This is the sanctioned way for a host or embedder thread to write signals synchronously: a
+    /// write to a store's signal from a thread that does not hold the owning runtime's core lock
+    /// is refused (E0065). Everything else sends the value to the core instead (`ctx.spawn`, a
+    /// call, a task that awaits [`spawn_blocking`](Ctx::spawn_blocking)'s result).
+    ///
+    /// ```
+    /// use undra_runtime::testing::TestRuntime;
+    /// use undra_signals::Signal;
+    ///
+    /// let t = TestRuntime::new();
+    /// let ctx = t.ctx();
+    /// let count = Signal::new(1);
+    /// let seen = std::thread::spawn(move || ctx.with_core(|| { count.set(2); count.get() }))
+    ///     .join()
+    ///     .unwrap();
+    /// assert_eq!(seen, Ok(2));
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`Reentrant`] when the calling thread already holds this runtime's core lock or is inside
+    /// one of its host callbacks (`E_REENTRANT`, SPEC 5.1): waiting for the lock there would
+    /// deadlock. Inside a dispatched call or a task the thread *is* the core already: write
+    /// directly.
+    pub fn with_core<R>(&self, f: impl FnOnce() -> R) -> Result<R, Reentrant> {
+        self.0.with_core(f)
     }
 }
 

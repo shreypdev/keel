@@ -1,7 +1,8 @@
 # ADR-035: a signal write off its runtime's core is refused in every build, and change-sets go to the store's owner
 
-Status: **Proposed** (2026-10-01, from the v1.x gap audit `.10x/specs/2026-10-01-v1x-gaps.md`, gaps OW-1 and
-OW-2; the open half of runtime review L3; Track A, piece A2). Touches SPEC 5.1 (threading: the write rule),
+Status: **Accepted** (2026-10-01; implemented on `wt/runtime-lifecycle`, Track A, piece A2. Proposed the same day
+from the v1.x gap audit `.10x/specs/2026-10-01-v1x-gaps.md`, gaps OW-1 and OW-2; the open half of runtime review
+L3). Touches SPEC 5.1 (threading: the write rule),
 16.1 (`set_write_checker`, `ChangeSink`, `StoreCell`) and 16.2 (`Ctx::with_core`), `undra-signals`
 (`context.rs`, `signal.rs`, `store.rs`, `sink.rs`), `undra-runtime` (`runtime.rs`: the checker, the sink, a
 runtime registry) and the macros' error catalogue (one new runtime code). **No wire change, no C ABI or wasm

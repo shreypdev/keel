@@ -2,10 +2,13 @@
 
 use std::cell::RefCell;
 use std::fmt;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
 use parking_lot::RwLock;
 
+use crate::error::WriteError;
 use crate::graph::{Binding, Dependents, Reactive, add_dependent, notify_dependents, record};
 use crate::oplog::ListLog;
 use crate::txn::TxnGuard;
@@ -95,6 +98,10 @@ pub(crate) struct SignalInner<T> {
     value: RwLock<Arc<T>>,
     pub(crate) binding: OnceLock<Binding>,
     pub(crate) dependents: Dependents,
+    /// Something has depended on this signal (a computed or an effect). Never cleared: a stale
+    /// `true` only means a write is checked when it need not be (ADR-035), and it spares a local
+    /// signal's writes the dependents lock.
+    has_dependents: AtomicBool,
     /// The op log of a list signal attached with [`StoreCell::attach_keyed`](crate::StoreCell):
     /// what the recorded list operations append to and every raw write invalidates.
     pub(crate) log: OnceLock<Arc<dyn ListLog>>,
@@ -116,6 +123,7 @@ impl<T: SignalValue> Signal<T> {
                 value: RwLock::new(Arc::new(value)),
                 binding: OnceLock::new(),
                 dependents: parking_lot::Mutex::new(Vec::new()),
+                has_dependents: AtomicBool::new(false),
                 log: OnceLock::new(),
             }),
         }
@@ -184,6 +192,47 @@ impl<T: SignalValue> Signal<T> {
         });
     }
 
+    /// Like [`set`](Signal::set), but a write the calling thread may not make is returned as a
+    /// [`WriteError`] instead of panicking (ADR-035): for code that can recover, such as a host
+    /// thread that falls back to sending the value to the core.
+    ///
+    /// # Errors
+    ///
+    /// [`WriteError::OffCore`] when the signal belongs to a store (or has dependents) and the
+    /// calling thread does not hold the owning runtime's core lock. Nothing was written.
+    pub fn try_set(&self, value: T) -> Result<(), WriteError> {
+        self.check_write()?;
+        let _old = self.write_unchecked(|slot| {
+            self.invalidate_log();
+            std::mem::replace(slot, Arc::new(value))
+        });
+        Ok(())
+    }
+
+    /// Like [`update`](Signal::update), but a write the calling thread may not make is returned as
+    /// a [`WriteError`] instead of panicking (ADR-035). `f` is not called then.
+    ///
+    /// # Errors
+    ///
+    /// [`WriteError::OffCore`], as for [`try_set`](Signal::try_set).
+    pub fn try_update(&self, f: impl FnOnce(&mut T)) -> Result<(), WriteError> {
+        self.check_write()?;
+        let me = self.id();
+        self.write_unchecked(|slot| {
+            self.invalidate_log();
+            let _updating = Updating::enter(me);
+            f(Arc::make_mut(slot));
+        });
+        Ok(())
+    }
+
+    /// Whether the calling thread may write this signal right now (ADR-035): `true` for a local
+    /// signal, and for one that belongs to a store (or has dependents) when the thread holds the
+    /// owning runtime's core lock (as the runtime's write checker decides).
+    pub fn can_write(&self) -> bool {
+        self.check_write().is_ok()
+    }
+
     /// Returns `true` if `self` and `other` are handles to the same signal.
     pub fn ptr_eq(&self, other: &Signal<T>) -> bool {
         Arc::ptr_eq(&self.inner, &other.inner)
@@ -247,13 +296,55 @@ impl<T: SignalValue> Signal<T> {
         );
     }
 
-    fn write_with<R>(&self, f: impl FnOnce(&mut Arc<T>) -> R) -> R {
-        // Before anything changes: a write that reaches the host or other nodes must come from
-        // a thread the embedder allows to mutate (debug builds; see `set_write_checker`).
-        #[cfg(debug_assertions)]
-        if self.inner.binding.get().is_some() || !self.inner.dependents.lock().is_empty() {
-            crate::context::assert_write_allowed();
+    /// The runtime a write would be checked against: the owner of the store the signal is
+    /// attached to (`0` until it is published), `0` for an unattached signal something depends on,
+    /// and `None` for a purely local signal, whose writes have no consequences and are free.
+    fn write_owner(&self) -> Option<u64> {
+        if let Some(binding) = self.inner.binding.get() {
+            return Some(binding.owner.load(Ordering::Relaxed));
         }
+        self.inner
+            .has_dependents
+            .load(Ordering::Relaxed)
+            .then_some(0)
+    }
+
+    /// Asks the embedder's write checker whether this thread may write the signal (ADR-035).
+    fn check_write(&self) -> Result<(), WriteError> {
+        match self.write_owner() {
+            Some(owner) => crate::context::check_write(owner),
+            None => Ok(()),
+        }
+    }
+
+    /// A refused write: reported to the sink (which logs it through the owning runtime), then
+    /// the E0065 panic. Inside a dispatched call or a task the runtime contains the panic (status 2
+    /// to the caller); on a user thread it unwinds that thread, the loudest correct outcome for a
+    /// contract violation.
+    #[cold]
+    #[inline(never)]
+    fn refuse(error: WriteError) -> ! {
+        let WriteError::OffCore { owner } = error;
+        let message = error.to_string();
+        if let Some(sink) = crate::sink::current() {
+            // A sink that panics while reporting must not replace the teaching panic.
+            let _ = catch_unwind(AssertUnwindSafe(|| sink.off_core_write(owner, &message)));
+        }
+        panic!("{message}");
+    }
+
+    fn write_with<R>(&self, f: impl FnOnce(&mut Arc<T>) -> R) -> R {
+        // Before anything changes: a write that reaches the host or other nodes must come from a
+        // thread that holds the owning runtime's core lock, in every build (ADR-035; see
+        // `set_write_checker`).
+        if let Err(error) = self.check_write() {
+            Self::refuse(error);
+        }
+        self.write_unchecked(f)
+    }
+
+    /// The write itself, once it has been allowed.
+    fn write_unchecked<R>(&self, f: impl FnOnce(&mut Arc<T>) -> R) -> R {
         // Drop order matters: the lock guard goes first, then the change is announced, then
         // the transaction ends (and commits if it was the outermost). Announcing from a guard
         // means a panicking `f` still marks whatever it managed to change.
@@ -273,6 +364,7 @@ impl<T: SignalValue> Signal<T> {
 
     /// The weak handle other nodes register on to be invalidated by this signal.
     pub(crate) fn add_dependent(&self, dependent: Weak<dyn Reactive>) {
+        self.inner.has_dependents.store(true, Ordering::Relaxed);
         add_dependent(&self.inner.dependents, dependent);
     }
 }

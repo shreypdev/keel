@@ -136,6 +136,9 @@ struct Slot {
 pub struct StoreCell {
     type_id: u32,
     handle: AtomicU64,
+    /// The id of the runtime that owns the store (`0` until published), shared with every
+    /// signal's binding so a write can be checked against it cheaply (ADR-035).
+    owner: Arc<AtomicU64>,
     slots: RwLock<Vec<Arc<Slot>>>,
     /// Slots whose change was claimed for delivery but never reached the sink, sorted (see
     /// `commit_slots`). The next commit that touches this store sends them again.
@@ -156,6 +159,7 @@ impl StoreCell {
         Arc::new(StoreCell {
             type_id,
             handle: AtomicU64::new(0),
+            owner: Arc::new(AtomicU64::new(0)),
             slots: RwLock::new(Vec::new()),
             unsent: Mutex::new(Vec::new()),
             has_unsent: AtomicBool::new(false),
@@ -271,6 +275,7 @@ impl StoreCell {
             cell: Arc::downgrade(self),
             signal_id,
             flags: Arc::clone(&flags),
+            owner: Arc::clone(&self.owner),
         };
         if binding.set(bound).is_err() {
             return Err(SignalsError::AlreadyAttached);
@@ -314,6 +319,22 @@ impl StoreCell {
     /// The handle set by [`set_handle`](StoreCell::set_handle), or `0`.
     pub fn handle(&self) -> u64 {
         self.handle.load(Ordering::SeqCst)
+    }
+
+    /// Records the id of the runtime that owns the store. The runtime calls this wherever it
+    /// sets the handle (inserting the store, restoring it), before the handle (ADR-035).
+    ///
+    /// Two things follow from it: a write to one of the store's signals is allowed only on a
+    /// thread that holds **that** runtime's core lock (the checker of
+    /// [`set_write_checker`](crate::set_write_checker) is asked about this id), and the store's
+    /// change-sets go to that runtime ([`ChangeSink::deliver_from`]), whichever thread commits.
+    pub fn set_owner(&self, runtime_id: u64) {
+        self.owner.store(runtime_id, Ordering::SeqCst);
+    }
+
+    /// The owner recorded by [`set_owner`](StoreCell::set_owner), or `0`.
+    pub fn owner(&self) -> u64 {
+        self.owner.load(Ordering::SeqCst)
     }
 
     /// The store type's id.
@@ -738,7 +759,7 @@ impl StoreCell {
             }
         }
         builder.finish();
-        sink.deliver(payload.as_slice());
+        sink.deliver_from(self.owner(), payload.as_slice());
         abandon.armed = false;
         recycle_buffer(payload.into_vec());
     }

@@ -59,6 +59,7 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0062 | a port call had no adapter (a runtime message, not a compile error; addition) |
 /// | E0063 | nested `Option<Option<T>>` (addition) |
 /// | E0064 | an object (`#[undra::api] impl`) used where a value is expected (addition) |
+/// | E0065 | a signal of a store written from a thread that does not hold its owning runtime's core lock (a runtime message, not a compile error, raised by `undra-signals` with the same what/why/fix/docs shape; ADR-035) |
 pub(crate) mod code {
     pub(crate) const E0001: &str = "E0001";
     pub(crate) const E0002: &str = "E0002";

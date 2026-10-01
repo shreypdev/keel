@@ -97,6 +97,9 @@ pub(crate) struct Binding {
     pub(crate) cell: Weak<StoreCell>,
     pub(crate) signal_id: u32,
     pub(crate) flags: Arc<SlotFlags>,
+    /// The store's owning runtime (shared with the cell, `0` until it is published): what a write
+    /// is checked against (ADR-035), read without reaching the cell.
+    pub(crate) owner: Arc<AtomicU64>,
 }
 
 /// Notes in the current transaction that the slot behind `binding` changed.
