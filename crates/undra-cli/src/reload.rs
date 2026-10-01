@@ -105,9 +105,10 @@ impl Outcome {
                 cancelled,
             } => {
                 let mut text = format!(
-                    "state kept ({}, {})",
+                    "state kept ({}, {}, restored in {})",
                     plural(restored.stores, "store", "stores"),
-                    kib(restored.bytes)
+                    kib(restored.bytes),
+                    took(restored.micros)
                 );
                 if restored.lost > 0 {
                     text.push_str(&format!(
@@ -134,6 +135,16 @@ impl Outcome {
 #[must_use]
 pub fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// `189 us`, `2.4 ms`.
+#[must_use]
+pub fn took(micros: u128) -> String {
+    if micros < 1000 {
+        format!("{micros} \u{b5}s")
+    } else {
+        format!("{:.1} ms", micros as f64 / 1000.0)
+    }
 }
 
 /// `204 KiB`, `1.5 MiB`.
@@ -501,12 +512,13 @@ mod tests {
         };
         assert_eq!(
             kept.describe(),
-            "state kept (3 stores, 205 KiB); 2 objects not carried over: their handles are stale, the app creates them again; 1 call still running when the core was replaced was cancelled"
+            "state kept (3 stores, 205 KiB, restored in 189 \u{b5}s); 2 objects not carried over: their handles are stale, the app creates them again; 1 call still running when the core was replaced was cancelled"
         );
         assert_eq!(
             Outcome::Reset("schema changed (was 0x1, now 0x2)".into()).describe(),
             "state reset: schema changed (was 0x1, now 0x2)"
         );
+        assert_eq!(took(2_400), "2.4 ms");
         assert_eq!(kib(1536 * 1024), "1.5 MiB");
         assert_eq!(kib(1), "1 KiB");
     }

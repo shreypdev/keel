@@ -334,6 +334,8 @@ fn a_rebuild_keeps_the_screen_the_client_was_on() {
     )
     .unwrap();
     let restarted = dev.wait_line("Restarted: ws://", BUILD);
+    // `cargo test -- --nocapture` shows what a developer reads in the terminal.
+    eprintln!("{restarted}");
     assert!(restarted.contains("state kept (2 stores,"), "{restarted}");
     assert!(
         restarted.contains("1 object not carried over"),

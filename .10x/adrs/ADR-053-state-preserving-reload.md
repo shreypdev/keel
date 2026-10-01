@@ -347,3 +347,30 @@ Also required of the evidence: the device proof shows the notice text on the And
 shared: used, never killed) and on the iOS dev bar; the CLI integration test asserts the counter value after a
 reload and `state reset` after a schema change; the runtime-side diff stays additive (Track A touches
 `UndraCore.kt`, `core.ts` and `UndraCore.swift`).
+
+## As built (2026-10-01)
+
+What differs from the text above, and what was measured.
+
+* **Measured, playground (a `Counter`, a `Todos` and the 10,000-row `BigList`)**: snapshot 209,008 bytes (204 KiB);
+  `Runtime::snapshot` 68 us and `restore` into a fresh runtime 189 us (release, in process, best of 20); inside the dev runner
+  (a *debug* build of the core) `restore` takes 1.6 ms, which `undra dev` prints (`restored in 1.6 ms`). From the old core
+  closing its client to the new core listening: 74 ms (the dev server's own log). What an app sees: the web page was
+  `reconnecting` for 171 ms; the iOS simulator's client was away 0.1 s, the Android emulator's 1.0 s (the Kotlin client's
+  backoff, 250 ms at least, and its jitter, not the swap). An incremental rebuild of the playground core is 0.5 s.
+* **A fix the ADR did not foresee, found on the Android emulator.** The Kotlin `RemoteTransport` dropped a frame that arrived
+  right behind the server's `Hello`, because `handshakeDone` and `current` were set by the thread that waits for the Hello, not
+  by the thread that reads it: the dev notice (the first frame after the `Hello` of a resumed session) never reached
+  `onDevNotice`. The reader thread now sets `handshakeDone` when it reads the `Hello` and a connection being opened counts as
+  current for dispatch. A test fails without the change (20 connects, a `Log` frame right behind each `Hello`). TypeScript
+  and Swift set the flag on the reading thread and were not affected. SPEC 11.0 says a client must process such a frame.
+* **The cap and the settle are named constants in `crates/undra-cli/src/reload.rs`** (`STATE_LIMIT_BYTES`, `SETTLE`,
+  `NOTICE_WINDOW`) and are written into the generated runner; `UNDRA_DEV_STATE_LIMIT_BYTES` can only *lower* the cap (the
+  integration test proves the over-the-limit path with it).
+* **The TypeScript runtime over a real WebSocket** was run against `undra dev` on the playground in a browser (the playground
+  page, Vite dev server, a real `UndraCore.load({ mode: "remote" })`), not from a node script: the counter kept its value, the
+  bar said `Reloaded, state kept (1 object not carried over)`, and a `refetch` on the stale query handle was refused with
+  `UndraCallError.Refused` (the status 5 path). The automated tests of the client side are in each runtime's suite; the
+  CLI integration tests speak the envelope with a raw client.
+* **`Server::suspend` hands a session over only when `resume_grace` is above zero** (as `undra dev` has it); with zero nothing
+  is retained and the client's objects are released at the close.

@@ -82,7 +82,7 @@ You see this:
 ```
 ==> Change detected, rebuilding
     built in 0.5s
-Restarted: ws://127.0.0.1:7443  (schema hash 0x...); state kept (3 stores, 205 KiB); 1 object not carried over: their handles are stale, the app creates them again; connected apps reconnect by themselves
+Restarted: ws://127.0.0.1:7443  (schema hash 0x...); state kept (3 stores, 205 KiB, restored in 0.2 ms); 1 object not carried over: their handles are stale, the app creates them again; connected apps reconnect by themselves
 ```
 
 and each app's dev bar says the same for four seconds: **`Reloaded, state kept`**, with `(N objects not carried over)` when
