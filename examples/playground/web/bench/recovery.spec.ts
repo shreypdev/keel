@@ -40,4 +40,20 @@ test("recovery bench, web: Chromium, wasm-main", async ({ browser, browserName }
     }
   }
   console.log(`wrote ${out}`);
+  // ADR-049's budgets (desktop Chromium) are tests (R9): every run's p50 is within its row's budget. A quick
+  // smoke run is too short to judge.
+  if (!quick) {
+    for (const result of results) {
+      for (const op of result.ops) {
+        const budgetMs = BUDGET_MS[op.id];
+        if (budgetMs !== undefined) expect(op.p50 / 1e6, `${op.id} p50 (budget ${budgetMs} ms)`).toBeLessThan(budgetMs);
+      }
+    }
+  }
 });
+
+/** ADR-049's budget per row, in milliseconds (`bench/RESULTS.md`, "Web recovery"). */
+const BUDGET_MS: Record<string, number> = {
+  "ts/snapshot_take_100kb": 2,
+  "ts/recovery_restart_100kb": 50,
+};

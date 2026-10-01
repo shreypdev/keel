@@ -525,6 +525,23 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 | `snapshot/cold_start_restore_100kb` | 84.68 µs | 83.95 µs .. 85.53 µs |
 | `snapshot/cold_start_restore_100kb_core_thread` | 90.27 µs | 88.78 µs .. 91.94 µs |
 
+### Web recovery (TypeScript, ADR-049)
+
+`cd examples/playground/web && UNDRA_BENCH_RECOVERY_RUNS=5 npm run bench:recovery` (after `undra build -C
+examples/playground --platform web`): headless Chromium 153.0.8010.12 (Playwright), cross-origin isolated (a 5 µs
+clock), wasm-main, on the machine above (Apple M5 Pro, macOS 26.5). The workload is the playground core with one
+`Todos` store of 1,000 to-dos and 16 `Counter` stores, 52 signals: a 101,446-byte snapshot.
+`ts/snapshot_take_100kb` is what the snapshot keeper pays to keep one (the core's `snapshot` plus the copy kept, 50
+batches of 10 per run, so its p99 is over batch means); `ts/recovery_restart_100kb` is a trap until `onCoreRestarted`
+(the panic report, failing what was in flight, a new instance of the same compiled module, the restore, re-observing
+every store and re-creating the query handles; 30 samples per run, so its p99 is the maximum). The ranges are over five
+runs in fresh pages. `bench/recovery.spec.ts` fails a run whose p50 is over its budget (R9).
+
+| Benchmark | p50 | p99 | Budget (desktop Chromium) | Verdict |
+|---|---|---|---|---|
+| `ts/snapshot_take_100kb` | 0.041 ms .. 0.043 ms | 0.046 ms .. 0.071 ms | 2 ms | within |
+| `ts/recovery_restart_100kb` | 1.55 ms .. 1.64 ms | 5.47 ms .. 5.86 ms | 50 ms | within |
+
 ### C ABI (`crates/undra-ffi/benches/boundary.rs`)
 
 `call/ready_add` is the only row that includes a real `undra-core` thread hop (spawn, wake, poll, reply on the core thread) and is the one most sensitive to machine load.
