@@ -305,6 +305,8 @@ jobs:
           cargo build -p undra-cli
           target/debug/undra build -C examples/playground --platform host
           target/debug/undra build -C examples/playground --platform web
+      - name: The derived-list recording S19 replays (the contract column)
+        run: bash contract-tests/derived-vectors.sh
       # The package's build config (tsconfig.build.json) compiles against @undra/runtime's emitted declarations,
       # as an app that installs both sees them; dist/ is not committed.
       - name: The TypeScript runtime's declarations
@@ -339,6 +341,6 @@ jobs:
       - name: Typecheck (sources and the build config)
         working-directory: runtimes/rn/@undra/react-native
         run: npm run typecheck
-      - name: Contract scenarios through NativeTransport (17 pass, S17 is app-tested)
+      - name: Contract scenarios through NativeTransport (18 pass, S17 is app-tested)
         working-directory: runtimes/rn/@undra/react-native
         run: npm run test:contract

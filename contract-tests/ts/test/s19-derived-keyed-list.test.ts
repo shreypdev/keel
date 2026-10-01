@@ -233,12 +233,13 @@ test("S19 derived keyed list", async () => {
     let drains = 0;
     // The recording's scripted prologue (seeded_views.rs): records 2-3 are a row's Move + Update in
     // the sorted views and then its Remove, records 4-5 a rebuild's full values and then patches.
-    // Each pair is drained as one: three views, six entries received, three applied.
+    // Each pair is drained as one. Records 2-3: one merged patch per view (six entries received,
+    // three applied). Records 4-5: each view's full value, then its patch (six applied).
     const scriptedDrains = new Map([
       [0, 0],
       [1, 0],
       [3, 3],
-      [5, 3],
+      [5, 6],
     ]);
     let applied = 0;
     for (const [i, record] of records.entries()) {
@@ -247,9 +248,11 @@ test("S19 derived keyed list", async () => {
       if (scripted ? scriptedDrains.has(i) : next() % 12 === 0 || i === records.length - 1) {
         mirror.flush();
         drains++;
-        const merged = scriptedDrains.get(i);
-        if (scripted && merged !== undefined && merged > 0) {
-          expect(mirror.stats().entriesApplied - applied, `the drain of records ${i - 1}-${i} merges`).toBe(merged);
+        const appliedInDrain = scriptedDrains.get(i);
+        if (scripted && appliedInDrain !== undefined && appliedInDrain > 0) {
+          expect(mirror.stats().entriesApplied - applied, `entries the drain of records ${i - 1}-${i} applies`).toBe(
+            appliedInDrain,
+          );
         }
         applied = mirror.stats().entriesApplied;
         for (let v = 0; v < 3; v++) {
