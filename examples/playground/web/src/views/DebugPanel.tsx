@@ -1,4 +1,4 @@
-import { UndraCallError, UndraCore } from "@undra/runtime";
+import { UndraCallError } from "@undra/runtime";
 import { useSignal } from "@undra/runtime/react";
 import { explode } from "@playground/core";
 import { useState } from "react";
@@ -12,13 +12,13 @@ import type { Playground } from "../undra";
  */
 export function DebugPanel({ playground }: { readonly playground: Playground }) {
   const restarts = useSignal(playground.restarts.entries) ?? [];
-  const connection = useSignal(UndraCore.shared.connection);
+  const connection = useSignal(playground.core.connection);
   const [outcome, setOutcome] = useState<string | null>(null);
-  const wasm = UndraCore.shared.mode !== "remote";
+  const wasm = playground.core.mode !== "remote";
 
   const crash = (): void => {
     setOutcome("…");
-    explode("crashed on purpose from the debug panel").then(
+    explode("crashed on purpose from the debug panel", playground.core).then(
       () => setOutcome("the core did not crash"),
       (error: unknown) => {
         // A wasm core traps: the call fails "restarted" (Unavailable) and the core comes back. A native core (`undra dev`)

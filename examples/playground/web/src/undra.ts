@@ -29,6 +29,8 @@ export interface Playground {
   readonly server: PlaygroundServer;
   /** The restarts of the wasm core after a crash (ADR-049), for the debug panel. */
   readonly restarts: RestartLog;
+  /** The core itself (`UndraCore.shared` becomes a closed placeholder if it goes down for good; this does not). */
+  readonly core: UndraCore;
 }
 
 /**
@@ -67,14 +69,16 @@ function onPanic(report: UndraPanicReport): void {
 export async function startUndra(): Promise<Playground> {
   const server = new PlaygroundServer();
   const restarts = new RestartLog();
+  let inbox: RemoteTodosQueryHandle | undefined;
   const adapters = { http: server, kv: memoryKv() };
   // Development builds only (`vite dev`): a production page that took its core's address from a link would hand
   // whoever wrote the link its ports (Kv, Http, SecureStore) and its screen. Android and iOS gate it the same way.
   const devUrl = import.meta.env.DEV
     ? (new URLSearchParams(location.search).get("undra") ?? import.meta.env["VITE_UNDRA_DEV_URL"])
     : undefined;
+  let core: UndraCore;
   if (typeof devUrl === "string" && devUrl.length > 0) {
-    const core = await UndraCore.load({
+    core = await UndraCore.load({
       mode: "remote",
       url: devUrl,
       expectedSchemaHash: UndraIds.schemaHash,
@@ -88,7 +92,7 @@ export async function startUndra(): Promise<Playground> {
     });
     showDevConnection(core, devUrl);
   } else {
-    await UndraCore.load({
+    core = await UndraCore.load({
       mode: "wasm-main",
       wasm: new URL(wasmUrl, location.href),
       expectedSchemaHash: UndraIds.schemaHash,
@@ -99,17 +103,21 @@ export async function startUndra(): Promise<Playground> {
       recovery: RECOVERY,
       onCoreRestarted: (event) => {
         restarts.record(event);
+        // The stores came back from the snapshot, but what the core held outside them did not: tell the new instance
+        // where the server is again, then fetch the re-created query (it tried before it knew).
+        void configureRemote({ baseUrl: REMOTE_BASE_URL }).then(() => inbox?.refetch());
       },
     });
   }
   // Tell the core where the server is before anything observes the query.
   await configureRemote({ baseUrl: REMOTE_BASE_URL });
-  const [todos, bigList, inbox] = await Promise.all([
+  const [todos, bigList, inboxQuery] = await Promise.all([
     Todos.create(),
     BigList.create(),
     RemoteTodosQueryHandle.create(INBOX),
   ]);
-  return { todos, bigList, inbox, server, restarts };
+  inbox = inboxQuery;
+  return { todos, bigList, inbox: inboxQuery, server, restarts, core };
 }
 
 /**
