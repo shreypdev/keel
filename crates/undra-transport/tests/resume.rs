@@ -193,8 +193,9 @@ fn a_session_that_is_not_resumed_in_time_is_released() {
     let mut client = f.session_client("tok", false);
     client.new_counter(1);
     drop(client);
+    // (Whether the object is still held before the grace passes is covered with a long grace above; with
+    // a short one the assertion would race the clock.)
     f.eventually("the slot is free", |f| !f.bridge.is_connected());
-    assert_eq!(stat(&f.rt, "live_handles"), 1);
     f.eventually("the grace passes and the object goes", |f| {
         stat(&f.rt, "live_handles") == 0
     });
