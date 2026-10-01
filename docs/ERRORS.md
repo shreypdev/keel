@@ -225,5 +225,15 @@ nothing from the text of a message.
 * TypeScript has an abort path the others spell differently (`AbortSignal` versus task or coroutine cancellation), and
   its methods are all `Promise`s: a command's promise resolves rather than being `void`.
 * A wasm core cannot contain a panic (SPEC 7: `panic=abort`): the call fails as `unavailable` (reason `trap`) and the
-  core is closed, where a native core answers `panicked` and keeps working.
-* A custom `sync` port cannot serve the core in `wasm-worker` mode (SPEC 17.1).
+  core is closed, where a native core answers `panicked` and keeps working. **With `recovery` on** (TypeScript,
+  ADR-049, SPEC 17.1) the core is restarted from its last snapshot instead: the call that trapped, every other call and
+  stream in flight, and every call made until the restart completes fail as `unavailable` with the transport reason
+  `restarted` (they may or may not have run, and nothing retries them); `onPanic` gets the panic report first, then
+  `onCoreRestarted` and `onError` get one `UndraCoreRestarted` (an `UndraUnhandledError` whose `error` is `panicked`)
+  saying how old the snapshot was, how many calls were rejected and how many objects went stale. A call on an object
+  that is not a store (a query handle excepted, which is re-created) is then `refused`. One trap more than
+  `maxRestarts` within `perMs` and the core stays closed, as without recovery.
+* In `wasm-worker` mode a synchronous port must run in the worker (`worker: { ports }`, SPEC 17.1): registering one on
+  the main thread fails `load` with `UndraError("options")` (and a later `registerPort` throws it), naming the port,
+  where it used to fail each of the core's calls to it as unavailable. A web platform without WebCrypto fails `load` with
+  `UndraTransportError("unsupported")` rather than run with predictable random bytes.
