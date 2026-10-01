@@ -150,12 +150,14 @@ await UndraCore.load({ mode: "wasm-main", wasm, expectedSchemaHash: UndraIds.sch
 What reaches `onError`, on every platform: a failed command, and a change from the core that a store cannot decode
 (operation `"Todos.apply(signal: 2)"`; the change is skipped, never half applied). Kotlin and TypeScript also report a
 malformed change-set (dropped whole) and a port implementation that failed (operation `"port 0x... method 0x..."`).
-A port that has an error type answers its failures with it (`HttpError` and `FsError`: the Android adapters answer a lost network
-with `HttpError.Network`, and a refused permission or a path outside the root with `FsError.Denied`): the core gets a typed reply
-and the failure never reaches `onError`. An
-exception that is not that type (a Keystore failure, a full disk under `Kv`) answers the core `unavailable` and arrives here as
-`Malformed`, whose message names the exception. `Unavailable` is not used for a device that is offline: it means the *core* cannot
-be reached.
+A port that has an error type answers its failures with it (`HttpError`, `FsError` and, since ADR-049, `StorageError` for `Kv`
+and `SecureStore`: the Android adapters answer a lost network with `HttpError.Network`, a refused permission or a path outside
+the root with `FsError.Denied`, a full disk with `FsError.Full` or `StorageError.Full`, a Keystore key that needs the user with
+`StorageError.Locked` and ciphertext that no longer opens with `StorageError.Corrupt`): the core gets a typed reply, the query
+client treats storage as best-effort (ADR-049: a WARN and a counter, never a crash), and the failure never reaches `onError`.
+An exception that is not that type (a bug in an adapter) answers the core `unavailable`, is logged at ERROR naming the port,
+the method and the adapter, and on Kotlin and TypeScript arrives here as `Malformed`, whose message names the exception.
+`Unavailable` is not used for a device that is offline: it means the *core* cannot be reached.
 
 The handler runs synchronously on the thread (Swift: the task) that made the call: the main actor for a store, the main
 thread for a Compose click. Keep it short, and do not call into Undra from it: a failure reported while a handler runs
@@ -217,8 +219,9 @@ nothing from the text of a message.
 
 ## Differences that remain
 
-* A failed **port** implementation and a malformed change-set reach `onError` on Kotlin and TypeScript; on Swift they are
-  logged (a failed port answers the core `unavailable`, ADR-032 row k).
+* A failed **port** implementation (an untyped throw) and a malformed change-set reach `onError` on Kotlin and TypeScript; on
+  Swift they are logged at ERROR (a failed port answers the core `unavailable`, ADR-032 row k). A typed storage failure
+  (`StorageError`) is the port's answer, not a failure of the adapter, on all three.
 * TypeScript has an abort path the others spell differently (`AbortSignal` versus task or coroutine cancellation), and
   its methods are all `Promise`s: a command's promise resolves rather than being `void`.
 * A wasm core cannot contain a panic (SPEC 7: `panic=abort`): the call fails as `unavailable` (reason `trap`) and the
