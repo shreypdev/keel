@@ -137,6 +137,8 @@ pub struct QueryDef { pub name: String, pub query_id: u32, pub kind: QueryKind /
 
 Canonical form: `serde_json` with all `Vec`s sorted by `name` (variants keep declaration `index` and are sorted by index), map keys in struct-field order as declared above, no whitespace, `docs` fields **excluded**, `SignalDef.no_coalesce` written only when `true` (so a schema without such a signal hashes as it did before the field existed, ADR-031). `schema_hash = fnv1a64(canonical_bytes)`. `undra-meta` exposes `Schema::canonical_json()` and `Schema::hash()`. Two cores with the same public surface produce the same hash regardless of doc comments or source order of *unordered* things. Ordered (part of the wire layout, kept in declaration order): record fields, variant fields, params, signals (signal_id), variants (index). Unordered (sorted by name in canonical form): the six top-level lists, object methods and constructors, port methods. `crate_name` and `undra_version` are labels and are **excluded** from the canonical form (they do not change the wire).
 
+Exchange form: `Schema::to_json()` (compact) and `Schema::to_json_pretty()` are the *whole* schema, `undra_version` and `crate_name` labels and `docs` included, every list in declaration order; `Schema::from_json` reads either. This is the document `undra_schema_json` returns (§6), `undra-dev-runner --print-schema` prints and a `schema.json` file holds. The hash does not cover docs or labels, so it is the `fnv1a64` of the **canonical** form, not of the exchange form's bytes: a host that wants to check `undra_schema_hash` against the JSON it was given recomputes the canonical form (`Schema::from_json(..).hash()` in Rust; drop `docs` and the labels and sort the unordered lists elsewhere, as `crates/undra-ffi/tests/wasm/raw.test.mjs` does) and hashes that. `Schema::without_docs()` removes every doc and leaves the hash unchanged. Docs reach a binary through the registrations (§2.4), unconditionally: they are `&'static str` fields of the `*Meta` statics, so exporting them adds no data that the core did not already carry.
+
 ### 2.4 Registration (`inventory`)
 
 Each macro emits `inventory::submit! { undra_meta::Registration::Record(&RECORD_DEF) }` etc., where the def is a `static` built from `const` data (`&'static str`, `&'static [..]`). `undra_meta::Registration` is:
@@ -429,7 +431,7 @@ typedef void (*undra_stream_cb)(void *user, uint32_t call_id, const uint8_t *ptr
 
 uint32_t undra_abi_version(void);                       // 1
 uint64_t undra_schema_hash(void);
-UndraBuf  undra_schema_json(void);                       // owned copy
+UndraBuf  undra_schema_json(void);                       // owned copy of the whole schema as JSON, doc comments included (§2.3); undra_schema_hash covers its canonical form, not these bytes
 uint32_t undra_init(const uint8_t *cfg, uint32_t len, undra_reply_cb reply, undra_changeset_cb changes, undra_stream_cb stream, void *user); // idempotent per process; cfg = encoded RuntimeConfig record; returns 0 ok
 void     undra_shutdown(void);                          // answers every in-flight call (status 3) and ends every open stream (§5.1 Shutdown) before stopping the threads; then drops the port registrations, waiting for port callbacks still running (host contract 5)
 uint32_t undra_call(const uint8_t *ptr, uint32_t len);  // Call payload (§3.3); returns 0 accepted, 5 bad request. Reply via reply_cb. Works for sync and async methods.
@@ -783,7 +785,7 @@ contract-tests/                     schema fixture + per-language runners + the 
 bench/                              criterion (Rust), node bench, JVM bench, iOS bench target notes
 ```
 
-Schema extraction: `undra-cli` builds the core for the host as a cdylib, `dlopen`s it, calls `undra_schema_json`, and runs bindgen. Fallback: `undra bindgen --schema schema.json`.
+Schema extraction: `undra-cli` builds the core for the host as a cdylib, `dlopen`s it, calls `undra_schema_json` (the whole schema, doc comments included, §2.3), checks its hash against `undra_schema_hash`, and runs bindgen; the generated code carries the doc comments with `undra bindgen --docs` and none without. Fallback: `undra bindgen --schema schema.json`.
 
 ---
 
