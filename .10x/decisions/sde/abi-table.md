@@ -80,7 +80,7 @@ hash (the playground's was `0xddcdea47fa95a8d4` before and after it; `0xefd907be
 | `cargo test --workspace --no-fail-fast` | 2,620 passed, 0 failed, 13 ignored (doc tests included) |
 | Miri: `-p undra-ffi --lib`; the `abi` subset CI runs plus the table tests | 35 pass; 4 pass |
 | C harness (plain and ASan), wasm harness, Swift over the fixture's table, JNI end-to-end (Kotlin 2.4.20 and 2.0.21) | ok; 19 + 24; 6; 16 + 16 |
-| Swift runtime `swift test` | 497, 0 failures |
+| Swift runtime `swift test` | 526, 0 failures (497 before main's Swift Fs fix was merged last) |
 | Kotlin runtime `test-local.sh`, Kotlin 2.4.20 and 2.0.21 (own build directory) | 629 cases, 0 failed, 1 skipped, both |
 | TypeScript runtime `npm test` | 1,133 |
 | React Native: `npm test`, typecheck, `test:contract`; `cpp/test/run.sh` | 65; clean; 17 + S17 skipped; 15 store + 29 + 29 host checks, JSI, TurboModule and the Apple platform compile |
