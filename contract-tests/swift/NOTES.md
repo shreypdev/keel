@@ -9,6 +9,7 @@ pipes the `SCENARIO` lines through `../check.sh swift`.
 | Path | What |
 |---|---|
 | `Tests/ContractTests/Harness/` | the fakes of scenarios.md: `ManualClock`, `FakeServer` (the `Http` port), `MemoryKv`, `CapturingLog`, and `Fixture` (the one core of the process and its adapters) |
+| `Tests/ContractTests/ApplyReportTests.swift` | not a scenario: a generated store skips a change it cannot decode and reports it through `onError` (ADR-032, decision 6); it runs before the scenarios, on the core they share |
 | `Tests/ContractTests/ContractScenarios.swift` and `S*.swift` | one XCTest per scenario, `testS07_streamWithBackpressure` and so on, in one class so that XCTest's alphabetical order is the order of the ids |
 | `Packages/PlaygroundCore` | a symlink to `examples/playground/generated/swift`, see below |
 
