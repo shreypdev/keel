@@ -18,7 +18,7 @@
         { "title": "Schema-hash gate", "text": "Checked at load and at build; a mismatched UI and core refuse to talk." },
         { "title": "undra dev", "text": "A live core over a WebSocket, rebuilt on save." },
         { "title": "Teaching diagnostics", "text": "Every macro error says what, why and how to fix it." },
-        { "title": "17 contract scenarios on 3 platforms", "text": "The same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 51 of 51 pass." },
+        { "title": "18 contract scenarios on 3 platforms", "text": "The same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 54 of 54 pass." },
         { "title": "Adversarial reviews of every core crate", "text": "Signals, runtime, macros and ffi were each reviewed by someone who did not write them." }
       ]
     },

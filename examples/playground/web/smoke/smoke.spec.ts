@@ -151,7 +151,8 @@ test("the playground runs: todos, counter, 10k list, remote", async ({ page }) =
     await expect(page.getByTestId("remote-item")).toHaveCount(4);
     await expect(page.getByTestId("remote-item").last()).toContainText("Ship the playground");
 
-    await page.getByTestId("remote-toggle").first().check();
+    // The optimistic change is the core's own write, so it reaches the page at the next frame (ADR-031): click, then wait for it.
+    await page.getByTestId("remote-toggle").first().click();
     await expect(page.getByTestId("remote-toggle").first()).toBeChecked();
     await expect(page.getByTestId("remote-saving")).toHaveCount(0); // the PATCH was answered
 
@@ -191,6 +192,112 @@ test("the playground runs: todos, counter, 10k list, remote", async ({ page }) =
 
   for (const line of logged) console.log(line);
   expect(problems, "the page logged no errors").toEqual([]);
+});
+
+/** The number in a tile such as `10,081`. */
+async function tileNumber(page: Page, testId: string): Promise<number> {
+  return Number(((await page.getByTestId(testId).textContent()) ?? "").replace(/,/g, ""));
+}
+
+test("the stress screen: the core generates, the mirror merges, no_coalesce is applied step by step", async ({ page }) => {
+  mkdirSync(PROOF, { recursive: true });
+  const problems: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") problems.push(message.text());
+  });
+  page.on("pageerror", (error) => problems.push(error.message));
+
+  await page.goto("/?screen=stress&mode=firehose&rate=10000&autostart=1");
+  await expect(page.getByTestId("stress-state")).toHaveText("running");
+
+  await test.step("firehose: 10,000 updates a second arrive as change-sets and are applied once per frame", async () => {
+    // The tiles are measured over a two-second window and refresh every 500 ms.
+    await expect.poll(() => tileNumber(page, "stress-received"), { timeout: 10_000 }).toBeGreaterThan(2_000);
+    const generated = await tileNumber(page, "stress-generated");
+    const received = await tileNumber(page, "stress-received");
+    const applied = await tileNumber(page, "stress-applied");
+    const valueApplies = await tileNumber(page, "stress-value-applies");
+    const value = await tileNumber(page, "stress-value");
+    console.log(`stress, firehose 10k/s: generated ${generated}/s, received ${received}/s, applied ${applied}/s, value ${value}, applied ${valueApplies} times`);
+    expect(generated, "the generator tracks its rate (a loaded CI machine gets a wide band)").toBeGreaterThan(5_000);
+    expect(generated).toBeLessThan(15_000);
+    expect(applied, "the mirror merged what arrived between two frames").toBeLessThan(received / 10);
+    expect(valueApplies, "the merged signal was applied far less often than it was written").toBeLessThan(value / 10);
+    expect(value).toBeGreaterThan(0);
+    await page.screenshot({ path: `${PROOF}web-stress.png`, fullPage: true });
+  });
+
+  await test.step("progress: the no_coalesce signal is applied once per update", async () => {
+    await page.getByTestId("stress-mode-progress").click();
+    await expect.poll(() => tileNumber(page, "stress-progress-applies"), { timeout: 10_000 }).toBeGreaterThan(2_000);
+    const progress = await tileNumber(page, "stress-progress");
+    const applies = await tileNumber(page, "stress-progress-applies");
+    console.log(`stress, progress 10k/s: progress ${progress}, applied ${applies} times`);
+    // Every update was applied on its own; the count is read up to half a second after the number.
+    expect(applies).toBeGreaterThan(progress / 2);
+    expect(applies).toBeLessThanOrEqual(progress);
+  });
+
+  await test.step("stop: the generator ends and the rates fall to zero", async () => {
+    await page.getByTestId("stress-stop").click();
+    await expect(page.getByTestId("stress-state")).toHaveText("stopped");
+    await expect.poll(() => tileNumber(page, "stress-generated"), { timeout: 10_000 }).toBe(0);
+    await expect.poll(() => tileNumber(page, "stress-received"), { timeout: 10_000 }).toBeLessThan(5);
+  });
+
+  await test.step("burst: a thousand updates at once, one change-set each, applied as one", async () => {
+    await page.getByTestId("stress-mode-firehose").click();
+    const before = await tileNumber(page, "stress-value");
+    const appliesBefore = await tileNumber(page, "stress-value-applies");
+    await page.getByTestId("stress-burst").click();
+    await expect.poll(() => tileNumber(page, "stress-value")).toBe(before + 1_000);
+    await expect.poll(() => tileNumber(page, "stress-value-applies"), { timeout: 5_000 }).toBeGreaterThan(appliesBefore);
+    expect(await tileNumber(page, "stress-value-applies"), "1,000 writes were not 1,000 applies").toBeLessThan(appliesBefore + 50);
+  });
+
+  await test.step("leaving the screen stops the generator and releases its store", async () => {
+    await page.getByTestId("stress-start").click();
+    await expect(page.getByTestId("stress-state")).toHaveText("running");
+    await page.getByTestId("tab-counter").click();
+    await expect(page.getByTestId("counter-value")).toHaveText("0");
+    await page.getByTestId("tab-stress").click();
+    // A new store: nothing is running and the count starts again from zero.
+    await expect(page.getByTestId("stress-state")).toHaveText("stopped");
+    await expect(page.getByTestId("stress-value")).toHaveText("0");
+  });
+
+  expect(problems, "the page logged no errors").toEqual([]);
+});
+
+test("embedded, the stress screen posts the extended undra-stats message to its parent", async ({ page }) => {
+  await page.goto("/?screen=todos");
+  // A same-origin parent (as the landing page is) with the stress screen in an iframe, as "Push it" opens it.
+  const message = await page.evaluate(
+    () =>
+      new Promise<Record<string, unknown>>((resolve, reject) => {
+        const frame = document.createElement("iframe");
+        frame.src = "/?screen=stress&embed=1&rate=10000&mode=firehose&autostart=1";
+        window.addEventListener("message", (event: MessageEvent<Record<string, unknown>>) => {
+          const data = event.data;
+          if (event.source === frame.contentWindow && data?.["type"] === "undra-stats" && Number(data["generatedPerSec"]) > 2_000) resolve(data);
+        });
+        setTimeout(() => reject(new Error("the iframe posted no stress stats within 20 s")), 20_000);
+        document.body.appendChild(frame);
+      }),
+  );
+  console.log(`embedded stress message: ${JSON.stringify(message)}`);
+  // The base shape is still there, for a consumer that knows only that.
+  for (const field of ["changeSetsPerSec", "applyP50Us", "applyP99Us", "timerResolutionUs"]) expect(typeof message[field], field).toBe("number");
+  // And the stress fields.
+  expect(message["mode"]).toBe("firehose");
+  expect(message["targetRate"]).toBe(10_000);
+  expect(message["running"]).toBe(true);
+  expect(message["runtime"]).toBe("wasm-main");
+  for (const field of ["generatedPerSec", "entriesReceivedPerSec", "entriesAppliedPerSec", "mergeRatio", "drainsPerSec", "applyNsPerChangeSet", "droppedFrames", "droppedFramesRecent", "longestFrameMs", "valueApplies", "progressApplies"]) {
+    expect(typeof message[field], field).toBe("number");
+  }
+  expect(Number(message["entriesAppliedPerSec"]), "merged").toBeLessThan(Number(message["entriesReceivedPerSec"]) / 10);
+  expect(Number(message["mergeRatio"])).toBeLessThan(0.1);
 });
 
 test("a core that cannot be loaded is reported on the page", async ({ page }) => {

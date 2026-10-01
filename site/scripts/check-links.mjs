@@ -21,7 +21,7 @@ export const LANDING_WORD_BUDGET = 350;
  *  the install blocks, the numbers grid, diagrams, scripts, and what a closed <details> hides. */
 export function landingWords(html) {
   let h = html.slice(html.indexOf("<body"));
-  for (const open of [/<header class="site-header"[^>]*>/, /<footer class="site-footer"[^>]*>/, /<script\b[^>]*>/, /<style\b[^>]*>/, /<svg\b[^>]*>/, /<noscript\b[^>]*>/, /<pre\b[^>]*>/, /<div class="stats"[^>]*>/, /<div class="install"[^>]*>/, /<a class="skip"[^>]*>/, /<ul class="seg-key"[^>]*>/, /<div class="grid51"[^>]*>/, /<button\b[^>]*\bhidden\b[^>]*>/]) h = stripElements(h, open);
+  for (const open of [/<header class="site-header"[^>]*>/, /<footer class="site-footer"[^>]*>/, /<script\b[^>]*>/, /<style\b[^>]*>/, /<svg\b[^>]*>/, /<noscript\b[^>]*>/, /<pre\b[^>]*>/, /<div class="stats"[^>]*>/, /<div class="install"[^>]*>/, /<a class="skip"[^>]*>/, /<ul class="seg-key"[^>]*>/, /<div class="gridcells"[^>]*>/, /<button\b[^>]*\bhidden\b[^>]*>/]) h = stripElements(h, open);
   h = h.replace(/<details\b[^>]*>\s*(<summary\b[^>]*>[\s\S]*?<\/summary>)[\s\S]*?<\/details>/g, "$1");
   return decode(h.replace(/<[^>]+>/g, " ")).split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w));
 }

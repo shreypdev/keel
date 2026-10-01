@@ -1,6 +1,7 @@
 import { ChangeOp, Mirror, encodeChangeSet } from "@undra/runtime";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { STATS_INTERVAL_MS, StatsWindow, instrumentMirror, startStatsPoster, timerResolutionUs, toStatsMessage } from "./embed-stats";
+import { STATS_INTERVAL_MS, StatsChannel, type StatsMessage, startStatsPoster, timerResolutionUs, toStatsMessage, toStressMessage } from "./embed-stats";
+import type { StressSnapshot } from "./stress-stats";
 
 /** A clock the test moves by hand, in milliseconds. */
 function fakeClock(start = 0): { now: () => number; advance: (ms: number) => void } {
@@ -13,189 +14,107 @@ function fakeClock(start = 0): { now: () => number; advance: (ms: number) => voi
   };
 }
 
-describe("StatsWindow", () => {
-  test("no samples: everything is 0", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now });
-    expect(stats.snapshot()).toEqual({ changeSetsPerSec: 0, applyP50Us: 0, applyP99Us: 0 });
-    clock.advance(5000);
-    expect(stats.snapshot()).toEqual({ changeSetsPerSec: 0, applyP50Us: 0, applyP99Us: 0 });
-  });
-
-  test("a steady 10 per second reads 10 per second", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now });
-    for (let i = 0; i < 50; i++) {
-      clock.advance(100);
-      stats.record(100);
-    }
-    expect(stats.snapshot().changeSetsPerSec).toBeCloseTo(10, 10);
-  });
-
-  test("the rate uses the time since the start while that is shorter than the window", () => {
-    const clock = fakeClock(1000);
-    const stats = new StatsWindow({ now: clock.now });
-    for (let i = 0; i < 5; i++) {
-      clock.advance(100);
-      stats.record(50);
-    }
-    // 5 change-sets in the 500 ms since the start: 10 per second, not 5 / 2 s.
-    expect(stats.snapshot().changeSetsPerSec).toBeCloseTo(10, 10);
-  });
-
-  test("nothing is reported at the instant the window starts", () => {
-    const clock = fakeClock(42);
-    const stats = new StatsWindow({ now: clock.now });
-    stats.record(10);
-    expect(stats.snapshot().changeSetsPerSec).toBe(0);
-  });
-
-  test("the rate can be fractional", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now });
-    clock.advance(1500);
-    stats.record(10);
-    stats.record(10);
-    expect(stats.snapshot().changeSetsPerSec).toBeCloseTo(2000 / 1500, 10);
-  });
-
-  test("percentiles are nearest-rank over the samples", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now });
-    clock.advance(1000);
-    // 100 samples: 1..100 microseconds, recorded out of order.
-    for (let i = 0; i < 100; i++) stats.record(((i * 37) % 100) + 1);
-    const snapshot = stats.snapshot();
-    expect(snapshot.applyP50Us).toBe(50);
-    expect(snapshot.applyP99Us).toBe(99);
-  });
-
-  test("one sample is every percentile", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now });
-    clock.advance(10);
-    stats.record(123.5);
-    expect(stats.snapshot()).toMatchObject({ applyP50Us: 123.5, applyP99Us: 123.5 });
-  });
-
-  test("the slowest 1% is the p99, not the median", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now });
-    clock.advance(1000);
-    for (let i = 0; i < 98; i++) stats.record(20);
-    stats.record(900);
-    stats.record(5000);
-    const snapshot = stats.snapshot();
-    expect(snapshot.applyP50Us).toBe(20);
-    expect(snapshot.applyP99Us).toBe(900);
-  });
-
-  test("a flush of several change-sets is that many samples of the average", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now });
-    clock.advance(1000);
-    stats.record(400, 4); // four change-sets in 400 us: 100 us each
-    stats.record(10, 1);
-    const snapshot = stats.snapshot();
-    expect(snapshot.changeSetsPerSec).toBeCloseTo(5, 10);
-    expect(snapshot.applyP50Us).toBe(100);
-    expect(snapshot.applyP99Us).toBe(100);
-  });
-
-  test("samples leave the window after two seconds, and the numbers go back to 0", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now });
-    clock.advance(1000);
-    stats.record(900);
-    clock.advance(1500);
-    stats.record(100);
-    // The 900 us sample is 1.5 s old, still inside.
-    expect(stats.snapshot().applyP99Us).toBe(900);
-    clock.advance(600);
-    // Now it is 2.1 s old, the 100 us one 0.6 s.
-    expect(stats.snapshot().applyP99Us).toBe(100);
-    clock.advance(1500);
-    expect(stats.snapshot()).toEqual({ changeSetsPerSec: 0, applyP50Us: 0, applyP99Us: 0 });
-  });
-
-  test("the window is (now - windowMs, now]: a sample exactly windowMs old is out", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now, windowMs: 1000 });
-    clock.advance(10);
-    stats.record(7);
-    clock.advance(999);
-    expect(stats.snapshot().applyP50Us).toBe(7);
-    clock.advance(1);
-    expect(stats.snapshot().applyP50Us).toBe(0);
-  });
-
-  test("a steady stream at the rate keeps a steady window", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now });
-    for (let i = 0; i < 1000; i++) {
-      clock.advance(100);
-      stats.record(i % 2 === 0 ? 30 : 60);
-    }
-    const snapshot = stats.snapshot();
-    expect(snapshot.changeSetsPerSec).toBeCloseTo(10, 10);
-    expect(snapshot.applyP50Us).toBe(30);
-    expect(snapshot.applyP99Us).toBe(60);
-  });
-
-  test("at most maxSamples flushes are kept, the oldest dropped first", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now, maxSamples: 3 });
-    clock.advance(100);
-    for (const us of [1000, 1, 2, 3]) stats.record(us);
-    // The 1000 us sample was dropped; 1, 2, 3 remain.
-    expect(stats.snapshot().applyP99Us).toBe(3);
-  });
-
-  test("a long run reclaims expired samples and stays correct", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now });
-    for (let i = 0; i < 20_000; i++) {
-      clock.advance(1);
-      stats.record(5);
-    }
-    const snapshot = stats.snapshot();
-    // 1 ms spacing for 2 s: 2000 change-sets in the window.
-    expect(snapshot.changeSetsPerSec).toBeCloseTo(1000, 6);
-    expect(snapshot.applyP50Us).toBe(5);
-  });
-
-  test("ignores durations and counts that are not usable", () => {
-    const clock = fakeClock();
-    const stats = new StatsWindow({ now: clock.now });
-    clock.advance(1000);
-    stats.record(Number.NaN);
-    stats.record(Number.POSITIVE_INFINITY);
-    stats.record(-1);
-    stats.record(10, 0);
-    stats.record(10, -2);
-    stats.record(10, Number.NaN);
-    expect(stats.snapshot()).toEqual({ changeSetsPerSec: 0, applyP50Us: 0, applyP99Us: 0 });
-    stats.record(10, 2.9);
-    expect(stats.snapshot().changeSetsPerSec).toBeCloseTo(2, 10);
-  });
-});
+/** A snapshot with every number at a recognisable value. */
+const SNAPSHOT: StressSnapshot = {
+  generatedPerSec: 10_000.04,
+  receivedPerSec: 10_020.66,
+  entriesReceivedPerSec: 10_020.66,
+  appliedPerSec: 124.26,
+  mergeRatio: 0.012_401_234,
+  drainsPerSec: 59.96,
+  drainP50Us: 300.000_000_000_001_4,
+  drainP99Us: 449.96,
+  nsPerChangeSet: 1795.6,
+  droppedFrames: 3,
+  droppedFramesRecent: 1,
+  longestFrameMs: 50.04,
+  frameMs: 16.67,
+  heapMb: 61.449,
+  timerResolutionUs: 99.999_999_999,
+  generatedTotal: 40_000,
+  receivedTotal: 40_080,
+  appliedTotal: 248,
+  compactions: 0,
+  applies: { value: 120, progress: 40_000 },
+};
 
 describe("toStatsMessage", () => {
   test("types the message and rounds to a tenth", () => {
-    expect(toStatsMessage({ changeSetsPerSec: 9.987654, applyP50Us: 100.00000000000142, applyP99Us: 249.96 }, 99.99999999999)).toEqual({
+    expect(toStatsMessage({ changeSetsPerSec: 9.987654, p50Us: 100.00000000000142, p99Us: 249.96 }, 99.99999999999)).toEqual({
       type: "undra-stats",
       changeSetsPerSec: 10,
       applyP50Us: 100,
       applyP99Us: 250,
       timerResolutionUs: 100,
     });
-    expect(toStatsMessage({ changeSetsPerSec: 0, applyP50Us: 0, applyP99Us: 0 }, 0)).toEqual({
+    expect(toStatsMessage({ changeSetsPerSec: 0, p50Us: 0, p99Us: 0 }, 0)).toEqual({
       type: "undra-stats",
       changeSetsPerSec: 0,
       applyP50Us: 0,
       applyP99Us: 0,
       timerResolutionUs: 0,
     });
+  });
+
+  test("the base message has exactly the four fields a consumer of the first version reads", () => {
+    expect(Object.keys(toStatsMessage({ changeSetsPerSec: 1, p50Us: 2, p99Us: 3 }, 4)).sort()).toEqual(
+      ["applyP50Us", "applyP99Us", "changeSetsPerSec", "timerResolutionUs", "type"].sort(),
+    );
+  });
+});
+
+describe("toStressMessage", () => {
+  const context = { mode: "firehose", targetRate: 10_000, running: true } as const;
+
+  test("keeps the base fields and adds the stress ones, from one snapshot", () => {
+    const message = toStressMessage(SNAPSHOT, context);
+    expect(message).toEqual({
+      type: "undra-stats",
+      // The base shape.
+      changeSetsPerSec: 10_020.7,
+      applyP50Us: 300,
+      applyP99Us: 450,
+      timerResolutionUs: 100,
+      // The stress fields.
+      generatedPerSec: 10_000,
+      entriesReceivedPerSec: 10_020.7,
+      entriesAppliedPerSec: 124.3,
+      mergeRatio: 0.0124,
+      drainsPerSec: 60,
+      applyNsPerChangeSet: 1796,
+      droppedFrames: 3,
+      droppedFramesRecent: 1,
+      longestFrameMs: 50,
+      heapMb: 61.4,
+      valueApplies: 120,
+      progressApplies: 40_000,
+      mode: "firehose",
+      targetRate: 10_000,
+      running: true,
+      runtime: "wasm-main",
+    });
+  });
+
+  test("the base fields are the same numbers the tiles show: received, and the per-drain percentiles", () => {
+    const message = toStressMessage(SNAPSHOT, context);
+    expect(message.changeSetsPerSec).toBeCloseTo(SNAPSHOT.receivedPerSec, 1);
+    expect(message.applyP50Us).toBeCloseTo(SNAPSHOT.drainP50Us, 1);
+    expect(message.applyP99Us).toBeCloseTo(SNAPSHOT.drainP99Us, 1);
+  });
+
+  test("outside Chrome there is no heap field, rather than a made-up one", () => {
+    const message = toStressMessage({ ...SNAPSHOT, heapMb: null }, context);
+    expect("heapMb" in message).toBe(false);
+  });
+
+  test("the generator's settings travel with it, and a missing applies count is 0", () => {
+    const message: StatsMessage = toStressMessage({ ...SNAPSHOT, applies: {} }, { mode: "progress", targetRate: 100_000, running: false });
+    expect(message).toMatchObject({ mode: "progress", targetRate: 100_000, running: false, valueApplies: 0, progressApplies: 0 });
+  });
+
+  test("survives a structured clone, which is what postMessage does", () => {
+    const message = toStressMessage(SNAPSHOT, context);
+    expect(structuredClone(message)).toEqual(message);
   });
 });
 
@@ -232,189 +151,54 @@ describe("timerResolutionUs", () => {
   });
 });
 
-describe("instrumentMirror, on the runtime's real Mirror", () => {
-  const STORE = 7n;
+describe("StatsChannel", () => {
+  const message = toStatsMessage({ changeSetsPerSec: 1, p50Us: 2, p99Us: 3 }, 4);
 
-  /** A change-set with one full-value entry for the store. */
-  const changeSet = (txnId: number): Uint8Array =>
-    encodeChangeSet({ txnId: BigInt(txnId), entries: [{ handle: STORE, signalId: 0, op: ChangeOp.FullValue, value: new Uint8Array([1]) }] });
-
-  /** A mirror whose flushes the test runs by hand, whose store applies in `applyMs` of fake time. */
-  function setup(applyMs: number) {
-    const clock = fakeClock();
-    const scheduled: Array<() => void> = [];
-    const errors: unknown[] = [];
-    const mirror = new Mirror({ schedule: (fn) => scheduled.push(fn), onError: (error) => errors.push(error) });
-    const applied: Array<{ us: number; changeSets: number }> = [];
-    let entries = 0;
-    mirror.register(STORE, () => {
-      entries++;
-      clock.advance(applyMs);
-    });
-    const restore = instrumentMirror(mirror, (us, changeSets) => applied.push({ us, changeSets }), clock.now);
-    const runScheduled = (): void => {
-      while (scheduled.length > 0) (scheduled.shift() as () => void)();
-    };
-    return { clock, mirror, applied, errors, restore, runScheduled, entries: () => entries };
-  }
-
-  test("reports the time of a scheduled flush, in microseconds, for one change-set", () => {
-    const t = setup(0.25);
-    t.mirror.enqueue(changeSet(1));
-    // Time spent waiting for the flush is not part of it.
-    t.clock.advance(3);
-    t.runScheduled();
-    expect(t.entries()).toBe(1);
-    expect(t.applied).toHaveLength(1);
-    expect(t.applied[0]).toEqual({ us: 250, changeSets: 1 });
-    expect(t.errors).toEqual([]);
+  test("posts to the parent, addressed to the origin it was given", () => {
+    const posted: Array<{ message: unknown; origin: string }> = [];
+    const channel = new StatsChannel({ postMessage: (m, origin) => posted.push({ message: m, origin }) }, "https://example.test");
+    channel.post(message);
+    expect(posted).toEqual([{ message, origin: "https://example.test" }]);
   });
 
-  test("change-sets queued before one flush are applied, and counted, by that flush", () => {
-    const t = setup(0.1);
-    t.mirror.enqueue(changeSet(1));
-    t.mirror.enqueue(changeSet(2));
-    t.mirror.enqueue(changeSet(3));
-    t.runScheduled();
-    // The flush merges them per signal (ADR-031): the store applies the last value once, and the
-    // flush still counts the three change-sets it consumed.
-    expect(t.entries()).toBe(1);
-    expect(t.applied).toHaveLength(1);
-    expect(t.applied[0]?.changeSets).toBe(3);
-    expect(t.applied[0]?.us).toBeCloseTo(100, 6);
+  test("with no origin it is addressed to *", () => {
+    const origins: string[] = [];
+    new StatsChannel({ postMessage: (_m, origin) => origins.push(origin) }).post(message);
+    expect(origins).toEqual(["*"]);
   });
 
-  test("a direct flush() (what observe does) is measured like a scheduled one", () => {
-    const t = setup(0.5);
-    t.mirror.enqueue(changeSet(1));
-    t.mirror.flush();
-    expect(t.applied).toEqual([{ us: 500, changeSets: 1 }]);
-    // The scheduled flush that enqueue asked for finds nothing to do and reports nothing.
-    t.runScheduled();
-    expect(t.applied).toHaveLength(1);
-  });
-
-  test("a flush with nothing queued, and a change-set with no entries, are not reported", () => {
-    const t = setup(0.5);
-    t.mirror.flush();
-    t.mirror.enqueue(encodeChangeSet({ txnId: 1n, entries: [] }));
-    t.runScheduled();
-    expect(t.applied).toEqual([]);
-    // It was accepted by the mirror, but it applied nothing.
-    expect(t.mirror.changeSets).toBe(1);
-  });
-
-  test("a rejected payload is reported by the mirror, not counted", () => {
-    const t = setup(0.5);
-    t.mirror.enqueue(new Uint8Array([1, 2, 3]));
-    t.runScheduled();
-    expect(t.errors).toHaveLength(1);
-    expect(t.applied).toEqual([]);
-  });
-
-  test("entries for a store nobody registered apply nothing but the change-set is still one flush", () => {
-    const t = setup(0.5);
-    t.mirror.enqueue(encodeChangeSet({ txnId: 1n, entries: [{ handle: 99n, signalId: 0, op: ChangeOp.FullValue, value: new Uint8Array() }] }));
-    t.runScheduled();
-    expect(t.mirror.dropped).toBe(1);
-    expect(t.applied).toEqual([{ us: 0, changeSets: 1 }]);
-  });
-
-  test("a nested flush() from inside an apply is neither measured twice nor lost", () => {
-    const clock = fakeClock();
-    const scheduled: Array<() => void> = [];
-    const mirror = new Mirror({ schedule: (fn) => scheduled.push(fn) });
-    const applied: Array<{ us: number; changeSets: number }> = [];
-    mirror.register(STORE, () => {
-      clock.advance(0.2);
-      mirror.flush();
-    });
-    instrumentMirror(mirror, (us, changeSets) => applied.push({ us, changeSets }), clock.now);
-    mirror.enqueue(changeSet(1));
-    (scheduled.shift() as () => void)();
-    expect(applied).toHaveLength(1);
-    expect(applied[0]?.us).toBeCloseTo(200, 6);
-  });
-
-  test("a change-set that arrives while a flush runs is applied by it and counted with it", () => {
-    const clock = fakeClock();
-    const scheduled: Array<() => void> = [];
-    const mirror = new Mirror({ schedule: (fn) => scheduled.push(fn) });
-    const applied: Array<{ us: number; changeSets: number }> = [];
-    let first = true;
-    mirror.register(STORE, () => {
-      clock.advance(0.1);
-      if (first) {
-        first = false;
-        // What a subscriber that makes a synchronous core call does.
-        mirror.enqueue(changeSet(2));
-      }
-    });
-    instrumentMirror(mirror, (us, changeSets) => applied.push({ us, changeSets }), clock.now);
-    mirror.enqueue(changeSet(1));
-    (scheduled.shift() as () => void)();
-    expect(applied).toHaveLength(1);
-    expect(applied[0]?.changeSets).toBe(2);
-    expect(applied[0]?.us).toBeCloseTo(200, 6);
-  });
-
-  test("a store that throws is reported by the mirror and the flush is still measured", () => {
-    const clock = fakeClock();
-    const scheduled: Array<() => void> = [];
-    const errors: unknown[] = [];
-    const mirror = new Mirror({ schedule: (fn) => scheduled.push(fn), onError: (error) => errors.push(error) });
-    const applied: Array<{ us: number; changeSets: number }> = [];
-    mirror.register(STORE, () => {
-      clock.advance(0.3);
-      throw new Error("boom");
-    });
-    instrumentMirror(mirror, (us, changeSets) => applied.push({ us, changeSets }), clock.now);
-    mirror.enqueue(changeSet(1));
-    (scheduled.shift() as () => void)();
-    expect(errors).toHaveLength(1);
-    expect(applied).toHaveLength(1);
-    expect(applied[0]?.us).toBeCloseTo(300, 6);
-    expect(applied[0]?.changeSets).toBe(1);
-  });
-
-  test("the restore function puts the original methods back", () => {
-    const t = setup(0.5);
-    t.restore();
-    t.mirror.enqueue(changeSet(1));
-    t.runScheduled();
-    expect(t.entries()).toBe(1);
-    expect(t.applied).toEqual([]);
-  });
-
-  test("feeds a StatsWindow: the numbers a counter would show", () => {
-    const t = setup(0.1);
-    const stats = new StatsWindow({ now: t.clock.now });
-    t.restore();
-    instrumentMirror(t.mirror, (us, changeSets) => stats.record(us, changeSets), t.clock.now);
-    for (let i = 0; i < 20; i++) {
-      t.clock.advance(100);
-      t.mirror.enqueue(changeSet(i));
-      t.runScheduled();
-    }
-    const snapshot = stats.snapshot();
-    // 20 change-sets in a window that is 2 s long by now.
-    expect(snapshot.changeSetsPerSec).toBeCloseTo(10, 10);
-    expect(snapshot.applyP50Us).toBeCloseTo(100, 6);
-    expect(snapshot.applyP99Us).toBeCloseTo(100, 6);
+  test("claims nest and release once each", () => {
+    const channel = new StatsChannel({ postMessage: () => {} });
+    expect(channel.claimed).toBe(false);
+    const first = channel.claim();
+    const second = channel.claim();
+    expect(channel.claimed).toBe(true);
+    first();
+    first(); // twice is harmless
+    expect(channel.claimed).toBe(true);
+    second();
+    expect(channel.claimed).toBe(false);
   });
 });
 
 describe("startStatsPoster", () => {
+  const STORE = 9n;
+
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
+
+  const entry = (i: number): Uint8Array =>
+    encodeChangeSet({ txnId: BigInt(i), entries: [{ handle: STORE, signalId: 0, op: ChangeOp.FullValue, value: new Uint8Array([i & 0xff]) }] });
 
   test("posts an undra-stats message to the parent every 500 ms, zeros while idle", () => {
     vi.useFakeTimers();
     const clock = fakeClock();
     const mirror = new Mirror({ schedule: () => {} });
     const posted: Array<{ message: unknown; origin: string }> = [];
-    const stop = startStatsPoster(mirror, { postMessage: (message, origin) => posted.push({ message, origin }) }, clock.now);
+    const channel = new StatsChannel({ postMessage: (message, origin) => posted.push({ message, origin }) });
+    const stop = startStatsPoster(mirror, channel, clock.now);
     expect(STATS_INTERVAL_MS).toBe(500);
 
     vi.advanceTimersByTime(499);
@@ -429,41 +213,101 @@ describe("startStatsPoster", () => {
     stop();
     vi.advanceTimersByTime(5000);
     expect(posted).toHaveLength(3);
-
-    // The page passes its own origin, so the message is addressed to the embedding page and nowhere else.
-    posted.length = 0;
-    const stopScoped = startStatsPoster(mirror, { postMessage: (message, origin) => posted.push({ message, origin }) }, clock.now, "https://example.test");
-    vi.advanceTimersByTime(500);
-    expect(posted.map((p) => p.origin)).toEqual(["https://example.test"]);
-    stopScoped();
   });
 
-  test("the messages carry the measured numbers", () => {
+  test("the messages are addressed to the channel's origin and nowhere else", () => {
     vi.useFakeTimers();
-    const clock = fakeClock();
+    const mirror = new Mirror({ schedule: () => {} });
+    const origins: string[] = [];
+    const stop = startStatsPoster(mirror, new StatsChannel({ postMessage: (_m, origin) => origins.push(origin) }, "https://example.test"), fakeClock().now);
+    vi.advanceTimersByTime(500);
+    expect(origins).toEqual(["https://example.test"]);
+    stop();
+  });
+
+  test("the messages carry the drains the runtime reported: rate and per-drain percentiles", () => {
+    vi.useFakeTimers();
+    // The mirror times a drain with the global performance.now(); each apply takes 0.2 ms of it.
+    const mirrorClock = fakeClock(50);
+    vi.spyOn(performance, "now").mockImplementation(mirrorClock.now);
     const scheduled: Array<() => void> = [];
     const mirror = new Mirror({ schedule: (fn) => scheduled.push(fn) });
-    mirror.register(9n, () => {
-      clock.advance(0.2);
+    mirror.register(STORE, () => {
+      mirrorClock.advance(0.2);
     });
     const posted: unknown[] = [];
-    const stop = startStatsPoster(mirror, { postMessage: (message) => posted.push(message) }, clock.now);
+    const stop = startStatsPoster(mirror, new StatsChannel({ postMessage: (message) => posted.push(message) }), mirrorClock.now);
 
-    // Five change-sets in the 500 ms before the first message, 200 us each.
+    // Five change-sets, one drain each, 100 ms apart, 0.2 ms per drain.
     for (let i = 0; i < 5; i++) {
-      clock.advance(100);
-      mirror.enqueue(encodeChangeSet({ txnId: BigInt(i), entries: [{ handle: 9n, signalId: 0, op: ChangeOp.FullValue, value: new Uint8Array([0]) }] }));
+      mirrorClock.advance(100);
+      mirror.enqueue(entry(i));
       (scheduled.shift() as () => void)();
     }
     vi.advanceTimersByTime(500);
     expect(posted).toHaveLength(1);
-    const message = posted[0] as { type: string; changeSetsPerSec: number; applyP50Us: number; applyP99Us: number; timerResolutionUs: number };
+    const message = posted[0] as StatsMessage;
     expect(message.type).toBe("undra-stats");
     expect(message.applyP50Us).toBeCloseTo(200, 6);
     expect(message.applyP99Us).toBeCloseTo(200, 6);
-    // The fake clock advanced 5 * (100 + 0.2) ms = 501 ms; 5 change-sets in that span is about 10 per second.
+    // The clock advanced 5 * 100.2 ms = 501 ms; 5 change-sets in that span is about 10 a second.
     expect(message.changeSetsPerSec).toBeGreaterThan(9.9);
     expect(message.changeSetsPerSec).toBeLessThan(10.1);
     stop();
+  });
+
+  test("under a burst the percentile is per drain, not per change-set", () => {
+    vi.useFakeTimers();
+    const mirrorClock = fakeClock(0);
+    vi.spyOn(performance, "now").mockImplementation(mirrorClock.now);
+    const scheduled: Array<() => void> = [];
+    const mirror = new Mirror({ schedule: (fn) => scheduled.push(fn) });
+    mirror.register(STORE, () => {
+      mirrorClock.advance(0.4);
+    });
+    const posted: unknown[] = [];
+    const stop = startStatsPoster(mirror, new StatsChannel({ postMessage: (message) => posted.push(message) }), mirrorClock.now);
+    mirrorClock.advance(10);
+    for (let i = 0; i < 1000; i++) mirror.enqueue(entry(i));
+    (scheduled.shift() as () => void)();
+    vi.advanceTimersByTime(500);
+    const message = posted[0] as StatsMessage;
+    // One drain held the thread for 0.4 ms, however many change-sets it merged.
+    expect(message.applyP99Us).toBeCloseTo(400, 6);
+    stop();
+  });
+
+  test("stays quiet while a screen has claimed the channel, and resumes when it lets go", () => {
+    vi.useFakeTimers();
+    const mirror = new Mirror({ schedule: () => {} });
+    const posted: unknown[] = [];
+    const channel = new StatsChannel({ postMessage: (message) => posted.push(message) });
+    const stop = startStatsPoster(mirror, channel, fakeClock().now);
+    const release = channel.claim();
+    vi.advanceTimersByTime(2000);
+    expect(posted).toEqual([]);
+    release();
+    vi.advanceTimersByTime(500);
+    expect(posted).toHaveLength(1);
+    stop();
+  });
+
+  test("stopping removes the drain listener", () => {
+    vi.useFakeTimers();
+    const mirror = new Mirror({ schedule: () => {} });
+    let listeners = 0;
+    const add = mirror.addDrainListener.bind(mirror);
+    mirror.addDrainListener = (listener) => {
+      listeners++;
+      const remove = add(listener);
+      return () => {
+        listeners--;
+        remove();
+      };
+    };
+    const stop = startStatsPoster(mirror, new StatsChannel({ postMessage: () => {} }), fakeClock().now);
+    expect(listeners).toBe(1);
+    stop();
+    expect(listeners).toBe(0);
   });
 });

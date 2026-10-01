@@ -81,7 +81,7 @@ Every suite is local; nothing needs the network after install.
 | Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` | 328 pass |
 | wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 29 pass |
 | C host harness | `bash crates/undra-ffi/tests/c/run.sh` (add `UNDRA_C_SANITIZE=1` for ASan) | ok |
-| Contract scenarios ×3 platforms | `bash contract-tests/run-all.sh` | 51/51 pass |
+| Contract scenarios ×3 platforms | `bash contract-tests/run-all.sh` | 54/54 pass |
 | Distribution: npm packages (build, pack, `npm install -g`, run) | `bash packaging/npm/test.sh` | all checks pass |
 | Distribution: the curl installer against a served release (checksums, tampering, platforms) | `bash packaging/test-install.sh` | all checks pass |
 | Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` | pass |

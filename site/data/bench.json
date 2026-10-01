@@ -1,8 +1,8 @@
 {
   "machine": "Apple M5 Pro, 18 cores, macOS 26.5",
-  "method": "Medians from cargo bench (criterion, release, LTO). Budgets are the design's per-device targets; CI gates are regression guards about 5x the host median. Harsh-conditions cards: 10-second sustained runs on the host, core side, on a shared machine, measured before frame-coalesced delivery (ADR-031); their gates are floors at one fifth of the measured rate.",
+  "method": "Medians from cargo bench (criterion, release, LTO). Budgets are the design's per-device targets; CI gates are regression guards about 5x the host median. Harsh-conditions cards: 10-second sustained runs on the host, core side, on a shared machine; their gates are floors at one fifth of the measured rate. Frame-coalesced delivery (ADR-031) leaves these core-side numbers as they are: what it changes is the platform-side apply, and the live demo above shows that, measured in your browser (Push it).",
   "source": "https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md",
-  "stressScreen": false,
+  "stressScreen": true,
   "rows": [
     {
       "id": "call-sync",

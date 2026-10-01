@@ -8,7 +8,7 @@ core will.
 ```
 examples/playground/
   undra.toml        the Undra project: core path, names of the generated bindings, platforms
-  core/            the Rust core (crate playground-core): todos, counter, 10k list, remote query, lab, bench
+  core/            the Rust core (crate playground-core): todos, counter, 10k list, remote query, lab, bench, stress
   generated/       Swift package, Kotlin module and npm package: written by `undra bindgen`, committed
   web/             React + Vite app         -> build/web/undra_core.wasm
   ios/             SwiftUI app (Xcode)      -> build/ios/UndraCore.xcframework
@@ -27,6 +27,7 @@ examples/playground/
 | `remote` | a query (`remote_todos`), mutations and optimistic commands over the `Http` port: cached per list, fresh for 30 s, persisted, retried, queued while offline and replayed | Remote tab |
 | `lab` | every wire type, sync and async calls, typed errors, panics, cancellation, streams with backpressure | the contract tests |
 | `bench` | the hooks of the budget rows (next section) | `bench/` |
+| `stress` | high-frequency data: a generator the core runs on its own, paced by the `Timer` port and corrected by the `Clock` port, one transaction per update; a `no_coalesce` signal next to a merged one | Stress tab (web), contract scenario S18 |
 
 The core reads no clock and no random source and starts no thread (R12): identities come from
 counters, time from the `Clock` port, delays from `Ctx::sleep`, the network from the `Http` port. That is
@@ -65,6 +66,24 @@ hold an optimistic add and replay it.
 `?undra=ws://127.0.0.1:7443`; iOS: the `UNDRA_DEV_URL` environment variable) and edit `core/` to see the
 change without rebuilding the app.
 
+## The stress screen
+
+The **Stress** tab (web, `?screen=stress`) pushes the runtime and shows what it did, measured in your browser.
+`Stress.start(mode, per_second)` (`core/src/stress.rs`) makes the core generate updates by itself: a task sleeps
+10 ms on the `Timer` port and commits `rate x elapsed` updates per tick (the elapsed time from the `Clock` port,
+the remainder carried), each its own transaction, so the platform receives one change-set per update. `value`
+(firehose) is merged by the mirror once per frame; `progress` (progress) is `#[undra(no_coalesce)]` and applied
+every time. `generated` and `running` are signals the UI reads; `stop()` ends the generator; `burst(mode, n)` commits
+`n` updates at once (contract scenario S18).
+
+The web screen (`web/src/views/StressView.tsx`, math in `web/src/stress-stats.ts`) offers firehose or progress at
+1k, 10k, 50k or 100k updates a second and reports generated, received and applied updates a second (and the merge
+ratio), drains a second with p50 and p99 duration, nanoseconds per change-set, dropped frames and the JS heap
+(Chrome only). `?screen=stress&rate=100000&mode=firehose&autostart=1` starts it on load (`rate` takes `1..=1000000`
+or a count of thousands such as `100k`; a rate the chips do not offer gets a chip of its own); embedded (`embed=1`) it
+posts the same numbers to the landing page as the `undra-stats` message. `docs/HIGH_FREQUENCY.md` explains the
+numbers; the iOS and Android screens are the device phase.
+
 ## Benchmark hooks
 
 The blueprint's section 14 budget rows are measured against one store, `Bench`
@@ -81,5 +100,5 @@ The blueprint's section 14 budget rows are measured against one store, `Bench`
 
 ## Contract tests
 
-`contract-tests/` runs the seventeen scenarios of SPEC section 14 against this core from the TypeScript
+`contract-tests/` runs the eighteen scenarios of SPEC section 14 against this core from the TypeScript
 (wasm), Kotlin (JNI) and Swift (C ABI) runtimes; see `contract-tests/scenarios.md`.

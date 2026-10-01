@@ -1,26 +1,38 @@
 import { describe, expect, test } from "vitest";
-import { parseParams, parseThemeMessage, resolveTab, tabFromHash } from "./url-params";
+import { STRESS_MAX_RATE, parseParams, parseThemeMessage, resolveTab, tabFromHash } from "./url-params";
+
+/** What a query that asks for nothing parses to. */
+const NOTHING = { screen: undefined, stream: false, embed: false, theme: undefined, rate: undefined, mode: undefined, autostart: false };
 
 describe("parseParams", () => {
   test("an empty query asks for nothing", () => {
-    expect(parseParams("")).toEqual({ screen: undefined, stream: false, embed: false, theme: undefined });
-    expect(parseParams("?")).toEqual({ screen: undefined, stream: false, embed: false, theme: undefined });
+    expect(parseParams("")).toEqual(NOTHING);
+    expect(parseParams("?")).toEqual(NOTHING);
   });
 
-  test("the landing page's embed URL", () => {
-    expect(parseParams("?screen=list&stream=1&embed=1")).toEqual({ screen: "biglist", stream: true, embed: true, theme: undefined });
+  test("the landing page's embed URLs", () => {
+    expect(parseParams("?screen=list&stream=1&embed=1")).toEqual({ ...NOTHING, screen: "biglist", stream: true, embed: true });
+    expect(parseParams("?screen=stress&embed=1&rate=10000&mode=firehose&autostart=1")).toEqual({
+      ...NOTHING,
+      screen: "stress",
+      embed: true,
+      rate: 10_000,
+      mode: "firehose",
+      autostart: true,
+    });
   });
 
-  test("screen names the four views; list is the 10k list (tab id biglist)", () => {
+  test("screen names the five views; list is the 10k list (tab id biglist)", () => {
     expect(parseParams("?screen=todos").screen).toBe("todos");
     expect(parseParams("?screen=counter").screen).toBe("counter");
     expect(parseParams("?screen=list").screen).toBe("biglist");
     expect(parseParams("?screen=remote").screen).toBe("remote");
+    expect(parseParams("?screen=stress").screen).toBe("stress");
   });
 
   test("the tab id biglist is not a screen name; unknown screens are ignored", () => {
     expect(parseParams("?screen=biglist").screen).toBeUndefined();
-    expect(parseParams("?screen=stress").screen).toBeUndefined();
+    expect(parseParams("?screen=stres").screen).toBeUndefined();
     expect(parseParams("?screen=").screen).toBeUndefined();
     expect(parseParams("?screen").screen).toBeUndefined();
     expect(parseParams("?screen=%20").screen).toBeUndefined();
@@ -34,12 +46,32 @@ describe("parseParams", () => {
 
   test("flags are on for 1 or true, off for anything else", () => {
     for (const on of ["1", "true", "TRUE"]) {
-      expect(parseParams(`?stream=${on}&embed=${on}`)).toMatchObject({ stream: true, embed: true });
+      expect(parseParams(`?stream=${on}&embed=${on}&autostart=${on}`)).toMatchObject({ stream: true, embed: true, autostart: true });
     }
     for (const off of ["0", "false", "", "yes", "2", "on"]) {
-      expect(parseParams(`?stream=${off}&embed=${off}`)).toMatchObject({ stream: false, embed: false });
+      expect(parseParams(`?stream=${off}&embed=${off}&autostart=${off}`)).toMatchObject({ stream: false, embed: false, autostart: false });
     }
-    expect(parseParams("?stream&embed")).toMatchObject({ stream: false, embed: false });
+    expect(parseParams("?stream&embed&autostart")).toMatchObject({ stream: false, embed: false, autostart: false });
+  });
+
+  test("rate is whole updates a second, or a count of thousands, inside the core's range", () => {
+    expect(parseParams("?rate=1").rate).toBe(1);
+    expect(parseParams("?rate=1000").rate).toBe(1000);
+    expect(parseParams("?rate=50000").rate).toBe(50_000);
+    expect(parseParams("?rate=100k").rate).toBe(100_000);
+    expect(parseParams("?rate=%2010K%20").rate).toBe(10_000);
+    expect(parseParams(`?rate=${STRESS_MAX_RATE}`).rate).toBe(STRESS_MAX_RATE);
+    expect(parseParams("?rate=1000k").rate).toBe(STRESS_MAX_RATE);
+    for (const bad of ["0", "-5", "1.5", "1e3", "1000001", "1001k", "k", "", "fast", "0x10", "99999999999", "NaN", "Infinity"]) {
+      expect(parseParams(`?rate=${bad}`).rate, `rate=${bad}`).toBeUndefined();
+    }
+    expect(parseParams("?rate").rate).toBeUndefined();
+  });
+
+  test("mode is firehose or progress; anything else is the screen's default", () => {
+    expect(parseParams("?mode=firehose").mode).toBe("firehose");
+    expect(parseParams("?mode=%20PROGRESS%20").mode).toBe("progress");
+    for (const bad of ["churn", "board", "", "toString", "__proto__", "0"]) expect(parseParams(`?mode=${bad}`).mode, `mode=${bad}`).toBeUndefined();
   });
 
   test("theme is light or dark; anything else follows the system", () => {
@@ -60,8 +92,8 @@ describe("parseParams", () => {
   });
 
   test("a value that is not a string counts as an empty query", () => {
-    expect(parseParams(undefined as unknown as string)).toEqual({ screen: undefined, stream: false, embed: false, theme: undefined });
-    expect(parseParams(null as unknown as string)).toEqual({ screen: undefined, stream: false, embed: false, theme: undefined });
+    expect(parseParams(undefined as unknown as string)).toEqual(NOTHING);
+    expect(parseParams(null as unknown as string)).toEqual(NOTHING);
   });
 });
 
@@ -70,6 +102,7 @@ describe("tabFromHash", () => {
     expect(tabFromHash("#counter")).toBe("counter");
     expect(tabFromHash("#biglist")).toBe("biglist");
     expect(tabFromHash("remote")).toBe("remote");
+    expect(tabFromHash("#stress")).toBe("stress");
   });
 
   test("anything else is no tab", () => {
@@ -93,10 +126,17 @@ describe("resolveTab", () => {
     expect(resolveTab(parseParams("?screen=list"), "")).toBe("biglist");
   });
 
-  test("an unknown screen falls back like an absent one; `stress` does not exist yet", () => {
-    expect(resolveTab(parseParams("?screen=stress"), "")).toBe("todos");
-    expect(resolveTab(parseParams("?screen=stress"), "#counter")).toBe("counter");
-    expect(resolveTab(parseParams("?screen=stress&embed=1"), "")).toBe("biglist");
+  test("the stress screen is reachable by screen= and by the hash", () => {
+    expect(resolveTab(parseParams("?screen=stress"), "")).toBe("stress");
+    expect(resolveTab(parseParams("?screen=stress"), "#counter")).toBe("stress");
+    expect(resolveTab(parseParams("?screen=stress&embed=1"), "")).toBe("stress");
+    expect(resolveTab(none, "#stress")).toBe("stress");
+  });
+
+  test("an unknown screen falls back like an absent one", () => {
+    expect(resolveTab(parseParams("?screen=nope"), "")).toBe("todos");
+    expect(resolveTab(parseParams("?screen=nope"), "#counter")).toBe("counter");
+    expect(resolveTab(parseParams("?screen=nope&embed=1"), "")).toBe("biglist");
   });
 
   test("embedded, the default is the list", () => {

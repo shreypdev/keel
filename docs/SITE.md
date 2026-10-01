@@ -83,9 +83,12 @@ All live in `site/scripts/` and run from the repository root.
   `{ id, operation, value, unit, budget, budgetUnit, gate, source }` with units `ns`, `µs`, `ms`, `KB`, `MB`;
   keep `operation` to one short line, it is the card's label. The `harsh` array takes rows of the same shape (the
   stress suite fills it); when it is non-empty the section grows a "Harsh conditions" group of cards in the same
-  style. A new card adds no prose, so the word budget is not affected. Set `"stressScreen": true` when the
-  playground's `screen=stress` exists (and add `stress` to the screens in
-  `examples/playground/web/src/url-params.ts`) to show the "Push it" button.
+  style. A new card adds no prose, so the word budget is not affected. `"stressScreen": true` shows the "Push it"
+  button of the live demo, which loads the playground's stress screen
+  (`playground/?screen=stress&embed=1&rate=10000&mode=firehose&autostart=1`) into the iframe and reveals the extra
+  counters (generated per second, the share of received entries the mirror applied, dropped frames) from the
+  optional fields of the `undra-stats` message (`examples/playground/web/src/embed-stats.ts`). Keep the button
+  hidden (`false`) on a build whose playground has no `screen=stress`.
 * **Roadmap:** edit `data/roadmap.json` (the source of truth for the wording is `.10x/handoff.md`; keep them in
   step), then `build-all`.
 * **A docs page:** edit the HTML. Give it a unique `<title>` (at most 60 characters), a description (at most 155),
@@ -160,7 +163,7 @@ accessibility, best practices and SEO); run Lighthouse against the deployed URL 
 
 ## Known limits
 
-* The live demo's apply time comes from `performance.now()`, which browsers round (about 0.1 ms in Chrome when
+* The live demo's apply time (the duration of one mirror drain, which merges every change-set that arrived since the previous one) comes from `performance.now()`, which browsers round (about 0.1 ms in Chrome when
   the page is not cross-origin isolated, about 1 ms in Firefox and Safari). GitHub Pages cannot send the headers
   that lift this, so the landing page shows "under" the clock step for the smallest values and says so. The
   playground measures the step it sees and reports it with the stats; `home.js` never trusts a step below 100 µs
