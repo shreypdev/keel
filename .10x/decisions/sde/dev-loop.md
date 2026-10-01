@@ -102,6 +102,23 @@ Layering: the transport owns the socket and the timer; the core owns what is rep
 * The generated Android template builds (`undra init` + Gradle `assembleDebug`); the merged release manifest has no
   `INTERNET` or cleartext entry.
 
+## Merge with main (2026-10-01)
+
+`main` gained `device-bench`, `schema-json` and `diagnostics` after this branch was cut. The Android `UndraApp` (template and
+playground) and the iOS `PlaygroundApp` conflicted with device-bench; both behaviours are kept, with this branch's structure as
+the skeleton:
+
+* Android: `start(requested)` / `load()` / `retry()` with `Mode.INPROC | REMOTE` and `connection` / `epoch` / `failure`, and
+  `MirrorOptions(framePacer = ChoreographerFramePacer())` inside the `LoadOptions` of `load()`, so both modes drain per display
+  frame. The playground also times the first successful `UndraCore.load` (`coreLoadNanos`, set once, around the call inside `load()`).
+* iOS playground: the `BenchLaunch.mode` branch comes first (a benchmark run gets neither the dev status bar nor the reload
+  wrapper); otherwise `RootView(model:).id(epoch).safeAreaInset(DevStatusBar)` with `reload()` as before.
+* The core now loads when the activity starts (`UndraApp.start`), not in `Application.onCreate`, so `BenchInstrumentedTest`
+  (which launches no activity) calls `app.start(null)` on the main thread before it runs. Without it `UndraCore.shared` is unloaded.
+  `.10x/decisions/sde/device-bench.md` still says `UndraApp.onCreate` times the load; it is `load()` now.
+* The in-process failure messages no longer say "the dev server" (a stale `jniLibs` core gave "The dev server runs a core built
+  from another schema" with no dev server involved).
+
 ## Files
 
 New: `.10x/adrs/ADR-051-*`, `docs/DEV_LOOP.md`, `crates/undra-transport/src/resume.rs`, `crates/undra-transport/tests/resume.rs`,

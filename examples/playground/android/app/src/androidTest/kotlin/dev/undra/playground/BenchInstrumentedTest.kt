@@ -29,6 +29,12 @@ class BenchInstrumentedTest {
         assumeTrue("pass -e undra_bench 1 to run the device benchmark", arguments.getString("undra_bench") == "1")
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val config = if (arguments.getString("undra_bench_quick") == "1") BenchConfig.QUICK else BenchConfig.FULL
+        // The app loads its core when its activity starts (`UndraApp.start`, which `undra dev` needs to choose the core
+        // by the launch intent); this test launches no activity, so it starts the in-process core the way the activity does.
+        // `coreLoadNanos` is the time of that load, the first of this process.
+        val app = instrumentation.targetContext.applicationContext as UndraApp
+        instrumentation.runOnMainSync { app.start(null) }
+        check(app.failure.value == null) { "the in-process core did not load: ${app.failure.value}" }
         val runner = BenchRunner(instrumentation.targetContext, config) { block -> instrumentation.runOnMainSync(block) }
         val json = when (val mode = arguments.getString("undra_bench_mode") ?: "full") {
             "full" -> runner.runFull()

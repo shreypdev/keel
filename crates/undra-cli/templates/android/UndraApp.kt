@@ -93,10 +93,11 @@ class UndraApp : Application() {
             _failure.value = null
             true
         } catch (e: UndraSchemaMismatchException) {
-            _failure.value = "The dev server runs a core built from another schema than this app's bindings. Run `undra bindgen`, then rebuild and reinstall the app."
+            val whose = if (url == null) "The core in this app is" else "The dev server's core is"
+            _failure.value = "$whose built from another schema than this app's bindings. Run `undra bindgen`, then rebuild and reinstall the app."
             false
         } catch (e: UndraException) {
-            _failure.value = "Cannot reach the dev server at $url: ${e.message}"
+            _failure.value = if (url == null) "The core did not load: ${e.message}" else "Cannot reach the dev server at $url: ${e.message}"
             false
         }
     }
