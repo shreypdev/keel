@@ -160,8 +160,11 @@ before the rename crosses it mechanically, in the same order the rename branch d
 5. **What a text rename cannot see** fails a test, and the fix is to recompute the
    expectation, not to loosen it: fixed-width text (a padded table), hashes of names
    (`fnv1a64` known-answer vectors, file names derived from a key), and sort order. The four
-   envelope magic bytes `4B 45 45 4C` are wire format and deliberately did not change; a
-   test that needs a wrong magic spells it as bytes.
+   envelope magic bytes are wire format and did not change in the rename; ADR-033 changed them
+   afterwards to `55 4E 44 52` (`UNDR`). A branch that holds an envelope frame of its own
+   (a test fixture, a vector) from before ADR-033 takes the new magic: every decoder rejects
+   the old one with the typed bad-magic error. A test that needs a wrong magic spells it as
+   bytes.
 6. **Re-run your suites.**
 
 ## For AI agents specifically

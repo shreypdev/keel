@@ -65,12 +65,12 @@ public sealed class WireException(message: String) : RuntimeException(message) {
         WireException("$count trailing byte(s) after a complete message")
 
     /**
-     * The envelope does not start with the magic bytes `4B 45 45 4C`.
+     * The envelope does not start with the magic bytes `55 4E 44 52`.
      *
      * @property found the four bytes found instead, as lowercase hex.
      */
     public class BadMagic(public val found: String) :
-        WireException("bad envelope magic: expected 4b45454c, found $found")
+        WireException("bad envelope magic: expected 554e4452, found $found")
 
     /**
      * The envelope declares a wire version this runtime does not speak.

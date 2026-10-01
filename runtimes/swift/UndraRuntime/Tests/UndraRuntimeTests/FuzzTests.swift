@@ -158,7 +158,7 @@ final class FuzzTests: XCTestCase {
     }
 
     func testRandomBytesOnlyEverThrowWireError() {
-        var rng = SplitMix64(seed: 0x4B45_454C)
+        var rng = SplitMix64(seed: 0x554E_4452)
         let decoders = allDecoders()
         for _ in 0 ..< 2_000 {
             runAll(randomBytes(&rng, maxLength: 96), decoders)

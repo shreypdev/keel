@@ -40,7 +40,7 @@ impl SeededRng {
     pub const MAX_FILL: u32 = 1 << 24;
 
     /// The seed of [`SeededRng::default`].
-    pub const DEFAULT_SEED: u64 = 0x4B45_454C_5F52_4E47; // "UNDRA_RNG"
+    pub const DEFAULT_SEED: u64 = 0x4B45_454C_5F52_4E47; // arbitrary and fixed (the old working name + "_RNG" as ASCII)
 
     /// A generator started from `seed`.
     pub fn new(seed: u64) -> SeededRng {
