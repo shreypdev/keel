@@ -209,8 +209,17 @@ impl Shared {
         };
         let ctx = &ctx;
         let kv = ctx.kv();
-        let Some(Bytes(raw)) = kv.get(QUEUE_KEY.to_owned()).await else {
-            return;
+        let raw = match kv.get(QUEUE_KEY.to_owned()).await {
+            Ok(Some(Bytes(raw))) => raw,
+            Ok(None) => return,
+            Err(error) => {
+                Shared::log(
+                    ctx,
+                    WARN,
+                    &format!("the offline queue could not be read: {error}"),
+                );
+                return;
+            }
         };
         let schema_hash = ctx.runtime().schema_hash();
         match decode_queue(&raw) {
@@ -247,7 +256,7 @@ impl Shared {
                     WARN,
                     "dropping a persisted offline queue from another build",
                 );
-                kv.delete(QUEUE_KEY.to_owned()).await;
+                let _ = kv.delete(QUEUE_KEY.to_owned()).await;
             }
         }
     }
@@ -311,9 +320,16 @@ async fn run_queue_writer(shared: Arc<Shared>, weak: WeakCtx) {
                 Some(encode_queue(schema_hash, &items))
             }
         };
-        match bytes {
+        let written = match bytes {
             Some(bytes) => ctx.kv().set(QUEUE_KEY.to_owned(), Bytes(bytes)).await,
             None => ctx.kv().delete(QUEUE_KEY.to_owned()).await,
+        };
+        if let Err(error) = written {
+            Shared::log(
+                &ctx,
+                WARN,
+                &format!("the offline queue could not be written: {error}"),
+            );
         }
     }
 }

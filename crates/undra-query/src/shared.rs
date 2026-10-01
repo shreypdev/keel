@@ -845,7 +845,7 @@ impl Shared {
             };
             let kv = ctx.kv();
             let schema_hash = ctx.runtime().schema_hash();
-            let Some(Bytes(raw)) = kv.get(key.clone()).await else {
+            let Ok(Some(Bytes(raw))) = kv.get(key.clone()).await else {
                 continue;
             };
             match decode_persisted(&raw) {
@@ -858,7 +858,7 @@ impl Shared {
                         DEBUG,
                         &format!("dropping the stale cache entry `{key}`"),
                     );
-                    kv.delete(key).await;
+                    let _ = kv.delete(key).await;
                 }
             }
         }
@@ -1190,7 +1190,8 @@ async fn run_persist(shared: Arc<Shared>, weak: WeakCtx, key: QueryKey) {
                 return;
             };
             let value = encode_persisted(ctx.runtime().schema_hash(), updated_at, &bytes);
-            ctx.kv()
+            let _ = ctx
+                .kv()
                 .set(cache_key(key.query_id, &key.params), Bytes(value))
                 .await;
         }
