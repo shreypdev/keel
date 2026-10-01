@@ -1,0 +1,8 @@
+error: error[undra::E0020]: `&mut self` receiver on method `increment`
+         = note: objects are shared as `Arc<Type>` across calls and threads, so methods only ever get `&self`
+         = help: take `&self` and mutate through signals (`Signal<T>`), a `Mutex` or another form of interior mutability
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0020
+  --> tests/ui/e0020_mut_self.rs:15:22
+   |
+15 |     pub fn increment(&mut self) {
+   |                      ^^^^^^^^^

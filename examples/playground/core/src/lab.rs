@@ -17,11 +17,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::task::{Context, Poll};
 
-use keel::prelude::*;
-use keel::runtime::Stream;
+use undra::prelude::*;
+use undra::runtime::Stream;
 
 /// One value of every primitive the wire has, so a single call covers them all.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Primitives {
     /// A boolean.
@@ -59,7 +59,7 @@ pub struct Primitives {
 }
 
 /// A shape: an enum with named fields, a tuple variant and a unit variant.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Figure {
     /// A circle.
@@ -82,7 +82,7 @@ pub enum Figure {
 
 /// A record that nests the other kinds: lists, options, maps, enums with data and a map with
 /// integer keys.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Composite {
     /// A name.
@@ -102,7 +102,7 @@ pub struct Composite {
 }
 
 /// Why a lab call failed.
-#[keel::error]
+#[undra::error]
 #[derive(Clone, Debug, PartialEq)]
 pub enum LabError {
     /// Nothing was given.
@@ -128,47 +128,47 @@ pub enum LabError {
 }
 
 /// The name and version of the core.
-#[keel::api]
+#[undra::api]
 pub fn version() -> String {
-    "keel playground 1".to_owned()
+    "undra playground 1".to_owned()
 }
 
 /// Returns `value` unchanged.
-#[keel::api]
+#[undra::api]
 pub fn echo_primitives(value: Primitives) -> Primitives {
     value
 }
 
 /// Returns `value` unchanged.
-#[keel::api]
+#[undra::api]
 pub fn echo_composite(value: Composite) -> Composite {
     value
 }
 
 /// Returns `value` unchanged.
-#[keel::api]
+#[undra::api]
 pub fn echo_figure(value: Figure) -> Figure {
     value
 }
 
 /// Does nothing and returns nothing: a call with neither arguments nor a result.
-#[keel::api]
+#[undra::api]
 pub fn ping() {}
 
 /// Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments.
-#[keel::api]
+#[undra::api]
 pub fn add(a: i32, b: i32) -> i32 {
     a.wrapping_add(b)
 }
 
 /// A greeting.
-#[keel::api]
+#[undra::api]
 pub fn greet(name: String) -> String {
     format!("Hello, {name}, from the playground core")
 }
 
 /// The area of a circle or a rectangle. A label and an empty figure have none.
-#[keel::api]
+#[undra::api]
 pub fn area(figure: Figure) -> Result<f64, LabError> {
     match figure {
         Figure::Circle { radius } => Ok(std::f64::consts::PI * radius * radius),
@@ -182,7 +182,7 @@ pub fn area(figure: Figure) -> Result<f64, LabError> {
 }
 
 /// Reads an unsigned number of at most nine digits.
-#[keel::api]
+#[undra::api]
 pub fn parse_count(text: String) -> Result<u32, LabError> {
     let text = text.trim();
     if text.is_empty() {
@@ -197,7 +197,7 @@ pub fn parse_count(text: String) -> Result<u32, LabError> {
 
 /// Adds two numbers after `delay_ms` milliseconds: an asynchronous call that waits on the `Timer`
 /// port.
-#[keel::api]
+#[undra::api]
 pub async fn add_later(ctx: &Ctx, a: i32, b: i32, delay_ms: u32) -> i32 {
     ctx.sleep(Duration::from_millis(u64::from(delay_ms))).await;
     a.wrapping_add(b)
@@ -205,7 +205,7 @@ pub async fn add_later(ctx: &Ctx, a: i32, b: i32, delay_ms: u32) -> i32 {
 
 /// Fails with `LabError::Rejected { code, .. }` after `delay_ms` milliseconds: an asynchronous
 /// call with a typed error.
-#[keel::api]
+#[undra::api]
 pub async fn fail_later(ctx: &Ctx, delay_ms: u32, code: i32) -> Result<u32, LabError> {
     ctx.sleep(Duration::from_millis(u64::from(delay_ms))).await;
     Err(LabError::Rejected {
@@ -216,20 +216,20 @@ pub async fn fail_later(ctx: &Ctx, delay_ms: u32, code: i32) -> Result<u32, LabE
 
 /// Panics with `reason`. The boundary turns the panic into a reply (status 2), never into a
 /// crash, on the platforms that can unwind (R6).
-#[keel::api]
+#[undra::api]
 pub fn explode(reason: String) -> u32 {
     panic!("{reason}")
 }
 
 /// Panics with `reason` after `delay_ms` milliseconds, inside an asynchronous call.
-#[keel::api]
+#[undra::api]
 pub async fn explode_later(ctx: &Ctx, delay_ms: u32, reason: String) -> u32 {
     ctx.sleep(Duration::from_millis(u64::from(delay_ms))).await;
     panic!("{reason}")
 }
 
 /// What a [`Probe`] has seen.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ProbeCounters {
     /// Calls that started running in the core.
@@ -289,7 +289,7 @@ pub struct Probe {
     shared: Arc<Shared>,
 }
 
-#[keel::api]
+#[undra::api]
 impl Probe {
     /// A probe with every counter at zero.
     pub fn new(ctx: Ctx) -> Self {
@@ -373,10 +373,10 @@ impl Stream for Ticks {
 
 #[cfg(test)]
 mod tests {
-    use keel::meta::ids;
-    use keel::runtime::testing::TestRuntime;
-    use keel::wire::payload::{CallTarget, ReplyStatus, StreamFlag};
-    use keel::wire::{Decode, Encode};
+    use undra::meta::ids;
+    use undra::runtime::testing::TestRuntime;
+    use undra::wire::payload::{CallTarget, ReplyStatus, StreamFlag};
+    use undra::wire::{Decode, Encode};
 
     use super::*;
 

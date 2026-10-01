@@ -1,0 +1,486 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-objects",
+  "records": [
+    {
+      "name": "Todo",
+      "type_id": 2995082141,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "uuid"
+          },
+          "default": false
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ]
+    },
+    {
+      "name": "Stats",
+      "type_id": 267161228,
+      "fields": [
+        {
+          "name": "count",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        },
+        {
+          "name": "total",
+          "ty": {
+            "kind": "i64"
+          },
+          "default": false
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "CalcError",
+      "type_id": 3090612898,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Overflow",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "overflow"
+        },
+        {
+          "name": "DivideByZero",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": "divide by zero"
+        }
+      ]
+    },
+    {
+      "name": "Mode",
+      "type_id": 1397651250,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Fast",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Exact",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "name": "Calculator",
+      "type_id": 1461820269,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 853962117,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Calculator"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "with_precision",
+          "method_id": 1714788266,
+          "params": [
+            {
+              "name": "digits",
+              "ty": {
+                "kind": "u8"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "Calculator"
+              },
+              {
+                "kind": "named",
+                "of": "CalcError"
+              }
+            ]
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "open",
+          "method_id": 1114251173,
+          "params": [
+            {
+              "name": "path",
+              "ty": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "mode",
+              "ty": {
+                "kind": "named",
+                "of": "Mode"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "Calculator"
+              },
+              {
+                "kind": "named",
+                "of": "CalcError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "add",
+          "method_id": 2353348832,
+          "params": [
+            {
+              "name": "a",
+              "ty": {
+                "kind": "i32"
+              }
+            },
+            {
+              "name": "b",
+              "ty": {
+                "kind": "i32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "i32"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Adds two numbers."
+        },
+        {
+          "name": "reset",
+          "method_id": 592497652,
+          "params": [],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "divide",
+          "method_id": 3355938708,
+          "params": [
+            {
+              "name": "a",
+              "ty": {
+                "kind": "i64"
+              }
+            },
+            {
+              "name": "b",
+              "ty": {
+                "kind": "i64"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "i64"
+              },
+              {
+                "kind": "named",
+                "of": "CalcError"
+              }
+            ]
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Divides, failing on zero."
+        },
+        {
+          "name": "check",
+          "method_id": 352250027,
+          "params": [],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "CalcError"
+              }
+            ]
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "lookup",
+          "method_id": 3329429567,
+          "params": [
+            {
+              "name": "id",
+              "ty": {
+                "kind": "uuid"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "Todo"
+              },
+              {
+                "kind": "named",
+                "of": "CalcError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Fetches a todo."
+        },
+        {
+          "name": "compute",
+          "method_id": 1074070734,
+          "params": [
+            {
+              "name": "input",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "f64"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "f64"
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "An async method without an error type."
+        },
+        {
+          "name": "warm_up",
+          "method_id": 2344254684,
+          "params": [],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": true,
+          "takes_ctx": false
+        },
+        {
+          "name": "ticks",
+          "method_id": 260737561,
+          "params": [
+            {
+              "name": "n",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "stream",
+            "of": {
+              "kind": "u32"
+            }
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Counts up."
+        },
+        {
+          "name": "watch",
+          "method_id": 1927980436,
+          "params": [
+            {
+              "name": "mode",
+              "ty": {
+                "kind": "named",
+                "of": "Mode"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "stream",
+                "of": {
+                  "kind": "named",
+                  "of": "Todo"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "CalcError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Streams todos, failing to open with a typed error."
+        },
+        {
+          "name": "stats",
+          "method_id": 2323217368,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Stats"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "delete",
+          "method_id": 2463829054,
+          "params": [
+            {
+              "name": "w",
+              "ty": {
+                "kind": "i32"
+              }
+            },
+            {
+              "name": "body",
+              "ty": {
+                "kind": "i32"
+              }
+            },
+            {
+              "name": "core",
+              "ty": {
+                "kind": "i32"
+              }
+            },
+            {
+              "name": "default",
+              "ty": {
+                "kind": "i32"
+              }
+            },
+            {
+              "name": "signal",
+              "ty": {
+                "kind": "i32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "i32"
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "A method named like a keyword."
+        }
+      ],
+      "store": null,
+      "docs": "Adds numbers."
+    }
+  ],
+  "functions": [
+    {
+      "name": "greet",
+      "method_id": 93641134,
+      "params": [
+        {
+          "name": "name",
+          "ty": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "docs": "Says hello."
+    },
+    {
+      "name": "ping",
+      "method_id": 1625714901,
+      "params": [],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "unit"
+          },
+          {
+            "kind": "named",
+            "of": "CalcError"
+          }
+        ]
+      },
+      "is_async": true,
+      "takes_ctx": false
+    },
+    {
+      "name": "numbers",
+      "method_id": 1013922093,
+      "params": [
+        {
+          "name": "upto",
+          "ty": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "stream",
+        "of": {
+          "kind": "u32"
+        }
+      },
+      "is_async": true,
+      "takes_ctx": false
+    }
+  ],
+  "ports": [],
+  "queries": []
+}

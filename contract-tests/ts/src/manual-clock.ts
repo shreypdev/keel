@@ -1,4 +1,4 @@
-import type { ClockAdapter } from "@keel/runtime";
+import type { ClockAdapter } from "@undra/runtime";
 
 /** Where the manual clock starts (scenarios.md, the harness): 14 November 2023, in milliseconds since the epoch. */
 export const CLOCK_START_MS = 1_700_000_000_000;

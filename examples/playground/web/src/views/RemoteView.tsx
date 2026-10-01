@@ -1,7 +1,7 @@
-import { useSignal } from "@keel/runtime/react";
+import { useSignal } from "@undra/runtime/react";
 import { RemoteError, type RemoteTodo, createRemoteTodo, setRemoteDone } from "@playground/core";
 import { useState } from "react";
-import { type Playground, setOffline } from "../keel";
+import { type Playground, setOffline } from "../undra";
 import { INBOX } from "../playground-server";
 
 /** An item the server has not answered for yet has an identity counting down from `u32::MAX` (see `RemoteTodo.id`). */

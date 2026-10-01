@@ -1,0 +1,129 @@
+pub async fn add_todo(ctx: Ctx, title: String) -> Result<Todo, HttpError> {
+    todo!()
+}
+///The `add_todo` mutation: its identifiers and settings, and the function `undra-query` runs.
+pub struct AddTodoMutation;
+impl AddTodoMutation {
+    /// The stable id: `fnv1a32` of `query.<fn>` or `mutation.<fn>`.
+    pub const MUTATION_ID: u32 = ::undra::meta::ids::mutation_id("add_todo");
+    /// The cache key template.
+    pub const KEY: &'static str = "todos";
+    /// The staleness window in milliseconds, if any.
+    pub const STALE_MS: ::core::option::Option<u64> = ::core::option::Option::None;
+    /// Whether results are persisted.
+    pub const PERSIST: bool = false;
+    /// Retry attempts after a failure.
+    pub const RETRY: u32 = 2u32;
+    /// Whether the call is safe to replay.
+    pub const IDEMPOTENT: bool = true;
+}
+#[automatically_derived]
+impl ::undra::query::MutationDef for AddTodoMutation {
+    const ID: u32 = Self::MUTATION_ID;
+    const KEY: &'static str = Self::KEY;
+    const RETRY: u32 = Self::RETRY;
+    const IDEMPOTENT: bool = Self::IDEMPOTENT;
+    type Input = (String,);
+    type Output = Todo;
+    type Error = HttpError;
+    #[allow(unused_variables)]
+    fn execute(
+        __ctx: ::undra::runtime::Ctx,
+        __params: Self::Input,
+    ) -> ::core::pin::Pin<
+        ::std::boxed::Box<
+            dyn ::core::future::Future<
+                Output = ::core::result::Result<Todo, HttpError>,
+            > + ::core::marker::Send,
+        >,
+    > {
+        fn __undra_assert_send<T: ::core::marker::Send>(_: &T) {}
+        let (__undra_a0,) = __params;
+        let __fut = async move { add_todo(__ctx, __undra_a0).await };
+        __undra_assert_send(&__fut);
+        ::std::boxed::Box::pin(__fut)
+    }
+}
+#[allow(non_upper_case_globals)]
+static __UNDRA_META_AddTodoMutation: ::undra::meta::QueryMeta = ::undra::meta::QueryMeta {
+    name: "add_todo",
+    query_id: ::undra::meta::ids::mutation_id("add_todo"),
+    kind: ::undra::meta::QueryKind::Mutation,
+    key: "todos",
+    params: &[
+        ::undra::meta::ParamMeta {
+            name: "title",
+            ty: ::undra::meta::TypeRefMeta::String,
+        },
+    ],
+    returns: ::undra::meta::TypeRefMeta::Result(
+        &::undra::meta::TypeRefMeta::Named("Todo"),
+        &::undra::meta::TypeRefMeta::Named("HttpError"),
+    ),
+    stale_ms: ::core::option::Option::None,
+    persist: false,
+    idempotent: true,
+};
+::undra::meta::inventory::submit! {
+    ::undra::meta::Registration::Query(& __UNDRA_META_AddTodoMutation)
+}
+::undra::meta::inventory::submit! {
+    ::undra::query::MutationRegistration::of:: < AddTodoMutation > ()
+}
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code, unused, unused_braces, clippy::all)]
+const _: () = {
+    #[diagnostic::on_unimplemented(
+        message = "error[undra::E0060]: `{Self}` is spelled like the built-in Undra type `{T}`, but it is a different type\n  = note: the schema records this position as the built-in type, so the platforms would read the bytes of `{T}` where the generated code writes `{Self}`\n  = help: rename your type, or import the built-in one (`{T}`) where it is used\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0060",
+        label = "this is not `{T}`"
+    )]
+    trait __UndraSameAs<T: ?::core::marker::Sized> {}
+    impl<T: ?::core::marker::Sized> __UndraSameAs<T> for T {}
+    fn __undra_same<A, B>()
+    where
+        A: ?::core::marker::Sized + __UndraSameAs<B>,
+        B: ?::core::marker::Sized,
+    {}
+    fn __undra_identity() {
+        __undra_same::<String, ::std::string::String>();
+        __undra_same::<
+            Result<Todo, HttpError>,
+            ::core::result::Result<Todo, HttpError>,
+        >();
+    }
+    trait __UndraFallback {
+        const UNDRA_TYPE_ID: u32 = 0;
+        const UNDRA_IS_ERROR: bool = false;
+        const __UNDRA_IS_OBJECT: bool = false;
+    }
+    impl<T: ?::core::marker::Sized> __UndraFallback for T {}
+    const _: () = {
+        if <Todo>::__UNDRA_IS_OBJECT {
+            ::core::panic!(
+                "error[undra::E0064]: `Todo` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
+            );
+        }
+        if <Todo>::UNDRA_TYPE_ID != ::undra::meta::ids::type_id("Todo") {
+            ::core::panic!(
+                "error[undra::E0061]: the schema records this type as `Todo`, but the type written here is not that type\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type Todo = Other`), a renamed import (`use path::Other as Todo`) or a type that is not declared with `#[undra::api]` makes the two differ, so the platforms would read the wrong layout\n  = help: write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[undra::api]` (`#[undra::error]` for errors)\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+            );
+        }
+    };
+    const _: () = {
+        if <HttpError>::__UNDRA_IS_OBJECT {
+            ::core::panic!(
+                "error[undra::E0064]: `HttpError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
+            );
+        }
+        if <HttpError>::UNDRA_TYPE_ID != ::undra::meta::ids::type_id("HttpError") {
+            ::core::panic!(
+                "error[undra::E0061]: the schema records this type as `HttpError`, but the type written here is not that type\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type HttpError = Other`), a renamed import (`use path::Other as HttpError`) or a type that is not declared with `#[undra::api]` makes the two differ, so the platforms would read the wrong layout\n  = help: write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[undra::api]` (`#[undra::error]` for errors)\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+            );
+        }
+        if !<HttpError>::UNDRA_IS_ERROR {
+            ::core::panic!(
+                "error[undra::E0001]: `HttpError` is used as the error type of a `Result`, but it is not a `#[undra::error]` enum\n  = note: the platforms throw the error type by name, and only `#[undra::error]` enums carry the messages they show\n  = help: declare it with `#[undra::error]`, for example `#[undra::error] enum HttpError {{ #[error(\"failed\")] Failed }}`\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001"
+            );
+        }
+    };
+};

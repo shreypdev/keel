@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Playground } from "./keel";
+import type { Playground } from "./undra";
 import { BigListView } from "./views/BigListView";
 import { CounterView } from "./views/CounterView";
 import { RemoteView } from "./views/RemoteView";
@@ -20,7 +20,7 @@ function tabFromHash(): TabId {
   return TABS.find((tab) => tab.id === wanted)?.id ?? "todos";
 }
 
-/** Four views over one core. Each reads the signals of its store with `useSignal` (`@keel/runtime/react`) and calls its methods. */
+/** Four views over one core. Each reads the signals of its store with `useSignal` (`@undra/runtime/react`) and calls its methods. */
 export function App({ playground }: { readonly playground: Playground }) {
   const [tab, setTab] = useState<TabId>(tabFromHash);
 
@@ -32,7 +32,7 @@ export function App({ playground }: { readonly playground: Playground }) {
   return (
     <main>
       <header>
-        <h1>Keel playground</h1>
+        <h1>Undra playground</h1>
         <p className="tagline">One Rust core. This page is only the UI.</p>
       </header>
       <div role="tablist" aria-label="Views" className="tabs">

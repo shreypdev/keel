@@ -1,4 +1,4 @@
-import KeelRuntime
+import UndraRuntime
 import PlaygroundCore
 
 /// A store driven through the runtime's raw API, for the checks the generated classes hide: which
@@ -16,24 +16,24 @@ final class RawStore {
         let value: [UInt8]
 
         /// The value decoded as `Value`, which must use every byte.
-        func decode<Value: KeelCodec>(_ type: Value.Type = Value.self) throws -> Value {
-            var reader = KeelReader(value)
-            let decoded = try Value.keelDecode(&reader)
+        func decode<Value: UndraCodec>(_ type: Value.Type = Value.self) throws -> Value {
+            var reader = UndraReader(value)
+            let decoded = try Value.undraDecode(&reader)
             try reader.finish()
             return decoded
         }
 
         /// The value decoded as a keyed patch of `Item`s.
-        func decodePatch<Item: KeelCodec>(_ type: Item.Type = Item.self) throws -> [PatchOp<Item>] {
-            var reader = KeelReader(value)
-            let ops: [PatchOp<Item>] = try KeelRuntime.decodePatch(&reader)
+        func decodePatch<Item: UndraCodec>(_ type: Item.Type = Item.self) throws -> [PatchOp<Item>] {
+            var reader = UndraReader(value)
+            let ops: [PatchOp<Item>] = try UndraRuntime.decodePatch(&reader)
             try reader.finish()
             return ops
         }
     }
 
-    let core: KeelCore
-    let handle: KeelHandle
+    let core: UndraCore
+    let handle: UndraHandle
     /// Every entry received since the last `clear()`, oldest first.
     private(set) var entries: [Entry] = []
     /// Called for every entry as it arrives, on the main actor, from inside the mirror's apply:
@@ -42,7 +42,7 @@ final class RawStore {
 
     /// Constructs `type` with `method` and `args`, and registers for its change-sets. It does not
     /// observe yet; call `observe()`.
-    init(core: KeelCore, type: UInt32, method: UInt32, args: [UInt8] = []) throws {
+    init(core: UndraCore, type: UInt32, method: UInt32, args: [UInt8] = []) throws {
         self.core = core
         self.handle = try core.construct(type: type, method: method, args: args)
         core.mirror.register(handle) { [weak self] signal, op, reader in

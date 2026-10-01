@@ -1,0 +1,19 @@
+[package]
+name = "undra-signals"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Undra reactive state: signals, computed values, effects, transactions and change-set delivery."
+readme = "README.md"
+keywords = ["undra", "signals", "reactive", "state"]
+categories = ["data-structures"]
+
+[dependencies]
+undra-wire.workspace = true
+parking_lot.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

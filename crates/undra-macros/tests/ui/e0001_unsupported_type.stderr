@@ -1,0 +1,38 @@
+error: error[undra::E0001]: `&str` cannot cross the boundary
+         = note: references have no wire representation; every value crosses by copy
+         = help: use an owned `String`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+ --> tests/ui/e0001_unsupported_type.rs:7:15
+  |
+7 |     pub name: &str,
+  |               ^^^^
+
+error: error[undra::E0001]: `usize` cannot cross the boundary
+         = note: its width differs between platforms (32-bit wasm, 64-bit iOS and Android), so the wire layout would too
+         = help: use a fixed-width integer such as `u32` or `u64`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+ --> tests/ui/e0001_unsupported_type.rs:8:17
+  |
+8 |     pub visits: usize,
+  |                 ^^^^^
+
+error: error[undra::E0001]: `Ctx` parameter on method `touch`
+         = note: methods reach the runtime through the object: `Ctx` is only injected into constructors, free functions, queries and mutations
+         = help: store a `Ctx` in the object when it is constructed, or use `Ctx::current()`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0001_unsupported_type.rs:15:30
+   |
+15 |     pub fn touch(&self, ctx: &Ctx) {}
+   |                              ^^^^
+
+error[E0106]: missing lifetime specifier
+ --> tests/ui/e0001_unsupported_type.rs:7:15
+  |
+7 |     pub name: &str,
+  |               ^ expected named lifetime parameter
+  |
+help: consider introducing a named lifetime parameter
+  |
+6 ~ pub struct Profile<'a> {
+7 ~     pub name: &'a str,
+  |

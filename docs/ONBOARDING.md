@@ -1,4 +1,4 @@
-# Onboarding — build and test Keel on your machine
+# Onboarding — build and test Undra on your machine
 
 Everything here was exercised end to end on a clean Apple-Silicon Mac. Linux notes are
 inline where the path differs; Windows is untested. Time to a green core suite: ~10
@@ -9,7 +9,7 @@ minutes. Time to the full five-language matrix: ~30 minutes including downloads.
 ### Required for the Rust workspace (everything in `crates/`)
 
 ```bash
-# Rust — stable, plus the cross targets Keel ships to
+# Rust — stable, plus the cross targets Undra ships to
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 rustup target add wasm32-unknown-unknown \
   aarch64-apple-ios aarch64-apple-ios-sim \
@@ -25,7 +25,7 @@ brew install node
 # JDK 17 + Kotlin + Gradle (Kotlin runtime, Android app)
 brew install openjdk@17 kotlin gradle
 
-# binaryen (wasm-opt, used by `keel build --platform web`)
+# binaryen (wasm-opt, used by `undra build --platform web`)
 brew install binaryen
 
 # The Kotlin local test runner needs one jar (any location; env.sh looks in ../.tools/lib)
@@ -55,7 +55,7 @@ SDKM=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
 yes | $SDKM --licenses
 $SDKM "platform-tools" "platforms;android-35" "build-tools;35.0.0" \
       "ndk;27.2.12479018" "emulator" "system-images;android-35;google_apis;arm64-v8a"
-$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n keel \
+$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n undra \
       -k "system-images;android-35;google_apis;arm64-v8a" -d pixel_7
 cargo install cargo-ndk
 ```
@@ -63,8 +63,8 @@ cargo install cargo-ndk
 ### One command wires it all up per shell
 
 ```bash
-source scripts/env.sh    # PATH, KEEL_KOTLIN_* jars, DEVELOPER_DIR fallback
-keel doctor              # (after `cargo install --path crates/keel-cli`) prints what's missing, with the fix
+source scripts/env.sh    # PATH, UNDRA_KOTLIN_* jars, DEVELOPER_DIR fallback
+undra doctor              # (after `cargo install --path crates/undra-cli`) prints what's missing, with the fix
 ```
 
 ## 2. Run the suites
@@ -75,29 +75,29 @@ Every suite is local; nothing needs the network after install.
 |---|---|---|
 | Rust workspace | `cargo test --workspace` | 2,100+ pass |
 | Lints (CI-equivalent) | `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings` | clean |
-| TypeScript runtime | `cd runtimes/ts/@keel/runtime && npm ci && npm test` | 890+ pass |
-| Kotlin runtime | `runtimes/kotlin/keel-runtime/scripts/test-local.sh` | 454 cases, 0 failed |
-| Kotlin over the real JNI core | `cargo build -p keel-ffi --features jni`, then `KEEL_NATIVE_LIB_DIR=$PWD/target/debug KEEL_NATIVE_NAME=keel_ffi runtimes/kotlin/keel-runtime/scripts/test-local.sh` | the JNI smoke cases run |
-| Swift runtime | `cd runtimes/swift/KeelRuntime && swift test` | 328 pass |
-| wasm ABI (real module + real TS runtime) | `bash crates/keel-ffi/tests/wasm/run.sh` | 29 pass |
-| C host harness | `bash crates/keel-ffi/tests/c/run.sh` (add `KEEL_C_SANITIZE=1` for ASan) | ok |
+| TypeScript runtime | `cd runtimes/ts/@undra/runtime && npm ci && npm test` | 890+ pass |
+| Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 454 cases, 0 failed |
+| Kotlin over the real JNI core | `cargo build -p undra-ffi --features jni`, then `UNDRA_NATIVE_LIB_DIR=$PWD/target/debug UNDRA_NATIVE_NAME=undra_ffi runtimes/kotlin/undra-runtime/scripts/test-local.sh` | the JNI smoke cases run |
+| Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` | 328 pass |
+| wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 29 pass |
+| C host harness | `bash crates/undra-ffi/tests/c/run.sh` (add `UNDRA_C_SANITIZE=1` for ASan) | ok |
 | Contract scenarios ×3 platforms | `bash contract-tests/run-all.sh` | 51/51 pass |
-| Benchmark budget gate | `cargo test -p keel-bench --test budgets --release` | pass |
-| Benchmarks (numbers for humans) | `cargo bench -p keel-bench` | see `bench/RESULTS.md` |
+| Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` | pass |
+| Benchmarks (numbers for humans) | `cargo bench -p undra-bench` | see `bench/RESULTS.md` |
 
-Gotcha worth knowing: the C harness builds `keel-ffi` **without** the `jni` feature and
-overwrites `target/debug/libkeel_ffi.dylib`. If you run the Kotlin JNI leg afterwards,
+Gotcha worth knowing: the C harness builds `undra-ffi` **without** the `jni` feature and
+overwrites `target/debug/libundra_ffi.dylib`. If you run the Kotlin JNI leg afterwards,
 rebuild with `--features jni` first. CI jobs are isolated, so only local chained runs hit
 this.
 
 ## 3. Run the reference app
 
 ```bash
-cargo install --path crates/keel-cli
-keel build -C examples/playground --platform web,ios,android   # artifacts under examples/playground/build/
+cargo install --path crates/undra-cli
+undra build -C examples/playground --platform web,ios,android   # artifacts under examples/playground/build/
 cd examples/playground/web && npm install && npm run dev       # Chrome
 bash examples/playground/ios/smoke.sh                          # boots a simulator, installs, screenshots
-# Android: see examples/playground/android/README.md (gradlew assembleDebug + the `keel` AVD)
+# Android: see examples/playground/android/README.md (gradlew assembleDebug + the `undra` AVD)
 ```
 
 ## 4. Read before you write code

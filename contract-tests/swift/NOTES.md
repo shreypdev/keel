@@ -1,7 +1,7 @@
 # Swift contract runner: notes
 
-`run.sh` runs the seventeen scenarios of `../scenarios.md` for Swift (`KeelRuntime` over the C ABI,
-the real playground core through `libkeel_core.dylib`, the bindings `keel bindgen` generated) and
+`run.sh` runs the seventeen scenarios of `../scenarios.md` for Swift (`UndraRuntime` over the C ABI,
+the real playground core through `libundra_core.dylib`, the bindings `undra bindgen` generated) and
 pipes the `SCENARIO` lines through `../check.sh swift`.
 
 ## Layout
@@ -18,41 +18,41 @@ SwiftPM names a path dependency after its directory. `examples/playground/genera
 package (`contract-tests/swift`) are both called `swift`, which SwiftPM treats as one package
 ("product 'PlaygroundCore' not found in package 'swift'"). The symlink gives the dependency another
 name. It sits four directories below the repository root on purpose, so that the generated
-package's own relative path to the runtime (`../../../../runtimes/swift/KeelRuntime`) still resolves
+package's own relative path to the runtime (`../../../../runtimes/swift/UndraRuntime`) still resolves
 to the same package as the one this manifest names (otherwise SwiftPM warns of conflicting
 identities, "will be escalated to an error").
 
 ## Deviations from scenarios.md
 
 * **S07 reads the generated `Probe.ticks` throughout.** The generated method returns
-  `KeelCore.stream(..., decode:)`, which pulls an item from the core when the consumer asks for the next
+  `UndraCore.stream(..., decode:)`, which pulls an item from the core when the consumer asks for the next
   one, so the credit follows the consumer. Besides the scenario's bound (`produced` at most 69 after reading 5
   and waiting 200 ms) the Swift column checks the runtime's own window: at most 16 items sent plus the one
   the producer made and holds for credit. Step 4 compares `produced` against a reading taken at its start
   instead of resetting the probe.
-* **S14.6.** The core empties the offline queue by *deleting* the key `keel.query.queue`, it does not
+* **S14.6.** The core empties the offline queue by *deleting* the key `undra.query.queue`, it does not
   write an empty queue. The scenario accepts either as "emptied".
-* **S16.1 "before the core is initialised".** `InprocTransport.start` reads `keel_schema_hash()` (which
-  needs no running core) and compares it before it claims the process or calls `keel_init`. The scenario
-  checks what a caller can see (`KeelSchemaMismatchError` with `expected` and `got`, hex in the message, no
+* **S16.1 "before the core is initialised".** `InprocTransport.start` reads `undra_schema_hash()` (which
+  needs no running core) and compares it before it claims the process or calls `undra_init`. The scenario
+  checks what a caller can see (`UndraSchemaMismatchError` with `expected` and `got`, hex in the message, no
   shared core left behind, and a later load that works), and step 1b makes "before" observable: with the
-  core initialised by another embedder (`keel_init` called directly), `load(wrong hash)` still throws the
+  core initialised by another embedder (`undra_init` called directly), `load(wrong hash)` still throws the
   mismatch, where a runtime that initialises first would fail with `coreInitFailed`.
 * **S16 shuts the shared core down first** (step 1b needs a process in which no core is
-  initialised, and `keel_init` is once per process) and loads a fresh one at the end, so it is ordered
+  initialised, and `undra_init` is once per process) and loads a fresh one at the end, so it is ordered
   before S17 and it is the only scenario that does this. S16.4, which scenarios.md lists for
-  TypeScript and Kotlin, is also checked here, through `keel_schema_json`.
-* **S17.1 uses the raw `KeelCore.callSync` for `explode`.** The generated sync binding treats a panic
-  reply as "the core and the bindings disagree" and stops the process on purpose (`keelUnexpected`).
-  The async `explodeLater` is called through the binding and throws `KeelReplyError`.
+  TypeScript and Kotlin, is also checked here, through `undra_schema_json`.
+* **S17.1 uses the raw `UndraCore.callSync` for `explode`.** The generated sync binding treats a panic
+  reply as "the core and the bindings disagree" and stops the process on purpose (`undraUnexpected`).
+  The async `explodeLater` is called through the binding and throws `UndraReplyError`.
 * **S03.2** ("no suspension") is shown by compilation: the sync calls are made from a plain, non-async
   function (`plainSyncCalls`).
 * **S06 cancels with `Task.cancel()`** and expects `CancellationError`.
-* **S08.1/S09.1 "before observe returns".** `KeelCore.observe` applies the initial change-set to the
+* **S08.1/S09.1 "before observe returns".** `UndraCore.observe` applies the initial change-set to the
   mirror before it returns, so the raw checks read the entries synchronously after `observe()`.
 * **S10.8** runs on a fresh `BigList` (after the earlier steps the list has no single missing first item).
 * **S15.5.** `Todo.id` is a `UUID` whose first eight bytes are the core's counter, so "an id above
-  `b`'s" is compared byte-wise (`KeelUUID` is `Comparable`).
+  `b`'s" is compared byte-wise (`UndraUUID` is `Comparable`).
 
 ## Findings in merged code
 
@@ -63,5 +63,5 @@ step 1b), and generated stores warned about a missing `@unchecked Sendable` unde
 Still open:
 
 1. Generated bindings and runtime: the standard-port records (`HttpRequest`, `HttpResponse`,
-   `Header`, `NetKind`) are internal in `KeelRuntime` and not generated, so an app that supplies its own
+   `Header`, `NetKind`) are internal in `UndraRuntime` and not generated, so an app that supplies its own
    `Http` adapter has to write their wire layout by hand (`@testable` here, a small codec in the app).

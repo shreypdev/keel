@@ -1,0 +1,17 @@
+error: error[undra::E0002]: generic parameter `T` on `Page`
+         = note: the schema describes concrete types; every target language would need one instantiation per use
+         = help: remove the parameter, and declare one concrete `#[undra::api]` type per instantiation
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+ --> tests/ui/e0002_generics.rs:6:17
+  |
+6 | pub struct Page<T> {
+  |                 ^
+
+error: error[undra::E0002]: generic parameter `T` on `first`
+         = note: the schema describes concrete types; every target language would need one instantiation per use
+         = help: remove the parameter, and declare one concrete `#[undra::api]` type per instantiation
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generics.rs:11:14
+   |
+11 | pub fn first<T>(items: Vec<T>) -> Option<T> {
+   |              ^

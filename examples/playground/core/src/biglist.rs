@@ -7,13 +7,13 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use keel::prelude::*;
+use undra::prelude::*;
 
 /// How many items a new list has.
 pub const LIST_LEN: u32 = 10_000;
 
 /// One row of a list, identified by `id`.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
     /// Identity of the row; lists are patched by it, never by position.
@@ -36,7 +36,7 @@ impl Item {
 }
 
 /// Why an operation on a list was refused.
-#[keel::error]
+#[undra::error]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ListError {
     /// A position is not in the list.
@@ -50,15 +50,15 @@ pub enum ListError {
 }
 
 /// A list of [`LIST_LEN`] items with operations that change one item at a time.
-#[keel::store(restore = "Self::assemble")]
+#[undra::store(restore = "Self::assemble")]
 pub struct BigList {
     next_id: AtomicU32,
-    #[keel(key = "id")]
+    #[undra(key = "id")]
     items: Signal<Vec<Item>>,
     count: Computed<u32>,
 }
 
-#[keel::api(store)]
+#[undra::api(store)]
 impl BigList {
     /// A list of [`LIST_LEN`] items numbered from 1.
     pub fn new(ctx: Ctx) -> Self {
@@ -155,11 +155,11 @@ fn check(index: u32, len: usize) -> Result<(), ListError> {
 
 #[cfg(test)]
 mod tests {
-    use keel::meta::ids;
-    use keel::runtime::testing::TestRuntime;
-    use keel::signals::ALL_SIGNALS;
-    use keel::wire::payload::{CallTarget, ChangeOp, ChangeSet, ReplyStatus};
-    use keel::wire::{Decode, Encode, KeyedPatch, PatchOp, Reader};
+    use undra::meta::ids;
+    use undra::runtime::testing::TestRuntime;
+    use undra::signals::ALL_SIGNALS;
+    use undra::wire::payload::{CallTarget, ChangeOp, ChangeSet, ReplyStatus};
+    use undra::wire::{Decode, Encode, KeyedPatch, PatchOp, Reader};
 
     use super::*;
 

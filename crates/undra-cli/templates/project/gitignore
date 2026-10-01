@@ -1,0 +1,23 @@
+# Rust
+/target
+
+# undra build output (XCFramework, jniLibs, wasm); `undra build` recreates it
+/build
+
+# Node
+node_modules/
+dist/
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# Gradle / Android Studio
+.gradle/
+/android/local.properties
+/android/.idea/
+**/build/
+
+# OS
+.DS_Store
