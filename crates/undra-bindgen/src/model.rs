@@ -5,7 +5,7 @@
 //! Every language generator reads the [`Model`], never the raw [`Schema`], so
 //! ordering, kind lookups and the shape of returns are decided in one place.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use undra_meta::{
     EnumDef, FunctionDef, MethodDef, ObjectDef, PortDef, QueryDef, QueryKind, RecordDef, Schema,
@@ -168,10 +168,9 @@ impl Model {
     /// [`crate::validate`].
     ///
     /// Unless `emit_standard` is set, the standard library (ADR-024) is left out of the lists
-    /// of definitions: the standard ports entirely, and the standard types when the platform
-    /// runtime of `lang` provides them. A provided type stays known to [`Model::kind`] and its
-    /// lookups and is reported by [`Model::external`]; a standard type the runtime does not
-    /// provide is declared like a user's type, but only when something refers to it.
+    /// of definitions: the standard ports entirely, and the standard types, which every platform
+    /// runtime provides. A provided type stays known to [`Model::kind`] and its lookups and is
+    /// reported by [`Model::external`].
     #[must_use]
     pub fn new(schema: &Schema, lang: Lang, emit_standard: bool) -> Model {
         let covered = if emit_standard {
@@ -183,8 +182,8 @@ impl Model {
         let mut records = Vec::new();
         let mut standard_records = Vec::new();
         for record in &schema.records {
-            if covered.types.contains(record.name.as_str()) {
-                standard_records.push(record.clone());
+            if let Some(&standard) = covered.types.get(record.name.as_str()) {
+                standard_records.push((standard, record.clone()));
             } else {
                 records.push(record.clone());
             }
@@ -196,8 +195,8 @@ impl Model {
         for en in &schema.enums {
             let mut en = en.clone();
             en.variants.sort_by_key(|v| v.index);
-            if covered.types.contains(en.name.as_str()) {
-                standard_enums.push(en);
+            if let Some(&standard) = covered.types.get(en.name.as_str()) {
+                standard_enums.push((standard, en));
             } else if en.is_error {
                 errors.push(en);
             } else {
@@ -238,87 +237,39 @@ impl Model {
             }
         }
 
-        // The standard types: provided by the runtime (external), declared because something
-        // refers to them, or dropped.
+        // The standard types are provided by the platform runtime: generated code refers to them
+        // and declares none (ADR-024).
         let mut externals = HashMap::new();
         let mut external_records = Vec::new();
         let mut external_enums = Vec::new();
         let mut external_errors = Vec::new();
-        let mut declared: Vec<Pending> = Vec::new();
-        for record in standard_records {
-            match stdlib::runtime_spelling(lang, &record.name) {
-                Some(spelling) => {
-                    externals.insert(
-                        record.name.clone(),
-                        External {
-                            spelling,
-                            kind: NamedKind::Record,
-                        },
-                    );
-                    external_records.push(record);
-                }
-                None => declared.push(Pending::new(PendingDef::Record(record))),
-            }
+        for (standard, record) in standard_records {
+            externals.insert(
+                record.name.clone(),
+                External {
+                    spelling: stdlib::runtime_spelling(lang, standard),
+                    kind: NamedKind::Record,
+                },
+            );
+            external_records.push(record);
         }
-        for en in standard_enums {
-            match stdlib::runtime_spelling(lang, &en.name) {
-                Some(spelling) => {
-                    let kind = if en.is_error {
-                        NamedKind::Error
-                    } else {
-                        NamedKind::UnitEnum
-                    };
-                    externals.insert(en.name.clone(), External { spelling, kind });
-                    if en.is_error {
-                        external_errors.push(en);
-                    } else {
-                        external_enums.push(en);
-                    }
-                }
-                None => declared.push(Pending::new(PendingDef::Enum(en))),
-            }
-        }
-        if !declared.is_empty() {
-            let mut referenced = BTreeSet::new();
-            for r in &records {
-                for f in &r.fields {
-                    mentions(&f.ty, &mut referenced);
-                }
-            }
-            for e in enums.iter().chain(&errors) {
-                enum_mentions(e, &mut referenced);
-            }
-            for o in objects.iter().chain(&stores).chain(&query_handles) {
-                object_mentions(o, &mut referenced);
-            }
-            for f in functions.iter().chain(&mutations) {
-                method_mentions(&f.params, &f.returns, &mut referenced);
-            }
-            for p in &ports {
-                for m in &p.methods {
-                    method_mentions(&m.params, &m.returns, &mut referenced);
-                }
-            }
-            // A declared type pulls in the types it refers to.
-            loop {
-                let mut progressed = false;
-                for d in &mut declared {
-                    if !d.emitted && referenced.contains(d.name()) {
-                        d.emitted = true;
-                        d.mentions(&mut referenced);
-                        progressed = true;
-                    }
-                }
-                if !progressed {
-                    break;
-                }
-            }
-            for d in declared.into_iter().filter(|d| d.emitted) {
-                match d.def {
-                    PendingDef::Record(r) => records.push(r),
-                    PendingDef::Enum(e) if e.is_error => errors.push(e),
-                    PendingDef::Enum(e) => enums.push(e),
-                }
+        for (standard, en) in standard_enums {
+            let kind = if en.is_error {
+                NamedKind::Error
+            } else {
+                NamedKind::UnitEnum
+            };
+            externals.insert(
+                en.name.clone(),
+                External {
+                    spelling: stdlib::runtime_spelling(lang, standard),
+                    kind,
+                },
+            );
+            if en.is_error {
+                external_errors.push(en);
+            } else {
+                external_enums.push(en);
             }
         }
 
@@ -469,87 +420,6 @@ pub fn no_coalesce_ids(object: &ObjectDef) -> Vec<u32> {
 #[must_use]
 pub fn is_unit_enum(en: &EnumDef) -> bool {
     !en.is_error && en.variants.iter().all(|v| v.fields.is_empty())
-}
-
-/// A standard type the runtime does not provide, waiting to see whether something refers to it.
-struct Pending {
-    def: PendingDef,
-    emitted: bool,
-}
-
-enum PendingDef {
-    Record(RecordDef),
-    Enum(EnumDef),
-}
-
-impl Pending {
-    fn new(def: PendingDef) -> Pending {
-        Pending {
-            def,
-            emitted: false,
-        }
-    }
-
-    fn name(&self) -> &str {
-        match &self.def {
-            PendingDef::Record(r) => &r.name,
-            PendingDef::Enum(e) => &e.name,
-        }
-    }
-
-    fn mentions(&self, out: &mut BTreeSet<String>) {
-        match &self.def {
-            PendingDef::Record(r) => {
-                for f in &r.fields {
-                    mentions(&f.ty, out);
-                }
-            }
-            PendingDef::Enum(e) => enum_mentions(e, out),
-        }
-    }
-}
-
-/// Collects the names `ty` refers to.
-fn mentions(ty: &TypeRef, out: &mut BTreeSet<String>) {
-    match ty {
-        TypeRef::Named(n) => {
-            out.insert(n.clone());
-        }
-        TypeRef::Option(t) | TypeRef::Vec(t) | TypeRef::Lazy(t) | TypeRef::Stream(t) => {
-            mentions(t, out);
-        }
-        TypeRef::Map(a, b) | TypeRef::Result(a, b) => {
-            mentions(a, out);
-            mentions(b, out);
-        }
-        _ => {}
-    }
-}
-
-fn enum_mentions(en: &EnumDef, out: &mut BTreeSet<String>) {
-    for v in &en.variants {
-        for f in &v.fields {
-            mentions(&f.ty, out);
-        }
-    }
-}
-
-fn method_mentions(params: &[undra_meta::ParamDef], returns: &TypeRef, out: &mut BTreeSet<String>) {
-    for p in params {
-        mentions(&p.ty, out);
-    }
-    mentions(returns, out);
-}
-
-fn object_mentions(object: &ObjectDef, out: &mut BTreeSet<String>) {
-    for m in object.constructors.iter().chain(&object.methods) {
-        method_mentions(&m.params, &m.returns, out);
-    }
-    if let Some(store) = &object.store {
-        for signal in &store.signals {
-            mentions(&signal.ty, out);
-        }
-    }
 }
 
 fn query_status() -> EnumDef {

@@ -74,44 +74,44 @@ final class PlaygroundNetwork: UndraAdapter, @unchecked Sendable {
     func makePortImpl(core: UndraCore) -> PortImpl? {
         return .async([
             fnv1a32("Http.request"): { [self] arguments in
-                let request = try WireHttpRequest.decode(arguments)
+                let request = try HttpRequest.undraDecoded(from: arguments)
                 if isOffline {
                     throw UndraPortError(body: HttpError.network("The Internet connection appears to be offline.").undraEncoded())
                 }
                 try await Task.sleep(for: PlaygroundNetwork.latency)
-                return respond(to: request).encoded()
+                return respond(to: request).undraEncoded()
             },
         ])
     }
 
     /// Routes one request. The URL is `https://playground.undra.test/lists/{list}/todos[/{id}]`.
-    private func respond(to request: WireHttpRequest) -> WireHttpResponse {
+    private func respond(to request: HttpRequest) -> HttpResponse {
         guard let url = URL(string: request.url), url.host == URL(string: UndraBootstrap.serverURL)?.host else {
-            return WireHttpResponse(status: 404, body: Data())
+            return HttpResponse(status: 404)
         }
         let path = url.pathComponents.filter { $0 != "/" }
         guard path.count >= 3, path[0] == "lists", path[2] == "todos" else {
-            return WireHttpResponse(status: 404, body: Data())
+            return HttpResponse(status: 404)
         }
         let list = path[1]
         switch (request.method, path.count) {
-        case ("GET", 3):
+        case (.get, 3):
             return json(200, state.withLock { $0.lists[list] ?? [] })
-        case ("POST", 3):
+        case (.post, 3):
             return create(in: list, request)
-        case ("PATCH", 4):
+        case (.patch, 4):
             return change(in: list, id: UInt32(path[3]), request)
         default:
-            return WireHttpResponse(status: 404, body: Data())
+            return HttpResponse(status: 404)
         }
     }
 
-    private func create(in list: String, _ request: WireHttpRequest) -> WireHttpResponse {
+    private func create(in list: String, _ request: HttpRequest) -> HttpResponse {
         struct NewTodo: Decodable {
             let title: String
         }
-        guard let body = request.body, let new = try? JSONDecoder().decode(NewTodo.self, from: body) else {
-            return WireHttpResponse(status: 400, body: Data())
+        guard let body = request.body, let new = try? JSONDecoder().decode(NewTodo.self, from: Data(body)) else {
+            return HttpResponse(status: 400)
         }
         let key = request.header("Idempotency-Key")
         let todo = state.withLock { (state: inout State) -> ServerTodo in
@@ -129,12 +129,12 @@ final class PlaygroundNetwork: UndraAdapter, @unchecked Sendable {
         return json(201, todo)
     }
 
-    private func change(in list: String, id: UInt32?, _ request: WireHttpRequest) -> WireHttpResponse {
+    private func change(in list: String, id: UInt32?, _ request: HttpRequest) -> HttpResponse {
         struct Change: Decodable {
             let done: Bool
         }
-        guard let id, let body = request.body, let change = try? JSONDecoder().decode(Change.self, from: body) else {
-            return WireHttpResponse(status: 400, body: Data())
+        guard let id, let body = request.body, let change = try? JSONDecoder().decode(Change.self, from: Data(body)) else {
+            return HttpResponse(status: 400)
         }
         let changed = state.withLock { (state: inout State) -> ServerTodo? in
             guard let index = state.lists[list]?.firstIndex(where: { $0.id == id }) else {
@@ -144,13 +144,24 @@ final class PlaygroundNetwork: UndraAdapter, @unchecked Sendable {
             return state.lists[list]?[index]
         }
         guard let changed else {
-            return WireHttpResponse(status: 404, body: Data())
+            return HttpResponse(status: 404)
         }
         return json(200, changed)
     }
 
-    private func json<Value: Encodable>(_ status: UInt16, _ value: Value) -> WireHttpResponse {
+    private func json<Value: Encodable>(_ status: UInt16, _ value: Value) -> HttpResponse {
         // Encoding plain Codable structs cannot fail.
-        return WireHttpResponse(status: status, body: (try? JSONEncoder().encode(value)) ?? Data())
+        return HttpResponse(
+            status: status,
+            headers: [Header(name: "Content-Type", value: "application/json")],
+            body: [UInt8]((try? JSONEncoder().encode(value)) ?? Data())
+        )
+    }
+}
+
+private extension HttpRequest {
+    /// The value of the header called `name`, compared without regard to case.
+    func header(_ name: String) -> String? {
+        return headers.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value
     }
 }

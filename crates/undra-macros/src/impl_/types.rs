@@ -317,13 +317,16 @@ pub(crate) fn map_type<'a>(ty: &Type, cx: impl Into<Cx<'a>>, allow: Allow) -> Re
                 ))
             }
         }
-        Type::Tuple(_) => Err(TyErr::new(
+        Type::Tuple(tuple) => Err(TyErr::new(
             ty,
             Diag::new(
                 code::E0001,
                 format!("tuple `{}` cannot cross the boundary", ty_string(ty)),
                 "tuples have no schema representation, and the other languages would have to invent names for the elements",
-                "declare a record with named fields: `#[undra::api] struct Pair { first: A, second: B }`",
+                format!(
+                    "declare a record with named fields: `#[undra::api] struct Pair {{ {} }}`",
+                    tuple_fields(tuple)
+                ),
             ),
         )),
         Type::Reference(reference) => Err(reference_error(ty, reference)),
@@ -360,15 +363,23 @@ pub(crate) fn map_type<'a>(ty: &Type, cx: impl Into<Cx<'a>>, allow: Allow) -> Re
                 "use an owned value, or an object handle by returning a `#[undra::api]` object",
             ),
         )),
-        Type::Array(_) | Type::Slice(_) => Err(TyErr::new(
-            ty,
-            Diag::new(
-                code::E0001,
-                format!("`{}` cannot cross the boundary", ty_string(ty)),
-                "arrays and slices have no schema representation",
-                "use `Vec<T>` (or `Bytes` for raw bytes)",
-            ),
-        )),
+        Type::Array(syn::TypeArray { elem, .. }) | Type::Slice(syn::TypeSlice { elem, .. }) => {
+            let elem = ty_string(elem);
+            let help = if elem == "u8" {
+                "use `Bytes` for raw bytes, or `Vec<u8>`".to_owned()
+            } else {
+                format!("use `Vec<{elem}>`")
+            };
+            Err(TyErr::new(
+                ty,
+                Diag::new(
+                    code::E0001,
+                    format!("`{}` cannot cross the boundary", ty_string(ty)),
+                    "arrays and slices have no schema representation: the other languages have no fixed-length array to decode into",
+                    help,
+                ),
+            ))
+        }
         Type::Never(_) => Err(TyErr::new(
             ty,
             Diag::new(
@@ -393,10 +404,25 @@ pub(crate) fn map_type<'a>(ty: &Type, cx: impl Into<Cx<'a>>, allow: Allow) -> Re
                 code::E0001,
                 format!("`{}` cannot cross the boundary", ty_string(ty)),
                 format!("only these types are supported: {ALLOWED_SET}"),
-                "use one of the supported types",
+                "write one of the supported types here, for example `String`, `Vec<T>` or a record declared with `#[undra::api]`",
             ),
         )),
     }
+}
+
+/// The fields of a record that replaces a tuple: `first: A, second: B`.
+fn tuple_fields(tuple: &syn::TypeTuple) -> String {
+    const NAMES: [&str; 4] = ["first", "second", "third", "fourth"];
+    tuple
+        .elems
+        .iter()
+        .enumerate()
+        .map(|(index, elem)| match NAMES.get(index) {
+            Some(name) => format!("{name}: {}", ty_string(elem)),
+            None => format!("field{index}: {}", ty_string(elem)),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn reference_error(ty: &Type, reference: &syn::TypeReference) -> TyErr {

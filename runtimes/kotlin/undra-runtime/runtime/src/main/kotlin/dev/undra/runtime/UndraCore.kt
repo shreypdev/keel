@@ -2,8 +2,11 @@ package dev.undra.runtime
 
 import dev.undra.runtime.wire.Payloads.CallTarget
 import java.net.URI
+import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * A running Undra core, seen from Kotlin: everything generated code calls (SPEC section 17.2).
@@ -70,13 +73,14 @@ public open class UndraCore protected constructor() : AutoCloseable {
          * schema hash and compares it with [LoadOptions.expectedSchemaHash].
          */
         internal fun attach(transport: Transport, options: LoadOptions, makeShared: Boolean): UndraCore {
-            val core = ConnectedCore(transport, options.remoteTimeout, mirrorOptions = options.mirror)
+            val core = ConnectedCore(transport, options.remoteTimeout, mirrorOptions = options.mirror, onConnectionChange = options.onConnectionChange)
             try {
                 core.installPorts(options)
                 val got = transport.connect(core, options.expectedSchemaHash)
                 if (got != options.expectedSchemaHash) {
                     throw UndraSchemaMismatchException(options.expectedSchemaHash, got)
                 }
+                core.markConnected()
             } catch (e: UndraException) {
                 core.abandon()
                 throw e
@@ -111,17 +115,34 @@ public open class UndraCore protected constructor() : AutoCloseable {
                     if (uri.scheme != "ws" && uri.scheme != "wss") {
                         throw UndraModeException("remoteUrl must start with ws:// or wss://, got: $url")
                     }
-                    try {
-                        RemoteTransport(uri, options.remoteTimeout)
-                    } catch (e: LinkageError) {
-                        throw UndraModeException("Mode.REMOTE needs java.net.http, which this platform does not provide (${e.message})")
-                    }
+                    RemoteTransport(uri, options.remoteTimeout, options.reconnect, session = newSessionToken())
                 }
             }
+
+        /** A random token for the dev server to recognise this core's connections by (ADR-051). */
+        private fun newSessionToken(): String {
+            val bytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
+            return bytes.joinToString("") { "%02x".format(it) }
+        }
     }
 
     /** The mode this core runs in. */
     public open val mode: Mode get() = throw unsupported("mode")
+
+    private val inertConnection: StateFlow<ConnectionState> by lazy { MutableStateFlow(ConnectionState.Connected) }
+
+    /**
+     * What the connection to the core is doing: [ConnectionState.Connected] from [load] until the core is closed, and,
+     * for a [Mode.REMOTE] core, [ConnectionState.Reconnecting] while `undra dev` is unreachable (ADR-051). While it is,
+     * calls and [observe] fail at once with [UndraException], and what was in flight when the connection dropped
+     * failed with it; when it is [ConnectionState.Connected] again every store the app observes has been observed
+     * again, so the mirrors converge on the core's current values by themselves. A state that is
+     * [ConnectionState.Closed] is final.
+     *
+     * A `StateFlow` conflates: a quick drop and recovery can be seen as no change. [LoadOptions.onConnectionChange]
+     * hears every one.
+     */
+    public open val connectionState: StateFlow<ConnectionState> get() = inertConnection
 
     /**
      * Calls a synchronous method or function and returns the reply body. In [Mode.INPROC] this is a

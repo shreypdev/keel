@@ -1,90 +1,173 @@
 #!/usr/bin/env node
-// Writes site/docs/errors.html: one anchored section per macro diagnostic code (#E0001 ...).
+// Writes site/docs/errors.html: one anchored section per diagnostic code (#E0001 ... #C0014).
 //
 // Sources, all in the repository, nothing typed by hand:
-//   * docs/SPEC.md section 12 (the catalogue: code and trigger),
-//   * the doc table in crates/<name>-macros/src/impl_/diag.rs (a short meaning per code),
-//   * the compile-fail goldens crates/<name>-macros/tests/ui/*.stderr (the real messages: what, why, fix).
-// Codes that no golden covers (they come from bindgen, rustc or the runtime) show the catalogue entry only.
+//   * docs/SPEC.md section 12 (the catalogue: code, who raises it, trigger),
+//   * the code table in crates/<name>-macros/src/impl_/diag.rs (a short meaning per E code) and the
+//     variants of `Code` in crates/<name>-cli/src/error.rs (the meaning of a C code),
+//   * the real messages: the compile-fail goldens crates/<name>-macros/tests/ui/*.stderr and the message
+//     goldens crates/*/tests/golden/diagnostics/*.txt (schema validation, the runtime), each message
+//     with its what, why and fix.
+// A code of the catalogue with no real message is an error: the page never shows a bare entry. The
+// audit that keeps the sources honest is crates/<name>-macros/tests/catalogue.rs.
 //
 //   node site/scripts/build-errors.mjs
-import { readdirSync, existsSync } from "node:fs";
+import { readdirSync, existsSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { SITE, ORIGIN, read, writeIfChanged, replaceRegion, esc } from "./lib.mjs";
 
 const REPO = resolve(SITE, "..");
-const macros = readdirSync(join(REPO, "crates")).find((d) => d.endsWith("-macros") && existsSync(join(REPO, "crates", d, "Cargo.toml")));
+const crateDir = (suffix) => readdirSync(join(REPO, "crates")).find((d) => d.endsWith(suffix) && existsSync(join(REPO, "crates", d, "Cargo.toml")));
+const macros = crateDir("-macros");
+const cli = crateDir("-cli");
 if (!macros) throw new Error("no crates/*-macros directory");
 const MAX_ROWS = 6;
 
-// ---- the catalogue (SPEC section 12)
+// ---- the catalogue (SPEC section 12): `| E0001 | raised by | trigger |`
 const spec = read(join(REPO, "docs/SPEC.md"));
 const sec = spec.slice(spec.indexOf("## 12. Diagnostics"), spec.indexOf("## 13."));
 const trigger = new Map();
-for (const m of sec.matchAll(/^\| (E\d{4}) \| (.+) \|$/gm)) trigger.set(m[1], m[2]);
-
-// ---- short meanings (diag.rs doc table)
-const meaning = new Map();
-const diag = read(join(REPO, "crates", macros, "src/impl_/diag.rs"));
-for (const m of diag.matchAll(/^\/\/\/ \| (E\d{4}) \| (.+) \|$/gm)) meaning.set(m[1], m[2].replace(/\s*\(addition\)\s*$/, "").replace(/;? ?\(a runtime message.*$/, ""));
-
-// ---- the real messages (compile-fail goldens)
-const dir = join(REPO, "crates", macros, "tests/ui");
-const seen = new Map();
-let brand = "";
-for (const f of readdirSync(dir).filter((x) => x.endsWith(".stderr")).sort()) {
-  const text = read(join(dir, f));
-  for (const m of text.matchAll(/error: error\[\w+::(E\d{4})\]: (.+)\n((?:[ \t]+= (?:note|help|docs): .*\n)+)/g)) {
-    brand ||= /error\[(\w+)::/.exec(m[0])?.[1] ?? "";
-    const note = /= note: (.*)/.exec(m[3])?.[1], help = /= help: (.*)/.exec(m[3])?.[1];
-    if (!note || !help) continue;
-    const rows = seen.get(m[1]) ?? [];
-    if (!rows.some((r) => r.why === note)) rows.push({ what: m[2], why: note, fix: help });
-    seen.set(m[1], rows);
-  }
+const raisedBy = new Map();
+// Whitespace-tolerant, so a reflowed (padded) table reads the same.
+for (const m of sec.matchAll(/^\s*\|\s*([EC]\d{4})\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*\|\s*$/gm)) {
+  trigger.set(m[1], m[3]);
+  raisedBy.set(m[1], m[2]);
 }
 
+// ---- short meanings: the doc table of diag.rs (E codes) and the doc comments of `Code` (C codes)
+const meaning = new Map();
+const diag = read(join(REPO, "crates", macros, "src/impl_/diag.rs"));
+for (const m of diag.matchAll(/^\/\/\/ \| (E\d{4}) \| (.+) \|$/gm)) meaning.set(m[1], m[2].replace(/\s*\((?:schema validation; )?addition\)\s*$/, ""));
+if (cli) {
+  const errorRs = read(join(REPO, "crates", cli, "src/error.rs"));
+  for (const m of errorRs.matchAll(/^\s*\/\/\/ `(C\d{4})`: (.+?)\.?$/gm)) meaning.set(m[1], m[2]);
+}
+
+// ---- the real messages
+/** The Undra diagnostics in `text`: the first line holds `error[<brand>::E0001]: what` (after `error: `, `error[E0277]: ` or
+ *  `evaluation panicked: `), the next lines `= note:`, `= help:` and `= docs:`. */
+function messagesOf(text) {
+  const lines = text.split("\n");
+  const found = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /(?:^|:\s)error\[(\w+)::([EC]\d{4})\]: (.+)$/.exec(lines[i]);
+    if (!m) continue;
+    const parts = { note: [], help: [] };
+    let kind = "";
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = /^\s+= (note|help|docs): (.*)$/.exec(lines[j]);
+      if (line) {
+        kind = line[1];
+        if (kind === "docs") break;
+        parts[kind].push(line[2]);
+      } else if (kind === "help" && /^\s{10,}\S/.test(lines[j])) parts.help.push(lines[j].trim()); // a CLI fix spans lines
+      else break;
+    }
+    if (parts.note.length && parts.help.length) found.push({ brand: m[1], code: m[2], what: m[3], why: parts.note.join(" "), fix: parts.help.join(" ") });
+  }
+  return found;
+}
+
+const seen = new Map();
+const nativeGolden = new Map(); // a code whose message is rustc's own: the ui test named after it
+let brand = "";
+const add = (message) => {
+  brand ||= message.brand;
+  const rows = seen.get(message.code) ?? [];
+  if (!rows.some((r) => r.why === message.why && r.what === message.what)) rows.push({ what: message.what, why: message.why, fix: message.fix });
+  seen.set(message.code, rows);
+};
+const ui = join(REPO, "crates", macros, "tests/ui");
+// The compiler's own message stands in for a branded one only for a code SPEC says rustc raises,
+// and only if it quotes the name the macro gave the thing rustc reports (how a reader finds the code).
+const compilerRaised = (c) => /^rustc\b/.test(raisedBy.get(c) ?? "");
+for (const f of readdirSync(ui).filter((x) => x.endsWith(".stderr")).sort()) {
+  const text = read(join(ui, f));
+  for (const message of messagesOf(text)) add(message);
+  const named = /^(e\d{4})_/.exec(f);
+  const c = named?.[1].toUpperCase();
+  if (c && compilerRaised(c)) {
+    if (!text.includes(`_error_${c}_`)) throw new Error(`${f}: the compiler's message of ${c} does not name the assertion that leads to the code`);
+    nativeGolden.set(c, { file: f, text });
+  }
+}
+/** Every `crates/<crate>/tests/golden/diagnostics/*.txt`: messages that no macro test can show. */
+const goldenDirs = readdirSync(join(REPO, "crates"))
+  .map((c) => join(REPO, "crates", c, "tests/golden/diagnostics"))
+  .filter((d) => existsSync(d) && statSync(d).isDirectory());
+for (const d of goldenDirs) for (const f of readdirSync(d).filter((x) => x.endsWith(".txt")).sort()) for (const message of messagesOf(read(join(d, f)))) add(message);
+
+// ---- the page
 const FAMILIES = [
-  ["types-and-shapes", "Types and shapes", (n) => n <= 8],
-  ["errors-and-stores", "Errors and stores", (n) => n >= 10 && n <= 13],
-  ["methods", "Methods", (n) => n >= 20 && n <= 22],
-  ["ports", "Ports", (n) => n >= 30 && n <= 33],
-  ["queries-and-mutations", "Queries and mutations", (n) => n >= 40 && n <= 42],
-  ["names", "Names in the generators", (n) => n >= 50 && n <= 52],
-  ["type-identity", "Type identity and the schema", (n) => n >= 60],
+  ["types-and-shapes", "Types and shapes", (c) => c[0] === "E" && +c.slice(1) <= 8],
+  ["errors-and-stores", "Errors and stores", (c) => c[0] === "E" && +c.slice(1) >= 10 && +c.slice(1) <= 13],
+  ["methods", "Methods", (c) => c[0] === "E" && +c.slice(1) >= 20 && +c.slice(1) <= 22],
+  ["ports", "Ports", (c) => c[0] === "E" && +c.slice(1) >= 30 && +c.slice(1) <= 33],
+  ["queries-and-mutations", "Queries and mutations", (c) => c[0] === "E" && +c.slice(1) >= 40 && +c.slice(1) <= 42],
+  ["names", "Names in the generators", (c) => c[0] === "E" && +c.slice(1) >= 50 && +c.slice(1) <= 52],
+  ["type-identity", "Type identity and the schema", (c) => c[0] === "E" && +c.slice(1) >= 60],
+  ["command-line", "The command line", (c) => c[0] === "C"],
 ];
 
 /** `code` spans of a message to <code>, everything else escaped. */
 const md = (t) => t.split("`").map((part, i) => (i % 2 ? `<code>${esc(part)}</code>` : esc(part))).join("");
 const codes = [...trigger.keys()].sort();
+const short = (c) => meaning.get(c) ?? String(trigger.get(c)).split(/[;(]/)[0].trim();
+
+// The catalogue as parsed must hold every code the code table of the macros and the command line's
+// `Code` know: a SPEC table the regex above cannot read must fail here, not drop codes from the page.
+const known = [...meaning.keys()];
+const unread = known.filter((c) => !trigger.has(c));
+if (unread.length) throw new Error(`codes in diag.rs or error.rs that are not read from SPEC section 12: ${unread.join(", ")}`);
+
+// Every code of the catalogue shows a real message: a branded one, or the compiler's own.
+const bare = codes.filter((c) => c[0] === "E" && !seen.has(c) && !nativeGolden.has(c));
+if (bare.length) throw new Error(`no real message (compile-fail golden or crates/*/tests/golden/diagnostics/<code>.txt) for ${bare.join(", ")}`);
+
 const sample = seen.get("E0004")?.[0];
+
+/** The compiler's own message, as a user's file would show it. */
+const native = (c) => {
+  const { file, text } = nativeGolden.get(c);
+  const clean = text
+    .replace(/\$DIR\/tests\/ui\/\w+\.rs/g, "src/lib.rs")
+    .replace(new RegExp(`tests/ui/${file.replace(/\.stderr$/, "\\.rs")}`, "g"), "src/lib.rs")
+    .replace(/\n+$/, "");
+  return `<p>The compiler reports this one itself, so it carries no Undra code. It is pointed at the method, and the last note names the assertion the macro emitted, <code>${esc(/_undra_error_E\d{4}_\w+/.exec(clean)?.[0] ?? c)}</code>: the code to look up.</p><div class="code"><div class="code-bar"><span><span class="lang">text</span></span></div><pre><code>${esc(clean)}</code></pre></div>`;
+};
 
 const out = [];
 out.push('<p class="crumb">Reference</p>', "<h1>Error codes</h1>");
-out.push('<p class="lede">Every compile error the macros raise has a stable code, a fixed shape and a fix. The link at the end of each message lands on its code below.</p>');
+out.push('<p class="lede">Every diagnostic Undra raises, from a macro at compile time, from schema validation, from the runtime or from the <code>undra</code> command, has a stable code, a fixed shape and a fix. The link at the end of each message lands on its code below.</p>');
 if (sample) out.push(
   '<h2 id="how-to-read-one">How to read one</h2>',
   "<p>A diagnostic says what is wrong, why the rule exists and how to fix it. This one is verbatim from the macro test suite:</p>",
   `<div class="code"><div class="code-bar"><span><span class="lang">text</span></span></div><pre><code>error[${brand}::E0004]: ${esc(sample.what)}\n  = note: ${esc(sample.why)}\n  = help: ${esc(sample.fix)}\n  = docs: ${ORIGIN}docs/errors.html#E0004</code></pre></div>`,
 );
 out.push('<h2 id="all-codes">All codes</h2>', '<div class="table-wrap"><table><thead><tr><th>Code</th><th>Meaning</th></tr></thead><tbody>',
-  ...codes.map((c) => `<tr><td><a href="#${c}"><code>${c}</code></a></td><td>${md(meaning.get(c) ?? String(trigger.get(c)).split(/[;(]/)[0].trim())}</td></tr>`), "</tbody></table></div>");
+  ...codes.map((c) => `<tr><td><a href="#${c}"><code>${c}</code></a></td><td>${md(short(c))}</td></tr>`), "</tbody></table></div>");
 
 const toc = [["how-to-read-one", "How to read one"], ["all-codes", "All codes"]];
+const placed = new Set();
 for (const [id, title, test] of FAMILIES) {
-  const list = codes.filter((c) => test(+c.slice(1)));
+  const list = codes.filter(test);
   if (!list.length) continue;
+  list.forEach((c) => placed.add(c));
   toc.push([id, title]);
   out.push(`<h2 id="${id}">${esc(title)}<a class="anchor" href="#${id}" aria-label="Link to this section">#</a></h2>`);
   for (const c of list) {
     const rows = (seen.get(c) ?? []).slice(0, MAX_ROWS);
-    out.push(`<h3 id="${c}"><code>${c}</code> ${md(meaning.get(c) ?? String(trigger.get(c)).split(/[;(]/)[0].trim())}<a class="anchor" href="#${c}" aria-label="Link to ${c}">#</a></h3>`);
+    out.push(`<h3 id="${c}"><code>${c}</code> ${md(short(c))}<a class="anchor" href="#${c}" aria-label="Link to ${c}">#</a></h3>`);
+    out.push(`<p class="tok-dim">Raised by ${md(raisedBy.get(c))}.</p>`);
     out.push(`<p>${md(trigger.get(c))}</p>`);
     if (rows.length) out.push('<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>', ...rows.map((r) => `<tr><td>${md(r.what)}</td><td>${md(r.why)}</td><td>${md(r.fix)}</td></tr>`), "</tbody></table></div>");
-    else out.push('<p class="tok-dim">No compile-fail example: this code comes from the generators or the runtime, not from the macros.</p>');
+    else if (nativeGolden.has(c)) out.push(native(c));
+    else out.push('<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>');
   }
 }
-out.push(`<p class="tok-dim">Generated by <code>site/scripts/build-errors.mjs</code> from <code>docs/SPEC.md</code> section 12 and the compile-fail tests of the macros crate. To change a message, change the macro; to change the catalogue, change the specification.</p>`);
+const lost = codes.filter((c) => !placed.has(c));
+if (lost.length) throw new Error(`codes outside every family: ${lost.join(", ")}`);
+out.push(`<p class="tok-dim">Generated by <code>site/scripts/build-errors.mjs</code> from <code>docs/SPEC.md</code> section 12, the compile-fail tests of the macros crate and the message goldens of the other crates. To change a message, change the code that raises it and regenerate its golden; to change the catalogue, change the specification.</p>`);
 
 const file = join(SITE, "docs", "errors.html");
 let html = read(file);

@@ -42,6 +42,7 @@ use tungstenite::http::StatusCode;
 
 use crate::bridge::{Bridge, ClientInfo};
 use crate::conn::{Conn, Item};
+use crate::resume::{self, Resume, short_token};
 use crate::server::{Shared, ServerConfig};
 use crate::ws::{self, ReadHalf, close};
 use crate::writer;
@@ -105,6 +106,7 @@ pub(crate) struct Session {
     rt: Arc<Runtime>,
     bridge: Arc<Bridge>,
     conn: Arc<Conn>,
+    resume: Arc<Resume>,
     release_on_disconnect: bool,
     busy_grace: Duration,
 }
@@ -114,12 +116,14 @@ impl Session {
         rt: Arc<Runtime>,
         bridge: Arc<Bridge>,
         conn: Arc<Conn>,
+        resume: Arc<Resume>,
         config: &ServerConfig,
     ) -> Session {
         Session {
             rt,
             bridge,
             conn,
+            resume,
             release_on_disconnect: config.release_on_disconnect,
             busy_grace: config.busy_grace,
         }
@@ -178,6 +182,17 @@ impl Session {
             mode: printable(hello.mode),
         };
         self.conn.set_client(info.clone());
+        // A client that is back on a new socket under its old token replaces its own stale one
+        // at once; the claim below then waits for that socket's teardown (which retains its
+        // objects first), not for the keepalive to give up on it.
+        if let Some(request) = self.conn.session() {
+            if self.bridge.evict_session(&request.token, self.conn.id) {
+                self.note(
+                    INFO,
+                    &format!("session {}: replacing its previous connection", request.short()),
+                );
+            }
+        }
         if !self.bridge.claim(&self.conn, self.busy_grace) {
             self.note(
                 INFO,
@@ -189,6 +204,65 @@ impl Session {
                     .to_owned(),
                 noted: true,
             });
+        }
+        self.settle_session(&info)
+    }
+
+    /// Decides what the client finds: its own objects again (it resumed), or a core with none of
+    /// its making (it is new), or neither (it asked for objects that are gone). The slot is
+    /// ours by now.
+    fn settle_session(&self, info: &ClientInfo) -> Result<(), Violation> {
+        let request = self.conn.session().cloned();
+        if let Some(request) = request.as_ref().filter(|r| r.resume) {
+            return match self.resume.take(&request.token) {
+                Some(kept) => {
+                    self.conn.adopt(&kept.handles);
+                    self.note(
+                        INFO,
+                        &format!(
+                            "client reconnected: platform={} mode={} undra={} (session {}, away {:.1} s, {} object(s) kept)",
+                            info.platform,
+                            info.mode,
+                            info.undra_version,
+                            request.short(),
+                            kept.away().as_secs_f32(),
+                            kept.handles.len()
+                        ),
+                    );
+                    Ok(())
+                }
+                None => {
+                    self.note(
+                        WARN,
+                        &format!(
+                            "a client ({}) asked to resume session {}, which this core does not hold (it was restarted, or the session expired): its objects are gone, so it is told to load a new core",
+                            info.platform,
+                            request.short()
+                        ),
+                    );
+                    self.conn.mark_refused();
+                    Err(Violation {
+                        code: close::SESSION_LOST,
+                        reason: format!(
+                            "session lost: this core has no session {} (it was restarted or the session expired); load a new core",
+                            request.short()
+                        ),
+                        noted: true,
+                    })
+                }
+            };
+        }
+        // A new client: whatever the previous one left behind is not coming back.
+        if let Some(gone) = self.resume.supersede() {
+            resume::release_all(&self.rt, &gone.handles);
+            self.note(
+                INFO,
+                &format!(
+                    "released the {} object(s) of the previous client (session {}): a new client attached",
+                    gone.handles.len(),
+                    short_token(&gone.token)
+                ),
+            );
         }
         self.note(
             INFO,
@@ -288,32 +362,44 @@ impl Session {
     }
 
     /// Gives back what the client held: cancels its calls, stops its observations, releases
-    /// the objects its constructors made and fails the port calls it will never answer.
-    /// Idempotent.
+    /// the objects its constructors made (or keeps them for its return, see
+    /// [`resume`](crate::resume)) and fails the port calls it will never answer. Idempotent.
     ///
-    /// Releasing is not something the protocol asks for (no client releases at disconnect and
-    /// none reconnects to reuse a handle), but a dev core outlives many app launches and would
-    /// otherwise keep every launch's stores, observers included, for ever.
+    /// Releasing is not something the protocol asks for (no client releases at disconnect), but
+    /// a dev core outlives many app launches and would otherwise keep every launch's stores,
+    /// observers included, for ever.
     pub(crate) fn teardown(&self) {
         let had_client = self.conn.client().is_some();
+        let session = self.conn.session().cloned();
         let left = self.conn.drain();
         for call_id in &left.calls {
             self.rt.cancel(*call_id);
         }
-        let owned: HashSet<u64> = if self.release_on_disconnect {
+        let attached = self.bridge.is_attached(self.conn.id);
+        // Retained for a client that announced a session and made objects worth coming back to.
+        let retain = attached
+            && had_client
+            && self.release_on_disconnect
+            && self.resume.enabled()
+            && !left.constructed.is_empty();
+        let keep_for = if retain { session.as_ref() } else { None };
+        let owned: HashSet<u64> = if self.release_on_disconnect && keep_for.is_none() {
             left.constructed.iter().copied().collect()
         } else {
             HashSet::new()
         };
+        // Observations stop for everything that outlives the connection: the client observes
+        // again when it comes back, and the core answers with the current values.
         for (handle, signal) in &left.observed {
             if !owned.contains(handle) {
                 self.rt.observe(*handle, *signal, false);
             }
         }
-        for handle in &left.constructed {
-            if self.release_on_disconnect {
-                self.rt.release(*handle);
-            }
+        if let Some(request) = keep_for {
+            let replaced = self.resume.retain(&request.token, left.constructed.clone());
+            resume::release_all(&self.rt, &replaced);
+        } else if self.release_on_disconnect {
+            resume::release_all(&self.rt, &left.constructed);
         }
         for id in &left.port_calls {
             let mut w = Writer::with_capacity(5);
@@ -325,16 +411,24 @@ impl Session {
             .encode(&mut w);
             self.rt.port_reply(w.as_slice());
         }
-        let attached = self.bridge.is_attached(self.conn.id);
+        // Vacated after the retention above: a client waiting in `claim` for this slot (the
+        // same session, back on a new socket) must find the objects when it gets it.
         self.bridge.vacate(self.conn.id);
-        if attached && had_client {
+        if attached && had_client && !self.conn.is_refused() {
+            let objects = if keep_for.is_some() {
+                format!(
+                    "{} object(s) kept for {} s so it can reconnect",
+                    left.constructed.len(),
+                    self.resume.grace().as_secs()
+                )
+            } else if self.release_on_disconnect {
+                format!("{} handles released", left.constructed.len())
+            } else {
+                "0 handles released".to_owned()
+            };
             self.note(
                 INFO,
-                &format!(
-                    "client disconnected ({} calls cancelled, {} handles released)",
-                    left.calls.len(),
-                    if self.release_on_disconnect { left.constructed.len() } else { 0 }
-                ),
+                &format!("client disconnected ({} calls cancelled, {objects})", left.calls.len()),
             );
         }
     }
@@ -379,7 +473,13 @@ fn serve(shared: &Arc<Shared>, id: u64, tcp: TcpStream) {
         conn.abort();
         return;
     }
-    let session = Session::new(shared.rt.clone(), shared.bridge.clone(), conn.clone(), config);
+    let session = Session::new(
+        shared.rt.clone(),
+        shared.bridge.clone(),
+        conn.clone(),
+        shared.resume.clone(),
+        config,
+    );
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         session_loop(shared, &session, tcp, &control, write_tcp, queue);
     }));
@@ -415,6 +515,10 @@ fn session_loop(
         }
     };
     let origin_check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
+        // The session the client announces in the query of its URL (ADR-051).
+        if let Some(request) = resume::parse_query(request.uri().query()) {
+            conn.set_session(request);
+        }
         let origin = request.headers().get("Origin").map(|value| value.to_str());
         let allowed = match origin {
             None => config.origin_policy.allows(None),
@@ -601,7 +705,13 @@ mod tests {
             let (conn, queue) = Conn::new(1, rt.schema_hash(), usize::MAX, None);
             let conn = Arc::new(conn);
             assert!(bridge.claim(&conn, Duration::ZERO));
-            let session = Session::new(rt.clone(), bridge, conn, &ServerConfig::default());
+            let session = Session::new(
+                rt.clone(),
+                bridge,
+                conn,
+                Resume::new(Duration::ZERO),
+                &ServerConfig::default(),
+            );
             Rig {
                 rt,
                 session,

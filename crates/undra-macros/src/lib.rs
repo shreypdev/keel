@@ -57,8 +57,16 @@
 //!   `E::from(PortError)`; one without an error channel panics with a message that names the
 //!   port and how to bind it (E0062).
 //!
-//! One `#[undra::api] impl` block per type: the registration and the dispatcher are named after
-//! the type, so a second block would define them twice.
+//! One `#[undra::api] impl` block per type: the object impl and the `__UNDRA_IS_OBJECT` marker are
+//! defined on the type, so a second block would define them twice. A macro cannot see another
+//! block, so `rustc` finds the second one and the expansion makes its error read as the rule
+//! (`_undra_error_E0007_<Type>_has_two_undra_api_impl_blocks_merge_them_into_one`). The same goes for
+//! a query or mutation written inside an `impl` block that is not `#[undra::api]`: the items it adds
+//! are declared through a `macro_rules!` named after the rule (see `impl_::query`). A function whose
+//! signature names `Self` is reported directly. `SPEC.md` section 16.3 lists these.
+//!
+//! The code table (`impl_::diag`), SPEC section 12, the emitting sites and the goldens are audited
+//! against each other by the integration test `tests/catalogue.rs`.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]

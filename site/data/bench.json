@@ -56,8 +56,8 @@
     },
     {
       "id": "web-size",
-      "operation": "Web core, gzipped wasm",
-      "value": 85,
+      "operation": "Web core, gzipped wasm — over budget, tracked as E5",
+      "value": 135,
       "unit": "KB",
       "budget": 120,
       "budgetUnit": "KB",

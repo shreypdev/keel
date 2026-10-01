@@ -88,9 +88,10 @@ EXAMPLES
     undra bindgen --docs                   include the core's doc comments (see below)
 
 DOC COMMENTS
-    The library's own schema export is the canonical form that the schema hash is computed from, which
-    has no doc comments. --docs runs the core once more to read the full schema, so the generated code
-    carries the same documentation the Rust source has."
+    The core's schema carries the doc comments of the Rust source, and the generated code can carry them
+    too: with --docs every type, field, variant, method and port in the bindings is documented with the
+    text of its `///` comment. Without it the bindings have no doc comments, as before. The schema hash
+    covers neither, so the two outputs have the same hash and the same wire."
     )]
     Bindgen(BindgenArgs),
     /// Build the core for iOS, Android, the web or this machine.
@@ -121,20 +122,27 @@ iOS DEBUG BUILDS
     #[command(
         long_about = "Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a \
 browser tab connects with the `remote` transport of its Undra runtime and uses this core instead of a built-in \
-one: edit Rust, save, and the core is rebuilt and restarted; reload the app to reconnect.\n\n\
-Logs, including the development records of docs/SPEC.md 5.10 (a line per transaction commit, port call \
-and panic), are printed here. Clocks, randomness and logging are answered by this machine because a remote \
-client cannot answer a synchronous port.",
+one: edit Rust, save, and the core is rebuilt and restarted. The apps reconnect by themselves, with backoff, \
+whenever the connection drops (a rebuild, a phone that slept, a restarted adb): nothing to relaunch for a \
+dropped socket. After a rebuild an app finds a new core with none of its objects and loads it afresh (the web \
+playground reloads its page); keeping the state across a rebuild is planned.\n\n\
+Logs, including the development records of docs/SPEC.md 5.10 (a line per transaction commit, port call and \
+panic), are printed here, with a line for each client that connects, reconnects or leaves. Clocks, randomness and \
+logging are answered by this machine because a remote client cannot answer a synchronous port.",
         after_long_help = "\
 EXAMPLES
     undra dev                               listen on 127.0.0.1:7443
+    undra dev --android                     also `adb reverse` the port to every attached Android device
     undra dev --addr 0.0.0.0:7443           reachable from a phone on your network (no authentication!)
     undra dev --no-watch                    build once and serve
 
 CONNECTING
-    web       UndraCore.load({ mode: \"remote\", url: \"ws://127.0.0.1:7443\", expectedSchemaHash })
+    web       UndraCore.load({ mode: \"remote\", url: \"ws://127.0.0.1:7443\", expectedSchemaHash })   (or ?undra=ws://... in the page URL)
     iOS       UNDRA_DEV_URL=ws://<your Mac>:7443 (the generated app reads it in debug builds)
-    Android   the Kotlin runtime has no remote transport on Android yet; use the JVM or the web
+    Android   emulator: ws://10.0.2.2:7443; USB device: `adb reverse tcp:7443 tcp:7443` (or --android), then ws://127.0.0.1:7443;
+              the generated app reads it from the undra_dev_url launch extra, or ./gradlew -PundraDevUrl=... (debug builds only)
+
+The banner prints these with the real port. docs/DEV_LOOP.md has the rest: reconnecting, troubleshooting.
 
 The server has no authentication. Keep the default loopback address unless a device has to reach it."
     )]
@@ -222,7 +230,7 @@ pub struct BindgenArgs {
     #[arg(long)]
     pub check: bool,
 
-    /// Keep the core's doc comments in the bindings (runs the core to read the full schema).
+    /// Keep the core's doc comments in the bindings.
     #[arg(long)]
     pub docs: bool,
 
@@ -259,6 +267,10 @@ pub struct DevArgs {
     /// Log records below this level (0 trace .. 5 fatal) are not printed.
     #[arg(long, value_name = "LEVEL", default_value_t = 1)]
     pub log_level: u8,
+
+    /// Run `adb reverse` for the server's port on every attached Android device or emulator (only the one in ANDROID_SERIAL, when set).
+    #[arg(long)]
+    pub android: bool,
 }
 
 /// Arguments of `undra doctor`.
@@ -345,6 +357,17 @@ mod tests {
         assert_eq!(args.addr, "127.0.0.1:7443");
         assert!(!args.no_watch);
         assert_eq!(args.log_level, 1);
+        assert!(!args.android);
+    }
+
+    #[test]
+    fn dev_android_asks_for_adb_reverse() {
+        let cli =
+            Cli::try_parse_from(["undra", "dev", "--android", "--addr", "127.0.0.1:0"]).unwrap();
+        let Command::Dev(args) = cli.command else {
+            panic!("not dev")
+        };
+        assert!(args.android);
     }
 
     #[test]

@@ -101,7 +101,7 @@ final class FakeServer: UndraAdapter, @unchecked Sendable {
         return .async([
             StandardPorts.Http.request: { args in
                 var reader = UndraReader(args)
-                let request = try PortHttpRequest.undraDecode(&reader)
+                let request = try HttpRequest.undraDecode(&reader)
                 try reader.finish()
                 let route = state.withLock { (current: inout State) -> Route? in
                     current.requests.append(Request(
@@ -117,11 +117,11 @@ final class FakeServer: UndraAdapter, @unchecked Sendable {
                 }
                 switch route?.outcome {
                 case .response(let status, let body)?:
-                    return PortHttpResponse(status: status, headers: [], body: body).undraEncoded()
+                    return HttpResponse(status: status, headers: [], body: body).undraEncoded()
                 case .networkError(let reason)?:
-                    throw UndraPortError(body: PortHttpError.network(reason).undraEncoded())
+                    throw UndraPortError(body: HttpError.network(reason).undraEncoded())
                 case nil:
-                    return PortHttpResponse(status: 404, headers: [], body: []).undraEncoded()
+                    return HttpResponse(status: 404, headers: [], body: []).undraEncoded()
                 }
             },
         ])

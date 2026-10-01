@@ -1,0 +1,19 @@
+error[undra::E0001]: unknown type `User` referenced at record Todo, field owner
+  = note: the schema describes a type by name, so the name must be declared in the same core: a record or enum with `#[undra::api]`, an error with `#[undra::error]`
+  = help: declare `User` with `#[undra::api]`, or fix the name where it is used
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+
+error[undra::E0001]: a Lazy<T> signal at object Feed, signal archive
+  = note: a lazy list needs a runtime API that SPEC section 17 does not define yet, so no platform could observe it
+  = help: expose the items as a `Vec<T>` signal, or as a method that takes an offset and a limit
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+
+error[undra::E0001]: the object `Child` used as a value at record Parent, field child
+  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation
+  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+
+error[undra::E0001]: `unit` at record Todo, field marker: Unit is only allowed as a return type or as a variant with no fields, not as a field, parameter or signal type, nor inside option, vec, map or lazy
+  = note: `()` occupies zero bytes on the wire, and zero-width items defeat length validation: a `Vec` of them would accept any count from a four-byte message
+  = help: remove the value, or use `bool` if you need a marker
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001

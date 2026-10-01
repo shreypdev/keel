@@ -11,6 +11,6 @@ export * from "./version.js";
 export * from "./transport/transport.js";
 export { WasmMainTransport, type WasmMainOptions, type WasmSource } from "./transport/wasm-main.js";
 export { WasmWorkerTransport, type WasmWorkerOptions, type WorkerLike } from "./transport/wasm-worker.js";
-export { RemoteTransport, type RemoteOptions, type WebSocketFactory, type WebSocketLike } from "./transport/remote.js";
+export { RemoteTransport, reconnectDelayMs, type ReconnectOptions, type RemoteOptions, type WebSocketFactory, type WebSocketLike } from "./transport/remote.js";
 export * from "./adapters/index.js";
 export type { UndraClass } from "./lifetime.js";

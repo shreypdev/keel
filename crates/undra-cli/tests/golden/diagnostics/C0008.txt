@@ -1,0 +1,4 @@
+error[undra::C0008]: <dir>/taken already exists and is not empty
+  = note: `undra init` creates a new project and will not write into a directory that has files in it
+  = help: choose another name, or another parent with `--dir`; to add Undra to an existing app use `undra adopt <dir>/taken`
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0008

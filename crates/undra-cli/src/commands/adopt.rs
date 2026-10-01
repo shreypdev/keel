@@ -363,7 +363,7 @@ impl Steps<'_> {
         text.push_str(&format!(
             "5. **Load the core at startup**, before any Undra object exists:\n\n   ```swift\n   import UndraRuntime\n   import {module}\n\n   @main struct MyApp: App {{\n       init() {{\n           do {{ try UndraCore.load(.inproc(expectedSchemaHash: UndraIds.schemaHash)) }}\n           catch {{ fatalError(\"Undra did not start: \\(error)\") }}\n       }}\n       // ...\n   }}\n   ```\n\n   then use the generated store wherever a screen needs it: `@State private var todos = try! Todos()` (a `@MainActor @Observable`\n   class; read its properties in a SwiftUI view).\n"
         ));
-        text.push_str("6. **Optional, for `undra dev`:** add `NSAppTransportSecurity > NSAllowsLocalNetworking = YES` to the Info.plist so the app may connect to\n   `ws://` on your network, and pass `.remote(url: \"ws://<your Mac>:7443\", ...)` to `UndraCore.load` in debug builds.\n\n");
+        text.push_str("6. **Optional, for `undra dev`:** add `NSAppTransportSecurity > NSAllowsLocalNetworking = YES` to the Info.plist so the app may connect to\n   `ws://` on your network, and pass `.remote(url: \"ws://<your Mac>:7443\", ...)` to `UndraCore.load` in debug builds. The runtime reconnects by itself (`core.connectionState`); when `undra dev` restarts the core it reports `.closed(.sessionLost)` and the app loads a new core.\n\n");
         text
     }
 
@@ -455,6 +455,7 @@ impl Steps<'_> {
             "3. **Load the core once per process**, in your `Application` subclass (register it with `android:name` in the manifest):\n\n   ```kotlin\n   import {package}.UndraIds\n   import dev.undra.runtime.UndraCore\n   import dev.undra.runtime.LoadOptions\n\n   class App : Application() {{\n       override fun onCreate() {{\n           super.onCreate()\n           UndraCore.load(LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH))\n       }}\n   }}\n   ```\n\n   then `val todos = Todos()` (a generated store; its `StateFlow` properties work with `collectAsState()`).\n"
         ));
         text.push_str("4. **Shrinking.** If you minify, keep the natives the library registers by name: `-keep class dev.undra.runtime.UndraNative { *; }` and\n   `-keep class dev.undra.runtime.UndraNative$Callbacks { *; }`.\n\n");
+        text.push_str("5. **Optional, for `undra dev`:** in debug builds pass `mode = Mode.REMOTE, remoteUrl = \"ws://10.0.2.2:7443\"` (the emulator's name for your computer; a USB device uses `adb reverse tcp:7443 tcp:7443`\n   and `ws://127.0.0.1:7443`, which `undra dev --android` sets up) to `LoadOptions`, and allow cleartext traffic and the `INTERNET` permission in a **debug-only** manifest\n   (`app/src/debug/AndroidManifest.xml`: `<uses-permission android:name=\"android.permission.INTERNET\" />` and `<application android:usesCleartextTraffic=\"true\" />`).\n   The runtime reconnects by itself (`core.connectionState`); when `undra dev` restarts the core it reports `Closed(SESSION_LOST)` and the app loads a new core.\n\n");
         text
     }
 

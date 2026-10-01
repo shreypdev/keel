@@ -5,6 +5,9 @@ pub struct Point {
 impl Point {
     /// The stable Undra type id: `fnv1a32` of the type name.
     pub const UNDRA_TYPE_ID: u32 = ::undra_runtime::meta::ids::type_id("Point");
+    /// The names of the fields, in declaration order (see `undra_meta::keys`).
+    #[doc(hidden)]
+    pub const __UNDRA_FIELDS: &'static [&'static str] = &["x", "y"];
 }
 #[automatically_derived]
 impl ::undra_runtime::wire::Encode for Point {

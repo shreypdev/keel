@@ -251,30 +251,63 @@ fn references_resolve_to_the_runtimes_types() {
     assert!(!text(&kotlin).contains("class HttpRequest"));
     assert!(!text(&kotlin).contains("class HttpError"));
 
-    // Swift: the runtime keeps seven of the eight internal, so what is referenced is declared
-    // (and only that); `AppState` is the runtime's public `UndraAppState`.
+    // Swift: `UndraRuntime` exports all eight, so they are referenced and none is declared;
+    // `AppState` is the runtime's `UndraAppState`.
     let types = file(&swift, "Types.swift");
-    assert!(types.contains("public struct HttpRequest:"));
-    assert!(types.contains("public struct Header:"));
-    assert!(types.contains("public enum HttpMethod:"));
-    assert!(types.contains("var app: UndraAppState?"));
-    assert!(!text(&swift).contains("enum AppState"));
+    assert!(types.contains("public var request: HttpRequest"), "{types}");
+    assert!(types.contains("public var kind: NetKind"), "{types}");
+    assert!(types.contains("var app: UndraAppState?"), "{types}");
+    for declared in [
+        "struct HttpRequest",
+        "struct HttpResponse",
+        "struct Header",
+        "enum HttpMethod",
+        "enum NetKind",
+        "enum HttpError",
+        "enum FsError",
+        "enum AppState",
+    ] {
+        assert!(!text(&swift).contains(declared), "{declared} is declared");
+    }
     assert!(!text(&swift).contains("AppState?") || text(&swift).contains("UndraAppState?"));
+    // What refers to a standard error decodes it with the runtime's own type, which is an
+    // `UndraError` (`UndraCallError.mapped(_:domain:)`).
+    assert!(
+        file(&swift, "Objects.swift").contains("domain: HttpError.self"),
+        "{}",
+        file(&swift, "Objects.swift")
+    );
+    // The `Codable` a record derives survives holding a standard type: the runtime's records
+    // are `Codable`, so `Endpoint` (a request, a response and a list of methods and headers) is.
+    assert!(
+        types.contains("public struct Endpoint: UndraRecord, Sendable, Hashable, Codable"),
+        "{types}"
+    );
 }
 
 #[test]
-fn swift_declares_only_the_standard_types_something_refers_to() {
-    // Only `Header` and what it needs: nothing refers to the other seven.
+fn no_language_declares_a_standard_type_something_refers_to() {
+    // Swift used to declare each standard type that something referred to, because its runtime
+    // kept them internal (ADR-024); the runtime exports all eight now, so the three languages
+    // agree: reference, never declare.
     let mut schema = standard_schema("app-core");
     schema.records.push(record(
         "Banner",
         "",
         vec![field("lines", TypeRef::vec(named("Header")))],
     ));
+    schema.records.push(record(
+        "Call",
+        "",
+        vec![field("request", named("HttpRequest"))],
+    ));
     let generator = Generator::for_crate("app-core");
     let swift = text(&generator.swift(&schema).unwrap());
-    assert!(swift.contains("public struct Header:"));
+    assert!(swift.contains("public struct Banner:"));
+    assert!(swift.contains("public var lines: [Header]"), "{swift}");
+    assert!(swift.contains("public var request: HttpRequest"), "{swift}");
     for absent in [
+        "struct Header",
         "struct HttpRequest",
         "struct HttpResponse",
         "enum HttpMethod",
@@ -285,26 +318,27 @@ fn swift_declares_only_the_standard_types_something_refers_to() {
     ] {
         assert!(!swift.contains(absent), "{absent} is declared");
     }
-    // A type that is referenced pulls in the types it refers to.
-    let mut schema = standard_schema("app-core");
-    schema.records.push(record(
-        "Call",
-        "",
-        vec![field("request", named("HttpRequest"))],
-    ));
-    let swift = text(&generator.swift(&schema).unwrap());
-    for present in [
-        "struct Call:",
-        "struct HttpRequest:",
-        "struct Header:",
-        "enum HttpMethod:",
-    ] {
-        assert!(swift.contains(present), "{present} is missing");
-    }
-    assert!(!swift.contains("struct HttpResponse"));
     // TypeScript and Kotlin import the ones that are used and declare none of them.
     let ts = text(&generator.typescript(&schema).unwrap());
     assert!(ts.contains("type HttpRequest,") && !ts.contains("interface HttpRequest"));
+    let kotlin = text(&generator.kotlin(&schema).unwrap());
+    assert!(kotlin.contains("import dev.undra.runtime.adapters.HttpRequest"));
+    assert!(!kotlin.contains("class HttpRequest"));
+}
+
+#[test]
+fn a_swift_app_type_that_only_shares_a_standard_name_is_still_the_apps_own() {
+    // `Header { text }` is not the standard `Header` (another shape), so it is generated, in the
+    // app's module, where it shadows the runtime's public `Header`.
+    let mut schema = standard_schema("app-core");
+    schema.records.retain(|r| r.name != "Header");
+    schema
+        .records
+        .push(record("Header", "", vec![field("text", TypeRef::String)]));
+    let generator = Generator::for_crate("app-core");
+    let swift = text(&generator.swift(&schema).unwrap());
+    assert!(swift.contains("public struct Header:"), "{swift}");
+    assert!(swift.contains("public var text: String"), "{swift}");
 }
 
 #[test]

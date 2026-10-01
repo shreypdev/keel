@@ -63,9 +63,22 @@ or TypeScript") that answers for `https://playground.undra.test`, and an Offline
 it fail every request and tells the core through the `Connectivity` port, so you can watch the offline queue
 hold an optimistic add and replay it.
 
-`undra dev -C examples/playground` serves the core over a WebSocket: start an app against it (web:
-`?undra=ws://127.0.0.1:7443`; iOS: the `UNDRA_DEV_URL` environment variable) and edit `core/` to see the
-change without rebuilding the app.
+`undra dev -C examples/playground` serves the core over a WebSocket: start an app against it and edit `core/` to see
+the change without rebuilding the app (`docs/DEV_LOOP.md` is the whole story; `undra dev` prints these with the
+real port):
+
+| App | Against `undra dev` |
+|---|---|
+| web | `?undra=ws://127.0.0.1:7443` in the page URL (or `VITE_UNDRA_DEV_URL`) |
+| iOS simulator | `SIMCTL_CHILD_UNDRA_DEV_URL=ws://127.0.0.1:7443 xcrun simctl launch booted dev.undra.playground`, or `UNDRA_DEV_URL` in the scheme |
+| Android emulator | `adb shell am start -n dev.undra.playground/.MainActivity --es undra_dev_url ws://10.0.2.2:7443` |
+| Android USB device | `undra dev --android` (it runs `adb reverse tcp:7443 tcp:7443`), then `--es undra_dev_url ws://127.0.0.1:7443` |
+
+Edit a Rust function, save, and each app reconnects by itself and starts over on the rebuilt core (the web page
+reloads; the native apps load the new core and rebuild their screens). A thin bar at the top shows what the
+connection is doing: green connected, amber reconnecting, red over. A dropped connection (the laptop slept, adb
+restarted) resumes the same objects with their state; `.proof/dev-loop/` has screenshots of the Android app doing
+both. State is not kept across a *rebuild* yet.
 
 ## The stress screen
 
@@ -97,7 +110,19 @@ The blueprint's section 14 budget rows are measured against one store, `Bench`
 | 1 KB record, round trip | `Bench.bench_echo_bytes(data)` with 1,024 bytes |
 | Change-set with 100 dirty signals, applied on the main thread | `Bench.bench_touch_signals(100)` |
 | Keyed patch on a 10,000-item list, one insert | `Bench.bench_list_insert(i)`, then `bench_list_reset()` to start over |
-| Core cold start with a snapshot restore | `BigList` or `Bench` (about 250 KB of state each) through `snapshot` / `restore` |
+| Core cold start with a snapshot restore | `BigList` or `Bench` (about 250 KB of state each) through `snapshot` / `restore`; the device bench restores 1,000 to-dos of 80 characters (100 KB) |
+| ADR-031 drain: 1,667 one-update keyed patches in one frame | `Bench.bench_list_update_burst(1667)`: one transaction, so one change-set, per update |
+
+### The device bench
+
+The three apps run these hooks themselves, through the generated bindings and the platform's mirror, when asked to:
+`scripts/bench-device.sh --device ios|android|web` builds the core and the app for the target, drives it with the
+harness its smoke test uses and writes `bench/results/device/<date>-<target>.json` and the device tables of
+`bench/RESULTS.md`. The app side is `web/src/bench/` (a separate page, `bench.html`, run by `npm run bench`),
+`ios/PlaygroundApp/Bench/` (the app starts in benchmark mode with `-bench full`; `PlaygroundBenchTests` is the
+XCUITest, skipped unless `TEST_RUNNER_UNDRA_BENCH=1`) and `android/app/src/main/kotlin/.../bench/` (an instrumented
+test, `BenchInstrumentedTest`, over a `benchmark` build type: release, not debuggable, signed with the debug key).
+`bench/RESULTS.md` ("Device numbers") says how every row is timed and what the labels mean.
 
 ## Contract tests
 

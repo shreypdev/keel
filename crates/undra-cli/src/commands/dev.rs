@@ -2,8 +2,8 @@
 //!
 //! The core runs in the dev runner (a child process, see [`crate::runner`]); this command builds
 //! it, starts it, watches the core's sources and, on a change, rebuilds and swaps the running
-//! runner for the new one on the same address, so a client only has to reconnect. While a rebuild
-//! is failing the old core keeps serving: a typo does not take the app down.
+//! runner for the new one on the same address; the clients reconnect by themselves (ADR-051).
+//! While a rebuild is failing the old core keeps serving: a typo does not take the app down.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher};
 
+use crate::adb;
 use crate::cli::DevArgs;
+use crate::config::Platform;
 use crate::error::{CliError, Code, Result};
 use crate::runner::{self, RunnerEvent, Running};
 use crate::session::Session;
@@ -65,10 +67,14 @@ pub fn run(env: &Env<'_>, args: &DevArgs) -> Result<()> {
     } else {
         Some(watch(&core.local_dirs, tx.clone())?)
     };
-    announce(&session, &url, &hash, args, &core.local_dirs, false);
+    announce(&session, &url, &hash, args, &core.local_dirs, None);
     // A port of 0 asked the OS to choose; keep that port across restarts so clients find the
     // server where they left it.
     addr = socket_of(&url).unwrap_or(addr);
+    let mut hash = hash;
+    if args.android {
+        reverse_android(&session, &url);
+    }
 
     loop {
         match rx.recv() {
@@ -104,7 +110,18 @@ pub fn run(env: &Env<'_>, args: &DevArgs) -> Result<()> {
                         }
                         let (new_url, new_hash) = running.1.clone();
                         url = new_url;
-                        announce(&session, &url, &new_hash, args, &core.local_dirs, true);
+                        announce(
+                            &session,
+                            &url,
+                            &new_hash,
+                            args,
+                            &core.local_dirs,
+                            Some(&hash),
+                        );
+                        hash = new_hash;
+                        if args.android {
+                            reverse_android(&session, &url);
+                        }
                     }
                     Err(e) => {
                         ui.warn(&format!(
@@ -277,21 +294,47 @@ fn is_source(path: &Path) -> bool {
     ) || name == "Cargo.lock"
 }
 
-/// Prints the banner: where to connect and how.
+/// The host and port of a `ws://host:port` URL's socket.
+fn port_of(url: &str) -> Option<u16> {
+    socket_of(url)?.rsplit(':').next()?.parse().ok()
+}
+
+/// Whether the project has an Android app (the Android lines of the banner are for it).
+fn has_android(session: &Session<'_>) -> bool {
+    session
+        .project
+        .config
+        .platforms
+        .contains(&Platform::Android)
+}
+
+/// How an Android emulator reaches this server: `10.0.2.2` is the emulator's name for the host's
+/// loopback interface, so the port is all that carries over.
+fn emulator_url(url: &str) -> Option<String> {
+    Some(format!("ws://10.0.2.2:{}", port_of(url)?))
+}
+
+/// Prints the banner: where to connect and how. `previous` is the schema hash of the core that
+/// ran before, on a restart.
 fn announce(
-    _session: &Session<'_>,
+    session: &Session<'_>,
     url: &str,
     hash: &str,
     args: &DevArgs,
     watched: &[PathBuf],
-    restarted: bool,
+    previous: Option<&str>,
 ) {
     let say = |s: &str| println!("{s}");
-    if restarted {
+    if let Some(before) = previous {
         say("");
         say(&format!(
-            "Restarted: {url}  (schema hash {hash}); reload the app to reconnect"
+            "Restarted: {url}  (schema hash {hash}); connected apps reconnect by themselves"
         ));
+        if before != hash {
+            say(&format!(
+                "  The schema changed (was {before}): an app built from the old bindings reports a schema mismatch and stops. Run `undra bindgen`, rebuild the app, relaunch it."
+            ));
+        }
         return;
     }
     say("");
@@ -301,9 +344,22 @@ fn announce(
     say("");
     say(&format!("  schema hash   {hash}"));
     say(
-        "  web           UndraCore.load({ mode: \"remote\", url, expectedSchemaHash: UndraIds.schemaHash })",
+        "  web           UndraCore.load({ mode: \"remote\", url, expectedSchemaHash: UndraIds.schemaHash })  or ?undra=<url> in the page URL",
     );
     say("  iOS           launch the app with UNDRA_DEV_URL set to the URL above");
+    if has_android(session) {
+        if let (Some(emulator), Some(port)) = (emulator_url(url), port_of(url)) {
+            say(&format!("  Android       emulator  {emulator}"));
+            say(&format!(
+                "                device    adb reverse tcp:{port} tcp:{port}  (`undra dev --android` runs it), then {}",
+                url.replace("0.0.0.0", "127.0.0.1")
+            ));
+            say(&format!(
+                "                launch    adb shell am start -n {}/.MainActivity --es undra_dev_url {emulator}",
+                session.project.config.id
+            ));
+        }
+    }
     say("  JVM           LoadOptions(mode = REMOTE, remoteUrl = url)");
     if args.addr.starts_with("0.0.0.0") || args.addr.starts_with("[::]") {
         say(
@@ -311,6 +367,7 @@ fn announce(
         );
     }
     say("");
+    say("Apps reconnect by themselves when the connection drops or the core is rebuilt.");
     if args.no_watch {
         say("Serving. Press Ctrl-C to stop.");
     } else {
@@ -324,6 +381,37 @@ fn announce(
         ));
     }
     say("");
+}
+
+/// `undra dev --android`: `adb reverse` for the server's port on every attached device, and a
+/// line each about what happened (a device that is not ready, or none at all, is not an error:
+/// the emulator does not need it).
+fn reverse_android(session: &Session<'_>, url: &str) {
+    let Some(port) = port_of(url) else { return };
+    let only = session.sys.env("ANDROID_SERIAL");
+    let result = adb::reverse_all(session.sys, &session.toolchain, port, only.as_deref());
+    for done in &result.reversed {
+        match &done.result {
+            Ok(()) => println!(
+                "adb reverse   {}: tcp:{port} reaches this server (ws://127.0.0.1:{port} on the device)",
+                done.serial
+            ),
+            Err(why) => session
+                .ui
+                .warn(&format!("adb reverse failed for {}: {why}", done.serial)),
+        }
+    }
+    for device in &result.not_ready {
+        session.ui.warn(&format!(
+            "{} is {}: `adb reverse` was skipped (unlock it and accept the debugging prompt, then save a file or restart `undra dev`)",
+            device.serial, device.state
+        ));
+    }
+    if let Some(problem) = &result.problem {
+        session.ui.warn(&format!(
+            "--android: {problem}. An emulator does not need it: it reaches this server at ws://10.0.2.2:{port}."
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -359,5 +447,17 @@ mod tests {
             Some("127.0.0.1:7443")
         );
         assert_eq!(socket_of("http://x"), None);
+    }
+
+    #[test]
+    fn the_port_and_the_emulator_address_come_from_the_url() {
+        assert_eq!(port_of("ws://127.0.0.1:7443"), Some(7443));
+        assert_eq!(port_of("ws://[::1]:9000"), Some(9000));
+        assert_eq!(port_of("http://x:1"), None);
+        assert_eq!(
+            emulator_url("ws://127.0.0.1:7443").as_deref(),
+            Some("ws://10.0.2.2:7443")
+        );
+        assert_eq!(emulator_url("nonsense"), None);
     }
 }

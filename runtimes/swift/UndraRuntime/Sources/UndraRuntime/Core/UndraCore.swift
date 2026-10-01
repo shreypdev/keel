@@ -14,6 +14,7 @@
 //    running a port method).
 
 import Dispatch
+import Foundation
 
 /// One attachment to a Rust core. Load one at startup and pass it (or leave it as
 /// `UndraCore.shared`) to the generated bindings.
@@ -41,6 +42,17 @@ public final class UndraCore: @unchecked Sendable {
         var liveObjects = 0
         var isShutDown = false
         var schemaHash: UInt64 = 0
+        /// What the connection is doing (``UndraCore/connectionState``).
+        var connection: UndraConnectionState = .connecting
+        var watchers: [UUID: AsyncStream<UndraConnectionState>.Continuation] = [:]
+        /// The signals the app observes, per store: observed again after a reconnect (ADR-051).
+        var observed: [UndraHandle: Set<UInt32>] = [:]
+        /// The objects the app's constructors made and it has not released: what the server is asked to keep for it.
+        var constructed: Set<UndraHandle> = []
+        /// Handles released while the connection was down: released at the server once it is back.
+        var releasedWhileDown: Set<UndraHandle> = []
+        /// Counts the times the connection was lost, so that a replay that a newer loss overtook does not announce a connection.
+        var lossEpoch = 0
     }
 
     private static let sharedSlot = Guarded<UndraCore?>(nil)
@@ -56,10 +68,15 @@ public final class UndraCore: @unchecked Sendable {
     /// main actor, merged, once per display frame. `register(handle) { signal, op, reader in ... }`.
     public let mirror: Mirror
 
+    /// The connection state, for SwiftUI: an `@Observable` object updated on the main actor (ADR-051).
+    /// ``connectionState`` is the same news for any thread.
+    public let connection: UndraConnection
+
     let transport: any UndraTransport
     private let state: Guarded<State>
     private let blockingTimeout: Double
     private let onError: (@Sendable (UndraUnhandledError) -> Void)?
+    private let onConnectionChange: (@Sendable (UndraConnectionState) -> Void)?
     private let deferredQueue = DispatchQueue(label: "dev.undra.runtime.deferred")
 
     /// True while `onError` runs on this task or thread, so a handler that makes a failing call
@@ -73,13 +90,29 @@ public final class UndraCore: @unchecked Sendable {
         isShutDown: Bool = false,
         maxPendingEntries: Int = Mirror.defaultMaxPendingEntries,
         maxPendingBytes: Int = Mirror.defaultMaxPendingBytes,
-        frameScheduler: (any FrameScheduler)? = nil
+        frameScheduler: (any FrameScheduler)? = nil,
+        onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil
     ) {
         self.transport = transport
         self.mirror = Mirror(maxPendingEntries: maxPendingEntries, maxPendingBytes: maxPendingBytes, scheduler: frameScheduler)
         self.blockingTimeout = blockingCallTimeout
         self.onError = onError
-        self.state = Guarded<State>(State(isShutDown: isShutDown))
+        self.onConnectionChange = onConnectionChange
+        var initial = State(isShutDown: isShutDown)
+        if isShutDown {
+            initial.connection = .closed(.requested)
+        }
+        let observable = UndraConnection()
+        self.connection = observable
+        self.state = Guarded<State>(initial)
+        if isShutDown {
+            // The placeholder `shared` returns: its observable says so too, not `.connecting`.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    observable.state = .closed(.requested)
+                }
+            }
+        }
         mirror.setResyncHandler { [weak self] handle, signal in
             self?.resync(handle, signal: signal)
         }
@@ -103,7 +136,11 @@ public final class UndraCore: @unchecked Sendable {
         case .inproc:
             transport = InprocTransport()
         case .remote(let url):
-            transport = try WebSocketTransport(urlString: url)
+            transport = try WebSocketTransport(
+                urlString: url,
+                reconnect: options.reconnect,
+                session: UUID().uuidString
+            )
         }
         let core = try connect(transport: transport, options: options)
         sharedSlot.withLock { (slot: inout UndraCore?) -> Void in
@@ -164,8 +201,10 @@ public final class UndraCore: @unchecked Sendable {
             onError: options.onError,
             maxPendingEntries: options.maxPendingEntries,
             maxPendingBytes: options.maxPendingBytes,
-            frameScheduler: frameScheduler
+            frameScheduler: frameScheduler,
+            onConnectionChange: options.onConnectionChange
         )
+        options.onConnectionChange?(.connecting)
         let startOptions = TransportStartOptions(
             platform: UndraCore.platformName,
             logLevel: options.logLevel,
@@ -181,6 +220,7 @@ public final class UndraCore: @unchecked Sendable {
             current.schemaHash = info.schemaHash
         }
         core.install(options.adapters)
+        core.setConnectionState(.connected)
         return core
     }
 
@@ -218,6 +258,74 @@ public final class UndraCore: @unchecked Sendable {
     public var schemaHash: UInt64 {
         return state.withLock { (current: inout State) -> UInt64 in
             return current.schemaHash
+        }
+    }
+
+    /// What the connection to the core is doing (ADR-051). A remote core is `.reconnecting` while `undra dev` is
+    /// unreachable: calls fail at once with ``UndraCallError/unavailable(_:)``, and what was in flight when the
+    /// connection dropped failed with it. When it is `.connected` again every store the app observes has been
+    /// observed again, so the mirrors converge on the core's current values by themselves. `.closed` is final.
+    public var connectionState: UndraConnectionState {
+        return state.withLock { (current: inout State) -> UndraConnectionState in
+            return current.connection
+        }
+    }
+
+    /// The connection state now, then every change, ending after `.closed`. For code that is not a SwiftUI view
+    /// (see ``connection`` for those).
+    public func connectionStates() -> AsyncStream<UndraConnectionState> {
+        return AsyncStream { continuation in
+            let id = UUID()
+            let current = state.withLock { (current: inout State) -> UndraConnectionState in
+                if case .closed = current.connection {
+                    return current.connection
+                }
+                current.watchers[id] = continuation
+                return current.connection
+            }
+            continuation.yield(current)
+            if case .closed = current {
+                continuation.finish()
+            }
+            continuation.onTermination = { [weak self] _ in
+                self?.state.withLock { (current: inout State) -> Void in
+                    current.watchers[id] = nil
+                }
+            }
+        }
+    }
+
+    /// Records a new connection state and tells whoever listens.
+    func setConnectionState(_ next: UndraConnectionState) {
+        let watchers = state.withLock { (current: inout State) -> [AsyncStream<UndraConnectionState>.Continuation]? in
+            if current.connection == next {
+                return nil
+            }
+            if case .closed = current.connection {
+                return nil // final
+            }
+            current.connection = next
+            let list = Array(current.watchers.values)
+            if case .closed = next {
+                current.watchers = [:]
+            }
+            return list
+        }
+        guard let watchers = watchers else {
+            return
+        }
+        for watcher in watchers {
+            watcher.yield(next)
+            if case .closed = next {
+                watcher.finish()
+            }
+        }
+        onConnectionChange?(next)
+        let observable = connection
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                observable.state = next
+            }
         }
     }
 
@@ -433,6 +541,9 @@ public final class UndraCore: @unchecked Sendable {
         if handle.isNull {
             throw UndraProtocolError.nullHandle
         }
+        state.withLock { (current: inout State) -> Void in
+            current.constructed.insert(handle)
+        }
         return handle
     }
 
@@ -477,6 +588,19 @@ public final class UndraCore: @unchecked Sendable {
         if isShutDown {
             return
         }
+        // Remembered, so that a reconnect observes it again (a call made while reconnecting is not lost either).
+        state.withLock { (current: inout State) -> Void in
+            if on {
+                current.observed[handle, default: []].insert(signal)
+            } else if signal == Observe.allSignals {
+                current.observed[handle] = nil
+            } else {
+                current.observed[handle]?.remove(signal)
+                if current.observed[handle]?.isEmpty == true {
+                    current.observed[handle] = nil
+                }
+            }
+        }
         mirror.withImmediateDrain {
             transport.observe(handle: handle, signal: signal, on: on)
         }
@@ -488,7 +612,19 @@ public final class UndraCore: @unchecked Sendable {
         if isShutDown {
             return
         }
-        transport.release(handle: handle)
+        let reconnecting = state.withLock { (current: inout State) -> Bool in
+            current.observed[handle] = nil
+            current.constructed.remove(handle)
+            if case .reconnecting = current.connection {
+                // The server keeps the object for us (ADR-051); it is released when the connection is back.
+                current.releasedWhileDown.insert(handle)
+                return true
+            }
+            return false
+        }
+        if !reconnecting {
+            transport.release(handle: handle)
+        }
     }
 
     /// Sends a host-to-core event of an event port (`Connectivity.changed`, `Lifecycle.changed`).
@@ -554,6 +690,11 @@ public final class UndraCore: @unchecked Sendable {
     /// `UndraTransportError.closed`, and (in process) shuts the core down. Idempotent. After it,
     /// a new core can be loaded.
     public func shutdown() {
+        closeForGood(.requested, failing: UndraTransportError.closed)
+    }
+
+    /// Ends this core for good for `reason`, failing what is in flight with `error`.
+    private func closeForGood(_ reason: UndraClosedReason, failing error: any Error) {
         let adapters = state.withLock { (current: inout State) -> [any UndraAdapter]? in
             if current.isShutDown {
                 return nil
@@ -566,10 +707,11 @@ public final class UndraCore: @unchecked Sendable {
         guard let adapters = adapters else {
             return
         }
+        setConnectionState(.closed(reason))
         for adapter in adapters {
             adapter.detach()
         }
-        failAllPending(UndraTransportError.closed)
+        failAllPending(error)
         transport.shutdown()
         mirror.invalidateScheduler()
         UndraCore.sharedSlot.withLock { (slot: inout UndraCore?) -> Void in
@@ -747,6 +889,9 @@ public final class UndraCore: @unchecked Sendable {
     /// already shut: both are `UndraTransportError.closed`, as for a call in flight when the
     /// connection went. Otherwise the in-process core refused it (`rejection()`).
     private func notSent() -> any Error {
+        if case .reconnecting = connectionState {
+            return UndraTransportError.connectionLost(reason: "the dev server is unreachable; reconnecting")
+        }
         if transport.mode == .remote || isShutDown {
             return UndraTransportError.closed
         }
@@ -923,7 +1068,81 @@ extension UndraCore: UndraInbound {
     }
 
     func onDisconnect(_ error: any Error) {
-        failAllPending(error)
+        let reason: UndraClosedReason
+        if let mismatch = error as? UndraSchemaMismatchError {
+            reason = .schemaMismatch(expected: mismatch.expected, got: mismatch.got)
+        } else if error is UndraSessionLostError {
+            reason = .sessionLost
+        } else {
+            reason = .failed(String(describing: error))
+        }
+        closeForGood(reason, failing: error)
+    }
+
+    func onReconnecting(attempt: Int, error: any Error) {
+        let proceed = state.withLock { (current: inout State) -> Bool in
+            if current.isShutDown {
+                return false
+            }
+            if attempt == 1 {
+                current.lossEpoch += 1
+            }
+            return true
+        }
+        guard proceed else {
+            return
+        }
+        if attempt == 1 {
+            failAllPending(UndraTransportError.connectionLost(reason: "\(error); reconnecting"))
+        }
+        setConnectionState(.reconnecting(attempt: attempt))
+    }
+
+    func onReconnected() {
+        let epoch = state.withLock { (current: inout State) -> Int in
+            return current.lossEpoch
+        }
+        // On a queue of ours: the transport's callback must not call back into it.
+        deferToQueue { [self] in
+            self.observeAgain(epoch: epoch)
+        }
+    }
+
+    func holdsObjects() -> Bool {
+        return state.withLock { (current: inout State) -> Bool in
+            return !current.constructed.isEmpty
+        }
+    }
+
+    /// The connection is back: release what was released meanwhile and observe what the app observes again. The core
+    /// answers each observation with the current values, so every mirror converges by itself.
+    private func observeAgain(epoch: Int) {
+        let work = state.withLock { (current: inout State) -> (released: [UndraHandle], observed: [(UndraHandle, [UInt32])])? in
+            if current.isShutDown || current.lossEpoch != epoch {
+                return nil
+            }
+            return (Array(current.releasedWhileDown), current.observed.map { ($0.key, Array($0.value)) })
+        }
+        guard let work = work else {
+            return
+        }
+        for handle in work.released {
+            transport.release(handle: handle)
+        }
+        state.withLock { (current: inout State) -> Void in
+            current.releasedWhileDown.subtract(work.released)
+        }
+        for (handle, signals) in work.observed {
+            for signal in signals {
+                transport.observe(handle: handle, signal: signal, on: true)
+            }
+        }
+        let stillCurrent = state.withLock { (current: inout State) -> Bool in
+            return !current.isShutDown && current.lossEpoch == epoch
+        }
+        if stillCurrent {
+            setConnectionState(.connected)
+        }
     }
 
     /// Fails one call with `error` (for a reply that cannot be decoded).

@@ -37,9 +37,13 @@
 //! * The client's `Hello` `mode` decides whether it receives development-mode records
 //!   (SPEC 5.10): `"dev"` gets them, anything else does not. Kotlin and Swift always send
 //!   `"dev"`; TypeScript sends it when its `devtools` option is on.
-//! * There is no reconnection in any client: a closed socket fails what is in flight and the
-//!   app loads a new core. So a *new* connection is a new session, and the server ends the
-//!   old one's calls and observations (and by default releases its objects) when it closes.
+//! * The clients **reconnect by themselves** (ADR-051): a closed socket fails what is in flight
+//!   and the client connects again with backoff, then observes its stores again. A connection
+//!   is a *session* only if its URL says so (`?undra_session=<token>`): the server ends a
+//!   connection's calls and observations when it closes, and releases its objects too, unless
+//!   [`ServerConfig::resume_grace`] keeps them for a client that comes back with the same token
+//!   (`&undra_resume=1`). A client that asks to resume objects the server no longer holds (the
+//!   core was restarted) is answered with [`close::SESSION_LOST`]; it has to load a new core.
 //!
 //! # Which thread runs a call
 //!
@@ -81,6 +85,7 @@ native_server! {
     mod conn;
     mod error;
     mod origin;
+    mod resume;
     mod server;
     mod session;
     mod tracker;

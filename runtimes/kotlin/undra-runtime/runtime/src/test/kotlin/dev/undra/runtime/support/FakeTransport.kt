@@ -1,5 +1,6 @@
 package dev.undra.runtime.support
 
+import dev.undra.runtime.UndraException
 import dev.undra.runtime.UndraModeException
 import dev.undra.runtime.Mode
 import dev.undra.runtime.PortOutcome
@@ -63,6 +64,28 @@ internal class FakeTransport(
     @Volatile var onRestore: (() -> Unit)? = null
     @Volatile var restoreResult: Int = 0
     @Volatile var connectFailure: RuntimeException? = null
+
+    /** `false` while the fake plays a remote core that is unreachable: everything the host sends fails like a remote transport's. */
+    @Volatile var up = true
+
+    private fun requireUp() {
+        if (!up) throw UndraException("not connected to the fake dev server: reconnecting")
+    }
+
+    /** The connection drops and the (pretend) transport starts reconnecting: attempt 1 is the loss. */
+    fun drop(cause: Throwable = UndraException("the fake connection was lost")) {
+        up = false
+        events.onReconnecting(1, cause)
+    }
+
+    /** A reconnect attempt failed; the transport tries again. */
+    fun retry(attempt: Int, cause: Throwable = UndraException("the fake server is still down")) = events.onReconnecting(attempt, cause)
+
+    /** The connection is back. */
+    fun reconnect() {
+        up = true
+        events.onReconnected()
+    }
 
     /** The thread a real core would call back from. */
     private val coreThread = Executors.newSingleThreadExecutor { r -> Thread(r, "fake-core").also { it.isDaemon = true } }
@@ -136,6 +159,7 @@ internal class FakeTransport(
     }
 
     override fun call(payload: ByteArray): Int {
+        requireUp()
         callFailure?.let { throw it }
         val call = Payloads.Call.decode(payload)
         calls.add(call)
@@ -151,20 +175,24 @@ internal class FakeTransport(
     }
 
     override fun cancel(callId: UInt) {
+        requireUp()
         cancels.add(callId)
     }
 
     override fun streamCredit(callId: UInt, credit: UInt) {
+        requireUp()
         credits.add(callId to credit)
         producers[callId]?.grant(credit)
     }
 
     override fun observe(handle: Long, signalId: UInt, on: Boolean) {
+        requireUp()
         observes.add(Triple(handle, signalId, on))
         onObserve(handle, signalId, on)
     }
 
     override fun release(handle: Long) {
+        requireUp()
         releases.add(handle)
     }
 

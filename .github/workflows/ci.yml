@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# The Rust version is pinned, not "stable": the compile-fail goldens (trybuild) quote rustc's
+# wording and the bench budgets are baselined on one compiler, so a new stable release must land
+# as a deliberate commit that bumps every `rust-toolchain@` line here, in bench.yml, release.yml
+# and site.yml together, regenerates the goldens (TRYBUILD=overwrite) and re-baselines the
+# budgets. 1.99.0 (2026-10-01) is the first one waiting: it renames `fetch_update`
+# (already replaced by `cas_update`) and rewords const-eval panics.
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
@@ -15,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
@@ -30,6 +36,8 @@ jobs:
         run: cargo fmt --check
       - name: Shared wire vectors (the Swift copy matches contract-tests/wire-vectors.json)
         run: bash runtimes/swift/scripts/sync-vectors.sh --check
+      - name: Device bench report (RESULTS.md's device tables are what the result files say; the blueprint targets match)
+        run: node --test scripts/bench-device-report.test.mjs
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
@@ -38,8 +46,8 @@ jobs:
         run: cargo clippy -p undra-ffi --target wasm32-unknown-unknown -- -D warnings
       - name: C ABI acceptance (undra.h with -Werror; the host contract under ASan)
         run: UNDRA_C_SANITIZE=1 bash crates/undra-ffi/tests/c/run.sh
-      - name: Loaded cdylib keeps its schema + JNI exports (ADR-029 regression)
-        run: cargo test -p undra-cli --test schema_retention -- --ignored --nocapture
+      - name: Loaded cdylib keeps its schema + JNI exports (ADR-029 regression), and its docs equal the dev runner's
+        run: cargo test -p undra-cli --test schema_retention --test schema_docs -- --ignored --nocapture
       - name: Docs
         run: cargo doc --workspace --no-deps
         env:
@@ -83,7 +91,7 @@ jobs:
           mkdir -p "$HOME/lib"
           curl -sSfLo "$HOME/lib/kotlinx-coroutines-core-jvm-1.6.4.jar" \
             https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
       - name: Build the JNI library
         run: cargo build -p undra-ffi --features jni
@@ -99,7 +107,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
@@ -119,17 +127,19 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
       - name: Swift tests
         working-directory: runtimes/swift/UndraRuntime
         run: swift test
+      - name: Generated Swift compiles against the runtime (every golden case; ADR-024 amendment)
+        run: UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-bindgen --test typecheck_swift
       - name: Swift-over-C-ABI acceptance
         run: bash crates/undra-ffi/tests/swift/run.sh
       - name: C ABI acceptance (undra.h with -Werror; the host contract under ASan)
         run: UNDRA_C_SANITIZE=1 bash crates/undra-ffi/tests/c/run.sh
-      - name: Loaded cdylib keeps its schema + JNI exports (ADR-029 regression, macOS dead-strip)
-        run: cargo test -p undra-cli --test schema_retention -- --ignored --nocapture
+      - name: Loaded cdylib keeps its schema + JNI exports (ADR-029 regression, macOS dead-strip), and its docs equal the dev runner's
+        run: cargo test -p undra-cli --test schema_retention --test schema_docs -- --ignored --nocapture
       - name: iOS cross-build (device + simulator)
         run: |
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim
@@ -141,7 +151,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
         with:
           targets: aarch64-linux-android, x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
@@ -195,7 +205,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
@@ -229,7 +239,7 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
       - name: Run the Swift scenario runner
         run: bash contract-tests/run-all.sh swift

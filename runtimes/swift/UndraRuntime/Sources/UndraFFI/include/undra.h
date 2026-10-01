@@ -126,7 +126,7 @@ typedef void (*undra_stream_cb)(void *user, uint32_t call_id, const uint8_t *ptr
 
 uint32_t undra_abi_version(void);                       /* 1 */
 uint64_t undra_schema_hash(void);
-UndraBuf  undra_schema_json(void);                       /* owned copy */
+UndraBuf  undra_schema_json(void);                       /* owned copy of the whole schema as JSON, doc comments included (SPEC 2.3) */
 uint32_t undra_init(const uint8_t *cfg, uint32_t len, undra_reply_cb reply, undra_changeset_cb changes, undra_stream_cb stream, void *user); /* idempotent per process; cfg = encoded RuntimeConfig record; returns 0 ok */
 void     undra_shutdown(void);                          /* not from a callback; waits for running port callbacks (contract 5); init may follow */
 uint32_t undra_call(const uint8_t *ptr, uint32_t len);  /* Call payload (SPEC 3.3); returns 0 accepted, 5 bad request. Reply via reply_cb. Works for sync and async methods. */

@@ -42,8 +42,11 @@
   "include": [
     "src",
     "smoke",
+    "bench",
     "vite.config.ts",
+    "vite.bench.config.ts",
     "vitest.config.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "playwright.bench.config.ts"
   ]
 }
