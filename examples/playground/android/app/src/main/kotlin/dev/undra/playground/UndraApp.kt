@@ -36,8 +36,16 @@ class UndraApp : Application() {
     /** Sends `Connectivity.changed` to the core; the Remote tab calls it with the Offline switch. */
     val connectivity: ConnectivityEvents by lazy { ConnectivityEvents(UndraCore.shared) }
 
+    /**
+     * How long `UndraCore.load` took in this process, in nanoseconds: the first load, which loads `libundra_core.so`,
+     * starts the core and checks the schema. The device benchmark (`bench/BenchRunner`) reports it as the cold start.
+     */
+    var coreLoadNanos: Long = 0L
+        private set
+
     override fun onCreate() {
         super.onCreate()
+        val loadStarted = System.nanoTime()
         UndraCore.load(
             LoadOptions(
                 expectedSchemaHash = UndraIds.SCHEMA_HASH,
@@ -48,6 +56,7 @@ class UndraApp : Application() {
                 mirror = MirrorOptions(framePacer = ChoreographerFramePacer()),
             ),
         )
+        coreLoadNanos = System.nanoTime() - loadStarted
         // Where the remote lists live: every request of the core goes to this address through the Http port.
         configureRemote(RemoteConfig(baseUrl = DemoServer.BASE_URL))
     }

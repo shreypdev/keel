@@ -86,6 +86,8 @@ Every suite is local; nothing needs the network after install.
 | Distribution: the curl installer against a served release (checksums, tampering, platforms) | `bash packaging/test-install.sh` | all checks pass |
 | Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` | pass |
 | Benchmarks (numbers for humans) | `cargo bench -p undra-bench` | see `bench/RESULTS.md` |
+| Device bench: the blueprint rows through the generated binding and the mirror, on a simulator, emulator, browser or phone | `scripts/bench-device.sh --device ios`, `--device android` (boots the `undra` AVD if nothing is attached; `--target <serial>` for a phone), `--device web`; add `--quick` to check the plumbing in seconds | writes `bench/results/device/<date>-<target>.json` and the device tables of `bench/RESULTS.md`; needs the iOS simulator + Xcode, the Android SDK + NDK, or Playwright's Chromium (`cd examples/playground/web && npx playwright install chromium`) |
+| Device bench report (CI runs it) | `node --test scripts/bench-device-report.test.mjs` | 14 pass |
 
 Gotcha worth knowing: the C harness builds `undra-ffi` **without** the `jni` feature and
 overwrites `target/debug/libundra_ffi.dylib`. If you run the Kotlin JNI leg afterwards,
