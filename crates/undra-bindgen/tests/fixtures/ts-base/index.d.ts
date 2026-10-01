@@ -28,6 +28,18 @@ export interface LoadOptions {
   readonly expectedSchemaHash: bigint;
 }
 
+/** Addition (ADR-044): what `UndraCore.attach` and a generated entry's `attach` take. */
+export interface AttachOptions {
+  readonly adapters?: Readonly<Record<string, PortImpl>>;
+  readonly expectedSchemaHash: bigint;
+  readonly shared?: boolean;
+}
+
+/** Addition (ADR-044): a transport a host provides (React Native's `NativeTransport`, a test double). */
+export interface Transport {
+  readonly mode: string;
+}
+
 export interface UndraStats {
   readonly liveHandles: number;
 }
@@ -65,6 +77,12 @@ export declare class UndraCore {
   static get shared(): UndraCore;
   /** Addition (ADR-032, amendment A): the loaded shared core, or `null`. */
   static get current(): UndraCore | null;
+  /** Addition (ADR-044): runs a core over a transport the caller provides. */
+  static attach(transport: Transport, options: AttachOptions): Promise<UndraCore>;
+  /** Addition (ADR-044): the closed placeholder a generated entry's `core` is while its core is not loaded. */
+  static get unloaded(): UndraCore;
+  /** Whether the core was closed. */
+  readonly closed: boolean;
   callSync(target: CallTargetRef, methodId: number, args: Uint8Array): Uint8Array;
   call(target: CallTargetRef, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array>;
   stream(target: CallTargetRef, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array>;

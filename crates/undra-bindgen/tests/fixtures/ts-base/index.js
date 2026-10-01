@@ -45,6 +45,23 @@ export class UndraCore {
   static get current() {
     return null;
   }
+
+  static load() {
+    return Promise.reject(new Error("no core to load in this test"));
+  }
+
+  static attach() {
+    return Promise.reject(new Error("no core to attach in this test"));
+  }
+
+  /** The closed placeholder (ADR-044): what a generated entry's `core` is while nothing is loaded. */
+  static get unloaded() {
+    throw new Error("no core is loaded in this test; pass one explicitly");
+  }
+
+  get closed() {
+    return false;
+  }
 }
 
 export class UndraObject {

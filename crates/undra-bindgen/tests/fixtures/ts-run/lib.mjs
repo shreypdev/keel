@@ -16,7 +16,7 @@ export async function setup(pkg) {
   const load = loader(pkg);
   const rt = await load("node_modules/@undra/runtime/index.js");
   const modules = {};
-  for (const name of ["types", "errors", "objects", "stores", "ports", "queries", "ids"]) {
+  for (const name of ["types", "errors", "objects", "stores", "ports", "queries", "ids", "core"]) {
     modules[name] = await load(`dist/${name}.js`);
   }
   return { rt, ...modules, UndraIds: modules.ids.UndraIds };
