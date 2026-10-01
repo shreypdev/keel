@@ -9,7 +9,7 @@
 //!   time past its deadline, so timing tests are exact and instant;
 //! * `spawn_blocking` runs its closure on a **real pool thread**, like a native runtime, so a
 //!   closure that writes signals (forbidden: it does not hold the core lock) fails in a test
-//!   exactly as it does in a native debug build. [`run_pending`](TestRuntime::run_pending),
+//!   exactly as it does natively (E0065, in every build since ADR-035). [`run_pending`](TestRuntime::run_pending),
 //!   [`run_until`](TestRuntime::run_until) and [`advance`](TestRuntime::advance) wait for the
 //!   closures to finish and run the tasks they wake, so a test sees their results without
 //!   waiting by hand.

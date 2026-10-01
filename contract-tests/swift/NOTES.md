@@ -65,7 +65,11 @@ identities, "will be escalated to an error").
   may arrive. The generator (`Stress.start(mode: .firehose, perSecond: 1_000)`) is shown running before
   the shutdown by its Clock calls and, with the manual clock moved on by a second, by `generated > 0`. The
   200 ms window is measured from the moment `shutdown()` returned (the readings are taken then), so it
-  includes step 6's checks.
+  includes step 6's checks. The window alone cannot show a task of the old core that kept running (the
+  shutdown retires the port registrations and detaches the adapters first, so its calls are answered
+  "unavailable" and its host timers never fire), so the step also reads `undra_stats_json()` with no core
+  loaded and requires `runtime_threads == 0` after each shutdown (review of runtime-lifecycle: a mutant
+  whose shutdown only released the global slot passed the window and the reload; it fails here).
 * **Commands are asserted through `onError`.** A generated command (a synchronous method that returns
   nothing and has no error type: `Counter.increment()`, `Probe.reset()`) does not throw; it reports to
   `LoadOptions.onError` (ADR-032). `Fixture` installs a handler that records every `UndraUnhandledError`

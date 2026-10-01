@@ -3,10 +3,10 @@
 //!
 //! * **Native**: up to `min(4, cores)` worker threads (or `RuntimeConfig::blocking_threads`),
 //!   started on demand, named `undra-blocking-N`, alive until shutdown.
-//! * **wasm and test runtimes**: there is no thread to run on, so `f` runs **inline,
-//!   synchronously, inside the `spawn_blocking` call**, and the returned future is already
-//!   complete. Code that is correct on wasm therefore never relies on the pool for
-//!   concurrency.
+//! * **wasm**: there is no thread to run on, so `f` runs **inline, synchronously, inside the
+//!   `spawn_blocking` call**, and the returned future is already complete. Code that is correct
+//!   on wasm therefore never relies on the pool for concurrency. (Test runtimes use the real
+//!   pool, ADR-023, so a test sees the native rules.)
 //!
 //! The closure runs with the runtime installed as current on its thread, so `Ctx::current()`
 //! works, but *without the core lock*: it must not write signals or call the host entry

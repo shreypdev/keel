@@ -362,9 +362,12 @@ List `s14`; the server serves `[]`. A handle observes it.
    adapters receive). Then `UndraCore.load` with the same options succeeds again in the same process
    (Kotlin: `close()` reached the JNI `UndraNative.shutdown`; Swift: `undra_shutdown`), `stats()` of the
    new core reports no live handles, the generated `add(1, 2) == 3` runs on it, for 200 ms its Clock
-   adapter receives no call (the new core runs no timer-paced task; a task that survived the shutdown
-   would still be reading the Clock, and on Kotlin, whose transport detaches before the native shutdown,
-   this is where it would show), and it closes cleanly.
+   adapter receives no call (the new core runs no timer-paced task), and it closes cleanly. After each
+   close, the native core reports no thread of its own still running: with no core loaded,
+   `undra_stats_json` (Kotlin `UndraNative.statsJson()`) says `runtime_threads == 0`. That is the check
+   that sees a task which survived the shutdown: its port calls never reach the runner's adapters (Kotlin
+   detaches the transport first; the native shutdown retires the port registrations and the Swift
+   adapters are detached), so the windows alone cannot.
 
 **wasm (TypeScript)** — the shipped wasm profile aborts on panic (SPEC section 7), so containment means
 the host survives and recovers:

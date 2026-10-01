@@ -114,3 +114,15 @@ the final verification.
 * The Swift contract harness's `ManualClock` answered `monotonic_ns` in milliseconds; fixed (nanoseconds).
 * The playground's `Counter`, `Probe` and bench stores still keep a strong `Ctx` field; `shutdown` breaks those
   cycles (ADR-023), and none of them runs a task. Converting them is an R10 polish item.
+
+## After review
+
+The adversarial review (`.10x/reviews/2026-10-01-runtime-lifecycle-review.md`) changed what S17.7 proves. The
+sentence above that the fresh core's 200 ms Clock window is "where a surviving task would show" was wrong: a task of
+the old runtime calls through the old runtime's host (the detached Kotlin callbacks, or C-ABI registrations the
+shutdown retired), never through the fresh core's, so neither window could fail; a shutdown mutant that only released
+the global slot passed all 18 scenarios on Kotlin and Swift. With no core loaded, `undra_stats_json` (JNI
+`statsJson()`) now reports `runtime_threads`, and both runners require 0 after every close; the mutant fails S17 on
+both. The review also converted the playground's `Counter`, `Bench` (no context) and `Probe` (a `WeakCtx`), and
+recorded in SPEC 5.1 that a `Ctx` held across an await (an async method's parameter, a port proxy) pins the runtime
+until the await completes (the `lc1_*` call fixture holds none).

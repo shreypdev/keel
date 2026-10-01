@@ -1498,6 +1498,72 @@ fn many_threads_call_sync_and_async_at_once() {
     host.cap.with(|inner| assert!(inner.replies.is_empty()));
 }
 
+/// Review (runtime-lifecycle, surface 1): `undra_shutdown` is what the JNI `shutdown` native runs
+/// (`session::stop`, ADR-034). Here it races host threads that are inside `undra_call`,
+/// `undra_call_sync`, `undra_stream_credit`, `undra_cancel` and `undra_stats_json`, and a second
+/// `undra_shutdown` on another thread; then a third thread starts a new core. Nothing crashes
+/// (Miri runs this too), every call is answered at most once, and the new core works.
+#[test]
+fn shutdown_racing_host_threads_and_a_second_shutdown_answers_each_call_at_most_once() {
+    use std::sync::atomic::AtomicBool;
+    let host = Embedder::start();
+    let calc = host.calculator(0);
+    let stop = Arc::new(AtomicBool::new(false));
+    let workers: Vec<_> = (0..3_u32)
+        .map(|n| {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                let mut i = 0_u32;
+                while !stop.load(Ordering::SeqCst) {
+                    let id = 1_000_000 + n * 100_000 + i;
+                    let args = [1_i64.encode_to_vec(), 2_i64.encode_to_vec()].concat();
+                    let (status, _) = sync_call(
+                        &call_payload(method(calc, "Calculator", "add"), id, &args),
+                        id,
+                    );
+                    assert!(
+                        matches!(status, ReplyStatus::Ok | ReplyStatus::BadRequest),
+                        "{status:?}"
+                    );
+                    let id = id + 50_000;
+                    let _ = submit(&call_payload(method(calc, "Calculator", "never"), id, &[]));
+                    undra_stream_credit(id, 1);
+                    if i % 2 == 0 {
+                        undra_cancel(id);
+                    }
+                    take(undra_stats_json());
+                    i += 1;
+                }
+                i
+            })
+        })
+        .collect();
+    std::thread::sleep(StdDuration::from_millis(5));
+    let second = std::thread::spawn(|| undra_shutdown());
+    undra_shutdown();
+    second.join().expect("the second shutdown returned");
+    stop.store(true, Ordering::SeqCst);
+    for worker in workers {
+        worker.join().expect("a host thread survived the shutdown");
+    }
+    assert!(Runtime::global().is_none());
+    // At most one reply per call id, whoever answered it (the call, a cancel or the shutdown).
+    host.cap.with(|inner| {
+        let mut ids: Vec<u32> = inner.replies.iter().map(|(id, _)| *id).collect();
+        let total = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), total, "a call was answered twice");
+    });
+    // A new core, started from another thread, works.
+    let cap = host.cap.clone();
+    let code = std::thread::spawn(move || init_raw(&config("inproc", 2), &cap))
+        .join()
+        .unwrap();
+    assert_eq!(code, init_code::OK);
+    assert_eq!(host.sync(function("version"), &[]).0, ReplyStatus::Ok);
+}
+
 #[test]
 fn shutdown_with_calls_in_flight_returns_and_leaves_no_thread_behind() {
     let host = Embedder::start();
@@ -1507,6 +1573,11 @@ fn shutdown_with_calls_in_flight_returns_and_leaves_no_thread_behind() {
     }
     undra_shutdown();
     assert!(Runtime::global().is_none());
+    // Nothing of the core is left running: its threads were joined (ADR-034), and the stats of
+    // "no runtime" say so, which is what the Kotlin and Swift contract runners check after close.
+    let stats: serde_json::Value = serde_json::from_slice(&take(undra_stats_json())).unwrap();
+    assert_eq!(stats["initialized"], false);
+    assert_eq!(stats["runtime_threads"], 0, "{stats}");
     // The registrations were dropped with the runtime and a fresh one starts cleanly.
     assert_eq!(init_raw(&config("inproc", 2), &host.cap), init_code::OK);
     assert_eq!(host.sync(function("version"), &[]).0, ReplyStatus::Ok);

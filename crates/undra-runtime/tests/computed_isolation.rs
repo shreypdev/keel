@@ -4,6 +4,7 @@
 
 use std::any::Any;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use undra_meta::{DispatchCall, DispatchOutcome, ObjectMeta, Registration, ids};
 use undra_runtime::testing::{ReplyRecord, TestRuntime};
@@ -18,6 +19,8 @@ struct Gauge {
     level: Signal<i32>,
     label: Signal<String>,
     ratio: Computed<i32>,
+    /// How often `ratio`'s closure ran.
+    evaluations: Arc<AtomicUsize>,
 }
 
 impl Gauge {
@@ -25,7 +28,12 @@ impl Gauge {
         let cell = StoreCell::new(<Gauge as UndraObject>::TYPE_ID);
         let level = Signal::new(level);
         let label = Signal::new(String::from("gauge"));
-        let ratio = Computed::new(&level, |level: &i32| 100 / level);
+        let evaluations = Arc::new(AtomicUsize::new(0));
+        let counted = evaluations.clone();
+        let ratio = Computed::new(&level, move |level: &i32| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            100 / level
+        });
         cell.attach(&level, LEVEL).unwrap();
         cell.attach(&label, LABEL).unwrap();
         cell.attach_computed(&ratio, RATIO).unwrap();
@@ -34,6 +42,7 @@ impl Gauge {
             level,
             label,
             ratio,
+            evaluations,
         }
     }
 }
@@ -202,4 +211,49 @@ fn pc1_observing_a_store_whose_computed_fails_delivers_everything_else() {
     assert_eq!(stat(&t, "poisoned_signals"), 1);
     call(&t, handle, SET_LEVEL, &5_i32.encode_to_vec());
     assert_eq!(delivered(&t), vec![vec![LEVEL, RATIO]]);
+}
+
+/// Review (runtime-lifecycle, surface 4): the amendment says a failed computed "is evaluated again
+/// when one of its inputs changes". The graph has no equality check, so writing the input the value
+/// it already has (a no-op write) is a change: the computed is evaluated again, still fails, stays
+/// held back, and is **not** reported a second time; the input itself is delivered.
+#[test]
+fn a_no_op_write_to_a_failed_computeds_input_evaluates_it_again_without_a_second_report() {
+    let t = TestRuntime::new();
+    let handle = t.runtime().insert_store(Arc::new(Gauge::new(1)));
+    t.runtime().observe(handle.0, ALL_SIGNALS, true);
+    let gauge = t.runtime().object::<Gauge>(handle.0).unwrap();
+    call(&t, handle, SET_LEVEL, &0_i32.encode_to_vec());
+    delivered(&t);
+    let errors = |t: &TestRuntime| {
+        t.host()
+            .take_logs()
+            .into_iter()
+            .filter(|l| l.level >= undra_runtime::log::ERROR)
+            .count()
+    };
+    assert_eq!(errors(&t), 1, "the failure is reported once");
+    let evaluations = gauge.evaluations.load(Ordering::SeqCst);
+
+    // The same value again.
+    let reply = call(&t, handle, SET_LEVEL, &0_i32.encode_to_vec());
+    assert_eq!(reply.status, ReplyStatus::Ok, "{reply:?}");
+    assert_eq!(
+        delivered(&t),
+        vec![vec![LEVEL]],
+        "the input is delivered, the computed is not"
+    );
+    assert_eq!(
+        gauge.evaluations.load(Ordering::SeqCst),
+        evaluations + 1,
+        "a write is a change for the graph: evaluated once more"
+    );
+    assert!(gauge.cell().is_failed(RATIO));
+    assert_eq!(errors(&t), 0, "no second report for the same failure");
+    assert_eq!(stat(&t, "poisoned_signals"), 1);
+
+    // An unrelated write does not evaluate it at all.
+    call(&t, handle, SET_LABEL, &"x".to_owned().encode_to_vec());
+    assert_eq!(delivered(&t), vec![vec![LABEL]]);
+    assert_eq!(gauge.evaluations.load(Ordering::SeqCst), evaluations + 1);
 }

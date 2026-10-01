@@ -360,7 +360,7 @@ impl StreamState {
 
 /// How the runtime is assembled; `Runtime::init` and `Runtime::new` use the defaults.
 pub(crate) struct BuildOptions {
-    /// No core thread, a manual clock and inline blocking: the test runtime.
+    /// No core thread and a manual clock (the blocking pool is real): the test runtime.
     pub manual: bool,
     /// Run the [`InitHook`]s.
     pub run_hooks: bool,

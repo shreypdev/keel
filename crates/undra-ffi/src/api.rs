@@ -330,14 +330,20 @@ pub(crate) fn restore(payload: &[u8]) -> u32 {
     )
 }
 
-/// `undra_stats_json`.
+/// `undra_stats_json`. With no runtime the document also says how many threads started by
+/// `undra-runtime` are still running in the process (`runtime_threads`): `0` once a shutdown has
+/// joined them, which is how a host checks that closing ended the core's work (ADR-034) rather
+/// than only detaching from it.
 pub(crate) fn stats_json() -> String {
     guarded(
         "undra_stats_json",
         |_| "{\"initialized\":false,\"panicked\":true}".to_owned(),
         || match runtime() {
             Some(rt) => rt.stats_json(),
-            None => "{\"initialized\":false,\"live_handles\":0}".to_owned(),
+            None => format!(
+                "{{\"initialized\":false,\"live_handles\":0,\"runtime_threads\":{}}}",
+                undra_runtime::testing::live_threads()
+            ),
         },
     )
 }

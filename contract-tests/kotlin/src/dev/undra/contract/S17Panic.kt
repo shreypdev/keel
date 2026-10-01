@@ -9,6 +9,7 @@ import dev.undra.playground.core.explodeLater
 import dev.undra.playground.core.failLater
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.UndraException
+import dev.undra.runtime.UndraNative
 import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.wire.Payloads.ReplyStatus
 import java.util.concurrent.CompletableFuture
@@ -106,8 +107,14 @@ fun s17Panic(w: World) {
     check("closed" in (closedCommand.message ?: "")) { "increment on a store of the shut-down core failed with $closedCommand, not as closed" }
     counter.close()
 
-    // 7, second half: closing ended the core's work (ADR-034). For 200 ms after the shutdown no port call reaches
-    // the adapters (the generator task above would read the Clock every 10 ms) ...
+    // 7, second half: closing ended the core's work (ADR-034), not only detached this host from it. The native
+    // core says so itself: with no runtime loaded, `undra_stats_json` counts the threads `undra-runtime` started that
+    // are still running, and a shutdown joins them (the `undra-core` thread that ran the generator above, the timer
+    // thread that paced it). The port-call windows below cannot show a surviving task on Kotlin: the transport
+    // detaches before the native shutdown, so a task of the old core that kept running would call into the old,
+    // detached callbacks and never reach the adapters, and its sleeps run on the core's own timer thread. (Review of
+    // runtime-lifecycle: a shutdown that only released the global slot passed both windows and the reload.)
+    awaitUntil("the old core's threads to exit after close") { runtimeThreadsLeft() == 0L }
     var portCallsSeen = portCallsAtShutdown
     try {
         holdsFor("the port calls the adapters received after the shutdown", 200) {
@@ -125,12 +132,22 @@ fun s17Panic(w: World) {
         check(fresh !== w.core) { "UndraCore.load after the shutdown returned the closed core" }
         expectEq("live_handles of the fresh core", 0L, fresh.readStats().liveHandles)
         expectEq("add(1, 2) on the fresh core", 3, add(1, 2, fresh))
-        // The fresh core runs no timer-paced task, so its Clock adapter stays quiet. On Kotlin this is the check with
-        // teeth: the transport detached before the shutdown, so a task that survived it would only show up here, as
-        // Clock calls through the fresh core's callbacks.
+        // The fresh core runs no timer-paced task, so its Clock adapter stays quiet.
         val clockOnFresh = w.portCalls.count("Clock")
         holdsFor("the Clock calls the adapters received on the fresh core", 200) { w.portCalls.count("Clock") == clockOnFresh }
     } finally {
         fresh.close()
     }
+    awaitUntil("the fresh core's threads to exit after close") { runtimeThreadsLeft() == 0L }
+}
+
+/**
+ * The threads `undra-runtime` started that still run in this process, as the native library reports them while no
+ * core is loaded (`runtime_threads` of `UndraNative.statsJson()`); fails if a core is loaded.
+ */
+private fun runtimeThreadsLeft(): Long {
+    val raw = UndraNative.statsJson()
+    val doc = Json.parseObject(raw)
+    check(doc["initialized"] == false) { "a native core is still loaded after close: $raw" }
+    return doc["runtime_threads"] as? Long ?: fail("the statistics of no core carry no runtime_threads: $raw")
 }

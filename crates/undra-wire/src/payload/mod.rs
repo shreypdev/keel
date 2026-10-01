@@ -708,6 +708,35 @@ mod tests {
         for cut in 0..body.len() {
             assert!(StreamFailure::decode(&mut Reader::new(&body[..cut])).is_err());
         }
+        // Review (runtime-lifecycle, surface 5): every status byte, not a sample of them.
+        for tag in 0..=u8::MAX {
+            let mut any = body.clone();
+            any[0] = tag;
+            let decoded = StreamFailure::decode(&mut Reader::new(&any));
+            match ReplyStatus::from_u8(tag).filter(|s| StreamFailure::allows(*s)) {
+                Some(status) => assert_eq!(decoded.map(|f| f.status), Ok(status), "{tag}"),
+                None => assert!(
+                    matches!(
+                        decoded,
+                        Err(WireError::InvalidTag {
+                            at: 0,
+                            ty: "StreamFailure.status",
+                            ..
+                        })
+                    ),
+                    "{tag}: {decoded:?}"
+                ),
+            }
+        }
+        // A message or detail that is not UTF-8 is refused, at the offending byte.
+        let mut bad_detail = Writer::new();
+        bad_detail.write_u8(ReplyStatus::Panic.as_u8());
+        bad_detail.write_str("boom");
+        bad_detail.write_bytes(&[0xff, 0xfe]);
+        assert_eq!(
+            StreamFailure::decode(&mut Reader::new(bad_detail.as_slice())),
+            Err(WireError::InvalidUtf8 { at: 13 })
+        );
     }
 
     #[test]

@@ -74,9 +74,12 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
   never by an adapter. The fresh core is loaded with the same `LoadOptions` (the same adapter instances), and its
   `add(1, 2)` gets the fresh core explicitly. It hydrates the query cache from the `Kv` contents S12 to S14 left, so
   `Kv` calls start again after the reload. That is the new core's own work, and it is why the quiet window ends
-  before the load. Because the transport detaches first, the window after `close()` cannot fail on the JVM; the
-  check with teeth is the last one: for 200 ms on the fresh core the `Clock` count must not move (a generator that
-  survived the shutdown would read the Clock through the fresh core's callbacks every 10 ms).
+  before the load. Because the transport detaches first, neither port-call window can show a task of the old core
+  that kept running: its calls go to the old, detached callbacks (never the fresh core's), and its sleeps run on the
+  core's own timer thread. The check with teeth is the native core's own report: once `close()` returned,
+  `UndraNative.statsJson()` (no core loaded) must say `runtime_threads == 0`, the `undra-core`, timer and blocking
+  threads joined; the same after the fresh core's close. (Review of runtime-lifecycle: a mutant whose shutdown only
+  released the global slot, leaving the generator running, passed both windows and the reload; it fails here.)
 * S16: the order (S16 first) is described above. Step 2 ("a subsequent load succeeds") is the load every other
   scenario uses.
 

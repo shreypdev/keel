@@ -346,6 +346,12 @@ extension ContractScenarios {
             }
             try check(late.isEmpty, "port calls reached the adapters in the 200 ms after the shutdown: \(late.joined(separator: ", "))")
             try check(callsAfter == callsAtShutdown, "port calls reached the adapters after the shutdown: \(callsAtShutdown) then \(callsAfter)")
+            // The window above cannot show a task of the old core that kept running: the shutdown
+            // retires the port registrations and detaches the adapters first, so its calls would be
+            // answered "unavailable" and its host timers would never fire. The core says itself
+            // that its threads were joined (review of runtime-lifecycle: a shutdown that only
+            // released the global slot passed this window and the reload below).
+            try await waitUntil("the old core's threads to exit after the shutdown") { try runtimeThreadsLeft() == 0 }
 
             // A new load in the same process starts a fresh core: no live handles, calls answered,
             // and it closes cleanly. (S18 runs after this scenario and loads the core once more.)
@@ -361,8 +367,20 @@ extension ContractScenarios {
             try checkEqual(portCalls.count(StandardPorts.Clock.portId), clockOnFresh, "Clock calls the adapters received on the new core")
             fresh.shutdown()
             try check(fresh.isShutDown, "the new core is not shut down")
+            try await waitUntil("the new core's threads to exit after its shutdown") { try runtimeThreadsLeft() == 0 }
             try check(UndraCore.current == nil, "the new core is still the shared one after its shutdown")
             try checkThrows({ try PlaygroundCore.add(a: 1, b: 2, ctx: fresh) }, UndraCallError.unavailable(.closed), "add(1, 2) on the new core after its shutdown")
         }
     }
+}
+
+/// The threads `undra-runtime` started that still run in this process, as `undra_stats_json`
+/// reports them while no core is loaded (`runtime_threads`); throws if a core is loaded.
+private func runtimeThreadsLeft() throws -> Int {
+    let buffer = undra_stats_json()
+    defer { undra_buf_free(buffer) }
+    let bytes = Data(bytes: try require(buffer.ptr, "undra_stats_json output"), count: Int(buffer.len))
+    let doc = try require(try JSONSerialization.jsonObject(with: bytes) as? [String: Any], "a stats object")
+    try check((doc["initialized"] as? Bool) == false, "a core is still loaded after the shutdown: \(doc)")
+    return try require((doc["runtime_threads"] as? NSNumber)?.intValue, "runtime_threads in \(doc)")
 }

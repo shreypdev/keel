@@ -285,7 +285,9 @@ impl Drop for Flight {
 /// An object that reports how the core saw the calls made on it: what cancellation and stream
 /// backpressure do inside the core, which no amount of watching from the platform can show.
 pub struct Probe {
-    ctx: Ctx,
+    /// Weak (ADR-034): the object table the runtime owns holds the probe, so a `Ctx` here would
+    /// keep the runtime alive; a call upgrades it for as long as the call runs.
+    ctx: WeakCtx,
     shared: Arc<Shared>,
 }
 
@@ -294,7 +296,7 @@ impl Probe {
     /// A probe with every counter at zero.
     pub fn new(ctx: Ctx) -> Self {
         Probe {
-            ctx,
+            ctx: ctx.downgrade(),
             shared: Arc::new(Shared::default()),
         }
     }
@@ -310,7 +312,11 @@ impl Probe {
     /// Waits `ms` milliseconds and returns it. Cancelled before that, it counts as cancelled.
     pub async fn wait(&self, ms: u32) -> u32 {
         let flight = Flight::take_off(&self.shared);
-        self.ctx.sleep(Duration::from_millis(u64::from(ms))).await;
+        // A strong `Ctx` for this call only. The runtime is running while it dispatches the call,
+        // so the upgrade succeeds; if it went since, the shutdown answers the call anyway.
+        if let Ok(ctx) = self.ctx.upgrade() {
+            ctx.sleep(Duration::from_millis(u64::from(ms))).await;
+        }
         flight.land();
         ms
     }
