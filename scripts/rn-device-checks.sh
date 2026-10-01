@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
-# The React Native playground app's on-device checks (RN01..RN10, examples/playground/rn/src/checks.ts) on the
-# iOS simulator and an Android emulator or phone: build the core and the Release app, install it, launch it, and
-# wait for the app's own verdict line in the device log,
+# The React Native playground app's on-device checks on the iOS simulator and an Android emulator or phone: build
+# the core and the Release app, install it, launch it, and wait for the app's own verdict line in the device log,
 #
-#     UNDRA-RN CHECKS 10/10 passed
+#     UNDRA-RN CHECKS 16/16 passed            RN01..RN10, the boundary; RN11..RN16, the default ports through the
+#                                             core (examples/playground/rn/src/checks.ts, ADR-038 amendment B)
 #
-# which is the only thing that counts: the process exits 0 only when every check passed, and prints the CHECK
-# lines (and the device-log tail when it did not). The .github/workflows/rn-devices.yml jobs run exactly this.
+# then drive what only the outside of the app can do, each a CHECK line of its own (ADR-038 amendment B, B10):
+#
+#     RN17  SecureStore: the app's secret is not in its files as plain text, while a Kv marker written next to it is
+#           (the scan works): the simulator's data container, or /data/data/<package> through `su` on Android
+#     RN18  Kv survives the process: the app is killed and relaunched, and reads the token the first launch wrote
+#     RN19  Lifecycle: the core sees `background` (Home on Android, another app on iOS) and `active` again
+#     RN20  Connectivity (Android): the core sees online = false in airplane mode and true after it
+#
+# and print the total, which is the only thing that counts:
+#
+#     UNDRA-RN CHECKS 20/20 passed            (19/19 on iOS: the simulator has no airplane mode)
+#
+# The process exits 0 only when every check passed, and prints the CHECK lines (and the device-log tail when the
+# app's verdict is missing or failed). The Http check (RN14) calls a loopback server this script runs on
+# 127.0.0.1:8737 (the simulator shares the Mac's loopback; Android reaches it through `adb reverse`). The
+# .github/workflows/rn-devices.yml jobs run exactly this.
 #
 #   scripts/rn-device-checks.sh ios                          the iPhone 17 Pro simulator (boots it if needed)
 #   scripts/rn-device-checks.sh ios --target <udid>          a simulator by UDID
@@ -20,7 +34,8 @@
 #   --target ID       the simulator UDID or the adb serial
 #   --abi ABI         Android only: the one ABI of the app's own native library (default: the device's, else every
 #                     ABI of gradle.properties), which is what keeps the CI build to one architecture
-#   --expect N        the number of checks that must pass (default 10, RN01..RN10)
+#   --expect N        the number of the app's own checks that must pass (default 16, RN01..RN16)
+#   --app-only        stop after the app's own verdict: no restart, scan, lifecycle or airplane-mode phase
 #   --timeout SEC     how long to wait for the verdict line after the launch (default 240)
 #   --debug-core      build the core without --release (much slower; the checks pass too)
 #
@@ -43,7 +58,7 @@ die() { echo "rn-device-checks: $*" >&2; exit 1; }
 [ "$PLATFORM" != help ] || { usage; exit 0; }
 [ -n "$PLATFORM" ] || die "ios or android is required (see --help)"
 
-BUILD=1 RUN=1 TARGET="" ABI="" EXPECT=10 TIMEOUT=240 RELEASE=(--release)
+BUILD=1 RUN=1 TARGET="" ABI="" EXPECT=16 TIMEOUT=240 RELEASE=(--release) PHASES=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --build-only) RUN=0; shift ;;
@@ -53,6 +68,7 @@ while [ $# -gt 0 ]; do
     --expect) EXPECT="${2:?}"; shift 2 ;;
     --timeout) TIMEOUT="${2:?}"; shift 2 ;;
     --debug-core) RELEASE=(); shift ;;
+    --app-only) PHASES=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option $1 (see --help)" ;;
   esac
@@ -66,8 +82,12 @@ fi
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/undra-rn-checks.XXXXXX")"
 BG_PIDS=()
+CLEANUPS=()
 cleanup() {
-  local pid
+  local pid step
+  for step in ${CLEANUPS[@]+"${CLEANUPS[@]}"}; do
+    eval "$step" >/dev/null 2>&1 || true
+  done
   for pid in ${BG_PIDS[@]+"${BG_PIDS[@]}"}; do
     kill "$pid" >/dev/null 2>&1 || true
     { wait "$pid"; } >/dev/null 2>&1 || true   # reaped here, so the shell does not print "Terminated"
@@ -75,6 +95,93 @@ cleanup() {
   rm -rf "$WORK"
 }
 trap cleanup EXIT
+
+# ---- the phases outside the app (RN17..RN20) -----------------------------------------------------------------
+
+LOOPBACK_PORT=8737
+APP_PASSED=0 APP_TOTAL=0 OUT_PASSED=0 OUT_TOTAL=0
+
+# start_loopback: the server of the Http check (RN14): GET /undra-rn-check answers its request's headers as JSON.
+start_loopback() {
+  if (exec 3<>"/dev/tcp/127.0.0.1/$LOOPBACK_PORT") 2>/dev/null; then
+    die "127.0.0.1:$LOOPBACK_PORT is taken: the loopback server of the Http check needs it"
+  fi
+  node -e '
+    const http = require("http");
+    http.createServer((req, res) => {
+      if (req.url.startsWith("/undra-rn-check")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, path: req.url, headers: req.headers }));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    }).listen(Number(process.argv[1]), "127.0.0.1");' "$LOOPBACK_PORT" >"$WORK/loopback.log" 2>&1 &
+  BG_PIDS+=("$!")
+  local waited=0
+  until (exec 3<>"/dev/tcp/127.0.0.1/$LOOPBACK_PORT") 2>/dev/null; do
+    sleep 0.2; waited=$((waited + 1))
+    [ "$waited" -lt 50 ] || die "the loopback server did not start: $(cat "$WORK/loopback.log")"
+  done
+  echo "== loopback server on 127.0.0.1:$LOOPBACK_PORT"
+}
+
+# lines LOG: the number of lines LOG has now (a mark to search after).
+lines() { wc -l <"$1" | tr -d ' '; }
+
+# wait_line LOG FROM REGEX SECONDS: prints the first line after line FROM matching REGEX; 1 if none in time.
+wait_line() {
+  local log="$1" from="$2" regex="$3" limit="$4" waited=0 found
+  while :; do
+    found="$(tail -n +"$((from + 1))" "$log" | grep -E "$regex" | head -n 1 || true)"
+    if [ -n "$found" ]; then
+      echo "$found" | sed -E 's/^.*(UNDRA-RN)/\1/'
+      return 0
+    fi
+    [ "$waited" -lt "$limit" ] || return 1
+    sleep 1; waited=$((waited + 1))
+  done
+}
+
+# outside ID TITLE OK DETAIL: one check made from outside the app.
+outside() {
+  OUT_TOTAL=$((OUT_TOTAL + 1))
+  if [ "$3" = 0 ]; then
+    OUT_PASSED=$((OUT_PASSED + 1))
+    echo "UNDRA-RN CHECK $1 PASS $2: $4"
+  else
+    echo "UNDRA-RN CHECK $1 FAIL $2: $4"
+  fi
+}
+
+# app_verdict LOG: the app's own counts from its verdict line, into APP_PASSED and APP_TOTAL.
+app_verdict() {
+  local line
+  line="$(grep -E 'UNDRA-RN CHECKS [0-9]+/[0-9]+ passed' "$1" | tail -n 1 || true)"
+  APP_PASSED="$(echo "$line" | sed -E 's/.*UNDRA-RN CHECKS ([0-9]+)\/([0-9]+) passed.*/\1/')"
+  APP_TOTAL="$(echo "$line" | sed -E 's/.*UNDRA-RN CHECKS ([0-9]+)\/([0-9]+) passed.*/\2/')"
+}
+
+# scan_verdict NONCE SECRET_HITS KV_HITS: RN17 from the two scans of the app's files.
+scan_verdict() {
+  local nonce="$1" secret_hits="$2" kv_hits="$3"
+  if [ -z "$nonce" ]; then
+    outside RN17 "SecureStore is not plain text in the app's files" 1 "the app logged no marker nonce (RN12)"
+  elif [ "$kv_hits" -lt 1 ]; then
+    outside RN17 "SecureStore is not plain text in the app's files" 1 "the scan did not find the Kv marker either: it cannot see the app's files"
+  elif [ "$secret_hits" -ne 0 ]; then
+    outside RN17 "SecureStore is not plain text in the app's files" 1 "UNDRA-SECRET-$nonce found in $secret_hits file(s)"
+  else
+    outside RN17 "SecureStore is not plain text in the app's files" 0 "UNDRA-SECRET-$nonce in no file; the Kv marker next to it in $kv_hits (the scan sees the files)"
+  fi
+}
+
+# total: the line that counts, and the exit status.
+total() {
+  local passed=$((APP_PASSED + OUT_PASSED)) all=$((APP_TOTAL + OUT_TOTAL))
+  echo "== UNDRA-RN CHECKS $passed/$all passed"
+  [ "$passed" = "$all" ] && [ "$APP_TOTAL" -ge "$EXPECT" ]
+}
 
 # build_core: the core for both phones (the iOS half only on macOS) and the UndraCore pod.
 build_core() {
@@ -115,7 +222,7 @@ wait_for_verdict() {
     sleep 2; waited=$((waited + 2))
   done
   echo "== the app's lines"
-  grep -E 'UNDRA-RN (CHECK|loaded|failed|error|stores|todos)' "$log" | sed -E 's/^.*(UNDRA-RN)/\1/' | sort -u -k1,3 -s || true
+  grep -E 'UNDRA-RN (CHECK|loaded|defaults|KV|failed|error|stores|todos)' "$log" | sed -E 's/^.*(UNDRA-RN)/\1/' | sort -u -k1,3 -s || true
   if [ "$rc" = 0 ]; then
     echo "== PASS: $(grep -E 'UNDRA-RN CHECKS [0-9]+/[0-9]+ passed' "$log" | tail -n 1 | sed -E 's/^.*(UNDRA-RN)/\1/') (after ${waited} s)"
     return 0
@@ -192,13 +299,59 @@ ios() {
   xcrun simctl spawn "$udid" log stream --level debug --style compact --predicate 'eventMessage CONTAINS "UNDRA-RN"' >"$log" 2>&1 &
   BG_PIDS+=("$!")
   sleep 2
+  start_loopback
   echo "== launching $IOS_BUNDLE"
   xcrun simctl launch "$udid" "$IOS_BUNDLE" >/dev/null
   local rc=0
   wait_for_verdict "$log" || rc=$?
+  app_verdict "$log"
+  if [ "$rc" = 0 ] && [ "$PHASES" = 1 ]; then
+    ios_phases "$udid" "$log"
+    total || rc=1
+  fi
   xcrun simctl terminate "$udid" "$IOS_BUNDLE" >/dev/null 2>&1 || true
   [ -z "${STARTED_SIM:-}" ] || xcrun simctl shutdown "$STARTED_SIM" >/dev/null 2>&1 || true
   return "$rc"
+}
+
+# ios_phases UDID LOG: RN17..RN19 on the simulator (it has no airplane mode: no RN20).
+ios_phases() {
+  local udid="$1" log="$2" nonce data secret_hits kv_hits wrote previous mark bg fg
+  echo "== outside the app"
+  # RN17: the simulator's data container is a directory of this Mac. The Keychain is not in it (it is the
+  # simulator's own database): a secret written there must not appear in the app's files.
+  nonce="$(grep -E 'UNDRA-RN CHECK RN12 PASS' "$log" | tail -n 1 | sed -E 's/.*marker nonce ([a-z0-9]+).*/\1/')"
+  data="$(xcrun simctl get_app_container "$udid" "$IOS_BUNDLE" data)"
+  secret_hits="$(grep -r -l -a -F "UNDRA-SECRET-$nonce" "$data" 2>/dev/null | wc -l | tr -d ' ')"
+  kv_hits="$(grep -r -l -a -F "UNDRA-KVMARK-$nonce" "$data" 2>/dev/null | wc -l | tr -d ' ')"
+  scan_verdict "$nonce" "$secret_hits" "$kv_hits"
+
+  # RN18: kill the app, launch it again; it reads what the first launch wrote.
+  wrote="$(grep -E 'UNDRA-RN KV wrote=' "$log" | tail -n 1 | sed -E 's/.*wrote=([a-z0-9]+).*/\1/')"
+  xcrun simctl terminate "$udid" "$IOS_BUNDLE" >/dev/null 2>&1 || true
+  sleep 1
+  mark="$(lines "$log")"
+  xcrun simctl launch "$udid" "$IOS_BUNDLE" >/dev/null
+  previous="$(wait_line "$log" "$mark" 'UNDRA-RN KV previous=' 90 | sed -E 's/.*previous=([^ ]+).*/\1/' || true)"
+  if [ -n "$wrote" ] && [ "$previous" = "$wrote" ]; then
+    outside RN18 "Kv survives the process" 0 "the first launch wrote $wrote; after the kill the second read $previous"
+  else
+    outside RN18 "Kv survives the process" 1 "the first launch wrote '${wrote}', the second read '${previous}'"
+  fi
+
+  # RN19: another app in front (Settings), then this one again.
+  wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=active' 60 >/dev/null || true
+  mark="$(lines "$log")"
+  xcrun simctl launch "$udid" com.apple.Preferences >/dev/null 2>&1 || true
+  bg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=background' 30 || true)"
+  mark="$(lines "$log")"
+  xcrun simctl launch "$udid" "$IOS_BUNDLE" >/dev/null
+  fg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=active' 30 || true)"
+  if [ -n "$bg" ] && [ -n "$fg" ]; then
+    outside RN19 "Lifecycle reaches the core" 0 "Settings in front: '$bg'; back: '$fg'"
+  else
+    outside RN19 "Lifecycle reaches the core" 1 "background: '${bg}', active again: '${fg}'"
+  fi
 }
 
 # ================================================================================================
@@ -247,12 +400,78 @@ android() {
   : >"$log"
   "$adb" -s "$serial" logcat -v brief ReactNativeJS:V '*:S' >"$log" 2>&1 &
   BG_PIDS+=("$!")
+  start_loopback
+  # The device's 127.0.0.1:8737 is this machine's (the emulator's own loopback is not the host's).
+  "$adb" -s "$serial" reverse "tcp:$LOOPBACK_PORT" "tcp:$LOOPBACK_PORT" >/dev/null
+  CLEANUPS+=("'$adb' -s '$serial' reverse --remove tcp:$LOOPBACK_PORT")
   echo "== launching $ANDROID_PACKAGE on $serial"
   "$adb" -s "$serial" shell am start -W -n "$ANDROID_PACKAGE/$ANDROID_ACTIVITY" >/dev/null
   local rc=0
   wait_for_verdict "$log" || rc=$?
+  app_verdict "$log"
+  if [ "$rc" = 0 ] && [ "$PHASES" = 1 ]; then
+    android_phases "$adb" "$serial" "$log"
+    total || rc=1
+  fi
   "$adb" -s "$serial" shell am force-stop "$ANDROID_PACKAGE" >/dev/null 2>&1 || true
   return "$rc"
+}
+
+# android_phases ADB SERIAL LOG: RN17..RN20 on the emulator or phone.
+android_phases() {
+  local adb="$1" serial="$2" log="$3" nonce secret_hits kv_hits wrote previous mark bg fg off on
+  local app_dir="/data/data/$ANDROID_PACKAGE"
+  echo "== outside the app"
+  # RN17: the app's private directory needs root to read from outside (a userdebug emulator image has `su`; a
+  # release build is not debuggable, so `run-as` cannot).
+  nonce="$(grep -E 'UNDRA-RN CHECK RN12 PASS' "$log" | tail -n 1 | sed -E 's/.*marker nonce ([a-z0-9]+).*/\1/')"
+  if "$adb" -s "$serial" shell "su 0 true" >/dev/null 2>&1; then
+    secret_hits="$("$adb" -s "$serial" shell "su 0 grep -r -l -F 'UNDRA-SECRET-$nonce' $app_dir" 2>/dev/null | tr -d '\r' | grep -c . || true)"
+    kv_hits="$("$adb" -s "$serial" shell "su 0 grep -r -l -F 'UNDRA-KVMARK-$nonce' $app_dir" 2>/dev/null | tr -d '\r' | grep -c . || true)"
+    scan_verdict "$nonce" "$secret_hits" "$kv_hits"
+  else
+    outside RN17 "SecureStore is not plain text in the app's files" 1 "no root (su) on $serial: the app's files cannot be read from outside"
+  fi
+
+  # RN18: kill the process, start the app again; it reads what the first launch wrote.
+  wrote="$(grep -E 'UNDRA-RN KV wrote=' "$log" | tail -n 1 | sed -E 's/.*wrote=([a-z0-9]+).*/\1/')"
+  "$adb" -s "$serial" shell am force-stop "$ANDROID_PACKAGE" >/dev/null 2>&1 || true
+  mark="$(lines "$log")"
+  "$adb" -s "$serial" shell am start -W -n "$ANDROID_PACKAGE/$ANDROID_ACTIVITY" >/dev/null
+  previous="$(wait_line "$log" "$mark" 'UNDRA-RN KV previous=' 90 | sed -E 's/.*previous=([^ ]+).*/\1/' || true)"
+  if [ -n "$wrote" ] && [ "$previous" = "$wrote" ]; then
+    outside RN18 "Kv survives the process" 0 "the first launch wrote $wrote; after force-stop the second read $previous"
+  else
+    outside RN18 "Kv survives the process" 1 "the first launch wrote '${wrote}', the second read '${previous}'"
+  fi
+
+  # RN19: Home, then the app again.
+  wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=active' 60 >/dev/null || true
+  mark="$(lines "$log")"
+  "$adb" -s "$serial" shell input keyevent KEYCODE_HOME
+  bg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=background' 30 || true)"
+  mark="$(lines "$log")"
+  "$adb" -s "$serial" shell am start -n "$ANDROID_PACKAGE/$ANDROID_ACTIVITY" >/dev/null
+  fg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=active' 30 || true)"
+  if [ -n "$bg" ] && [ -n "$fg" ]; then
+    outside RN19 "Lifecycle reaches the core" 0 "Home: '$bg'; back: '$fg'"
+  else
+    outside RN19 "Lifecycle reaches the core" 1 "background: '${bg}', active again: '${fg}'"
+  fi
+
+  # RN20: real airplane mode, then out of it (switched off on any exit).
+  CLEANUPS+=("'$adb' -s '$serial' shell cmd connectivity airplane-mode disable")
+  mark="$(lines "$log")"
+  "$adb" -s "$serial" shell cmd connectivity airplane-mode enable
+  off="$(wait_line "$log" "$mark" 'UNDRA-RN CONNECTIVITY online=false' 60 || true)"
+  mark="$(lines "$log")"
+  "$adb" -s "$serial" shell cmd connectivity airplane-mode disable
+  on="$(wait_line "$log" "$mark" 'UNDRA-RN CONNECTIVITY online=true' 90 || true)"
+  if [ -n "$off" ] && [ -n "$on" ]; then
+    outside RN20 "Connectivity follows airplane mode" 0 "on: '$off'; off: '$on'"
+  else
+    outside RN20 "Connectivity follows airplane mode" 1 "airplane mode on: '${off}', off: '${on}'"
+  fi
 }
 
 STARTED_SIM=""
