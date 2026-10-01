@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>TypeScript reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x04d2adf769c58b9f</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xddcdea47fa95a8d4</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="entry">Entry point<a class="anchor" href="#entry" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The package entry: it re-exports every file below.</p>
@@ -398,7 +398,7 @@ export const TodoErrorCodec: Codec&lt;TodoError&gt;;
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and an async function for each free Rust function.</p>
 <p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>greet</code> <code>parseCount</code> <code>ping</code> <code>setRemoteDone</code> <code>version</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>205 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>213 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/objects.ts" rel="noopener">objects.ts</a></span></div><pre><code data-lang="ts">export class Probe extends UndraObject {
   /**
    * A probe with every counter at zero.
@@ -432,6 +432,14 @@ export const TodoErrorCodec: Codec&lt;TodoError&gt;;
    * Iterating throws UndraCallError; leaving the loop early ends the stream quietly.
    */
   ticks(count: number): AsyncIterable&lt;number&gt;;
+
+  /**
+   * The numbers `0..count` like `ticks`, except that it ends with the error `Rejected` (with
+   * `code`) where the number `fail_at` would come, when `fail_at &lt; count`: a stream that ends
+   * with its typed error part-way (ADR-036). The items before it arrive first.
+   * Iterating throws LabError or UndraCallError; leaving the loop early ends the stream quietly.
+   */
+  ticksThenFail(count: number, failAt: number, code: number): AsyncIterable&lt;number&gt;;
 
   /**
    * Waits `ms` milliseconds and returns it. Cancelled before that, it counts as cancelled.
@@ -925,13 +933,13 @@ export function postRemoteTodo(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>92 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>93 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/ids.ts" rel="noopener">ids.ts</a></span></div><pre><code data-lang="ts">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
  * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
  */
 export const UndraIds = {
-  schemaHash: 0x04d2adf769c58b9fn,
+  schemaHash: 0xddcdea47fa95a8d4n,
   Objects: {
     Probe: {
       typeId: 0x4fdd3051,
@@ -940,6 +948,7 @@ export const UndraIds = {
       hang: 0x98f10ca1,
       reset: 0xce3a32f8,
       ticks: 0x9ea5858d,
+      ticksThenFail: 0xa48a6ac2,
       wait: 0x6bab3fb8,
     },
     Bench: {

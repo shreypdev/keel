@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Swift reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x04d2adf769c58b9f</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xddcdea47fa95a8d4</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A struct for each record, an enum for each enum, with the wire codec beside it.</p>
@@ -409,7 +409,7 @@ extension TodoError: CustomStringConvertible, LocalizedError {
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
 <p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>greet</code> <code>parseCount</code> <code>ping</code> <code>setRemoteDone</code> <code>version</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>125 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>135 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Objects.swift" rel="noopener">Objects.swift</a></span></div><pre><code data-lang="swift">public final class Probe: UndraObject, @unchecked Sendable {
     /// A probe with every counter at zero.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
@@ -432,6 +432,16 @@ extension TodoError: CustomStringConvertible, LocalizedError {
     /// stays within one of what the platform has asked for, however large `count` is.
     /// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
     public func ticks(count: UInt32) -&gt; AsyncThrowingStream&lt;UInt32, Error&gt;
+
+    /// The numbers `0..count` like `ticks`, except that it ends with the error `Rejected` (with
+    /// `code`) where the number `fail_at` would come, when `fail_at &lt; count`: a stream that ends
+    /// with its typed error part-way (ADR-036). The items before it arrive first.
+    /// - Note: Iterating throws ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
+    public func ticksThenFail(
+        count: UInt32,
+        failAt: UInt32,
+        code: Int32
+    ) -&gt; AsyncThrowingStream&lt;UInt32, Error&gt;
 
     /// Waits `ms` milliseconds and returns it. Cancelled before that, it counts as cancelled.
     /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
@@ -776,11 +786,11 @@ public func postRemoteTodo(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>93 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>94 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift" rel="noopener">Ids.swift</a></span></div><pre><code data-lang="swift">/// Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
 /// hash to pass to `UndraCore.load` as the expected schema hash.
 public enum UndraIds {
-    public static let schemaHash: UInt64 = 0x04d2adf769c58b9f
+    public static let schemaHash: UInt64 = 0xddcdea47fa95a8d4
 
     public enum Objects {
         public enum Probe {
@@ -790,6 +800,7 @@ public enum UndraIds {
             public static let hang: UInt32 = 0x98f10ca1
             public static let reset: UInt32 = 0xce3a32f8
             public static let ticks: UInt32 = 0x9ea5858d
+            public static let ticksThenFail: UInt32 = 0xa48a6ac2
             public static let wait: UInt32 = 0x6bab3fb8
         }
         public enum Bench {

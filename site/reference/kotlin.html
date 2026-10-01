@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Kotlin reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in Kotlin for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x04d2adf769c58b9f</code>). <a href="../docs/api-kotlin.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Kotlin for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xddcdea47fa95a8d4</code>). <a href="../docs/api-kotlin.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A data class for each record, an enum or sealed interface for each enum, each with its codec.</p>
@@ -310,7 +310,7 @@ sealed class TodoError(message: String) : UndraException(message) {
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
 <p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>greet</code> <code>parseCount</code> <code>ping</code> <code>setRemoteDone</code> <code>version</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>176 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>184 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Objects.kt" rel="noopener">Objects.kt</a></span></div><pre><code data-lang="kotlin">class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /**
      * A probe with every counter at zero.
@@ -344,6 +344,14 @@ sealed class TodoError(message: String) : UndraException(message) {
      * Collecting throws UndraCallError; cancelling the collector ends it quietly.
      */
     fun ticks(count: UInt): Flow&lt;UInt&gt;
+
+    /**
+     * The numbers `0..count` like `ticks`, except that it ends with the error `Rejected` (with
+     * `code`) where the number `fail_at` would come, when `fail_at &lt; count`: a stream that ends
+     * with its typed error part-way (ADR-036). The items before it arrive first.
+     * Collecting throws LabError or UndraCallError; cancelling the collector ends it quietly.
+     */
+    fun ticksThenFail(count: UInt, failAt: UInt, code: Int): Flow&lt;UInt&gt;
 
     /**
      * Waits `ms` milliseconds and returns it. Cancelled before that, it counts as cancelled.
@@ -845,13 +853,13 @@ suspend fun postRemoteTodo(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>95 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>96 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Ids.kt" rel="noopener">Ids.kt</a></span></div><pre><code data-lang="kotlin">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
  * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
  */
 object UndraIds {
-    const val SCHEMA_HASH: ULong = 0x04d2adf769c58b9fuL
+    const val SCHEMA_HASH: ULong = 0xddcdea47fa95a8d4uL
 
     object Objects {
         object Probe {
@@ -861,6 +869,7 @@ object UndraIds {
             const val HANG: UInt = 0x98f10ca1u
             const val RESET: UInt = 0xce3a32f8u
             const val TICKS: UInt = 0x9ea5858du
+            const val TICKS_THEN_FAIL: UInt = 0xa48a6ac2u
             const val WAIT: UInt = 0x6bab3fb8u
         }
         object Bench {
