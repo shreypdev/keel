@@ -47,8 +47,14 @@ fi
 # 3. The scenarios. The runner prints one `SCENARIO Sxx PASS|FAIL|SKIP <title>` line each.
 cd "$HERE"
 status=0
-UNDRA_LINK_CORE=1 swift test "$@" 2>&1 | tee "$LOG" || status=$?
+UNDRA_LINK_CORE=1 swift test --skip TestKitTests "$@" 2>&1 | tee "$LOG" || status=$?
 
 # 4. The grid. A filtered run reports the scenarios it did not run as MISSING, which is expected.
 "$REPO/contract-tests/check.sh" swift < "$LOG" || status=1
+
+# 5. The testing kit against the same core (its own process: a process holds one in-process core). Skipped when the caller filtered the run.
+if [ "$#" = 0 ]; then
+  echo "==> the testing kit (PreviewCore, RecordedCore) against the real core" >&2
+  UNDRA_LINK_CORE=1 swift test --filter TestKitTests 2>&1 | tee "$HERE/.build/testkit.log" || status=1
+fi
 exit "$status"

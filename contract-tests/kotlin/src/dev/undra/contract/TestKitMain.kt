@@ -6,6 +6,11 @@ import dev.undra.playground.core.RemoteTodosQueryHandle
 import dev.undra.playground.core.Todos
 import dev.undra.playground.core.UndraIds
 import dev.undra.playground.core.configureRemote
+import dev.undra.playground.core.fileRead
+import dev.undra.playground.core.fileWrite
+import dev.undra.playground.core.kvGet
+import dev.undra.playground.core.kvPut
+import dev.undra.playground.core.secretGet
 import dev.undra.runtime.UndraNative
 import dev.undra.testkit.PreviewCore
 import dev.undra.testkit.RecordedCore
@@ -76,16 +81,27 @@ private fun t2SeedAnswersTheQueryAndTheManualClockMakesItStale() {
     }
 }
 
-private fun t3KvIsTheQueryCachesPersistence() {
-    PreviewCore.load(UndraIds.SCHEMA_HASH, Seed.fromJson("""{"now_ms": 5000}""")).use { preview ->
-        configureRemote(RemoteConfig("https://api.test"), preview.core)
-        preview.fakes.http.respond("https://api.test/lists/inbox/todos", httpResponse(200, "[]"))
-        RemoteTodosQueryHandle.create("inbox", preview.core)
-        // The query is persisted: a quarter of a second after the fetch the core writes its cache through the Kv port. The core's `ctx.sleep` runs on
-        // the runtime's own timer thread in a native core (the manual clock moves the `Clock` port, not that thread), so the write is waited for.
-        preview.settle()
-        eventually("the cache write", { preview.fakes.kv.ops.map { it.op } }) { "set" in it }
-        check(preview.fakes.kv.keys().isNotEmpty()) { "the kv fake holds nothing" }
+private fun t3SeededPortsAreWhatTheCoreReadsAndWhatItWritesLandsInTheFakes() {
+    PreviewCore.load(UndraIds.SCHEMA_HASH, Seed.fromJson(SEED)).use { preview ->
+        val core = preview.core
+        runBlocking {
+            check(kvGet("greeting", core)?.decodeToString() == "hello") { "the seeded Kv value" }
+            check(kvGet("absent", core) == null) { "an absent key" }
+            kvPut("saved", byteArrayOf(1, 2, 3), core)
+            check(preview.fakes.kv.value("saved")?.toList() == listOf<Byte>(1, 2, 3)) { "the core's write reached the Kv fake" }
+            check(secretGet("token", core)?.decodeToString() == "t-123") { "the seeded SecureStore value" }
+            check(fileRead("notes/a.txt", core).decodeToString() == "hello") { "the seeded file" }
+            fileWrite("out/b.txt", "written".toByteArray(), core)
+            check(preview.fakes.fs.contents("out/b.txt")?.decodeToString() == "written") { "the core's file landed in the Fs fake" }
+            val missing = try {
+                fileRead("nope", core)
+                null
+            } catch (e: Exception) {
+                e
+            }
+            check(missing != null && missing.message?.contains("not found") == true || missing is dev.undra.runtime.adapters.FsError) { "a missing file is a typed error: $missing" }
+        }
+        check(preview.fakes.kv.ops.count { it.op == "set" } == 1) { "Kv ops ${preview.fakes.kv.ops}" }
     }
 }
 
@@ -116,7 +132,7 @@ fun main() {
     val cases = listOf(
         "T1 preview: a store runs the real logic on the fakes" to ::t1StoreRunsTheRealLogicOnTheFakes,
         "T2 preview: the seed answers the query and the manual clock makes it stale" to ::t2SeedAnswersTheQueryAndTheManualClockMakesItStale,
-        "T3 preview: the kv fake is the query cache's persistence" to ::t3KvIsTheQueryCachesPersistence,
+        "T3 preview: the seeded ports are what the core reads, and its writes land in the fakes" to ::t3SeededPortsAreWhatTheCoreReadsAndWhatItWritesLandsInTheFakes,
         "T4 recorded: a recorded session plays under the generated store" to ::t4RecordedSessionUnderTheGeneratedStore,
     )
     var failures = 0

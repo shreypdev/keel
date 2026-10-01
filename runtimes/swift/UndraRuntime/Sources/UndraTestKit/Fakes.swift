@@ -941,9 +941,12 @@ public final class Fakes: @unchecked Sendable {
     public init() {}
 
     /// Every fake as the adapters of a core: what `LoadOptions.adapters` takes.
+    ///
+    /// A port is registered after the core started, and the core's start-up work (the query cache is read from the `Kv` at once) runs
+    /// concurrently with the registrations (docs/SPEC.md section 6), so the stores come first, then the rest.
     public func adapters() -> Adapters {
         return Adapters([
-            clock.clockAdapter, clock.timerAdapter, rng, log, http, kv, secureStore, fs, connectivity, lifecycle,
+            kv, secureStore, fs, http, clock.clockAdapter, clock.timerAdapter, rng, log, connectivity, lifecycle,
         ])
     }
 }

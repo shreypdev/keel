@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, test } from "vitest";
-import { RemoteTodosQueryHandle, Todos, UndraIds, configureRemote } from "@playground/core";
+import { RemoteTodosQueryHandle, Todos, UndraIds, configureRemote, fileRead, fileWrite, kvGet, kvPut, secretGet } from "@playground/core";
 import { PreviewCore, parseSeed, response } from "@undra/testkit";
 import { PLAYGROUND_WASM } from "../src/harness.js";
 
@@ -70,6 +70,20 @@ test("T3 preview: the kv fake is the query cache's persistence, and a seeded kv 
   await preview.advance(5_000);
   expect(preview.fakes.kv.ops.map((op) => op.op)).toContain("set");
   expect(preview.fakes.kv.keys().length).toBeGreaterThan(0);
+});
+
+test("T5 preview: the seeded ports are what the core reads, and its writes land in the fakes", async () => {
+  const preview = await load();
+  const text = (bytes: Uint8Array | null | undefined): string | undefined => (bytes === null || bytes === undefined ? undefined : new TextDecoder().decode(bytes));
+  expect(text(await kvGet("greeting", preview.core))).toBe("hello");
+  expect(await kvGet("absent", preview.core)).toBeNull();
+  await kvPut("saved", Uint8Array.of(1, 2, 3), preview.core);
+  expect(preview.fakes.kv.value("saved")).toEqual(Uint8Array.of(1, 2, 3));
+  expect(text(await secretGet("token", preview.core))).toBe("t-123");
+  expect(text(await fileRead("notes/a.txt", preview.core))).toBe("hello");
+  await fileWrite("out/b.txt", new TextEncoder().encode("written"), preview.core);
+  expect(text(preview.fakes.fs.contents("out/b.txt"))).toBe("written");
+  await expect(fileRead("nope", preview.core)).rejects.toMatchObject({ kind: "notFound" });
 });
 
 test("T4 preview: the same seed document reads in every kit", () => {
