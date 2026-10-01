@@ -72,6 +72,34 @@ test("undra_alloc traps for a size nothing can satisfy instead of returning 0 (L
   assert.notEqual(core.x.undra_alloc(0x1000), 0);
 });
 
+/**
+ * The canonical form of an exported schema (SPEC 2.3), which is what the schema hash covers: the
+ * six lists without labels and docs, the unordered ones sorted (top-level lists, constructors,
+ * methods and port methods by name, enum variants by index), everything else in declaration
+ * order, which `JSON.parse` keeps. `undra_schema_json` carries docs and labels, so a host that
+ * wants to check the hash recomputes this.
+ */
+function canonicalSchemaJson(schema) {
+  const byName = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const bare = (value) => {
+    if (Array.isArray(value)) return value.map(bare);
+    if (value !== null && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).filter(([key]) => key !== "docs").map(([key, v]) => [key, bare(v)]));
+    }
+    return value;
+  };
+  const lists = Object.fromEntries(
+    ["records", "enums", "objects", "functions", "ports", "queries"].map((key) => [key, bare(schema[key]).sort(byName)]),
+  );
+  for (const en of lists.enums) en.variants.sort((a, b) => a.index - b.index);
+  for (const object of lists.objects) {
+    object.constructors.sort(byName);
+    object.methods.sort(byName);
+  }
+  for (const port of lists.ports) port.methods.sort(byName);
+  return JSON.stringify(lists);
+}
+
 test("version, schema hash and schema JSON are consistent and work before undra_init", () => {
   const core = fresh();
   core.x._initialize();
@@ -79,9 +107,13 @@ test("version, schema hash and schema JSON are consistent and work before undra_
   assert.equal(core.x.undra_abi_version(), 1);
   const hash = BigInt.asUintN(64, core.x.undra_schema_hash());
   const json = core.takeBuf(core.x.undra_schema_json());
-  assert.equal(fnv1a64(json), hash);
   const schema = JSON.parse(new TextDecoder().decode(json));
+  // The export is the whole schema (labels and docs); the hash covers its canonical form only.
+  assert.equal(fnv1a64(new TextEncoder().encode(canonicalSchemaJson(schema))), hash);
   assert.ok(JSON.stringify(schema).includes("Calculator"));
+  assert.equal(typeof schema.crate_name, "string");
+  const echo = schema.ports.find((p) => p.name === "Echo");
+  assert.equal(echo.docs, "Answered by the host, asynchronously.");
   assert.notEqual(hash, 0n);
 });
 

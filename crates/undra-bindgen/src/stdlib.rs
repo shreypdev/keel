@@ -474,22 +474,23 @@ pub fn covered(schema: &Schema) -> Covered {
     Covered { types, ports }
 }
 
-/// How the platform runtime of `lang` spells the standard type `name`, when it exports one
-/// that generated code can use as it is.
+/// How the platform runtime of `lang` spells the standard type `name` (one of [`TYPES`]).
+///
+/// Every runtime exports every standard type, so generated code refers to all eight and
+/// declares none (ADR-024):
 ///
 /// * TypeScript: `@undra/runtime` exports all eight types with their codecs (`HttpRequestCodec`,
 ///   ...) from `adapters/types.ts` and `adapters/codecs.ts`, under the standard names.
 /// * Kotlin: `dev.undra.runtime.adapters` declares all eight as public classes whose companion
 ///   object is the `UndraCodec` (`StandardRecords.kt`), under the standard names.
-/// * Swift: `UndraRuntime` keeps seven of them internal and prefixed (`PortHttpRequest`, ...)
-///   on purpose, so that a generated module declaring its own `HttpRequest` is not ambiguous;
-///   nothing outside the runtime can name them, so the generator declares those itself whenever
-///   something refers to them. `AppState` is the exception: it is public as `UndraAppState`.
-pub(crate) fn runtime_spelling(lang: Lang, name: &str) -> Option<&'static str> {
-    let standard = TYPES.iter().find(|t| t.name == name)?;
+/// * Swift: `UndraRuntime` exports all eight as public types (`Core/StandardRecords.swift`),
+///   under the standard names except `AppState`, which is `UndraAppState`: an app's own
+///   `AppState` is the commonest type name in Swift, and the runtime has exported it under that
+///   name since v1 (ADR-024, amended).
+pub(crate) fn runtime_spelling(lang: Lang, name: &'static str) -> &'static str {
     match lang {
-        Lang::TypeScript | Lang::Kotlin => Some(standard.name),
-        Lang::Swift => (name == "AppState").then_some("UndraAppState"),
+        Lang::Swift if name == "AppState" => "UndraAppState",
+        Lang::Swift | Lang::TypeScript | Lang::Kotlin => name,
     }
 }
 
@@ -597,17 +598,17 @@ mod tests {
     }
 
     #[test]
-    fn only_the_runtimes_public_types_are_referenced() {
+    fn every_runtime_exports_every_standard_type() {
         for t in TYPES {
-            assert_eq!(runtime_spelling(Lang::TypeScript, t.name), Some(t.name));
-            assert_eq!(runtime_spelling(Lang::Kotlin, t.name), Some(t.name));
-            let swift = runtime_spelling(Lang::Swift, t.name);
-            if t.name == "AppState" {
-                assert_eq!(swift, Some("UndraAppState"));
+            assert_eq!(runtime_spelling(Lang::TypeScript, t.name), t.name);
+            assert_eq!(runtime_spelling(Lang::Kotlin, t.name), t.name);
+            // Swift spells `AppState` as the runtime's `UndraAppState` and the rest as they are.
+            let expected = if t.name == "AppState" {
+                "UndraAppState"
             } else {
-                assert_eq!(swift, None, "{} is internal in the Swift runtime", t.name);
-            }
+                t.name
+            };
+            assert_eq!(runtime_spelling(Lang::Swift, t.name), expected);
         }
-        assert_eq!(runtime_spelling(Lang::Kotlin, "Todo"), None);
     }
 }

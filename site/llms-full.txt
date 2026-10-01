@@ -782,7 +782,7 @@ Reads the core's schema and writes the bindings the app shells import: a Swift p
 | `--docs` | keep the core's doc comments in the bindings |
 | `--crate-name <name>` | the core crate's name, for a schema file that has none |
 
-The schema a library exports is the canonical form its hash is computed from, and that form has no doc comments. `--docs` runs the core once more to read the full schema so the generated code carries the same documentation as the Rust source.
+The schema a library exports is the whole schema, doc comments included. `--docs` keeps them in the generated code, so every type, field, variant, method and port carries the text of its `///` comment; without it the generated code has no doc comments. The schema hash covers neither, so both outputs have the same hash and the same wire.
 
 ## undra build
 

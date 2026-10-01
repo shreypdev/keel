@@ -472,13 +472,13 @@ final class FsAdapterTests: XCTestCase {
     }
 
     /// The `FsError` a failed call carries.
-    private func fsError(_ body: () async throws -> [UInt8], file: StaticString = #filePath, line: UInt = #line) async -> PortFsError? {
+    private func fsError(_ body: () async throws -> [UInt8], file: StaticString = #filePath, line: UInt = #line) async -> FsError? {
         do {
             _ = try await body()
             XCTFail("expected an Fs error", file: file, line: line)
             return nil
         } catch let error as UndraPortError {
-            return try? PortFsError.undraDecoded(from: error.body)
+            return try? FsError.undraDecoded(from: error.body)
         } catch {
             XCTFail("expected an UndraPortError, got \(error)", file: file, line: line)
             return nil
@@ -666,7 +666,7 @@ final class StubURLProtocol: URLProtocol {
 
 @MainActor
 final class HttpAdapterTests: XCTestCase {
-    private func requestArgs(_ request: PortHttpRequest) -> [UInt8] {
+    private func requestArgs(_ request: HttpRequest) -> [UInt8] {
         return request.undraEncoded()
     }
 
@@ -676,21 +676,21 @@ final class HttpAdapterTests: XCTestCase {
         }
     }
 
-    private func perform(_ request: PortHttpRequest) async throws -> PortHttpResponse {
+    private func perform(_ request: HttpRequest) async throws -> HttpResponse {
         let adapter = HttpAdapter(session: StubURLProtocol.makeSession())
         let core = try makeCore(FakeTransport())
         let impl = adapter.makePortImpl(core: core)
         let reply = try await PortCaller.callAsync(impl, StandardPorts.Http.request, requestArgs(request))
-        return try PortHttpResponse.undraDecoded(from: reply)
+        return try HttpResponse.undraDecoded(from: reply)
     }
 
-    private func httpError(_ request: PortHttpRequest, file: StaticString = #filePath, line: UInt = #line) async -> PortHttpError? {
+    private func httpError(_ request: HttpRequest, file: StaticString = #filePath, line: UInt = #line) async -> HttpError? {
         do {
             _ = try await perform(request)
             XCTFail("expected an Http error", file: file, line: line)
             return nil
         } catch let error as UndraPortError {
-            return try? PortHttpError.undraDecoded(from: error.body)
+            return try? HttpError.undraDecoded(from: error.body)
         } catch {
             XCTFail("expected an UndraPortError, got \(error)", file: file, line: line)
             return nil
@@ -708,16 +708,16 @@ final class HttpAdapterTests: XCTestCase {
             ))
             return (response, Data([1, 2, 3]))
         }
-        let response = try await perform(PortHttpRequest(
+        let response = try await perform(HttpRequest(
             method: .post,
             url: "https://example.com/todos?x=1",
-            headers: [PortHeader(name: "X-Test", value: "v")],
+            headers: [Header(name: "X-Test", value: "v")],
             body: [9, 8, 7],
             timeoutMs: 2500
         ))
         XCTAssertEqual(response.status, 201)
         XCTAssertEqual(response.body, [1, 2, 3])
-        XCTAssertEqual(response.headers, [PortHeader(name: "A-Header", value: "1"), PortHeader(name: "B-Header", value: "2")])
+        XCTAssertEqual(response.headers, [Header(name: "A-Header", value: "1"), Header(name: "B-Header", value: "2")])
 
         let seen = StubURLProtocol.lastRequest.withLock { (value: inout URLRequest?) -> URLRequest? in
             return value
@@ -739,8 +739,8 @@ final class HttpAdapterTests: XCTestCase {
             let response = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil))
             return (response, Data())
         }
-        for method in PortHttpMethod.allCases {
-            _ = try await perform(PortHttpRequest(method: method, url: "https://example.com/", headers: [], body: nil, timeoutMs: nil))
+        for method in HttpMethod.allCases {
+            _ = try await perform(HttpRequest(method: method, url: "https://example.com/", headers: [], body: nil, timeoutMs: nil))
             let seen = StubURLProtocol.lastRequest.withLock { (value: inout URLRequest?) -> URLRequest? in
                 return value
             }
@@ -754,7 +754,7 @@ final class HttpAdapterTests: XCTestCase {
             let response = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: nil))
             return (response, Data("nope".utf8))
         }
-        let response = try await perform(PortHttpRequest(method: .get, url: "https://example.com/x", headers: [], body: nil, timeoutMs: nil))
+        let response = try await perform(HttpRequest(method: .get, url: "https://example.com/x", headers: [], body: nil, timeoutMs: nil))
         XCTAssertEqual(response.status, 404)
         XCTAssertEqual(response.body, Array("nope".utf8))
         XCTAssertEqual(response.headers, [])
@@ -762,13 +762,13 @@ final class HttpAdapterTests: XCTestCase {
 
     func testUnusableURLsAreInvalidUrlErrors() async throws {
         for url in ["", "not a url", "ftp://example.com/x", "https://", "//example.com"] {
-            let error = await httpError(PortHttpRequest(method: .get, url: url, headers: [], body: nil, timeoutMs: nil))
+            let error = await httpError(HttpRequest(method: .get, url: url, headers: [], body: nil, timeoutMs: nil))
             XCTAssertEqual(error, .invalidUrl(url), url)
         }
     }
 
     func testURLErrorsMapToHttpErrors() async throws {
-        let cases: [(URLError.Code, PortHttpError?)] = [
+        let cases: [(URLError.Code, HttpError?)] = [
             (.timedOut, .timeout),
             (.cancelled, .cancelled),
             (.badURL, .invalidUrl("https://example.com/")),
@@ -779,7 +779,7 @@ final class HttpAdapterTests: XCTestCase {
             respond { _ in
                 throw URLError(code)
             }
-            let error = await httpError(PortHttpRequest(method: .get, url: "https://example.com/", headers: [], body: nil, timeoutMs: nil))
+            let error = await httpError(HttpRequest(method: .get, url: "https://example.com/", headers: [], body: nil, timeoutMs: nil))
             if let expected = expected {
                 XCTAssertEqual(error, expected, "\(code)")
             } else {
@@ -795,8 +795,8 @@ final class HttpAdapterTests: XCTestCase {
         StubURLProtocol.behavior.withLock { (value: inout StubURLProtocol.Behavior) -> Void in
             value = .hang
         }
-        let request = PortHttpRequest(method: .get, url: "https://example.com/slow", headers: [], body: nil, timeoutMs: nil)
-        let task = Task { () -> PortHttpResponse in
+        let request = HttpRequest(method: .get, url: "https://example.com/slow", headers: [], body: nil, timeoutMs: nil)
+        let task = Task { () -> HttpResponse in
             return try await self.perform(request)
         }
         let started = await waitUntil {
@@ -814,7 +814,7 @@ final class HttpAdapterTests: XCTestCase {
             guard let portError = error as? UndraPortError else {
                 return XCTFail("expected an UndraPortError, got \(error)")
             }
-            XCTAssertEqual(try? PortHttpError.undraDecoded(from: portError.body), .cancelled)
+            XCTAssertEqual(try? HttpError.undraDecoded(from: portError.body), .cancelled)
         }
     }
 
@@ -824,7 +824,7 @@ final class HttpAdapterTests: XCTestCase {
             let response = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
             return (response, Data())
         }
-        _ = try await perform(PortHttpRequest(method: .get, url: "https://example.com/", headers: [], body: nil, timeoutMs: 0))
+        _ = try await perform(HttpRequest(method: .get, url: "https://example.com/", headers: [], body: nil, timeoutMs: 0))
         let seen = StubURLProtocol.lastRequest.withLock { (value: inout URLRequest?) -> URLRequest? in
             return value
         }
@@ -843,7 +843,7 @@ final class EventAdapterTests: XCTestCase {
             wifi: Bool = false,
             cellular: Bool = false,
             wired: Bool = false
-        ) -> (online: Bool, kind: PortNetKind) {
+        ) -> (online: Bool, kind: NetKind) {
             return ConnectivityAdapter.classify(
                 status: status,
                 usesWifi: wifi,
