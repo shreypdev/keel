@@ -13,7 +13,8 @@ Read this when you embed a core by hand or debug the boundary.
 A core library exports one symbol, named after its namespace (C ABI version 2, ADR-044). The crate
 that links the core into a library (the shim `undra build` generates) says which:
 
-```rust
+```rust,ignore
+// The shim crate's lib.rs (`ignore`: `acme_pay_core` is the app's crate, not one of this workspace)
 undra_ffi::export_core!(acme_pay, jni_class = "com/acme/pay/UndraCoreNative");
 extern crate acme_pay_core; // the core's #[undra::api] items
 ```

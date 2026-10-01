@@ -701,6 +701,23 @@ fn undra_h_declares_the_table_in_the_order_of_the_rust_struct() {
     );
 }
 
+/// There is one `undra.h`, kept in two places: the Swift runtime's `UndraFFI` module and the React
+/// Native module's C++ (ADR-038). They are the same bytes, so a table change cannot reach one host
+/// and miss the other.
+#[test]
+fn the_swift_and_react_native_copies_of_undra_h_are_identical() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let read = |path: &str| {
+        std::fs::read(root.join(path)).unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
+    };
+    let swift = read("runtimes/swift/UndraRuntime/Sources/UndraFFI/include/undra.h");
+    let react_native = read("runtimes/rn/@undra/react-native/cpp/undra.h");
+    assert!(
+        swift == react_native,
+        "runtimes/rn/@undra/react-native/cpp/undra.h differs from the Swift runtime's undra.h: copy it over"
+    );
+}
+
 #[test]
 fn the_exported_schema_carries_the_doc_comments_the_hash_ignores() {
     let _turn = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
