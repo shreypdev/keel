@@ -619,14 +619,14 @@ file records the thermal state and the mode).
 * **Release builds.** The core is `undra build --release` (LTO fat); the iOS app is the Release configuration, the Android
   app the `benchmark` build type (release, not debuggable, signed with the debug key) with the code compiled ahead of time
   (`cmd package compile -m speed`), the web page the production build. The file records all of it.
-* **The web build target decides most of the web rows.** The bench page is built at Vite's default target, which
+* **The web build target is a large share of every web row.** The bench page is built at Vite's default target, which
   lowers the runtime's ES2022 `#private` class members to `WeakMap`/`WeakSet` helpers (a `WeakMap` set for every
   private field of every `UndraWriter`, `UndraReader` and payload object a call allocates). That is what an app built
-  with Vite's defaults ships, the `undra init` web template included, and it is most of each web row: in the review's
-  rerun, the same page built with `build.target: "es2022"` measured the handle call at 1.8 us, the 1 KB round trip at
-  3.3 us and the 100-signal change-set at 31 us (host load about 27), against 5.6 to 6.0 us, 8.0 to 8.3 us and 173 us
-  for the default build minutes earlier (load about 20); the cause analysis is in
-  `.10x/reviews/2026-10-01-device-bench-review.md`. The rows below are the default build.
+  with Vite's defaults ships, the `undra init` web template included: in the review's rerun, the same page built with
+  `build.target: "es2022"` measured the handle call at 1.8 us, the 1 KB round trip at 3.3 us, the keyed insert at
+  22.5 us and the 100-signal change-set at 31 us (host load about 27), against 5.6 to 6.0 us, 8.0 to 8.3 us, 36 to
+  37 us and 173 us for the default build minutes earlier (load about 20): 1.6x (keyed insert) to 5.5x (change-set).
+  The cause analysis is in `.10x/reviews/2026-10-01-device-bench-review.md`. The rows below are the default build.
 * **Clocks.** `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)` (41.67 ns tick), `System.nanoTime` and `performance.now`, which a
   browser rounds to 100 us, or to 5 us when the page is cross-origin isolated (the bench page is). The handle call is
   tens to hundreds of nanoseconds, so it is timed as **batches of calls divided by the batch** (1,000 on a phone) and
@@ -722,7 +722,7 @@ Cold start: fresh launches (10): load p50 1.09 ms, min 1 ms, max 1.2 ms; restore
 
 Cold start: fresh launches (10): load p50 4.5 ms, min 4.29 ms, max 4.67 ms; wasm compile p50 700 µs (not in the row, as the blueprint says); in-page reloads (warm): load p50 710 µs.
 
-* Review annotation (2026-10-01; no number in this file changed): the page was built at Vite's default target, which lowers the runtime's ES2022 `#private` class members to WeakMap/WeakSet helpers; that lowering is most of every row here (the same page built with `build.target: "es2022"` measured 1.8 us, 3.3 us and 31 us for the handle call, the 1 KB round trip and the 100-signal change-set at a higher host load). See `.10x/reviews/2026-10-01-device-bench-review.md`.
+* Review annotation (2026-10-01; no number in this file changed): the page was built at Vite's default target, which lowers the runtime's ES2022 `#private` class members to WeakMap/WeakSet helpers, and that lowering is a large share of every row here: the same page built with `build.target: "es2022"` measured 1.8 us, 3.3 us, 22.5 us and 31 us for the handle call, the 1 KB round trip, the keyed insert and the 100-signal change-set at a host load of about 27, against 5.6 to 6.0, 8.0 to 8.3, 36 to 37 and 173 us for the default build at a load of about 20 (this file was at 2 to 4). See `.10x/reviews/2026-10-01-device-bench-review.md`.
 
 <details><summary>What each row timed</summary>
 
