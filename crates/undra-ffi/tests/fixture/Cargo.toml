@@ -3,7 +3,10 @@
 # `cargo build --workspace`.
 #
 #   cargo build --manifest-path crates/undra-ffi/tests/fixture/Cargo.toml --target wasm32-unknown-unknown
-#   cargo build --manifest-path crates/undra-ffi/tests/fixture/Cargo.toml            # libundra_core.dylib for the Kotlin tests
+#   cargo build --manifest-path crates/undra-ffi/tests/fixture/Cargo.toml            # libundra_fixture.{dylib,a} for the C, Swift and Kotlin tests
+#
+# Its namespace is `undra_fixture` (ADR-044): the library exports `undra_fixture_undra_api` and, with
+# the `jni` feature, `JNI_OnLoad` registering on `dev.undra.fixture.UndraCoreNative`.
 [package]
 name = "undra-ffi-fixture"
 version = "0.0.0"
@@ -11,7 +14,7 @@ edition = "2024"
 publish = false
 
 [lib]
-name = "undra_core"
+name = "undra_fixture"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]

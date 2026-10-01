@@ -10,7 +10,7 @@ public final class Probe: UndraObject, @unchecked Sendable {
 
     /// A probe with every counter at zero.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -126,7 +126,7 @@ public final class Probe: UndraObject, @unchecked Sendable {
 
 /// Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func add(a: Int32, b: Int32, ctx: UndraCore = .shared) throws -> Int32 {
+public func add(a: Int32, b: Int32, ctx: UndraCore = UndraPlaygroundCore.core) throws -> Int32 {
     var w = UndraWriter()
     a.undraEncode(&w)
     b.undraEncode(&w)
@@ -149,7 +149,7 @@ public func addLater(
     a: Int32,
     b: Int32,
     delayMs: UInt32,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> Int32 {
     var w = UndraWriter()
     a.undraEncode(&w)
@@ -169,7 +169,7 @@ public func addLater(
 
 /// The area of a circle or a rectangle. A label and an empty figure have none.
 /// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func area(_ figure: Figure, ctx: UndraCore = .shared) throws -> Double {
+public func area(_ figure: Figure, ctx: UndraCore = UndraPlaygroundCore.core) throws -> Double {
     var w = UndraWriter()
     figure.undraEncode(&w)
     do {
@@ -188,7 +188,7 @@ public func area(_ figure: Figure, ctx: UndraCore = .shared) throws -> Double {
 /// [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
 /// stale).
 /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
-public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = .shared) {
+public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = UndraPlaygroundCore.core) {
     var w = UndraWriter()
     config.undraEncode(&w)
     do {
@@ -213,7 +213,7 @@ public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = .shared) {
 public func createRemoteTodo(
     list: String,
     title: String,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> RemoteTodo {
     var w = UndraWriter()
     list.undraEncode(&w)
@@ -232,7 +232,10 @@ public func createRemoteTodo(
 
 /// Returns `value` unchanged.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func echoComposite(_ value: Composite, ctx: UndraCore = .shared) throws -> Composite {
+public func echoComposite(
+    _ value: Composite,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) throws -> Composite {
     var w = UndraWriter()
     value.undraEncode(&w)
     do {
@@ -249,7 +252,10 @@ public func echoComposite(_ value: Composite, ctx: UndraCore = .shared) throws -
 
 /// Returns `value` unchanged.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func echoFigure(_ value: Figure, ctx: UndraCore = .shared) throws -> Figure {
+public func echoFigure(
+    _ value: Figure,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) throws -> Figure {
     var w = UndraWriter()
     value.undraEncode(&w)
     do {
@@ -266,7 +272,10 @@ public func echoFigure(_ value: Figure, ctx: UndraCore = .shared) throws -> Figu
 
 /// Returns `value` unchanged.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func echoPrimitives(_ value: Primitives, ctx: UndraCore = .shared) throws -> Primitives {
+public func echoPrimitives(
+    _ value: Primitives,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) throws -> Primitives {
     var w = UndraWriter()
     value.undraEncode(&w)
     do {
@@ -284,7 +293,7 @@ public func echoPrimitives(_ value: Primitives, ctx: UndraCore = .shared) throws
 /// Panics with `reason`. The boundary turns the panic into a reply (status 2), never into a
 /// crash, on the platforms that can unwind (R6).
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func explode(reason: String, ctx: UndraCore = .shared) throws -> UInt32 {
+public func explode(reason: String, ctx: UndraCore = UndraPlaygroundCore.core) throws -> UInt32 {
     var w = UndraWriter()
     reason.undraEncode(&w)
     do {
@@ -304,7 +313,7 @@ public func explode(reason: String, ctx: UndraCore = .shared) throws -> UInt32 {
 public func explodeLater(
     delayMs: UInt32,
     reason: String,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> UInt32 {
     var w = UndraWriter()
     delayMs.undraEncode(&w)
@@ -327,7 +336,7 @@ public func explodeLater(
 public func failLater(
     delayMs: UInt32,
     code: Int32,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> UInt32 {
     var w = UndraWriter()
     delayMs.undraEncode(&w)
@@ -346,7 +355,7 @@ public func failLater(
 
 /// Deletes the file or directory `path` of the `Fs` port.
 /// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func fileDelete(path: String, ctx: UndraCore = .shared) async throws {
+public func fileDelete(path: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws {
     var w = UndraWriter()
     path.undraEncode(&w)
     do {
@@ -362,7 +371,10 @@ public func fileDelete(path: String, ctx: UndraCore = .shared) async throws {
 
 /// The names in the directory `dir` of the `Fs` port, sorted.
 /// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func fileList(dir: String, ctx: UndraCore = .shared) async throws -> [String] {
+public func fileList(
+    dir: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -> [String] {
     var w = UndraWriter()
     dir.undraEncode(&w)
     do {
@@ -379,7 +391,10 @@ public func fileList(dir: String, ctx: UndraCore = .shared) async throws -> [Str
 
 /// The contents of the file `path` of the `Fs` port.
 /// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func fileRead(path: String, ctx: UndraCore = .shared) async throws -> [UInt8] {
+public func fileRead(
+    path: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -> [UInt8] {
     var w = UndraWriter()
     path.undraEncode(&w)
     do {
@@ -396,7 +411,11 @@ public func fileRead(path: String, ctx: UndraCore = .shared) async throws -> [UI
 
 /// Writes `data` to the file `path` of the `Fs` port, creating its directories.
 /// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func fileWrite(path: String, data: [UInt8], ctx: UndraCore = .shared) async throws {
+public func fileWrite(
+    path: String,
+    data: [UInt8],
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws {
     var w = UndraWriter()
     path.undraEncode(&w)
     w.writeBytes(data)
@@ -413,7 +432,7 @@ public func fileWrite(path: String, data: [UInt8], ctx: UndraCore = .shared) asy
 
 /// A greeting.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func greet(name: String, ctx: UndraCore = .shared) throws -> String {
+public func greet(name: String, ctx: UndraCore = UndraPlaygroundCore.core) throws -> String {
     var w = UndraWriter()
     name.undraEncode(&w)
     do {
@@ -434,7 +453,7 @@ public func greet(name: String, ctx: UndraCore = .shared) throws -> String {
 public func httpGet(
     url: String,
     timeoutMs: UInt32?,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> HttpResponse {
     var w = UndraWriter()
     url.undraEncode(&w)
@@ -453,7 +472,7 @@ public func httpGet(
 
 /// The value the `Kv` port has under `key`, if any.
 /// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func kvGet(key: String, ctx: UndraCore = .shared) async throws -> [UInt8]? {
+public func kvGet(key: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws -> [UInt8]? {
     var w = UndraWriter()
     key.undraEncode(&w)
     do {
@@ -470,7 +489,10 @@ public func kvGet(key: String, ctx: UndraCore = .shared) async throws -> [UInt8]
 
 /// The keys of the `Kv` port that start with `prefix`, in ascending order.
 /// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func kvKeys(prefix: String, ctx: UndraCore = .shared) async throws -> [String] {
+public func kvKeys(
+    prefix: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -> [String] {
     var w = UndraWriter()
     prefix.undraEncode(&w)
     do {
@@ -487,7 +509,11 @@ public func kvKeys(prefix: String, ctx: UndraCore = .shared) async throws -> [St
 
 /// Stores `value` under `key` in the `Kv` port.
 /// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func kvPut(key: String, value: [UInt8], ctx: UndraCore = .shared) async throws {
+public func kvPut(
+    key: String,
+    value: [UInt8],
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws {
     var w = UndraWriter()
     key.undraEncode(&w)
     w.writeBytes(value)
@@ -504,7 +530,7 @@ public func kvPut(key: String, value: [UInt8], ctx: UndraCore = .shared) async t
 
 /// Removes `key` from the `Kv` port; a missing key is not an error.
 /// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func kvRemove(key: String, ctx: UndraCore = .shared) async throws {
+public func kvRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws {
     var w = UndraWriter()
     key.undraEncode(&w)
     do {
@@ -520,7 +546,10 @@ public func kvRemove(key: String, ctx: UndraCore = .shared) async throws {
 
 /// Greets `name` in the user's language, through the [`Locale`] port.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func localizedGreeting(name: String, ctx: UndraCore = .shared) throws -> String {
+public func localizedGreeting(
+    name: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) throws -> String {
     var w = UndraWriter()
     name.undraEncode(&w)
     do {
@@ -537,7 +566,7 @@ public func localizedGreeting(name: String, ctx: UndraCore = .shared) throws -> 
 
 /// Reads an unsigned number of at most nine digits.
 /// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func parseCount(text: String, ctx: UndraCore = .shared) throws -> UInt32 {
+public func parseCount(text: String, ctx: UndraCore = UndraPlaygroundCore.core) throws -> UInt32 {
     var w = UndraWriter()
     text.undraEncode(&w)
     do {
@@ -554,7 +583,7 @@ public func parseCount(text: String, ctx: UndraCore = .shared) throws -> UInt32 
 
 /// Does nothing and returns nothing: a call with neither arguments nor a result.
 /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
-public func ping(ctx: UndraCore = .shared) {
+public func ping(ctx: UndraCore = UndraPlaygroundCore.core) {
     do {
         _ = try ctx.callSync(
             .freeFunction(methodId: UndraIds.Functions.ping),
@@ -568,7 +597,10 @@ public func ping(ctx: UndraCore = .shared) {
 
 /// The value the `SecureStore` port has under `key`, if any.
 /// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func secretGet(key: String, ctx: UndraCore = .shared) async throws -> [UInt8]? {
+public func secretGet(
+    key: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -> [UInt8]? {
     var w = UndraWriter()
     key.undraEncode(&w)
     do {
@@ -585,7 +617,10 @@ public func secretGet(key: String, ctx: UndraCore = .shared) async throws -> [UI
 
 /// The keys of the `SecureStore` port that start with `prefix`, in ascending order.
 /// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func secretKeys(prefix: String, ctx: UndraCore = .shared) async throws -> [String] {
+public func secretKeys(
+    prefix: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -> [String] {
     var w = UndraWriter()
     prefix.undraEncode(&w)
     do {
@@ -602,7 +637,11 @@ public func secretKeys(prefix: String, ctx: UndraCore = .shared) async throws ->
 
 /// Stores `value` under `key` in the `SecureStore` port (the Keychain, the Android Keystore).
 /// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func secretPut(key: String, value: [UInt8], ctx: UndraCore = .shared) async throws {
+public func secretPut(
+    key: String,
+    value: [UInt8],
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws {
     var w = UndraWriter()
     key.undraEncode(&w)
     w.writeBytes(value)
@@ -619,7 +658,7 @@ public func secretPut(key: String, value: [UInt8], ctx: UndraCore = .shared) asy
 
 /// Removes `key` from the `SecureStore` port; a missing key is not an error.
 /// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func secretRemove(key: String, ctx: UndraCore = .shared) async throws {
+public func secretRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws {
     var w = UndraWriter()
     key.undraEncode(&w)
     do {
@@ -640,7 +679,7 @@ public func setRemoteDone(
     list: String,
     id: UInt32,
     done: Bool,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> RemoteTodo {
     var w = UndraWriter()
     list.undraEncode(&w)
@@ -661,7 +700,7 @@ public func setRemoteDone(
 /// What the query client's persistence did: the offline queue, its dead letters and the
 /// persistence counters.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func storageStatus(ctx: UndraCore = .shared) throws -> StorageStatus {
+public func storageStatus(ctx: UndraCore = UndraPlaygroundCore.core) throws -> StorageStatus {
     do {
         let body = try ctx.callSync(
             .freeFunction(methodId: UndraIds.Functions.storageStatus),
@@ -676,7 +715,7 @@ public func storageStatus(ctx: UndraCore = .shared) throws -> StorageStatus {
 
 /// The name and version of the core.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func version(ctx: UndraCore = .shared) throws -> String {
+public func version(ctx: UndraCore = UndraPlaygroundCore.core) throws -> String {
     do {
         let body = try ctx.callSync(
             .freeFunction(methodId: UndraIds.Functions.version),

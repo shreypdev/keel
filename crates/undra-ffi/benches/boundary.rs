@@ -1,6 +1,11 @@
 //! Cost of crossing the C ABI (SPEC 6, constitution R4): what a Swift or Kotlin call pays for
 //! the boundary itself, with a trivial method behind it.
 //!
+//! Since C ABI version 2 (ADR-044) a host calls through the core's `UndraApi` table: it reads the
+//! table once and every call below is one indirect call through a field of it (`api.call_sync`),
+//! as the Swift and C++ hosts make it. ADR-044 budgets that at no more than 2 ns over version 1's
+//! direct call of `call_sync/add`.
+//!
 //! * `call_sync/add`: `undra_call_sync` of a sync method, payload prebuilt, reply buffer freed;
 //! * `call_sync/unknown`: the status 5 path (decode, lookup, reply);
 //! * `call/add`: `undra_call` of a sync method; the reply callback runs on this thread;
@@ -23,13 +28,13 @@ use undra::prelude::Handle;
 use undra::runtime::RuntimeConfig;
 use undra::wire::payload::{Call, CallTarget};
 use undra::wire::{Decode, Encode, Writer};
-use undra_ffi::{
-    UndraBuf, undra_buf_free, undra_call, undra_call_sync, undra_init, undra_observe,
-    undra_port_register, undra_shutdown,
-};
+use undra_ffi::{UndraApi, UndraBuf};
 
+#[path = "../tests/common/table.rs"]
+mod table;
 #[path = "../tests/common/core.rs"]
 mod test_core;
+use table::{undra_init, undra_observe, undra_port_register, undra_shutdown};
 
 static REPLIES: AtomicU64 = AtomicU64::new(0);
 static CHANGES: AtomicU64 = AtomicU64::new(0);
@@ -89,17 +94,19 @@ fn payload(target: CallTarget, call_id: u32, args: &[u8]) -> Vec<u8> {
     w.into_vec()
 }
 
-fn call_sync(payload: &[u8]) -> usize {
+/// One synchronous call through the table, the way a host makes it: `api->call_sync`, then
+/// `api->buf_free` of the reply.
+fn call_sync(api: &UndraApi, payload: &[u8]) -> usize {
     // SAFETY: `payload` is valid for its length; the returned buffer is read once and freed.
     unsafe {
-        let buf = undra_call_sync(payload.as_ptr(), payload.len() as u32);
+        let buf = (api.call_sync)(payload.as_ptr(), payload.len() as u32);
         let len = buf.len as usize;
-        undra_buf_free(buf);
+        (api.buf_free)(buf);
         len
     }
 }
 
-fn construct(type_name: &str, args: &[u8]) -> Handle {
+fn construct(api: &UndraApi, type_name: &str, args: &[u8]) -> Handle {
     let p = payload(
         CallTarget::Constructor {
             type_id: ids::type_id(type_name),
@@ -110,15 +117,18 @@ fn construct(type_name: &str, args: &[u8]) -> Handle {
     );
     // SAFETY: as in `call_sync`.
     let body = unsafe {
-        let buf = undra_call_sync(p.as_ptr(), p.len() as u32);
+        let buf = (api.call_sync)(p.as_ptr(), p.len() as u32);
         let reply = buf.as_slice()[5..].to_vec();
-        undra_buf_free(buf);
+        (api.buf_free)(buf);
         reply
     };
     Handle::decode_exact(&body).expect("a handle")
 }
 
 fn boundary(c: &mut Criterion) {
+    // Read once, as a host does after checking `abi_version` and `schema_hash`.
+    let api: &UndraApi = table::api();
+    assert_eq!(api.abi_version, 2);
     let cfg = RuntimeConfig::default().encode_to_vec();
     // SAFETY: `on_port` is an `extern "C"` function that touches nothing but its arguments.
     unsafe { undra_port_register(ids::port_id("Sum"), Some(on_port), std::ptr::null_mut()) };
@@ -135,7 +145,7 @@ fn boundary(c: &mut Criterion) {
     };
     assert_eq!(code, 0);
 
-    let calc = construct("Calculator", &7_i64.encode_to_vec());
+    let calc = construct(api, "Calculator", &7_i64.encode_to_vec());
     let args = [1_i64.encode_to_vec(), 2_i64.encode_to_vec()].concat();
     let target = |name: &str| CallTarget::Method {
         handle: calc,
@@ -151,9 +161,11 @@ fn boundary(c: &mut Criterion) {
     );
 
     let mut group = c.benchmark_group("boundary");
-    group.bench_function("call_sync/add", |b| b.iter(|| call_sync(black_box(&add))));
+    group.bench_function("call_sync/add", |b| {
+        b.iter(|| call_sync(api, black_box(&add)))
+    });
     group.bench_function("call_sync/unknown", |b| {
-        b.iter(|| call_sync(black_box(&unknown)));
+        b.iter(|| call_sync(api, black_box(&unknown)));
     });
 
     let sum = payload(
@@ -162,7 +174,7 @@ fn boundary(c: &mut Criterion) {
         &[20_u32.encode_to_vec(), 22_u32.encode_to_vec()].concat(),
     );
     group.bench_function("port_call/sum_on_host", |b| {
-        b.iter(|| call_sync(black_box(&sum)));
+        b.iter(|| call_sync(api, black_box(&sum)));
     });
 
     group.bench_function("call/add", |b| {
@@ -172,7 +184,7 @@ fn boundary(c: &mut Criterion) {
             let p = payload(target("add"), id, &args);
             let before = REPLIES.load(Ordering::Acquire);
             // SAFETY: `p` is valid for its length.
-            assert_eq!(unsafe { undra_call(p.as_ptr(), p.len() as u32) }, 0);
+            assert_eq!(unsafe { (api.call)(p.as_ptr(), p.len() as u32) }, 0);
             assert!(
                 REPLIES.load(Ordering::Acquire) > before,
                 "synchronous reply"
@@ -187,14 +199,14 @@ fn boundary(c: &mut Criterion) {
             let p = payload(target("ready_add"), id, &args);
             let before = REPLIES.load(Ordering::Acquire);
             // SAFETY: `p` is valid for its length.
-            assert_eq!(unsafe { undra_call(p.as_ptr(), p.len() as u32) }, 0);
+            assert_eq!(unsafe { (api.call)(p.as_ptr(), p.len() as u32) }, 0);
             while REPLIES.load(Ordering::Acquire) == before {
                 std::hint::spin_loop();
             }
         });
     });
 
-    let counter = construct("Counter", &[]);
+    let counter = construct(api, "Counter", &[]);
     undra_observe(counter.0, u32::MAX, 1);
     let bump = payload(
         CallTarget::Method {
@@ -207,7 +219,7 @@ fn boundary(c: &mut Criterion) {
     group.bench_function("write_observed", |b| {
         b.iter(|| {
             let before = CHANGES.load(Ordering::Acquire);
-            black_box(call_sync(&bump));
+            black_box(call_sync(api, &bump));
             assert!(CHANGES.load(Ordering::Acquire) > before);
         });
     });

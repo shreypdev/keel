@@ -1,6 +1,9 @@
 import type { NativeHostCounters, NativePlatformDefaults, UndraNativeModule } from "../../src/native.js";
 import { RecordKind } from "../../src/native.js";
 
+/** The namespace of a {@link FakeNative} unless it is given another. */
+export const FAKE_NAMESPACE = "fake_core";
+
 /** Where a fake record comes from: the JS thread inside a host function, or a core thread. */
 export type Thread = "js" | "core";
 
@@ -10,7 +13,9 @@ export class FakeNative implements UndraNativeModule {
   portSync?: ((portId: number, methodId: number, portCallId: number, args: ArrayBuffer) => ArrayBuffer | number) | undefined;
   frame?: (() => void) | undefined;
 
-  abi = 1;
+  /** The core's namespace (a real module reports its table's). */
+  namespace: string;
+  abi = 2;
   hash = 0x1234_5678_9abc_def0n;
   schema: unknown = {
     ports: [
@@ -47,6 +52,11 @@ export class FakeNative implements UndraNativeModule {
 
   #inbox: Array<{ kind: number; payload: Uint8Array }> = [];
   #depth = 0;
+
+  /** @param namespace The core's namespace; default {@link FAKE_NAMESPACE}. */
+  constructor(namespace: string = FAKE_NAMESPACE) {
+    this.namespace = namespace;
+  }
   #draining = false;
   #drainPending = false;
   #records = 0;

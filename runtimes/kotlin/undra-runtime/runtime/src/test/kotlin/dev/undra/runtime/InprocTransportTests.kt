@@ -128,23 +128,76 @@ class InprocTransportTests : Suite() {
             assertEq(1, native.inits.get())
         }
 
-        case("an unavailable native library is an UndraException that says how to fix it") {
-            val native = FakeNative()
+        case("an unavailable native library is an UndraException that names the core and says how to fix it") {
+            val native = FakeNative("acme_pay")
             native.isAvailable = false
-            native.unavailableReason = UnsatisfiedLinkError("no undra_core in java.library.path")
+            native.unavailableReason = UnsatisfiedLinkError("no acme_pay in java.library.path")
             val e = assertThrows<UndraException> { InprocTransport(native).connect(RecordingEvents(), HASH) }
             assertTrue(e.cause is UnsatisfiedLinkError)
-            for (hint in listOf("java.library.path", UndraNative.PATH_PROPERTY, UndraNative.NAME_PROPERTY, "Mode.REMOTE")) {
+            for (hint in listOf("`acme_pay`", "libacme_pay", "java.library.path", "jniLibs/<abi>/libacme_pay.so", "-Dundra.native.acme_pay.path=", "Mode.REMOTE")) {
                 assertTrue(e.message!!.contains(hint), "the message should mention $hint: ${e.message}")
             }
+            assertEq(0, native.inits.get())
         }
 
-        case("an ABI version this runtime does not speak is refused") {
-            val native = FakeNative()
-            native.abi = 2
-            val e = assertThrows<UndraException> { InprocTransport(native).connect(RecordingEvents(), HASH) }
-            assertTrue(e.message!!.contains("ABI"), e.message!!)
-            assertEq(0, native.inits.get())
+        case("the runtime speaks ABI version 2 (ADR-044's table); a version-1 core and a newer one are refused before init") {
+            for (abi in listOf(1, 3)) {
+                val native = FakeNative()
+                native.abi = abi
+                val e = assertThrows<UndraException> { InprocTransport(native).connect(RecordingEvents(), HASH) }
+                assertTrue(e.message!!.contains("ABI version $abi") && e.message!!.contains("speaks 2"), e.message!!)
+                assertEq(0, native.inits.get())
+            }
+            val v2 = FakeNative()
+            InprocTransport(v2).use { it.connect(RecordingEvents(), HASH) }
+            assertEq(1, v2.inits.get())
+        }
+
+        case("two cores with different namespaces run side by side; each close ends only its own core") {
+            val a = FakeNative("side_a")
+            val b = FakeNative("side_b")
+            val ta = InprocTransport(a)
+            val tb = InprocTransport(b)
+            val ea = RecordingEvents()
+            val eb = RecordingEvents()
+            ta.connect(ea, HASH)
+            tb.connect(eb, HASH)
+            assertEq(1, a.inits.get())
+            assertEq(1, b.inits.get())
+            // Each core's callbacks reach its own transport only.
+            a.emitChangeSet(changeSet(1uL, full(0x100000002L, 1u, byteArrayOf(1))))
+            b.emitChangeSet(changeSet(1uL, full(0x100000002L, 1u, byteArrayOf(2))))
+            b.emitChangeSet(changeSet(2uL, full(0x100000002L, 1u, byteArrayOf(3))))
+            assertEq(1, ea.changeSets.size)
+            assertEq(2, eb.changeSets.size)
+            ta.close()
+            assertEq(1, a.shutdowns.get())
+            assertEq(0, b.shutdowns.get(), "closing one core leaves the other running")
+            // The closed namespace is free again; the other one is still claimed.
+            InprocTransport(FakeNative("side_a")).use { it.connect(RecordingEvents(), HASH) }
+            val busy = assertThrows<UndraException> { InprocTransport(FakeNative("side_b")).connect(RecordingEvents(), HASH) }
+            assertTrue(busy.message!!.contains("`side_b` is already loaded"), busy.message!!)
+            tb.close()
+            assertEq(1, b.shutdowns.get())
+        }
+
+        case("a second core with the same namespace is refused, even over another NativeApi object, and never initialized") {
+            val first = FakeNative("same_ns")
+            val second = FakeNative("same_ns")
+            val t1 = InprocTransport(first)
+            t1.connect(RecordingEvents(), HASH)
+            val refused = InprocTransport(second)
+            val e = assertThrows<UndraException> { refused.connect(RecordingEvents(), HASH) }
+            assertTrue(e.message!!.contains("`same_ns` is already loaded"), e.message!!)
+            assertEq(0, second.inits.get(), "the refused core never starts")
+            // The refused transport owns nothing: closing it neither shuts the loaded core down nor frees its claim.
+            refused.close()
+            assertEq(0, first.shutdowns.get())
+            assertEq(0, second.shutdowns.get())
+            assertThrows<UndraException> { InprocTransport(second).connect(RecordingEvents(), HASH) }
+            t1.close()
+            InprocTransport(second).use { it.connect(RecordingEvents(), HASH) }
+            assertEq(1, second.inits.get(), "after the first one closed, the namespace loads again")
         }
 
         case("a failing init is reported and a retry is allowed; a second core after a success is refused") {

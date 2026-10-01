@@ -18,6 +18,7 @@ import {
   codecs,
   decodeValue,
 } from "@undra/runtime";
+import { UndraGoldenStdlib } from "./core.js";
 import { UndraIds } from "./ids.js";
 import { type QueryStatus, QueryStatusCodec } from "./types.js";
 
@@ -49,7 +50,9 @@ export class LatestResponseQueryHandle extends UndraStore {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(core: UndraCore = UndraCore.shared): Promise<LatestResponseQueryHandle> {
+  static async create(
+    core: UndraCore = UndraGoldenStdlib.core,
+  ): Promise<LatestResponseQueryHandle> {
     const args = new Uint8Array(0);
     let handle: bigint;
     try {
@@ -143,7 +146,7 @@ export class LatestResponseQueryHandle extends UndraStore {
  */
 export async function retry(
   request: HttpRequest,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraGoldenStdlib.core,
   signal?: AbortSignal,
 ): Promise<HttpResponse> {
   const w = new UndraWriter();

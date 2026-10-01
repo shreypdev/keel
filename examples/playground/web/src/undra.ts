@@ -1,5 +1,5 @@
 import {
-  UndraCore,
+  type UndraCore,
   UndraCoreRestarted,
   crashRecovery,
   type UndraPanicReport,
@@ -7,9 +7,9 @@ import {
   type UndraUnhandledError,
   emitConnectivity,
 } from "@undra/runtime";
-import { BigList, UndraIds, RemoteTodosQueryHandle, Todos, configureRemote } from "@playground/core";
+import { BigList, RemoteTodosQueryHandle, Todos, UndraPlaygroundCore, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
-import wasmUrl from "../../build/web/undra_core.wasm?url";
+import wasmUrl from "../../build/web/playground_core.wasm?url";
 import { onDevNotice, showDevConnection } from "./dev-banner";
 import { memoryKv } from "./memory-kv";
 import { INBOX, PlaygroundServer, REMOTE_BASE_URL } from "./playground-server";
@@ -30,7 +30,7 @@ export interface Playground {
   readonly server: PlaygroundServer;
   /** The restarts of the wasm core after a crash (ADR-049), for the debug panel. */
   readonly restarts: RestartLog;
-  /** The core itself (`UndraCore.shared` becomes a closed placeholder if it goes down for good; this does not). */
+  /** The core itself (`UndraPlaygroundCore.core` becomes a closed placeholder if it goes down for good; this does not). */
   readonly core: UndraCore;
 }
 
@@ -79,10 +79,9 @@ export async function startUndra(): Promise<Playground> {
     : undefined;
   let core: UndraCore;
   if (typeof devUrl === "string" && devUrl.length > 0) {
-    core = await UndraCore.load({
+    core = await UndraPlaygroundCore.load({
       mode: "remote",
       url: devUrl,
-      expectedSchemaHash: UndraIds.schemaHash,
       adapters,
       onError,
       // `undra dev` carries the core's state across a rebuild and the runtime reconnects by itself, so the page
@@ -96,10 +95,9 @@ export async function startUndra(): Promise<Playground> {
     });
     showDevConnection(core, devUrl);
   } else {
-    core = await UndraCore.load({
+    core = await UndraPlaygroundCore.load({
       mode: "wasm-main",
       wasm: new URL(wasmUrl, location.href),
-      expectedSchemaHash: UndraIds.schemaHash,
       adapters,
       onError,
       onPanic,
@@ -131,5 +129,5 @@ export async function startUndra(): Promise<Playground> {
  */
 export function setOffline(playground: Playground, offline: boolean): void {
   playground.server.offline = offline;
-  emitConnectivity(UndraCore.shared, !offline, offline ? "none" : "wifi");
+  emitConnectivity(UndraPlaygroundCore.core, !offline, offline ? "none" : "wifi");
 }

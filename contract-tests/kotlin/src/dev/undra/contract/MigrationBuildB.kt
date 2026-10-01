@@ -2,10 +2,10 @@ package dev.undra.contract
 
 import dev.undra.playground.core.RemoteConfig
 import dev.undra.playground.core.StorageStatus
+import dev.undra.playground.core.UndraCoreNative
 import dev.undra.playground.core.UndraIds
 import dev.undra.runtime.LoadOptions
 import dev.undra.runtime.UndraCore
-import dev.undra.runtime.UndraNative
 import dev.undra.runtime.UndraRestoreException
 import dev.undra.runtime.adapters.ConnectivityEvents
 import dev.undra.runtime.adapters.HttpError
@@ -24,7 +24,7 @@ import dev.undra.runtime.wire.encodeToByteArray
  * The build-B process of the two-build steps (scenarios.md, "Two builds"; S14 steps 8 and 9, S15 steps 12 to 14).
  *
  * `run.sh` runs it after the main run, in a second JVM (`UNDRA_CONTRACT_PHASE=B`) whose `java.library.path` holds build
- * B's `libundra_core`. Build B has no generated bindings: the core is loaded with the hash it reports
+ * B's `libplayground_core`. Build B has no generated bindings: the core is loaded with the hash it reports
  * (`undra_schema_hash`) and driven through `UndraCore`'s raw API with ids made by `fnv1a32` (the generated
  * `StorageStatus` and `RemoteConfig` are used only as codecs: their layouts are the same in both builds). It reads what
  * build A handed over ([Handover]) and prints only `SCENARIO S14 FAIL ...` / `SCENARIO S15 FAIL ...` lines (and an
@@ -41,13 +41,13 @@ fun migrationBuildB(): Int {
         println("SCENARIO $id FAIL $title: build B: ${reason.replace('\n', ' ')}")
     }
 
-    if (!UndraNative.isAvailable) {
-        val why = "the native core library could not be loaded: ${UndraNative.unavailableReason}"
+    if (!UndraCoreNative.isAvailable) {
+        val why = "the native core library could not be loaded: ${UndraCoreNative.unavailableReason}"
         failed("S14", why)
         failed("S15", why)
         return failures.size
     }
-    val reported = UndraNative.schemaHash().toULong()
+    val reported = UndraCoreNative.schemaHash().toULong()
     if (reported == UndraIds.SCHEMA_HASH) {
         failed("S14", "the core library is build A (schema hash 0x${reported.toString(16)}), not build B")
         failed("S15", "the core library is build A, not build B")
@@ -80,6 +80,8 @@ fun migrationBuildB(): Int {
                     StandardPorts.Log.PORT_ID to log.portImpl(),
                 ),
             ),
+            // Build B's library has build A's namespace, so the bindings' natives object binds it.
+            UndraCoreNative,
         )
     } catch (e: Exception) {
         failed("S14", "build B did not load: $e")

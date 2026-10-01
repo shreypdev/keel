@@ -145,7 +145,7 @@ public final class Bench: UndraStore, @unchecked Sendable {
 
     /// A store with every counter at zero and [`ROWS`] rows numbered from 1.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -1717,7 +1717,7 @@ public final class BigList: UndraStore, @unchecked Sendable {
 
     /// A list of [`LIST_LEN`] items numbered from 1.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -1871,7 +1871,7 @@ public final class Counter: UndraStore, @unchecked Sendable {
 
     /// A counter at zero with no changes made.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -2014,7 +2014,7 @@ public final class Device: UndraStore, @unchecked Sendable {
 
     /// The store, showing every report received so far and following the next ones.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -2111,7 +2111,7 @@ public final class Legacy: UndraStore, @unchecked Sendable {
 
     /// A score of `score`.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(score: Int32, ctx: UndraCore = .shared) throws {
+    public convenience init(score: Int32, ctx: UndraCore = UndraPlaygroundCore.core) throws {
         var w = UndraWriter()
         score.undraEncode(&w)
         let handle: UndraHandle
@@ -2182,7 +2182,7 @@ public final class Profile: UndraStore, @unchecked Sendable {
 
     /// A profile called `name`, never visited.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(name: String, ctx: UndraCore = .shared) throws {
+    public convenience init(name: String, ctx: UndraCore = UndraPlaygroundCore.core) throws {
         var w = UndraWriter()
         name.undraEncode(&w)
         let handle: UndraHandle
@@ -2281,7 +2281,7 @@ public final class Stress: UndraStore, @unchecked Sendable {
 
     /// A store with every signal at its start: zeros, and no generator running.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -2425,7 +2425,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
 
     /// An empty list showing every item.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(

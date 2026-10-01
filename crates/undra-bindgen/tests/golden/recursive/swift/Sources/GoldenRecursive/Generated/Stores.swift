@@ -22,7 +22,7 @@ public final class Outline: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraGoldenRecursive.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(

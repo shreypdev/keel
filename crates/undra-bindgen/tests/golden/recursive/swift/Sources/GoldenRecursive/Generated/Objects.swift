@@ -5,7 +5,10 @@ import UndraRuntime
 
 /// Evaluates an expression.
 /// - Throws: ``ParseError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func evaluate(_ expr: Expr, ctx: UndraCore = .shared) async throws -> Double {
+public func evaluate(
+    _ expr: Expr,
+    ctx: UndraCore = UndraGoldenRecursive.core
+) async throws -> Double {
     var w = UndraWriter()
     expr.undraEncode(&w)
     do {
@@ -22,7 +25,10 @@ public func evaluate(_ expr: Expr, ctx: UndraCore = .shared) async throws -> Dou
 
 /// Reverses a list.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func reverse(_ list: ListNode, ctx: UndraCore = .shared) throws -> ListNode {
+public func reverse(
+    _ list: ListNode,
+    ctx: UndraCore = UndraGoldenRecursive.core
+) throws -> ListNode {
     var w = UndraWriter()
     list.undraEncode(&w)
     do {

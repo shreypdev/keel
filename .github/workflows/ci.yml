@@ -100,13 +100,12 @@ jobs:
             https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar
       - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
-      - name: Build the JNI library
-        run: cargo build -p undra-ffi --features jni
+      - name: Build the JNI library (the fixture core, namespace undra_fixture)
+        run: cargo build --manifest-path crates/undra-ffi/tests/fixture/Cargo.toml
       - name: Test (incl. JNI smoke against the real library)
         env:
           UNDRA_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
-          UNDRA_NATIVE_LIB_DIR: ${{ github.workspace }}/target/debug
-          UNDRA_NATIVE_NAME: undra_ffi
+          UNDRA_NATIVE_LIB_DIR: ${{ github.workspace }}/crates/undra-ffi/tests/fixture/target/debug
         run: runtimes/kotlin/undra-runtime/scripts/test-local.sh
 
   wasm-ffi:
@@ -304,6 +303,8 @@ jobs:
         run: |
           cargo build -p undra-cli
           target/debug/undra build -C examples/playground --platform host
+          # the C++ test's second core: the same crate under the namespace playground_a (ADR-044)
+          target/debug/undra build -C examples/two-cores/a --platform host
           target/debug/undra build -C examples/playground --platform web
       - name: The derived-list recording S19 replays (the contract column)
         run: bash contract-tests/derived-vectors.sh

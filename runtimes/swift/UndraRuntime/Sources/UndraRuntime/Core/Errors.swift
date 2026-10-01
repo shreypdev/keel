@@ -155,13 +155,24 @@ func hex16(_ value: UInt64) -> String {
 
 /// Why `UndraCore.load` could not attach to a core.
 public enum UndraLoadError: Error, Sendable, Equatable {
-    /// An in-process core is already loaded in this process; call `UndraCore.shutdown()` on it
-    /// first.
+    /// This core (an in-process core of the same namespace, ADR-044) is already loaded in this
+    /// process, or its generated entry already holds an open core; call `shutdown()` on that core
+    /// first. Cores of different namespaces load side by side.
     case alreadyLoaded
-    /// The linked native library speaks another C ABI version. Version 0 is the stub that is
-    /// compiled when the real core is not linked (see the package README, `UNDRA_LINK_CORE`).
+    /// The core's table (`<namespace>_undra_api()`) is of another C ABI version than this runtime
+    /// (``UndraCore``'s, 2): the core and the runtime come from different Undra releases. Nothing
+    /// after the version was read and the core was not started.
     case abiMismatch(expected: UInt32, got: UInt32)
-    /// `undra_init` returned a non-zero code.
+    /// The core's table is not one this runtime can use: smaller than a version 2 `UndraApi`,
+    /// without a namespace, or with a null entry. The core was not started.
+    case invalidCoreTable(String)
+    /// An in-process load was given no core table (``LoadOptions/api``): load the core through its
+    /// generated entry, `Undra<Namespace>.load()`, which passes it.
+    case missingCoreTable
+    /// A load was given no ``LoadOptions/expectedSchemaHash``: load the core through its generated
+    /// entry, `Undra<Namespace>.load()`, which passes the hash of its bindings.
+    case missingSchemaHash
+    /// The table's `init` returned a non-zero code.
     case coreInitFailed(code: UInt32)
     /// The remote URL is not a valid `ws://` or `wss://` URL.
     case invalidURL(String)
@@ -177,12 +188,17 @@ extension UndraLoadError: CustomStringConvertible {
     public var description: String {
         switch self {
         case .alreadyLoaded:
-            return "an Undra core is already loaded in this process; call shutdown() on it before loading another"
+            return "this Undra core (its namespace) is already loaded in this process; call shutdown() on it before loading it again"
         case .abiMismatch(let expected, let got):
-            return "the linked Undra library speaks C ABI version \(got), this runtime needs \(expected)"
-                + (got == 0 ? " (version 0 is the link-time stub: link the real core, see UNDRA_LINK_CORE)" : "")
+            return "the Undra core's table is of C ABI version \(got), this runtime needs \(expected): build the core and the app with the same Undra release"
+        case .invalidCoreTable(let reason):
+            return "not a usable Undra core table: \(reason)"
+        case .missingCoreTable:
+            return "LoadOptions.inproc has no core table (api): load the core through its generated entry, Undra<Namespace>.load()"
+        case .missingSchemaHash:
+            return "LoadOptions has no expectedSchemaHash: load the core through its generated entry, Undra<Namespace>.load()"
         case .coreInitFailed(let code):
-            return "undra_init failed with code \(code)"
+            return "the Undra core's init failed with code \(code)"
         case .invalidURL(let url):
             return "not a valid ws:// or wss:// URL: \(url)"
         case .connectionFailed(let reason):

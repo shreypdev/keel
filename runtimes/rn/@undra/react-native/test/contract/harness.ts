@@ -18,10 +18,10 @@ import { WasmNative } from "./wasm-native.js";
  * frame scheduler. vitest.contract.config.ts swaps this file in for the scenarios' `../src/harness.js`.
  */
 
-/** The playground core, built by `undra build -C examples/playground --platform web`. */
+/** The playground core, built by `undra build -C examples/playground --platform web` (`<namespace>.wasm`, ADR-044). */
 export const PLAYGROUND_WASM: string =
   process.env["UNDRA_PLAYGROUND_WASM"] ??
-  fileURLToPath(new URL("../../../../../../examples/playground/build/web/undra_core.wasm", import.meta.url));
+  fileURLToPath(new URL(`../../../../../../examples/playground/build/web/${UndraIds.namespace}.wasm`, import.meta.url));
 
 /** The base URL every scenario that talks to the server configures. */
 export const BASE_URL = "https://playground.test";
@@ -99,8 +99,9 @@ export async function bootRaw(options: BootOptions = {}): Promise<BootedRaw> {
   const closed: Error[] = [];
   const runtimeErrors: unknown[] = [];
   const expectedSchemaHash = options.expectedSchemaHash ?? UndraIds.schemaHash;
-  const native = await WasmNative.load(await playgroundModule(), { clock: world.clock });
+  const native = await WasmNative.load(await playgroundModule(), { clock: world.clock, namespace: UndraIds.namespace });
   const transport = new NativeTransport({
+    namespace: UndraIds.namespace,
     native,
     expectedSchemaHash,
     platform: "react-native-contract",

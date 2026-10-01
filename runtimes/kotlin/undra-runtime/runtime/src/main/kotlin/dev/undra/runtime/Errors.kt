@@ -161,14 +161,16 @@ public class UndraRestoreException(public val code: Int) : UndraException(descri
 }
 
 /**
- * An operation is not available in the mode the core was loaded in, or the [LoadOptions] contradict
- * each other. For example, snapshots exist only for an in-process core, and `Mode.REMOTE` needs a URL.
+ * An operation is not available in the mode the core was loaded in, or the [LoadOptions] cannot start a core:
+ * they contradict each other or lack what the load needs. For example, snapshots exist only for an in-process
+ * core, `Mode.REMOTE` needs a URL, [UndraCore.load] needs the schema hash, and an in-process core is loaded
+ * through the generated entry of its bindings (`Undra<Namespace>.load`), not through [UndraCore.load].
  */
 public class UndraModeException(message: String) : UndraException(message)
 
 /**
  * The core was built from a different schema than the bindings in this app (SPEC section 11): the
- * `expectedSchemaHash` passed to [UndraCore.load] differs from the hash the core reports. Regenerate
+ * schema hash of the bindings ([LoadOptions.expectedSchemaHash]) differs from the hash the core reports. Regenerate
  * the bindings (`undra bindgen`) and rebuild the core, or use matching builds of both.
  *
  * @property expected the hash the bindings were generated from (`UndraIds.SCHEMA_HASH`).

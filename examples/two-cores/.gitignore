@@ -1,0 +1,10 @@
+# What `undra build` writes for each core, and the apps' build output.
+*/build/
+/ios/DerivedData/
+/ios/**/xcuserdata/
+/android/**/build/
+/android/.gradle/
+/android/.kotlin/
+/android/local.properties
+/jvm/build/
+/node/node_modules/

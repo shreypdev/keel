@@ -1,5 +1,6 @@
-//! The native C ABI (SPEC 6) exercised the way a host does: through the exported `undra_*`
-//! functions, with `extern "C"` callbacks that capture what the core sends.
+//! The native C ABI (SPEC 6) exercised the way a host does: through a core's `UndraApi` table (C ABI
+//! version 2, ADR-044; `common/table.rs` spells its entries with their version 1 names), with
+//! `extern "C"` callbacks that capture what the core sends.
 //!
 //! The core under test is real macro-generated code (an object with sync, async, stream,
 //! panicking and failing methods, a store, and two ports), linked into this test binary, so
@@ -20,11 +21,15 @@ use undra::wire::payload::{
     StreamItem,
 };
 use undra::wire::{Decode, Encode, Reader, Writer};
-use undra_ffi::{
-    UndraBuf, init_code, restore_code, undra_abi_version, undra_buf_free, undra_call,
-    undra_call_sync, undra_cancel, undra_event, undra_init, undra_observe, undra_port_register,
-    undra_port_reply, undra_release, undra_restore, undra_schema_hash, undra_schema_json,
-    undra_shutdown, undra_snapshot, undra_stats_json, undra_stream_credit, undra_timer_fired,
+use undra_ffi::{UndraBuf, init_code, restore_code};
+
+#[path = "common/table.rs"]
+mod table;
+use table::{
+    undra_abi_version, undra_buf_free, undra_call, undra_call_sync, undra_cancel, undra_event,
+    undra_init, undra_observe, undra_port_register, undra_port_reply, undra_release, undra_restore,
+    undra_schema_hash, undra_schema_json, undra_shutdown, undra_snapshot, undra_stats_json,
+    undra_stream_credit, undra_timer_fired,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -236,7 +241,7 @@ fn probe_entries(cap: &Capture) {
     seen.push(("undra_timer_fired", true));
     port_reply(&port_reply_payload(0xFFFF_0003, PortStatus::Ok, &[]));
     seen.push(("undra_port_reply", true));
-    seen.push(("undra_abi_version", undra_abi_version() == 1));
+    seen.push(("undra_abi_version", undra_abi_version() == 2));
     seen.push(("undra_schema_hash", undra_schema_hash() != 0));
     let json = undra_schema_json();
     // SAFETY: a buffer the core returned, read and freed once.
@@ -593,7 +598,7 @@ fn reason(body: &[u8]) -> String {
 fn abi_version_schema_hash_and_json_work_before_init() {
     let _turn = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
     undra_shutdown();
-    assert_eq!(undra_abi_version(), 1);
+    assert_eq!(undra_abi_version(), 2);
     let hash = undra_schema_hash();
     assert_ne!(hash, 0);
     let json = take(undra_schema_json());
@@ -608,6 +613,111 @@ fn abi_version_schema_hash_and_json_work_before_init() {
     let schema = Schema::from_json(&text).expect("the schema JSON reads back");
     assert_eq!(schema.hash(), hash);
     assert_eq!(ids::fnv1a64(schema.canonical_json().as_bytes()), hash);
+}
+
+/// C ABI version 2 (ADR-044): what a host reads from the table before it calls anything. The wire
+/// did not change with it, so the schema hash is the one the runtime computes, as in version 1.
+#[test]
+fn the_table_carries_its_version_size_namespace_and_the_unchanged_schema_hash() {
+    let api = table::api();
+    assert_eq!(api.abi_version, 2);
+    assert_eq!(api.abi_version, undra_ffi::ABI_VERSION);
+    assert_eq!(
+        api.size as usize,
+        core::mem::size_of::<undra_ffi::UndraApi>()
+    );
+    // SAFETY: the table's `name_space` is a static NUL-terminated string.
+    let name = unsafe { core::ffi::CStr::from_ptr(api.name_space) };
+    assert_eq!(name, table::NAMESPACE);
+    assert_eq!(
+        api.schema_hash,
+        undra::meta::collect_schema("undra-core").hash(),
+        "the table carries the hash the runtime computes; ADR-044 changes no hash"
+    );
+    // Immutable: the entry hands out the same table every time.
+    assert!(core::ptr::eq(api, table::api()));
+}
+
+/// `undra.h` declares the table field for field as `UndraApi` is laid out here: same names, same
+/// order (a wrong order is a host calling the wrong entry). The C smoke test checks `size`.
+#[test]
+fn undra_h_declares_the_table_in_the_order_of_the_rust_struct() {
+    let header = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../runtimes/swift/UndraRuntime/Sources/UndraFFI/include/undra.h"),
+    )
+    .expect("undra.h");
+    let start = header
+        .find("typedef struct UndraApi {")
+        .expect("undra.h declares UndraApi");
+    let body = &header[start..header[start..].find("} UndraApi;").unwrap() + start];
+    let fields: Vec<&str> = body
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let line = line.split("/*").next().unwrap().trim();
+            if line.is_empty() {
+                return None;
+            }
+            Some(match line.find("(*") {
+                Some(at) => line[at + 2..].split(')').next().unwrap().trim(),
+                None => line
+                    .trim_end_matches(';')
+                    .rsplit([' ', '*'])
+                    .next()
+                    .unwrap(),
+            })
+        })
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            "abi_version",
+            "size",
+            "schema_hash",
+            "name_space",
+            "schema_json",
+            "init",
+            "shutdown",
+            "call",
+            "call_sync",
+            "cancel",
+            "stream_credit",
+            "observe",
+            "release",
+            "port_register",
+            "port_reply",
+            "event",
+            "timer_fired",
+            "snapshot",
+            "restore",
+            "stats_json",
+            "buf_free",
+        ]
+    );
+    assert!(header.contains("#define UNDRA_ABI_VERSION 2u"));
+    // Version 2 declares no function: a core exports one entry, declared by its own header.
+    assert!(
+        !header.contains("undra_init("),
+        "undra.h v2 declares the table, not the v1 functions"
+    );
+}
+
+/// There is one `undra.h`, kept in two places: the Swift runtime's `UndraFFI` module and the React
+/// Native module's C++ (ADR-038). They are the same bytes, so a table change cannot reach one host
+/// and miss the other.
+#[test]
+fn the_swift_and_react_native_copies_of_undra_h_are_identical() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let read = |path: &str| {
+        std::fs::read(root.join(path)).unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
+    };
+    let swift = read("runtimes/swift/UndraRuntime/Sources/UndraFFI/include/undra.h");
+    let react_native = read("runtimes/rn/@undra/react-native/cpp/undra.h");
+    assert!(
+        swift == react_native,
+        "runtimes/rn/@undra/react-native/cpp/undra.h differs from the Swift runtime's undra.h: copy it over"
+    );
 }
 
 #[test]
@@ -1545,7 +1655,7 @@ fn shutdown_racing_host_threads_and_a_second_shutdown_answers_each_call_at_most_
         })
         .collect();
     std::thread::sleep(StdDuration::from_millis(5));
-    let second = std::thread::spawn(|| undra_shutdown());
+    let second = std::thread::spawn(undra_shutdown);
     undra_shutdown();
     second.join().expect("the second shutdown returned");
     stop.store(true, Ordering::SeqCst);

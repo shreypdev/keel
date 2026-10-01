@@ -37,5 +37,7 @@ val SCENARIOS: List<Scenario> = listOf(
     scenario("S18", "coalesced burst", ::s18CoalescedBurst),
     scenario("S19", "derived keyed list", ::s19DerivedKeyedList),
     scenario("S20", "storage failures are typed", ::s20Storage),
+    // S26 loads two other cores (other namespaces) next to the playground core, and closes them again.
+    scenario("S26", "two cores", ::s26TwoCores),
     scenario("S17", "panic containment", ::s17Panic),
 )

@@ -55,6 +55,7 @@ async function attach(native = new FakeNative()): Promise<Attached> {
   const errors: unknown[] = [];
   const logs: Array<[number, string, string]> = [];
   const transport = new NativeTransport({
+    namespace: native.namespace,
     native,
     expectedSchemaHash: native.hash,
     platform: "test",
@@ -98,31 +99,61 @@ describe("start", () => {
     expect(started!.ports).toEqual([0xcd99c48e, 0x1ebeb908, 0x7e57]);
     expect(started!.syncMethods).toEqual([0xcd99c48e, 0xccc94d90, 0x7e57, 0x7e58]);
     expect(core.mode).toBe("native");
-    expect(core.hello.undraVersion).toBe("c-abi-1");
+    expect(core.hello.undraVersion).toBe("c-abi-2");
   });
 
   test("refuses another schema before the core is started", async () => {
     const native = new FakeNative();
-    const transport = new NativeTransport({ native, expectedSchemaHash: 1n });
+    const transport = new NativeTransport({ namespace: native.namespace, native, expectedSchemaHash: 1n });
     await expect(UndraCore.attach(transport, { expectedSchemaHash: 1n, shared: false })).rejects.toBeInstanceOf(UndraSchemaMismatchError);
     expect(native.log).not.toContain("start");
   });
 
   test("refuses another C ABI version", async () => {
     const native = new FakeNative();
-    native.abi = 2;
-    const transport = new NativeTransport({ native, expectedSchemaHash: native.hash });
+    native.abi = 1;
+    const transport = new NativeTransport({ namespace: native.namespace, native, expectedSchemaHash: native.hash });
     await expect(transport.start({} as never)).rejects.toMatchObject({ reason: "handshake" });
     expect(native.log).not.toContain("start");
+  });
+
+  test("refuses the module of another core before anything is called", async () => {
+    const native = new FakeNative("other_core");
+    const transport = new NativeTransport({ namespace: "fake_core", native, expectedSchemaHash: native.hash });
+    const failure = transport.start({} as never);
+    await expect(failure).rejects.toMatchObject({ reason: "handshake" });
+    await expect(failure).rejects.toThrow(/the core `other_core`, not `fake_core`/);
+    expect(native.log).not.toContain("start");
+    expect(native.sink).toBeUndefined();
+  });
+
+  test("without a module it uses the one installed for its namespace, and says so when there is none", async () => {
+    const g = globalThis as { __undraNative?: Record<string, unknown> };
+    const native = new FakeNative();
+    try {
+      const missing = new NativeTransport({ namespace: native.namespace, expectedSchemaHash: native.hash });
+      await expect(missing.start({} as never)).rejects.toMatchObject({ reason: "unsupported" });
+      expect(() => missing.counters()).toThrow(expect.objectContaining({ reason: "unsupported" }));
+      g.__undraNative = { other_core: new FakeNative("other_core"), [native.namespace]: native };
+      const transport = new NativeTransport({ namespace: native.namespace, expectedSchemaHash: native.hash });
+      expect(transport.namespace).toBe("fake_core");
+      const core = await UndraCore.attach(transport, { expectedSchemaHash: native.hash, shared: false, adapters: { http: null } });
+      expect(native.started).not.toBeNull();
+      expect(transport.counters().records).toBe(0);
+      core.close();
+      expect(native.shutdowns).toBe(1);
+    } finally {
+      delete g.__undraNative;
+    }
   });
 
   test("turns a start code into a handshake error and detaches", async () => {
     const native = new FakeNative();
     native.startCode = NativeStartCode.Busy;
-    const transport = new NativeTransport({ native, expectedSchemaHash: native.hash });
+    const transport = new NativeTransport({ namespace: native.namespace, native, expectedSchemaHash: native.hash });
     const failure = transport.start({} as never);
     await expect(failure).rejects.toBeInstanceOf(UndraTransportError);
-    await expect(failure).rejects.toThrow(/one per process/);
+    await expect(failure).rejects.toThrow(/already running in this process/);
     expect(native.sink).toBeUndefined();
     expect(native.portSync).toBeUndefined();
   });
@@ -134,7 +165,7 @@ describe("one module, several transports", () => {
     const sink = native.sink;
     const portSync = native.portSync;
     native.startCode = NativeStartCode.AlreadyStarted;
-    const second = new NativeTransport({ native, expectedSchemaHash: native.hash });
+    const second = new NativeTransport({ namespace: native.namespace, native, expectedSchemaHash: native.hash });
     await expect(second.start({} as never)).rejects.toThrow(/already started/);
     second.close();
     expect(native.sink).toBe(sink);

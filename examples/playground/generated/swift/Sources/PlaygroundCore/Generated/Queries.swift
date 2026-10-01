@@ -25,7 +25,7 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(list: String, ctx: UndraCore = .shared) throws {
+    public convenience init(list: String, ctx: UndraCore = UndraPlaygroundCore.core) throws {
         var w = UndraWriter()
         list.undraEncode(&w)
         let handle: UndraHandle
@@ -146,7 +146,7 @@ public func patchRemoteTodo(
     list: String,
     id: UInt32,
     done: Bool,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> RemoteTodo {
     var w = UndraWriter()
     list.undraEncode(&w)
@@ -169,7 +169,7 @@ public func patchRemoteTodo(
 public func postRemoteTodo(
     list: String,
     title: String,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> RemoteTodo {
     var w = UndraWriter()
     list.undraEncode(&w)
@@ -188,7 +188,11 @@ public func postRemoteTodo(
 
 /// Runs the `save_note` mutation.
 /// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func saveNote(list: String, text: String, ctx: UndraCore = .shared) async throws -> Bool {
+public func saveNote(
+    list: String,
+    text: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -> Bool {
     var w = UndraWriter()
     list.undraEncode(&w)
     text.undraEncode(&w)
@@ -206,7 +210,11 @@ public func saveNote(list: String, text: String, ctx: UndraCore = .shared) async
 
 /// Runs the `tag_note` mutation.
 /// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func tagNote(list: String, id: UInt32, ctx: UndraCore = .shared) async throws -> Bool {
+public func tagNote(
+    list: String,
+    id: UInt32,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -> Bool {
     var w = UndraWriter()
     list.undraEncode(&w)
     id.undraEncode(&w)

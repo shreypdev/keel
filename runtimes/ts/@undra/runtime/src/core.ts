@@ -232,7 +232,8 @@ interface PendingStream {
   readonly stream: StreamCall;
 }
 
-const UNLOADED_MESSAGE = "no UndraCore is loaded: call UndraCore.load(...) at app startup, before creating any Undra object, or pass a core explicitly";
+const UNLOADED_MESSAGE =
+  "the core is not loaded: load it at app startup (the bindings' Undra<Namespace>.load(...), or UndraCore.load(...)), before creating any Undra object, or pass a core explicitly";
 const DEFAULT_OBSERVE_TIMEOUT_MS = 10_000;
 
 function abortReason(signal: AbortSignal): unknown {
@@ -307,6 +308,15 @@ export class UndraCore {
     return UndraCore.#shared;
   }
 
+  /**
+   * The permanently closed placeholder: what {@link UndraCore.shared} returns while no core is loaded, and what
+   * the generated entry of a core (`Undra<Namespace>.core`, ADR-044) returns while that core is not loaded. Its
+   * calls reject with `UndraCallError.Unavailable` and its commands only log; its first use logs what to do.
+   */
+  static get unloaded(): UndraCore {
+    return UndraCore.#placeholder();
+  }
+
   static #unloaded: UndraCore | null = null;
 
   /** The placeholder `shared` returns while no core is loaded: a core that was closed from the start. */
@@ -333,7 +343,7 @@ export class UndraCore {
       consoleLog().log(
         4,
         "undra::runtime",
-        "UndraCore.shared was used while no core is loaded (before UndraCore.load(...) succeeds, or after the shared core was closed); calls on it reject with UndraCallError.Unavailable. Load a core at app startup, before creating any Undra object.",
+        "a core was used while it is not loaded (before its load(...) succeeded, or after it was closed); calls on it reject with UndraCallError.Unavailable. Load the core at app startup, before creating any Undra object.",
       );
     }
     return UndraCore.#unloaded;

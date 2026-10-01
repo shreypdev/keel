@@ -10,6 +10,7 @@ import {
   codecs,
   encodeValue,
 } from "@undra/runtime";
+import { UndraPlaygroundCore } from "./core.js";
 import { HttpError, HttpErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import {
@@ -23,7 +24,7 @@ import {
 
 /** Sends the events of this port from the host to the core. A failure (a closed core) is logged and passed to `onError`; the methods do not throw. */
 export class ConnectivityEvents {
-  constructor(private readonly core: UndraCore = UndraCore.shared) {}
+  constructor(private readonly core: UndraCore = UndraPlaygroundCore.core) {}
 
   changed(online: boolean, kind: NetKind): void {
     try {

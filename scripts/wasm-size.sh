@@ -70,7 +70,8 @@ echo "==> undra init hello --platforms web" >&2
 echo "==> undra build --platform web" >&2
 "$UNDRA" build --platform web -C "$PROJECT" >"$WORK/build.log" 2>&1 \
   || { tail -40 "$WORK/build.log" >&2; die "undra build --platform web failed (log: $WORK/build.log)"; }
-WASM="$PROJECT/build/web/undra_core.wasm"
+# Named after the core's namespace (ADR-044): the template's core package `hello-core` gives `hello_core`.
+WASM="$PROJECT/build/web/hello_core.wasm"
 [ -f "$WASM" ] || die "undra build did not write $WASM"
 RAW="$(ls -t "$CARGO_TARGET_DIR"/wasm32-unknown-unknown/release-wasm/undra_core_*.wasm 2>/dev/null | head -1)"
 [ -n "$RAW" ] || die "cannot find cargo's wasm output in $CARGO_TARGET_DIR"

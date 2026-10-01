@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The Kotlin column of the contract tests: runs S01..S20 of contract-tests/scenarios.md on the JVM over
-# JNI against the real libundra_core of the playground core, then checks all twenty passed.
+# The Kotlin column of the contract tests: runs S01..S20 and S26 of contract-tests/scenarios.md on the JVM
+# over JNI against the real libplayground_core of the playground core (and, for S26, libplayground_a and
+# libplayground_b: the same core under two more namespaces, examples/two-cores), then checks all twenty-one passed.
 #
 #   contract-tests/kotlin/run.sh
 #
@@ -8,9 +9,11 @@
 #   1. builds the host core twice with the undra CLI (`undra build -C examples/playground --platform host`,
 #      incremental): first build B of the migration steps (`UNDRA_PLAYGROUND_V2=1`, scenarios.md "Two
 #      builds"), whose library is copied aside to $OUT/core-b, then build A, the default, copied to
-#      $OUT/core-a (each JVM loads its own copy, so a later `undra build` cannot swap it under the run)
+#      $OUT/core-a (each JVM loads its own copy, so a later `undra build` cannot swap it under the run), and
+#      S26's two cores (examples/two-cores/a and b) when missing or older than their sources
 #   2. compiles the Kotlin runtime's main sources (runtimes/kotlin/undra-runtime/scripts/test-local.sh main)
-#   3. compiles the generated bindings (examples/playground/generated/kotlin) together with the runner (src/)
+#   3. compiles the generated bindings (examples/playground/generated/kotlin and examples/two-cores/{a,b}/generated/kotlin)
+#      together with the runner (src/)
 #   4. runs the runner on the JVM with -Djava.library.path pointing at build A; S14 and S15 hand what build A
 #      persisted over in $OUT/migration
 #   5. runs it again in a second JVM over build B (UNDRA_CONTRACT_PHASE=B), which checks S14 steps 8-9 and
@@ -50,10 +53,10 @@ CORE_B="$OUT/core-b"
 # Copies the library `undra build` just wrote to $1 (under its usual name, which is what System.loadLibrary finds).
 stage_core() {
   local lib="" candidate
-  for candidate in "$LIB_DIR/libundra_core.dylib" "$LIB_DIR/libundra_core.so"; do
+  for candidate in "$LIB_DIR/libplayground_core.dylib" "$LIB_DIR/libplayground_core.so"; do
     if [ -f "$candidate" ]; then lib="$candidate"; fi
   done
-  if [ -z "$lib" ]; then echo "error: undra build wrote no libundra_core under $LIB_DIR" >&2; exit 1; fi
+  if [ -z "$lib" ]; then echo "error: undra build wrote no libplayground_core under $LIB_DIR" >&2; exit 1; fi
   rm -rf "$1"
   mkdir -p "$1"
   cp "$lib" "$1/"
@@ -65,24 +68,45 @@ stage_core "$CORE_B"
 echo "==> undra build -C examples/playground --platform host (build A)"
 "$UNDRA" build -C "$PLAYGROUND" --platform host
 stage_core "$CORE_A"
-if cmp -s "$CORE_A"/libundra_core.* "$CORE_B"/libundra_core.*; then
+if cmp -s "$CORE_A"/libplayground_core.* "$CORE_B"/libplayground_core.*; then
   echo "error: build B's library is identical to build A's; UNDRA_PLAYGROUND_V2=1 did not reach the core" >&2
   exit 1
 fi
+# S26's two cores: the same core (build A) under two more namespaces, each rebuilt when missing or older than its sources.
+host_core() { # <project dir> <namespace>: echoes the library's directory, building it when needed
+  local project="$1" ns="$2" lib="" candidate stale=0
+  for candidate in "$project/build/host/lib$ns.dylib" "$project/build/host/lib$ns.so"; do
+    if [ -f "$candidate" ]; then lib="$candidate"; fi
+  done
+  if [ -z "$lib" ]; then
+    stale=1
+  elif [ -n "$(find "$PLAYGROUND/core" "$project/undra.toml" "$REPO/crates" \( -name '*.rs' -o -name 'Cargo.toml' -o -name undra.toml \) -newer "$lib" -print -quit)" ]; then
+    stale=1
+  fi
+  if [ "$stale" = 1 ]; then
+    echo "==> undra build -C ${project#"$REPO"/} --platform host" >&2
+    "$UNDRA" build -C "$project" --platform host >&2
+  fi
+  echo "$project/build/host"
+}
+LIB_DIR_A="$(host_core "$REPO/examples/two-cores/a" playground_a)"
+LIB_DIR_B="$(host_core "$REPO/examples/two-cores/b" playground_b)"
 
 # --- 2. the Kotlin runtime (main sources only) -----------------------------------------------------------
 UNDRA_BUILD_DIR="$OUT/runtime" "$REPO/runtimes/kotlin/undra-runtime/scripts/test-local.sh" main
 
 # --- 3. the generated bindings and the runner ------------------------------------------------------------
 GENERATED="$PLAYGROUND/generated/kotlin/src/main/kotlin"
+GENERATED_A="$REPO/examples/two-cores/a/generated/kotlin/src/main/kotlin"
+GENERATED_B="$REPO/examples/two-cores/b/generated/kotlin/src/main/kotlin"
 CLASSES="$OUT/classes"
 STAMP="$OUT/classes.stamp"
 if [ ! -f "$STAMP" ] || [ "$OUT/runtime/main.stamp" -nt "$STAMP" ] \
-   || [ -n "$(find "$HERE/src" "$GENERATED" -type f -newer "$STAMP" -print -quit)" ]; then
+   || [ -n "$(find "$HERE/src" "$GENERATED" "$GENERATED_A" "$GENERATED_B" -type f -newer "$STAMP" -print -quit)" ]; then
   echo "==> compiling the bindings and the runner"
   rm -rf "$CLASSES" "$STAMP"
   mkdir -p "$CLASSES"
-  kotlinc -cp "$OUT/runtime/main:$UNDRA_KOTLINX_COROUTINES" -jvm-target 11 -d "$CLASSES" "$GENERATED" "$HERE/src"
+  kotlinc -cp "$OUT/runtime/main:$UNDRA_KOTLINX_COROUTINES" -jvm-target 11 -d "$CLASSES" "$GENERATED" "$GENERATED_A" "$GENERATED_B" "$HERE/src"
   touch "$STAMP"
 fi
 
@@ -94,10 +118,10 @@ HANDOVER="$OUT/migration"
 rm -rf "$HANDOVER"
 export UNDRA_CONTRACT_HANDOVER="$HANDOVER"
 CP="$OUT/runtime/main:$CLASSES:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES"
-echo "==> running S01..S20 against build A (${CORE_A#"$REPO"/})"
+echo "==> running S01..S20 and S26 against build A (${CORE_A#"$REPO"/}, and playground_a, playground_b)"
 mkdir -p "$OUT"
 status=0
-java -Xmx1g -Djava.library.path="$CORE_A" -cp "$CP" dev.undra.contract.MainKt 2>&1 | tee "$OUT/run.log" || status=$?
+java -Xmx1g -Djava.library.path="$CORE_A:$LIB_DIR_A:$LIB_DIR_B" -cp "$CP" dev.undra.contract.MainKt 2>&1 | tee "$OUT/run.log" || status=$?
 echo "==> running the build-B steps of S14 and S15 against build B (${CORE_B#"$REPO"/})"
 UNDRA_CONTRACT_PHASE=B java -Xmx1g -Djava.library.path="$CORE_B" -cp "$CP" dev.undra.contract.MainKt 2>&1 | tee -a "$OUT/run.log" || status=$?
 "$REPO/contract-tests/check.sh" kotlin "$OUT/run.log" || status=1

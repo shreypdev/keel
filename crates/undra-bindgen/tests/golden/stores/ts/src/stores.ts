@@ -18,6 +18,7 @@ import {
   decodePatch,
   decodeValue,
 } from "@undra/runtime";
+import { UndraGoldenStores } from "./core.js";
 import { type TodoError, TodoErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import {
@@ -39,7 +40,7 @@ export class Clock extends UndraStore {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(zone: string, core: UndraCore = UndraCore.shared): Promise<Clock> {
+  static async create(zone: string, core: UndraCore = UndraGoldenStores.core): Promise<Clock> {
     const w = new UndraWriter();
     w.writeStr(zone);
     let handle: bigint;
@@ -116,7 +117,7 @@ export class Todos extends UndraStore {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(core: UndraCore = UndraCore.shared): Promise<Todos> {
+  static async create(core: UndraCore = UndraGoldenStores.core): Promise<Todos> {
     let handle: bigint;
     try {
       handle = await core.construct(
@@ -136,7 +137,7 @@ export class Todos extends UndraStore {
    * @throws {TodoError}
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static async open(path: string, core: UndraCore = UndraCore.shared): Promise<Todos> {
+  static async open(path: string, core: UndraCore = UndraGoldenStores.core): Promise<Todos> {
     const w = new UndraWriter();
     w.writeStr(path);
     let handle: bigint;

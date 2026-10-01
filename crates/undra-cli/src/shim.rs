@@ -5,9 +5,10 @@
 //! platforms is built from two generated crates instead, so those decisions are made once, here,
 //! and cannot drift between projects:
 //!
-//! * the **shim** (`target/undra/<project>/shim`) links the core and `undra-ffi` into one library named
-//!   `undra_core` (the name the Kotlin runtime loads), with the release profiles of SPEC 7. It is
-//!   built as a `cdylib` (host, Android, web) or a `staticlib` (iOS);
+//! * the **shim** (`target/undra/<project>/shim`) links the core and `undra-ffi` into one library that
+//!   exports the core's table under its namespace (`undra_ffi::export_core!`, ADR-044), with the
+//!   release profiles of SPEC 7. It is built as a `cdylib` (host, Android, web) or a `staticlib`
+//!   (iOS, prelinked into one object);
 //! * the **dev runner** (`target/undra/<project>/dev-runner`) links the core, `undra-runtime` and
 //!   `undra-transport` into an executable that serves the core over a WebSocket (`undra dev`).
 //!
@@ -52,9 +53,9 @@ pub fn project_key(project_root: &Path) -> String {
 }
 
 /// The shim crate's library name: `undra_core_` plus the project-path hash. Per-project so a
-/// shared target directory never sees two crates fight over one `libundra_core.*` artifact
-/// (undra-ffi's test fixture builds an `undra_core` of its own; a global `CARGO_TARGET_DIR`
-/// would too). The build steps copy the artifact to its canonical `libundra_core.*` name.
+/// shared target directory never sees two crates fight over one artifact (a global
+/// `CARGO_TARGET_DIR` shared by several projects). The build steps copy the artifact to the core's
+/// names (`lib<namespace>.*`, ADR-044).
 #[must_use]
 pub fn shim_lib_name(project_root: &Path) -> String {
     let hash = undra_meta::ids::fnv1a32(&project_root.to_string_lossy());
@@ -80,7 +81,8 @@ pub fn shim_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
 /// reused and stripped. A dedicated directory always builds the core fresh with the shim's
 /// (non-incremental) profile, so the result does not depend on what else touched the project's
 /// target. It still lives under the resolved target directory, so `CARGO_TARGET_DIR` is honoured.
-/// Android (ELF keeps the symbols) and iOS (its staticlib is `-force_load`ed) do not need this.
+/// Android (ELF keeps the symbols) and iOS (its staticlib is prelinked with `-all_load` in debug)
+/// do not need this.
 #[must_use]
 pub fn host_lib_target_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
     target_dir
@@ -173,6 +175,15 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
+/// What the shim exports the core as (ADR-044).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShimNames {
+    /// The core's namespace: the export is `<namespace>_undra_api`.
+    pub namespace: String,
+    /// The JNI class `JNI_OnLoad` registers the natives on (`dev/acme/pay/core/UndraCoreNative`).
+    pub jni_class: String,
+}
+
 /// Generates the shim crate and returns its `Cargo.toml`.
 ///
 /// # Errors
@@ -182,15 +193,19 @@ pub fn write_shim(
     target_dir: &Path,
     project_root: &Path,
     core: &CoreInfo,
+    names: &ShimNames,
     wasm_opt_level: &str,
 ) -> Result<PathBuf> {
     let dir = shim_dir(target_dir, project_root);
     let vars = common_vars(core)
         .with("UNDRA_FFI", core.undra.dependency("undra-ffi", &[]))
         .with("SHIM_LIB_NAME", shim_lib_name(project_root))
-        .with("WASM_OPT_LEVEL", wasm_opt_level);
+        .with("WASM_OPT_LEVEL", wasm_opt_level)
+        .with("NAMESPACE", names.namespace.clone())
+        .with("JNI_CLASS", names.jni_class.clone())
+        .with("JNI_CLASS_DOTTED", names.jni_class.replace('/', "."));
     write_if_changed(&dir.join("Cargo.toml"), &render(SHIM_MANIFEST, &vars)?)?;
-    write_if_changed(&dir.join("src/lib.rs"), SHIM_LIB)?;
+    write_if_changed(&dir.join("src/lib.rs"), &render(SHIM_LIB, &vars)?)?;
     seed_lockfile(&dir, project_root, core);
     Ok(dir.join("Cargo.toml"))
 }
@@ -279,6 +294,30 @@ mod tests {
         }
     }
 
+    fn names() -> ShimNames {
+        ShimNames {
+            namespace: "todo_core".into(),
+            jni_class: "com/example/todo/core/UndraCoreNative".into(),
+        }
+    }
+
+    #[test]
+    fn the_shim_exports_the_core_under_its_namespace() {
+        let dir = crate::fsutil::unique_temp_dir("shim-export");
+        let manifest =
+            write_shim(&dir, Path::new("/nonexistent"), &core(false), &names(), "z").unwrap();
+        let lib = std::fs::read_to_string(manifest.parent().unwrap().join("src/lib.rs")).unwrap();
+        assert!(
+            lib.contains(
+                "undra_ffi::export_core!(todo_core, jni_class = \"com/example/todo/core/UndraCoreNative\");"
+            ),
+            "{lib}"
+        );
+        assert!(lib.contains("extern crate app_core;"), "{lib}");
+        assert!(!lib.contains("pub use undra_ffi::*"), "{lib}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn projects_sharing_a_target_directory_get_their_own_crates() {
         let target = Path::new("/shared/target");
@@ -327,7 +366,7 @@ mod tests {
             "# v1\n[[package]]\nname = \"itoa\"\nversion = \"1.0.18\"\n",
         )
         .unwrap();
-        let manifest = write_shim(&target, &project, &core(false), "s").unwrap();
+        let manifest = write_shim(&target, &project, &core(false), &names(), "s").unwrap();
         let shim_lock = manifest.with_file_name("Cargo.lock");
         assert_eq!(
             std::fs::read_to_string(&shim_lock).unwrap(),
@@ -336,7 +375,7 @@ mod tests {
         // Cargo completes the shim's lock with what the shim adds: kept while the project's is unchanged.
         let completed = "# v1\n[[package]]\nname = \"itoa\"\nversion = \"1.0.18\"\n\n[[package]]\nname = \"shim\"\n";
         std::fs::write(&shim_lock, completed).unwrap();
-        write_shim(&target, &project, &core(false), "s").unwrap();
+        write_shim(&target, &project, &core(false), &names(), "s").unwrap();
         assert_eq!(std::fs::read_to_string(&shim_lock).unwrap(), completed);
         // `cargo update -p itoa --precise 1.0.5` in the project: the next build uses it.
         std::fs::write(
@@ -344,7 +383,7 @@ mod tests {
             "# v2\n[[package]]\nname = \"itoa\"\nversion = \"1.0.5\"\n",
         )
         .unwrap();
-        write_shim(&target, &project, &core(false), "s").unwrap();
+        write_shim(&target, &project, &core(false), &names(), "s").unwrap();
         assert!(
             std::fs::read_to_string(&shim_lock)
                 .unwrap()
@@ -372,7 +411,8 @@ mod tests {
     #[test]
     fn the_shim_depends_on_the_core_and_undra_ffi_from_the_same_source() {
         let dir = crate::fsutil::unique_temp_dir("shim-gen");
-        let manifest = write_shim(&dir, Path::new("/nonexistent"), &core(false), "s").unwrap();
+        let manifest =
+            write_shim(&dir, Path::new("/nonexistent"), &core(false), &names(), "s").unwrap();
         let text = std::fs::read_to_string(&manifest).unwrap();
         assert!(
             text.contains("undra-ffi = { path = \"/src/undra/crates/undra-ffi\" }"),
@@ -393,7 +433,7 @@ mod tests {
         // Regenerating identical content leaves the file alone (Cargo keys rebuilds on mtime).
         let before = std::fs::metadata(&manifest).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        write_shim(&dir, Path::new("/nonexistent"), &core(false), "s").unwrap();
+        write_shim(&dir, Path::new("/nonexistent"), &core(false), &names(), "s").unwrap();
         assert_eq!(
             std::fs::metadata(&manifest).unwrap().modified().unwrap(),
             before

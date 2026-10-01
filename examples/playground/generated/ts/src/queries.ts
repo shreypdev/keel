@@ -12,6 +12,7 @@ import {
   codecs,
   decodeValue,
 } from "@undra/runtime";
+import { UndraPlaygroundCore } from "./core.js";
 import { type RemoteError, RemoteErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import { type QueryStatus, QueryStatusCodec, type RemoteTodo, RemoteTodoCodec } from "./types.js";
@@ -46,7 +47,7 @@ export class RemoteTodosQueryHandle extends UndraStore {
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
   static async create(
     list: string,
-    core: UndraCore = UndraCore.shared,
+    core: UndraCore = UndraPlaygroundCore.core,
   ): Promise<RemoteTodosQueryHandle> {
     const w = new UndraWriter();
     w.writeStr(list);
@@ -145,7 +146,7 @@ export async function patchRemoteTodo(
   list: string,
   id: number,
   done: boolean,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise<RemoteTodo> {
   const w = new UndraWriter();
@@ -174,7 +175,7 @@ export async function patchRemoteTodo(
 export async function postRemoteTodo(
   list: string,
   title: string,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise<RemoteTodo> {
   const w = new UndraWriter();
@@ -202,7 +203,7 @@ export async function postRemoteTodo(
 export async function saveNote(
   list: string,
   text: string,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise<boolean> {
   const w = new UndraWriter();
@@ -230,7 +231,7 @@ export async function saveNote(
 export async function tagNote(
   list: string,
   id: number,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise<boolean> {
   const w = new UndraWriter();

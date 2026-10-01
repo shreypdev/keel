@@ -4,7 +4,8 @@ import PlaygroundCore
 
 /// The one core of this process and the fakes it runs against.
 ///
-/// `undra_init` is once per process, so every scenario shares the core the first of them loads.
+/// The playground core's `init` is once per core, so every scenario shares the core the first of
+/// them loads (through its generated entry, `UndraPlaygroundCore`, as an app does).
 /// The fakes outlive a reload (S16 shuts the core down and loads it again), which is why they
 /// are owned here and not by the adapters.
 @MainActor
@@ -46,13 +47,12 @@ final class Fixture {
         return all
     }
 
-    /// The options every load of the harness uses: its adapters, the generated schema hash, and an
-    /// `onError` that records into `unhandled`.
+    /// The options every load of the harness uses: its adapters and an `onError` that records into
+    /// `unhandled` (the entry adds the core's table and the generated schema hash).
     func loadOptions() -> LoadOptions {
         let sink = unhandled
         return .inproc(
             adapters: makeAdapters(),
-            expectedSchemaHash: UndraIds.schemaHash,
             onError: { (report: UndraUnhandledError) -> Void in
                 sink.withLock { (current: inout [UndraUnhandledError]) -> Void in current.append(report) }
             }
@@ -65,7 +65,7 @@ final class Fixture {
         if let core = loaded, !core.isShutDown {
             return core
         }
-        let core = try UndraCore.load(loadOptions())
+        let core = try UndraPlaygroundCore.load(loadOptions())
         configureRemote(RemoteConfig(baseUrl: FakeServer.baseURL), ctx: core)
         loaded = core
         return core

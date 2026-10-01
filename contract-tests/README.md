@@ -1,14 +1,15 @@
 # Contract tests
 
-The definition of "the platforms agree" (SPEC section 14): twenty-two scenarios, run against the **real
-playground core** (`examples/playground/core`) through the real boundary: S01 to S20 by each platform runtime,
-S21 and S22 (web worker mode and crash recovery, ADR-049) by TypeScript only, 62 cells in all.
+The definition of "the platforms agree" (SPEC section 14): twenty-three scenarios, run against the **real
+playground core** (`examples/playground/core`) through the real boundary: S01 to S20 and S26 (two cores,
+ADR-044) by each platform runtime, S21 and S22 (web worker mode and crash recovery, ADR-049) by TypeScript
+only, 65 cells in all. S23 to S25 are held by other ADRs (the boundary-surface plan numbers them).
 
 | Directory | Platform | Boundary | Run |
 |---|---|---|---|
-| `ts/` | TypeScript (vitest) | `@undra/runtime` over the real `undra_core.wasm` (wasm-main) | `ts/run.sh` |
-| `kotlin/` | Kotlin (kotlinc + JVM) | `dev.undra.runtime` over JNI and the real `libundra_core` | `kotlin/run.sh` |
-| `swift/` | Swift (XCTest) | `UndraRuntime` over the C ABI and the real core library | `swift/run.sh` |
+| `ts/` | TypeScript (vitest) | `@undra/runtime` over the real `playground_core.wasm` (wasm-main) | `ts/run.sh` |
+| `kotlin/` | Kotlin (kotlinc + JVM) | `dev.undra.runtime` over JNI and the real `libplayground_core` | `kotlin/run.sh` |
+| `swift/` | Swift (XCTest) | `UndraRuntime` over the C ABI table of the real core library | `swift/run.sh` |
 
 ```sh
 contract-tests/run-all.sh            # all three (swift only on macOS), then the scenario grid

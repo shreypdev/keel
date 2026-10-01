@@ -2,10 +2,11 @@
 
 /**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
- * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
+ * hash and the namespace of the core these bindings belong to.
  */
 export const UndraIds = {
   schemaHash: 0x3e314305379cf9a4n,
+  namespace: "golden_records",
   Objects: {
   },
   Functions: {

@@ -15,7 +15,7 @@ public final class Clock: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(zone: String, ctx: UndraCore = .shared) throws {
+    public convenience init(zone: String, ctx: UndraCore = UndraGoldenStores.core) throws {
         var w = UndraWriter()
         zone.undraEncode(&w)
         let handle: UndraHandle
@@ -85,7 +85,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraGoldenStores.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -100,7 +100,10 @@ public final class Todos: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-    public static func `open`(path: String, ctx: UndraCore = .shared) async throws -> Todos {
+    public static func `open`(
+        path: String,
+        ctx: UndraCore = UndraGoldenStores.core
+    ) async throws -> Todos {
         var w = UndraWriter()
         path.undraEncode(&w)
         let handle: UndraHandle

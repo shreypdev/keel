@@ -18,8 +18,11 @@ end
 target 'UndraPlayground' do
   config = use_native_modules!
 
-  # The Undra core, built by `undra build -C examples/playground --platform rn` (docs/REACT_NATIVE.md).
-  pod 'UndraCore', :path => '../../build/ios'
+  # The Undra core `playground_core`, built by `undra build -C examples/playground --platform rn`
+  # (docs/REACT_NATIVE.md): PlaygroundCore.xcframework and the pod that vendors it, next to this
+  # app in examples/playground/build/ios. @undra/react-native finds it by its namespace (ADR-044);
+  # every further core of an app is one more pod line.
+  pod 'PlaygroundCore', :path => '../../build/ios'
 
   use_react_native!(
     :path => config[:reactNativePath],

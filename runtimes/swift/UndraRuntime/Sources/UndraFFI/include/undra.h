@@ -1,15 +1,30 @@
 /*
- * undra.h - the Undra native C ABI (docs/SPEC.md section 6).
+ * undra.h - the Undra native C ABI, version 2 (docs/SPEC.md section 6, ADR-044).
  *
- * This header is the single source of truth for the C ABI on the Swift side. It must stay
- * byte-for-byte equivalent (in signatures and types) to the exports of crates/undra-ffi.
+ * This header is the single source of truth for the C ABI on the host side. It must stay
+ * byte-for-byte equivalent (in layout, signatures and types) to `UndraApi` in crates/undra-ffi.
  * A change here is a boundary change and needs an ADR first (CLAUDE.md, R11).
+ *
+ * One table per core. A core exports exactly one function (plus `JNI_OnLoad` on Android and the
+ * JVM), named after its namespace (`[core] namespace` of undra.toml):
+ *
+ *     const UndraApi *<namespace>_undra_api(void);
+ *
+ * declared by the core's own header, `<namespace>_undra.h` (which returns `const void *`, so this
+ * header stays the one owner of the type). The table is immutable static data: read `abi_version`
+ * (must be UNDRA_ABI_VERSION) and `schema_hash` (must be the hash your bindings were generated
+ * for) before calling anything, then call through its function pointers. Two cores in one
+ * process are two tables, two runtimes and two sets of threads; they share nothing.
+ *
+ * Below, `undra_<name>` names the `<name>` entry of the table (`undra_init` is `api->init`): the
+ * host contract is the one of version 1, unchanged, and applies to each core separately.
  *
  * Conventions
  *  - Every `const uint8_t *ptr, uint32_t len` pair is borrowed for the duration of the call
  *    unless stated otherwise. A NULL `ptr` is an empty payload.
- *  - `UndraBuf` memory the core returns is owned by the caller; release it with `undra_buf_free`.
- *  - Nothing unwinds out of an undra_* function: a failure is a status, a code or a log record.
+ *  - `UndraBuf` memory the core returns is owned by the caller; release it with `undra_buf_free`
+ *    of the same table.
+ *  - Nothing unwinds out of an entry: a failure is a status, a code or a log record.
  *
  * THE HOST CONTRACT (binding: a host that breaks a rule below has undefined behaviour)
  *
@@ -40,8 +55,9 @@
  *  4. Re-entrancy: what a callback may call. The core lock may be held, so a callback must not
  *     call back into the core, except:
  *       undra_buf_free, undra_port_reply, undra_stream_credit, undra_timer_fired, undra_stats_json
- *       and the read-only undra_abi_version, undra_schema_hash, undra_schema_json.
- *     These never take the core lock. undra_port_reply is how a synchronous port is answered
+ *       and the read-only undra_schema_json.
+ *     These never take the core lock (the table's abi_version and schema_hash are plain data
+ *     and may be read at any time). undra_port_reply is how a synchronous port is answered
  *     from inside its own port_cb on wasm, and how an asynchronous one is answered from any
  *     thread.
  *     undra_call, undra_call_sync, undra_cancel, undra_observe, undra_release, undra_event and
@@ -69,7 +85,8 @@
  *     numbered from 1.
  *
  * JNI: the JNI shim (docs/SPEC.md section 6.1) follows the same contract. Its two-call protocol
- * for a synchronous port, `Callbacks.onPortCall` returning 0 and then `Callbacks.portSyncReply()`,
+ * for a synchronous port, `NativeCallbacks.onPortCall` returning 0 and then
+ * `NativeCallbacks.portSyncReply()`,
  * is made on the same thread back to back, so an implementation keeps the pending reply in
  * thread-local state (never in a shared field).
  */
@@ -82,10 +99,10 @@
 extern "C" {
 #endif
 
-/* ABI version implemented by this header. `undra_abi_version()` must return this value. */
-#define UNDRA_ABI_VERSION 1u
+/* ABI version implemented by this header: the `abi_version` of every table it describes. */
+#define UNDRA_ABI_VERSION 2u
 
-/* A byte buffer owned by the core. Free with `undra_buf_free`. */
+/* A byte buffer owned by the core. Free with the table's `buf_free`. */
 typedef struct { uint8_t *ptr; uint32_t len; uint32_t cap; } UndraBuf;
 
 /* Reply payload (SPEC 3.4) for an asynchronous call. `ptr` is valid only during the call. */
@@ -124,25 +141,33 @@ typedef uint8_t (*undra_port_cb)(void *user, uint32_t port_id, uint32_t method_i
 /* StreamItem payload (SPEC 3.7). `ptr` is valid only during the call. */
 typedef void (*undra_stream_cb)(void *user, uint32_t call_id, const uint8_t *ptr, uint32_t len);
 
-uint32_t undra_abi_version(void);                       /* 1 */
-uint64_t undra_schema_hash(void);
-UndraBuf  undra_schema_json(void);                       /* owned copy of the whole schema as JSON, doc comments included (SPEC 2.3) */
-uint32_t undra_init(const uint8_t *cfg, uint32_t len, undra_reply_cb reply, undra_changeset_cb changes, undra_stream_cb stream, void *user); /* idempotent per process; cfg = encoded RuntimeConfig record; returns 0 ok */
-void     undra_shutdown(void);                          /* not from a callback; waits for running port callbacks (contract 5); init may follow */
-uint32_t undra_call(const uint8_t *ptr, uint32_t len);  /* Call payload (SPEC 3.3); returns 0 accepted, 5 bad request. Reply via reply_cb. Works for sync and async methods. */
-UndraBuf  undra_call_sync(const uint8_t *ptr, uint32_t len); /* Reply payload (SPEC 3.4) returned directly; only for sync methods (async -> status 5) */
-void     undra_cancel(uint32_t call_id);
-void     undra_stream_credit(uint32_t call_id, uint32_t credit);
-void     undra_observe(uint64_t handle, uint32_t signal_id, uint8_t on);
-void     undra_release(uint64_t handle);
-void     undra_port_register(uint32_t port_id, undra_port_cb cb, void *user); /* cb NULL removes; removing or replacing waits for running callbacks of the old registration (contracts 1, 5) */
-void     undra_port_reply(const uint8_t *ptr, uint32_t len);   /* PortReply payload; allowed from a callback; port_call_id 0 is ignored (contract 6) */
-void     undra_event(uint32_t port_id, uint32_t method_id, const uint8_t *ptr, uint32_t len);
-void     undra_timer_fired(uint32_t timer_id);
-UndraBuf  undra_snapshot(void);                          /* also with no runtime: an empty snapshot carrying the process-wide generation floor (SPEC 5.9) */
-uint32_t undra_restore(const uint8_t *ptr, uint32_t len); /* 0 ok; restore_code: 2 panicked, 5 bad snapshot, 6 unavailable, 7 incompatible (ADR-037); a refusal changes nothing */
-UndraBuf  undra_stats_json(void);                        /* live handles, tasks, txn count, crossings */
-void     undra_buf_free(UndraBuf buf);
+/*
+ * One core's C ABI. Fields are only ever appended; `size` is sizeof(UndraApi) as the core was
+ * built, so a host compiled against a later header checks it before reading a newer field.
+ */
+typedef struct UndraApi {
+    uint32_t abi_version;   /* UNDRA_ABI_VERSION (2); check it first */
+    uint32_t size;          /* sizeof(UndraApi) as built */
+    uint64_t schema_hash;   /* fnv1a64 of the canonical schema (SPEC 2.3); check it before init */
+    const char *name_space; /* the core's namespace, NUL-terminated, static */
+    UndraBuf (*schema_json)(void);                       /* owned copy of the whole schema as JSON, doc comments included (SPEC 2.3) */
+    uint32_t (*init)(const uint8_t *cfg, uint32_t len, undra_reply_cb reply, undra_changeset_cb changes, undra_stream_cb stream, void *user); /* idempotent per core; cfg = encoded RuntimeConfig record; returns 0 ok */
+    void     (*shutdown)(void);                          /* not from a callback; waits for running port callbacks (contract 5); init may follow */
+    uint32_t (*call)(const uint8_t *ptr, uint32_t len);  /* Call payload (SPEC 3.3); returns 0 accepted, 5 bad request. Reply via reply_cb. Works for sync and async methods. */
+    UndraBuf (*call_sync)(const uint8_t *ptr, uint32_t len); /* Reply payload (SPEC 3.4) returned directly; only for sync methods (async -> status 5) */
+    void     (*cancel)(uint32_t call_id);
+    void     (*stream_credit)(uint32_t call_id, uint32_t credit);
+    void     (*observe)(uint64_t handle, uint32_t signal_id, uint8_t on);
+    void     (*release)(uint64_t handle);
+    void     (*port_register)(uint32_t port_id, undra_port_cb cb, void *user); /* cb NULL removes; removing or replacing waits for running callbacks of the old registration (contracts 1, 5) */
+    void     (*port_reply)(const uint8_t *ptr, uint32_t len);   /* PortReply payload; allowed from a callback; port_call_id 0 is ignored (contract 6) */
+    void     (*event)(uint32_t port_id, uint32_t method_id, const uint8_t *ptr, uint32_t len);
+    void     (*timer_fired)(uint32_t timer_id);
+    UndraBuf (*snapshot)(void);                          /* also with no runtime: an empty snapshot carrying the process-wide generation floor (SPEC 5.9) */
+    uint32_t (*restore)(const uint8_t *ptr, uint32_t len); /* 0 ok; restore_code: 2 panicked, 5 bad snapshot, 6 unavailable, 7 incompatible (ADR-037); a refusal changes nothing */
+    UndraBuf (*stats_json)(void);                        /* live handles, tasks, txn count, crossings */
+    void     (*buf_free)(UndraBuf buf);
+} UndraApi;
 
 #ifdef __cplusplus
 }

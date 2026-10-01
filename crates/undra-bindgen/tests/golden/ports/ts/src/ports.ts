@@ -10,6 +10,7 @@ import {
   codecs,
   encodeValue,
 } from "@undra/runtime";
+import { UndraGoldenPorts } from "./core.js";
 import { FsError, FsErrorCodec, HttpError, HttpErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import {
@@ -60,7 +61,7 @@ export function clockPortImpl(impl: Clock): PortImpl {
  * Sends the events of this port from the host to the core. A failure (a closed core) is logged and passed to `onError`; the methods do not throw.
  */
 export class ConnectivityEvents {
-  constructor(private readonly core: UndraCore = UndraCore.shared) {}
+  constructor(private readonly core: UndraCore = UndraGoldenPorts.core) {}
 
   /** The network changed. */
   changed(online: boolean, kind: NetKind): void {

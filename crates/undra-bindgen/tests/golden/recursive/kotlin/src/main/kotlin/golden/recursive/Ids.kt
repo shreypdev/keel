@@ -4,10 +4,11 @@ package golden.recursive
 
 /**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
- * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
+ * hash and the namespace of the core these bindings belong to.
  */
 object UndraIds {
     const val SCHEMA_HASH: ULong = 0x5b78096d0b449e75uL
+    const val NAMESPACE: String = "golden_recursive"
 
     object Objects {
         object Outline {

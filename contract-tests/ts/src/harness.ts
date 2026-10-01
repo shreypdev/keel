@@ -11,17 +11,17 @@ import { MemoryKv } from "./memory-kv.js";
 
 /** The playground core, built by `undra build -C examples/playground --platform web`. `UNDRA_PLAYGROUND_WASM` overrides the path. */
 export const PLAYGROUND_WASM: string =
-  process.env["UNDRA_PLAYGROUND_WASM"] ?? fileURLToPath(new URL("../../../examples/playground/build/web/undra_core.wasm", import.meta.url));
+  process.env["UNDRA_PLAYGROUND_WASM"] ?? fileURLToPath(new URL("../../../examples/playground/build/web/playground_core.wasm", import.meta.url));
 
 /** The base URL every scenario that talks to the server configures (scenarios.md, "Server fixtures"). */
 export const BASE_URL = "https://playground.test";
 
 /**
  * Build B of the playground core (scenarios.md, "Two builds"): `UNDRA_PLAYGROUND_V2=1 undra build ... --platform web`,
- * which run.sh copies to `build/b/undra_core.wasm`. `UNDRA_PLAYGROUND_WASM_B` overrides the path.
+ * which run.sh copies to `build/b/playground_core.wasm`. `UNDRA_PLAYGROUND_WASM_B` overrides the path.
  */
 export const PLAYGROUND_WASM_B: string =
-  process.env["UNDRA_PLAYGROUND_WASM_B"] ?? fileURLToPath(new URL("../build/b/undra_core.wasm", import.meta.url));
+  process.env["UNDRA_PLAYGROUND_WASM_B"] ?? fileURLToPath(new URL("../build/b/playground_core.wasm", import.meta.url));
 
 /** Which build of the playground core a scenario loads: A (the default, the generated bindings' schema) or B. */
 export type Build = "A" | "B";

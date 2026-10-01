@@ -16,11 +16,9 @@ does). minSdk 26.
 class MyApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        val core = UndraCore.load(
-            LoadOptions(
-                expectedSchemaHash = UndraIds.SCHEMA_HASH,
-                mirror = MirrorOptions(framePacer = ChoreographerFramePacer()), // drains at the display's frames (ADR-031)
-            ),
+        // UndraPlaygroundCore: the generated entry of your core's bindings, `Undra<Namespace>` (ADR-044).
+        val core = UndraPlaygroundCore.load(
+            LoadOptions(mirror = MirrorOptions(framePacer = ChoreographerFramePacer())), // drains at the display's frames (ADR-031)
         )
         AndroidPlatformDefaults.install(core, this)
     }
@@ -29,7 +27,7 @@ class MyApp : Application() {
 
 `AndroidPlatformDefaults.install(core, context)` registers the adapter of every standard port with the core and starts
 reporting `Connectivity` and `Lifecycle` events, mirroring the Swift `Adapters.platformDefault`. Call it once, in
-`Application.onCreate`, right after `UndraCore.load` and before any store is created. (The core reads its persisted
+`Application.onCreate`, right after the core's `load` and before any store is created. (The core reads its persisted
 query cache and offline queue through `Kv` while it starts and waits up to five seconds for the adapter to appear, which
 is why installing after `load` is enough.) It returns an `AndroidPlatform` holding the adapters; `close()` stops the event
 sources. To change one port, register another implementation afterwards: `core.registerPort(StandardPorts.Http.PORT_ID, impl)`
@@ -43,7 +41,7 @@ later (a Retry button, say) it starts from the process importance and counts fro
 `Background` instead of `Inactive` until the next activity change.
 
 **Against `undra dev` (`Mode.REMOTE`)** the adapters stay on the device and the core, on your computer, calls them over the
-connection; install after `UndraCore.load` as usual. A core that `undra dev` replaced (`Closed(SESSION_LOST)`) is a new core
+connection; install after the core's `load` as usual. A core that `undra dev` replaced (`Closed(SESSION_LOST)`) is a new core
 that needs its own `install`: `close()` the previous `AndroidPlatform` first, so its callbacks stop reporting to a core that is
 gone (the playground's `UndraApp.load` does). `Connectivity` and `Lifecycle` reports made while the connection is down are
 dropped with a log line, so the dev server's core can hold an older state until the next change.
@@ -138,7 +136,9 @@ failure is a typed `Network` error naming the policy. The playground allows only
 
 ## Still to come
 
-* **Loading the core.** `System.loadLibrary("undra_core")` from `jniLibs/<abi>/` stays with the app's Gradle project (16 KB page
-  alignment, NDK r27); the ProGuard / R8 consumer rules that keep `dev.undra.runtime.UndraNative` and `UndraNative$Callbacks`
-  (the native library finds them by name and descriptor) are not shipped by this module yet.
+* **Packaging the core.** `lib<namespace>.so` in `jniLibs/<abi>/` stays with the app's Gradle project (16 KB page alignment,
+  NDK r27). Loading it is not this module's job: the generated `UndraCoreNative` of the core's bindings loads it
+  (`NativeLibrary.load(namespace)`), and the R8 rules that keep what JNI finds by name ship with the code that declares it:
+  `META-INF/proguard/undra-runtime.pro` in the runtime jar (`NativeCallbacks`), `META-INF/proguard/undra-<namespace>.pro` with
+  the bindings (`UndraCoreNative`) (ADR-044).
 * A background-execution integration (`WorkManager`) for draining the offline queue while the app is not running.

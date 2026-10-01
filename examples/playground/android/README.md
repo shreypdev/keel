@@ -16,7 +16,7 @@ store, so the state (which lives in the core) survives switching tabs and rotati
 ## Build and run
 
 ```sh
-undra build -C .. --platform android --release   # ../build/android/jniLibs/<abi>/libundra_core.so (1.5 MB each)
+undra build -C .. --platform android --release   # ../build/android/jniLibs/<abi>/libplayground_core.so (1.5 MB each)
 ./gradlew :app:assembleDebug                    # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n dev.undra.playground/.MainActivity --es tab remote   # todos | counter | biglist | remote
@@ -30,7 +30,7 @@ line and says so if the app would not package what it just built.
 The **device benchmark** (`scripts/bench-device.sh --device android`) is an instrumented test (`app/src/androidTest`) over the
 `benchmark` build type (`./gradlew :app:assembleBenchmark :app:assembleBenchmarkAndroidTest`: release, not debuggable, signed
 with the debug key); its runner is `app/src/main/kotlin/dev/undra/playground/bench/BenchRunner.kt`, and `UndraApp` records how
-long the first `UndraCore.load` took for the cold-start row.
+long the first `UndraPlaygroundCore.load` took for the cold-start row.
 
 The Gradle project includes the Kotlin runtime from this checkout (`includeBuild`) and the generated bindings
 as the `:core-bindings` module, so a change to either shows up in the next build.
@@ -64,8 +64,8 @@ emulator slept, adb restarted) is resumed with the same objects.
 
 ## How the app is wired
 
-* `UndraApp` loads the core once per process (`UndraCore.load`, which checks the schema hash of the bindings against the
-  library's; `MainActivity` starts it, with the URL of `DevServer`, if any), calls `AndroidPlatformDefaults.install(core, this)`
+* `UndraApp` loads the core once per process (`UndraPlaygroundCore.load`, the bindings' entry, which loads
+  `libplayground_core.so` and checks the schema hash of the bindings against the library's; `MainActivity` starts it, with the URL of `DevServer`, if any), calls `AndroidPlatformDefaults.install(core, this)`
   (module `android-adapters`: `Http`, `Kv`, `SecureStore`, `Fs`, `Connectivity` and `Lifecycle` are all the real ones, nothing is
   faked) and calls `configureRemote`. The persisted query cache and the offline queue live in the app's files, so they survive
   the process being killed. Against `undra dev` the same adapters stay on the device (the core is on the laptop and calls

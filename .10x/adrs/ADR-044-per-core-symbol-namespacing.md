@@ -1,7 +1,9 @@
 # ADR-044: every core is a self-contained image with one namespaced entry point, so several cores can share a process
 
-Status: **Proposed** (2026-10-01, `wt/boundary-adrs`; Amendment B "multiple cores per app", catalogue M-12
-and finding 5; decided with ADR-038 in mind). Touches SPEC 6 (the C ABI is reached through one exported
+Status: **Accepted** (2026-10-02, with the merge of `wt/abi-table`; review
+`.10x/reviews/2026-10-02-abi-table-review.md`). Proposed 2026-10-01, `wt/boundary-adrs`; Amendment B
+"multiple cores per app", catalogue M-12 and finding 5; decided with ADR-038 in mind. As implemented, with the
+deviations listed under "Acceptance" at the end, and Amendment A (per-namespace default storage, a follow-up). Touches SPEC 6 (the C ABI is reached through one exported
 function per core returning a function table; `undra_abi_version` becomes the table's version 2), 6.1 (the JNI
 natives are registered on a class per core), 6.2, 7 (unchanged exports; one module instance per core), 11 and
 17 (an `UndraCore` per core; generated code defaults to its own core), 13 (artefact names) and the CLI's
@@ -235,3 +237,46 @@ library exports **every** Rust symbol, and two of them in one binary either coll
 
 None to start; the earlier the better, because every host built after it (ADR-038 first) must use the table.
 ADR-046's symbol artefacts build on the prelinked iOS object and the renamed libraries.
+
+## Acceptance (2026-10-02)
+
+Implemented by `wt/abi-table` (record `.10x/decisions/sde/abi-table.md`) and accepted after its adversarial
+review (`.10x/reviews/2026-10-02-abi-table-review.md`). The implementation deviates from the decision above in
+these points, each recorded with its reason in the record:
+
+1. **17 function pointers and 2 data fields, not 19 pointers.** `abi_version` and `schema_hash` are fields of the
+   table (with `size` and `name_space`), so a host reads the version and the hash before it calls anything.
+   `abi_version` is the breaking version: every host refuses any other value. `size` grows when entries are
+   appended under the same version: every host accepts `size >= sizeof(UndraApi)` as it knows it.
+2. **No module map in the XCFramework.** The `<Namespace>CoreFFI` module (the core's `<ns>_undra.h`, a module
+   map, an empty `.c`) lives in the generated Swift package: Xcode copies every linked XCFramework's `Headers`
+   into one directory, where two cores' module maps would collide.
+3. **Namespaces are lowercase only**: `[a-z][a-z0-9_]*`, at most 32 bytes (`undra.toml`, and `export_core!`'s
+   compile-time check). In review, a namespace whose entry `Undra<Namespace>` is a name the runtimes, the
+   generated bindings or the app templates declare (`core` → `UndraCore`) is refused too
+   (`undra_bindgen::naming::RESERVED_ENTRIES`).
+4. **Swift `LoadOptions.inproc(api: UnsafeRawPointer?)`**, not `UnsafePointer<UndraApi>`: the generated header
+   returns `const void *` so `undra.h` stays the one owner of the type; the runtime checks the table before it
+   binds it.
+5. **Kotlin natives are instance methods** of the generated `internal object UndraCoreNative : NativeApi`
+   (`override external fun`), not `@JvmStatic`: the runtime calls them through the interface without reflection,
+   and `RegisterNatives` binds them on the object's class the same way.
+6. **TypeScript gains one runtime member, `UndraCore.unloaded`**: the closed placeholder a generated entry
+   returns while its core is not loaded (every call on it rejects with `UndraCallError.Unavailable`).
+7. **`undra build` refuses a sibling project with the same namespace** (a directory next to the project with its
+   own `undra.toml` and another `[project] id`; another checkout of the same project does not count).
+8. **React Native on iOS finds a core through an Objective-C class**, `UndraCoreTable_<ns>` (`+api`), compiled by
+   the core's pod, not by calling the symbol from the core's header: the module is compiled once for all cores
+   and names none. ADR-038 says so.
+9. **S26 keeps its provisional number.**
+
+## Amendment A (2026-10-02, integrator): default storage directories per namespace — follow-up `ns-storage`
+
+Two cores of one app share nothing in memory, but the default storage adapters (`Kv`, `Fs`, `SecureStore`) of the
+Swift, Kotlin and React Native runtimes (and the web's) still use one location per app, so two cores that both use
+the defaults read and overwrite each other's keys and files. **Decision:** every platform's default `Kv`, `Fs`
+and `SecureStore` location becomes per namespace, `…/undra/<namespace>/…` (the secure store's service or alias
+prefix likewise carries the namespace), with **no legacy path and no migration**: nothing has been released, so no
+installed app holds data at the old location. An app that passes its own adapters is unaffected. Implemented by
+the follow-up piece `ns-storage` (not by `abi-table`), with a test per platform that two cores' defaults do not
+see each other's data, and SPEC 8's adapter section updated with it.

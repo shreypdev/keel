@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.map
 /** Adds numbers. */
 class Calculator private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0)),
     )
@@ -91,7 +91,7 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(ctx: UndraCore = UndraCore.shared): Calculator {
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Calculator {
             val handle = ctx.constructObject(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0))
             return Calculator(ctx, handle)
         }
@@ -99,7 +99,7 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
 }
 
 /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-fun greet(name: String, ctx: UndraCore = UndraCore.shared): String {
+fun greet(name: String, ctx: UndraCore = UndraPlaygroundCore.core): String {
     val w = UndraWriter()
     w.writeStr(name)
     try {
@@ -119,7 +119,7 @@ fun greet(name: String, ctx: UndraCore = UndraCore.shared): String {
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun ping(ctx: UndraCore = UndraCore.shared) {
+suspend fun ping(ctx: UndraCore = UndraPlaygroundCore.core) {
     try {
         ctx.call(
             CallTarget.FreeFunction(UndraIds.Functions.PING),

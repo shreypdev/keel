@@ -121,7 +121,10 @@ class RemoteTodosQueryHandle private constructor(core: UndraCore, handle: Long) 
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(list: String, ctx: UndraCore = UndraCore.shared): RemoteTodosQueryHandle {
+        fun create(
+            list: String,
+            ctx: UndraCore = UndraPlaygroundCore.core,
+        ): RemoteTodosQueryHandle {
             val w = UndraWriter()
             w.writeStr(list)
             val handle = ctx.constructObject(UndraIds.Objects.RemoteTodosQueryHandle.TYPE_ID, UndraIds.Objects.RemoteTodosQueryHandle.NEW, w.toByteArray())
@@ -140,7 +143,7 @@ suspend fun patchRemoteTodo(
     list: String,
     id: UInt,
     done: Boolean,
-    ctx: UndraCore = UndraCore.shared,
+    ctx: UndraCore = UndraPlaygroundCore.core,
 ): RemoteTodo {
     val w = UndraWriter()
     w.writeStr(list)
@@ -167,7 +170,7 @@ suspend fun patchRemoteTodo(
 suspend fun postRemoteTodo(
     list: String,
     title: String,
-    ctx: UndraCore = UndraCore.shared,
+    ctx: UndraCore = UndraPlaygroundCore.core,
 ): RemoteTodo {
     val w = UndraWriter()
     w.writeStr(list)
@@ -190,7 +193,11 @@ suspend fun postRemoteTodo(
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun saveNote(list: String, text: String, ctx: UndraCore = UndraCore.shared): Boolean {
+suspend fun saveNote(
+    list: String,
+    text: String,
+    ctx: UndraCore = UndraPlaygroundCore.core,
+): Boolean {
     val w = UndraWriter()
     w.writeStr(list)
     w.writeStr(text)
@@ -212,7 +219,7 @@ suspend fun saveNote(list: String, text: String, ctx: UndraCore = UndraCore.shar
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun tagNote(list: String, id: UInt, ctx: UndraCore = UndraCore.shared): Boolean {
+suspend fun tagNote(list: String, id: UInt, ctx: UndraCore = UndraPlaygroundCore.core): Boolean {
     val w = UndraWriter()
     w.writeStr(list)
     w.writeU32(id)

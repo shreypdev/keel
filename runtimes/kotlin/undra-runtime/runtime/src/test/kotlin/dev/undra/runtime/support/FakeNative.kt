@@ -1,7 +1,7 @@
 package dev.undra.runtime.support
 
-import dev.undra.runtime.UndraNative
 import dev.undra.runtime.NativeApi
+import dev.undra.runtime.NativeCallbacks
 import dev.undra.runtime.wire.Payloads
 import dev.undra.runtime.wire.Payloads.ReplyStatus
 import java.nio.ByteBuffer
@@ -18,17 +18,20 @@ import java.util.concurrent.atomic.AtomicInteger
  *    returns, so a runtime that keeps a view instead of copying reads garbage;
  *  - a native method called on a thread that is inside a callback is recorded in [violations] (the real
  *    core would deadlock or answer `E_REENTRANT`).
+ *
+ * Each fake is a core of its own: its [namespace] is unique unless a test gives it one, so fakes never share the
+ * in-process transport's per-namespace claim by accident.
  */
-internal class FakeNative : NativeApi {
+internal class FakeNative(override val namespace: String = "fake_core_${counter.incrementAndGet()}") : NativeApi {
     override var isAvailable: Boolean = true
     override var unavailableReason: Throwable? = null
-    var abi: Int = 1
+    var abi: Int = 2
     var hash: Long = HASH.toLong()
     var initResult: Int = 0
 
     val inits = AtomicInteger()
     @Volatile var config: ByteArray? = null
-    @Volatile lateinit var callbacks: UndraNative.Callbacks
+    @Volatile lateinit var callbacks: NativeCallbacks
 
     val violations = CopyOnWriteArrayList<String>()
     val calls = CopyOnWriteArrayList<Payloads.Call>()
@@ -120,7 +123,11 @@ internal class FakeNative : NativeApi {
 
     override fun schemaHash(): Long = hash
 
-    override fun init(cfg: ByteArray, cb: UndraNative.Callbacks): Int {
+    @Volatile var schema: ByteArray = "{}".toByteArray()
+
+    override fun schemaJson(): ByteArray = schema
+
+    override fun init(cfg: ByteArray, cb: NativeCallbacks): Int {
         checkNotInCallback("init")
         inits.incrementAndGet()
         config = cfg
@@ -196,5 +203,9 @@ internal class FakeNative : NativeApi {
     override fun shutdown() {
         checkNotInCallback("shutdown")
         shutdowns.incrementAndGet()
+    }
+
+    private companion object {
+        val counter = AtomicInteger()
     }
 }

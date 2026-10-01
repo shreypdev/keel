@@ -1,12 +1,14 @@
 //! The JNI shim (SPEC 6.1), feature `jni`.
 //!
-//! Kotlin talks to the core through `dev.undra.runtime.UndraNative`, a Kotlin `object` whose
-//! `@JvmStatic external` functions are `static native` methods. [`JNI_OnLoad`] registers them
-//! with `RegisterNatives` (no per-call symbol lookup); the same functions are also exported under
-//! their mangled `Java_dev_undra_runtime_UndraNative_<name>` names, so a JVM that skips
-//! `JNI_OnLoad` (static linking) still finds them.
+//! Kotlin talks to a core through a class of the core's own (ADR-044): the generated
+//! `<kotlin package>.UndraCoreNative`, an `object` implementing the runtime's `NativeApi` with
+//! `external` members. [`export_core!`](crate::export_core) exports `JNI_OnLoad`, which registers
+//! the natives on the class it names with `RegisterNatives` ([`on_load`]); nothing is exported under
+//! a `Java_*` name, so two cores in one JVM (each `System.loadLibrary`ed, each running its own
+//! `JNI_OnLoad`) never bind one another's natives. A native may be declared static or as a member:
+//! the second JNI argument (the class or the receiver) is not used.
 //!
-//! Callbacks reach Kotlin through the `UndraNative.Callbacks` object given to `init`. Payloads
+//! Callbacks reach Kotlin through the `dev.undra.runtime.NativeCallbacks` object given to `init`. Payloads
 //! travel as **direct `ByteBuffer`s over core memory**, valid only while the callback runs (the
 //! Kotlin runtime copies immediately); byte arrays coming from Kotlin are copied once with
 //! `GetByteArrayRegion`. Callback threads are attached to the JVM as daemon threads, so an idle
@@ -24,7 +26,7 @@ use std::ptr;
 use std::sync::Arc;
 
 use jni::errors::Result as JniResult;
-use jni::objects::{GlobalRef, JByteArray, JByteBuffer, JClass, JMethodID, JObject, JValue};
+use jni::objects::{GlobalRef, JByteArray, JByteBuffer, JMethodID, JObject, JValue};
 use jni::signature::{Primitive, ReturnType};
 use jni::sys::{JNI_ERR, JNI_VERSION_1_6, jboolean, jbyteArray, jint, jlong, jstring};
 use jni::{JNIEnv, JavaVM, NativeMethod};
@@ -34,12 +36,12 @@ use crate::api::{self, init_code};
 use crate::guard::guarded;
 use crate::session::{self, Sink};
 
-/// The class that declares the natives.
-const NATIVE_CLASS: &str = "dev/undra/runtime/UndraNative";
-/// The callbacks interface (a nested interface of the object).
-const CALLBACKS_CLASS: &str = "dev/undra/runtime/UndraNative$Callbacks";
+/// The callbacks interface, shared by every core (it declares no natives).
+const CALLBACKS_CLASS: &str = "dev/undra/runtime/NativeCallbacks";
+/// The JNI descriptor of `init`, whose second parameter is a [`CALLBACKS_CLASS`].
+const INIT_DESCRIPTOR: &str = "([BLdev/undra/runtime/NativeCallbacks;)I";
 
-/// The `UndraNative.Callbacks` methods, resolved once in `init`.
+/// The `NativeCallbacks` methods, resolved once in `init`.
 #[derive(Clone, Copy)]
 struct MethodIds {
     on_reply: JMethodID,
@@ -60,7 +62,7 @@ struct JniSink {
 fn direct<'l>(env: &mut JNIEnv<'l>, payload: &[u8]) -> JniResult<JByteBuffer<'l>> {
     // SAFETY: `payload` is valid for `payload.len()` bytes for as long as the caller keeps the
     // slice borrowed, which is the whole callback: the Java side must not retain the buffer
-    // (documented on `UndraNative.Callbacks`). The buffer is only read on the Java side; the
+    // (documented on `NativeCallbacks`). The buffer is only read on the Java side; the
     // `*mut` is what the JNI signature asks for.
     unsafe { env.new_direct_byte_buffer(payload.as_ptr().cast_mut(), payload.len()) }
 }
@@ -111,7 +113,7 @@ impl JniSink {
                     &without_id[..]
                 }
             };
-            // SAFETY: `method` was resolved on `UndraNative$Callbacks` with a descriptor whose
+            // SAFETY: `method` was resolved on `NativeCallbacks` with a descriptor whose
             // parameters are exactly `args` (an optional `int` and the `ByteBuffer`), returning
             // `void`; `self.callbacks` implements that interface.
             unsafe {
@@ -220,30 +222,18 @@ fn java_bytes(env: &JNIEnv<'_>, bytes: &[u8]) -> jbyteArray {
         .map_or(ptr::null_mut(), JByteArray::into_raw)
 }
 
-/// `static native int abiVersion()`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_abiVersion<'l>(
-    _env: JNIEnv<'l>,
-    _class: JClass<'l>,
-) -> jint {
+/// `int abiVersion()`: [`ABI_VERSION`](crate::ABI_VERSION), `2`.
+extern "system" fn native_abi_version<'l>(_env: JNIEnv<'l>, _this: JObject<'l>) -> jint {
     api::ABI_VERSION as jint
 }
 
-/// `static native long schemaHash()`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_schemaHash<'l>(
-    _env: JNIEnv<'l>,
-    _class: JClass<'l>,
-) -> jlong {
+/// `long schemaHash()`.
+extern "system" fn native_schema_hash<'l>(_env: JNIEnv<'l>, _this: JObject<'l>) -> jlong {
     guarded("schemaHash", |_| 0, || api::schema_hash() as jlong)
 }
 
-/// `static native byte[] schemaJson()`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_schemaJson<'l>(
-    env: JNIEnv<'l>,
-    _class: JClass<'l>,
-) -> jbyteArray {
+/// `byte[] schemaJson()`.
+extern "system" fn native_schema_json<'l>(env: JNIEnv<'l>, _this: JObject<'l>) -> jbyteArray {
     guarded(
         "schemaJson",
         |_| ptr::null_mut(),
@@ -251,11 +241,10 @@ pub extern "system" fn Java_dev_undra_runtime_UndraNative_schemaJson<'l>(
     )
 }
 
-/// `static native int init(byte[] cfg, UndraNative.Callbacks cb)`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_init<'l>(
+/// `int init(byte[] cfg, NativeCallbacks cb)`.
+extern "system" fn native_init<'l>(
     mut env: JNIEnv<'l>,
-    _class: JClass<'l>,
+    _this: JObject<'l>,
     cfg: JByteArray<'l>,
     callbacks: JObject<'l>,
 ) -> jint {
@@ -273,11 +262,10 @@ pub extern "system" fn Java_dev_undra_runtime_UndraNative_init<'l>(
     )
 }
 
-/// `static native int call(byte[] payload)`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_call<'l>(
+/// `int call(byte[] payload)`.
+extern "system" fn native_call<'l>(
     env: JNIEnv<'l>,
-    _class: JClass<'l>,
+    _this: JObject<'l>,
     payload: JByteArray<'l>,
 ) -> jint {
     guarded(
@@ -287,11 +275,10 @@ pub extern "system" fn Java_dev_undra_runtime_UndraNative_call<'l>(
     )
 }
 
-/// `static native byte[] callSync(byte[] payload)`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_callSync<'l>(
+/// `byte[] callSync(byte[] payload)`.
+extern "system" fn native_call_sync<'l>(
     env: JNIEnv<'l>,
-    _class: JClass<'l>,
+    _this: JObject<'l>,
     payload: JByteArray<'l>,
 ) -> jbyteArray {
     guarded(
@@ -301,32 +288,25 @@ pub extern "system" fn Java_dev_undra_runtime_UndraNative_callSync<'l>(
     )
 }
 
-/// `static native void cancel(int callId)`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_cancel<'l>(
-    _env: JNIEnv<'l>,
-    _class: JClass<'l>,
-    call_id: jint,
-) {
+/// `void cancel(int callId)`.
+extern "system" fn native_cancel<'l>(_env: JNIEnv<'l>, _this: JObject<'l>, call_id: jint) {
     api::cancel(call_id as u32);
 }
 
-/// `static native void streamCredit(int callId, int credit)`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_streamCredit<'l>(
+/// `void streamCredit(int callId, int credit)`.
+extern "system" fn native_stream_credit<'l>(
     _env: JNIEnv<'l>,
-    _class: JClass<'l>,
+    _this: JObject<'l>,
     call_id: jint,
     credit: jint,
 ) {
     api::stream_credit(call_id as u32, credit as u32);
 }
 
-/// `static native void observe(long handle, int signalId, boolean on)`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_observe<'l>(
+/// `void observe(long handle, int signalId, boolean on)`.
+extern "system" fn native_observe<'l>(
     _env: JNIEnv<'l>,
-    _class: JClass<'l>,
+    _this: JObject<'l>,
     handle: jlong,
     signal_id: jint,
     on: jboolean,
@@ -334,21 +314,15 @@ pub extern "system" fn Java_dev_undra_runtime_UndraNative_observe<'l>(
     api::observe(handle as u64, signal_id as u32, on != 0);
 }
 
-/// `static native void release(long handle)`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_release<'l>(
-    _env: JNIEnv<'l>,
-    _class: JClass<'l>,
-    handle: jlong,
-) {
+/// `void release(long handle)`.
+extern "system" fn native_release<'l>(_env: JNIEnv<'l>, _this: JObject<'l>, handle: jlong) {
     api::release(handle as u64);
 }
 
-/// `static native void portReply(byte[] payload)`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_portReply<'l>(
+/// `void portReply(byte[] payload)`.
+extern "system" fn native_port_reply<'l>(
     env: JNIEnv<'l>,
-    _class: JClass<'l>,
+    _this: JObject<'l>,
     payload: JByteArray<'l>,
 ) {
     guarded(
@@ -358,11 +332,10 @@ pub extern "system" fn Java_dev_undra_runtime_UndraNative_portReply<'l>(
     );
 }
 
-/// `static native void event(int portId, int methodId, byte[] payload)`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_event<'l>(
+/// `void event(int portId, int methodId, byte[] payload)`.
+extern "system" fn native_event<'l>(
     env: JNIEnv<'l>,
-    _class: JClass<'l>,
+    _this: JObject<'l>,
     port_id: jint,
     method_id: jint,
     payload: JByteArray<'l>,
@@ -374,22 +347,13 @@ pub extern "system" fn Java_dev_undra_runtime_UndraNative_event<'l>(
     );
 }
 
-/// `static native void timerFired(int timerId)`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_timerFired<'l>(
-    _env: JNIEnv<'l>,
-    _class: JClass<'l>,
-    timer_id: jint,
-) {
+/// `void timerFired(int timerId)`.
+extern "system" fn native_timer_fired<'l>(_env: JNIEnv<'l>, _this: JObject<'l>, timer_id: jint) {
     api::timer_fired(timer_id as u32);
 }
 
-/// `static native byte[] snapshot()`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_snapshot<'l>(
-    env: JNIEnv<'l>,
-    _class: JClass<'l>,
-) -> jbyteArray {
+/// `byte[] snapshot()`.
+extern "system" fn native_snapshot<'l>(env: JNIEnv<'l>, _this: JObject<'l>) -> jbyteArray {
     guarded(
         "snapshot",
         |_| ptr::null_mut(),
@@ -397,11 +361,10 @@ pub extern "system" fn Java_dev_undra_runtime_UndraNative_snapshot<'l>(
     )
 }
 
-/// `static native int restore(byte[] snapshot)`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_restore<'l>(
+/// `int restore(byte[] snapshot)`.
+extern "system" fn native_restore<'l>(
     env: JNIEnv<'l>,
-    _class: JClass<'l>,
+    _this: JObject<'l>,
     snapshot: JByteArray<'l>,
 ) -> jint {
     guarded(
@@ -411,12 +374,8 @@ pub extern "system" fn Java_dev_undra_runtime_UndraNative_restore<'l>(
     )
 }
 
-/// `static native String statsJson()`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_statsJson<'l>(
-    env: JNIEnv<'l>,
-    _class: JClass<'l>,
-) -> jstring {
+/// `String statsJson()`.
+extern "system" fn native_stats_json<'l>(env: JNIEnv<'l>, _this: JObject<'l>) -> jstring {
     guarded(
         "statsJson",
         |_| ptr::null_mut(),
@@ -427,23 +386,19 @@ pub extern "system" fn Java_dev_undra_runtime_UndraNative_statsJson<'l>(
     )
 }
 
-/// `static native void shutdown()`: what `undra_shutdown` runs (ADR-034, SPEC 6.1). Answers
+/// `void shutdown()`: what `undra_shutdown` runs (ADR-034, SPEC 6.1). Answers
 /// every call in flight (status 3) and ends every open stream, stops the core, timer and blocking
 /// threads, removes the port registrations and forgets the embedder, which releases the global
 /// reference to its `Callbacks` object; a later `init` starts a new core. Idempotent. The Kotlin
 /// runtime calls it from `UndraCore.close()`, never from inside a callback (it would wait for the
 /// thread it runs on).
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_undra_runtime_UndraNative_shutdown<'l>(
-    _env: JNIEnv<'l>,
-    _class: JClass<'l>,
-) {
+extern "system" fn native_shutdown<'l>(_env: JNIEnv<'l>, _this: JObject<'l>) {
     session::stop();
 }
 
-/// Registers every native with `RegisterNatives`. The descriptors are pinned by
-/// `NativeShapeTests` on the Kotlin side.
-fn register(env: &mut JNIEnv<'_>) -> JniResult<()> {
+/// Registers every native on `class` with `RegisterNatives`. The descriptors are pinned by the
+/// Kotlin runtime's `NativeTests` and the generated `UndraCoreNative` (bindgen's goldens).
+fn register(env: &mut JNIEnv<'_>, class: &str) -> JniResult<()> {
     fn native(name: &str, sig: &str, fn_ptr: *mut c_void) -> NativeMethod {
         NativeMethod {
             name: name.into(),
@@ -452,108 +407,53 @@ fn register(env: &mut JNIEnv<'_>) -> JniResult<()> {
         }
     }
     let methods = [
-        native(
-            "abiVersion",
-            "()I",
-            Java_dev_undra_runtime_UndraNative_abiVersion as *mut c_void,
-        ),
-        native(
-            "schemaHash",
-            "()J",
-            Java_dev_undra_runtime_UndraNative_schemaHash as *mut c_void,
-        ),
-        native(
-            "schemaJson",
-            "()[B",
-            Java_dev_undra_runtime_UndraNative_schemaJson as *mut c_void,
-        ),
-        native(
-            "init",
-            "([BLdev/undra/runtime/UndraNative$Callbacks;)I",
-            Java_dev_undra_runtime_UndraNative_init as *mut c_void,
-        ),
-        native(
-            "call",
-            "([B)I",
-            Java_dev_undra_runtime_UndraNative_call as *mut c_void,
-        ),
-        native(
-            "callSync",
-            "([B)[B",
-            Java_dev_undra_runtime_UndraNative_callSync as *mut c_void,
-        ),
-        native(
-            "cancel",
-            "(I)V",
-            Java_dev_undra_runtime_UndraNative_cancel as *mut c_void,
-        ),
-        native(
-            "streamCredit",
-            "(II)V",
-            Java_dev_undra_runtime_UndraNative_streamCredit as *mut c_void,
-        ),
-        native(
-            "observe",
-            "(JIZ)V",
-            Java_dev_undra_runtime_UndraNative_observe as *mut c_void,
-        ),
-        native(
-            "release",
-            "(J)V",
-            Java_dev_undra_runtime_UndraNative_release as *mut c_void,
-        ),
-        native(
-            "portReply",
-            "([B)V",
-            Java_dev_undra_runtime_UndraNative_portReply as *mut c_void,
-        ),
-        native(
-            "event",
-            "(II[B)V",
-            Java_dev_undra_runtime_UndraNative_event as *mut c_void,
-        ),
-        native(
-            "timerFired",
-            "(I)V",
-            Java_dev_undra_runtime_UndraNative_timerFired as *mut c_void,
-        ),
-        native(
-            "snapshot",
-            "()[B",
-            Java_dev_undra_runtime_UndraNative_snapshot as *mut c_void,
-        ),
-        native(
-            "restore",
-            "([B)I",
-            Java_dev_undra_runtime_UndraNative_restore as *mut c_void,
-        ),
+        native("abiVersion", "()I", native_abi_version as *mut c_void),
+        native("schemaHash", "()J", native_schema_hash as *mut c_void),
+        native("schemaJson", "()[B", native_schema_json as *mut c_void),
+        native("init", INIT_DESCRIPTOR, native_init as *mut c_void),
+        native("call", "([B)I", native_call as *mut c_void),
+        native("callSync", "([B)[B", native_call_sync as *mut c_void),
+        native("cancel", "(I)V", native_cancel as *mut c_void),
+        native("streamCredit", "(II)V", native_stream_credit as *mut c_void),
+        native("observe", "(JIZ)V", native_observe as *mut c_void),
+        native("release", "(J)V", native_release as *mut c_void),
+        native("portReply", "([B)V", native_port_reply as *mut c_void),
+        native("event", "(II[B)V", native_event as *mut c_void),
+        native("timerFired", "(I)V", native_timer_fired as *mut c_void),
+        native("snapshot", "()[B", native_snapshot as *mut c_void),
+        native("restore", "([B)I", native_restore as *mut c_void),
         native(
             "statsJson",
             "()Ljava/lang/String;",
-            Java_dev_undra_runtime_UndraNative_statsJson as *mut c_void,
+            native_stats_json as *mut c_void,
         ),
-        native(
-            "shutdown",
-            "()V",
-            Java_dev_undra_runtime_UndraNative_shutdown as *mut c_void,
-        ),
+        native("shutdown", "()V", native_shutdown as *mut c_void),
     ];
-    env.register_native_methods(NATIVE_CLASS, &methods)
+    env.register_native_methods(class, &methods)
 }
 
-/// Called by the JVM when the library is loaded: registers the natives of
-/// `dev.undra.runtime.UndraNative`. A failure (the class is not visible to the loader that loaded
-/// the library) makes `System.loadLibrary` throw `UnsatisfiedLinkError`.
-#[unsafe(no_mangle)]
-pub extern "system" fn JNI_OnLoad(vm: JavaVM, _reserved: *mut c_void) -> jint {
+/// What the core's `JNI_OnLoad` runs ([`export_core!`](crate::export_core)): registers the natives of
+/// SPEC 6.1 on `class` (`dev/acme/pay/core/UndraCoreNative`). A failure (the class is not visible to
+/// the loader that loaded the library, or lacks a native) clears the exception and returns
+/// `JNI_ERR`, which makes `System.loadLibrary` throw `UnsatisfiedLinkError`.
+///
+/// # Safety
+///
+/// `vm` must be the `JavaVM *` the JVM passed to `JNI_OnLoad`, called on the thread and for the
+/// duration of that call.
+pub unsafe fn on_load(vm: *mut c_void, class: &str) -> jint {
     guarded(
         "JNI_OnLoad",
         |_| JNI_ERR,
         || {
+            // SAFETY: the caller passes the JVM's own `JavaVM *`, valid for the whole process.
+            let Ok(vm) = (unsafe { JavaVM::from_raw(vm.cast()) }) else {
+                return JNI_ERR;
+            };
             let Ok(mut env) = vm.get_env() else {
                 return JNI_ERR;
             };
-            match register(&mut env) {
+            match register(&mut env, class) {
                 Ok(()) => JNI_VERSION_1_6,
                 Err(_) => {
                     let _ = env.exception_clear();
@@ -564,9 +464,8 @@ pub extern "system" fn JNI_OnLoad(vm: JavaVM, _reserved: *mut c_void) -> jint {
     )
 }
 
-/// Called by the JVM before the library is unloaded (its class loader was collected): stops the
-/// runtime, so no core thread is left running code that is about to be unmapped.
-#[unsafe(no_mangle)]
-pub extern "system" fn JNI_OnUnload(_vm: JavaVM, _reserved: *mut c_void) {
+/// What the core's `JNI_OnUnload` runs (its class loader was collected): stops the runtime, so no
+/// core thread is left running code that is about to be unmapped.
+pub fn on_unload() {
     session::stop();
 }

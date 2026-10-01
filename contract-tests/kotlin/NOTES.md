@@ -1,9 +1,9 @@
 # Kotlin column of the contract tests
 
-`run.sh` runs the twenty scenarios of `../scenarios.md` that Kotlin runs (S01 to S20) on the JVM, through
-`dev.undra.runtime.UndraCore` over the real JNI shim and the real `libundra_core` of `examples/playground/core`, and
+`run.sh` runs the twenty-one scenarios of `../scenarios.md` that Kotlin runs (S01 to S20 and S26) on the JVM, through
+`dev.undra.runtime.UndraCore` over the real JNI shim and the real `libplayground_core` of `examples/playground/core`, and
 pipes the verdicts through `../check.sh kotlin`. Sources are in `src/dev/undra/contract/`: one file per scenario
-(`S01Primitives.kt` ... `S19DerivedKeyedList.kt`, `S20Storage.kt`), the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`, `Handover.kt`),
+(`S01Primitives.kt` ... `S19DerivedKeyedList.kt`, `S20Storage.kt`, `S26TwoCores.kt`), the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`, `Handover.kt`),
 the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `MemoryKv`, `CapturingLog`) and the build-B
 process of S14 and S15 (`MigrationBuildB.kt`).
 
@@ -102,14 +102,14 @@ after the load, and drives the core through `UndraCore`'s raw API (`configure_re
   reads the `Clock` port every 10 ms (the manual clock does not move, so it commits nothing), and the step waits for
   three such reads before step 6 starts the shutdown. The port-call counts are read when `close()` returns and must
   not change for 200 ms. On the JVM `InprocTransport.close()` detaches from the core before
-  `UndraNative.shutdown()`, so a call during the shutdown itself would be answered "unavailable" by the transport,
+  the core's `UndraCoreNative.shutdown()`, so a call during the shutdown itself would be answered "unavailable" by the transport,
   never by an adapter. The fresh core is loaded with the same `LoadOptions` (the same adapter instances), and its
   `add(1, 2)` gets the fresh core explicitly. It hydrates the query cache from the `Kv` contents S12 to S14 left, so
   `Kv` calls start again after the reload. That is the new core's own work, and it is why the quiet window ends
   before the load. Because the transport detaches first, neither port-call window can show a task of the old core
   that kept running: its calls go to the old, detached callbacks (never the fresh core's), and the sleep it had set
   on the default `Timer` adapter is never reported back to the closed core. The check with teeth is the native core's own report: once `close()` returned,
-  `UndraNative.statsJson()` (no core loaded) must say `runtime_threads == 0`, the `undra-core`, timer and blocking
+  `UndraCoreNative.statsJson()` (no core loaded) must say `runtime_threads == 0`, the `undra-core`, timer and blocking
   threads joined; the same after the fresh core's close. (Review of runtime-lifecycle: a mutant whose shutdown only
   released the global slot, leaving the generator running, passed both windows and the reload; it fails here.)
 * S16.5: S16 runs first, so `UndraCore.shared` is still the placeholder after its failing load; the step checks that

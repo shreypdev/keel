@@ -10,7 +10,7 @@ plugins {
 
 /**
  * Builds the Rust core for Android: `undra build --platform android` (add `--release` for a release variant), which
- * writes `<abi>/libundra_core.so` where the `sourceSets` block below packages them. Gradle runs it before anything
+ * writes `<abi>/lib@@NAMESPACE@@.so` where the `sourceSets` block below packages them. Gradle runs it before anything
  * else (`preBuild` depends on it, see `undraBuild` below) and skips it while the core's sources and the libraries it
  * wrote are unchanged, so there is no manual `undra build` step.
  */
@@ -65,7 +65,7 @@ abstract class UndraBuild @Inject constructor(private val execOps: ExecOperation
 
     private fun undraNotFound(why: String = "`undra` is not on PATH or in ~/.undra/bin, ~/.cargo/bin or Homebrew's directories"): String = """
         error[undra::C0003]: `undra` was not found
-          = note: the `undraBuild` task of android/app/build.gradle.kts runs `undra build --platform android` to compile the Rust core into libundra_core.so, and $why
+          = note: the `undraBuild` task of android/app/build.gradle.kts runs `undra build --platform android` to compile the Rust core into lib@@NAMESPACE@@.so, and $why
           = help: curl -fsSL https://shreypdev.github.io/undra/install.sh | sh
                   then stop the Gradle daemon (./gradlew --stop) and restart Android Studio so they see the new PATH, or set UNDRA_BIN to the executable; `undra doctor` checks the rest of the toolchain
           = docs: https://shreypdev.github.io/undra/docs/errors.html#C0003
@@ -116,8 +116,8 @@ android {
     }
 
     sourceSets {
-        // `undra build --platform android --release` writes libundra_core.so for every ABI here. The
-        // Kotlin runtime loads it with System.loadLibrary("undra_core"). Like any path in this file
+        // `undra build --platform android --release` writes lib@@NAMESPACE@@.so for every ABI here. The
+        // bindings load it with System.loadLibrary("@@NAMESPACE@@"). Like any path in this file
         // it is relative to this module (android/app), not to android/; Gradle ignores a
         // directory that does not exist, so `undra build` checks this line after building.
         getByName("main").jniLibs.srcDir("@@JNI_LIBS_PATH@@")

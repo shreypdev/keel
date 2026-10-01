@@ -19,7 +19,7 @@ public final class Link: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraGoldenStdlib.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(

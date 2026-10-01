@@ -12,6 +12,7 @@ import {
   codecs,
   decodeValue,
 } from "@undra/runtime";
+import { UndraPlaygroundCore } from "./core.js";
 import { type TodoError, TodoErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import {
@@ -51,7 +52,10 @@ export class TodosQueryHandle extends UndraStore {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(page: number, core: UndraCore = UndraCore.shared): Promise<TodosQueryHandle> {
+  static async create(
+    page: number,
+    core: UndraCore = UndraPlaygroundCore.core,
+  ): Promise<TodosQueryHandle> {
     const w = new UndraWriter();
     w.writeU32(page);
     const args = w.finish();
@@ -147,7 +151,7 @@ export class TodosQueryHandle extends UndraStore {
  */
 export async function addTodo(
   title: string,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise<Todo> {
   const w = new UndraWriter();

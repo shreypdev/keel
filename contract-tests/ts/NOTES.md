@@ -1,7 +1,7 @@
 # Notes on the TypeScript column
 
-`run.sh` runs S01..S22 of `../scenarios.md` against the real wasm build of the playground core
-(`examples/playground/build/web/undra_core.wasm`, built by `undra build -C examples/playground --platform web`)
+`run.sh` runs S01..S22 and S26 of `../scenarios.md` against the real wasm build of the playground core
+(`examples/playground/build/web/playground_core.wasm`, built by `undra build -C examples/playground --platform web`)
 through `@undra/runtime` in `wasm-main` mode (S17 step 6 and S21 in `wasm-worker` mode), on Node, under vitest. `src/reporter.ts` prints one
 `SCENARIO Sxx PASS|FAIL|SKIP <title>` line per scenario; `../check.sh ts` grades them. `NOTE` lines carry
 measurements (S03: ns per sync call; S07: how far the producer ran).

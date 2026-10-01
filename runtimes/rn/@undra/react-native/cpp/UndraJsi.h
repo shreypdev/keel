@@ -1,10 +1,11 @@
 // The JSI side of @undra/react-native (ADR-038, decisions 1, 4, 5 and 11).
 //
-// `Binding` belongs to one JS runtime. `install` puts `globalThis.__undraNative` into it: plain JSI
-// host functions over the C ABI, which `NativeTransport` (src/transport.ts) calls. The binding never
-// stores a JSI value: the inbox sink, the sync-port function and the frame callback are read from
-// `__undraNative` (`sink`, `portSync`, `frame`) when needed, so nothing outlives the runtime it came
-// from, and a dev reload leaves no dangling JSI handle behind.
+// `Binding` belongs to one JS runtime and one core (ADR-044: one per namespace). `install` puts
+// `globalThis.__undraNative[<namespace>]` into the runtime: plain JSI host functions over the core's
+// table, which `NativeTransport` (src/transport.ts) calls. The binding never stores a JSI value: the
+// inbox sink, the sync-port function and the frame callback are read from that object (`sink`,
+// `portSync`, `frame`) when needed, so nothing outlives the runtime it came from, and a dev reload
+// leaves no dangling JSI handle behind.
 #pragma once
 
 #include <jsi/jsi.h>
@@ -23,7 +24,7 @@
 
 namespace undra::rn {
 
-/// One JS runtime's view of the process's core.
+/// One JS runtime's view of one core of the process: its host object, its inbox, its frame source.
 class Binding : public std::enable_shared_from_this<Binding> {
  public:
   Binding(const Api &api, std::shared_ptr<facebook::react::CallInvoker> invoker);
@@ -31,7 +32,7 @@ class Binding : public std::enable_shared_from_this<Binding> {
   Binding(const Binding &) = delete;
   Binding &operator=(const Binding &) = delete;
 
-  /// Installs `globalThis.__undraNative` in `rt` (once per runtime).
+  /// Installs `globalThis.__undraNative[api.name_space]` in `rt` (once per runtime and core).
   void install(facebook::jsi::Runtime &rt);
   /// The JS runtime is going away (the TurboModule's destructor): shuts the core down if this
   /// binding started it, posts nothing more. Callable from any thread but a core callback.
@@ -57,6 +58,7 @@ class Binding : public std::enable_shared_from_this<Binding> {
   /// The running host, if this binding started one.
   std::shared_ptr<Host> host() const;
 
+  /// The core this binding reaches (its namespace is `api.name_space`).
   const Api &api;
 
  private:

@@ -293,7 +293,7 @@ class Bench private constructor(core: UndraCore, handle: Long) : UndraStore(core
      * A store with every counter at zero and [`ROWS`] rows numbered from 1.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Bench.TYPE_ID, UndraIds.Objects.Bench.NEW, ByteArray(0)),
     )
@@ -1349,7 +1349,7 @@ class Bench private constructor(core: UndraCore, handle: Long) : UndraStore(core
          * A store with every counter at zero and [`ROWS`] rows numbered from 1.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Bench {
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Bench {
             val handle = ctx.constructObject(UndraIds.Objects.Bench.TYPE_ID, UndraIds.Objects.Bench.NEW, ByteArray(0))
             return Bench(ctx, handle)
         }
@@ -1372,7 +1372,7 @@ class BigList private constructor(core: UndraCore, handle: Long) : UndraStore(co
      * A list of [`LIST_LEN`] items numbered from 1.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.BigList.TYPE_ID, UndraIds.Objects.BigList.NEW, ByteArray(0)),
     )
@@ -1519,7 +1519,7 @@ class BigList private constructor(core: UndraCore, handle: Long) : UndraStore(co
          * A list of [`LIST_LEN`] items numbered from 1.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): BigList {
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): BigList {
             val handle = ctx.constructObject(UndraIds.Objects.BigList.TYPE_ID, UndraIds.Objects.BigList.NEW, ByteArray(0))
             return BigList(ctx, handle)
         }
@@ -1544,7 +1544,7 @@ class Counter private constructor(core: UndraCore, handle: Long) : UndraStore(co
      * A counter at zero with no changes made.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Counter.TYPE_ID, UndraIds.Objects.Counter.NEW, ByteArray(0)),
     )
@@ -1653,7 +1653,7 @@ class Counter private constructor(core: UndraCore, handle: Long) : UndraStore(co
          * A counter at zero with no changes made.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Counter {
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Counter {
             val handle = ctx.constructObject(UndraIds.Objects.Counter.TYPE_ID, UndraIds.Objects.Counter.NEW, ByteArray(0))
             return Counter(ctx, handle)
         }
@@ -1687,7 +1687,7 @@ class Device private constructor(core: UndraCore, handle: Long) : UndraStore(cor
      * The store, showing every report received so far and following the next ones.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Device.TYPE_ID, UndraIds.Objects.Device.NEW, ByteArray(0)),
     )
@@ -1742,7 +1742,7 @@ class Device private constructor(core: UndraCore, handle: Long) : UndraStore(cor
          * The store, showing every report received so far and following the next ones.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Device {
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Device {
             val handle = ctx.constructObject(UndraIds.Objects.Device.TYPE_ID, UndraIds.Objects.Device.NEW, ByteArray(0))
             return Device(ctx, handle)
         }
@@ -1797,7 +1797,7 @@ class Legacy private constructor(core: UndraCore, handle: Long) : UndraStore(cor
          * A score of `score`.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(score: Int, ctx: UndraCore = UndraCore.shared): Legacy {
+        fun create(score: Int, ctx: UndraCore = UndraPlaygroundCore.core): Legacy {
             val w = UndraWriter()
             w.writeI32(score)
             val handle = ctx.constructObject(UndraIds.Objects.Legacy.TYPE_ID, UndraIds.Objects.Legacy.NEW, w.toByteArray())
@@ -1879,7 +1879,7 @@ class Profile private constructor(core: UndraCore, handle: Long) : UndraStore(co
          * A profile called `name`, never visited.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(name: String, ctx: UndraCore = UndraCore.shared): Profile {
+        fun create(name: String, ctx: UndraCore = UndraPlaygroundCore.core): Profile {
             val w = UndraWriter()
             w.writeStr(name)
             val handle = ctx.constructObject(UndraIds.Objects.Profile.TYPE_ID, UndraIds.Objects.Profile.NEW, w.toByteArray())
@@ -1910,7 +1910,7 @@ class Stress private constructor(core: UndraCore, handle: Long) : UndraStore(cor
      * A store with every signal at its start: zeros, and no generator running.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Stress.TYPE_ID, UndraIds.Objects.Stress.NEW, ByteArray(0)),
     )
@@ -2018,7 +2018,7 @@ class Stress private constructor(core: UndraCore, handle: Long) : UndraStore(cor
          * A store with every signal at its start: zeros, and no generator running.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Stress {
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Stress {
             val handle = ctx.constructObject(UndraIds.Objects.Stress.TYPE_ID, UndraIds.Objects.Stress.NEW, ByteArray(0))
             return Stress(ctx, handle)
         }
@@ -2046,7 +2046,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
      * An empty list showing every item.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW, ByteArray(0)),
     )
@@ -2228,7 +2228,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
          * An empty list showing every item.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Todos {
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Todos {
             val handle = ctx.constructObject(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW, ByteArray(0))
             return Todos(ctx, handle)
         }

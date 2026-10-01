@@ -25,13 +25,12 @@ until after v2.
 device-bench (E1; the honest web size is 135 KB gzipped, over budget — E5), diagnostics (D1), dev-loop
 (B1, B2, ADR-051), parity (C3, C4: the Kotlin/TS error channel), react-native (G1, ADR-038; G1b default
 adapters, E4 Hermes cost and a site page are open), android-adapters (M1 Maven publishing open), runtime-lifecycle (Track A: ADR-034/035/036 + the
-ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5), wasm-size (E5, ADR-052; `ts-runtime-size` owed), dev-reload (B3, ADR-053), rn-adapters (G1b), swift-fs, derived-lists (E2, ADR-039). Main moves with each checkpoint. CI pins Rust 1.98.1
+ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5), wasm-size (E5, ADR-052; `ts-runtime-size` owed), dev-reload (B3, ADR-053), rn-adapters (G1b), swift-fs, derived-lists (E2, ADR-039), abi-table (ADR-044; `ns-storage` owed). Main moves with each checkpoint. CI pins Rust 1.98.1
 (1.99.0 broke it on 2026-10-01; the bump is a deliberate piece: four workflow pins, `rustup update`,
 `TRYBUILD=overwrite` goldens, bench re-baseline).
 
 **Merge queue (cross-merge main on the branch, full matrix, fast-forward).** Every branch below lives in
 `/Users/shrey/Desktop/src/.work/<name>` with its record in `.10x/decisions/sde/<name>.md` there:
-5. `abi-table` (ADR-044; implementing; migrates the RN host to the table).
 6. `persistence-v2` (ADR-037 + ADR-049 A6/A7; implementing).
 Each still needs its adversarial review (opus) before merging, except 1 and 2 which have one.
 
