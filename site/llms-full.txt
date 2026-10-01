@@ -804,6 +804,7 @@ Builds the core for each platform and puts the result where the app shells look 
 | `android` | `build/android/jniLibs/<abi>/libundra_core.so`, arm64-v8a and x86_64, 16 KB page aligned |
 | `web` | `build/web/undra_core.wasm`, release profile, then `wasm-opt -Oz` if installed |
 | `host` | `build/host/libundra_core.{dylib,so}`, for the JVM tests and `undra bindgen` |
+| `rn` | the `ios` and `android` outputs, plus `build/ios/UndraCore.podspec` for a React Native app's Podfile ([docs/REACT_NATIVE.md](https://github.com/shreypdev/undra/blob/main/docs/REACT_NATIVE.md)); the iOS half only on macOS |
 
 `--release` turns on LTO and one codegen unit. The web build is always optimized. Sizes are printed at the end next to the design's budgets. A debug Android core is tens of megabytes per ABI, so package with `--release`. The library is your core plus the Undra C ABI, built from a small crate generated under `target/undra/`; you never write that crate.
 

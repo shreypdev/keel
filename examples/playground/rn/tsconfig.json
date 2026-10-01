@@ -1,0 +1,42 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "paths": {
+      "@undra/runtime/react": [
+        "../../../runtimes/ts/@undra/runtime/src/react.ts"
+      ],
+      "@undra/runtime": [
+        "../../../runtimes/ts/@undra/runtime/src/index.ts"
+      ],
+      "@undra/react-native": [
+        "../../../runtimes/rn/@undra/react-native/src/index.ts"
+      ],
+      "@playground/core": [
+        "../generated/ts/src/index.ts"
+      ],
+      "react-native": [
+        "./node_modules/react-native/types_generated/index.d.ts"
+      ],
+      "react": [
+        "./node_modules/@types/react/index.d.ts"
+      ]
+    },
+    "types": [],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.AsyncIterable",
+      "ESNext.Disposable"
+    ],
+    "skipLibCheck": true
+  },
+  "include": [
+    "index.js",
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/Pods"
+  ]
+}

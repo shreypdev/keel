@@ -1,0 +1,132 @@
+name: RN devices
+
+# The React Native playground app on an iPhone simulator and an Android emulator: build the core and the
+# Release app, install it, launch it, and wait for the app's own verdict in the device log,
+#
+#     UNDRA-RN CHECKS 10/10 passed
+#
+# (RN01..RN10, examples/playground/rn/src/checks.ts: the JSI host under Hermes, the C++ module's ownership and
+# threading, the native frame source, panic containment, the schema-hash check). scripts/rn-device-checks.sh is
+# the whole recipe and runs the same way on a developer's Mac, so a red job here is reproduced with
+# `scripts/rn-device-checks.sh ios` or `... android`. What needs no device (the C++ host under sanitizers, the
+# JSI compile check, the unit tests, the contract column) is the `react-native` job of ci.yml, on every push.
+#
+# These jobs are slow (two Rust release builds of the core with fat LTO, CocoaPods or Gradle, a simulator or an
+# emulator boot), so they run on demand (`workflow_dispatch`), weekly (to see React Native, Xcode and the
+# runner images move), and on the pull requests that touch what they test. They are not required checks.
+#
+# The Rust version is pinned like every other workflow (see the comment at the top of ci.yml): a deliberate bump
+# changes this file's `rust-toolchain@` lines with the others.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays, 05:17 UTC.
+    - cron: "17 5 * * 1"
+  pull_request:
+    paths:
+      - "runtimes/rn/**"
+      - "examples/playground/rn/**"
+      - "scripts/rn-device-checks.sh"
+      - ".github/workflows/rn-devices.yml"
+
+permissions:
+  contents: read
+
+# A pull request's newer push replaces its older run (each run builds the whole pull request, so the older
+# one is stale the moment a newer one starts). A dispatched or scheduled run is never cancelled: it gets a
+# group of its own, because nothing newer would make it stale, and a cancelled scheduled run is a week
+# without a signal. (bench.yml's history is the reason for the care: a cancel-in-progress group shared by
+# pushes cancelled merge runs and turned its baseline gate into a no-op.)
+concurrency:
+  group: rn-devices-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # The NDK the playground app asks for (examples/playground/rn/android/build.gradle, ndkVersion). The core is
+  # built with it too: `undra build` refuses anything older than r27 (16 KB page alignment).
+  NDK_VERSION: 27.2.12479018
+
+jobs:
+  ios:
+    name: iOS simulator (Release)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          # `undra build --platform rn` builds the iOS slices (device and simulator) and, on every OS, the
+          # Android core as well; the Android targets are for that half.
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: examples/playground/rn/package-lock.json
+      - name: The newest stable Xcode (React Native asks for a recent one)
+        run: |
+          newest="$(ls -d /Applications/Xcode_*.app | grep -v -i -E 'beta|candidate|_rc' | sort -V | tail -n 1)"
+          echo "using $newest"
+          sudo xcode-select -s "$newest/Contents/Developer"
+          xcodebuild -version
+          xcrun simctl list devices available | grep -i iphone | head -n 5
+      - name: The Android NDK and cargo-ndk (the Android half of the core)
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          cargo install cargo-ndk
+      - name: The undra CLI
+        run: cargo build -p undra-cli
+      - name: Core, pods, Release app, simulator, the on-device checks
+        run: scripts/rn-device-checks.sh ios
+
+  android:
+    name: Android emulator (API 34, x86_64, release)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: examples/playground/rn/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: The Android NDK and cargo-ndk
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          cargo install cargo-ndk
+      - name: The undra CLI
+        run: cargo build -p undra-cli
+      # The build comes first and the emulator after it, so the emulator's boot does not compete with the two
+      # Rust builds and Gradle for the runner's four cores. The app's own native library is built for x86_64
+      # only (the emulator's ABI); the core's jniLibs carry both ABIs of [android] abis.
+      - name: Core and Release APK
+        run: scripts/rn-device-checks.sh android --build-only --abi x86_64
+      - name: Enable KVM (hardware acceleration for the emulator)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install, launch, wait for the on-device checks
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/rn-device-checks.sh android --no-build
