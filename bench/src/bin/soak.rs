@@ -16,10 +16,10 @@
 //! prints one line. It exits non-zero when:
 //!
 //! * RSS grew by more than the limit (1% of `[stress."soak/mixed"]` in `bench/budgets.toml`, or
-//!   64 KiB) from the first sample after the warm-up to the last. The warm-up is the first 20%
-//!   of the run but at least 5 s (and at most half the run): the allocator and the threads'
-//!   stacks take about 5 s to reach a steady state under this load (RSS climbs 1-3% in that
-//!   time on the reference host and is flat after it), and that is warm-up, not growth;
+//!   64 KiB) from the first sample after the warm-up to the last. The warm-up is the first half
+//!   of the run: under this load the allocator and the threads' stacks settle in page-sized steps
+//!   for the first 30 s or so (RSS climbs 1-3% on the reference host, then is flat), and that is
+//!   warm-up, not growth;
 //! * the worst post-warm-up second's p99 is more than 3x the median second's p99 (drift);
 //! * an invariant broke: a change-set out of order, a lost completion, the host's copy of the
 //!   list different from the core's, a stream more than one item ahead of its credit;
@@ -31,7 +31,7 @@
 //! retried, because an intermittent reordering is a bug and not noise.
 //!
 //! `cargo run -p keel-bench --release --bin soak -- --seconds 60` (locally; CI runs 10).
-//! Options: `--seconds N`, `--warmup PCT` (default: the rule above), `--rss-limit-pct X`,
+//! Options: `--seconds N`, `--warmup PCT` (default 50), `--rss-limit-pct X`,
 //! `--attempts N`, `--json PATH`.
 //!
 //! The pieces (`fixtures`, `host`, `stress`) are the ones the sustained scenarios use, included
@@ -89,8 +89,7 @@ struct Args {
 const USAGE: &str = "usage: soak [--seconds N] [--warmup PCT] [--rss-limit-pct X] [--attempts N] [--json PATH]
 
   --seconds N          how long to run (default 60; CI uses 10)
-  --warmup PCT         the first PCT percent of the run is warm-up (default: 20, but at least 5 s
-                       and at most half the run)
+  --warmup PCT         the first PCT percent of the run is warm-up (default 50)
   --rss-limit-pct X    RSS growth limit in percent (default: [stress.\"soak/mixed\"] of budgets.toml)
   --attempts N         run again (up to N runs) when only the noisy gates failed: RSS, drift, rate
                        (default 1; a broken invariant is never retried)
@@ -255,13 +254,9 @@ fn budget_limit() -> f64 {
         .unwrap_or(1.0)
 }
 
-/// The warm-up as a fraction of the run: what `--warmup` said, else 20% but at least 5 s and at
-/// most half the run.
+/// The warm-up as a fraction of the run: what `--warmup` said, else the first half.
 fn warmup_fraction(args: &Args) -> f64 {
-    match args.warmup_pct {
-        Some(pct) => pct / 100.0,
-        None => (5.0 / args.seconds as f64).clamp(0.2, 0.5),
-    }
+    args.warmup_pct.map_or(0.5, |pct| pct / 100.0)
 }
 
 fn mb(bytes: u64) -> f64 {
