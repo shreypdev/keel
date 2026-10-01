@@ -1,17 +1,16 @@
 import { expect, test } from "vitest";
-import { CallTarget, UndraReplyError, UndraTransportError, ReplyStatus } from "@undra/runtime";
+import { CallTarget, UndraCallError, UndraReplyError, UndraRestoreError, UndraUnhandledError, ReplyStatus } from "@undra/runtime";
 import { BigList, Counter, Probe, UndraIds, Todos, add } from "@playground/core";
-import { bootRaw } from "../src/harness.js";
+import { boot } from "../src/harness.js";
 import { counters } from "../src/stats.js";
 import { step, waitFor } from "../src/wait.js";
-import { restore, snapshot } from "../src/wasm-exports.js";
 
 // S15 snapshot and restore: the core's state can be captured as opaque bytes and put back; the
 // same handles keep working and show the captured values; identities continue; a snapshot that
 // is not one is refused and changes nothing; a handle released before the snapshot stays gone.
 
 test("S15 snapshot and restore", async () => {
-  const { core, transport } = await bootRaw();
+  const { core, runtimeErrors } = await boot();
   const liveBefore = (await counters(core)).liveHandles;
 
   const todos = await Todos.create(core);
@@ -62,8 +61,8 @@ test("S15 snapshot and restore", async () => {
     expect(view()).toEqual(atSnapshot);
   });
 
-  await step("2. the snapshot is non-empty and opaque", () => {
-    bytes = snapshot(transport);
+  await step("2. the snapshot is non-empty and opaque", async () => {
+    bytes = await core.snapshot();
     expect(bytes.length).toBeGreaterThan(0);
   });
 
@@ -79,8 +78,8 @@ test("S15 snapshot and restore", async () => {
 
   await step("4. restore: the same handles show the snapshot's values, delivered as change-sets", async () => {
     const changeSets = core.mirror.changeSets;
-    restore(transport, bytes);
-    await waitFor("the stores to show the snapshot", () => JSON.stringify(view()) === JSON.stringify(atSnapshot));
+    await core.restore(bytes);
+    // restore() resolves after the restored values reached the stores: no waiting.
     expect(view()).toEqual(atSnapshot);
     expect(core.mirror.changeSets - changeSets, "the restore delivered change-sets for the observed signals").toBeGreaterThanOrEqual(1);
     // And the handles are live: calls through them work.
@@ -104,12 +103,12 @@ test("S15 snapshot and restore", async () => {
     const liveBeforeRefusal = (await counters(core)).liveHandles;
     let refusal: unknown;
     try {
-      restore(transport, junk);
+      await core.restore(junk);
     } catch (error) {
       refusal = error;
     }
-    expect(refusal, `restoring ${Array.from(junk).join(",")} must fail`).toBeInstanceOf(UndraTransportError);
-    expect((refusal as UndraTransportError).reason).toBe("protocol");
+    expect(refusal, `restoring ${Array.from(junk).join(",")} must fail`).toBeInstanceOf(UndraRestoreError);
+    expect((refusal as UndraRestoreError).code, "the core's code for a malformed snapshot").toBe(5);
     expect(core.closed, "a refused snapshot does not take the core down").toBe(false);
     // The core still answers, and nothing was delivered for the refused bytes.
     expect(await add(1, 1, core)).toBe(2);
@@ -138,23 +137,45 @@ test("S15 snapshot and restore", async () => {
     const hanging = probe.hang();
     hanging.catch(() => {}); // awaited below
     await waitFor("the hang call to start in the core", async () => (await probe.counters()).started === 1);
-    restore(transport, snapshot(transport));
+    await core.restore(await core.snapshot());
     const error = await hanging.then(
       () => undefined,
       (e: unknown) => e,
     );
-    expect(error, "the call fails as a reply, not as an abort").toBeInstanceOf(UndraReplyError);
-    expect((error as UndraReplyError).status).toBe(ReplyStatus.Cancelled);
-    // The probe is not a store, so the restore invalidated its handle: calls on it are bad requests.
-    for (const call of [() => probe.counters(), () => probe.reset()]) {
-      const refused = await call().then(
-        () => undefined,
-        (e: unknown) => e,
-      );
-      expect(refused).toBeInstanceOf(UndraReplyError);
-      expect((refused as UndraReplyError).status).toBe(ReplyStatus.BadRequest);
-    }
+    expect(error, "the call fails as cancelled by the core, not as an abort").toBeInstanceOf(UndraCallError.CancelledByCore);
+    expect((error as UndraCallError.CancelledByCore).kind).toBe("cancelledByCore");
+    // The probe is not a store, so the restore invalidated its handle: a call on it is refused (a bad request), and the
+    // command `reset()` resolves and reports to `onError`.
+    const refused = await probe.counters().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(refused).toBeInstanceOf(UndraCallError.Refused);
+    expect((refused as UndraCallError.Refused).reason).toBeTruthy();
+    runtimeErrors.length = 0;
+    await probe.reset();
+    const reports = runtimeErrors.splice(0) as UndraUnhandledError[];
+    expect(reports.map((r) => r.operation)).toEqual(["Probe.reset"]);
+    expect(reports[0]?.error).toBeInstanceOf(UndraCallError.Refused);
     probe.close();
+  });
+
+  await step("10. a stream in flight across a restore ends as cancelled by the core", async () => {
+    const streamed = await Probe.create(core);
+    // Read one item, then stop reading without cancelling (as S07 does): the credit window keeps the core from running ahead,
+    // and the stream is still open when the restore arrives.
+    const iterator = streamed.ticks(1_000_000)[Symbol.asyncIterator]();
+    expect((await iterator.next()).done).toBe(false);
+    await core.restore(await core.snapshot());
+    // What the core sent before the restore is still delivered; then the stream ends with the core's own String.
+    let outcome: unknown;
+    try {
+      for (let next = await iterator.next(); !next.done; next = await iterator.next()) continue;
+    } catch (error) {
+      outcome = error;
+    }
+    expect(outcome, "the core's own String is not read as a typed error").toBeInstanceOf(UndraCallError.CancelledByCore);
+    streamed.close();
   });
 
   todos.close();

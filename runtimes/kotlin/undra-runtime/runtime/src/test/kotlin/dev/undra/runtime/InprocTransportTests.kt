@@ -54,6 +54,13 @@ private class RecordingEvents : TransportEvents {
         items.add(Triple(callId, flag, body.toList()))
     }
 
+    val malformed = CopyOnWriteArrayList<Pair<UInt, UndraProtocolException>>()
+
+    override fun onMalformed(callId: UInt, error: UndraProtocolException) {
+        failWith?.let { throw it }
+        malformed.add(callId to error)
+    }
+
     override fun onChangeSet(changeSet: ByteArray) {
         failWith?.let { throw it }
         changeSets.add(changeSet)
@@ -187,17 +194,17 @@ class InprocTransportTests : Suite() {
             )
         }
 
-        case("a malformed reply still tells the caller, by the call id JNI passes alongside it") {
+        case("a malformed reply still tells the caller, by the call id JNI passes alongside it, as malformed") {
             val native = FakeNative()
             val events = RecordingEvents()
             InprocTransport(native).connect(events, HASH)
             native.emitReplyFor(11, byteArrayOf(1, 2)) // shorter than call_id + status
             native.emitReplyFor(12, byteArrayOf(12, 0, 0, 0, 99)) // an unknown status byte
-            assertEq(2, events.replies.size)
-            assertEq(11u, events.replies[0].first)
-            assertEq(ReplyStatus.BAD_REQUEST, events.replies[0].second)
-            assertEq(12u, events.replies[1].first)
-            assertEq(ReplyStatus.BAD_REQUEST, events.replies[1].second)
+            // Not a status the core never sent: a protocol failure, which generated code reports as Malformed.
+            assertEq(0, events.replies.size)
+            assertEq(listOf(11u, 12u), events.malformed.map { it.first })
+            assertTrue(events.malformed.all { it.second.message!!.contains("malformed reply") }, "${events.malformed}")
+            assertTrue(UndraCallError.mapped(events.malformed[0].second) is UndraCallError.Malformed, "maps to Malformed")
         }
 
         case("change-sets are copied out of the buffer before it is recycled") {
@@ -219,8 +226,11 @@ class InprocTransportTests : Suite() {
             native.emitStream(5, byteArrayOf(1))
             assertEq(Triple(4u, StreamFlag.ITEM, listOf<Byte>(8, 9)), events.items[0])
             assertEq(Triple(4u, StreamFlag.END, emptyList<Byte>()), events.items[1])
-            assertEq(5u, events.items[2].first)
-            assertEq(StreamFlag.ERROR, events.items[2].second)
+            assertEq(2, events.items.size)
+            assertEq(5u, events.malformed.single().first)
+            assertTrue(events.malformed.single().second.message!!.contains("malformed stream item"), "${events.malformed}")
+            // Not the core's own String (which reads as a panic): Malformed, for a stream with or without an E.
+            assertTrue(UndraCallError.mappedStream(events.malformed.single().second) is UndraCallError.Malformed, "maps to Malformed")
         }
 
         case("a sync port answer is handed back through portSyncReply on the same thread") {

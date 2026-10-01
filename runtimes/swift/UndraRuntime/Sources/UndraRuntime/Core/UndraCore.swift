@@ -556,7 +556,10 @@ public final class UndraCore: @unchecked Sendable {
     /// `error` is mapped the way a throwing call's error is (``UndraCallError/mapped(_:)``), so the
     /// handler always receives an ``UndraCallError``. The handler runs synchronously on the calling
     /// thread. A report made while the handler is running (a handler that calls a failing command) is
-    /// only logged.
+    /// only logged, and so is a failure that is a remote core's connection being down
+    /// (``UndraCallError/unavailable(_:)`` while ``connectionState`` is `.reconnecting`, or `.closed` for a reason
+    /// other than `shutdown()`): the connection state and `LoadOptions.onConnectionChange` already report that,
+    /// once, and a command tapped meanwhile is not a second failure to hand to a crash reporter.
     ///
     /// - Parameters:
     ///   - error: What the call threw.
@@ -565,12 +568,35 @@ public final class UndraCore: @unchecked Sendable {
         let mapped = (UndraCallError.mapped(error) as? UndraCallError)
             ?? UndraCallError.malformed(String(describing: error))
         let unhandled = UndraUnhandledError(operation: operation, error: mapped)
+        if isConnectionDown(mapped) {
+            UndraLog.warning("\(unhandled.description) (the connection to the core is down: see connectionState)")
+            return
+        }
         UndraLog.error(unhandled.description)
         guard let handler = onError, !UndraCore.isReporting else {
             return
         }
         UndraCore.$isReporting.withValue(true) {
             handler(unhandled)
+        }
+    }
+
+    /// Whether `error` is the connection of a remote core being down, which ``connectionState`` already reports. A
+    /// core the app shut down itself and an in-process core are not: those are still reported.
+    private func isConnectionDown(_ error: UndraCallError) -> Bool {
+        guard case .unavailable(let reason) = error, transport.mode == .remote else {
+            return false
+        }
+        if case .connectionLost = reason {
+            return true
+        }
+        switch connectionState {
+        case .reconnecting:
+            return true
+        case .closed(let why):
+            return why != .requested
+        case .connecting, .connected:
+            return false
         }
     }
 

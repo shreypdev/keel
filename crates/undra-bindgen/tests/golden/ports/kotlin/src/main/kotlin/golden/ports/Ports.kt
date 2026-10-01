@@ -45,7 +45,7 @@ fun clockPortImpl(impl: Clock): PortImpl {
 
 /**
  * Connectivity changes, sent by the platform.
- * Sends the events of this port from the host to the core.
+ * Sends the events of this port from the host to the core. A failure (a closed core) is logged and passed to `LoadOptions.onError`; the methods do not throw.
  */
 class ConnectivityEvents(private val core: UndraCore = UndraCore.shared) {
     /** The network changed. */
@@ -53,19 +53,27 @@ class ConnectivityEvents(private val core: UndraCore = UndraCore.shared) {
         val w = UndraWriter()
         w.writeBool(online)
         NetKind.encode(w, kind)
-        this.core.event(
-            UndraIds.Ports.Connectivity.PORT_ID,
-            UndraIds.Ports.Connectivity.CHANGED,
-            w.toByteArray(),
-        )
+        try {
+            this.core.event(
+                UndraIds.Ports.Connectivity.PORT_ID,
+                UndraIds.Ports.Connectivity.CHANGED,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "ConnectivityEvents.changed")
+        }
     }
 
     fun reset() {
-        this.core.event(
-            UndraIds.Ports.Connectivity.PORT_ID,
-            UndraIds.Ports.Connectivity.RESET,
-            ByteArray(0),
-        )
+        try {
+            this.core.event(
+                UndraIds.Ports.Connectivity.PORT_ID,
+                UndraIds.Ports.Connectivity.RESET,
+                ByteArray(0),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "ConnectivityEvents.reset")
+        }
     }
 }
 

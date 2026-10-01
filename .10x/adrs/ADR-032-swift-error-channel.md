@@ -419,3 +419,228 @@ Button(todo.title) { todos.toggle(id: todo.id) }          // unchanged, still no
    compatibility of generated Swift is not yet a promise. The compile errors listed under Consequences
    are the whole migration.
 5. Names are accepted as proposed (open decision 5).
+
+---
+
+## Amendment A (2026-10-01): the same failure model for Kotlin and TypeScript (C4b)
+
+Status: accepted by the v1.x plan (amendment C, piece C4b; gap audit PA-1, PA-2, PA-3, PA-4, PA-9). The body above
+is unchanged. This amendment extends ADR-032's three-outcome rule and its command rule to the other two runtimes,
+because section 3 of the ADR ("Kotlin and TypeScript already surface every failure as an exception or a
+rejection") only checked that those platforms *do not abort*. The gap audit found the rest: they have no closed
+taxonomy, no reporting hook for the one shape that cannot throw, and a wire error and several transport failures
+sit outside their error hierarchy. R6 requires "every error is a typed value" on every platform, and R3 requires
+the generated shapes to read as native on each. **No wire, C ABI, wasm ABI or schema change.** Generated Kotlin and
+TypeScript shapes change (R11: decided here before the code). Swift is unchanged.
+
+### What the audit found (before)
+
+| Failure | Kotlin before | TypeScript before |
+|---|---|---|
+| a generated sync **command** (`fn f(&self)`, no `E`) fails | throws `UndraReplyException` into the Compose `onClick` (`Stores.kt:45-53`): an app crash | the returned `Promise` rejects; un-awaited (`onClick={() => void todos.toggle(id)}`) it is an unhandled rejection that never reaches `onError`, and Node ends the process on one |
+| typed error `E` (status 1) | throws `E` | rejects with `E` |
+| panic (status 2), cancelled by the core (3), refused (5) | raw `UndraReplyException(status, body)` | raw `UndraReplyError({status, body})` |
+| closed core, remote timeout or disconnect | plain `UndraException("...")` (untyped text) | `UndraTransportError` |
+| malformed reply, undecodable result or `E` | `UndraException("malformed reply")` or a `WireException` **outside** `UndraException` | `UndraTransportError("protocol")` or a `WireError` **outside** `UndraError` |
+| undecodable change-set entry | `java.util.logging` warning, entry skipped, **no hook** | logged and passed to `onError(unknown)` (no operation), but the failing store keeps a half-applied state on trailing bytes |
+| port implementation failed | warning only | `onError(unknown)` |
+| stream ended by restore or shutdown (flag 2 + `"cancelled: ..."` String) | read as `E`: a `WireException` or a wrong variant | the same, a `WireError` |
+| `UndraCore.shared` with no core loaded | throws `UndraException` at the point of access (inside a default argument or a constructor) | throws `UndraError("state")` at the point of access |
+| generated constructor whose `observe` fails | the raw exception | the raw rejection, and the freshly created handle leaks |
+
+### Decision
+
+1. **One closed set on each runtime, `UndraCallError`**, with the five cases of ADR-032 and the same meaning
+   (the table of decision 2 above applies unchanged): `CancelledByCore`, `Panicked(message, backtrace)`,
+   `Refused(reason)`, `Unavailable(transport error)`, `Malformed(detail)`.
+   * **Kotlin:** `sealed class UndraCallError : UndraException`, the five cases nested (`CancelledByCore` a
+     class without fields, not a `data object`: a singleton `Throwable` would share one stack trace and one list of
+     suppressed exceptions across every throw (corrected in the review); `Panicked.panicMessage` and
+     `.backtrace`; `Refused.reason`; `Unavailable.transport`, an `UndraTransportException`, also its `cause`;
+     `Malformed.detail`). A property is not called `message` because
+     `Throwable.message` is the one-line description an app shows (`error.message` reads like Swift's
+     `localizedDescription`).
+   * **TypeScript:** `abstract class UndraCallError extends UndraError` merged with a namespace of the five final
+     classes (the shape the generated `TodoError` already has), `kind` the discriminant (`"cancelledByCore"`,
+     `"panicked"`, `"refused"`, `"unavailable"`, `"malformed"`), and the union type `UndraCallFailure` for an
+     exhaustive `switch (error.kind)`. `Unavailable.transport` is the `UndraTransportError`.
+2. **The hierarchy is closed under the base type.** Everything the runtime throws on purpose is an
+   `UndraException` / `UndraError`: Kotlin `WireException` (was a bare `RuntimeException`) is re-rooted; the
+   transport failures the runtime raised as text-only `UndraException`s become `UndraTransportException` (reasons
+   `CLOSED`, `TIMEOUT`, `CONNECTION_LOST`, `INTERRUPTED`; the Swift `UndraTransportError` cases) and malformed
+   replies become `UndraProtocolException`; a refused snapshot is `UndraRestoreException(code)` (Swift
+   `UndraRestoreError`); TypeScript `WireError` is re-rooted under `UndraError` (`kind: "wire"`). The runtime's
+   raw entry points (`callSync`, `call`, `stream`, `construct`, `observe`, `restore`; TypeScript `call`,
+   `callSync`, `stream`, `construct`) keep throwing these raw types, exactly like the Swift raw API: they are for
+   what bindings do not expose, and the contract runners rely on their statuses.
+3. **A generated call fails with exactly one of three things**, on both runtimes:
+   * its own error `E` (reply status 1), decoded from the reply and thrown as `E` itself, so `catch (e: TodoError)`
+     and `catch (e) { if (e instanceof TodoError) ... }` keep working;
+   * cancellation of the caller: Kotlin `CancellationException`, TypeScript the `AbortSignal`'s reason (an
+     `AbortError` `DOMException` by default), never wrapped. A core cancellation (status 3) is **not** a platform
+     cancellation, for the reason decision 2 of the ADR gives: it is `UndraCallError.CancelledByCore`;
+   * `UndraCallError`, for everything else.
+   Argument validation is not an outcome of the call: a value the wire cannot represent (Kotlin
+   `WireException.NegativeDuration`, `DuplicateKey`, `IllegalArgumentException`; TypeScript `TypeError` and
+   `RangeError` from the writer) is a programming error raised before anything is sent, like Swift's codec
+   preconditions (ADR-032, section 3), and propagates unchanged. A **command** is the exception: it
+   cannot throw, and a click handler has no way to handle a `WireException` or a `RangeError`, so its argument
+   encoding is inside its `try` and a failure there is reported like any other.
+4. **Commands report instead of failing**, as in decision 4 of the ADR. A synchronous method that returns `()` and
+   has no error type is generated so that it logs the failure at error level, passes an
+   `UndraUnhandledError(operation, error: UndraCallError)` to `LoadOptions.onError` and returns:
+   * **Kotlin:** `fun toggle(id: UUID)` stays non-`suspend`, non-throwing; its body is one `try`/`catch (e:
+     Exception)` that calls `core.report(e, "Todos.toggle")`.
+   * **TypeScript:** commands stay `async` (every TypeScript method returns a `Promise`, SPEC 17.1) but the
+     promise **never rejects**: `try { await core.call(...) } catch (error) { core.report(error, "Todos.toggle"); }`.
+     A React handler can write `onClick={() => void todos.toggle(id)}` with no unhandled rejection; a caller that
+     awaits it learns that the command was sent and answered, not that it succeeded, exactly like Swift's
+     non-throwing command (the effect is observed through the store).
+   The ADR's argument that a command never writes a store property itself holds on both platforms
+   (`StateFlow` and `Signal` change only from `apply` / `_apply`).
+5. **`report` and `onError`.** `UndraCore.report(error, operation)` (public; the entry generated commands and
+   `apply` call) logs at error level (`java.util.logging` `SEVERE` / log level 4), maps `error` with the one
+   mapping function, and calls `LoadOptions.onError(UndraUnhandledError)` **synchronously on the calling thread**.
+   It never throws: a handler that throws is logged, a report made while the handler runs on the same thread is
+   only logged (a thread-local / synchronous flag, the analogue of Swift's task-local), so a handler cannot recurse.
+   Kotlin gains `LoadOptions.onError: ((UndraUnhandledError) -> Unit)?`; TypeScript's existing
+   `onError` changes its argument from `unknown` to `UndraUnhandledError` (`operation`, `error: UndraCallError`,
+   `cause` = the original failure), so it now says which operation failed (PA-4); a function that accepts
+   `unknown` still type-checks. Everything the runtimes reported before keeps reaching it: malformed change-sets,
+   store `apply` failures, failed ports (Kotlin gains the last two; TypeScript already had them). The handler runs on
+   a thread that may hold the core lock only for TypeScript's wasm callbacks, where it is documented "must not
+   call into Undra"; Kotlin dispatches reports that originate in a core callback (a malformed change-set, a
+   failed port) to the delivery executor instead of running the handler on the core's thread.
+6. **Store `apply` reports and skips.** Generated `apply` / `_apply` is one `try`/`catch` around the signal switch,
+   reporting `"<Store>.apply(signal: N)"` and skipping the entry, as Swift does (decision 6 of the ADR). Kotlin
+   decodes, calls `reader.finish()` and only then assigns the `StateFlow` (it used to assign first, so a change
+   with trailing bytes was stored and then reported; Swift fixed the same order in its review, L1). A
+   `PatchOutOfBounds` still re-observes the signal.
+7. **`UndraCore.shared` with no core loaded** returns a permanently closed placeholder core instead of throwing
+   (decision 7 of the ADR): its calls fail with `UndraCallError.Unavailable` (reason `CLOSED`), its commands only
+   log, its first use logs the teaching message once, and `UndraCore.current` (new) still returns `null`/`undefined`
+   so an app can tell. The same placeholder is what `shared` returns after the shared core was closed.
+8. **Generated constructors are calls.** Kotlin: `ctx.constructObject(typeId, methodId, args)` (a final member that
+   maps what `construct` throws; a secondary constructor cannot hold a `try`) and `UndraStore.observeAll()`
+   (observes every signal; on failure it closes the store and throws the mapped error, so a closed core does not
+   leak a handle). TypeScript: `UndraStore._observeAll()` does the same. Async and fallible constructors map like
+   any call.
+9. **One mapping function per runtime**, in one file (Kotlin `UndraCallError.kt`, TypeScript `call-error.ts`),
+   with the four entry points of Swift's `mapped`: a method without an error type, with `E` (given its codec),
+   a stream, a stream with `E`. Every path ends in the same private status mapping (Kotlin `fromStatus`,
+   TypeScript `fromReply`), so ADR-036's flag 3 (`status, message, detail`, mapped "exactly like a failed reply")
+   lands as one new `UndraReplyException`/`UndraReplyError` at the stream decoder and nothing else; until then a
+   flag-2 body is read as `E`, then as the core's `String` (a `"cancelled: "` prefix is `CancelledByCore`, any
+   other text `Panicked`), the behaviour of Swift's `mapped(streamFailure:domain:)`.
+
+   | Input | Output |
+   |---|---|
+   | `CancellationException` / the signal's reason, any non-Undra throwable | itself (Kotlin: only `Exception`s reach the mapper; an `Error` is not caught) |
+   | already an `UndraCallError` | itself |
+   | reply status 1 and a domain codec | the decoded `E`; a body that does not decode is `Malformed` |
+   | reply status 1 without a domain, status 0 or 4 | `Malformed` |
+   | reply status 2 | `Panicked(message, backtrace)` (`<undecodable panic report>` when the body does not decode) |
+   | reply status 3 | `CancelledByCore` |
+   | reply status 5, and the refusals the runtime makes itself (the re-entrancy guard, the mode errors) | `Refused(reason)` |
+   | transport failure: closed, timeout, connection lost, interrupted, trap, handshake, unsupported; a remote schema mismatch | `Unavailable(transport)` |
+   | protocol violation (TypeScript `UndraTransportError("protocol")`, Kotlin `UndraProtocolException`) | `Malformed` |
+   | `WireException` / `WireError`, a typed port failure that escaped, any other `UndraException` / `UndraError`, | `Malformed` (an unclassified runtime failure is a bug the bindings cannot read) |
+   | a plain `UndraException` (what `RemoteTransport` still throws for a lost connection) | `Unavailable` (reason `CONNECTION_LOST`) |
+10. **The re-entrancy refusal is a refusal.** Kotlin's `InprocTransport` guard (a call made from inside a core
+    callback) now throws the reply the core itself would send (`UndraReplyException(BAD_REQUEST)`, reason
+    `E_REENTRANT: ...`), so S17.5 reads the same on Swift and Kotlin: `Refused` whose reason names `E_REENTRANT`.
+
+### Shapes, before and after
+
+Kotlin (SPEC 10.2):
+
+| Rust | Before | After |
+|---|---|---|
+| `fn f(&self) -> T`, `T` not `()` | `fun f(): T`, throws raw `UndraReplyException` / `UndraException` / `WireException` | `fun f(): T`, throws `UndraCallError` |
+| `fn f(&self)` (command) | `fun f()`, throws raw | `fun f()`, **never throws**; reports |
+| `fn f(&self) -> Result<T, E>` | `fun f(): T`, throws `E` or raw | throws `E` or `UndraCallError` |
+| `async fn f(&self) -> T` | `suspend fun f(): T`, raw | throws `CancellationException` or `UndraCallError` |
+| `async fn f(&self) -> Result<T, E>` | `suspend fun f(): T`, `E` or raw | `E`, `CancellationException` or `UndraCallError` |
+| `-> impl Stream<Item = T>` (with or without `E`) | `Flow<T>`, ends with `E` or raw; flag 2 strings misread | ends with `E` or `UndraCallError`; collector cancellation is the usual `CancellationException` |
+| constructor | `fun create(...)` / `constructor(...)`, raw | `E` or `UndraCallError` |
+| store `apply` | warning, entry skipped | reported through `core.report`, entry skipped, never half-applied |
+| `UndraCore.shared`, nothing loaded | throws on access | placeholder; calls fail `Unavailable` |
+
+TypeScript (SPEC 10.3):
+
+| Rust | Before | After |
+|---|---|---|
+| any call returning a value, sync or async | `Promise<T>` rejects with `E`, or raw `UndraReplyError` / `UndraTransportError` / `WireError` | rejects with `E`, the abort reason, or `UndraCallError` |
+| `fn f(&self)` (command) | `Promise<void>` rejects | `Promise<void>` **never rejects**; reports |
+| stream | `AsyncIterable<T>` throws `E` or raw | throws `E` or `UndraCallError`; `break` ends it quietly |
+| constructor | `Promise<T>`, raw | `E` or `UndraCallError`; a failed `observe` releases the handle |
+| `_apply` | half-applied on trailing bytes in no case, reported unnamed | reported as `"<Store>.apply(signal: N)"`, entry skipped |
+| `UndraCore.shared`, nothing loaded | throws `UndraError("state")` at access (inside a default argument) | placeholder; calls reject `Unavailable` |
+
+### Alternatives considered
+
+* **Throw from commands** (the ADR's alternative c). Rejected for the reasons of decision 4 of the ADR; on the
+  web there is no way to await inside a React handler either, and a rejected un-awaited promise is a process-level
+  event on Node.
+* **A generic `UndraCallError<E>`** (one type carrying `E`). Rejected as the ADR rejects it for Swift: it breaks
+  `catch (e: TodoError)` and the cancellation idiom, and Kotlin has no typed `throws`.
+* **Reuse `UndraReplyException` / `UndraReplyError` as the closed set.** It exposes wire status bytes and an
+  undecoded body (fails R3), and `Panicked`, `Refused` and `CancelledByCore` need different fields.
+* **Make `UndraUnhandledError` a plain data class.** Kept an `UndraException` / `UndraError` so a handler can
+  rethrow it (`onError = { throw it }` in a debug build), which the runtime contains and logs.
+* **Wrap the argument encoding in every call's `try`.** Rejected: a value the wire cannot represent is the
+  caller's bug, not an outcome of the call (decision 3). Done for commands only, which must not throw.
+
+### Consequences
+
+* **Goldens.** All nine Kotlin and nine TypeScript trees change, the CLI golden's Kotlin and TypeScript trees,
+  and `examples/playground/generated/{kotlin,ts}`. Swift trees are byte-identical (checked with `git diff
+  --name-only`).
+* **SPEC.** 10.2 and 10.3 (shapes), 17.1 (TypeScript runtime API) and 17.2 (Kotlin runtime API).
+* **Runtimes.** Kotlin: `UndraCallError`, `UndraUnhandledError`, `UndraTransportException`, `UndraProtocolException`,
+  `UndraRestoreException`, `UndraCore.{report, current, constructObject}`, `UndraStore.observeAll`,
+  `LoadOptions.onError`; `WireException` re-rooted. TypeScript: `UndraCallError`, `UndraUnhandledError`,
+  `UndraCore.{report, current}`, `UndraStore._observeAll`, `onError` typed; `WireError` re-rooted.
+* **Contract suite.** Steps, specified in `contract-tests/scenarios.md` first: S05.6 (Kotlin and TypeScript now
+  report a command on a closed object like Swift, and calls on it fail `Refused`), S06.6 (unchanged: the platform
+  cancellation), S15.9 (`CancelledByCore`), S17.1/2/5/6 (the generated `explode` fails `Panicked`; the re-entry
+  refusal is `Refused`; shutdown with a call in flight is `Unavailable`; wasm: a trapped core's calls are
+  `Unavailable`), and a new S15.10 on all three: a stream open on a `Probe` across a restore ends
+  `CancelledByCore` (flag 2 with the core's `"cancelled: ..."` string, which Kotlin and TypeScript used to read
+  as an `E`). The playground core has no stream with an error type, so the stream-with-`E` mapping is covered by
+  the bindgen execution tests (`tests/fixtures/kotlin-run`, `tests/fixtures/ts-run`) and the runtimes' unit tests.
+* **Playground apps.** The Android and web screens drop the `try`/`catch` blocks that only existed to survive a
+  raw failure and handle `UndraCallError` in the one place that shows a problem to the user.
+* **Docs.** `docs/ERRORS.md` (one page for the three platforms; the Swift page `docs/SWIFT_ERRORS.md` is folded
+  into it) and the SDE record `.10x/decisions/sde/parity.md` with the per-shape parity table.
+* **Performance.** No boundary crossing changes; the success path is unchanged. No benchmark is owed (R4, R9).
+
+### Risks
+
+* **Source compatibility.** Kotlin code that caught `UndraReplyException` from a generated call, and TypeScript
+  code that matched `UndraReplyError` or `WireError` from one, must match `UndraCallError`. Pre-1.0, no promise
+  (decision 4 of the ADR's resolution); the compiler does not flag it, so the SPEC and docs say so.
+* **A command that fails in release goes unnoticed** if the app installs no `onError`: logged at error level,
+  changed nothing, and the playgrounds show the hook (the ADR's own risk, applied to the two runtimes).
+* **The stream tie-break** (flag 2 as `E`, else `String`) is the Swift behaviour and the same ambiguity; ADR-036
+  removes it.
+* **Remaining differences after this amendment** (recorded, not hidden): a failed port implementation and a malformed
+  change-set are reported to `onError` on Kotlin and TypeScript but only logged on Swift; `UndraCore.stats()` shapes and Kotlin's missing
+  `isClosed` (PA-8) are untouched; close semantics (PA-6) and connection state (PA-7) belong to ADR-034 and B2.
+
+### Addendum (2026-10-01): reconnecting remote cores (ADR-051)
+
+ADR-051 added a connection state and automatic reconnecting to the remote transports after this amendment was written.
+Two things follow, with no change to a generated shape or the wire:
+
+1. **The failures of a down connection are `Unavailable`, by type.** What is in flight when a remote connection drops,
+   and every call made while it reconnects, fails with the transport's typed failure (Swift `UndraTransportError.connectionLost`,
+   Kotlin `UndraTransportException` with reason `CONNECTION_LOST`, TypeScript `UndraTransportError("closed")`), which the one
+   mapping function turns into `UndraCallError.Unavailable`. Kotlin's `RemoteTransport` throws the typed exception everywhere
+   (it threw a bare `UndraException`); a bare `UndraException` still maps to `Unavailable`, as a fallback for a foreign
+   transport only. A lost session (`UndraSessionLostException` / `UndraSessionLostError`) maps to `Unavailable` on all three.
+2. **`onError` does not hear a lost connection.** `report` logs a failure that is a remote core's connection being down
+   (`Unavailable` while the state is `reconnecting`, or `closed` for a reason other than the app's own close) at warning
+   level and does not call the handler: the connection state reports it, once, and a command tapped while the laptop
+   sleeps is not a crash report. Other `Unavailable` failures (a core the app closed, a timeout, a wasm trap) are still
+   reported. Same rule on the three platforms; `docs/ERRORS.md` states it.

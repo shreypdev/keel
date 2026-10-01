@@ -1,5 +1,6 @@
 package dev.undra.runtime
 
+import dev.undra.runtime.UndraTransportException.Reason
 import dev.undra.runtime.wire.Envelope
 import dev.undra.runtime.wire.Payloads
 import dev.undra.runtime.wire.Payloads.PortStatus
@@ -111,6 +112,16 @@ internal class RemoteTransport(
     /** A malformed or forbidden message from the server: retrying would meet the same bug. */
     private class ProtocolError(message: String, cause: Throwable? = null) : UndraException(message, cause)
 
+    // Every failure of the channel is an [UndraTransportException], so that `UndraCallError.mapped` makes it
+    // `UndraCallError.Unavailable` by its type and not by its text (ADR-032 amendment A, ADR-051).
+
+    /** The connection to the dev server is down, failed or could not be made: the reason `undra dev` is away. */
+    private fun lostConnection(message: String, cause: Throwable? = null) =
+        UndraTransportException(Reason.CONNECTION_LOST, message, cause)
+
+    /** The app closed this transport; what is left of it fails with this. */
+    private fun closedByApp() = UndraTransportException(Reason.CLOSED, "the connection to the Undra dev server at $uri was closed")
+
     override fun connect(events: TransportEvents, expectedSchemaHash: ULong): ULong {
         this.events = events
         this.expected = expectedSchemaHash
@@ -128,11 +139,11 @@ internal class RemoteTransport(
             outcome.get().schemaHash
         } catch (e: ExecutionException) {
             close()
-            throw (e.cause as? UndraException) ?: UndraException("could not connect to the Undra dev server at $uri: ${e.cause?.message}", e.cause)
+            throw (e.cause as? UndraException) ?: lostConnection("could not connect to the Undra dev server at $uri: ${e.cause?.message}", e.cause)
         } catch (e: InterruptedException) {
             close()
             Thread.currentThread().interrupt()
-            throw UndraException("interrupted while connecting to the Undra dev server at $uri", e)
+            throw UndraTransportException(Reason.INTERRUPTED, "interrupted while connecting to the Undra dev server at $uri", e)
         }
     }
 
@@ -149,12 +160,12 @@ internal class RemoteTransport(
             val ws = try {
                 WebSocketClient.connect(urlFor(resume), connection, millis.toInt().coerceAtLeast(1), MAX_MESSAGE_BYTES, pingAfterMillis)
             } catch (e: IOException) {
-                throw UndraException("could not connect to the Undra dev server at $uri: ${e.message}", e)
+                throw lostConnection("could not connect to the Undra dev server at $uri: ${e.message}", e)
             }
             connection.ws = ws
             if (closed.get()) {
                 ws.abort()
-                throw UndraException("the connection to the Undra dev server at $uri was closed")
+                throw closedByApp()
             }
             try {
                 val hello = Payloads.Hello(UNDRA_RUNTIME_VERSION, expected, Platform.name, "dev").toByteArray()
@@ -165,21 +176,21 @@ internal class RemoteTransport(
                     // A close that arrived right behind the Hello (a refused session) is this attempt's failure,
                     // not a connection that came up and dropped.
                     connection.failure?.let { throw it as? UndraException ?: wrap(it) }
-                    if (closed.get()) throw UndraException("the connection to the Undra dev server at $uri was closed")
+                    if (closed.get()) throw closedByApp()
                     if (checkSchema && theirs.schemaHash != expected) throw UndraSchemaMismatchException(expected, theirs.schemaHash)
                     current = connection
                 }
                 return theirs
             } catch (e: ExecutionException) {
                 ws.abort()
-                throw (e.cause as? UndraException) ?: UndraException("the Undra dev server at $uri did not complete the handshake: ${e.cause?.message}", e.cause)
+                throw (e.cause as? UndraException) ?: lostConnection("the Undra dev server at $uri did not complete the handshake: ${e.cause?.message}", e.cause)
             } catch (e: TimeoutException) {
                 ws.abort()
-                throw UndraException("the Undra dev server at $uri did not answer the handshake within $millis ms", e)
+                throw UndraTransportException(Reason.TIMEOUT, "the Undra dev server at $uri did not answer the handshake within $millis ms", e)
             } catch (e: InterruptedException) {
                 ws.abort()
                 Thread.currentThread().interrupt()
-                throw UndraException("interrupted during the handshake with $uri", e)
+                throw UndraTransportException(Reason.INTERRUPTED, "interrupted during the handshake with $uri", e)
             } catch (e: UndraException) {
                 ws.abort()
                 throw e
@@ -233,10 +244,10 @@ internal class RemoteTransport(
         reconnectThread?.interrupt()
         val up = synchronized(stateLock) { current.also { current = null } }
         up?.ws?.close()
-        up?.hello?.completeExceptionally(UndraException("the connection to $uri was closed"))
+        up?.hello?.completeExceptionally(closedByApp())
         opening?.let {
             it.ws?.abort()
-            it.hello.completeExceptionally(UndraException("the connection to $uri was closed"))
+            it.hello.completeExceptionally(closedByApp())
         }
     }
 
@@ -244,24 +255,25 @@ internal class RemoteTransport(
 
     private fun send(kind: Envelope.Kind, payload: ByteArray) {
         val connection = current
-            ?: throw UndraException(
-                when {
-                    closed.get() -> "the connection to the Undra dev server at $uri is closed"
-                    reconnect != null -> "not connected to the Undra dev server at $uri: reconnecting"
-                    else -> "not connected to the Undra dev server"
-                },
-            )
+            ?: throw if (closed.get()) {
+                closedByApp()
+            } else {
+                lostConnection(
+                    if (reconnect != null) "not connected to the Undra dev server at $uri: reconnecting" else "not connected to the Undra dev server",
+                )
+            }
         send(connection, kind, payload)
     }
 
     private fun send(connection: Connection, kind: Envelope.Kind, payload: ByteArray) {
-        val ws = connection.ws ?: throw UndraException("not connected to the Undra dev server")
-        if (closed.get() || !ws.isOpen) throw UndraException("the connection to the Undra dev server at $uri is closed")
+        val ws = connection.ws ?: throw lostConnection("not connected to the Undra dev server")
+        if (closed.get()) throw closedByApp()
+        if (!ws.isOpen) throw lostConnection("the connection to the Undra dev server at $uri is closed")
         synchronized(connection.sendLock) {
             try {
                 ws.sendBinary(Envelope.encode(kind, (connection.nextSeq++).toUInt(), expected, payload))
             } catch (e: IOException) {
-                throw UndraException("the connection to the Undra dev server at $uri is closed", e)
+                throw lostConnection("the connection to the Undra dev server at $uri is closed", e)
             }
         }
     }
@@ -321,11 +333,11 @@ internal class RemoteTransport(
         if (code == SESSION_LOST) {
             UndraSessionLostException(reason.ifEmpty { "the dev server no longer has this core's objects" })
         } else {
-            UndraException("the Undra dev server closed the connection ($code ${reason.ifEmpty { "no reason" }})")
+            lostConnection("the Undra dev server closed the connection ($code ${reason.ifEmpty { "no reason" }})")
         }
 
     private fun wrap(cause: Throwable): Throwable =
-        cause as? UndraException ?: UndraException("the connection to the Undra dev server at $uri failed: ${cause.message}", cause)
+        cause as? UndraException ?: lostConnection("the connection to the Undra dev server at $uri failed: ${cause.message}", cause)
 
     /** [connection] ended. Before its handshake that fails the attempt; afterwards it is a loss to reconnect from (or to end on). */
     private fun lost(connection: Connection, cause: Throwable) {
@@ -351,7 +363,7 @@ internal class RemoteTransport(
     /** Ends the transport for good and tells the core. Called with [stateLock] held. */
     private fun giveUp(cause: Throwable) {
         if (!closed.compareAndSet(false, true)) return
-        events?.onClosed(cause as? UndraException ?: UndraException("the connection to the Undra dev server at $uri failed: ${cause.message}", cause))
+        events?.onClosed(cause as? UndraException ?: lostConnection("the connection to the Undra dev server at $uri failed: ${cause.message}", cause))
     }
 
     private fun startReconnecting(cause: Throwable) {

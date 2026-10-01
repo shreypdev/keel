@@ -1,5 +1,7 @@
 package dev.undra.runtime.wire
 
+import dev.undra.runtime.UndraException
+
 /**
  * Every way decoding an Undra wire message can fail (SPEC §3.9 `WireError`).
  *
@@ -12,10 +14,13 @@ package dev.undra.runtime.wire
  *    errors with no wire analogue (a string with an unpaired surrogate, a negative length) throw
  *    [IllegalArgumentException].
  *
+ * It is an [UndraException], so everything the runtime throws on purpose has one root. A generated call
+ * reports a decoding failure of a reply as `UndraCallError.Malformed`.
+ *
  * All offsets (`at`) are byte offsets relative to the start of the [UndraReader] window that was being
  * read, so they are stable regardless of where the window sits inside a larger array or buffer.
  */
-public sealed class WireException(message: String) : RuntimeException(message) {
+public sealed class WireException(message: String) : UndraException(message) {
 
     /**
      * A read needed more bytes than the input has left.

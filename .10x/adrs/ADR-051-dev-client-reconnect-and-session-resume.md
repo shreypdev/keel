@@ -45,8 +45,9 @@ jitter, and tells its core what the connection is doing.
   app sees `connecting` and every later change from the first one.
 * **What a drop does.** Everything in flight fails at once with the typed outcome each runtime
   already has for a lost connection (TypeScript `UndraTransportError` `closed`; Kotlin
-  `UndraException`; Swift `UndraCallError.unavailable(.connectionLost)`); nothing waits for a
-  reconnect. A call made while disconnected fails the same way, immediately. Streams end with it.
+  `UndraTransportException` with reason `CONNECTION_LOST`, an `UndraException`; Swift
+  `UndraTransportError.connectionLost`; a generated call throws each as `UndraCallError.Unavailable`,
+  ADR-032 amendment A and its addendum); nothing waits for a reconnect. A call made while disconnected fails the same way, immediately. Streams end with it.
 * **What a reconnect does.** After the handshake the runtime re-sends `Observe` for every store
   signal the app had observed and `Release` for every handle released meanwhile. The core answers
   each `Observe` with the current values as one change-set (SPEC 5.5), so every mirror converges

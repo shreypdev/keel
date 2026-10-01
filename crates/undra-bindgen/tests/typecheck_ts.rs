@@ -55,7 +55,7 @@ macro_rules! ts_cases {
 }
 
 ts_cases!(
-    records, enums, errors, objects, stores, ports, queries, full, stdlib
+    records, enums, errors, objects, stores, ports, queries, full, stdlib, recursive
 );
 
 #[test]

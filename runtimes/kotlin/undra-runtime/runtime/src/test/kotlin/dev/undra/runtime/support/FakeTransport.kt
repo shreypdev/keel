@@ -2,6 +2,7 @@ package dev.undra.runtime.support
 
 import dev.undra.runtime.UndraException
 import dev.undra.runtime.UndraModeException
+import dev.undra.runtime.UndraTransportException
 import dev.undra.runtime.Mode
 import dev.undra.runtime.PortOutcome
 import dev.undra.runtime.Transport
@@ -69,7 +70,8 @@ internal class FakeTransport(
     @Volatile var up = true
 
     private fun requireUp() {
-        if (!up) throw UndraException("not connected to the fake dev server: reconnecting")
+        // What the real remote transport throws while it reconnects: typed, so a generated call maps it onto Unavailable.
+        if (!up) throw UndraTransportException(UndraTransportException.Reason.CONNECTION_LOST, "not connected to the fake dev server: reconnecting")
     }
 
     /** The connection drops and the (pretend) transport starts reconnecting: attempt 1 is the loss. */

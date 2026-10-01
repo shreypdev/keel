@@ -25,8 +25,8 @@ public sealed interface ConnectionState {
 
     /**
      * The connection dropped and the transport is trying again: attempt [attempt] (from 1) is waiting for its
-     * backoff or connecting. Calls and `observe` fail at once ([UndraException]); what was in flight when the
-     * connection dropped failed with it. [cause] is why the connection was lost (or the last attempt failed).
+     * backoff or connecting. Calls and `observe` fail at once ([UndraTransportException], which a generated call
+     * reports as [UndraCallError.Unavailable]); what was in flight when the connection dropped failed with it. [cause] is why the connection was lost (or the last attempt failed).
      */
     public data class Reconnecting(public val attempt: Int, public val cause: Throwable?) : ConnectionState
 

@@ -30,53 +30,64 @@ class Link private constructor(core: UndraCore, handle: Long) : UndraStore(core,
     val pending: StateFlow<List<HttpRequest>> = _pending.asStateFlow()
 
     init {
-        core.observe(handle, UInt.MAX_VALUE, true)
+        observeAll()
     }
 
+    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
     constructor(ctx: UndraCore = UndraCore.shared) : this(
         ctx,
-        ctx.construct(UndraIds.Objects.Link.TYPE_ID, UndraIds.Objects.Link.NEW, ByteArray(0)),
+        ctx.constructObject(UndraIds.Objects.Link.TYPE_ID, UndraIds.Objects.Link.NEW, ByteArray(0)),
     )
 
     override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader) {
-        when (signalId) {
-            0u -> {
-                if (op == ChangeOp.FULL) {
-                    _state.value = AppState.decode(reader)
-                    reader.finish()
+        try {
+            when (signalId) {
+                0u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = AppState.decode(reader)
+                        reader.finish()
+                        _state.value = value
+                    }
                 }
-            }
-            1u -> {
-                if (op == ChangeOp.FULL) {
-                    _kind.value = NetKind.decode(reader)
-                    reader.finish()
+                1u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = NetKind.decode(reader)
+                        reader.finish()
+                        _kind.value = value
+                    }
                 }
-            }
-            2u -> {
-                if (op == ChangeOp.FULL) {
-                    _last.value = codecOptionHttpResponse.decode(reader)
-                    reader.finish()
+                2u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionHttpResponse.decode(reader)
+                        reader.finish()
+                        _last.value = value
+                    }
                 }
-            }
-            3u -> {
-                if (op == ChangeOp.FULL) {
-                    _failure.value = codecOptionHttpError.decode(reader)
-                    reader.finish()
+                3u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionHttpError.decode(reader)
+                        reader.finish()
+                        _failure.value = value
+                    }
                 }
-            }
-            4u -> {
-                if (op == ChangeOp.FULL) {
-                    _pending.value = codecVecHttpRequest.decode(reader)
-                    reader.finish()
+                4u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecVecHttpRequest.decode(reader)
+                        reader.finish()
+                        _pending.value = value
+                    }
                 }
+                else -> Unit
             }
-            else -> Unit
+        } catch (e: Exception) {
+            core.report(e, "Link.apply(signal: $signalId)")
         }
     }
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraCore.shared): Link {
-            val handle = ctx.construct(UndraIds.Objects.Link.TYPE_ID, UndraIds.Objects.Link.NEW, ByteArray(0))
+            val handle = ctx.constructObject(UndraIds.Objects.Link.TYPE_ID, UndraIds.Objects.Link.NEW, ByteArray(0))
             return Link(ctx, handle)
         }
     }

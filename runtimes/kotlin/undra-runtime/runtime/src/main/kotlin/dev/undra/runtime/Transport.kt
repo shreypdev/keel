@@ -98,6 +98,13 @@ internal interface TransportEvents {
     /** A stream produced an item, ended or failed. */
     fun onStreamItem(callId: UInt, flag: StreamFlag, body: ByteArray)
 
+    /**
+     * The core's reply or stream item for [callId] does not decode (the transport learned the call id some
+     * other way): the call or stream fails with [error], which generated code reports as
+     * `UndraCallError.Malformed`, not as a status the core never sent.
+     */
+    fun onMalformed(callId: UInt, error: UndraProtocolException)
+
     /** A transaction committed; [changeSet] is a whole `ChangeSet` payload. */
     fun onChangeSet(changeSet: ByteArray)
 
