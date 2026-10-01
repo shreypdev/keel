@@ -547,6 +547,69 @@ mod tests {
 
     use super::*;
 
+    /// A change-set of `txn` with one `Full` entry per `(handle, signal)`.
+    fn change_set(txn: u64, entries: &[(u64, u32)]) -> Vec<u8> {
+        let mut w = Writer::new();
+        let mut b = undra_wire::payload::ChangeSetBuilder::new(&mut w, txn);
+        for (handle, signal) in entries {
+            b.push(
+                undra_wire::Handle(*handle),
+                *signal,
+                undra_wire::payload::ChangeOp::Full,
+                &signal.to_le_bytes(),
+            );
+        }
+        b.finish();
+        w.into_vec()
+    }
+
+    fn sent_change_sets(rx: &Receiver<Item>) -> Vec<Vec<u8>> {
+        frames(rx)
+            .iter()
+            .map(|f| Envelope::parse(f).unwrap())
+            .filter(|e| e.kind == Kind::ChangeSet)
+            .map(|e| e.payload.to_vec())
+            .collect()
+    }
+
+    #[test]
+    fn a_client_is_sent_only_the_entries_it_observed() {
+        let (conn, rx) = Conn::new(1, 7, 1 << 20, None);
+        conn.observe(10, 0, true);
+        conn.observe(20, u32::MAX, true);
+
+        // Everything observed: the bytes go out as they are.
+        let all = change_set(5, &[(10, 0), (20, 4)]);
+        conn.on_change_set_observed(&all);
+        // A mixed one: re-encoded with the same transaction id and the entries it observed.
+        conn.on_change_set_observed(&change_set(6, &[(10, 0), (10, 1), (20, 2), (30, 0)]));
+        // Nothing observed: nothing is sent.
+        conn.on_change_set_observed(&change_set(7, &[(10, 1), (30, 0)]));
+        // A payload the runtime built wrongly is not ours to judge: it goes out untouched.
+        conn.on_change_set_observed(&[1, 2, 3]);
+
+        let sent = sent_change_sets(&rx);
+        assert_eq!(sent.len(), 3);
+        assert_eq!(sent[0], all, "the original bytes");
+        let mixed = undra_wire::payload::ChangeSet::decode(&mut Reader::new(&sent[1])).unwrap();
+        assert_eq!(mixed.txn_id, 6);
+        let kept: Vec<(u64, u32)> = mixed.entries.iter().map(|e| (e.handle.0, e.signal_id)).collect();
+        assert_eq!(kept, [(10, 0), (20, 2)]);
+        assert_eq!(sent[2], [1, 2, 3]);
+    }
+
+    #[test]
+    fn messages_that_are_not_envelopes_are_queued_in_order_and_counted() {
+        let (conn, rx) = Conn::new(1, 7, 1 << 20, None);
+        assert!(conn.send_plain(vec![1, 2, 3]));
+        assert!(conn.send_plain(vec![4]));
+        assert_eq!(conn.queued_bytes(), 4);
+        assert_eq!(frames(&rx), [vec![1, 2, 3], vec![4]]);
+        conn.dequeued(4);
+        conn.close(1000, "done");
+        assert!(!conn.send_plain(vec![9]), "nothing is accepted once the connection is closing");
+    }
+
     fn frames(rx: &Receiver<Item>) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
         loop {

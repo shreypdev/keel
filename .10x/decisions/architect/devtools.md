@@ -43,11 +43,15 @@ numbers the dev server never sees; the page shows their server-side counterparts
 per step, outbound backlog) and says which is which. A change-set is labelled with the sync call that caused it
 (thread-local around `Runtime::call`), else `async`/`restore`.
 
-Security: the endpoint exists only when `ServerConfig::devtools` is set, which only the dev runner does; a production
-core has no `Server` (`undra-transport` is not a dependency of `undra-ffi`, the wasm shell or generated code), and
-`mode = "dev"` of a runtime only adds log lines. `undra dev --devtools auto|on|off` (default auto) serves it on a
-loopback address only; a LAN `--addr` needs `on`. Same `OriginPolicy` as the app socket; assets are a fixed table (no
-filesystem), `no-store`, CSP.
+Security (amended by the integrator: a token is not optional, because a page can restore the app's state): the endpoint
+exists only when `ServerConfig::devtools` is set, which only the dev runner does; a production core has no `Server`
+(`undra-transport` is not a dependency of `undra-ffi`, the wasm shell or generated code), and `mode = "dev"` of a runtime only
+adds log lines. **Every request, the page and the socket, needs `?token=`**: 128 bits from the OS, made per run of `undra dev`
+(a reload keeps the address valid), printed in the page's address, handed to the runner in its environment; a wrong or missing
+token, an unknown path, devtools off and a non-`GET` are the same `404`, so the endpoint does not announce itself.
+`undra dev --devtools auto|on|off` (default auto) serves it on a loopback `--addr` only, whatever the token. Same
+`OriginPolicy` as the app socket; assets are a fixed table (no filesystem), `no-store`, CSP. `Runtime::register_inspector`
+is the one runtime seam (ADR-054), with its test (`undra-runtime/tests/inspectors.rs`, `undra-query/tests/inspector.rs`).
 
 Assets: `runtimes/ts/devtools/` (TypeScript, esbuild, no framework) builds to `crates/undra-cli/assets/devtools/`
 (committed; `build.sh`, `build.sh --check` in CI; <= 150 KB gzipped, a test).

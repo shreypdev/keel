@@ -53,6 +53,9 @@ const COALESCE: Duration = Duration::from_millis(10);
 /// How often the worker looks for new stores and a changed query cache when nothing else wakes it.
 const TICK: Duration = Duration::from_millis(250);
 
+/// How many port calls the hub keeps open at once before it forgets the old ones.
+const MAX_OPEN_PORT_CALLS: usize = 2048;
+
 /// How often it sends the counters.
 const STATS_EVERY: Duration = Duration::from_secs(1);
 
@@ -416,14 +419,22 @@ impl Hub {
     /// The core asked the client to run a port method.
     pub(crate) fn port_start(&self, id: u32, port_id: u32, method_id: u32, args: &[u8]) {
         self.counters.port_calls.fetch_add(1, Ordering::Relaxed);
-        self.ports.lock().insert(
-            id,
-            OpenPort {
-                started: Instant::now(),
-                port_id,
-                method_id,
-            },
-        );
+        {
+            let mut ports = self.ports.lock();
+            // A call the platform never answers stays open; keep the table bounded (a page that is
+            // open for hours against an app that drops its replies must not grow the server).
+            if ports.len() >= MAX_OPEN_PORT_CALLS {
+                ports.retain(|_, open| open.started.elapsed() < Duration::from_secs(60));
+            }
+            ports.insert(
+                id,
+                OpenPort {
+                    started: Instant::now(),
+                    port_id,
+                    method_id,
+                },
+            );
+        }
         let mut w = Writer::with_capacity(32 + args.len());
         encode_port_start(&mut w, id, port_id, method_id, self.at_ms(), args);
         self.broadcast_bytes(w.as_slice(), None);

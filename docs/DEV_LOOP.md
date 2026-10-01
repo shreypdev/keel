@@ -136,6 +136,7 @@ undra dev -> runner  (stdin)                     runner -> undra dev  (stdout)
   listen                                           UNDRA-DEV ready <ws-url> <schema-hash>
   (a runner started with --standby)                UNDRA-DEV standby <schema-hash>
   (stdin closes: stop)
+  (started with --devtools and UNDRA_DEVTOOLS_TOKEN in its environment: serves the page of ADR-054 at /devtools)
 ```
 
 `undra dev` reads at most 48 MiB of one stdout line (a snapshot at the 16 MiB limit is 32 MiB of hex) and does not
@@ -204,6 +205,47 @@ suspended for a reload: 0 call(s) were still open, 0 sent meanwhile were not run
 holding session 356b33fa (1 object(s)) for its client
 a client (ios) asked to resume session 319c2156, which this core does not hold (it was restarted, ...)
 ```
+
+## The devtools page
+
+`undra dev` serves a page next to the core, and prints its address with the banner:
+
+```
+  devtools      http://127.0.0.1:7443/devtools?token=4a378c25cfbc04128333e3667da4755d
+```
+
+Open it in a browser while the app runs (any platform: the page talks to the core, not to the app). It shows:
+
+* **Stores**: every store the core holds, each signal with its type and live value; a keyed list is a table (the first 40
+  rows, then "show more"); a value that just changed flashes.
+* **A scrubber** over the history: one *step* per burst of commits (a click is a step). Drag it, press the arrows, or
+  press **Restore** on a timeline entry: the core is restored to that step (`Runtime::restore`, SPEC 5.9) and the app
+  converges on it, with its dev bar saying `time travel: step 3`. **Live** goes back to the newest step you did not
+  restore. A restore is itself a step: the history only grows.
+* **Timeline**: every change-set, newest first, with the call that caused it (`Counter.increment`; `task, timer or stream`
+  for what an async method, a timer or a stream committed) and a per-signal diff (`3 → 4`, a keyed patch as `+1 −2 ~3`).
+* **Ports**: each call the core makes to a platform port (Http, Kv, ...) with its decoded arguments and reply, its status
+  and its latency. Calls made while no app is attached are counted in Counters, not listed.
+* **Queries**: the query cache (status, who watches it, how old, the cached value) and what happened to each entry.
+* **Counters**: the core's `undra_stats_json` once a second, and the dev server's own: commits and entries forwarded, steps
+  taken, commits merged per step, the history held, the app connection's outbound backlog. They are the *server's* numbers:
+  the app's own drains, merges and backlog (SPEC 11.1) are counted by its mirror and never reach the dev server.
+
+The page keeps the dark and light themes of the site (it follows the system; the button overrides it).
+
+**What time travel is.** A restore replaces the core's stores with the snapshot of the step and re-issues their handles, so
+the app's references keep working and its mirrors converge through the change-sets the restore emits, like a reload
+(the rules of "What carries over" above apply: objects that are not stores and query handles go stale). Stores built
+*after* the step are dropped (the answer says how many; the app's references to them are stale). Calls running on a replaced
+store are cancelled. The history is kept in the dev server (200 steps, 32 MiB, 4 MiB a step; a bigger state is listed but
+cannot be restored), records only while a page is open, and starts again after a reload (the page draws a divider). While a
+page is open the server observes every store, so a computed nobody shows is evaluated.
+
+**Who can open it.** The page can read the core's state and restore it, so every request needs the per-run token in the
+address (`undra dev` makes one per run, 128 random bits, and passes it to the runner in its environment); a wrong or missing
+token is a `404`, like a path that does not exist. `--devtools auto` (the default) serves the page on a loopback `--addr`
+only; with a LAN address use `--devtools on` and treat the printed address as a secret, or `--devtools off`. The page is
+compiled into the runner `undra dev` generates; a production core has no dev server and so none of this.
 
 ## Android notes
 

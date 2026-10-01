@@ -161,6 +161,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_signal_is_covered_when_observed_alone_or_with_its_store() {
+        let mut t = Tracker::default();
+        t.observe(1, 0, true);
+        t.observe(2, ALL_SIGNALS, true);
+        assert!(t.covers(1, 0));
+        assert!(!t.covers(1, 1), "only the signal that was asked for");
+        assert!(t.covers(2, 0) && t.covers(2, 99), "every signal of a store observed whole");
+        assert!(!t.covers(3, 0));
+        t.observe(1, 0, false);
+        assert!(!t.covers(1, 0));
+        assert_eq!(t.signals_of(2), [ALL_SIGNALS]);
+        t.observe(5, 3, true);
+        t.observe(5, 1, true);
+        assert_eq!(t.signals_of(5), [1, 3], "sorted, for a deterministic re-statement");
+    }
+
+    #[test]
     fn a_call_is_open_until_it_is_answered() {
         let mut t = Tracker::default();
         assert!(t.begin_call(1, false));

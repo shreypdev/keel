@@ -17,33 +17,33 @@ pub const PROTOCOL: u16 = 1;
 
 /// Message tags, server to page.
 pub mod server {
-    /// [`Welcome`](super::Welcome).
+    /// [`super::Welcome`].
     pub const WELCOME: u8 = 1;
-    /// [`ServerMsg::Stores`].
+    /// [`super::ServerMsg::Stores`].
     pub const STORES: u8 = 2;
-    /// [`ServerMsg::ChangeSet`].
+    /// [`super::ServerMsg::ChangeSet`].
     pub const CHANGE_SET: u8 = 3;
-    /// [`StepInfo`].
+    /// [`super::StepInfo`].
     pub const STEP: u8 = 4;
-    /// [`ServerMsg::Evicted`].
+    /// [`super::ServerMsg::Evicted`].
     pub const EVICTED: u8 = 5;
-    /// [`PortRecord`].
+    /// [`super::PortRecord`].
     pub const PORT: u8 = 6;
-    /// [`ServerMsg::Stats`].
+    /// [`super::ServerMsg::Stats`].
     pub const STATS: u8 = 7;
-    /// [`ServerMsg::Queries`].
+    /// [`super::ServerMsg::Queries`].
     pub const QUERIES: u8 = 8;
-    /// [`Traveled`].
+    /// [`super::Traveled`].
     pub const TRAVELED: u8 = 9;
-    /// [`ServerMsg::App`].
+    /// [`super::ServerMsg::App`].
     pub const APP: u8 = 10;
 }
 
 /// Message tags, page to server.
 pub mod client {
-    /// [`ClientMsg::Restore`].
+    /// [`super::ClientMsg::Restore`].
     pub const RESTORE: u8 = 1;
-    /// [`ClientMsg::Resync`].
+    /// [`super::ClientMsg::Resync`].
     pub const RESYNC: u8 = 2;
 }
 

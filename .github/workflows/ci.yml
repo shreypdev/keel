@@ -78,6 +78,15 @@ jobs:
         run: |
           npm ci
           npm test
+      # The devtools page of `undra dev` (ADR-054): its tests, and the committed assets must be what its
+      # sources build to (the CLI embeds them, so `cargo build` needs no Node).
+      - name: Devtools page (typecheck, tests, committed assets equal a rebuild, size budget)
+        working-directory: runtimes/ts/devtools
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          bash build.sh --check
 
   kotlin:
     name: Kotlin runtime (JVM)
