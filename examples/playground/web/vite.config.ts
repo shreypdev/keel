@@ -14,6 +14,8 @@ export default defineConfig({
       // The Undra runtime, from the Undra checkout's sources: the React adapter first, because an
       // alias matches by prefix and `@undra/runtime` would swallow `@undra/runtime/react`.
       "@undra/runtime/react": here("../../../runtimes/ts/@undra/runtime/src/react.ts"),
+      "@undra/runtime/realtime": here("../../../runtimes/ts/@undra/runtime/src/realtime.ts"),
+      "@undra/runtime/db": here("../../../runtimes/ts/@undra/runtime/src/db.ts"),
       "@undra/runtime": here("../../../runtimes/ts/@undra/runtime/src/index.ts"),
     },
   },

@@ -4,6 +4,8 @@ import type { Playground } from "./undra";
 import { type PlaygroundParams, type TabId, resolveTab } from "./url-params";
 import { BigListView } from "./views/BigListView";
 import { CounterView } from "./views/CounterView";
+import { LiveView } from "./views/LiveView";
+import { NotesView } from "./views/NotesView";
 import { RemoteView } from "./views/RemoteView";
 import { StressView } from "./views/StressView";
 import { TodosView } from "./views/TodosView";
@@ -14,12 +16,15 @@ const TABS = [
   { id: "biglist", label: "10k list" },
   { id: "remote", label: "Remote" },
   { id: "stress", label: "Stress" },
+  { id: "live", label: "Live" },
+  { id: "notes", label: "Notes" },
 ] as const satisfies readonly { readonly id: TabId; readonly label: string }[];
 
 /**
- * Five views over one core. Each reads the signals of its store with `useSignal` (`@undra/runtime/react`) and calls its methods.
+ * Seven views over one core. Each reads the signals of its store with `useSignal` (`@undra/runtime/react`) and calls its methods.
+ * Live and Notes use the opt-in WebSocket and Db ports (ADR-047, ADR-048); Live's address is `?ws=`.
  *
- * The first view comes from the URL: `?screen=` (`todos`, `counter`, `list`, `remote`, `stress`), else the
+ * The first view comes from the URL: `?screen=` (`todos`, `counter`, `list`, `remote`, `stress`, `live`, `notes`), else the
  * `#fragment` (`#counter`, so a view can be linked to and reloaded). With `?embed=1` the page is
  * only that view, with no tab bar or heading, for the landing page's iframe; `channel` is then the
  * line to that page, which the stress screen posts its numbers through.
@@ -50,6 +55,8 @@ export function App({
       {tab === "biglist" && <BigListView bigList={playground.bigList} autoStream={params.stream} />}
       {tab === "remote" && <RemoteView playground={playground} />}
       {tab === "stress" && <StressView channel={channel} initialRate={params.rate} initialMode={params.mode} autostart={autostart} />}
+      {tab === "live" && <LiveView initialUrl={params.ws} />}
+      {tab === "notes" && <NotesView />}
     </>
   );
 

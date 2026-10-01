@@ -1,4 +1,6 @@
-import { UndraCore, UndraSessionLostError, type UndraUnhandledError, emitConnectivity } from "@undra/runtime";
+import { PortIds, type PortImpl, UndraCore, UndraSessionLostError, type UndraUnhandledError, emitConnectivity } from "@undra/runtime";
+import { dbPort, waSqliteDb } from "@undra/runtime/db";
+import { browserWebSocket, fetchSse, ssePort, webSocketPort } from "@undra/runtime/realtime";
 import { BigList, UndraIds, RemoteTodosQueryHandle, Todos, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
 import wasmUrl from "../../build/web/undra_core.wasm?url";
@@ -41,11 +43,12 @@ function onError(unhandled: UndraUnhandledError): void {
  *
  * The app supplies its own `Http` port (an in-memory server, so the playground needs no backend)
  * and `Kv` port (in memory, so a reload starts from the server's seed again); the other ports are
- * the browser's defaults.
+ * the browser's defaults, plus the opt-in ones this core enables (see {@link optInPorts}).
  */
 export async function startUndra(): Promise<Playground> {
   const server = new PlaygroundServer();
   const adapters = { http: server, kv: memoryKv() };
+  const ports = optInPorts();
   // Development builds only (`vite dev`): a production page that took its core's address from a link would hand
   // whoever wrote the link its ports (Kv, Http, SecureStore) and its screen. Android and iOS gate it the same way.
   const devUrl = import.meta.env.DEV
@@ -57,6 +60,7 @@ export async function startUndra(): Promise<Playground> {
       url: devUrl,
       expectedSchemaHash: UndraIds.schemaHash,
       adapters,
+      ports,
       onError,
       // `undra dev` carries the core's state across a rebuild and the runtime reconnects by itself, so the page
       // usually stays where it is. When the state could not be carried (a schema change, a state too big), the
@@ -74,6 +78,7 @@ export async function startUndra(): Promise<Playground> {
       wasm: new URL(wasmUrl, location.href),
       expectedSchemaHash: UndraIds.schemaHash,
       adapters,
+      ports,
       onError,
     });
   }
@@ -85,6 +90,25 @@ export async function startUndra(): Promise<Playground> {
     RemoteTodosQueryHandle.create(INBOX),
   ]);
   return { todos, bigList, inbox, server };
+}
+
+/**
+ * The opt-in ports the playground core enables (`undra = { features = ["websocket", "sse", "db"] }`,
+ * ADR-047 and ADR-048), registered before the first use. They live in `@undra/runtime/realtime` and
+ * `@undra/runtime/db`, out of the main entry, so an app that does not use them does not ship them.
+ *
+ * * `WebSocket`: the browser's `WebSocket` (the Live view). A browser cannot send headers with the
+ *   upgrade, so a connect with headers is refused rather than sent without them.
+ * * `Sse`: `fetch` with a streamed body.
+ * * `Db`: wa-sqlite in a worker over OPFS once its dependency is approved; until then
+ *   `waSqliteDb()` answers every open with a typed `DbError.Unavailable`, which the Notes view shows.
+ */
+function optInPorts(): Record<number, PortImpl> {
+  return {
+    [PortIds.WebSocket.portId]: webSocketPort(browserWebSocket()),
+    [PortIds.Sse.portId]: ssePort(fetchSse()),
+    [PortIds.Db.portId]: dbPort(waSqliteDb(), { wal: false }),
+  };
 }
 
 /**

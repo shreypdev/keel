@@ -589,3 +589,25 @@ button.big {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+/* The Live view's conversation: what was sent, what came back, what happened to the connection. */
+.live-log {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.live-log li {
+  padding: 0.15rem 0;
+}
+
+.live-out {
+  color: var(--accent);
+}
+
+.live-info {
+  color: var(--muted);
+  font-style: italic;
+}

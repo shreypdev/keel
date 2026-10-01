@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach } from "vitest";
-import { type AdapterOverrides, UndraCore, type LoadOptions, WasmMainTransport, type WorkerLike } from "@undra/runtime";
+import { type AdapterOverrides, type PortImpl, UndraCore, type LoadOptions, WasmMainTransport, type WorkerLike } from "@undra/runtime";
 import { runWorker, type WorkerScope } from "@undra/runtime/worker";
 import { UndraIds } from "@playground/core";
 import { CapturingLog } from "./capturing-log.js";
@@ -67,6 +67,8 @@ export interface BootedRaw extends Booted {
 export interface BootOptions extends Partial<World> {
   /** The schema hash to demand of the core. Default: the bindings' (`UndraIds.schemaHash`). */
   readonly expectedSchemaHash?: bigint;
+  /** More ports, by port id (`LoadOptions.ports`): the opt-in WebSocket, Sse and Db ports of S23 to S25. */
+  readonly ports?: Readonly<Record<number, PortImpl>>;
 }
 
 const booted: Booted[] = [];
@@ -124,6 +126,7 @@ export async function boot(options: BootOptions = {}): Promise<Booted> {
     expectedSchemaHash: options.expectedSchemaHash ?? UndraIds.schemaHash,
     shared: false,
     adapters: adaptersOf(world),
+    ...(options.ports !== undefined && { ports: options.ports }),
     onClose: (error) => {
       closed.push(error);
     },
@@ -216,6 +219,7 @@ export async function bootWorker(options: BootOptions = {}): Promise<Booted> {
     expectedSchemaHash: options.expectedSchemaHash ?? UndraIds.schemaHash,
     shared: false,
     adapters: adaptersOf(world),
+    ...(options.ports !== undefined && { ports: options.ports }),
     onClose: (error) => {
       closed.push(error);
     },

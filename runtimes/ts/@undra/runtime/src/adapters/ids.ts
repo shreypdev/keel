@@ -17,8 +17,15 @@ function port<const M extends readonly string[]>(name: string, methods: M) {
   return Object.freeze(ids);
 }
 
-/** Port and method ids of the ten standard ports. */
+/**
+ * Port and method ids of the ten standard ports and the three opt-in ones (`WebSocket`, `Sse`
+ * and `Db`, ADR-047 and ADR-048; their bindings are in `@undra/runtime/realtime` and
+ * `@undra/runtime/db`).
+ */
 export const PortIds = Object.freeze({
+  WebSocket: port("WebSocket", ["connect", "send", "receive", "close"] as const),
+  Sse: port("Sse", ["open", "next", "close"] as const),
+  Db: port("Db", ["open", "execute", "query", "begin", "commit", "rollback", "close"] as const),
   Clock: port("Clock", ["nowMs", "monotonicNs"] as const),
   Rng: port("Rng", ["fill"] as const),
   Log: port("Log", ["log"] as const),

@@ -20,6 +20,8 @@
     "baseUrl": ".",
     "paths": {
       "@undra/runtime/worker": ["../../runtimes/ts/@undra/runtime/src/worker.ts"],
+      "@undra/runtime/realtime": ["../../runtimes/ts/@undra/runtime/src/realtime.ts"],
+      "@undra/runtime/db": ["../../runtimes/ts/@undra/runtime/src/db.ts"],
       "@undra/runtime": ["../../runtimes/ts/@undra/runtime/src/index.ts"],
       "@playground/core": ["../../examples/playground/generated/ts/src/index.ts"]
     }

@@ -605,7 +605,9 @@ export class UndraCore {
    * adapters that build the {@link PortImpl} from a typed implementation.
    */
   registerPort(portId: number, impl: PortImpl): void {
+    const previous = this.#ports.get(portId);
     this.#ports.set(portId, impl);
+    if (previous !== undefined && previous !== impl) this.#disposePorts([previous]);
   }
 
   /**
@@ -769,6 +771,20 @@ export class UndraCore {
     this.#failInFlight(reason ?? new UndraTransportError("closed", "the core is closed"));
     this.#setConnection(reason === null || why === "requested" ? { kind: "closed", reason: why } : { kind: "closed", reason: why, error: reason });
     this.#transport.close();
+    this.#disposePorts(this.#ports.values());
+  }
+
+  /** Lets each port in `ports` that is no longer registered release what it holds (`PortImpl.dispose`), once each. */
+  #disposePorts(ports: Iterable<PortImpl>): void {
+    const live = this.#closed ? null : new Set(this.#ports.values());
+    for (const impl of new Set(ports)) {
+      if (impl.dispose === undefined || live?.has(impl)) continue;
+      try {
+        impl.dispose();
+      } catch (error) {
+        this.#reportError("port dispose", error);
+      }
+    }
   }
 
   /** Fails every call, stream and `observe` that waits for the core with `failure`. */

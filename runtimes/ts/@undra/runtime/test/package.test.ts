@@ -16,7 +16,7 @@ const pkg = JSON.parse(readFileSync(new URL("package.json", root), "utf8")) as {
 
 describe("package exports", () => {
   it("lists the subpaths of SPEC section 13 that exist", () => {
-    expect(Object.keys(pkg.exports).sort()).toEqual([".", "./package.json", "./react", "./solid", "./svelte", "./vite", "./vue", "./wire", "./worker"]);
+    expect(Object.keys(pkg.exports).sort()).toEqual([".", "./db", "./package.json", "./react", "./realtime", "./solid", "./svelte", "./vite", "./vue", "./wire", "./worker"]);
   });
 
   it("points every subpath at the compiled form of a source file that exists", () => {
@@ -49,4 +49,32 @@ describe("package exports", () => {
     // The Svelte adapter takes a type from svelte and nothing else: no run-time import.
     expect(readFileSync(new URL("src/svelte.ts", root), "utf8")).toMatch(/^import type \{ Readable \} from "svelte\/store";$/m);
   });
+
+  it("keeps the opt-in ports out of the main entry: nothing in it imports ./realtime or ./db (ADR-052)", () => {
+    const main = ["src/index.ts", "src/core.ts", "src/adapters/index.ts", "src/adapters/browser.ts", "src/adapters/ports.ts"];
+    for (const file of main) {
+      const text = readFileSync(new URL(file, root), "utf8");
+      expect(text, file).not.toMatch(/from ["'][./]*(realtime|db)(\/[^"']*)?\.js["']/);
+    }
+  });
+
+  it("exports the names the brief gives the React Native piece", async () => {
+    const realtime = await import("../src/realtime.js");
+    for (const name of ["webSocketPort", "browserWebSocket", "nodeWebSocket", "ssePort", "fetchSse", "SseParser"]) expect(realtime, name).toHaveProperty(name);
+    const db = await import("../src/db.js");
+    for (const name of ["dbPort", "nodeSqliteDb", "waSqliteDb"]) expect(db, name).toHaveProperty(name);
+  });
+
+  it("reaches Node's modules without a module request, so Metro, Vite and webpack bundle ./realtime and ./db unchanged", async () => {
+    for (const file of ["src/realtime/node-websocket.ts", "src/db/node-sqlite.ts", "src/node-builtin.ts"]) {
+      const code = readFileSync(new URL(file, root), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+      expect(code, file).not.toMatch(/\bimport\s*\(/);
+      expect(code, file).not.toMatch(/\brequire\s*\(/);
+      expect(code, file).not.toMatch(/from\s+["']node:/);
+    }
+    const { nodeBuiltin } = await import("../src/node-builtin.js");
+    expect(typeof nodeBuiltin<{ request: unknown }>("node:http").request).toBe("function");
+    expect(() => nodeBuiltin("node:no-such-module")).toThrow();
+  });
 });
+

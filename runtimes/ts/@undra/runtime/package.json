@@ -10,7 +10,7 @@
   },
   "type": "module",
   "sideEffects": false,
-  "//": "SPEC section 13 lists the subpath exports ., ./react, ./vue, ./svelte, ./solid, ./worker, ./vite and ./node. All exist except ./node: the runtime has no node-specific module yet (the Node adapters are the ones in '.'), and no export may point at a stub. ./vite is the Vite plugin that runs `undra build --platform web` (Node only, no dependencies, compiled by tsconfig.vite.json because it needs Node's types and the other modules must not). The framework packages are optional peer dependencies: @undra/runtime itself imports none of them, each adapter imports only its own.",
+  "//": "SPEC section 13 lists the subpath exports ., ./react, ./vue, ./svelte, ./solid, ./worker, ./vite and ./node. All exist except ./node: the runtime has no node-specific module yet (the Node adapters are the ones in '.', ./realtime and ./db), and no export may point at a stub. ./realtime (WebSocket and Sse) and ./db (Db) are the opt-in ports of ADR-047 and ADR-048, out of the main entry so a hello-world bundle stays under ADR-052's gate. ./vite is the Vite plugin that runs `undra build --platform web` (Node only, no dependencies, compiled by tsconfig.vite.json because it needs Node's types and the other modules must not). The framework packages are optional peer dependencies: @undra/runtime itself imports none of them, each adapter imports only its own.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -39,6 +39,14 @@
     "./worker": {
       "types": "./dist/worker.d.ts",
       "default": "./dist/worker.js"
+    },
+    "./realtime": {
+      "types": "./dist/realtime.d.ts",
+      "default": "./dist/realtime.js"
+    },
+    "./db": {
+      "types": "./dist/db.d.ts",
+      "default": "./dist/db.js"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",
@@ -93,6 +101,7 @@
     "typescript": "^5.9.3",
     "vitest": "^5.0.2",
     "vue": "^3.5.43",
+    "wa-sqlite": "^1.0.0",
     "wabt": "^1.0.39"
   }
 }

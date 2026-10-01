@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { PortIds } from "../src/adapters/ids.js";
 import { UndraCore } from "../src/core.js";
-import { UndraReplyError, UndraSchemaMismatchError } from "../src/errors.js";
+import { UndraPortError, UndraReplyError, UndraSchemaMismatchError } from "../src/errors.js";
 import type { PortImpl } from "../src/port.js";
+import { dbPort } from "../src/db.js";
+import { ssePort, webSocketPort } from "../src/realtime.js";
 import { WasmWorkerTransport, type WorkerLike } from "../src/transport/wasm-worker.js";
 import { runWorker, type WorkerScope } from "../src/worker.js";
 import {
@@ -95,6 +97,10 @@ const CROSSING = [
   ["SecureStore", PortIds.SecureStore.portId],
   ["Fs", PortIds.Fs.portId],
   ["Timer", PortIds.Timer.portId],
+  // The opt-in ports of ADR-047 and ADR-048 are asynchronous: their bindings run on the main thread (ADR-049 §2).
+  ["WebSocket", PortIds.WebSocket.portId],
+  ["Sse", PortIds.Sse.portId],
+  ["Db", PortIds.Db.portId],
 ] as const;
 
 describe("the worker answers the built-in sync ports itself", () => {
@@ -300,6 +306,22 @@ describe("over a real channel, with UndraCore on the main thread", () => {
     expect([...reply.subarray(4)]).toEqual([PortStatus.Ok, ...u32(5)]);
     expect(w.log.records.filter((r) => r.level >= 3)).toEqual([]);
     w.close();
+  });
+
+  it("the realtime and db bindings are asynchronous ports, so worker mode serves them here without a warning", async () => {
+    // The worker transport warns about a port that answers inline; every binding method answers with a promise,
+    // its typed failures included (here: closing an id that was never opened).
+    const unknownClose: Array<[string, PortImpl, number, Uint8Array]> = [
+      ["WebSocket", webSocketPort({ connect: () => Promise.reject(new Error("unused")) }), PortIds.WebSocket.close, Uint8Array.of(9, 0, 0, 0, 0xe8, 0x03, 0, 0, 0, 0)],
+      ["Sse", ssePort({ open: () => Promise.reject(new Error("unused")) }), PortIds.Sse.close, u32(9)],
+      ["Db", dbPort({ open: () => Promise.reject(new Error("unused")) }), PortIds.Db.close, u32(9)],
+    ];
+    for (const [name, impl, method, args] of unknownClose) {
+      expect(impl.sync, name).toBe(false);
+      const reply = (impl.methods[method] as (args: Uint8Array) => Uint8Array | Promise<Uint8Array>)(args);
+      expect(reply, name).toBeInstanceOf(Promise);
+      await expect(reply, name).rejects.toBeInstanceOf(UndraPortError);
+    }
   });
 
   it("a port declared sync cannot serve the core in worker mode: a warning names it once", async () => {
