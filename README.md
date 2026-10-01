@@ -54,9 +54,10 @@ The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.
 `undra init` template for the web the way an app does (`wasm-opt -Oz`, gzip level 9), and CI fails
 a change that takes it over 120 KB or more than 5% over its record
 ([`bench/results/web-size.jsonl`](bench/results/web-size.jsonl), [ADR-052](.10x/adrs/ADR-052-web-bundle-size.md)).
-The JavaScript runtime the page loads with it is recorded there too:
-<!--measured:web-runtime-js-->22.5 KB<!--/measured--> gzipped, against the blueprint's 8 KB, a
-decision still open in ADR-052.
+The JavaScript runtime the page loads with it is gated the same way:
+<!--measured:web-runtime-js-->22.5 KB<!--/measured--> gzipped against a 24 KB budget (the
+blueprint's 8 KB predates the transports, reconnect, coalescing and worker mode; the next piece
+aims for 16 KB).
 
 ## Why you can trust it
 

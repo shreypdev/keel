@@ -552,5 +552,16 @@ measured = 39.5
 # alone: Undra's Rust runtime, the C/wasm ABI shim and the core. The blueprint's 120 KB.
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 95712
+measured_gzip_bytes = 95684
+tolerance = 0.05
+
+# What a hello-world app ships of the JavaScript runtime: `@undra/runtime` as the template's
+# web/src/undra.ts imports it, tree-shaken and minified by the Vite of the runtime's lockfile
+# (scripts/web-size-runtime.mjs); the generated bindings, the app's loader and the lazily loaded
+# worker script are not in it. The blueprint's 8 KB predates the transports, reconnect, coalescing
+# and worker mode: ADR-052's decision 2 (2026-10-01) restates it at 24 KB, and the follow-up piece
+# `ts-runtime-size` targets 16 KB. Gated like the wasm.
+[size."web/hello-runtime-js"]
+budget_gzip_bytes = 24000
+measured_gzip_bytes = 22521
 tolerance = 0.05

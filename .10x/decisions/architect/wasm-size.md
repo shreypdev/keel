@@ -1,6 +1,6 @@
 # Architect: the web bundle size (E5, `wt/wasm-size`)
 
-ADR: `.10x/adrs/ADR-052-web-bundle-size.md` (Proposed; the founder accepts it by reply). Brief: piece E5 of
+ADR: `.10x/adrs/ADR-052-web-bundle-size.md` (Accepted 2026-10-01 with four decisions, below). Brief: piece E5 of
 `.10x/specs/2026-10-01-v1x-default-choice-design.md`, Amendment D.
 
 ## What was measured
@@ -40,9 +40,14 @@ ADR: `.10x/adrs/ADR-052-web-bundle-size.md` (Proposed; the founder accepts it by
 * **R6 on the web**: panic → level-5 `log` import → trap → `UndraTransportError("trap")` in the TS runtime;
   pinned by `raw.test.mjs` and `ts-runtime.test.mjs`, which pass on the dev and the release-wasm build.
 * **Gate**: `scripts/wasm-size.sh` (+ `scripts/web-size-runtime.mjs`), `[size."web/hello-wasm"]` in
-  `bench/budgets.toml` (budget 120,000, record 95,712, tolerance 0.05 → ceiling 100,497), a `size` job in
-  `bench.yml` with binaryen version_133 pinned, the record in `bench/results/web-size.jsonl`. The budgets
-  parser learned the table; a unit test fails when the record and the table disagree.
+  `bench/budgets.toml` (budget 120,000, record 95,684 after the review's path remapping, tolerance 0.05 →
+  ceiling 100,468) and `[size."web/hello-runtime-js"]` (budget 24,000, record 22,521 → ceiling 23,647), a
+  `size` job in `bench.yml` with binaryen version_133 pinned, the record in `bench/results/web-size.jsonl`.
+  The budgets parser learned the table; a unit test fails when the record and the table disagree.
+* **Accepted decisions (2026-10-01, the integrator)**: ADR-052 accepted; the JavaScript runtime's budget is
+  restated at 24 KB and gated like the wasm, and the follow-up piece **`ts-runtime-size`** targets 16 KB
+  (its levers are in the ADR); the 5% tolerance stays; no second landing card, the landing row says it is
+  the wasm alone.
 * **Published number**: `site/scripts/build-numbers.mjs` writes the `web-size` row's value from the record
   and fills `<!--measured:NAME-->` slots in the site and README.md; the site workflow checks README.md too.
 
@@ -64,11 +69,13 @@ ADR: `.10x/adrs/ADR-052-web-bundle-size.md` (Proposed; the founder accepts it by
 
 ## Open items
 
-1. ADR-052 open decisions 1-3 (the JS runtime's budget: 22.5 KB against 8 KB; the 5% tolerance; no second
-   landing card).
-2. `--remap-path-prefix` for web builds: removes the builder's home directory from shipped binaries (privacy)
-   and makes the size identical across machines; worth about 1-2 KB raw. Needs RUSTFLAGS for every crate of
-   the web build, which `Build.rustc_args` (shim only) cannot do.
+1. ~~ADR-052 open decisions 1-3~~: decided (see above). Follow-up piece **`ts-runtime-size`**: what a hello app
+   ships of `@undra/runtime` from 22.5 KB to 16 KB gzipped, lowering `[size."web/hello-runtime-js"]` in the
+   same commit.
+2. ~~`--remap-path-prefix`~~: done in the review, for every release build `undra build` runs (wasm, iOS,
+   Android, host) through `build.rustflags` (or the user's `RUSTFLAGS` / `CARGO_ENCODED_RUSTFLAGS`); see
+   ADR-052 and SPEC 7. It keeps the part of the path below the home directory, so the size still moves by
+   tens of bytes with where the checkout lives.
 3. Merge notes for the integrator. (a) `git merge-tree` of this branch with `main` (7f1080c) is clean, and
    `node site/scripts/build-all.mjs` on the merged tree changes nothing.
    (b) Then move the roadmap item to shipped (or reword it in place), for example: "The web bundle under its

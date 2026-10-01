@@ -93,7 +93,16 @@ const slotText = Object.fromEntries(Object.entries(SLOTS).map(([name, at]) => [n
 const SLOT = /<!--measured:([a-z0-9-]+)-->[^<]*<!--\/measured-->/g;
 for (const file of [...htmlFiles(SITE), join(ROOT, "README.md")]) {
   const text = read(file);
-  if (!text.includes("<!--measured:")) continue;
+  if (!text.includes("<!--measured:") && !text.includes("<!--/measured-->")) continue;
+  // Every opener and closer must belong to a whole slot with plain text inside: a slot whose
+  // number was edited into markup, or whose closer was mistyped, would otherwise be skipped by the
+  // pattern and keep its hand-written number past CI's "generated files are up to date" check.
+  const whole = [...text.matchAll(SLOT)].length;
+  const openers = text.split("<!--measured:").length - 1;
+  const closers = text.split("<!--/measured-->").length - 1;
+  if (openers !== whole || closers !== whole) {
+    throw new Error(`${file}: ${openers} <!--measured:NAME--> and ${closers} <!--/measured--> markers, but only ${whole} whole slots; a slot holds plain text only: <!--measured:NAME-->95.7 KB<!--/measured-->`);
+  }
   const filled = text.replace(SLOT, (_, name) => {
     if (!(name in slotText)) throw new Error(`${file}: unknown measured slot ${name}`);
     return `<!--measured:${name}-->${slotText[name]}<!--/measured-->`;

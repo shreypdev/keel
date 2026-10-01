@@ -1328,6 +1328,15 @@ rss_growth_pct = 1
             assert_eq!(json_number(line, "budget"), Some(size.budget_gzip_bytes));
             assert_eq!(json_number(line, "ceiling"), Some(size.ceiling()));
         }
+        // Both artefacts are gated (ADR-052 decision 2), and nothing is recorded without a gate.
         assert!(budgets.sizes.contains_key("web/hello-wasm"));
+        assert!(budgets.sizes.contains_key("web/hello-runtime-js"));
+        for line in record.lines().filter(|l| !l.trim().is_empty()) {
+            let artifact = json_string(line, "artifact").expect("every line names its artefact");
+            assert!(
+                budgets.sizes.contains_key(&artifact),
+                "{artifact} is recorded in web-size.jsonl but has no [size] table"
+            );
+        }
     }
 }
