@@ -20,3 +20,4 @@ takeover; treat these notes as [DISCOVERED] context, confirmed by reading the co
   Swift never traps; calls throw `E` / `CancellationError` / `UndraCallError`, sync `()` commands
   report to `LoadOptions.onError`; typed throws only on port requirements.
 * [v1x-default-choice](v1x-default-choice.md) — the v1.1 / v1.2 program: no reason to say no (2026-10-01).
+* [react-native](react-native.md) — ADR-038: React Native is a fourth host of the C ABI (a C++ TurboModule over JSI, the TS runtime's transport on top; ADR-044 transitional notes) (2026-10-01).
