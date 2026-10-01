@@ -10,6 +10,7 @@ description = "The Undra playground core: one Rust core shared by the web, iOS a
 # A plain library, like every Undra core: `undra build` links it with the C ABI into the library each
 # platform loads, and `undra dev` serves it over a WebSocket (see ../undra.toml).
 [dependencies]
-undra = { workspace = true }
+# The opt-in ports (ADR-047, ADR-048): `live` uses WebSocket and Sse, `notes` uses Db.
+undra = { workspace = true, features = ["websocket", "sse", "db"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

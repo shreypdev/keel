@@ -11,6 +11,9 @@
 //! | [`CaptureLog`] | [`Log`] | keeps every record |
 //! | [`ScriptedConnectivity`] | [`Connectivity`] | pushes scripted events into a runtime |
 //! | [`ScriptedLifecycle`] | [`Lifecycle`] | pushes scripted events into a runtime |
+//! | `FakeWebSocket` | `WebSocket` (feature `websocket`) | scripted server: accept, refuse, push, close, drop; records sends and pulls |
+//! | `FakeSse` | `Sse` (feature `sse`) | scripted event-stream server: push, end, fail; records `Last-Event-ID` |
+//! | `FakeDb` | `Db` (feature `db`) | scripted replies by SQL, failure injection, migrations and transactions tracked |
 //!
 //! Every fake is `Send + Sync`, keeps its state behind a lock and never reads the system clock,
 //! a random source or a thread (CLAUDE.md R12).
@@ -28,12 +31,18 @@
 //! `TestRuntime::advance`, to move time on such a runtime.
 
 mod clock;
+#[cfg(feature = "db")]
+mod db;
 mod events;
 mod fs;
 mod http;
 mod log;
 mod rng;
+#[cfg(feature = "sse")]
+mod sse;
 mod store;
+#[cfg(feature = "websocket")]
+mod ws;
 
 use core::time::Duration;
 use std::sync::Arc;
@@ -42,12 +51,18 @@ use undra_runtime::testing::TestRuntime;
 use undra_runtime::{Port, Runtime};
 
 pub use clock::FakeClock;
+#[cfg(feature = "db")]
+pub use db::{DbCall, DbCallKind, FakeDb};
 pub use events::{ScriptedConnectivity, ScriptedLifecycle};
 pub use fs::MemFs;
 pub use http::{FakeHttp, Matcher};
 pub use log::{CaptureLog, LogEntry};
 pub use rng::SeededRng;
+#[cfg(feature = "sse")]
+pub use sse::{FakeSse, FakeSseStream};
 pub use store::{MemKv, MemSecureStore, MemStore, StoreOp};
+#[cfg(feature = "websocket")]
+pub use ws::{FakeWebSocket, FakeWsConnection};
 
 use crate::{Clock, Connectivity, Fs, Http, Kv, Lifecycle, Log, Rng, SecureStore, Timer};
 
@@ -75,6 +90,15 @@ pub struct Fakes {
     pub connectivity: Arc<ScriptedConnectivity>,
     /// The source of `Lifecycle` events.
     pub lifecycle: Arc<ScriptedLifecycle>,
+    /// The `WebSocket` server (feature `websocket`).
+    #[cfg(feature = "websocket")]
+    pub web_socket: Arc<FakeWebSocket>,
+    /// The `Sse` server (feature `sse`).
+    #[cfg(feature = "sse")]
+    pub sse: Arc<FakeSse>,
+    /// The `Db` (feature `db`).
+    #[cfg(feature = "db")]
+    pub db: Arc<FakeDb>,
 }
 
 impl Fakes {
@@ -97,13 +121,19 @@ impl Fakes {
             fs: Arc::new(MemFs::new()),
             connectivity: Arc::new(ScriptedConnectivity::new()),
             lifecycle: Arc::new(ScriptedLifecycle::new()),
+            #[cfg(feature = "websocket")]
+            web_socket: Arc::new(FakeWebSocket::new()),
+            #[cfg(feature = "sse")]
+            sse: Arc::new(FakeSse::new()),
+            #[cfg(feature = "db")]
+            db: Arc::new(FakeDb::new()),
         }
     }
 
     /// Binds every fake to `rt`:
     ///
     /// * the request/reply ports (`Clock`, `Rng`, `Log`, `Http`, `Kv`, `SecureStore`, `Fs`,
-    ///   `Timer`) become Rust bindings, so both the typed accessors (`undra_ports::http(&ctx)`)
+    ///   `Timer`, and `WebSocket`, `Sse`, `Db` when their features are on) become Rust bindings, so both the typed accessors (`undra_ports::http(&ctx)`)
     ///   and raw port calls (the generated proxies) reach the fake;
     /// * the two event sources are attached to `rt`, so events they emit reach the subscribers
     ///   of `rt`'s [`Events`](undra_runtime::Events);
@@ -124,6 +154,15 @@ impl Fakes {
             self.secure_store.clone(),
         );
         rt.bind_dyn_port::<dyn Fs>(<dyn Fs as Port>::PORT_ID, self.fs.clone());
+        #[cfg(feature = "websocket")]
+        rt.bind_dyn_port::<dyn crate::WebSocket>(
+            <dyn crate::WebSocket as Port>::PORT_ID,
+            self.web_socket.clone(),
+        );
+        #[cfg(feature = "sse")]
+        rt.bind_dyn_port::<dyn crate::Sse>(<dyn crate::Sse as Port>::PORT_ID, self.sse.clone());
+        #[cfg(feature = "db")]
+        rt.bind_dyn_port::<dyn crate::Db>(<dyn crate::Db as Port>::PORT_ID, self.db.clone());
         // Event ports flow host to core; binding the source only makes it discoverable with
         // `Ctx::rust_port`.
         rt.bind_dyn_port::<dyn Connectivity>(

@@ -1,5 +1,7 @@
 //! The Undra standard library: the ten standard ports of SPEC section 8 and the eight records,
-//! enums and errors they exchange.
+//! enums and errors they exchange, plus the three opt-in ports (`WebSocket` and `Sse`, ADR-047;
+//! `Db`, ADR-048) and their twelve types, which a core has only when it enables the cargo feature
+//! of `undra-ports` (`websocket`, `sse`, `db`).
 //!
 //! Every app core links `undra-ports`, so its schema truthfully contains them (R1, and the schema
 //! hash covers them). The three platform runtimes implement exactly these ports and ship exactly
@@ -90,7 +92,7 @@ const fn m(id: u32, decl: &'static str) -> StandardMethod {
     StandardMethod { id, decl }
 }
 
-/// The eight standard types (SPEC section 8).
+/// The standard types: the eight of SPEC section 8, then the twelve of the opt-in ports.
 pub const TYPES: &[StandardType] = &[
     StandardType {
         name: "HttpMethod",
@@ -140,6 +142,143 @@ pub const TYPES: &[StandardType] = &[
         kind: StandardKind::Enum,
         shape: "Active = 0, Inactive = 1, Background = 2",
     },
+    // ----- opt-in: `WebSocket` (feature `websocket`, ADR-047) -----
+    StandardType {
+        name: "WsOpened",
+        type_id: 0x9364_0662,
+        kind: StandardKind::Record,
+        shape: "conn: u32, protocol: String",
+    },
+    StandardType {
+        name: "WsMessage",
+        type_id: 0x9f2d_9b9e,
+        kind: StandardKind::Enum,
+        shape: "Text(String) = 0, Binary(Bytes) = 1",
+    },
+    StandardType {
+        name: "WsError",
+        type_id: 0xc4e7_cc8f,
+        kind: StandardKind::Error,
+        shape: "Refused { status: Option<u16>, message: String } = 0, Network(String) = 1, Protocol(String) = 2, Closed { code: u16, reason: String } = 3",
+    },
+    // ----- opt-in: `Sse` (feature `sse`, ADR-047) -----
+    StandardType {
+        name: "SseEvent",
+        type_id: 0xa898_28ce,
+        kind: StandardKind::Record,
+        shape: "id: Option<String>, event: String, data: String, retry_ms: Option<u32>",
+    },
+    StandardType {
+        name: "SseError",
+        type_id: 0x2e78_01f4,
+        kind: StandardKind::Error,
+        shape: "Refused { status: Option<u16>, message: String } = 0, Network(String) = 1, Protocol(String) = 2, Ended = 3",
+    },
+    // ----- opt-in: `Db` (feature `db`, ADR-048) -----
+    StandardType {
+        name: "DbMigration",
+        type_id: 0x36b3_1925,
+        kind: StandardKind::Record,
+        shape: "version: u32, sql: String",
+    },
+    StandardType {
+        name: "DbOpened",
+        type_id: 0xaf76_040e,
+        kind: StandardKind::Record,
+        shape: "db: u32, version: u32",
+    },
+    StandardType {
+        name: "DbValue",
+        type_id: 0x48f7_4ac0,
+        kind: StandardKind::Enum,
+        shape: "Null = 0, Integer(i64) = 1, Real(f64) = 2, Text(String) = 3, Blob(Bytes) = 4",
+    },
+    StandardType {
+        name: "DbExecuted",
+        type_id: 0x41a1_a3a6,
+        kind: StandardKind::Record,
+        shape: "changes: u64, last_insert_id: i64",
+    },
+    StandardType {
+        name: "DbRows",
+        type_id: 0xffd1_2f2e,
+        kind: StandardKind::Record,
+        shape: "columns: Vec<String>, rows: Vec<Vec<DbValue>>",
+    },
+    StandardType {
+        name: "DbConstraint",
+        type_id: 0x856f_0900,
+        kind: StandardKind::Enum,
+        shape: "Unique = 0, NotNull = 1, ForeignKey = 2, Check = 3, Other = 4",
+    },
+    StandardType {
+        name: "DbError",
+        type_id: 0x1dfc_036b,
+        kind: StandardKind::Error,
+        shape: "Busy = 0, Constraint { kind: DbConstraint, message: String } = 1, Corrupt(String) = 2, Full = 3, Unavailable(String) = 4, Sql { message: String } = 5, Migration { version: u32, message: String } = 6",
+    },
+];
+
+/// How many of [`TYPES`] are the eight of SPEC section 8 (the rest are opt-in).
+pub const CORE_TYPE_COUNT: usize = 8;
+
+/// How many of [`PORTS`] are the ten of SPEC section 8 (the rest are opt-in).
+pub const CORE_PORT_COUNT: usize = 10;
+
+const WEB_SOCKET_METHODS: &[StandardMethod] = &[
+    m(
+        0x8347_7638,
+        "async connect(url: String, protocols: Vec<String>, headers: Vec<Header>) -> Result<WsOpened, WsError>",
+    ),
+    m(
+        0x117b_2158,
+        "async send(conn: u32, message: WsMessage) -> Result<(), WsError>",
+    ),
+    m(
+        0x8f31_f08f,
+        "async receive(conn: u32, max: u32) -> Result<Vec<WsMessage>, WsError>",
+    ),
+    m(
+        0x6015_4b86,
+        "async close(conn: u32, code: u16, reason: String) -> Result<(), WsError>",
+    ),
+];
+
+const SSE_METHODS: &[StandardMethod] = &[
+    m(
+        0xc003_3c14,
+        "async open(url: String, headers: Vec<Header>, last_event_id: Option<String>) -> Result<u32, SseError>",
+    ),
+    m(
+        0x4035_cbed,
+        "async next(stream: u32, max: u32) -> Result<Vec<SseEvent>, SseError>",
+    ),
+    m(
+        0x5bfe_2c88,
+        "async close(stream: u32) -> Result<(), SseError>",
+    ),
+];
+
+const DB_METHODS: &[StandardMethod] = &[
+    m(
+        0xee6f_26db,
+        "async open(name: String, migrations: Vec<DbMigration>) -> Result<DbOpened, DbError>",
+    ),
+    m(
+        0xffac_2f0a,
+        "async execute(db: u32, sql: String, params: Vec<DbValue>) -> Result<DbExecuted, DbError>",
+    ),
+    m(
+        0x3a4d_eefd,
+        "async query(db: u32, sql: String, params: Vec<DbValue>) -> Result<DbRows, DbError>",
+    ),
+    m(0xae2b_a428, "async begin(db: u32) -> Result<u32, DbError>"),
+    m(0xf866_d5ae, "async commit(tx: u32) -> Result<(), DbError>"),
+    m(
+        0x3e7b_24b3,
+        "async rollback(tx: u32) -> Result<(), DbError>",
+    ),
+    m(0xde3d_c7ed, "async close(db: u32) -> Result<(), DbError>"),
 ];
 
 const KV_METHODS: &[StandardMethod] = &[
@@ -175,7 +314,7 @@ const FS_METHODS: &[StandardMethod] = &[
     ),
 ];
 
-/// The ten standard ports (SPEC section 8).
+/// The standard ports: the ten of SPEC section 8, then the three opt-in ones.
 pub const PORTS: &[StandardPort] = &[
     StandardPort {
         name: "Clock",
@@ -245,6 +384,24 @@ pub const PORTS: &[StandardPort] = &[
         port_id: 0x81c0_afd4,
         kind: PortKind::Event,
         methods: &[m(0x0bc8_2569, "changed(state: AppState)")],
+    },
+    StandardPort {
+        name: "WebSocket",
+        port_id: 0x7388_b95f,
+        kind: PortKind::Async,
+        methods: WEB_SOCKET_METHODS,
+    },
+    StandardPort {
+        name: "Sse",
+        port_id: 0x75d2_ef19,
+        kind: PortKind::Async,
+        methods: SSE_METHODS,
+    },
+    StandardPort {
+        name: "Db",
+        port_id: 0x559e_da82,
+        kind: PortKind::Async,
+        methods: DB_METHODS,
     },
 ];
 
@@ -476,8 +633,8 @@ pub fn covered(schema: &Schema) -> Covered {
 
 /// How the platform runtime of `lang` spells the standard type `name` (one of [`TYPES`]).
 ///
-/// Every runtime exports every standard type, so generated code refers to all eight and
-/// declares none (ADR-024):
+/// Every runtime exports every standard type, so generated code refers to all of them and
+/// declares none (ADR-024; the twelve opt-in types are exported whatever a core enables):
 ///
 /// * TypeScript: `@undra/runtime` exports all eight types with their codecs (`HttpRequestCodec`,
 ///   ...) from `adapters/types.ts` and `adapters/codecs.ts`, under the standard names.
@@ -578,13 +735,15 @@ mod tests {
     }
 
     #[test]
-    fn the_table_has_the_ten_ports_and_eight_types() {
-        assert_eq!(PORTS.len(), 10);
-        assert_eq!(TYPES.len(), 8);
+    fn the_table_has_the_ten_ports_and_eight_types_then_the_opt_in_ones() {
+        assert_eq!(PORTS.len(), CORE_PORT_COUNT + 3);
+        assert_eq!(TYPES.len(), CORE_TYPE_COUNT + 12);
+        assert_eq!(PORTS[CORE_PORT_COUNT - 1].name, "Lifecycle");
+        assert_eq!(TYPES[CORE_TYPE_COUNT - 1].name, "AppState");
         let names: BTreeSet<_> = PORTS.iter().map(|p| p.name).collect();
-        assert_eq!(names.len(), 10, "port names are unique");
+        assert_eq!(names.len(), PORTS.len(), "port names are unique");
         let names: BTreeSet<_> = TYPES.iter().map(|t| t.name).collect();
-        assert_eq!(names.len(), 8, "type names are unique");
+        assert_eq!(names.len(), TYPES.len(), "type names are unique");
     }
 
     #[test]

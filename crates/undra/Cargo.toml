@@ -20,5 +20,14 @@ undra-runtime = { workspace = true }
 undra-query = { workspace = true }
 undra-ports = { workspace = true }
 
+# The opt-in standard ports (ADR-047, ADR-048), off by default: `undra = { features = ["websocket"] }`.
+[features]
+# The `WebSocket` port (`undra::ports::ws`).
+websocket = ["undra-ports/websocket"]
+# The `Sse` port (`undra::ports::sse`).
+sse = ["undra-ports/sse"]
+# The `Db` port over SQLite (`undra::ports::db`).
+db = ["undra-ports/db"]
+
 [dev-dependencies]
 undra-bindgen = { workspace = true }

@@ -37,6 +37,15 @@ pub trait CtxPorts {
     fn fs(&self) -> Arc<dyn Fs>;
     /// The `Timer` port.
     fn timer(&self) -> Arc<dyn Timer>;
+    /// The `WebSocket` port (feature `websocket`; prefer [`WsConnection`](crate::ws::WsConnection)).
+    #[cfg(feature = "websocket")]
+    fn web_socket(&self) -> Arc<dyn crate::WebSocket>;
+    /// The `Sse` port (feature `sse`; prefer [`sse::subscribe`](crate::sse::subscribe)).
+    #[cfg(feature = "sse")]
+    fn sse(&self) -> Arc<dyn crate::Sse>;
+    /// The `Db` port (feature `db`; prefer [`Database`](crate::db::Database)).
+    #[cfg(feature = "db")]
+    fn db(&self) -> Arc<dyn crate::Db>;
 }
 
 impl CtxPorts for Ctx {
@@ -70,6 +79,21 @@ impl CtxPorts for Ctx {
 
     fn timer(&self) -> Arc<dyn Timer> {
         crate::timer(self)
+    }
+
+    #[cfg(feature = "websocket")]
+    fn web_socket(&self) -> Arc<dyn crate::WebSocket> {
+        crate::web_socket(self)
+    }
+
+    #[cfg(feature = "sse")]
+    fn sse(&self) -> Arc<dyn crate::Sse> {
+        crate::sse(self)
+    }
+
+    #[cfg(feature = "db")]
+    fn db(&self) -> Arc<dyn crate::Db> {
+        crate::db(self)
     }
 }
 

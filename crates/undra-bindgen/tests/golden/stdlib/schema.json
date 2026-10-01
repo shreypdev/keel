@@ -3,6 +3,108 @@
   "crate_name": "golden-stdlib",
   "records": [
     {
+      "name": "DbExecuted",
+      "type_id": 1101112230,
+      "fields": [
+        {
+          "name": "changes",
+          "ty": {
+            "kind": "u64"
+          },
+          "default": false,
+          "docs": "Rows inserted, updated or deleted by the statement (`sqlite3_changes64`)."
+        },
+        {
+          "name": "last_insert_id",
+          "ty": {
+            "kind": "i64"
+          },
+          "default": false,
+          "docs": "The rowid of the last insert on the connection (`sqlite3_last_insert_rowid`)."
+        }
+      ],
+      "docs": "What `execute` answers."
+    },
+    {
+      "name": "DbMigration",
+      "type_id": 917707045,
+      "fields": [
+        {
+          "name": "version",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false,
+          "docs": "The version this migration brings the database to; versions strictly increase from 1."
+        },
+        {
+          "name": "sql",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The SQL, possibly several statements."
+        }
+      ],
+      "docs": "One schema migration, as the port carries it."
+    },
+    {
+      "name": "DbOpened",
+      "type_id": 2943747086,
+      "fields": [
+        {
+          "name": "db",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false,
+          "docs": "The database's id, chosen by the adapter; never reused by it."
+        },
+        {
+          "name": "version",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false,
+          "docs": "`PRAGMA user_version` after the migrations ran (0 for a database without any)."
+        }
+      ],
+      "docs": "What `open` answers: the database's id and its version after migrating."
+    },
+    {
+      "name": "DbRows",
+      "type_id": 4291899182,
+      "fields": [
+        {
+          "name": "columns",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false,
+          "docs": "The result's column names, in order."
+        },
+        {
+          "name": "rows",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "vec",
+              "of": {
+                "kind": "named",
+                "of": "DbValue"
+              }
+            }
+          },
+          "default": false,
+          "docs": "The rows, each with one value per column."
+        }
+      ],
+      "docs": "What `query` answers: the column names and the rows, each a cell per column."
+    },
+    {
       "name": "Header",
       "type_id": 290429312,
       "fields": [
@@ -119,6 +221,74 @@
       "docs": "An HTTP response. Any status, including 4xx and 5xx, is a response; only failures before a\nresponse exists are an `HttpError`."
     },
     {
+      "name": "SseEvent",
+      "type_id": 2828544206,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false,
+          "docs": "The event's `id` field, if the event (or an earlier one, per the standard's last-event-id\nbuffer) set one. Send it back as `last_event_id` to resume."
+        },
+        {
+          "name": "event",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The event type: the `event` field, `\"message\"` when absent."
+        },
+        {
+          "name": "data",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The `data` lines, joined with `\\n`."
+        },
+        {
+          "name": "retry_ms",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "u32"
+            }
+          },
+          "default": false,
+          "docs": "The `retry` field in milliseconds, when this event carried one: how long the server asks\nclients to wait before reconnecting."
+        }
+      ],
+      "docs": "One server-sent event."
+    },
+    {
+      "name": "WsOpened",
+      "type_id": 2472805986,
+      "fields": [
+        {
+          "name": "conn",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false,
+          "docs": "The connection's id, chosen by the adapter; never reused by it."
+        },
+        {
+          "name": "protocol",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The subprotocol the server selected, or `\"\"` when none was negotiated."
+        }
+      ],
+      "docs": "What `connect` answers: the connection's id and the subprotocol the server chose."
+    },
+    {
       "name": "Endpoint",
       "type_id": 669505180,
       "fields": [
@@ -172,6 +342,54 @@
         }
       ],
       "docs": "A request the app makes again and again."
+    },
+    {
+      "name": "Feed",
+      "type_id": 727822917,
+      "fields": [
+        {
+          "name": "last",
+          "ty": {
+            "kind": "named",
+            "of": "WsMessage"
+          },
+          "default": false
+        },
+        {
+          "name": "event",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "SseEvent"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "cells",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "DbValue"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "page",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "DbRows"
+            }
+          },
+          "default": false
+        }
+      ],
+      "docs": "What a live screen keeps."
     },
     {
       "name": "Connectivity",
@@ -239,6 +457,258 @@
         }
       ],
       "docs": "Where the app is in its lifecycle."
+    },
+    {
+      "name": "DbConstraint",
+      "type_id": 2238646528,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Unique",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null,
+          "docs": "`UNIQUE` or `PRIMARY KEY`."
+        },
+        {
+          "name": "NotNull",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null,
+          "docs": "`NOT NULL`."
+        },
+        {
+          "name": "ForeignKey",
+          "index": 2,
+          "fields": [],
+          "tuple": false,
+          "message": null,
+          "docs": "`FOREIGN KEY` (enforced: every adapter opens with `foreign_keys = ON`)."
+        },
+        {
+          "name": "Check",
+          "index": 3,
+          "fields": [],
+          "tuple": false,
+          "message": null,
+          "docs": "`CHECK`."
+        },
+        {
+          "name": "Other",
+          "index": 4,
+          "fields": [],
+          "tuple": false,
+          "message": null,
+          "docs": "Any other constraint (a trigger's `RAISE`, ...)."
+        }
+      ],
+      "docs": "Which constraint a statement broke."
+    },
+    {
+      "name": "DbError",
+      "type_id": 503055211,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Busy",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "the database is busy",
+          "docs": "The database stayed locked past the adapter's busy timeout (5 s): another connection, or a\nstatement made outside a running transaction on the same database."
+        },
+        {
+          "name": "Constraint",
+          "index": 1,
+          "fields": [
+            {
+              "name": "kind",
+              "ty": {
+                "kind": "named",
+                "of": "DbConstraint"
+              },
+              "default": false,
+              "docs": "Which kind of constraint."
+            },
+            {
+              "name": "message",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false,
+              "docs": "SQLite's message, for example `UNIQUE constraint failed: todos.id`."
+            }
+          ],
+          "tuple": false,
+          "message": "constraint failed: {message}",
+          "docs": "The statement broke a constraint; `message` is SQLite's (it names the columns)."
+        },
+        {
+          "name": "Corrupt",
+          "index": 2,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "the database is corrupt: {0}",
+          "docs": "The file is not a database or is damaged."
+        },
+        {
+          "name": "Full",
+          "index": 3,
+          "fields": [],
+          "tuple": false,
+          "message": "the database is full",
+          "docs": "The disk or the storage quota is full."
+        },
+        {
+          "name": "Unavailable",
+          "index": 4,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "the database is unavailable: {0}",
+          "docs": "No adapter, a database or transaction that is closed or unknown, an invalid name, a file\nthat cannot be opened."
+        },
+        {
+          "name": "Sql",
+          "index": 5,
+          "fields": [
+            {
+              "name": "message",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false,
+              "docs": "SQLite's message (or the adapter's)."
+            }
+          ],
+          "tuple": false,
+          "message": "SQL error: {message}",
+          "docs": "Anything else SQLite refused: a syntax error, a missing table, a wrong cell type, more\nthan one statement where one is expected."
+        },
+        {
+          "name": "Migration",
+          "index": 6,
+          "fields": [
+            {
+              "name": "version",
+              "ty": {
+                "kind": "u32"
+              },
+              "default": false,
+              "docs": "The version that failed, or the database's version when it is too new."
+            },
+            {
+              "name": "message",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false,
+              "docs": "What went wrong."
+            }
+          ],
+          "tuple": false,
+          "message": "migration {version} failed: {message}",
+          "docs": "A migration failed (everything it and the migrations before it in the same open did is\nrolled back), or the database is at a version newer than the newest migration."
+        }
+      ],
+      "docs": "Why a database operation failed (ADR-048). The variant follows SQLite's result code, never the\nmessage text (Android, which reports no code, is the documented exception)."
+    },
+    {
+      "name": "DbValue",
+      "type_id": 1224166080,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Null",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null,
+          "docs": "`NULL`."
+        },
+        {
+          "name": "Integer",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "i64"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null,
+          "docs": "A 64-bit signed integer."
+        },
+        {
+          "name": "Real",
+          "index": 2,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "f64"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null,
+          "docs": "A 64-bit float."
+        },
+        {
+          "name": "Text",
+          "index": 3,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null,
+          "docs": "UTF-8 text."
+        },
+        {
+          "name": "Blob",
+          "index": 4,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "bytes"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null,
+          "docs": "Bytes."
+        }
+      ],
+      "docs": "One SQLite value: the five storage classes."
     },
     {
       "name": "FsError",
@@ -449,6 +919,215 @@
       "docs": "What kind of network the device is on."
     },
     {
+      "name": "SseError",
+      "type_id": 779616756,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Refused",
+          "index": 0,
+          "fields": [
+            {
+              "name": "status",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "u16"
+                }
+              },
+              "default": false,
+              "docs": "The HTTP status, if there was an answer."
+            },
+            {
+              "name": "message",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false,
+              "docs": "What the platform said."
+            }
+          ],
+          "tuple": false,
+          "message": "the event stream was refused: {message}",
+          "docs": "The request was answered with a status other than 2xx (a 204 means \"stop\"), or the URL\nis unusable. `status` is absent when there was no HTTP answer."
+        },
+        {
+          "name": "Network",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "event stream network error: {0}",
+          "docs": "The connection failed or dropped; the text is the platform's."
+        },
+        {
+          "name": "Protocol",
+          "index": 2,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "event stream protocol error: {0}",
+          "docs": "The answer was not `text/event-stream`, was not UTF-8, or a port reply did not decode."
+        },
+        {
+          "name": "Ended",
+          "index": 3,
+          "fields": [],
+          "tuple": false,
+          "message": "the server ended the event stream",
+          "docs": "The server ended the response. Reconnect with the last event id to resume."
+        }
+      ],
+      "docs": "Why a server-sent event stream could not be opened, or how it ended (ADR-047 §5)."
+    },
+    {
+      "name": "WsError",
+      "type_id": 3303525519,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Refused",
+          "index": 0,
+          "fields": [
+            {
+              "name": "status",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "u16"
+                }
+              },
+              "default": false,
+              "docs": "The HTTP status of the refused upgrade, if the platform tells."
+            },
+            {
+              "name": "message",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false,
+              "docs": "What the platform said."
+            }
+          ],
+          "tuple": false,
+          "message": "the WebSocket was refused: {message}",
+          "docs": "The connection was not established. `status` is the HTTP status of the refused upgrade\nwhere the platform reports it (browsers do not)."
+        },
+        {
+          "name": "Network",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "WebSocket network error: {0}",
+          "docs": "The connection failed or dropped without a closing handshake; the text is the platform's."
+        },
+        {
+          "name": "Protocol",
+          "index": 2,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "WebSocket protocol error: {0}",
+          "docs": "The peer broke the protocol (or a port reply did not decode); the text says how."
+        },
+        {
+          "name": "Closed",
+          "index": 3,
+          "fields": [
+            {
+              "name": "code",
+              "ty": {
+                "kind": "u16"
+              },
+              "default": false,
+              "docs": "The close code (RFC 6455 §7.4): 1000 normal, 1001 going away, 1008 policy, ..."
+            },
+            {
+              "name": "reason",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false,
+              "docs": "The close reason, possibly empty."
+            }
+          ],
+          "tuple": false,
+          "message": "the WebSocket was closed ({code}): {reason}",
+          "docs": "The connection was closed with a close frame: `code` and `reason` are the frame's."
+        }
+      ],
+      "docs": "Why a WebSocket could not be opened, or how it ended (ADR-047 §5).\n\n| What happened | Variant |\n|---|---|\n| the upgrade was answered non-101, the URL is unusable, headers the platform cannot send | `Refused` |\n| the connection dropped without a close frame (DNS, reset, TLS, timeout) | `Network` |\n| the peer broke RFC 6455, or a reply did not decode | `Protocol` |\n| the peer sent a close frame (1000 included), or the adapter closed past its backlog limit (1008) | `Closed` |"
+    },
+    {
+      "name": "WsMessage",
+      "type_id": 2670566302,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Text",
+          "index": 0,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null,
+          "docs": "A text message (valid UTF-8 by RFC 6455)."
+        },
+        {
+          "name": "Binary",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "bytes"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null,
+          "docs": "A binary message."
+        }
+      ],
+      "docs": "One WebSocket message. Control frames (ping, pong, close) never surface as messages."
+    },
+    {
       "name": "SyncError",
       "type_id": 511807612,
       "is_error": true,
@@ -642,6 +1321,86 @@
           },
           "is_async": true,
           "takes_ctx": false
+        },
+        {
+          "name": "local",
+          "method_id": 260826796,
+          "params": [
+            {
+              "name": "sql",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "DbRows"
+              },
+              {
+                "kind": "named",
+                "of": "DbError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Reads the local database."
+        },
+        {
+          "name": "listen",
+          "method_id": 3694107658,
+          "params": [],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "stream",
+                "of": {
+                  "kind": "named",
+                  "of": "SseEvent"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "SseError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Streams the server's events."
+        },
+        {
+          "name": "push",
+          "method_id": 507534457,
+          "params": [
+            {
+              "name": "message",
+              "ty": {
+                "kind": "named",
+                "of": "WsMessage"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "WsError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Sends one message on the live connection."
         }
       ],
       "store": null,
@@ -794,6 +1553,248 @@
         }
       ],
       "docs": "Connectivity changes, pushed by the platform to the core."
+    },
+    {
+      "name": "Db",
+      "port_id": 1436473986,
+      "kind": "async",
+      "methods": [
+        {
+          "name": "open",
+          "method_id": 4000261851,
+          "params": [
+            {
+              "name": "name",
+              "ty": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "migrations",
+              "ty": {
+                "kind": "vec",
+                "of": {
+                  "kind": "named",
+                  "of": "DbMigration"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "DbOpened"
+              },
+              {
+                "kind": "named",
+                "of": "DbError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Opens (creating it if needed) the database `name` and runs, in one transaction, every\nmigration above its `user_version`."
+        },
+        {
+          "name": "execute",
+          "method_id": 4289474314,
+          "params": [
+            {
+              "name": "db",
+              "ty": {
+                "kind": "u32"
+              }
+            },
+            {
+              "name": "sql",
+              "ty": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "params",
+              "ty": {
+                "kind": "vec",
+                "of": {
+                  "kind": "named",
+                  "of": "DbValue"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "DbExecuted"
+              },
+              {
+                "kind": "named",
+                "of": "DbError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Runs one statement with `params` bound positionally; `db` is a database or transaction id."
+        },
+        {
+          "name": "query",
+          "method_id": 978185981,
+          "params": [
+            {
+              "name": "db",
+              "ty": {
+                "kind": "u32"
+              }
+            },
+            {
+              "name": "sql",
+              "ty": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "params",
+              "ty": {
+                "kind": "vec",
+                "of": {
+                  "kind": "named",
+                  "of": "DbValue"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "DbRows"
+              },
+              {
+                "kind": "named",
+                "of": "DbError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Runs one query with `params` bound positionally and returns every row."
+        },
+        {
+          "name": "begin",
+          "method_id": 2922095656,
+          "params": [
+            {
+              "name": "db",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "u32"
+              },
+              {
+                "kind": "named",
+                "of": "DbError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Waits for any running transaction on `db`, starts one (`BEGIN IMMEDIATE`) and returns its id."
+        },
+        {
+          "name": "commit",
+          "method_id": 4167488942,
+          "params": [
+            {
+              "name": "tx",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "DbError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Commits transaction `tx` and ends it (a failed commit rolls back and ends it too)."
+        },
+        {
+          "name": "rollback",
+          "method_id": 1048257715,
+          "params": [
+            {
+              "name": "tx",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "DbError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Rolls transaction `tx` back and ends it."
+        },
+        {
+          "name": "close",
+          "method_id": 3728590829,
+          "params": [
+            {
+              "name": "db",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "DbError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Closes database `db` (a running transaction is rolled back). Closing twice is not an error."
+        }
+      ],
+      "docs": "SQLite on the platform (ADR-048). Use [`Database`] rather than calling it directly.\n\nEvery open database has one connection and one serial worker owned by the adapter; the core\nonly awaits replies. Statements on a transaction id run inside it; statements on the database\nid wait for a running transaction to end (at most the busy timeout, then `Busy`)."
     },
     {
       "name": "Fs",
@@ -1233,6 +2234,124 @@
       "docs": "A key-value store for secrets. Same methods as `Kv`, under its own port id, and the same\nbehaviour when no adapter is registered (a panic naming the port, E0062)."
     },
     {
+      "name": "Sse",
+      "port_id": 1976758041,
+      "kind": "async",
+      "methods": [
+        {
+          "name": "open",
+          "method_id": 3221437460,
+          "params": [
+            {
+              "name": "url",
+              "ty": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "headers",
+              "ty": {
+                "kind": "vec",
+                "of": {
+                  "kind": "named",
+                  "of": "Header"
+                }
+              }
+            },
+            {
+              "name": "last_event_id",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "string"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "u32"
+              },
+              {
+                "kind": "named",
+                "of": "SseError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Requests `url` with `Accept: text/event-stream`, `headers` and, when given, the\n`Last-Event-ID` header. Completes with the stream's id once a 2xx `text/event-stream`\nanswer arrived."
+        },
+        {
+          "name": "next",
+          "method_id": 1077267437,
+          "params": [
+            {
+              "name": "stream",
+              "ty": {
+                "kind": "u32"
+              }
+            },
+            {
+              "name": "max",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "vec",
+                "of": {
+                  "kind": "named",
+                  "of": "SseEvent"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "SseError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "The next events, at least one and at most `max`, once there are any. `Ok([])` means the\ncore closed the stream; an error ends it."
+        },
+        {
+          "name": "close",
+          "method_id": 1543384200,
+          "params": [
+            {
+              "name": "stream",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "SseError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Stops the stream and releases the connection; a pending `next` answers `Ok([])`.\nClosing a stream that already ended is not an error."
+        }
+      ],
+      "docs": "Opens server-sent event streams on the platform (ADR-047). Use [`subscribe`] rather than\ncalling it directly."
+    },
+    {
       "name": "Timer",
       "port_id": 12766681,
       "kind": "sync",
@@ -1263,6 +2382,171 @@
         }
       ],
       "docs": "Arms timers. Fire-and-forget: the platform later reports `TimerFired(timer_id)` to the\nruntime, which completes the matching sleep. Timer ids are allocated by the runtime; a\nplatform never invents one."
+    },
+    {
+      "name": "WebSocket",
+      "port_id": 1938340191,
+      "kind": "async",
+      "methods": [
+        {
+          "name": "connect",
+          "method_id": 2202498616,
+          "params": [
+            {
+              "name": "url",
+              "ty": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "protocols",
+              "ty": {
+                "kind": "vec",
+                "of": {
+                  "kind": "string"
+                }
+              }
+            },
+            {
+              "name": "headers",
+              "ty": {
+                "kind": "vec",
+                "of": {
+                  "kind": "named",
+                  "of": "Header"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "WsOpened"
+              },
+              {
+                "kind": "named",
+                "of": "WsError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Opens a connection to `url` (`ws://` or `wss://`), offering `protocols` and sending\n`headers` with the upgrade request. Completes once the handshake succeeded."
+        },
+        {
+          "name": "send",
+          "method_id": 293282136,
+          "params": [
+            {
+              "name": "conn",
+              "ty": {
+                "kind": "u32"
+              }
+            },
+            {
+              "name": "message",
+              "ty": {
+                "kind": "named",
+                "of": "WsMessage"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "WsError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Sends `message`; completes when the platform accepted it and its outbound buffer is\nunder its high-water mark."
+        },
+        {
+          "name": "receive",
+          "method_id": 2402414735,
+          "params": [
+            {
+              "name": "conn",
+              "ty": {
+                "kind": "u32"
+              }
+            },
+            {
+              "name": "max",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "vec",
+                "of": {
+                  "kind": "named",
+                  "of": "WsMessage"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "WsError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "The next messages, at least one and at most `max`, once there are any. `Ok([])` means\nthe core closed the connection; an error ends the inbound stream."
+        },
+        {
+          "name": "close",
+          "method_id": 1612008326,
+          "params": [
+            {
+              "name": "conn",
+              "ty": {
+                "kind": "u32"
+              }
+            },
+            {
+              "name": "code",
+              "ty": {
+                "kind": "u16"
+              }
+            },
+            {
+              "name": "reason",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "WsError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Starts the closing handshake with `code` and `reason`; a pending `receive` then answers\n`Ok([])`. Closing a connection that already ended is not an error."
+        }
+      ],
+      "docs": "Opens WebSocket connections on the platform (ADR-047). Use [`WsConnection`] rather than\ncalling it directly: it keeps the pull discipline and closes what it opened.\n\nEvery method has an error channel, so a platform without an adapter answers\n`WsError::Network(..E0062..)` instead of panicking."
     },
     {
       "name": "Uploader",

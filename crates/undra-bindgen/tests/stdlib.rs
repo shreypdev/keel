@@ -113,8 +113,9 @@ fn the_table_is_what_undra_ports_registers() {
         assert_eq!(kind, p.kind, "{}", p.name);
     }
     let covered = stdlib::covered(&schema);
-    assert_eq!(covered.types.len(), 8, "{:?}", covered.types);
-    assert_eq!(covered.ports.len(), 10, "{:?}", covered.ports);
+    // The dev-dependency turns the opt-in ports on, so all of them are registered here.
+    assert_eq!(covered.types.len(), TYPES.len(), "{:?}", covered.types);
+    assert_eq!(covered.ports.len(), PORTS.len(), "{:?}", covered.ports);
 }
 
 #[test]
@@ -153,6 +154,18 @@ const STANDARD_DECLARATIONS: &[&str] = &[
     "FsError",
     "NetKind",
     "AppState",
+    "WsOpened",
+    "WsMessage",
+    "WsError",
+    "SseEvent",
+    "SseError",
+    "DbMigration",
+    "DbOpened",
+    "DbValue",
+    "DbExecuted",
+    "DbRows",
+    "DbConstraint",
+    "DbError",
 ];
 
 #[test]
@@ -181,6 +194,9 @@ fn an_app_that_only_links_the_standard_library_generates_nothing_of_it() {
             "Fs",
             "Timer",
             "Connectivity",
+            "WebSocket",
+            "Sse",
+            "Db",
         ] {
             assert!(
                 !all.contains(&format!("{port}PortImpl")),
