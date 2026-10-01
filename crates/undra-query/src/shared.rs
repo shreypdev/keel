@@ -744,10 +744,20 @@ impl Shared {
         self.refetch_observed(ctx, true);
     }
 
-    /// Subscribes to the `Connectivity` and `Lifecycle` events, once per runtime.
+    /// Subscribes to the `Connectivity` and `Lifecycle` events, once per runtime, and hydrates
+    /// the cache if no start-up hook will.
+    ///
+    /// The hook ([`crate::__private::HYDRATE`]) is submitted by `#[undra::query]` and
+    /// `#[undra::mutation]` (ADR-052), so a core whose queries are all written by hand does not
+    /// link it: there the first use of the client (this call) reads the persisted entries and
+    /// the offline queue, instead of nothing ever reading them.
     pub(crate) fn start(self: &Arc<Self>, ctx: &Ctx) {
         if self.started.swap(true, Ordering::SeqCst) {
             return;
+        }
+        if !hydrate_hook_linked() {
+            let (shared, hydrating) = (self.clone(), ctx.clone());
+            ctx.spawn(async move { shared.hydrate(&hydrating).await });
         }
         let shared = self.clone();
         undra_ports::on_connectivity_changed(ctx, move |online, _kind| {
@@ -1163,6 +1173,15 @@ async fn run_persist(shared: Arc<Shared>, ctx: Ctx, key: QueryKey) {
             }
         }
     }
+}
+
+/// Whether this program links the start-up hook that hydrates the cache, which it does when the
+/// core declares a query or a mutation with the macros (ADR-052). When it does, the runtime (or
+/// the test, for a `TestRuntime`) runs it; when it does not, [`Shared::start`] hydrates.
+fn hydrate_hook_linked() -> bool {
+    undra_runtime::inventory::iter::<undra_runtime::InitHook>
+        .into_iter()
+        .any(|hook| hook.name == crate::__private::HYDRATE.name)
 }
 
 /// The `Shared` of `ctx`'s runtime, created on first use.

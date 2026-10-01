@@ -123,6 +123,11 @@ jobs:
         run: cargo test -p undra-bench --test stress --release -- --nocapture
       - name: Soak (10 s)
         run: cargo run -p undra-bench --release --bin soak -- --seconds 10 --attempts 2
+      # The criterion benches are for humans and are not timed here, but they must still run:
+      # `--test` runs each once. (The query bench's platform calls broke unnoticed once, when the
+      # query layer stopped linking itself, ADR-052.)
+      - name: Criterion benches run (each once, untimed)
+        run: cargo bench -p undra-bench --benches -- --test
       - name: The JSON behind the numbers
         if: always()
         uses: actions/upload-artifact@v4

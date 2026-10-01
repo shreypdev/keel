@@ -77,8 +77,16 @@
 //! * **Linked by use.** Because the layer and the hook are submitted by `#[undra::query]` and
 //!   `#[undra::mutation]`, not by this crate, a core that declares neither does not link the
 //!   query runtime at all, and its start-up reads nothing from `Kv` (ADR-052: the layer was
-//!   34 KB of the 136 KB gzipped hello-world web core). A query or mutation written without the
-//!   macros submits [`__private::HYDRATE`] and [`__private::LAYER`] itself.
+//!   34 KB of the 136 KB gzipped hello-world web core). What such a core persisted while it had
+//!   queries stays in the store unread (an app that removes its last query leaves its old cache
+//!   entries and queue there; the next version that declares one deletes them, since their
+//!   schema hash no longer matches). A [`QueryDef`] written by hand, in a core without
+//!   macro-declared queries, is hydrated on the first use of the client (`ctx.query()`,
+//!   `ctx.mutate(..)`) rather than at start-up. A [`QueryRegistration`] or
+//!   [`MutationRegistration`] submitted by hand is reachable from a platform only through the
+//!   layer: submit [`__private::LAYER`] (and [`__private::HYDRATE`], for start-up hydration)
+//!   next to it, as the macros do; without the layer a platform's call is answered "unknown
+//!   object type" or "unknown function".
 //!
 //! # Deviations from SPEC 9 and 5.3
 //!
