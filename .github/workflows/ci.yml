@@ -124,6 +124,8 @@ jobs:
       - name: Swift tests
         working-directory: runtimes/swift/UndraRuntime
         run: swift test
+      - name: Generated Swift compiles against the runtime (every golden case; ADR-024 amendment)
+        run: UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-bindgen --test typecheck_swift
       - name: Swift-over-C-ABI acceptance
         run: bash crates/undra-ffi/tests/swift/run.sh
       - name: C ABI acceptance (undra.h with -Werror; the host contract under ASan)
