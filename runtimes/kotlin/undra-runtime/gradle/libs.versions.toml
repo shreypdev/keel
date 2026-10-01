@@ -4,6 +4,8 @@ kotlin = "2.0.21"
 # (which compiles against that jar) and the Gradle build see the same API.
 coroutines = "1.6.4"
 junit = "5.10.3"
+# The Android Gradle Plugin of :android-adapters; the same as the playground app's (examples/playground/android).
+agp = "8.7.3"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -13,3 +15,5 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+android-library = { id = "com.android.library", version.ref = "agp" }

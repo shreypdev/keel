@@ -1,7 +1,22 @@
-# android-adapters (not written yet)
+# android-adapters
 
-This directory reserves the place of the `:android-adapters` Gradle module (SPEC section 11). It will depend on `:runtime`; `:runtime`
-never depends on it. Nothing here compiles yet: `settings.gradle.kts` does not include it.
+The `:android-adapters` Gradle module of the Kotlin runtime (SPEC section 11): an Android library that
+depends on `:runtime` (never the reverse), so `:runtime` stays plain JVM, stdlib + kotlinx-coroutines only.
+`settings.gradle.kts` includes it only when an Android SDK is found (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, or
+`sdk.dir` in `local.properties`), so a JVM-only checkout still builds `:runtime`; its coordinates are
+`dev.undra:android-adapters:0.1.0-SNAPSHOT` (a composite build resolves them to this module, as the
+playground app does).
+
+## What it holds
+
+* **`ChoreographerFramePacer`** (`dev.undra.android`): paces the mirror's drains by the display
+  (ADR-031). Pass it when loading the core:
+
+  ```kotlin
+  UndraCore.load(LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH, mirror = MirrorOptions(framePacer = ChoreographerFramePacer())))
+  ```
+
+  Without it the runtime drains on a 60 Hz grid of its own (`undra-frame`), not aligned with the display.
 
 ## What it will hold
 
@@ -22,13 +37,12 @@ never depends on it. Nothing here compiles yet: `settings.gradle.kts` does not i
   | `Timer` | `Handler` on a `HandlerThread`, calling `UndraCore.timerFired` |
   | `Clock`, `Rng`, `Log` | the portable ones from `JvmAdapters.portable`; `Log` may go to `android.util.Log` instead of `java.util.logging` |
 
-* **A one-call installer** (`UndraAndroid.load(context, expectedSchemaHash)`) that builds the adapters from an `Application` context and calls
-  `UndraCore.load`. Main-thread delivery needs nothing here: `UndraDispatchers.main` already uses `Dispatchers.Main.immediate` when
-  it finds Android's `Looper`.
+* **A one-call installer** (`UndraAndroid.load(context, expectedSchemaHash)`) that builds the adapters from an `Application` context,
+  installs `ChoreographerFramePacer` and calls `UndraCore.load`.
 
 ## What the runtime already does for Android
 
-* No Android API is referenced at compile time; `android.os.Looper` is found by reflection.
+* No Android API is referenced at compile time; `android.os.Looper` is found by reflection (once, for the main thread).
 * `java.lang.ref.Cleaner` (Android 13+) is optional: a phantom-reference queue with one daemon thread stands in below API 33.
 * With `LoadOptions.defaultAdapters` on Android, only the portable adapters (Clock, Rng, Log, Timer) are installed; the classes that need
   `java.net.http` are never loaded. `Mode.REMOTE` fails with an `UndraModeException` because the JDK WebSocket is missing.

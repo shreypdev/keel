@@ -90,18 +90,18 @@ internal class ExecutorMainThread : MainThread {
 /**
  * Android's main thread, reached without a compile-time dependency: `Dispatchers.Main.immediate`
  * (needs `kotlinx-coroutines-android`, which every Android app using coroutines has) plus reflection on
- * `android.os.Looper` for the thread check.
+ * `android.os.Looper`, once, to find the main looper's thread for the thread check (which runs on every
+ * `callSync`, so it must not reflect).
  */
 internal class AndroidMainThread private constructor(
     override val dispatcher: CoroutineDispatcher,
-    private val mainLooper: Any,
-    private val myLooper: java.lang.reflect.Method,
+    private val thread: Thread,
 ) : MainThread {
     override fun post(task: Runnable) {
         dispatcher.dispatch(EmptyCoroutineContext, task)
     }
 
-    override fun isCurrent(): Boolean = myLooper.invoke(null) === mainLooper
+    override fun isCurrent(): Boolean = Thread.currentThread() === thread
 
     companion object {
         /** The Android main thread, or `null` when not on Android or when `Dispatchers.Main` is unusable. */
@@ -110,10 +110,10 @@ internal class AndroidMainThread private constructor(
             return try {
                 val looper = Class.forName("android.os.Looper")
                 val mainLooper = looper.getMethod("getMainLooper").invoke(null) ?: return null
-                val myLooper = looper.getMethod("myLooper")
+                val thread = looper.getMethod("getThread").invoke(mainLooper) as? Thread ?: return null
                 val immediate = Dispatchers.Main.immediate
                 immediate.isDispatchNeeded(EmptyCoroutineContext) // throws when no Main dispatcher is installed
-                AndroidMainThread(immediate, mainLooper, myLooper)
+                AndroidMainThread(immediate, thread)
             } catch (e: Exception) {
                 UndraLog.warn("Dispatchers.Main is not usable; falling back to a background thread for change-sets", e)
                 null
