@@ -52,12 +52,22 @@ public final class UndraCore: @unchecked Sendable {
     let transport: any UndraTransport
     private let state = Guarded<State>(State())
     private let blockingTimeout: Double
+    private let onError: (@Sendable (UndraUnhandledError) -> Void)?
     private let deferredQueue = DispatchQueue(label: "dev.undra.runtime.deferred")
 
-    init(transport: any UndraTransport, blockingCallTimeout: Double = 30) {
+    /// True while `onError` runs on this task or thread, so a handler that makes a failing call
+    /// is only logged, never reported again.
+    @TaskLocal private static var isReporting = false
+
+    init(
+        transport: any UndraTransport,
+        blockingCallTimeout: Double = 30,
+        onError: (@Sendable (UndraUnhandledError) -> Void)? = nil
+    ) {
         self.transport = transport
         self.mirror = Mirror()
         self.blockingTimeout = blockingCallTimeout
+        self.onError = onError
     }
 
     // MARK: Loading
@@ -110,7 +120,11 @@ public final class UndraCore: @unchecked Sendable {
     /// Starts `transport` and completes the attachment. Tests call this with a scripted
     /// transport; it does not touch `UndraCore.shared`.
     static func connect(transport: any UndraTransport, options: LoadOptions) throws -> UndraCore {
-        let core = UndraCore(transport: transport, blockingCallTimeout: options.blockingCallTimeout)
+        let core = UndraCore(
+            transport: transport,
+            blockingCallTimeout: options.blockingCallTimeout,
+            onError: options.onError
+        )
         let startOptions = TransportStartOptions(
             platform: UndraCore.platformName,
             logLevel: options.logLevel,
@@ -210,6 +224,7 @@ public final class UndraCore: @unchecked Sendable {
     /// - Parameter method: repeats the method id carried by `target`; `target` is authoritative.
     /// - Throws: `UndraReplyError` for any status other than ok; `UndraProtocolError` for an
     ///   undecodable reply; `UndraTransportError` if the core is shut down or does not answer.
+    ///   Generated methods map these with ``UndraCallError/mapped(_:)`` and never expose them.
     public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8]) throws -> [UInt8] {
         UndraCore.checkMethod(target, method)
         let callId = try reserveCallId()
@@ -230,7 +245,8 @@ public final class UndraCore: @unchecked Sendable {
     ///
     /// - Throws: `UndraReplyError` for any status other than ok (a typed error `E` is a reply with
     ///   `status == .error` whose `body` is the encoded `E`); `UndraTransportError` if the core is
-    ///   shut down or disconnected before it answers.
+    ///   shut down or disconnected before it answers. Generated methods map these with
+    ///   ``UndraCallError/mapped(_:domain:)`` and never expose them.
     public func call(_ target: CallTarget, method: UInt32, args: [UInt8]) async throws -> [UInt8] {
         UndraCore.checkMethod(target, method)
         try Task.checkCancellation()
@@ -362,6 +378,33 @@ public final class UndraCore: @unchecked Sendable {
             throw UndraProtocolError.nullHandle
         }
         return handle
+    }
+
+    // MARK: Reporting
+
+    /// Reports a failure that no caller can see (ADR-032): logs it at error level and passes it to
+    /// `LoadOptions.onError`. Generated commands and store `apply` call it; it never throws and never
+    /// stops the process.
+    ///
+    /// `error` is mapped the way a throwing call's error is (``UndraCallError/mapped(_:)``), so the
+    /// handler always receives an ``UndraCallError``. The handler runs synchronously on the calling
+    /// thread. A report made while the handler is running (a handler that calls a failing command) is
+    /// only logged.
+    ///
+    /// - Parameters:
+    ///   - error: What the call threw.
+    ///   - operation: What failed, as Swift spells it, for example `"Todos.toggle"`.
+    public func report(_ error: any Error, operation: String) {
+        let mapped = (UndraCallError.mapped(error) as? UndraCallError)
+            ?? UndraCallError.malformed(String(describing: error))
+        let unhandled = UndraUnhandledError(operation: operation, error: mapped)
+        UndraLog.error(unhandled.description)
+        guard let handler = onError, !UndraCore.isReporting else {
+            return
+        }
+        UndraCore.$isReporting.withValue(true) {
+            handler(unhandled)
+        }
     }
 
     // MARK: Observation and handles
