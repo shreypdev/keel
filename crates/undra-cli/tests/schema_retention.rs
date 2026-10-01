@@ -57,7 +57,7 @@ fn a_loaded_core_keeps_its_schema_and_jni_exports() {
 
     // The schema: reading it through the CLI's own loader also checks the library's self-reported
     // hash against its JSON. It must be the real schema, not the empty one a strip leaves behind.
-    let schema = undra_cli::schema::load_from_library(&lib, "playground-core")
+    let schema = undra_cli::schema::load_from_library(&lib, "playground-core", true)
         .expect("the built core library is not a readable Undra core");
     let empty = schema.records.is_empty()
         && schema.enums.is_empty()

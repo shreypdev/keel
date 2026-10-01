@@ -99,6 +99,11 @@ and the docs in a document consumers read by key, and the v1.x design lists C1 w
 while reserving 034 to 037 for track A). Integrator: if you read R11 more strictly, this is the
 text to promote.
 
+Review (2026-10-01): promoted. The meaning of a C ABI export changed and two tests had pinned the old
+one, so R11 wants a record: `.10x/adrs/ADR-050-schema-json-is-the-whole-schema.md` (Accepted). The
+review also made `--docs` on a core built before this change a `C0006` error instead of silently
+docless bindings (`.10x/reviews/2026-10-01-schema-json-review.md`).
+
 ### Tests (all new unless noted)
 
 * `undra-meta`: `to_json` is the whole document, equals the derived `Serialize`, hashes like the
@@ -168,7 +173,7 @@ gains it). `emit_standard_library` (the `undra-ports` self-proof) is unchanged.
 
 * `contract-tests/swift` (`FakeServer.swift`, `Support.swift`) and the runtime's own tests and
   adapters use the new names.
-* The playground iOS app's `HttpWire.swift` (89 lines: hand-written copies of `HttpRequest`,
+* The playground iOS app's `HttpWire.swift` (87 lines: hand-written copies of `HttpRequest`,
   `HttpResponse` and `Header`, there only because they were internal) is deleted;
   `ConnectivityWire.swift` keeps the two ids and the `Connectivity.changed` payload (now written
   with the public `NetKind`), and `PlaygroundNetwork` decodes `HttpRequest.undraDecoded(from:)` and
@@ -202,6 +207,6 @@ platforms, 54/54), and the iOS playground built with `xcodebuild` against the re
   generated tree gains comments) and needs its own decision; the library has had them all along.
 * The site's CLI page was edited because it described the old mechanism; `build-all.mjs` was run so
   the generated site files are in step. Nothing else under `site/` was touched.
-* No ADR for C1 (above). ADR numbers 034 to 037 are left to track A.
+* No ADR for C1 (above); superseded at review by ADR-050. ADR numbers 034 to 037 are left to track A.
 * `.10x/status.md` and `.10x/handoff.md` are the integrator's: the two v1.x queue items ("full-JSON
   `undra_schema_json`" and "Swift runtime `Port*` types public") are done on this branch.

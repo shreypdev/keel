@@ -143,8 +143,8 @@ fn read_schema_file(file: &Path, crate_name: &str) -> Result<Schema> {
 
 /// Builds the core as a host library and asks it for its schema.
 ///
-/// The library's schema always carries the doc comments (the same JSON the dev runner prints), so
-/// `--docs` only decides whether the bindings keep them: without it they are dropped, which is
+/// The library's schema carries the doc comments (the same JSON the dev runner prints, ADR-050),
+/// so `--docs` only decides whether the bindings keep them: without it they are dropped, which is
 /// what generated bindings have always been by default.
 fn schema_from_core(session: &Session<'_>, release: bool, docs: bool) -> Result<Schema> {
     session
@@ -153,8 +153,7 @@ fn schema_from_core(session: &Session<'_>, release: bool, docs: bool) -> Result<
     let library = host::cdylib(session, release)?;
     let core = session.core()?;
     session.ui.step("Reading the schema from the built library");
-    let schema = schema::load_from_library(&library, &core.package)?;
-    Ok(if docs { schema } else { schema.without_docs() })
+    schema::load_from_library(&library, &core.package, docs)
 }
 
 /// The generator configuration and output locations.

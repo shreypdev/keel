@@ -119,10 +119,11 @@ final class PublicStandardTypesTests: XCTestCase {
     }
 
     func testAnAppCanDeclareItsOwnTypeWithAStandardName() {
-        // The runtime's types are public, so a module that declares its own `Header` or
-        // `HttpRequest` shadows them inside that module (generated code relies on this when an app
-        // has a record that only shares a standard name). Naming the runtime's explicitly always
-        // works.
+        // A declaration closer than the import wins: here a local `Header`, in generated code a
+        // module's own `Header` or `HttpRequest` (an app record that only shares a standard name),
+        // which Swift prefers over an imported type of the same name inside that module. This test
+        // shows the nearer-scope rule and that the runtime's type can always be named in full; it
+        // does not compile a second module.
         struct Header { var text: String }
         XCTAssertEqual(Header(text: "mine").text, "mine")
         XCTAssertEqual(UndraRuntime.Header(name: "a", value: "b").name, "a")

@@ -157,7 +157,7 @@ nothing, as the Kotlin data class does), and doc comments from the Rust docs.
 * Generated Swift for an app that mentions standard types shrinks: the `stdlib` golden by 275 lines,
   the playground's `Errors.swift` by the 63 lines of its `HttpError`.
 * An app that answers `Http`, `Fs` or `Connectivity` itself no longer writes the wire types by hand:
-  the playground's `HttpWire.swift` (a 90-line copy of `HttpRequest`, `HttpResponse` and `Header`,
+  the playground's `HttpWire.swift` (an 87-line copy of `HttpRequest`, `HttpResponse` and `Header`,
   there only because they were internal) is gone, and `PlaygroundNetwork` decodes
   `HttpRequest.undraDecoded(from:)` and answers `HttpResponse(...).undraEncoded()`.
 * The public API surface of the Swift runtime grows by seven types and their conformances, which
