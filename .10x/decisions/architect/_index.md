@@ -20,3 +20,4 @@ takeover; treat these notes as [DISCOVERED] context, confirmed by reading the co
   Swift never traps; calls throw `E` / `CancellationError` / `UndraCallError`, sync `()` commands
   report to `LoadOptions.onError`; typed throws only on port requirements.
 * [v1x-default-choice](v1x-default-choice.md) — the v1.1 / v1.2 program: no reason to say no (2026-10-01).
+* [v1x-gaps](v1x-gaps.md) — gap audit (71 gaps: 7 block, 40 hurt, 24 polish) and ADR-034…037 proposed: WeakCtx, off-core writes refused in every build, typed stream failures, persisted-state migrations (2026-10-01).
