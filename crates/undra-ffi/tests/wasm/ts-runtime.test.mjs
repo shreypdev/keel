@@ -74,8 +74,9 @@ after(() => {
   for (const core of opened) core.close();
 });
 
-async function boot({ log = [], adapters = {}, ports, onClose, logLevel, drains } = {}) {
+async function boot({ log = [], adapters = {}, ports, onClose, logLevel, drains, ...extra } = {}) {
   const core = await UndraCore.load({
+    ...extra,
     mode: "wasm-main",
     wasm: module,
     expectedSchemaHash: SCHEMA_HASH,
@@ -142,10 +143,11 @@ function workerLike(thread) {
 }
 
 /** Loads the fixture core on a worker thread: `UndraCore.load({ mode: "wasm-worker" })`; `workerPorts` is the URL of `worker.ports`. */
-async function bootWorker({ log = [], adapters = {}, ports, onClose, onError, drains, workerPorts } = {}) {
+async function bootWorker({ log = [], adapters = {}, ports, onClose, onError, drains, workerPorts, ...extra } = {}) {
   const thread = new Worker(WORKER_SOURCE, { eval: true });
   threads.push(thread);
   const core = await UndraCore.load({
+    ...extra,
     mode: "wasm-worker",
     worker: workerPorts === undefined ? workerLike(thread) : { create: workerLike(thread), ports: workerPorts },
     wasm: module,
@@ -300,10 +302,11 @@ test("the core's own log records reach the log adapter, filtered by the configur
   assert.ok(!log.some((l) => l.level < 3), JSON.stringify(log));
 });
 
-test("a panic in the core logs at level 5, then the transport reports a trap and closes", async () => {
+test("a panic in the core logs at level 5, then the transport reports a trap and closes (recovery is off by default); onPanic hears it", async () => {
   const log = [];
   let closed = null;
-  const core = await boot({ log, onClose: (error) => (closed = error) });
+  const panics = [];
+  const core = await boot({ log, onClose: (error) => (closed = error), onPanic: (report) => panics.push(report) });
   const calc = await calculator(core);
   assert.throws(
     () => callSync(core, calc, "boom"),
@@ -316,6 +319,8 @@ test("a panic in the core logs at level 5, then the transport reports a trap and
   await macrotask();
   assert.ok(closed instanceof UndraTransportError, "the handler heard that the core died");
   assert.throws(() => callSync(core, calc, "add", concat(i64(1), i64(1))), UndraTransportError);
+  assert.equal(panics.length, 1);
+  assert.match(panics[0].message, /kaboom/);
 });
 
 // ----- randomness never degrades silently (ADR-049 decision 2.5, gap PO-11) -------------------------
@@ -622,6 +627,89 @@ inEachMode("a closed core rejects snapshot and restore with UndraTransportError(
     assert.ok(error instanceof UndraTransportError, String(error));
     assert.equal(error.reason, "closed");
   }
+});
+
+// ----- recovery: a trapped core restarts from its last snapshot (ADR-049 decision 3) ----------------
+
+inEachMode("recovery: a trap restarts the core from its last snapshot; calls in flight fail 'restarted', the store keeps its handle and value, an object goes stale", async (mode, bootMode) => {
+  const panics = [];
+  const restarts = [];
+  const errors = [];
+  const closed = [];
+  const core = await bootMode({
+    recovery: { snapshotEveryMs: 0 },
+    onPanic: (report) => panics.push(report),
+    onCoreRestarted: (event) => restarts.push(event),
+    onError: (error) => errors.push(error),
+    onClose: (error) => closed.push(error),
+  });
+  const { counter, seen, bump } = await observedCounter(core);
+  for (let i = 0; i < 3; i++) await bump();
+  assert.equal(seen.at(-1), 3);
+  // The snapshot is taken after the change, from a timer (and an idle callback where there is one).
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const calc = await calculator(core);
+  const never = call(core, calc, "never");
+  never.catch(() => {});
+  await macrotask();
+
+  const boom = await call(core, calc, "boom").then(() => undefined, (e) => e);
+  assert.ok(boom instanceof UndraTransportError, String(boom));
+  assert.equal(boom.reason, "restarted");
+  await until("the restart", () => restarts.length === 1, 10_000);
+  const neverFailure = await never.then(() => undefined, (e) => e);
+  assert.equal(neverFailure?.reason, "restarted", String(neverFailure));
+
+  // The panic report: the core's FATAL record and the trap's frames.
+  assert.equal(panics.length, 1);
+  assert.match(panics[0].message, /kaboom/);
+  assert.equal(panics[0].schemaHash, SCHEMA_HASH);
+  assert.ok(panics[0].frames.length > 0, `wasm frames in the report of "${panics[0].trap}": ${panics[0].frames.join(" | ")}`);
+  // The event, to both hooks.
+  const event = restarts[0];
+  assert.equal(event.report, panics[0]);
+  assert.equal(typeof event.restoredFromAgeMs, "number");
+  assert.ok(event.rejectedCalls >= 1, `rejected ${event.rejectedCalls}`);
+  assert.equal(event.staleObjects, 1, "the calculator, which is not a store");
+  assert.ok(errors.includes(event));
+  assert.deepEqual(closed, []);
+  assert.equal(core.closed, false);
+
+  // The store came back on the same handle with the snapshot's value, and is live.
+  assert.equal(core.mirror.has(counter), true);
+  assert.equal(seen.at(-1), 3);
+  await bump();
+  await until("the bump", () => seen.at(-1) === 4);
+  // The calculator went stale: a typed refusal, not a trap.
+  const stale = await call(core, calc, "add", concat(i64(1), i64(1))).then(() => undefined, (e) => e);
+  assert.ok(stale instanceof UndraReplyError, String(stale));
+  assert.equal(stale.status, ReplyStatus.BadRequest);
+  // New objects work, and their handles never collide with the stale one (the generation floor, ADR-022).
+  const fresh = await calculator(core);
+  assert.notEqual(fresh, calc);
+  assert.equal(decodeValue(codecs.i64, await call(core, fresh, "add", concat(i64(2), i64(3)))), 105n);
+});
+
+inEachMode("recovery: past maxRestarts within perMs the core stays dead and onClose reports the trap", async (_mode, bootMode) => {
+  const restarts = [];
+  const closed = [];
+  const core = await bootMode({
+    recovery: { snapshotEveryMs: 0, maxRestarts: 1 },
+    onCoreRestarted: (event) => restarts.push(event),
+    onClose: (error) => closed.push(error),
+  });
+  await observedCounter(core);
+  const first = await calculator(core);
+  await call(core, first, "boom").catch(() => {});
+  await until("the restart", () => restarts.length === 1, 10_000);
+  const second = await calculator(core);
+  const failure = await call(core, second, "boom").then(() => undefined, (e) => e);
+  assert.ok(failure instanceof UndraTransportError, String(failure));
+  assert.equal(failure.reason, "trap", "no restart left: the trap is what it is");
+  await until("the close", () => closed.length === 1, 10_000);
+  assert.equal(closed[0].reason, "trap");
+  assert.equal(core.closed, true);
+  assert.equal(restarts.length, 1);
 });
 
 test("a snapshot taken in one mode restores into a core of the other, and into a fresh core of the same", async () => {
