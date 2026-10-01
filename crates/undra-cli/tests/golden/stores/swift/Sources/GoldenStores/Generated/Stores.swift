@@ -63,7 +63,7 @@ public final class Clock: UndraStore, @unchecked Sendable {
 public final class Todos: UndraStore, @unchecked Sendable {
     public private(set) var todos: [Todo] = []
     public private(set) var filter: Filter = .all
-    /// Computed by the core; read-only.
+    /// Derived by the core from another list; read-only. Changes arrive as keyed patches.
     public private(set) var visible: [Todo] = []
     /// Computed by the core; read-only.
     public private(set) var remaining: UInt32 = 0
