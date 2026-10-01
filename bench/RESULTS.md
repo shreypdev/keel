@@ -596,11 +596,16 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 | `snapshot/cold_start_restore_100kb` | 84.68 µs | 83.95 µs .. 85.53 µs |
 | `snapshot/cold_start_restore_100kb_core_thread` | 90.27 µs | 88.78 µs .. 91.94 µs |
 
+After the hello-world size work at the end of persistence-v2 (the closure reader reads the canonical form only, the
+streamer checks lengths only when it copies), the budgets test's p50s on a loaded host: `restore_100kb` 27.97 µs,
+`restore_100kb_migrated` 76.48 µs (2.7x the fast path; the ratio gate's bound is 10).
+
 ### Web recovery (TypeScript, ADR-049)
 
 `cd examples/playground/web && UNDRA_BENCH_RECOVERY_RUNS=5 npm run bench:recovery` (after `undra build -C
 examples/playground --platform web`): headless Chromium 153.0.8010.12 (Playwright), cross-origin isolated (a 5 µs
-clock), wasm-main, on the machine above (Apple M5 Pro, macOS 26.5). The workload is the playground core with one
+clock), wasm-main, on the machine above (Apple M5 Pro, macOS 26.5), measured at the end of persistence-v2 with
+recovery as `crashRecovery()`, a layer over the transport (load average about 13: other builds were running). The workload is the playground core with one
 `Todos` store of 1,000 to-dos and 16 `Counter` stores, 52 signals: a 101,446-byte snapshot.
 `ts/snapshot_take_100kb` is what the snapshot keeper pays to keep one (the core's `snapshot` plus the copy kept, 50
 batches of 10 per run, so its p99 is over batch means); `ts/recovery_restart_100kb` is a trap until `onCoreRestarted`
@@ -610,8 +615,11 @@ runs in fresh pages. `bench/recovery.spec.ts` fails a run whose p50 is over its 
 
 | Benchmark | p50 | p99 | Budget (desktop Chromium) | Verdict |
 |---|---|---|---|---|
-| `ts/snapshot_take_100kb` | 0.041 ms .. 0.043 ms | 0.046 ms .. 0.071 ms | 2 ms | within |
-| `ts/recovery_restart_100kb` | 1.55 ms .. 1.64 ms | 5.47 ms .. 5.86 ms | 50 ms | within |
+| `ts/snapshot_take_100kb` | 0.063 ms .. 0.066 ms | 0.077 ms .. 0.094 ms | 2 ms | within |
+| `ts/recovery_restart_100kb` | 3.12 ms .. 3.22 ms | 5.33 ms .. 9.59 ms | 50 ms | within |
+
+The first measurement, with recovery built into `UndraCore` (before ADR-052's 26 KB gate on the hello-world runtime
+made it an import), read 0.041 ms .. 0.043 ms and 1.55 ms .. 1.64 ms on a quieter host.
 
 ### C ABI (`crates/undra-ffi/benches/boundary.rs`)
 

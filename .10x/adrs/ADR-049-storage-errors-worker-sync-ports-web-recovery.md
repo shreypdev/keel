@@ -297,6 +297,6 @@ room, and the deviations:
 * **`remote` keeps `UndraModeError` for `snapshot()` / `restore()`** (decision 3.1 mentions the envelopes): the wire
   has no host-to-core snapshot request (kind 15 flows from the core only), and recovery is wasm-only. The dev server's
   reload is ADR-053's.
-* **Bench.** `ts/snapshot_take_100kb` p50 0.041–0.043 ms (budget 2 ms) and `ts/recovery_restart_100kb` p50
-  1.55–1.64 ms, p99 at most 5.86 ms (budget 50 ms), headless Chromium, wasm-main, five runs (`bench/RESULTS.md`, "Web
-  recovery"); `examples/playground/web/bench/recovery.spec.ts` fails a run over its budget.
+* **Bench.** `ts/snapshot_take_100kb` p50 0.063–0.066 ms (budget 2 ms) and `ts/recovery_restart_100kb` p50
+  3.12–3.22 ms, p99 at most 9.6 ms (budget 50 ms), headless Chromium, wasm-main, five runs on a loaded host
+  (`bench/RESULTS.md`, "Web recovery"); `examples/playground/web/bench/recovery.spec.ts` fails a run over its budget.

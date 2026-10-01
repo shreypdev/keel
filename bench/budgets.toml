@@ -667,10 +667,13 @@ measured = 1.43
 # The hello-world web core: the `undra init` template (a store with a keyed list and two computeds,
 # a record, an enum, an error, a function; no query) built by `undra build --platform web`
 # (release-wasm: opt-level z, LTO fat, panic abort; then wasm-opt -Oz, binaryen 133). The wasm module
-# alone: Undra's Rust runtime, the C/wasm ABI shim and the core. The blueprint's 120 KB.
+# alone: Undra's Rust runtime, the C/wasm ABI shim and the core. The blueprint's 120 KB. Re-recorded by
+# persistence-v2 (ADR-037, ADR-049): snapshot layout 2 and the migrating restore (closures, the canonical
+# description, the streamed converter) are in every core, since `undra_restore` is; 102,722 -> 119,565.
+# Hooks, the value decoder and the E0066 check are linked only by a core that has a `#[undra::migrate]`.
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 102722
+measured_gzip_bytes = 119565
 tolerance = 0.05
 
 # What a hello-world app ships of the JavaScript runtime: `@undra/runtime` as the template's
@@ -679,8 +682,10 @@ tolerance = 0.05
 # worker script are not in it. The blueprint's 8 KB predates the transports, reconnect, coalescing
 # and worker mode: ADR-052's decision 2 (2026-10-01) restated it at 24 KB, and after the merge with
 # the parity failure model (its error channel added the bytes) at 26 KB; the follow-up piece
-# `ts-runtime-size` targets 16 KB. Gated like the wasm.
+# `ts-runtime-size` targets 16 KB. Gated like the wasm. Re-recorded by persistence-v2 (ADR-049: typed storage
+# errors, worker protocol 3, the snapshot layout-2 codec; crash recovery is `crashRecovery()`, which only an app
+# that imports it ships): 24,841 -> 25,906.
 [size."web/hello-runtime-js"]
 budget_gzip_bytes = 26000
-measured_gzip_bytes = 24841
+measured_gzip_bytes = 25906
 tolerance = 0.05
