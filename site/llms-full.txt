@@ -2774,6 +2774,7 @@ Landed in the day after v1.0, each behind an ADR and an adversarial review.
 - No manual build stepA Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project in lockstep; undra doctor names every fix.
 - The web bundle under its budget (ADR-052)The hello-world core ships at 102.7 KB gzipped against a 120 KB budget, measured and gated in CI; the number on this site comes from the record.
 - State-preserving reload (ADR-053)undra dev snapshots the old core and restores into the rebuilt one; the dev bar says whether the state was kept, and why not when it was not.
+- Derived keyed lists (ADR-039)A filtered, sorted view over a 10,000-row list costs what changed: one row edit is 158 bytes on the wire where it was 353 KB.
 
 Now
 
@@ -2798,7 +2799,6 @@ planned
 Planned for the releases after v1.0. The order may change with what the benchmarks show.
 
 - DevtoolsA page served by undra dev: store state, a change-set timeline with time travel, port and query logs, perf counters.
-- Derived keyed lists (ADR-039)Incremental filter, sort and map over a keyed list, so a view over 10,000 rows costs what changed.
 - Db and WebSocket portsSQL over SQLite on every platform with the same deterministic fake; bidirectional backpressured streams.
 - Objects as parameters, host callbacks, generics and Decimal (ADR-040 to 042)The boundary types a production app reaches for, each with a schema description and generated code that reads as native.
 - A testing kit for appsPreviews against an in-memory core; port traffic recorded once and replayed in tests.

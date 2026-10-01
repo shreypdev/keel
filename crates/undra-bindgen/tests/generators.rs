@@ -1212,16 +1212,32 @@ fn a_derived_list_is_declared_exactly_as_a_computed_list_and_also_applies_patche
             ),
         };
         let text = file(&files, stores);
+        // The declarations are the same shape; only the doc comment says which kind it is.
+        let code_only = |lines: Vec<String>| -> Vec<String> {
+            lines
+                .into_iter()
+                .filter(|line| {
+                    let l = line.trim_start();
+                    !(l.starts_with("///") || l.starts_with("/**") || l.starts_with('*'))
+                })
+                .collect()
+        };
         assert_eq!(
-            declaration(text, &lang, derived),
-            declaration(text, &lang, plain),
+            code_only(declaration(text, &lang, derived)),
+            code_only(declaration(text, &lang, plain)),
             "{lang}: a derived list's declaration is a computed list's"
         );
         assert!(
             declaration(text, &lang, derived)
                 .iter()
+                .any(|line| line.contains("Derived by the core from another list; read-only.")),
+            "{lang}: documented as derived and read-only"
+        );
+        assert!(
+            declaration(text, &lang, plain)
+                .iter()
                 .any(|line| line.contains("Computed by the core; read-only.")),
-            "{lang}: documented read-only"
+            "{lang}: a plain computed list stays documented as computed"
         );
         assert!(
             text.contains(&patch_of.replace("NAME", derived)),

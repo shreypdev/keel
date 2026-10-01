@@ -401,3 +401,11 @@ Matrix at checkpoint 13: Rust 2,603 · TS 1,132 · Kotlin 616 · Swift 482 · RN
 
 Matrix at checkpoint 14: Rust 2,603 · TS 1,132 · Kotlin 616 · Swift 511 · RN 60 · contracts 54/54.
 In flight: `derived-lists` (opus review), `abi-table`, `persistence-v2` (finishing), `ports-v2` (ADR-047/048 → implementation), `devtools` (ADR-054), `testkit` (ADR-055).
+
+### Checkpoint 15 (2026-10-02) — derived keyed lists
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **E2 derived-lists** (ADR-039 Accepted): `DerivedList<T>` / `derive()` with filter/map/sort (+ parameters) and `count()`, two arena order-statistic trees, source taps (4,096 cap), one patch per transaction, the 256-op parameter re-walk; the playground's `Todos` on recorded ops with derived `visible`/`remaining`; S19 replays a 60,000-op seeded recording on all columns; nine budget rows, two ratios, a stress scenario; a landing card "Filtered view of a 10,000-row list, one row changed" (392 ns, 158 B — was 176 µs, 353 KB) | `76f9364` + `(wording)` | opus review `.10x/reviews/2026-10-02-derived-lists-review.md`: sound, no High/Medium; a second model (four views + a computed, tap overflow inside one transaction) 3 × 3,000 cases; the hello-world wasm unchanged (a core without derived lists does not link the index); L1 S19 on the RN column, L2 patch merging pinned on Kotlin/Swift, L4 read-your-writes documented; Rust 2,700 · Swift 512 · Kotlin 617 · TS 1,132 · RN 60 · contracts 57/57 (19 × 3); playground hash `0xc5f05c376fde398c` |
+
+Matrix at checkpoint 15: Rust 2,700 · TS 1,132 · Kotlin 617 · Swift 512 · RN 60 · contracts 57/57.
