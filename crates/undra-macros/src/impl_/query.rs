@@ -20,13 +20,13 @@
 //! `idempotent` are off; a mutation's `key` defaults to the empty string.
 
 use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote, quote_spanned};
+use quote::{ToTokens, format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{ItemFn, LitInt, LitStr};
 
 use super::attrs::{flag, option_value, parse_args, root_arg};
 use super::check::Checks;
-use super::common::{item_root, param_meta, submit};
+use super::common::{item_root, mentions_self, param_meta, send_assertion, submit};
 use super::diag::{Diag, Errors, code};
 use super::naming::{pascal_case, unraw};
 use super::object::{analyze, arg_local};
@@ -281,6 +281,18 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
             &format!("`#[undra::{attribute}]` applies to free functions"),
             "make it a free function",
         ));
+    } else if mentions_self(item.sig.to_token_stream()) {
+        // Written inside an `impl` block that is not `#[undra::api]`: a free function cannot
+        // name `Self`. The one finding: the rest of the signature would only add noise.
+        return Err(
+            Diag::new(
+                code::E0007,
+                format!("`#[undra::{attribute}]` on `{fn_name}`, which is inside an `impl` block: its signature uses `Self`"),
+                format!("a {attribute} is a free function, and the macro generates a struct next to it, which an impl block cannot hold"),
+                format!("move `{fn_name}` out of the impl block, to module level, and spell out the type instead of `Self`"),
+            )
+            .on(&item.sig.ident),
+        );
     }
     if analysis.ctx.is_none() {
         errors.push(signature_error(
@@ -340,7 +352,9 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
             "spell the return type as `Result<T, E>` with `E` a `#[undra::error]` enum",
         ));
     };
-    let checks = checks.emit(&root);
+    // Named, not `const _`: valid in an `impl` block too, see the guard below.
+    let checks_name = format_ident!("__UNDRA_CHECKS_{}", pascal_case(&fn_name));
+    let checks = checks.emit_named(&root, &checks_name);
 
     // Generation.
     let meta = root.meta();
@@ -385,12 +399,14 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
         >>
     };
     let span = fn_ident.span();
+    let send_fn = send_assertion(span);
     let run_body = quote_spanned! {span=>
         // E0022: reported by `rustc` at the function, see `object.rs`.
-        fn __undra_assert_send<T: ::core::marker::Send>(_: &T) {}
+        #[allow(non_snake_case)]
+        fn #send_fn<T: ::core::marker::Send>(_: &T) {}
         let ( #(#param_names,)* ) = __params;
         let __fut = async move { #fn_ident( #ctx_arg #(, #param_names)* ).await };
-        __undra_assert_send(&__fut);
+        #send_fn(&__fut);
         ::std::boxed::Box::pin(__fut)
     };
 
@@ -477,15 +493,11 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
         },
     };
 
-    Ok(quote! {
-        #item
-
+    let items = quote! {
         #[doc = #struct_doc]
         #vis struct #struct_name;
 
         #inherent
-
-        #trait_impl
 
         #[allow(non_upper_case_globals)]
         static #meta_static: #meta::QueryMeta = #meta::QueryMeta {
@@ -501,6 +513,37 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
         };
         #registration
         #erased_registration
+    };
+
+    // A macro cannot see the block it sits in, and the items above are module-level: a query
+    // inside a plain `impl` block (one that is not `#[undra::api]`, which `object.rs` reports)
+    // would make `rustc` complain about each of them (a struct, impls, statics, ..: ten errors
+    // that never mention the query). Declared and invoked through a `macro_rules!` whose name is
+    // the rule, there is one parse error ("macro definition is not supported in `trait`s or
+    // `impl`s ... move it out to a nearby module scope") and one "cannot find macro
+    // `_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block`".
+    //
+    // Only what holds no token of the user's goes in: an error that `rustc` reports on a type
+    // the user wrote (a parameter that cannot cross the boundary) would otherwise say that it
+    // "originates in the macro `_undra_error_E0007_..`". So the `QueryDef` impl, which names the
+    // parameter and result types, and the checks stay outside. In an `impl` block they are not
+    // items `rustc` accepts either (one more parse error for the impl; the checks are a named
+    // constant, which is valid there).
+    let guard = format_ident!(
+        "_undra_error_{}_a_{}_is_a_free_function_move_it_out_of_the_impl_block",
+        code::E0007,
+        attribute
+    );
+    Ok(quote! {
+        #item
+
+        #[doc(hidden)]
+        macro_rules! #guard {
+            () => { #items };
+        }
+        #guard!();
+
+        #trait_impl
 
         #checks
     })
@@ -807,6 +850,12 @@ mod tests {
         )
         .unwrap();
         assert!(has(&out, "impl ::k::query::QueryDef for QQuery"), "{out}");
-        assert!(has(&out, "__undra_assert_send(&__fut)"), "{out}");
+        assert!(
+            has(
+                &out,
+                "_undra_error_E0022_the_future_of_an_async_method_must_be_Send(&__fut)"
+            ),
+            "{out}"
+        );
     }
 }

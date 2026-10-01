@@ -1,0 +1,4 @@
+error[undra::E0065]: a signal of a store owned by runtime 5 was written from a thread that does not hold its core lock
+  = note: signal writes belong on the core: the runtime delivers each change-set to its host in commit order under its core lock, so a write from any other thread (a blocking-pool worker, a host or embedder thread, another runtime's core) would be delivered unordered, to the wrong host, or not at all
+  = help: return the value to the task or call that awaits it (`ctx.spawn`, a dispatched call, the result of `spawn_blocking`), or wrap the write in `ctx.with_core(|| ..)` on a host thread; `Signal::try_set` reports this as a `WriteError` instead of panicking
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0065

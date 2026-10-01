@@ -18,9 +18,13 @@
 //! * the identity checks of `check.rs` for every parameter and return type, and the hidden
 //!   `__UNDRA_IS_OBJECT` marker that lets them say "an object cannot be a value" (E0064).
 //!
-//! A second `#[undra::api] impl` block for the same type defines the dispatcher twice: the
-//! expansion carries a constant named after the rule, so the duplicate-definition error says
-//! what is wrong.
+//! A type takes one `#[undra::api] impl` block. A macro cannot see the other blocks of the type,
+//! so a second one is found by `rustc`: the expansion carries a constant named after the rule
+//! (`_undra_error_E0007_<Type>_has_two_undra_api_impl_blocks_merge_them_into_one`), whose
+//! duplicate-definition error reads as the diagnostic and comes first. Everything else the block
+//! defines that is not an `impl` lives in an anonymous `const _` block, so only the two
+//! unavoidable conflicts follow it (`UndraObject` implemented twice, the `__UNDRA_IS_OBJECT`
+//! marker defined twice) and not one error for every generated name.
 //!
 //! Constructors (a `pub fn` without receiver that returns `Self` or `Result<Self, E>`) are
 //! listed separately in the meta. Their dispatch arm builds the value, inserts it into the
@@ -30,14 +34,16 @@
 //! added.
 
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote, quote_spanned};
+use quote::{ToTokens, format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::visit_mut::{self, VisitMut};
 use syn::{FnArg, ImplItem, ItemFn, ItemImpl, Pat, ReturnType, Signature, Type, Visibility};
 
 use super::attrs::{Site, docs, is_undra_macro_path, take};
-use super::check::Checks;
-use super::common::{check_generics, derived, item_root, param_meta, submit};
+use super::check::{Checks, panic_text};
+use super::common::{
+    check_generics, derived, item_root, mentions_self, param_meta, send_assertion, submit,
+};
 use super::diag::{Diag, Errors, code};
 use super::naming::{fnv1a32, unraw};
 use super::paths::Root;
@@ -517,7 +523,8 @@ fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) 
     let span = m.ident.span();
     let sync_ok = |value: TokenStream| quote!(__rt.sync_ok(&#value, #wire::Encode::encode));
     let sync_err = |value: TokenStream| quote!(__rt.sync_err(&#value, #wire::Encode::encode));
-    let assert_send = |what: TokenStream| quote_spanned!(span=> __undra_assert_send(&#what););
+    let send_fn = send_assertion(span);
+    let assert_send = |what: TokenStream| quote_spanned!(span=> #send_fn(&#what););
     let out_ok = |value: TokenStream| {
         let bytes = enc(&wire, &value);
         quote!(::core::result::Result::<_, ::std::vec::Vec<u8>>::Ok(#bytes))
@@ -826,7 +833,8 @@ fn fallible_stream_result(
     let wire = root.wire();
     let runtime = root.runtime();
     let span = m.ident.span();
-    let assert_send = |what: TokenStream| quote_spanned!(span=> __undra_assert_send(&#what););
+    let send_fn = send_assertion(span);
+    let assert_send = |what: TokenStream| quote_spanned!(span=> #send_fn(&#what););
     needs.try_stream = true;
     needs.send_assert = true;
     let check = assert_send(quote!(__stream));
@@ -898,9 +906,11 @@ fn helpers(root: &Root, needs: &Needs) -> TokenStream {
         // `Send`. `rustc` cannot carry an Undra code, but this assertion, called with the
         // method's span, makes its own "future cannot be sent between threads safely"
         // error (with the offending value and the `.await` it lives across) point at the
-        // method instead of at generated code.
+        // method instead of at generated code, and its name, which the error's last note
+        // quotes, carries the code (see `common::send_assertion`).
+        let send_fn = send_assertion(proc_macro2::Span::call_site());
         quote! {
-            fn __undra_assert_send<T: ::core::marker::Send>(_: &T) {}
+            fn #send_fn<T: ::core::marker::Send>(_: &T) {}
         }
     } else {
         TokenStream::new()
@@ -1378,9 +1388,11 @@ pub(crate) fn expand_impl(
         errors.push(
             Diag::new(
                 code::E0011,
-                format!("store `{type_name}` has no constructor"),
-                "the platforms create a store by calling one of its constructors; without one it can never be instantiated",
-                "add `pub fn new(..) -> Self` to the `#[undra::api(store)]` impl block",
+                format!("store `{type_name}` has no constructor in this `#[undra::api(store)]` block"),
+                "the platforms create a store by calling one of its constructors, and a type takes one `#[undra::api]` impl block, so a constructor in another block is not seen",
+                format!(
+                    "add `pub fn new(ctx: Ctx) -> Self` to this block; if `{type_name}` has a second `#[undra::api]` block (where the constructor is), move this block's methods into that one"
+                ),
             )
             .on(&item.self_ty),
         );
@@ -1455,14 +1467,28 @@ pub(crate) fn expand_impl(
 
     // The impl block and the struct must agree on whether this is a store.
     let probe_message = if store {
-        format!(
-            "error[undra::E0011]: `{type_name}` is implemented with `#[undra::api(store)]` but the struct has no `#[undra::store]`\n  = note: the `store` marker wires the constructors to the struct's signals, which only `#[undra::store]` sets up\n  = help: add `#[undra::store]` to `struct {type_name}`, or remove `store` from the impl attribute\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0011"
+        Diag::new(
+            code::E0011,
+            format!(
+                "`{type_name}` is implemented with `#[undra::api(store)]` but the struct has no `#[undra::store]`"
+            ),
+            "the `store` marker wires the constructors to the struct's signals, which only `#[undra::store]` sets up",
+            format!(
+                "add `#[undra::store]` to `struct {type_name}`, or remove `store` from the impl attribute"
+            ),
         )
     } else {
-        format!(
-            "error[undra::E0011]: `{type_name}` is a `#[undra::store]` but its `#[undra::api]` impl block is not marked as a store\n  = note: the impl block of a store must say so, so its constructors can attach the store's signals and its struct literals get the hidden cell field\n  = help: write `#[undra::api(store)]` on the impl block\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0011"
+        Diag::new(
+            code::E0011,
+            format!(
+                "`{type_name}` is a `#[undra::store]` but its `#[undra::api]` impl block is not marked as a store"
+            ),
+            "the impl block of a store must say so, so its constructors can attach the store's signals and its struct literals get the hidden cell field",
+            "write `#[undra::api(store)]` on the impl block",
         )
     };
+    // The text of an assertion is a format string: braces escaped.
+    let probe_message = panic_text(&probe_message);
     let probe_assert = if store {
         quote!(::core::assert!(<#self_ty>::__UNDRA_IS_STORE, #probe_message);)
     } else {
@@ -1527,11 +1553,13 @@ pub(crate) fn expand_impl(
     } else {
         quote!(#type_docs)
     };
-    // One `#[undra::api] impl` block per type: the dispatcher, the registration and the object
-    // impl are named after the type. This constant repeats in a second block and its
-    // duplicate-definition error then reads as the rule.
+    // One `#[undra::api] impl` block per type: the object impl and the `__UNDRA_IS_OBJECT`
+    // marker are defined on the type itself, so a second block defines them twice. This constant
+    // repeats in a second block too, and its duplicate-definition error, which `rustc` reports
+    // before the conflicting impls, reads as the rule and the fix.
     let one_block = format_ident!(
-        "_undra_error_E0007_a_type_takes_one_undra_api_impl_block_{}",
+        "_undra_error_{}_{}_has_two_undra_api_impl_blocks_merge_them_into_one",
+        code::E0007,
         type_name
     );
 
@@ -1557,71 +1585,76 @@ pub(crate) fn expand_impl(
             pub const __UNDRA_IS_OBJECT: bool = true;
         }
 
-        #[doc(hidden)]
-        #[allow(non_camel_case_types, dead_code)]
-        trait #probe_trait {
-            const __UNDRA_IS_STORE: bool = false;
-            const __UNDRA_DOCS: &'static str = "";
-            fn __undra_cell_ref(&self) -> &::std::sync::Arc<#signals::StoreCell> {
-                ::core::unreachable!("not a `#[undra::store]`: E0011 stops the build first")
-            }
-            fn __undra_restore(
-                _ctx: #runtime::Ctx,
-                _r: &mut #wire::Reader<'_>,
-            ) -> ::core::result::Result<Self, #wire::WireError>
-            where
-                Self: ::core::marker::Sized,
-            {
-                ::core::unreachable!("not a `#[undra::store]`: E0011 stops the build first")
-            }
-            const __UNDRA_STORE_META: #meta::StoreMeta = #meta::StoreMeta { signals: &[] };
-            fn __undra_attach_all(&self) -> ::core::result::Result<(), #signals::SignalsError> {
-                ::core::result::Result::Ok(())
-            }
-            fn __undra_set_handle(&self, _handle: u64) {}
-        }
-        impl #probe_trait for #self_ty {}
-
-        const _: () = {
-            #probe_assert
-        };
-
         #derived
         impl #runtime::UndraObject for #self_ty {
             const TYPE_ID: u32 = #meta::ids::type_id(#type_name);
             const NAME: &'static str = #type_name;
         }
 
-        #store_object
-
+        // Private to this block: a second block for the type does not define any of this twice.
         #[doc(hidden)]
-        #[allow(non_snake_case, non_upper_case_globals, unused_variables, unused_mut, deprecated, clippy::all)]
-        fn #dispatch_fn(
-            __rt: &dyn ::core::any::Any,
-            __call: #meta::DispatchCall<'_>,
-        ) -> #meta::DispatchOutcome {
-            #helper_items
-            let ::core::option::Option::Some(__rt) = __rt.downcast_ref::<#runtime::Runtime>() else {
-                return __undra_unknown();
-            };
-            #( const #id_consts: u32 = #id_values; )*
-            match __call.method_id {
-                #(#arms)*
-                _ => __undra_unknown(),
+        #[allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code)]
+        const _: () = {
+            trait #probe_trait {
+                const __UNDRA_IS_STORE: bool = false;
+                const __UNDRA_DOCS: &'static str = "";
+                fn __undra_cell_ref(&self) -> &::std::sync::Arc<#signals::StoreCell> {
+                    ::core::unreachable!("not a `#[undra::store]`: E0011 stops the build first")
+                }
+                fn __undra_restore(
+                    _ctx: #runtime::Ctx,
+                    _r: &mut #wire::Reader<'_>,
+                ) -> ::core::result::Result<Self, #wire::WireError>
+                where
+                    Self: ::core::marker::Sized,
+                {
+                    ::core::unreachable!("not a `#[undra::store]`: E0011 stops the build first")
+                }
+                const __UNDRA_STORE_META: #meta::StoreMeta = #meta::StoreMeta { signals: &[] };
+                fn __undra_attach_all(&self) -> ::core::result::Result<(), #signals::SignalsError> {
+                    ::core::result::Result::Ok(())
+                }
+                fn __undra_set_handle(&self, _handle: u64) {}
             }
-        }
+            impl #probe_trait for #self_ty {}
 
-        #[allow(non_upper_case_globals)]
-        static #meta_static: #meta::ObjectMeta = #meta::ObjectMeta {
-            name: #type_name,
-            type_id: #meta::ids::type_id(#type_name),
-            constructors: &[ #(#ctor_metas),* ],
-            methods: &[ #(#method_metas),* ],
-            store: #store_meta,
-            docs: #object_docs,
-            dispatch: #dispatch_fn,
+            // The assertion is the length of an array in a signature, so `rustc` evaluates it
+            // while it checks signatures, before any function body: E0011 comes before what the
+            // bodies get wrong because of it (a struct literal patched with `__undra_cell` when
+            // the struct is not a store).
+            fn __undra_store_probe() -> [(); { #probe_assert 0 }] {
+                []
+            }
+
+            #store_object
+
+            #[allow(unused_variables, unused_mut, deprecated, clippy::all)]
+            fn #dispatch_fn(
+                __rt: &dyn ::core::any::Any,
+                __call: #meta::DispatchCall<'_>,
+            ) -> #meta::DispatchOutcome {
+                #helper_items
+                let ::core::option::Option::Some(__rt) = __rt.downcast_ref::<#runtime::Runtime>() else {
+                    return __undra_unknown();
+                };
+                #( const #id_consts: u32 = #id_values; )*
+                match __call.method_id {
+                    #(#arms)*
+                    _ => __undra_unknown(),
+                }
+            }
+
+            static #meta_static: #meta::ObjectMeta = #meta::ObjectMeta {
+                name: #type_name,
+                type_id: #meta::ids::type_id(#type_name),
+                constructors: &[ #(#ctor_metas),* ],
+                methods: &[ #(#method_metas),* ],
+                store: #store_meta,
+                docs: #object_docs,
+                dispatch: #dispatch_fn,
+            };
+            #registration
         };
-        #registration
 
         #checks
     })
@@ -1662,7 +1695,7 @@ fn reject_undra_macros(attrs: &[syn::Attribute], errors: &mut Errors) -> bool {
 }
 
 /// The macro named by `#[undra::name]` / `#[undra_macros::name]`.
-fn undra_macro_name(attr: &syn::Attribute) -> Option<String> {
+pub(crate) fn undra_macro_name(attr: &syn::Attribute) -> Option<String> {
     let path = attr.path();
     if !is_undra_macro_path(path) {
         return None;
@@ -1683,6 +1716,26 @@ fn undra_macro_name(attr: &syn::Attribute) -> Option<String> {
 pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Result<TokenStream> {
     let mut errors = Errors::new();
     let root = item_root(&mut item.attrs, args_root, &mut errors);
+    if mentions_self(item.sig.to_token_stream()) && item.sig.receiver().is_none() {
+        // An associated function (a constructor, usually) of an impl block that is not itself
+        // `#[undra::api]`: a free function cannot name `Self`. This is the one finding; what the
+        // rest of the signature would add (`Self` is not a wire type either) is only noise.
+        return Err(
+            Diag::new(
+                code::E0007,
+                format!(
+                    "`#[undra::api]` on `{}`, which is an associated function: its signature uses `Self`",
+                    item.sig.ident
+                ),
+                "`Self` only exists inside an `impl` block, and `#[undra::api]` on a function exposes a free function; the functions of an object are exposed by putting the attribute on the `impl` block they are in",
+                format!(
+                    "remove `#[undra::api]` from `{}` and write `#[undra::api]` above the `impl` block (it exposes every `pub fn` in it)",
+                    item.sig.ident
+                ),
+            )
+            .on(&item.sig.ident),
+        );
+    }
     let analysis = analyze(&mut item.sig, &mut errors);
     if analysis.has_receiver {
         errors.push(
@@ -1712,8 +1765,8 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
     ensure_static_streams_in(&mut item.sig.output);
     errors.finish()?;
     let checks = checks.emit(&root);
-
     let name = unraw(&item.sig.ident);
+
     let model = FnModel {
         ident: item.sig.ident.clone(),
         name: name.clone(),
@@ -1789,6 +1842,8 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
 mod tests {
     use super::*;
     use crate::tests::has;
+
+    const SEND_FN: &str = "_undra_error_E0022_the_future_of_an_async_method_must_be_Send";
 
     fn impl_result(src: &str, store: bool) -> Result<String, String> {
         let item: ItemImpl = syn::parse_str(src).unwrap();
@@ -1978,11 +2033,11 @@ mod tests {
     #[test]
     fn async_methods_get_a_send_check() {
         let out = impl_result("impl C { pub async fn f(&self) -> u8 { 1 } }", false).unwrap();
-        assert!(has(&out, "__undra_assert_send"), "{out}");
-        assert!(has(&out, "__undra_assert_send(&__fut)"), "{out}");
+        assert!(has(&out, SEND_FN), "{out}");
+        assert!(has(&out, &format!("{SEND_FN}(&__fut)")), "{out}");
         assert!(has(&out, "is_async: true"), "{out}");
         let out = impl_result("impl C { pub fn f(&self) -> u8 { 1 } }", false).unwrap();
-        assert!(!has(&out, "__undra_assert_send"), "{out}");
+        assert!(!has(&out, SEND_FN), "{out}");
     }
 
     #[test]

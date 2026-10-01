@@ -66,7 +66,7 @@ public final class ConnectivityAdapter: UndraAdapter, @unchecked Sendable {
         usesWifi: Bool,
         usesCellular: Bool,
         usesWired: Bool
-    ) -> (online: Bool, kind: PortNetKind) {
+    ) -> (online: Bool, kind: NetKind) {
         if status != .satisfied {
             return (online: false, kind: .disconnected)
         }
@@ -83,7 +83,7 @@ public final class ConnectivityAdapter: UndraAdapter, @unchecked Sendable {
     }
 
     /// The parameters of `Connectivity.changed(online, kind)`, encoded.
-    static func encodeChanged(online: Bool, kind: PortNetKind) -> [UInt8] {
+    static func encodeChanged(online: Bool, kind: NetKind) -> [UInt8] {
         var writer = UndraWriter()
         writer.writeBool(online)
         kind.undraEncode(&writer)

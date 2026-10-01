@@ -73,11 +73,65 @@ fn run_recovering(
 fn wrong_item(macro_name: &str, expected: &str, item: &syn::Item) -> syn::Error {
     Diag::new(
         code::E0007,
-        format!("`#[undra::{macro_name}]` cannot be applied to this item"),
+        format!(
+            "`#[undra::{macro_name}]` cannot be applied to {}",
+            item_kind(item)
+        ),
         format!("`#[undra::{macro_name}]` applies to {expected}"),
-        "move the attribute to a supported item",
+        format!("move `#[undra::{macro_name}]` onto {expected}, or remove it"),
     )
-    .on(item)
+    .on(&Pointer::of(item))
+}
+
+/// Where a diagnostic about a whole item points: its name if it has one (the rest of a `struct`
+/// or an `enum` is not what is wrong with it), else the item.
+struct Pointer<'a>(&'a syn::Item);
+
+impl<'a> Pointer<'a> {
+    fn of(item: &'a syn::Item) -> Pointer<'a> {
+        Pointer(item)
+    }
+}
+
+impl quote::ToTokens for Pointer<'_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        use syn::Item;
+        match self.0 {
+            Item::Const(i) => i.ident.to_tokens(tokens),
+            Item::Enum(i) => i.ident.to_tokens(tokens),
+            Item::Fn(i) => i.sig.ident.to_tokens(tokens),
+            Item::Mod(i) => i.ident.to_tokens(tokens),
+            Item::Static(i) => i.ident.to_tokens(tokens),
+            Item::Struct(i) => i.ident.to_tokens(tokens),
+            Item::Trait(i) => i.ident.to_tokens(tokens),
+            Item::TraitAlias(i) => i.ident.to_tokens(tokens),
+            Item::Type(i) => i.ident.to_tokens(tokens),
+            Item::Union(i) => i.ident.to_tokens(tokens),
+            other => other.to_tokens(tokens),
+        }
+    }
+}
+
+/// What an item is, with its article, for a sentence ("a `trait`", "an `enum`").
+fn item_kind(item: &syn::Item) -> &'static str {
+    match item {
+        syn::Item::Const(_) => "a `const`",
+        syn::Item::Enum(_) => "an `enum`",
+        syn::Item::ExternCrate(_) => "an `extern crate` declaration",
+        syn::Item::Fn(_) => "a `fn`",
+        syn::Item::ForeignMod(_) => "an `extern` block",
+        syn::Item::Impl(_) => "an `impl` block",
+        syn::Item::Macro(_) => "a macro invocation",
+        syn::Item::Mod(_) => "a `mod`",
+        syn::Item::Static(_) => "a `static`",
+        syn::Item::Struct(_) => "a `struct`",
+        syn::Item::Trait(_) => "a `trait`",
+        syn::Item::TraitAlias(_) => "a trait alias",
+        syn::Item::Type(_) => "a type alias",
+        syn::Item::Union(_) => "a `union`",
+        syn::Item::Use(_) => "a `use` declaration",
+        _ => "this item",
+    }
 }
 
 /// The `crate = ".."` path of a macro's arguments, for a recovery step that only needs that:
@@ -108,7 +162,7 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     run_recovering(item, strip, recover, |item| {
         let mut root: Option<Root> = None;
-        let mut store = false;
+        let mut store: Option<proc_macro2::Span> = None;
         parse_args(
             attr,
             "api",
@@ -119,30 +173,30 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
                     Ok(true)
                 } else if meta.path.is_ident("store") {
                     flag(meta, code::E0008, "store")?;
-                    store = true;
+                    store = Some(syn::spanned::Spanned::span(&meta.path));
                     Ok(true)
                 } else {
                     Ok(false)
                 }
             },
         )?;
-        if store && !matches!(item, syn::Item::Impl(_)) {
+        if let Some(span) = store.filter(|_| !matches!(item, syn::Item::Impl(_))) {
             return Err(Diag::new(
                 code::E0008,
                 "`store` is only valid on an `impl` block",
                 "`#[undra::api(store)]` marks the impl block of a `#[undra::store]` struct so constructors can be wired to the store's signals",
                 "remove `store`, or apply the attribute to the store's impl block",
             )
-            .on(&item));
+            .at(span));
         }
         match item {
             syn::Item::Struct(item) => record::expand_struct(root, item),
             syn::Item::Enum(item) => record::expand_enum(root, item, Mode::Api),
-            syn::Item::Impl(item) => object::expand_impl(root, store, item),
+            syn::Item::Impl(item) => object::expand_impl(root, store.is_some(), item),
             syn::Item::Fn(item) => object::expand_fn(root, item),
             other => Err(wrong_item(
                 "api",
-                "structs, enums, `impl` blocks and free functions",
+                "a struct, an enum, an `impl` block or a free `fn`",
                 &other,
             )),
         }
@@ -167,7 +221,7 @@ pub(crate) fn expand_error(attr: TokenStream, item: TokenStream) -> TokenStream 
         })?;
         match item {
             syn::Item::Enum(item) => record::expand_enum(root, item, Mode::Error),
-            other => Err(wrong_item("error", "enums", &other)),
+            other => Err(wrong_item("error", "an enum", &other)),
         }
     })
 }
@@ -187,7 +241,7 @@ pub(crate) fn expand_query(
                     query::Flavor::Query => "query",
                     query::Flavor::Mutation => "mutation",
                 },
-                "`async fn`s",
+                "an `async fn`",
                 &other,
             )),
         }
@@ -212,7 +266,7 @@ pub(crate) fn expand_port(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
         other => Err(wrong_item(
             "port",
-            "trait definitions and `impl Trait for Type` blocks",
+            "a trait definition or an `impl Trait for Type` block",
             &other,
         )),
     })
@@ -272,7 +326,7 @@ pub(crate) fn expand_store(attr: TokenStream, item: TokenStream) -> TokenStream 
         )?;
         match item {
             syn::Item::Struct(item) => store::expand_store(root, hook, item),
-            other => Err(wrong_item("store", "structs", &other)),
+            other => Err(wrong_item("store", "a struct", &other)),
         }
     })
 }

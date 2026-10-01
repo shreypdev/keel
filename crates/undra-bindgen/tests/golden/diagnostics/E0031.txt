@@ -1,0 +1,4 @@
+error[undra::E0031]: event port `Connectivity` method `changed` returns a value or is `async`
+  = note: events are fire-and-forget notifications from the host; nothing waits for them, so there is no reply to carry a value
+  = help: make the method a plain `fn` returning `()`, or make the port a request/reply port
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0031

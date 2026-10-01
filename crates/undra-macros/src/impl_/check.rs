@@ -13,9 +13,14 @@
 //! * **Named mappings** (records, enums, errors): every type declared with `#[undra::api]` or
 //!   `#[undra::error]` has an inherent `UNDRA_TYPE_ID`, the hash of its declared name. A const
 //!   assertion compares it with the hash of the name the schema recorded, so an alias or a
-//!   renamed import fails (E0061). Types that are not Undra types fall back to a trait constant
-//!   of `0` and fail the same way; objects carry `__UNDRA_IS_OBJECT` and get their own message
+//!   renamed import fails (E0061). Objects carry `__UNDRA_IS_OBJECT` and get their own message
 //!   (E0064), and the error position of a `Result` also requires `UNDRA_IS_ERROR`.
+//!
+//! A type that is not an Undra type at all has no `UNDRA_TYPE_ID`: it falls back to `0`, and the
+//! assertion says so instead of calling it an alias. That is the case of a type that merely
+//! needs `#[undra::api]` (where the `Encode`/`Decode` bounds report it as E0001 as well, which is
+//! why the two messages agree on the fix) and of an alias of a type with no Undra declaration
+//! (`type Id = u64`), which no other check would catch before `undra build`.
 //!
 //! The fallback trait is how "an inherent constant if the type has one, else a default" is
 //! expressed: inherent associated items win over trait items in `<T>::NAME` resolution, and the
@@ -273,6 +278,18 @@ impl Checks {
 
     /// The tokens of every check: one anonymous constant whose items are private to it.
     pub(crate) fn emit(&self, root: &Root) -> TokenStream {
+        self.emit_as(root, None)
+    }
+
+    /// Like [`Checks::emit`], with the constant named. An anonymous constant is a module-level
+    /// item only; a named one is also valid as an associated constant, which is what lets a
+    /// function or query placed in an `impl` block by mistake get one error from `rustc` instead
+    /// of one for each of its generated items (see the guard in `query.rs`).
+    pub(crate) fn emit_named(&self, root: &Root, name: &syn::Ident) -> TokenStream {
+        self.emit_as(root, Some(name))
+    }
+
+    fn emit_as(&self, root: &Root, name: Option<&syn::Ident>) -> TokenStream {
         if self.is_empty() {
             return TokenStream::new();
         }
@@ -329,19 +346,36 @@ impl Checks {
             }
         };
 
-        quote! {
-            #[doc(hidden)]
-            #[allow(
-                non_camel_case_types,
-                dead_code,
-                unused,
-                unused_braces,
-                clippy::all
-            )]
-            const _: () = {
-                #same_items
-                #named_items
-            };
+        match name {
+            None => quote! {
+                #[doc(hidden)]
+                #[allow(
+                    non_camel_case_types,
+                    dead_code,
+                    unused,
+                    unused_braces,
+                    clippy::all
+                )]
+                const _: () = {
+                    #same_items
+                    #named_items
+                };
+            },
+            Some(name) => quote! {
+                #[doc(hidden)]
+                #[allow(
+                    non_camel_case_types,
+                    non_upper_case_globals,
+                    dead_code,
+                    unused,
+                    unused_braces,
+                    clippy::all
+                )]
+                const #name: () = {
+                    #same_items
+                    #named_items
+                };
+            },
         }
     }
 }
@@ -381,12 +415,22 @@ impl Named {
         let mismatch = panic_text(&Diag::new(
             code::E0061,
             format!(
-                "the schema records this type as `{name}`, but the type written here is not that type"
+                "`{name}` here is an alias or a renamed import of an Undra type that is declared under another name"
             ),
             format!(
-                "Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type {name} = Other`), a renamed import (`use path::Other as {name}`) or a type that is not declared with `#[undra::api]` makes the two differ, so the platforms would read the wrong layout"
+                "Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type {name} = Other` or `use path::Other as {name}` the platforms would be told `{name}` and receive the layout of `Other`"
             ),
-            "write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[undra::api]` (`#[undra::error]` for errors)",
+            format!(
+                "write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct {name}` if you mean a distinct type"
+            ),
+        ));
+        let undeclared = panic_text(&Diag::new(
+            code::E0061,
+            format!("`{name}` is not a type declared with `#[undra::api]`"),
+            "Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate",
+            format!(
+                "add `#[undra::api]` to `{name}`, or, if it is an alias, write the type it stands for where it is used"
+            ),
         ));
         let not_error = panic_text(&Diag::new(
             code::E0001,
@@ -412,7 +456,12 @@ impl Named {
                 if <#ty>::__UNDRA_IS_OBJECT {
                     ::core::panic!(#object);
                 }
-                if <#ty>::UNDRA_TYPE_ID != #meta::ids::type_id(#name) {
+                // `0` is the fallback of a type that has no Undra declaration at all.
+                let __undra_id = <#ty>::UNDRA_TYPE_ID;
+                if __undra_id == 0 {
+                    ::core::panic!(#undeclared);
+                }
+                if __undra_id != #meta::ids::type_id(#name) {
                     ::core::panic!(#mismatch);
                 }
                 #error_check
@@ -585,7 +634,16 @@ mod tests {
         assert!(
             has(
                 &out,
-                "<crate::model::Todo>::UNDRA_TYPE_ID != ::undra::meta::ids::type_id(\"Todo\")"
+                "let __undra_id = <crate::model::Todo>::UNDRA_TYPE_ID;"
+            ),
+            "{out}"
+        );
+        // `0` is the fallback of a type that is not declared with Undra at all.
+        assert!(has(&out, "if __undra_id == 0 {"), "{out}");
+        assert!(
+            has(
+                &out,
+                "if __undra_id != ::undra::meta::ids::type_id(\"Todo\") {"
             ),
             "{out}"
         );
@@ -600,7 +658,7 @@ mod tests {
         let mut checks = Checks::new();
         checks.ty(&ty, &kty);
         let out = checks.emit(&Root::default()).to_string();
-        assert!(!has(&out, "UNDRA_TYPE_ID !="), "{out}");
+        assert!(!has(&out, "let __undra_id"), "{out}");
         let ty: Type = syn::parse_str("String").unwrap();
         let mut checks = Checks::new();
         checks.ty(&ty, &KType::String);

@@ -1,0 +1,5 @@
+error[undra::C0009]: `my app` cannot be a project name: it contains characters other than ASCII letters, digits, `-` and `_`
+  = note: the name becomes a Cargo package (`<name>-core`), a Swift module and a Kotlin package, which are stricter than file names
+  = help: choose a name like `todo-app` or `acme_notes`
+          you can still call the folder anything: `undra init my-app --dir <parent>`
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0009

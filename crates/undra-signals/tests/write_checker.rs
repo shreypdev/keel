@@ -81,6 +81,21 @@ fn m2_ow1_a_write_from_a_thread_off_the_core_is_refused_in_every_build() {
     );
     assert!(message.contains("= help:") && message.contains("with_core"));
     assert!(message.ends_with("errors.html#E0065"), "{message}");
+    // The shape of every diagnostic (SPEC section 12), and the golden the error-codes page of the
+    // site shows: regenerate it with `UPDATE_GOLDEN=1 cargo test -p undra-signals --test
+    // write_checker` and review the diff.
+    let lines: Vec<&str> = message.lines().collect();
+    assert_eq!(lines.len(), 4, "{message}");
+    assert!(lines[1].starts_with("  = note: ") && lines[2].starts_with("  = help: "));
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/diagnostics/E0065.txt");
+    if std::env::var("UPDATE_GOLDEN").is_ok_and(|v| v == "1") {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, format!("{message}\n")).unwrap();
+    }
+    let golden = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}; run with UPDATE_GOLDEN=1", path.display()));
+    assert_eq!(golden, format!("{message}\n"));
 
     // Refused before anything changed: the value, the transaction state and delivery are intact.
     assert_eq!(x.get(), 0);

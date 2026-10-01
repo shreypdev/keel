@@ -54,6 +54,8 @@ kotlin {
 dependencies {
     // The Undra runtime and the bindings generated from the core.
     implementation("dev.undra:runtime:@@KOTLIN_RUNTIME_VERSION@@")
+    // The Android half of the runtime: the Choreographer frame pacer `UndraApp` installs (ADR-031).
+    implementation("dev.undra:android-adapters:@@KOTLIN_RUNTIME_VERSION@@")
     implementation(project(":core-bindings"))
 
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))

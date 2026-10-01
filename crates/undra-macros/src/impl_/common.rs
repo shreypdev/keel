@@ -43,6 +43,36 @@ pub(crate) fn check_generics(generics: &syn::Generics, item: &str, errors: &mut 
     }
 }
 
+/// Whether `tokens` mention `Self`. A free function cannot, so a signature that does sits in an
+/// `impl` block: the one placement a macro on a function cannot see directly.
+pub(crate) fn mentions_self(tokens: TokenStream) -> bool {
+    use proc_macro2::TokenTree;
+    tokens.into_iter().any(|tree| match tree {
+        TokenTree::Ident(ident) => ident == "Self",
+        TokenTree::Group(group) => mentions_self(group.stream()),
+        _ => false,
+    })
+}
+
+/// The name of the function that asserts a future or stream is `Send` (E0022).
+///
+/// `rustc` reports a future that is not `Send` itself, with the value held across an `.await` and
+/// the `.await` in question, and it cannot carry an Undra code. What it does print is the name of
+/// the bound it was asked to check ("required by a bound in `..`"), so the name carries the code
+/// and the rule: that note is how an engineer who sees the error finds the explanation.
+///
+/// `span` is where a call to it is reported: the method, so that the error points at it and not at
+/// generated code (the definition uses [`proc_macro2::Span::call_site`]; both resolve to the
+/// same name).
+pub(crate) fn send_assertion(span: proc_macro2::Span) -> syn::Ident {
+    let mut name = quote::format_ident!(
+        "_undra_error_{}_the_future_of_an_async_method_must_be_Send",
+        code::E0022
+    );
+    name.set_span(span);
+    name
+}
+
 /// The `inventory::submit!` for one registration.
 pub(crate) fn submit(root: &Root, variant: &str, meta_static: &syn::Ident) -> TokenStream {
     let meta = root.meta();

@@ -379,7 +379,9 @@ fn an_unscripted_port_is_unavailable_and_the_proxy_says_which() {
             .unwrap_or_default(),
     };
     assert!(
-        message.contains("undra: the `Clock` port has no adapter registered (method `now_ms`)"),
+        message.contains(
+            "error[undra::E0062]: the `Clock` port has no adapter registered (method `now_ms`)"
+        ),
         "{message}"
     );
     assert!(message.contains("errors.html#E0062"), "{message}");

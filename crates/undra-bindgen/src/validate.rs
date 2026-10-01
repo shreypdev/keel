@@ -166,6 +166,21 @@ pub enum BindgenError {
         /// Why that is a problem.
         why: String,
     },
+    /// A type has a name the generated code itself uses in at least one language, so it would
+    /// shadow it (E0050).
+    ReservedName {
+        /// What the item is: `record`, `enum`, `error`, `object`, `port`, ...
+        what: &'static str,
+        /// The reserved name.
+        name: String,
+    },
+    /// A name that cannot be an identifier in a target language (E0051).
+    NotAnIdentifier {
+        /// The scope the name lives in, such as `record Todo`.
+        at: String,
+        /// The name.
+        name: String,
+    },
     /// An item has the name of a standard library item but not its id (E0052).
     ShadowsStandard {
         /// What the item is: `record`, `enum`, `error`, `object` or `port`.
@@ -183,6 +198,8 @@ pub enum BindgenError {
         at: String,
         /// What is wrong.
         what: String,
+        /// Why the generated code cannot express it.
+        why: String,
         /// How to fix the schema.
         help: String,
     },
@@ -208,8 +225,8 @@ impl BindgenError {
     pub fn code(&self) -> &'static str {
         match self {
             BindgenError::Schema(e) => e.code(),
-            BindgenError::Duplicate { .. } => "E0050",
-            BindgenError::NameCollision { .. } => "E0051",
+            BindgenError::Duplicate { .. } | BindgenError::ReservedName { .. } => "E0050",
+            BindgenError::NameCollision { .. } | BindgenError::NotAnIdentifier { .. } => "E0051",
             BindgenError::ShadowsStandard { .. } => "E0052",
             BindgenError::Unsupported { .. } => "E0001",
             BindgenError::ErrorMessage { .. } => "E0010",
@@ -221,47 +238,84 @@ impl BindgenError {
 impl fmt::Display for BindgenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let code = self.code();
-        match self {
-            BindgenError::Schema(e) => write!(f, "{e}"),
-            BindgenError::Duplicate { what, value, at } => write!(
-                f,
-                "error[undra::{code}]: duplicate {what} `{value}` at {at}; names and ids must be unique within a core"
+        let (what, why, fix) = match self {
+            BindgenError::Schema(e) => return write!(f, "{e}"),
+            BindgenError::Duplicate { what, value, at } => (
+                format!("duplicate {what} `{value}` at {at}"),
+                "names and ids identify a type, a method or a variant to the platforms and in the generated code, so each must be unique within a core".to_owned(),
+                match *what {
+                    "variant index" => "give every variant of the enum an index of its own".to_owned(),
+                    w if w.ends_with(" id") => "rename one of the two items: ids are hashes of the names, so a different name gives a different id".to_owned(),
+                    _ => "rename one of the two, or remove the duplicate".to_owned(),
+                },
+            ),
+            BindgenError::ReservedName { what, name } => (
+                format!("{what} `{name}` has a name the generated code depends on"),
+                format!(
+                    "the generated bindings use a type called `{name}` (a standard type of Swift, Kotlin or TypeScript, or one of the Undra runtime's), so a type of the schema with the same name would shadow it"
+                ),
+                format!("rename it, for example `My{name}`"),
+            ),
+            BindgenError::NotAnIdentifier { at, name } => (
+                format!("at {at}, `{name}` is not a name the generated code can use"),
+                "every name of the schema becomes an identifier in Swift, Kotlin and TypeScript: ASCII letters, digits and underscores, not starting with a digit".to_owned(),
+                "rename it to letters, digits and underscores, starting with a letter".to_owned(),
             ),
             BindgenError::NameCollision {
                 at,
                 names,
                 converted,
                 why,
-            } => write!(
-                f,
-                "error[undra::{code}]: at {at}, {} all become `{converted}`: {why}; rename one of them",
-                names
-                    .iter()
-                    .map(|n| format!("`{n}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            } => match names.as_slice() {
+                [name] => (
+                    if name == converted {
+                        format!("at {at}, `{name}` is a name the generated code already uses")
+                    } else {
+                        format!("at {at}, `{name}` becomes `{converted}`, a name the generated code already uses")
+                    },
+                    why.clone(),
+                    "rename it so that it does not meet that name".to_owned(),
+                ),
+                _ => (
+                    format!(
+                        "at {at}, {} all become `{converted}`",
+                        names
+                            .iter()
+                            .map(|n| format!("`{n}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    format!("{why}, so names that differ only in case or underscores end up equal"),
+                    "rename one of them so that they stay distinct after conversion".to_owned(),
+                ),
+            },
             BindgenError::ShadowsStandard {
                 what,
                 name,
                 standard,
                 found,
-            } => write!(
-                f,
-                "error[undra::{code}]: {what} `{name}` has the name of an Undra standard library item but the id 0x{found:08x} instead of 0x{standard:08x}; every platform runtime implements the standard ports and types under those names and ids (generated code refers to them instead of declaring them), so a different item cannot share the name; rename it, for example `My{name}`, or use the standard one from undra-ports"
+            } => (
+                format!(
+                    "{what} `{name}` has the name of an Undra standard library item but the id 0x{found:08x} instead of 0x{standard:08x}"
+                ),
+                "every platform runtime implements the standard ports and types under those names and ids, and generated code refers to them instead of declaring them, so a different item cannot share the name".to_owned(),
+                format!("rename it, for example `My{name}`, or use the standard one from `undra-ports`"),
             ),
-            BindgenError::Unsupported { at, what, help } => {
-                write!(f, "error[undra::{code}]: {what} at {at}; {help}")
+            BindgenError::Unsupported { at, what, why, help } => {
+                (format!("{what} at {at}"), why.clone(), help.clone())
             }
-            BindgenError::ErrorMessage { at, what } => write!(
-                f,
-                "error[undra::{code}]: {what} at {at}; give the variant an #[error(\"...\")] message"
+            BindgenError::ErrorMessage { at, what } => (
+                format!("{what} at {at}"),
+                "the platforms show the message of an error to the user, so every variant needs one they can format".to_owned(),
+                "give the variant an `#[error(\"..\")]` message".to_owned(),
             ),
-            BindgenError::EventReturn { port, method } => write!(
-                f,
-                "error[undra::{code}]: event port `{port}` method `{method}` returns a value; event methods are fire-and-forget and return ()"
+            BindgenError::EventReturn { port, method } => (
+                format!("event port `{port}` method `{method}` returns a value or is `async`"),
+                "events are fire-and-forget notifications from the host; nothing waits for them, so there is no reply to carry a value".to_owned(),
+                "make the method a plain `fn` returning `()`, or make the port a request/reply port".to_owned(),
             ),
-        }
+        };
+        f.write_str(&undra_meta::diag::message(code, what, why, fix))
     }
 }
 
@@ -396,12 +450,9 @@ impl<'a> Checker<'a> {
 
     fn bad_ident(&mut self, at: &str, name: &str) {
         if !naming::is_valid_ident(name) {
-            self.errors.push(BindgenError::NameCollision {
+            self.errors.push(BindgenError::NotAnIdentifier {
                 at: at.to_owned(),
-                names: vec![name.to_owned()],
-                converted: name.to_owned(),
-                why: "it is not an identifier (ASCII letters, digits and underscores, not starting with a digit)"
-                    .to_owned(),
+                name: name.to_owned(),
             });
         }
     }
@@ -471,12 +522,9 @@ impl<'a> Checker<'a> {
         let mut seen: HashMap<String, &'static str> = HashMap::new();
         let mut declare = |errors: &mut Vec<BindgenError>, name: String, what: &'static str| {
             if RESERVED_TYPE_NAMES.contains(&name.as_str()) {
-                errors.push(BindgenError::Duplicate {
-                    what: "type name",
-                    value: name.clone(),
-                    at: format!(
-                        "{what} `{name}` (it collides with a name the generated code depends on)"
-                    ),
+                errors.push(BindgenError::ReservedName {
+                    what,
+                    name: name.clone(),
                 });
             }
             if let Some(first) = seen.get(&name) {
@@ -487,8 +535,8 @@ impl<'a> Checker<'a> {
                 if !both_schema_types {
                     errors.push(BindgenError::Duplicate {
                         what: "type name",
+                        at: format!("the {what} `{name}` (the name is already used by a {first})"),
                         value: name,
-                        at: format!("{what} (already used by a {first})"),
                     });
                 }
             } else {
@@ -553,7 +601,7 @@ impl<'a> Checker<'a> {
                     self.errors.push(BindgenError::Duplicate {
                         what,
                         value: format!("0x{id:08x}"),
-                        at: format!("{at}: `{first}` and `{name}` hash to the same id"),
+                        at: format!("{at} (`{first}` and `{name}` hash to the same id)"),
                     });
                 }
                 Some(_) => {}
@@ -678,7 +726,8 @@ impl<'a> Checker<'a> {
             self.errors.push(BindgenError::Unsupported {
                 at: at.clone(),
                 what: "an enum with no variants".to_owned(),
-                help: "it has no value to send; give it at least one variant".to_owned(),
+                why: "an enum without variants has no value that could be sent".to_owned(),
+                help: "give it at least one variant".to_owned(),
             });
         }
         let unit = crate::model::is_unit_enum(en);
@@ -726,8 +775,11 @@ impl<'a> Checker<'a> {
             // is the field's own.
             None if v.fields.len() == 1 => {}
             None => self.errors.push(BindgenError::ErrorMessage {
-                at: format!("{at} of error {}", en.name),
-                what: "the variant has no message".to_owned(),
+                at: at.to_owned(),
+                what: format!(
+                    "the variant of the error `{}` has no `#[error(\"..\")]` message",
+                    en.name
+                ),
             }),
         }
     }
@@ -785,7 +837,8 @@ impl<'a> Checker<'a> {
                 self.errors.push(BindgenError::Unsupported {
                     at: at.clone(),
                     what: "an object without a constructor".to_owned(),
-                    help: "add a `pub fn new(..) -> Self` to its #[undra::api] impl so the platform can create it".to_owned(),
+                    why: "the platforms create an object by calling one of its constructors, and no other call can hand one out, so without a constructor it can never be created".to_owned(),
+                    help: "add `pub fn new(..) -> Self` to its `#[undra::api]` impl block so the platform can create it".to_owned(),
                 });
             }
         }
@@ -816,7 +869,8 @@ impl<'a> Checker<'a> {
                     self.errors.push(BindgenError::Unsupported {
                         at: gat.clone(),
                         what: "a Lazy<T> signal".to_owned(),
-                        help: "lazy lists need a runtime API that SPEC section 17 does not define yet; expose the items as a Vec<T> signal or a paged method".to_owned(),
+                        why: "a lazy list needs a runtime API that SPEC section 17 does not define yet, so no platform could observe it".to_owned(),
+                        help: "expose the items as a `Vec<T>` signal, or as a method that takes an offset and a limit".to_owned(),
                     });
                 } else {
                     self.check_value_type(&g.ty, &gat);
@@ -824,7 +878,9 @@ impl<'a> Checker<'a> {
                         self.errors.push(BindgenError::Unsupported {
                             at: gat.clone(),
                             what: "a signal of type ()".to_owned(),
-                            help: "a signal needs a value".to_owned(),
+                            why: "a signal holds a value the platform shows, and `()` has none"
+                                .to_owned(),
+                            help: "give the signal a value type, or remove it".to_owned(),
                         });
                     }
                 }
@@ -832,7 +888,8 @@ impl<'a> Checker<'a> {
                     self.errors.push(BindgenError::Unsupported {
                         at: gat,
                         what: "a keyed signal that is not a Vec<T>".to_owned(),
-                        help: "#[undra(key = ..)] applies to Signal<Vec<T>> only".to_owned(),
+                        why: "a key identifies an item of a list across updates, so only a list can have one".to_owned(),
+                        help: "put `#[undra(key = ..)]` on a `Signal<Vec<T>>` only, or remove it".to_owned(),
                     });
                 }
             }
@@ -855,8 +912,9 @@ impl<'a> Checker<'a> {
             self.errors.push(BindgenError::Unsupported {
                 at: at.to_owned(),
                 what: format!("a constructor returning `{}`", c.returns),
+                why: "a constructor creates the object, so it returns the object (or fails with a typed error)".to_owned(),
                 help: format!(
-                    "a constructor returns `{0}` or `Result<{0}, E>`",
+                    "make it return `{0}` or `Result<{0}, E>` where `E` is a `#[undra::error]` enum",
                     object.name
                 ),
             });
@@ -921,14 +979,16 @@ impl<'a> Checker<'a> {
                 self.errors.push(BindgenError::Unsupported {
                     at: at.clone(),
                     what: "a query that returns ()".to_owned(),
-                    help: "a query caches a value; use a mutation for effects".to_owned(),
+                    why: "a query caches the value it returns, and `()` has none".to_owned(),
+                    help: "use a mutation for a call that only has effects, or return the data the platform needs".to_owned(),
                 });
             }
             if matches!(ok, TypeRef::Option(_)) {
                 self.errors.push(BindgenError::Unsupported {
                     at,
                     what: "a query that returns an Option".to_owned(),
-                    help: "the handle's `data` signal is already optional (no data yet), so a nested option would be ambiguous; return a record or a list".to_owned(),
+                    why: "the handle's `data` signal is already optional (no data yet), so an optional result would be ambiguous".to_owned(),
+                    help: "return a record or a list (an empty `Vec` says \"nothing\"), or an enum naming the cases".to_owned(),
                 });
             }
         }
@@ -967,7 +1027,8 @@ impl<'a> Checker<'a> {
             self.errors.push(BindgenError::Unsupported {
                 at: at.to_owned(),
                 what: format!("`{err}` as the error type of a Result"),
-                help: "the error type of a Result must be a #[undra::error] enum".to_owned(),
+                why: "the platforms throw the error by name, and only a `#[undra::error]` enum carries the messages they show".to_owned(),
+                help: format!("declare `{err}` with `#[undra::error]`, or use an error enum as the error type"),
             });
         }
     }
@@ -986,7 +1047,8 @@ impl<'a> Checker<'a> {
             self.errors.push(BindgenError::Unsupported {
                 at,
                 what: format!("the return type `{ty}`"),
-                help: "returns are `T`, `Result<T, E>`, `Stream<T>` or `Result<Stream<T>, E>` where E is a #[undra::error] enum".to_owned(),
+                why: "a method answers with a value, a typed error, a stream, or a stream that can fail to open; nothing else crosses the boundary".to_owned(),
+                help: "return `T`, `Result<T, E>`, `Stream<T>` or `Result<Stream<T>, E>` where `E` is a `#[undra::error]` enum".to_owned(),
             });
             return;
         };
@@ -997,7 +1059,12 @@ impl<'a> Checker<'a> {
             self.errors.push(BindgenError::Unsupported {
                 at: at.clone(),
                 what: "a stream".to_owned(),
-                help: "ports and queries cannot return streams".to_owned(),
+                why:
+                    "port calls and queries are request/reply, and a stream has no place in either"
+                        .to_owned(),
+                help:
+                    "return a `Vec<T>` page, or have the platform push events through an event port"
+                        .to_owned(),
             });
         }
         match ret {
@@ -1011,7 +1078,8 @@ impl<'a> Checker<'a> {
                     self.errors.push(BindgenError::Unsupported {
                         at,
                         what: "a stream of ()".to_owned(),
-                        help: "stream items need a value".to_owned(),
+                        why: "a stream yields values the platform handles one by one, and `()` has none".to_owned(),
+                        help: "give the stream an item type, for example `impl Stream<Item = u64>`".to_owned(),
                     });
                 } else {
                     self.check_value_type(item, &at);
@@ -1027,13 +1095,15 @@ impl<'a> Checker<'a> {
             TypeRef::Unit => self.errors.push(BindgenError::Unsupported {
                 at: at.to_owned(),
                 what: "the type ()".to_owned(),
-                help: "() is only legal as a return type; zero-width values defeat length validation (SPEC section 3.1)".to_owned(),
+                why: "`()` occupies zero bytes on the wire, and zero-width values defeat length validation (SPEC section 3.1)".to_owned(),
+                help: "remove the value, or use `bool` if you need a marker".to_owned(),
             }),
             TypeRef::Named(name) if self.kinds.get(name.as_str()) == Some(&Kind::Object) => {
                 self.errors.push(BindgenError::Unsupported {
                     at: at.to_owned(),
                     what: format!("the object `{name}` used as a value"),
-                    help: "object handles cannot cross as values yet; return a record with the data, or construct the object from the platform".to_owned(),
+                    why: "an object lives in the core and crosses the boundary as a handle; its contents have no wire representation".to_owned(),
+                    help: "return a record with the data the platform needs, or construct the object from the platform with one of its constructors".to_owned(),
                 });
             }
             TypeRef::Option(inner) => {
@@ -1041,7 +1111,8 @@ impl<'a> Checker<'a> {
                     self.errors.push(BindgenError::Unsupported {
                         at: at.to_owned(),
                         what: format!("the nested option `{ty}`"),
-                        help: "Kotlin and TypeScript cannot tell Some(None) from None; wrap the inner option in a record or an enum".to_owned(),
+                        why: "Kotlin and TypeScript cannot tell `Some(None)` from `None`".to_owned(),
+                        help: "wrap the inner option in a record or an enum that names the two cases".to_owned(),
                     });
                 }
                 self.check_value_type(inner, at);

@@ -26,8 +26,10 @@ pub const CORE: &[TemplateFile] = &[
     template!("core/src/lib.rs" => "core/src/lib.rs"),
 ];
 
-/// The canonical schema of the template core, as `undra_schema_json` reports it. A test builds
-/// the template and compares, so this cannot go stale unnoticed.
+/// The template core's schema in canonical form (`Schema::canonical_json`: no docs, no labels),
+/// which `init` generates the first bindings from. A test builds the template and checks that
+/// `undra bindgen` (which reads the built library's `undra_schema_json`) writes the same files,
+/// so this cannot go stale unnoticed.
 pub const CORE_SCHEMA: &str = include_str!("../templates/core/schema.json");
 
 /// The iOS app: an Xcode project (synchronized folder, no file lists to maintain) and a SwiftUI

@@ -1,10 +1,11 @@
 //! JSON forms of a [`Schema`], the canonical form and the schema hash
 //! (SPEC §2.3).
 //!
-//! * [`Schema::to_json_pretty`] and [`Schema::from_json`] are the
-//!   human-facing exchange format (`schema.json`, `undra_schema_json`). They
-//!   carry everything, including the `undra_version` and `crate_name` labels and
-//!   docs when present.
+//! * [`Schema::to_json`], [`Schema::to_json_pretty`] and [`Schema::from_json`]
+//!   are the exchange format: the same document, compact or indented
+//!   (`schema.json` files, the C ABI's `undra_schema_json`). They carry
+//!   everything, including the `undra_version` and `crate_name` labels and
+//!   docs when present, in declaration order.
 //! * [`Schema::canonical_json`] is the form the hash is computed over. It
 //!   contains only the six top-level lists (`records`, `enums`, `objects`,
 //!   `functions`, `ports`, `queries`), with docs stripped, no whitespace and
@@ -31,6 +32,22 @@ use crate::{EnumDef, FunctionDef, ObjectDef, PortDef, QueryDef, RecordDef, Schem
 /// labels. Field order here is the key order of the canonical JSON.
 #[derive(Serialize)]
 struct Canonical<'a> {
+    records: &'a [RecordDef],
+    enums: &'a [EnumDef],
+    objects: &'a [ObjectDef],
+    functions: &'a [FunctionDef],
+    ports: &'a [PortDef],
+    queries: &'a [QueryDef],
+}
+
+/// The whole schema, borrowed: what [`Schema::to_json`] serializes. It writes the same document
+/// as `Schema`'s own derived `Serialize` (the same keys in the same order) but through the same
+/// slice types as [`Canonical`], so the two share their serialization code: a core links one copy
+/// of it, not two (`undra_schema_json` and the hash are both in every shipped binary).
+#[derive(Serialize)]
+struct Document<'a> {
+    undra_version: &'a str,
+    crate_name: &'a str,
     records: &'a [RecordDef],
     enums: &'a [EnumDef],
     objects: &'a [ObjectDef],
@@ -94,8 +111,42 @@ impl Schema {
         fnv1a64(self.canonical_json().as_bytes())
     }
 
+    /// Compact JSON with everything: the labels, the docs and every list in
+    /// declaration order. This is what the C ABI's `undra_schema_json` returns,
+    /// so a tool that loads a built core (`undra bindgen`) sees the same schema,
+    /// documentation included, that the registrations hold.
+    ///
+    /// The output is *not* canonical (the hash does not cover docs or labels,
+    /// and unordered lists keep the order they were declared in): hash through
+    /// [`Schema::hash`], which canonicalizes first. [`Schema::from_json`] reads
+    /// it back.
+    ///
+    /// ```
+    /// use undra_meta::Schema;
+    ///
+    /// let schema = Schema::new("demo");
+    /// let back = Schema::from_json(&schema.to_json()).unwrap();
+    /// assert_eq!(back, schema);
+    /// assert_eq!(back.hash(), schema.hash());
+    /// ```
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        let document = Document {
+            undra_version: &self.undra_version,
+            crate_name: &self.crate_name,
+            records: &self.records,
+            enums: &self.enums,
+            objects: &self.objects,
+            functions: &self.functions,
+            ports: &self.ports,
+            queries: &self.queries,
+        };
+        // Infallible for the same reason as `canonical_json`.
+        serde_json::to_string(&document).expect("schema types always serialize to JSON")
+    }
+
     /// Pretty-printed JSON, with labels and docs, for humans and `schema.json`
-    /// files.
+    /// files. The same document as [`Schema::to_json`], indented.
     ///
     /// The output is *not* canonical; use [`Schema::canonical_json`] for
     /// hashing and comparisons.
@@ -131,9 +182,26 @@ impl Schema {
         serde_json::from_str(json)
     }
 
-    /// A doc-stripped clone with every unordered list sorted: the value the
-    /// canonical JSON is serialized from.
-    fn canonicalized(&self) -> Schema {
+    /// A clone with every doc comment removed. The schema hash does not cover
+    /// docs, so the clone has the same [`Schema::hash`] as `self`; bindings
+    /// generated from it carry no documentation.
+    ///
+    /// ```
+    /// use undra_meta::{RecordDef, Schema};
+    ///
+    /// let mut schema = Schema::new("demo");
+    /// schema.records.push(RecordDef {
+    ///     name: "P".into(),
+    ///     type_id: 1,
+    ///     fields: vec![],
+    ///     docs: "A point.".into(),
+    /// });
+    /// let bare = schema.without_docs();
+    /// assert_eq!(bare.records[0].docs, "");
+    /// assert_eq!(bare.hash(), schema.hash());
+    /// ```
+    #[must_use]
+    pub fn without_docs(&self) -> Schema {
         let mut s = self.clone();
 
         for record in &mut s.records {
@@ -147,7 +215,6 @@ impl Schema {
             for variant in &mut en.variants {
                 strip_variant_docs(variant);
             }
-            en.variants.sort_by_key(|v| v.index);
         }
         for object in &mut s.objects {
             object.docs.clear();
@@ -158,8 +225,6 @@ impl Schema {
             {
                 method.docs.clear();
             }
-            object.constructors.sort_by(|a, b| a.name.cmp(&b.name));
-            object.methods.sort_by(|a, b| a.name.cmp(&b.name));
         }
         for function in &mut s.functions {
             function.docs.clear();
@@ -169,6 +234,23 @@ impl Schema {
             for method in &mut port.methods {
                 method.docs.clear();
             }
+        }
+        s
+    }
+
+    /// A doc-stripped clone with every unordered list sorted: the value the
+    /// canonical JSON is serialized from.
+    fn canonicalized(&self) -> Schema {
+        let mut s = self.without_docs();
+
+        for en in &mut s.enums {
+            en.variants.sort_by_key(|v| v.index);
+        }
+        for object in &mut s.objects {
+            object.constructors.sort_by(|a, b| a.name.cmp(&b.name));
+            object.methods.sort_by(|a, b| a.name.cmp(&b.name));
+        }
+        for port in &mut s.ports {
             port.methods.sort_by(|a, b| a.name.cmp(&b.name));
         }
 
@@ -218,6 +300,69 @@ mod tests {
         assert!(back.records[0].docs.contains("todo"));
         assert_eq!(back.crate_name, "playground-core");
         assert_eq!(back.undra_version, crate::UNDRA_VERSION);
+    }
+
+    #[test]
+    fn to_json_is_the_full_document_compact() {
+        let schema = with_docs(representative_schema());
+        let json = schema.to_json();
+        assert!(
+            !json.contains('\n') && json.starts_with(r#"{"undra_version":"#),
+            "{json}"
+        );
+        // Labels and docs travel, in declaration order.
+        assert!(json.contains(r#""crate_name":"playground-core""#), "{json}");
+        assert!(json.contains("docs: todo item"), "{json}");
+        assert_eq!(Schema::from_json(&json).unwrap(), schema);
+        // It is the document `to_json_pretty` indents.
+        assert_eq!(
+            Schema::from_json(&json).unwrap(),
+            Schema::from_json(&schema.to_json_pretty()).unwrap()
+        );
+        // Declaration order is kept (the canonical form would sort this).
+        let mut reversed = schema.clone();
+        reversed.records.reverse();
+        assert_ne!(reversed.to_json(), json);
+        assert_eq!(reversed.hash(), schema.hash());
+    }
+
+    #[test]
+    fn to_json_is_exactly_what_schemas_derived_serialize_writes() {
+        // `to_json` goes through a borrowed twin of `Schema` to share code with the canonical
+        // form; the two must never drift apart (a field added to `Schema` and not to the twin).
+        for schema in [
+            Schema::new("empty"),
+            representative_schema(),
+            with_docs(representative_schema()),
+        ] {
+            assert_eq!(schema.to_json(), serde_json::to_string(&schema).unwrap());
+        }
+    }
+
+    #[test]
+    fn the_full_json_hashes_like_the_canonical_form() {
+        // `undra_schema_json` carries docs and labels; the hash still covers neither
+        // (ADR-025, SPEC 2.3), so it is the same through either door.
+        let plain = representative_schema();
+        let documented = with_docs(representative_schema());
+        let read_back = Schema::from_json(&documented.to_json()).unwrap();
+        assert_eq!(read_back.hash(), plain.hash());
+        assert_eq!(read_back.canonical_json(), plain.canonical_json());
+        assert!(documented.to_json().contains("docs"));
+        assert!(!plain.canonical_json().contains("docs"));
+    }
+
+    #[test]
+    fn without_docs_removes_every_doc_and_nothing_else() {
+        // The representative schema documents a few items itself.
+        let bare = representative_schema().without_docs();
+        let documented = with_docs(representative_schema());
+        assert_ne!(documented, bare);
+        assert_eq!(documented.without_docs(), bare);
+        assert!(!documented.without_docs().to_json().contains("docs"));
+        assert_eq!(documented.without_docs().hash(), documented.hash());
+        // The original is untouched.
+        assert!(documented.records[0].docs.contains("todo"));
     }
 
     #[test]

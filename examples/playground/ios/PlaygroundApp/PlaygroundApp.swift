@@ -7,10 +7,15 @@ import SwiftUI
 /// call its methods.
 @main
 struct PlaygroundApp: App {
-    /// The stores of the four screens, created once the core is loaded.
-    @State private var model: PlaygroundModel
+    /// The stores of the four screens, created once the core is loaded; none in benchmark mode (`-bench`, see
+    /// `BenchLaunch`), where the benchmark loads the core itself.
+    @State private var model: PlaygroundModel?
 
     init() {
+        if BenchLaunch.mode != nil {
+            _model = State(initialValue: nil)
+            return
+        }
         do {
             try UndraBootstrap.start()
             _model = State(initialValue: try PlaygroundModel())
@@ -23,7 +28,11 @@ struct PlaygroundApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
+            if let bench = BenchLaunch.mode {
+                BenchScreen(mode: bench, quick: BenchLaunch.quick)
+            } else if let model {
+                RootView(model: model)
+            }
         }
     }
 }

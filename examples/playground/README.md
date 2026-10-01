@@ -96,7 +96,19 @@ The blueprint's section 14 budget rows are measured against one store, `Bench`
 | 1 KB record, round trip | `Bench.bench_echo_bytes(data)` with 1,024 bytes |
 | Change-set with 100 dirty signals, applied on the main thread | `Bench.bench_touch_signals(100)` |
 | Keyed patch on a 10,000-item list, one insert | `Bench.bench_list_insert(i)`, then `bench_list_reset()` to start over |
-| Core cold start with a snapshot restore | `BigList` or `Bench` (about 250 KB of state each) through `snapshot` / `restore` |
+| Core cold start with a snapshot restore | `BigList` or `Bench` (about 250 KB of state each) through `snapshot` / `restore`; the device bench restores 1,000 to-dos of 80 characters (100 KB) |
+| ADR-031 drain: 1,667 one-update keyed patches in one frame | `Bench.bench_list_update_burst(1667)`: one transaction, so one change-set, per update |
+
+### The device bench
+
+The three apps run these hooks themselves, through the generated bindings and the platform's mirror, when asked to:
+`scripts/bench-device.sh --device ios|android|web` builds the core and the app for the target, drives it with the
+harness its smoke test uses and writes `bench/results/device/<date>-<target>.json` and the device tables of
+`bench/RESULTS.md`. The app side is `web/src/bench/` (a separate page, `bench.html`, run by `npm run bench`),
+`ios/PlaygroundApp/Bench/` (the app starts in benchmark mode with `-bench full`; `PlaygroundBenchTests` is the
+XCUITest, skipped unless `TEST_RUNNER_UNDRA_BENCH=1`) and `android/app/src/main/kotlin/.../bench/` (an instrumented
+test, `BenchInstrumentedTest`, over a `benchmark` build type: release, not debuggable, signed with the debug key).
+`bench/RESULTS.md` ("Device numbers") says how every row is timed and what the labels mean.
 
 ## Contract tests
 

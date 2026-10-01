@@ -589,6 +589,15 @@ impl Reader<'_> {
     }
 
     fn wrong_type(&self, entry: &Entry, table: &str, key: &str, expected: &str) -> CliError {
+        /// A value of the kind that was expected, as TOML.
+        fn example_value(expected: &str) -> &'static str {
+            match expected {
+                "a string" => "\"text\"",
+                "true or false" => "true",
+                "an array of strings" => "[\"a\", \"b\"]",
+                _ => "\"value\"",
+            }
+        }
         CliError::bad_config(
             self.file,
             format!(
@@ -596,7 +605,10 @@ impl Reader<'_> {
                 entry.line,
                 entry.value.describe()
             ),
-            format!("write it as {expected}, for example `{key} = ...`"),
+            format!(
+                "write it as {expected}, for example `{key} = {}`",
+                example_value(expected)
+            ),
         )
     }
 

@@ -1,0 +1,4 @@
+error[undra::E0010]: the variant of the error `Oops` has no `#[error("..")]` message at enum Oops, variant Bad
+  = note: the platforms show the message of an error to the user, so every variant needs one they can format
+  = help: give the variant an `#[error("..")]` message
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0010

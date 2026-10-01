@@ -28,7 +28,13 @@ pub(crate) const DOCS_BASE: &str = "https://shreypdev.github.io/undra/docs/error
 /// `error: error[undra::E0001]: ...`. Changing this constant changes every message.
 pub(crate) const MESSAGE_PREFIX: &str = "error";
 
-/// The diagnostic codes of SPEC section 12, plus the additions made by this crate.
+/// The diagnostic codes of SPEC section 12 that this crate knows, with the short meaning the
+/// error-codes page of the site shows for each. `catalogue.rs` (an integration test) checks this
+/// table against SPEC section 12, the constants below, the emitting sites and the goldens.
+///
+/// The codes E0050 to E0052 are raised by schema validation (`undra-meta`, `undra-bindgen`), which
+/// this crate cannot depend on; they have rows here, and no constant, because nothing here emits
+/// them.
 ///
 /// | Code | Meaning |
 /// |---|---|
@@ -38,7 +44,7 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0004 | trait object, `dyn`, `impl Trait` |
 /// | E0005 | `Result` / `Stream` outside return position |
 /// | E0006 | map key type not allowed |
-/// | E0007 | unsupported item shape (addition) |
+/// | E0007 | unsupported item shape or placement of an Undra attribute (addition) |
 /// | E0008 | unknown or misplaced `#[undra(..)]` attribute or macro argument (addition) |
 /// | E0010 | invalid `#[undra::error]` variant |
 /// | E0011 | store and `#[undra::api(store)]` impl block disagree |
@@ -46,7 +52,7 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0013 | store cannot be restored automatically (addition) |
 /// | E0020 | `&mut self` receiver |
 /// | E0021 | `self` by value |
-/// | E0022 | non-`Send` future in an async method: `rustc`'s own error, pointed at the method by a generated `Send` assertion (it cannot carry an Undra code) |
+/// | E0022 | non-`Send` future in an async method: `rustc`'s own error, pointed at the method by an assertion named after this code |
 /// | E0030 | port method with a non-wire parameter |
 /// | E0031 | event port method that is not a plain `fn(..)` returning `()` |
 /// | E0032 | invalid port trait shape (addition) |
@@ -54,9 +60,12 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0040 | query without `key`, mutation with `stale`, or another invalid query argument |
 /// | E0041 | query or mutation function with an invalid signature (addition) |
 /// | E0042 | query whose success value is `()` or an `Option` (addition) |
+/// | E0050 | duplicate type name, id or variant index (schema validation; addition) |
+/// | E0051 | a name that collides after case conversion or is not an identifier (schema validation; addition) |
+/// | E0052 | an item named like a standard library item, with another id (schema validation; addition) |
 /// | E0060 | a spelling that looks like a built-in Undra type is another type (addition) |
-/// | E0061 | the schema names a different type than the one spelled, or a type that is not an Undra type (addition) |
-/// | E0062 | a port call had no adapter (a runtime message, not a compile error; addition) |
+/// | E0061 | the name written is not the declared name of the type, or the type is not declared with `#[undra::api]` (addition) |
+/// | E0062 | a port call could not be answered and its method has no error channel: a runtime message (addition) |
 /// | E0063 | nested `Option<Option<T>>` (addition) |
 /// | E0064 | an object (`#[undra::api] impl`) used where a value is expected (addition) |
 /// | E0065 | a signal of a store written from a thread that does not hold its owning runtime's core lock (a runtime message, not a compile error, raised by `undra-signals` with the same what/why/fix/docs shape; ADR-035) |
@@ -75,6 +84,7 @@ pub(crate) mod code {
     pub(crate) const E0013: &str = "E0013";
     pub(crate) const E0020: &str = "E0020";
     pub(crate) const E0021: &str = "E0021";
+    pub(crate) const E0022: &str = "E0022";
     pub(crate) const E0030: &str = "E0030";
     pub(crate) const E0031: &str = "E0031";
     pub(crate) const E0032: &str = "E0032";
@@ -126,6 +136,17 @@ impl Diag {
             what = self.what,
             why = self.why,
             help = self.help,
+        )
+    }
+
+    /// The shape of [`Diag::message`] as a `format!` template with three `{}`: what, why and fix.
+    ///
+    /// For a message that is finished at run time (E0062 names the port and method of the call
+    /// that failed), so a runtime error reads exactly like a compile error: same code, same four
+    /// lines, same docs link.
+    pub(crate) fn runtime_template(code: &str) -> String {
+        format!(
+            "{MESSAGE_PREFIX}[undra::{code}]: {{}}\n  = note: {{}}\n  = help: {{}}\n  = docs: {DOCS_BASE}#{code}"
         )
     }
 
@@ -200,6 +221,19 @@ mod tests {
                 "  = help: fix",
                 "  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001",
             ]
+        );
+    }
+
+    #[test]
+    fn the_runtime_template_is_the_message_with_holes() {
+        let template = Diag::runtime_template(code::E0062);
+        let filled = template
+            .replacen("{}", "what", 1)
+            .replacen("{}", "why", 1)
+            .replacen("{}", "fix", 1);
+        assert_eq!(
+            filled,
+            Diag::new(code::E0062, "what", "why", "fix").message()
         );
     }
 

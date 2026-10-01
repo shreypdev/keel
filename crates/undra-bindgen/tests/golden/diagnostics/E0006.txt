@@ -1,0 +1,4 @@
+error[undra::E0006]: `f32` at record Scores, field by_weight is not a valid map key
+  = note: map keys must compare and hash the same on every platform: `String`, an integer type, `bool` and `Uuid` do, floats and composite keys do not
+  = help: use one of those key types, or a `Vec` of records with an explicit key field
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0006

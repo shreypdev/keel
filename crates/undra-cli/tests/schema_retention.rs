@@ -57,7 +57,7 @@ fn a_loaded_core_keeps_its_schema_and_jni_exports() {
 
     // The schema: reading it through the CLI's own loader also checks the library's self-reported
     // hash against its JSON. It must be the real schema, not the empty one a strip leaves behind.
-    let schema = undra_cli::schema::load_from_library(&lib, "playground-core")
+    let schema = undra_cli::schema::load_from_library(&lib, "playground-core", true)
         .expect("the built core library is not a readable Undra core");
     let empty = schema.records.is_empty()
         && schema.enums.is_empty()
@@ -69,6 +69,11 @@ fn a_loaded_core_keeps_its_schema_and_jni_exports() {
         !empty,
         "the loaded core reports an EMPTY schema: its `inventory` registrations were dead-stripped \
          (ADR-029). Restore the shim's non-incremental build."
+    );
+    assert!(
+        schema.records.iter().any(|r| !r.docs.is_empty()),
+        "the loaded core's schema has no doc comments: `undra_schema_json` must carry them \
+         (SPEC 2.3), or `undra bindgen --docs` has nothing to write"
     );
     assert_ne!(
         schema.hash(),

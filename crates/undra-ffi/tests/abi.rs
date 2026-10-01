@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration as StdDuration, Instant};
 
-use undra::meta::ids;
+use undra::meta::{Schema, ids};
 use undra::prelude::Handle;
 use undra::runtime::{Runtime, RuntimeConfig};
 use undra::wire::payload::{
@@ -595,14 +595,68 @@ fn abi_version_schema_hash_and_json_work_before_init() {
     let hash = undra_schema_hash();
     assert_ne!(hash, 0);
     let json = take(undra_schema_json());
-    // The hash is the fnv1a64 of exactly these bytes (SPEC 2.3).
-    assert_eq!(ids::fnv1a64(&json), hash);
     let doc: serde_json::Value = serde_json::from_slice(&json).expect("the schema is JSON");
     let text = String::from_utf8(json).expect("UTF-8");
     for expected in ["Calculator", "Counter", "Echo", "Sum", "version"] {
         assert!(text.contains(expected), "{expected} is in the schema");
     }
     assert!(doc.is_object());
+    // The JSON is the whole schema, docs and labels included (SPEC 2.3 and 6), so the hash is
+    // not the fnv1a64 of these bytes but of their canonical form, which has neither.
+    let schema = Schema::from_json(&text).expect("the schema JSON reads back");
+    assert_eq!(schema.hash(), hash);
+    assert_eq!(ids::fnv1a64(schema.canonical_json().as_bytes()), hash);
+}
+
+#[test]
+fn the_exported_schema_carries_the_doc_comments_the_hash_ignores() {
+    let _turn = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    undra_shutdown();
+    let hash = undra_schema_hash();
+    let schema = Schema::from_json(&String::from_utf8(take(undra_schema_json())).unwrap())
+        .expect("the schema JSON reads back");
+
+    let echo = schema.ports.iter().find(|p| p.name == "Echo").unwrap();
+    assert_eq!(echo.docs, "Answered by the host, asynchronously.");
+    let calculator = schema
+        .objects
+        .iter()
+        .find(|o| o.name == "Calculator")
+        .unwrap();
+    let ready_add = calculator
+        .methods
+        .iter()
+        .find(|m| m.name == "ready_add")
+        .unwrap();
+    assert_eq!(
+        ready_add.docs,
+        "An async method that is ready at once: measures the executor hop, not a timer."
+    );
+    // Stripping every doc changes nothing the wire depends on.
+    assert_eq!(schema.without_docs().hash(), hash);
+    assert_eq!(schema.hash(), hash);
+    assert_ne!(schema.to_json(), schema.without_docs().to_json());
+}
+
+#[test]
+fn the_exported_schema_is_what_the_dev_runner_prints() {
+    // `undra-dev-runner --print-schema` prints `collect_schema(..).to_json_pretty()`; the C ABI
+    // returns the same document compact. `undra bindgen` must generate the same bindings from
+    // either (docs included), so they have to read back as the same schema once labelled alike.
+    let _turn = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    undra_shutdown();
+    let exported = Schema::from_json(&String::from_utf8(take(undra_schema_json())).unwrap())
+        .expect("the schema JSON reads back");
+    let printed =
+        Schema::from_json(&undra::meta::collect_schema("playground-core").to_json_pretty())
+            .expect("the runner's schema JSON reads back");
+    let mut relabelled = exported.clone();
+    "playground-core".clone_into(&mut relabelled.crate_name);
+    assert_eq!(relabelled, printed);
+    assert!(
+        exported.ports.iter().any(|p| !p.docs.is_empty()),
+        "the comparison is only worth something when there are docs"
+    );
 }
 
 #[test]

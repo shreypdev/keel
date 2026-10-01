@@ -126,44 +126,55 @@ impl SchemaError {
 impl fmt::Display for SchemaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let code = self.code();
-        match self {
+        let (what, why, fix) = match self {
             SchemaError::DuplicateTypeName {
                 name,
                 first,
                 duplicate,
-            } => write!(
-                f,
-                "error[undra::{code}]: duplicate type name `{name}` (declared as {first} and again as {duplicate}); type names must be unique within a core"
+            } => (
+                format!(
+                    "duplicate type name `{name}` (declared as {first} and again as {duplicate})"
+                ),
+                "type names must be unique within a core: a type is identified to the platforms by its name (its id is a hash of it), so two declarations cannot share one".to_owned(),
+                format!("rename one of the two `{name}` declarations, or remove the duplicate"),
             ),
-            SchemaError::UnresolvedType { name, at } => write!(
-                f,
-                "error[undra::{code}]: unknown type `{name}` referenced at {at}; declare it with #[undra::api] or fix the name"
+            SchemaError::UnresolvedType { name, at } => (
+                format!("unknown type `{name}` referenced at {at}"),
+                "the schema describes a type by name, so the name must be declared in the same core: a record or enum with `#[undra::api]`, an error with `#[undra::error]`".to_owned(),
+                format!("declare `{name}` with `#[undra::api]`, or fix the name where it is used"),
             ),
-            SchemaError::MisplacedResult { ty, at } => write!(
-                f,
-                "error[undra::{code}]: `{ty}` at {at}: Result is only allowed as the outermost type of a return"
+            SchemaError::MisplacedResult { ty, at } => (
+                format!("`{ty}` at {at}: Result is only allowed as the outermost type of a return"),
+                "`Result<T, E>` is how a method reports a typed error, so it has no meaning inside a field, a parameter or another type".to_owned(),
+                "return the `Result` from the method and keep plain values in fields, parameters and nested types".to_owned(),
             ),
-            SchemaError::MisplacedStream { ty, at } => write!(
-                f,
-                "error[undra::{code}]: `{ty}` at {at}: Stream is only allowed as a return type, alone or as the Ok side of a Result"
+            SchemaError::MisplacedStream { ty, at } => (
+                format!("`{ty}` at {at}: Stream is only allowed as a return type, alone or as the Ok side of a Result"),
+                "a stream is how a method returns many values over time, so it has no meaning anywhere but a method's return".to_owned(),
+                "return the stream from the method".to_owned(),
             ),
-            SchemaError::MisplacedLazy { ty, at } => write!(
-                f,
-                "error[undra::{code}]: `{ty}` at {at}: Lazy is only allowed as the type of a store signal"
+            SchemaError::MisplacedLazy { ty, at } => (
+                format!("`{ty}` at {at}: Lazy is only allowed as the type of a store signal"),
+                "a lazy list is a list the platform pages through on demand, which only a store signal can offer".to_owned(),
+                "use a `Vec<T>` here, or move the list to a signal of a store".to_owned(),
             ),
-            SchemaError::MisplacedUnit { at } => write!(
-                f,
-                "error[undra::{code}]: `unit` at {at}: Unit is only allowed as a return type or as a variant with no fields, not as a field, parameter or signal type, nor inside option, vec, map or lazy (zero-width items defeat length validation)"
+            SchemaError::MisplacedUnit { at } => (
+                format!("`unit` at {at}: Unit is only allowed as a return type or as a variant with no fields, not as a field, parameter or signal type, nor inside option, vec, map or lazy"),
+                "`()` occupies zero bytes on the wire, and zero-width items defeat length validation: a `Vec` of them would accept any count from a four-byte message".to_owned(),
+                "remove the value, or use `bool` if you need a marker".to_owned(),
             ),
-            SchemaError::InvalidMapKey { key, at } => write!(
-                f,
-                "error[undra::{code}]: `{key}` at {at} is not a valid map key; use String, an integer type, Bool or Uuid"
+            SchemaError::InvalidMapKey { key, at } => (
+                format!("`{key}` at {at} is not a valid map key"),
+                "map keys must compare and hash the same on every platform: `String`, an integer type, `bool` and `Uuid` do, floats and composite keys do not".to_owned(),
+                "use one of those key types, or a `Vec` of records with an explicit key field".to_owned(),
             ),
-            SchemaError::StoreWithoutConstructor { object } => write!(
-                f,
-                "error[undra::{code}]: store `{object}` has no constructor; add a `pub fn new(..) -> Self` to its #[undra::api] impl"
+            SchemaError::StoreWithoutConstructor { object } => (
+                format!("store `{object}` has no constructor"),
+                "the platforms create a store by calling one of its constructors; without one it can never be instantiated".to_owned(),
+                "add `pub fn new(ctx: Ctx) -> Self` to its `#[undra::api(store)]` impl block".to_owned(),
             ),
-        }
+        };
+        f.write_str(&crate::diag::message(code, what, why, fix))
     }
 }
 
@@ -1218,6 +1229,19 @@ mod tests {
             for needle in needles {
                 assert!(text.contains(needle), "{text:?} should contain {needle:?}");
             }
+            // The shape of every diagnostic: what, note, help and the docs link of the code.
+            let lines: Vec<&str> = text.lines().collect();
+            assert_eq!(lines.len(), 4, "{text}");
+            assert!(lines[1].starts_with("  = note: "), "{text}");
+            assert!(lines[2].starts_with("  = help: "), "{text}");
+            assert_eq!(
+                lines[3],
+                format!(
+                    "  = docs: https://shreypdev.github.io/undra/docs/errors.html#{}",
+                    err.code()
+                ),
+                "{text}"
+            );
         }
     }
 

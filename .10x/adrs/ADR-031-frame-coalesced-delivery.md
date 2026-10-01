@@ -183,6 +183,35 @@ coalescing", and the opt-out cannot be honoured: `#[undra(no_coalesce)]` never r
 * **Docs.** SPEC 11's sentence becomes the rules above; SPEC 17 lists the options, counters and the drain
   listener; `docs/` gains a "high-frequency data" page (what coalescing does, when to use `no_coalesce`, how
   to batch in `ctx.txn`).
+* **Measured on Swift, Kotlin and TypeScript in Chromium (device phase, appended 2026-10-01; `bench/RESULTS.md`, "Device
+  numbers", files `bench/results/device/2026-10-01-*.json`).** The playground's `Bench.bench_list_update_burst(1667)`
+  commits 1,667 one-update keyed patches on the 10,000-row list, one transaction (one change-set) each. On iOS and Android a
+  thread of its own commits the burst once per frame and the main thread meets it only as the drain at the next frame
+  (`CADisplayLink`, `ChoreographerFramePacer`); the drain listener times it. Per frame, p50 over 240 frames after 60 warm-up
+  frames, runtime unchanged: **iOS simulator (iPhone 17 Pro, Release, Apple M5 Pro host) 0.79 to 0.82 ms** (one drain, 1,667
+  entries received, one applied; 5% of a 60 Hz frame), **Android emulator (arm64, API 35, benchmark build, AOT-compiled)
+  0.17 to 0.18 ms** (1%), TypeScript `wasm-main` in headless Chromium 153 4.0 to 4.3 ms for the whole burst on the page's
+  thread, of which the drain alone is 0.76 to 0.81 ms (the core's own 1,667 transactions run on the main thread there).
+  The unmerged cost is **estimated, not measured, and the runtime was not reverted**: after every frame of the experiment
+  the same mirror applies a single entry on its own (a call on the main thread drains before it returns, so the drain
+  listener times a drain of one change-set of one entry; on the web, a call that commits one update minus a call that commits
+  none), and the estimate is 1,667 times that entry's median (and, as the upper figure, its mean). Per entry: iOS 2.0 to 2.1
+  us (median) and 2.4 to 2.5 us (mean), Android 12.5 to 13.3 us and 13.7 to 14.8 us (a Kotlin patch copies the whole list),
+  web 6.8 to 7.3 us. **Estimated unmerged frame: iOS 3.4 to 4.1 ms (20 to 25% of a frame), Android 20.9 to 24.7 ms (125 to
+  148%: more than a frame), web 11.3 to 12.1 ms**; merging saves 4.2 to 5.0x on iOS, 122 to 137x on Android and 2.7 to
+  2.8x on the web. Three runs on iOS and two on each of the others agreed on the merged frame within 4% (iOS), 6% (web)
+  and 9% (Android). Method caveats: a simulator and an emulator share an Apple M5 Pro with other builds (load average 2.3
+  to 10.6), an A15 and a 2022 mid-range phone are slower, and nothing here is a device row; and the per-entry cost is the
+  cost of a one-entry drain, which includes the per-drain fixed work (the lock, folding a queue of one, notifying) that the
+  pre-ADR runtime paid once per hop and not once per entry, and leaves out what it paid per change-set outside the drain
+  (the copy and the queue append on the producing thread), so the unmerged figure shows the order of magnitude and is not a
+  measurement of the old runtime (the TypeScript probe above, run on the pre-ADR build, is). The runs
+  show decision 1 at work on all three runtimes (1,667 entries received, one applied, in one drain); on Kotlin the estimate
+  says the decision is what keeps a 100,000-patch-a-second feed on a large list inside a frame. Review note (same day,
+  `.10x/reviews/2026-10-01-device-bench-review.md`): the web figures are of the page built at Vite's default target,
+  which lowers the runtime's `#private` members to `WeakMap` helpers; the same page built at `es2022` measured a merged
+  frame of 2.4 ms, a drain of 0.59 ms and 4.75 us per entry at a higher host load (about 27, against 2 to 4 here), so
+  the web ratio holds (3.3x) and the web's absolute figures are a property of the build target as much as of the runtime.
 
 ## Acceptance conditions
 

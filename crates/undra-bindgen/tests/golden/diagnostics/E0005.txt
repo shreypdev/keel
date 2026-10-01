@@ -1,0 +1,4 @@
+error[undra::E0005]: `result<u8,named:Oops>` at record Todo, field outcome: Result is only allowed as the outermost type of a return
+  = note: `Result<T, E>` is how a method reports a typed error, so it has no meaning inside a field, a parameter or another type
+  = help: return the `Result` from the method and keep plain values in fields, parameters and nested types
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0005
