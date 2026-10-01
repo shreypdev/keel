@@ -9,6 +9,11 @@
 // core frees them; every `UndraBuf` is freed once; shutdown answers what is in flight and a new core
 // can start afterwards. `run.sh` builds it with AddressSanitizer and UndefinedBehaviorSanitizer.
 //
+// It also checks how the module finds a core (ADR-044): by namespace, through the shim under test
+// (the linked one finds the class `UndraCoreTable_<namespace>`, the dlopen one `lib<namespace>`), with
+// the table refused when it is of another ABI version, too short, of another namespace or missing
+// an entry (`fake_cores.c`, `fake_classes.m`), and two real cores side by side, one host each.
+//
 // Prints `ok - <name>` per check and exits non-zero on the first failure.
 
 #include <chrono>
@@ -139,6 +144,17 @@ std::vector<uint8_t> config() {
   w.str("host-test").str("inproc").u8(1).u8(0).u8(2);
   return w.bytes;
 }
+
+/// The core under test and a second core beside it (run.sh: the playground core, and the same crate
+/// built under another namespace, examples/two-cores/a).
+#ifndef UNDRA_TEST_NAMESPACE
+#define UNDRA_TEST_NAMESPACE "playground_core"
+#endif
+#ifndef UNDRA_TEST_SECOND_NAMESPACE
+#define UNDRA_TEST_SECOND_NAMESPACE "playground_a"
+#endif
+constexpr const char *kCoreNamespace = UNDRA_TEST_NAMESPACE;
+constexpr const char *kSecondNamespace = UNDRA_TEST_SECOND_NAMESPACE;
 
 // The playground's ids (examples/playground/generated/ts/src/ids.ts), recomputed from the names.
 const uint32_t kAdd = fnv1a32("fn.add");
@@ -313,13 +329,13 @@ void testsWithOneCore(const Api *api) {
   f.drain();
   ok("start registers the ports before undra_init and starts the core");
 
-  // A second host in the same process is refused without touching the core.
+  // A second host of the same core in this process is refused without touching the core.
   {
     Host other(*api, [] {});
     check(other.start(cfg.data(), static_cast<uint32_t>(cfg.size()), {}) == start_code::kBusy, "a second host is busy");
     check(f.host->running(), "the first host is untouched");
   }
-  ok("one core per process: a second host is refused");
+  ok("one running host per core: a second host of the same core is refused");
 
   // A synchronous call on the JS thread: the reply comes back directly, nothing wakes.
   {
@@ -484,10 +500,10 @@ void testsWithOneCore(const Api *api) {
     const auto took = std::chrono::steady_clock::now() - started;
     check(!f.host->running(), "not running after shutdown");
     check(took < std::chrono::seconds(5), "shutdown does not wait for the hanging call");
-    check(Host::runningHost() == nullptr, "the process has no running host");
+    check(Host::runningHost(api->name_space) == nullptr, "the core has no running host");
     f.host->shutdown(); // idempotent
   }
-  ok("shutdown with a call in flight returns, is idempotent, and frees the process's slot");
+  ok("shutdown with a call in flight returns, is idempotent, and frees the core's slot");
 }
 
 void testsWithSyncPorts(const Api *api) {
@@ -542,7 +558,7 @@ void testsWithSyncPorts(const Api *api) {
   ok("a JS sync port runs only on the JS thread; elsewhere it is unavailable and warned once");
 
   f.host.reset(); // the destructor shuts the core down
-  check(Host::runningHost() == nullptr, "the destructor shut the core down");
+  check(Host::runningHost(api->name_space) == nullptr, "the destructor shut the core down");
   ok("destroying a running host shuts its core down");
 }
 
@@ -571,7 +587,7 @@ void testsWithAReloadRace(const Api *api) {
     oldJsThread.join();
     check(code == 0, "a start during another host's shutdown waits for it (round " + std::to_string(round) + "), got " +
               std::to_string(code));
-    check(Host::runningHost() == fresh.host.get(), "the new host holds the process's slot");
+    check(Host::runningHost(api->name_space) == fresh.host.get(), "the new host holds the core's slot");
     {
       Writer args;
       args.i32(4).i32(5);
@@ -580,22 +596,146 @@ void testsWithAReloadRace(const Api *api) {
     }
     fresh.host->shutdown();
   }
-  check(Host::runningHost() == nullptr, "no host holds the slot afterwards");
+  check(Host::runningHost(api->name_space) == nullptr, "no host holds the slot afterwards");
   ok("a start while another host is shutting down waits for it (a reload on two JS threads)");
+}
+
+bool contains(const std::string &text, const std::string &part) {
+  return text.find(part) != std::string::npos;
+}
+
+/// `loadApi(name_space)` must fail, with an error that contains `part`.
+void refused(const std::string &name_space, const std::string &part) {
+  std::string error;
+  const Api *api = loadApi(name_space, error);
+  check(api == nullptr, "`" + name_space + "` is refused");
+  check(contains(error, part), "the error for `" + name_space + "` says `" + part + "`: " + error);
+  const std::string shown = error.size() > 150 ? error.substr(0, 150) + "..." : error;
+  std::printf("#   %s: %s\n", name_space.c_str(), shown.c_str());
+}
+
+void testsOfTheTable(const Api *api) {
+  check(api->abi_version == kAbiVersion && kAbiVersion == 2, "the core's table is C ABI 2");
+  check(api->name_space == kCoreNamespace, "the table's namespace is " + std::string(kCoreNamespace));
+  check(api->schema_hash != 0, "the table carries the schema hash");
+  {
+    std::string error;
+    check(loadApi(kCoreNamespace, error) == api && error.empty(), "a core is resolved once and kept");
+  }
+  ok("a core's table is found by its namespace, checked (ABI 2, its namespace) and kept");
+
+  refused("no_such_core", "`no_such_core`");
+  refused("not a namespace", "not an Undra core namespace");
+  refused("../escape", "not an Undra core namespace");
+  refused("9starts_with_a_digit", "not an Undra core namespace");
+  refused("a_namespace_of_thirty_three_chars", "not an Undra core namespace");
+  refused("", "not an Undra core namespace");
+  {
+    std::string error;
+    check(loadApi("no_such_core", error) == nullptr && contains(error, "undra build --platform rn"), "and says how to build it");
+  }
+  ok("an unknown core or a name that is not a namespace is a clear error");
+
+  // `bad_abi` is a 4-byte object holding 1: reading past `abi_version` would be an ASan error.
+  refused("bad_abi", "speaks C ABI 1, this module speaks 2");
+  refused("bad_abi", "speaks C ABI 1"); // not cached: refused again
+  ok("a table of another abi_version is refused, and nothing past abi_version is read");
+
+  refused("short_table", "shorter than");
+  refused("wrong_ns", "is the Undra core `other_core`, not `wrong_ns`");
+  refused("null_entry", "has no `schema_json` entry");
+  refused("not_a_core", "`not_a_core`");
+  ok("a table that is too short, of another namespace or missing an entry is refused, and so is a non-core");
+}
+
+void testsWithTwoCores(const Api *first, const Api *second) {
+  check(first != second && first->name_space != second->name_space, "two namespaces, two tables");
+  check(first->call != second->call && first->init != second->init, "two images: the entries differ");
+  const std::vector<uint8_t> cfg = config();
+  Fixture a(first);
+  Fixture b(second);
+  for (Fixture *f : {&a, &b}) {
+    CallScope scope(*f->host, nullptr);
+    const uint32_t code = f->host->start(cfg.data(), static_cast<uint32_t>(cfg.size()), {});
+    check(code == 0, "core " + f->api->name_space + " starts beside the other, got " + std::to_string(code));
+  }
+  a.drain();
+  b.drain();
+  check(Host::runningHost(first->name_space) == a.host.get() && Host::runningHost(second->name_space) == b.host.get(),
+        "each core's slot holds its own host");
+  {
+    Host other(*second, [] {});
+    check(other.start(cfg.data(), static_cast<uint32_t>(cfg.size()), {}) == start_code::kBusy, "a second host of a core is busy");
+    check(a.host->running() && b.host->running(), "both cores are untouched");
+  }
+  ok("two cores in one process: one running host each; a second host of either is refused");
+
+  // Each core answers its own calls, and what one says on its own threads lands in its own inbox.
+  {
+    Writer two;
+    two.i32(2).i32(3);
+    Writer four;
+    four.i32(4).i32(5);
+    std::vector<uint8_t> ra = a.callSync(freeCall(kAdd, a.nextCall++, two.bytes));
+    std::vector<uint8_t> rb = b.callSync(freeCall(kAdd, b.nextCall++, four.bytes));
+    check(ra.size() == 9 && static_cast<int32_t>(getU32(&ra[5])) == 5, "core a: 2 + 3");
+    check(rb.size() == 9 && static_cast<int32_t>(getU32(&rb[5])) == 9, "core b: 4 + 5");
+    // The same call id on both: two cores, two id spaces.
+    const uint32_t id = 900;
+    Writer args;
+    args.i32(40).i32(2);
+    check(a.call(freeCall(kAddLater, id, args.bytes)) == 0 && b.call(freeCall(kAddLater, id, args.bytes)) == 0,
+          "add_later is accepted by both");
+    check(a.waitFor([&] { return a.replied(id); }) && b.waitFor([&] { return b.replied(id); }), "both reply within 5 s");
+    std::size_t replies = 0;
+    for (Fixture *f : {&a, &b}) {
+      for (const Record &r : f->seen) {
+        replies += r.kind == RecordKind::Reply && r.payload.size() >= 5 && getU32(r.payload.data()) == id ? 1 : 0;
+      }
+    }
+    check(replies == 2, "one reply per core, each in its own inbox, got " + std::to_string(replies));
+  }
+  ok("each core answers its own calls into its own inbox (the same call id on both)");
+
+  // One shut down, the other keeps working; the first starts again beside it.
+  a.host->shutdown();
+  check(Host::runningHost(first->name_space) == nullptr && Host::runningHost(second->name_space) == b.host.get(),
+        "shutting one core down frees only its slot");
+  {
+    Writer args;
+    args.i32(1).i32(1);
+    std::vector<uint8_t> rb = b.callSync(freeCall(kAdd, b.nextCall++, args.bytes));
+    check(rb.size() == 9 && static_cast<int32_t>(getU32(&rb[5])) == 2, "the other core still answers");
+  }
+  Fixture again(first);
+  {
+    CallScope scope(*again.host, nullptr);
+    check(again.host->start(cfg.data(), static_cast<uint32_t>(cfg.size()), {}) == 0, "the first core starts again");
+  }
+  again.drain();
+  again.host->shutdown();
+  b.host->shutdown();
+  check(Host::runningHost(first->name_space) == nullptr && Host::runningHost(second->name_space) == nullptr, "no slot is held");
+  ok("one core shut down, the other keeps working, and the first starts again beside it");
 }
 
 } // namespace
 
 int main() {
   std::string error;
-  const Api *api = loadApi(error);
+  const Api *api = loadApi(kCoreNamespace, error);
   if (api == nullptr) {
-    fail("load the core: " + error);
+    fail("load the core " + std::string(kCoreNamespace) + ": " + error);
   }
-  check(api->abi_version == kAbiVersion, "the core speaks C ABI 1");
+  const Api *second = loadApi(kSecondNamespace, error);
+  if (second == nullptr) {
+    fail("load the second core " + std::string(kSecondNamespace) + ": " + error);
+  }
+  testsOfTheTable(api);
   testsWithOneCore(api);
   testsWithSyncPorts(api);
   testsWithAReloadRace(api);
+  testsWithTwoCores(api, second);
   std::printf("# %d checks passed\n", g_checks);
   return 0;
 }

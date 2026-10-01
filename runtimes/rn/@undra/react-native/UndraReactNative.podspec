@@ -1,9 +1,11 @@
 # The iOS half of @undra/react-native (ADR-038): the C++ TurboModule over the Undra C ABI.
 #
-# The core itself comes from the `UndraCore` pod that `undra build --platform rn` writes next to
-# `UndraCore.xcframework` (build/ios/UndraCore.podspec); the app's Podfile points at it:
+# It depends on no core: each core of the app is its own pod, which `undra build --platform rn` writes
+# next to the core's XCFramework (build/ios/<Bundle>.podspec, e.g. PlaygroundCore for the namespace
+# playground_core), and the module finds a core by its namespace at run time, through the class
+# `UndraCoreTable_<namespace>` that pod compiles (ADR-044). The app's Podfile lists each core's pod:
 #
-#   pod 'UndraCore', :path => '../../build/ios'
+#   pod 'PlaygroundCore', :path => '../../build/ios'
 require "json"
 
 package = JSON.parse(File.read(File.join(__dir__, "package.json")))
@@ -26,6 +28,5 @@ Pod::Spec.new do |s|
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++20",
   }
 
-  s.dependency "UndraCore"
   install_modules_dependencies(s)
 end

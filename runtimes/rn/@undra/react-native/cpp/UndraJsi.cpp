@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -15,10 +16,19 @@ namespace {
 /// called from the sink's JavaScript) leaves its records to the running one, so order is kept.
 thread_local bool t_draining = false;
 
-/// The binding that started the process's core, so a new runtime (dev reload) can stop a core
-/// whose runtime is gone before it starts its own.
-std::mutex g_ownerMutex;
-std::weak_ptr<Binding> g_owner;
+/// The binding that started each core of the process (by namespace), so a new runtime (dev reload)
+/// can stop a core whose runtime is gone before it starts its own. Never destroyed.
+std::mutex &g_ownerMutex = *new std::mutex;
+std::map<std::string, std::weak_ptr<Binding>> &g_owners = *new std::map<std::string, std::weak_ptr<Binding>>;
+
+/// `globalThis.__undraNative[name_space]`: the object `install` put there, or `undefined`.
+jsi::Value installedObject(jsi::Runtime &rt, const std::string &name_space) {
+  jsi::Value all = rt.global().getProperty(rt, "__undraNative");
+  if (!all.isObject()) {
+    return jsi::Value::undefined();
+  }
+  return all.getObject(rt).getProperty(rt, name_space.c_str());
+}
 
 /// Bytes that JavaScript receives as an `ArrayBuffer` and owns from then on: an inbox batch, or
 /// a copy of a sync port's arguments.
@@ -144,16 +154,16 @@ std::string takeString(const Api &api, UndraBuf buf) {
   return text;
 }
 
-/// `__undraNative`: the receiver of a method call, or the global.
-jsi::Object nativeOf(jsi::Runtime &rt, const jsi::Value &thisVal) {
+/// `__undraNative[name_space]`: the receiver of a method call, or the installed object.
+jsi::Object nativeOf(jsi::Runtime &rt, const jsi::Value &thisVal, const std::string &name_space) {
   if (thisVal.isObject()) {
     return thisVal.getObject(rt);
   }
-  jsi::Value global = rt.global().getProperty(rt, "__undraNative");
-  if (!global.isObject()) {
-    raise(rt, "__undraNative is not installed");
+  jsi::Value installed = installedObject(rt, name_space);
+  if (!installed.isObject()) {
+    raise(rt, "__undraNative." + name_space + " is not installed");
   }
-  return global.getObject(rt);
+  return installed.getObject(rt);
 }
 
 /// Runs a JavaScript sync port (`native.portSync`) on the JS thread, from inside a core callback
@@ -251,7 +261,7 @@ void Binding::postDrain(
       return;
     }
     try {
-      jsi::Value native = rt.global().getProperty(rt, "__undraNative");
+      jsi::Value native = installedObject(rt, self->api.name_space);
       if (native.isObject()) {
         self->drain(rt, native.getObject(rt));
       }
@@ -271,11 +281,15 @@ void Binding::postFrame(
   }
   try {
     invoker->invokeAsync([weak, alive](jsi::Runtime &rt) {
-      if (!alive->load() || weak.expired()) {
+      if (!alive->load()) {
+        return;
+      }
+      std::shared_ptr<Binding> self = weak.lock(); // on the JS thread, as in postDrain
+      if (!self) {
         return;
       }
       try {
-        jsi::Value native = rt.global().getProperty(rt, "__undraNative");
+        jsi::Value native = installedObject(rt, self->api.name_space);
         if (!native.isObject()) {
           return;
         }
@@ -351,12 +365,16 @@ jsi::Value Binding::start(jsi::Runtime &rt, const jsi::Object &native, const jsi
       return jsi::Value(static_cast<double>(start_code::kAlreadyStarted));
     }
   }
-  // A core another runtime of this process started (a reload whose old module was not destroyed
-  // yet) is stopped first: there is one core per process, and its runtime is gone or going.
+  // This core started by another runtime of this process (a reload whose old module was not
+  // destroyed yet) is stopped first: a core runs once per process, and that runtime is gone or
+  // going. Other cores (other namespaces) are not touched.
   std::shared_ptr<Binding> owner;
   {
     std::lock_guard<std::mutex> lock(g_ownerMutex);
-    owner = g_owner.lock();
+    auto found = g_owners.find(api.name_space);
+    if (found != g_owners.end()) {
+      owner = found->second.lock();
+    }
   }
   if (owner && owner.get() != this) {
     owner->detach();
@@ -383,7 +401,7 @@ jsi::Value Binding::start(jsi::Runtime &rt, const jsi::Object &native, const jsi
   }
   {
     std::lock_guard<std::mutex> lock(g_ownerMutex);
-    g_owner = weak;
+    g_owners[api.name_space] = weak;
   }
   drain(rt, native);
   return jsi::Value(0);
@@ -406,7 +424,10 @@ void Binding::shutdownHost(jsi::Runtime &rt) {
 }
 
 void Binding::install(jsi::Runtime &rt) {
-  if (rt.global().getProperty(rt, "__undraNative").isObject()) {
+  const std::string &name_space = api.name_space;
+  jsi::Value existing = rt.global().getProperty(rt, "__undraNative");
+  jsi::Object all = existing.isObject() ? existing.getObject(rt) : jsi::Object(rt);
+  if (all.getProperty(rt, name_space.c_str()).isObject()) {
     return;
   }
   std::shared_ptr<Binding> self = shared_from_this();
@@ -418,16 +439,16 @@ void Binding::install(jsi::Runtime &rt) {
 
   // Runs `body` (which enters the core) inside a CallScope, then drains what it queued on this
   // thread before returning to JavaScript (ADR-038, decision 4a). Without a running core of its
-  // own (not started, closed, or stopped because a reloaded runtime of this process started a new
-  // one) the binding never reaches the C ABI: the process's core may then belong to another
-  // runtime, whose calls, call ids, port call ids and state this one must not touch. `refused`
+  // own (not started, closed, or stopped because a reloaded runtime of this process started this
+  // core again) the binding never reaches the C ABI: the core may then belong to another runtime,
+  // whose calls, call ids, port call ids and state this one must not touch. `refused`
   // is the answer then, the one the C ABI gives with no core (status 5, ignored, unavailable).
   auto enter = [self](jsi::Runtime &rt, const jsi::Value &thisVal, auto &&body, auto &&refused) -> jsi::Value {
     std::shared_ptr<Host> host = self->host();
     if (!host || !host->running()) {
       return refused();
     }
-    jsi::Object native = nativeOf(rt, thisVal);
+    jsi::Object native = nativeOf(rt, thisVal, self->api.name_space);
     jsi::Value result;
     try {
       JsAnswerer answerer(rt, native);
@@ -454,7 +475,7 @@ void Binding::install(jsi::Runtime &rt) {
     return jsi::Value(rt, jsi::String::createFromUtf8(rt, takeString(self->api, self->api.schema_json())));
   });
   define("start", 5, [self](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
-    return self->start(rt, nativeOf(rt, thisVal), args, count);
+    return self->start(rt, nativeOf(rt, thisVal, self->api.name_space), args, count);
   });
   define("shutdown", 0, [self](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *, size_t) {
     self->shutdownHost(rt);
@@ -558,8 +579,8 @@ void Binding::install(jsi::Runtime &rt) {
         },
         none);
   });
-  // Every store of this runtime's core; `undefined` without one (the process's core may be
-  // another runtime's).
+  // Every store of this runtime's core; `undefined` without one (the core may be another
+  // runtime's).
   define("snapshot", 0, [self](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *, size_t) {
     std::shared_ptr<Host> host = self->host();
     if (!host || !host->running()) {
@@ -597,7 +618,12 @@ void Binding::install(jsi::Runtime &rt) {
     return jsi::Value(self->frames_ != nullptr && self->frames_->request());
   });
 
-  rt.global().setProperty(rt, "__undraNative", native);
+  // The table's namespace, which `NativeTransport` checks against the one it was given.
+  native.setProperty(rt, "namespace", jsi::String::createFromUtf8(rt, name_space));
+  all.setProperty(rt, name_space.c_str(), native);
+  if (!existing.isObject()) {
+    rt.global().setProperty(rt, "__undraNative", all);
+  }
 }
 
 } // namespace undra::rn

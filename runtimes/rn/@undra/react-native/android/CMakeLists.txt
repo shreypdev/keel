@@ -2,14 +2,16 @@
 #
 # React Native's autolinking adds this directory to the app's CMake build (react-native.config.js:
 # a pure C++ dependency) after `find_package(ReactAndroid)`, and links the static library below into
-# the app's `libappmodules.so`. The Undra core itself is not linked here: the module `dlopen`s the
-# APK's `libundra_core.so` (`undra build --platform rn`, or android) the first time it starts.
+# the app's `libappmodules.so`. No Undra core is linked here: the module `dlopen`s the APK's
+# `lib<namespace>.so` (`undra build --platform rn`, or android) the first time JavaScript installs
+# that core (`install(namespace)`, ADR-044), so one build of the module serves every core of the app.
 cmake_minimum_required(VERSION 3.13)
 project(undra_react_native CXX)
 
 set(UNDRA_RN_CPP_DIR ${CMAKE_CURRENT_LIST_DIR}/../cpp)
 
 add_library(undra_react_native STATIC
+  ${UNDRA_RN_CPP_DIR}/UndraApi.cpp
   ${UNDRA_RN_CPP_DIR}/UndraApiAndroid.cpp
   ${UNDRA_RN_CPP_DIR}/UndraFrameSource.cpp
   ${UNDRA_RN_CPP_DIR}/UndraHost.cpp
@@ -24,5 +26,5 @@ target_link_libraries(undra_react_native
   ReactAndroid::jsi
   ReactAndroid::reactnative
   android # AChoreographer
-  dl      # dlopen of libundra_core.so
+  dl      # dlopen of lib<namespace>.so
 )
