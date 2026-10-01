@@ -206,8 +206,8 @@ function StressPanel({
 
       <dl className="tiles" aria-label="Measured in this browser">
         <Tile label="Generated" unit="/ s" value={s ? formatCount(s.generatedPerSec) : "–"} note={`target ${formatCount(rate)} · ${s ? formatCount(s.generatedTotal) : 0} so far`} testId="stress-generated" />
-        <Tile label="Received" unit="change-sets / s" value={s ? formatCount(s.receivedPerSec) : "–"} note="one per update" testId="stress-received" />
-        <Tile label="Applied" unit="entries / s" value={s ? formatCount(s.appliedPerSec) : "–"} note={s ? formatMerge(s.mergeRatio) : "–"} testId="stress-applied" />
+        <Tile label="Received" unit="/ s" value={s ? formatCount(s.receivedPerSec) : "–"} note="change-sets, one per update" testId="stress-received" />
+        <Tile label="Applied" unit="/ s" value={s ? formatCount(s.appliedPerSec) : "–"} note={s ? `entries, ${formatMerge(s.mergeRatio)}` : "entries"} testId="stress-applied" />
         <Tile label="Drains" unit="/ s" value={s ? formatCount(s.drainsPerSec) : "–"} note="once per frame" testId="stress-drains" />
         <Tile
           label="Drain p50 / p99"
