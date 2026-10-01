@@ -28,6 +28,9 @@ websocket = ["undra-ports/websocket"]
 sse = ["undra-ports/sse"]
 # The `Db` port over SQLite (`undra::ports::db`).
 db = ["undra-ports/db"]
+# `undra::ports::fakes::MemDb`, a real in-memory SQLite behind the `Db` port, for a core's tests:
+# enable it in `[dev-dependencies]` only (it does not build for wasm32-unknown-unknown).
+db-fake = ["undra-ports/db-fake"]
 
 [dev-dependencies]
 undra-bindgen = { workspace = true }

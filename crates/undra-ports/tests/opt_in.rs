@@ -863,3 +863,93 @@ proptest! {
         prop_assert_eq!(delivered + fakes.web_socket.waiting(conn), sent);
     }
 }
+
+// ---- the dev-only real-SQLite fake -----------------------------------------------------------------
+
+/// `db-fake` pulls `rusqlite`, which does not build for wasm32-unknown-unknown: no feature a core
+/// ships with may reach it (ADR-048 §8).
+#[test]
+fn no_shipped_feature_reaches_db_fake() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ports = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    let facade = std::fs::read_to_string(root.join("../undra/Cargo.toml")).unwrap();
+    let feature_line = |manifest: &str, name: &str| -> String {
+        manifest
+            .lines()
+            .find(|l| l.trim_start().starts_with(&format!("{name} =")))
+            .unwrap_or_default()
+            .to_owned()
+    };
+    for name in ["default", "websocket", "sse", "db"] {
+        assert!(
+            !feature_line(&ports, name).contains("db-fake"),
+            "undra-ports/{name}"
+        );
+        assert!(
+            !feature_line(&ports, name).contains("rusqlite"),
+            "undra-ports/{name}"
+        );
+        assert!(
+            !feature_line(&facade, name).contains("db-fake"),
+            "undra/{name}"
+        );
+    }
+    assert!(
+        ports.contains(
+            "rusqlite = { version = \"0.40\", features = [\"bundled\"], optional = true }"
+        )
+    );
+}
+
+#[cfg(feature = "db-fake")]
+#[test]
+fn the_reference_adapter_runs_the_database_surface_on_real_sqlite() {
+    use undra_ports::fakes::MemDb;
+    let t = TestRuntime::new();
+    let _fakes = fakes::install(&t);
+    MemDb::new().install(t.runtime());
+    let ctx = t.ctx();
+    let outcome = t.run_until(async move {
+        let db = Database::open(&ctx, "ref", MIGRATIONS).await?;
+        assert_eq!(db.version(), 2);
+        let id = db
+            .transaction(|tx| async move {
+                let a = tx
+                    .execute("INSERT INTO todos (title) VALUES (?)", params!["a"])
+                    .await?;
+                tx.execute("INSERT INTO todos (title) VALUES (?)", params!["b"])
+                    .await?;
+                Ok(a.last_insert_id)
+            })
+            .await?;
+        let failed = db
+            .transaction(|tx| async move {
+                tx.execute("INSERT INTO todos (title) VALUES (?)", params!["c"])
+                    .await?;
+                tx.execute(
+                    "INSERT INTO todos (title) VALUES (?)",
+                    params![None::<String>],
+                )
+                .await?;
+                Ok(())
+            })
+            .await;
+        assert!(matches!(
+            failed,
+            Err(DbError::Constraint {
+                kind: DbConstraint::NotNull,
+                ..
+            })
+        ));
+        let rows = db
+            .query("SELECT id, title, done FROM todos ORDER BY id", params![])
+            .await?;
+        assert_eq!(rows.len(), 2, "the failed transaction rolled back");
+        let first = rows.row(0).unwrap();
+        assert_eq!(first.get::<i64>("id")?, id);
+        assert!(!first.get::<bool>("done")?);
+        db.close().await?;
+        Ok::<_, DbError>(())
+    });
+    assert_eq!(outcome, Ok(()));
+}

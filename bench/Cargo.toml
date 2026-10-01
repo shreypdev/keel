@@ -7,7 +7,7 @@ description = "Undra's benchmark harness: criterion benches for humans, the budg
 
 [dependencies]
 # The opt-in ports are benchmarked too (`ports/*`, `db/*`).
-undra = { workspace = true, features = ["websocket", "sse", "db"] }
+undra = { workspace = true, features = ["websocket", "sse", "db", "db-fake"] }
 undra-ports = { workspace = true }
 undra-query = { workspace = true }
 undra-runtime = { workspace = true }

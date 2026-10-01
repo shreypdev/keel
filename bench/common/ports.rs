@@ -2,26 +2,28 @@
 //! the core (argument encoding, the port table, the reply's decoding) with a Rust fake answering
 //! in place of the platform.
 //!
-//! These are host rows of the **core side** of the path. SQLite's own time and the platform's
-//! socket are the platform's, measured by each runtime (bench/RESULTS.md, "Opt-in ports").
+//! These are host rows: the core side of the path, and for `db/*` an in-memory SQLite in place of
+//! the platform's file (whose disk time is the platform's, measured by each runtime).
 //!
 //! * `ports/ws_roundtrip`: one 64-byte text message sent and the echo received, through
 //!   `WebSocketProxy` (`send`, then `receive` with the stream's credit of 16).
 //! * `db/insert_1k`: one transaction of 1,000 bound `INSERT`s through `DbProxy` (`begin`, 1,000
-//!   `execute` with three parameters, `commit`): what the core spends to write 1,000 rows.
-//! * `db/query_10k`: one `query` whose reply is 10,000 rows of 3 cells (integer, text, real),
-//!   decoded into `DbRows`: what the core spends to read 10,000 rows.
+//!   `execute` with three parameters, `commit`) into a real in-memory SQLite (`MemDb`, the
+//!   reference adapter): the port path plus SQLite's own work, the table emptied between runs.
+//! * `db/query_10k`: one `query` of 10,000 rows of 3 cells (integer, text, real) from the same
+//!   SQLite, encoded and decoded into `DbRows`.
 #![allow(missing_docs, dead_code)]
 
 use std::hint::black_box;
+use std::rc::Rc;
 use std::sync::Arc;
 
-use undra::ports::db::{Db, DbExecuted, DbRows, DbValue};
-use undra::ports::fakes::Fakes;
+use undra::ports::db::{Db, DbMigration, DbValue};
+use undra::ports::fakes::{Fakes, MemDb};
 use undra::ports::ws::{WebSocket, WsMessage};
 use undra::ports::{DbProxy, WebSocketProxy};
 use undra::runtime::testing::TestRuntime;
-use undra_bench::workload::{Workload, with_reset};
+use undra_bench::workload::{Workload, plain, with_reset};
 
 fn rig() -> (TestRuntime, Fakes) {
     let t = TestRuntime::new();
@@ -64,24 +66,43 @@ pub fn ports() -> Vec<Workload> {
     })]
 }
 
-/// The workloads of the `db` group.
+/// A runtime whose `Db` port is a real in-memory SQLite ([`MemDb`]) with an `items` table.
+fn sqlite_rig() -> (TestRuntime, Arc<DbProxy>, u32) {
+    let t = TestRuntime::new();
+    let _fakes = undra::ports::fakes::install(&t);
+    MemDb::new().install(t.runtime());
+    let proxy = Arc::new(DbProxy::new(t.ctx()));
+    let p = proxy.clone();
+    let db = t
+        .run_until(async move {
+            p.open(
+                "bench".into(),
+                vec![DbMigration {
+                    version: 1,
+                    sql: "CREATE TABLE items (id INTEGER PRIMARY KEY, title TEXT NOT NULL, score REAL)"
+                        .into(),
+                }],
+            )
+            .await
+        })
+        .expect("the database opens")
+        .db;
+    (t, proxy, db)
+}
+
+fn item(i: i64) -> Vec<DbValue> {
+    vec![
+        DbValue::Integer(i),
+        DbValue::Text(format!("item {i}")),
+        DbValue::Real(i as f64 / 2.0),
+    ]
+}
+
+/// The workloads of the `db` group: the port path and a real in-memory SQLite.
 pub fn db() -> Vec<Workload> {
     vec![
         Workload::new("db/insert_1k", || {
-            let (t, fakes) = rig();
-            fakes.db.respond_executed(
-                "INSERT",
-                DbExecuted {
-                    changes: 1,
-                    last_insert_id: 1,
-                },
-            );
-            let proxy = Arc::new(DbProxy::new(t.ctx()));
-            let p = proxy.clone();
-            let db = t
-                .run_until(async move { p.open("bench".into(), vec![]).await })
-                .expect("the fake opens")
-                .db;
+            let (t, proxy, db) = sqlite_rig();
             let insert_1k = move |t: &TestRuntime, proxy: &Arc<DbProxy>| {
                 let p = proxy.clone();
                 t.run_until(async move {
@@ -90,52 +111,60 @@ pub fn db() -> Vec<Workload> {
                         p.execute(
                             tx,
                             "INSERT INTO items (id, title, score) VALUES (?, ?, ?)".to_owned(),
-                            vec![
-                                DbValue::Integer(i),
-                                DbValue::Text(format!("item {i}")),
-                                DbValue::Real(i as f64 / 2.0),
-                            ],
+                            item(i),
                         )
                         .await?;
                     }
                     p.commit(tx).await
                 })
             };
+            let clear = move |t: &TestRuntime, proxy: &Arc<DbProxy>| {
+                let p = proxy.clone();
+                t.run_until(
+                    async move { p.execute(db, "DELETE FROM items".to_owned(), vec![]).await },
+                )
+            };
             insert_1k(&t, &proxy).expect("1,000 inserts commit");
-            let executes = fakes
-                .db
-                .calls_of(undra::ports::fakes::DbCallKind::Execute)
-                .len();
-            assert_eq!(executes, 1_000, "every insert crossed");
-            let server = fakes.db.clone();
+            let count = {
+                let p = proxy.clone();
+                t.run_until(async move {
+                    p.query(db, "SELECT COUNT(*) FROM items".to_owned(), vec![])
+                        .await
+                })
+                .expect("count")
+            };
+            assert_eq!(
+                count.rows,
+                [[DbValue::Integer(1_000)]],
+                "every insert landed"
+            );
+            let t = Rc::new(t);
+            let (t2, proxy2) = (t.clone(), proxy.clone());
             with_reset(
                 move || {
                     black_box(insert_1k(&t, &proxy)).ok();
                 },
-                move || server.clear_calls(),
+                move || {
+                    clear(&t2, &proxy2).expect("the table empties");
+                },
             )
         }),
         Workload::new("db/query_10k", || {
-            let (t, fakes) = rig();
-            let rows = DbRows {
-                columns: vec!["id".into(), "title".into(), "score".into()],
-                rows: (0..10_000_i64)
-                    .map(|i| {
-                        vec![
-                            DbValue::Integer(i),
-                            DbValue::Text(format!("item {i}")),
-                            DbValue::Real(i as f64 / 2.0),
-                        ]
-                    })
-                    .collect(),
-            };
-            fakes.db.respond_rows("SELECT", rows);
-            let proxy = Arc::new(DbProxy::new(t.ctx()));
+            let (t, proxy, db) = sqlite_rig();
             let p = proxy.clone();
-            let db = t
-                .run_until(async move { p.open("bench".into(), vec![]).await })
-                .expect("the fake opens")
-                .db;
+            t.run_until(async move {
+                let tx = p.begin(db).await?;
+                for i in 0..10_000_i64 {
+                    p.execute(
+                        tx,
+                        "INSERT INTO items (id, title, score) VALUES (?, ?, ?)".to_owned(),
+                        item(i),
+                    )
+                    .await?;
+                }
+                p.commit(tx).await
+            })
+            .expect("10,000 rows seeded");
             let query = move |t: &TestRuntime, proxy: &Arc<DbProxy>| {
                 let p = proxy.clone();
                 t.run_until(async move {
@@ -146,13 +175,10 @@ pub fn db() -> Vec<Workload> {
             let first = query(&t, &proxy).expect("the query answers");
             assert_eq!(first.len(), 10_000, "10,000 rows come back");
             assert_eq!(first.columns.len(), 3, "of 3 cells");
-            let server = fakes.db.clone();
-            with_reset(
-                move || {
-                    black_box(query(&t, &proxy)).ok();
-                },
-                move || server.clear_calls(),
-            )
+            assert_eq!(first.rows[9_999], item(9_999));
+            plain(move || {
+                black_box(query(&t, &proxy)).ok();
+            })
         }),
     ]
 }

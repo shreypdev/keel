@@ -14,6 +14,7 @@
 //! | `FakeWebSocket` | `WebSocket` (feature `websocket`) | scripted server: accept, refuse, push, close, drop; records sends and pulls |
 //! | `FakeSse` | `Sse` (feature `sse`) | scripted event-stream server: push, end, fail; records `Last-Event-ID` |
 //! | `FakeDb` | `Db` (feature `db`) | scripted replies by SQL, failure injection, migrations and transactions tracked |
+//! | `MemDb` | `Db` (feature `db-fake`, tests only) | a real in-memory SQLite: the reference adapter of ADR-048 |
 //!
 //! Every fake is `Send + Sync`, keeps its state behind a lock and never reads the system clock,
 //! a random source or a thread (CLAUDE.md R12).
@@ -37,6 +38,8 @@ mod events;
 mod fs;
 mod http;
 mod log;
+#[cfg(feature = "db-fake")]
+mod mem_db;
 mod rng;
 #[cfg(feature = "sse")]
 mod sse;
@@ -57,6 +60,8 @@ pub use events::{ScriptedConnectivity, ScriptedLifecycle};
 pub use fs::MemFs;
 pub use http::{FakeHttp, Matcher};
 pub use log::{CaptureLog, LogEntry};
+#[cfg(feature = "db-fake")]
+pub use mem_db::MemDb;
 pub use rng::SeededRng;
 #[cfg(feature = "sse")]
 pub use sse::{FakeSse, FakeSseStream};

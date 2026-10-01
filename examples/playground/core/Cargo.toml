@@ -14,3 +14,8 @@ description = "The Undra playground core: one Rust core shared by the web, iOS a
 undra = { workspace = true, features = ["websocket", "sse", "db"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+# Tests only: `MemDb`, a real in-memory SQLite behind the Db port (never in a shipped build: it does not
+# build for wasm32-unknown-unknown).
+[dev-dependencies]
+undra = { workspace = true, features = ["db-fake"] }

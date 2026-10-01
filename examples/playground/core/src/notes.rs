@@ -349,6 +349,71 @@ mod tests {
     }
 
     #[test]
+    fn notes_on_real_sqlite() {
+        use undra::ports::fakes::MemDb;
+        let t = TestRuntime::new();
+        let _fakes = fakes::install(&t);
+        MemDb::new().install(t.runtime());
+        let notes = Arc::new(Notes::new(t.ctx()));
+        let n = notes.clone();
+        let outcome = t.run_until(async move {
+            assert_eq!(n.open("notes".into()).await?, 2);
+            let milk = n.add("milk".into()).await?;
+            n.add("eggs".into()).await?;
+            n.toggle(milk.id).await?;
+            let dup = n.add_with_id(milk.id, "dup".into()).await;
+            assert!(matches!(
+                dup,
+                Err(DbError::Constraint {
+                    kind: undra::ports::db::DbConstraint::Unique,
+                    ..
+                })
+            ));
+            let rolled_back = n.add_all(vec![Some("a".into()), None]).await;
+            assert!(matches!(rolled_back, Err(DbError::Constraint { .. })));
+            assert_eq!(n.count().await?, 2);
+            assert_eq!(
+                n.add_all(vec![Some("a".into()), Some("b".into())]).await?,
+                2
+            );
+            n.close_database().await?;
+            assert_eq!(n.open("notes".into()).await?, 2);
+            n.count().await
+        });
+        assert_eq!(outcome, Ok(4));
+        let ctx = t.ctx();
+        let (cells, migrate_broken, migrate_good, sql) = t.run_until(async move {
+            let cells = db_cells(
+                &ctx,
+                -9_007_199_254_740_993,
+                1.5,
+                "é😀".into(),
+                Bytes(vec![0, 255, 7]),
+                None,
+            )
+            .await;
+            let broken = db_migrate(&ctx, "m".into(), true).await;
+            let good = db_migrate(&ctx, "m".into(), false).await;
+            let sql = db_run(
+                &ctx,
+                ":memory:".into(),
+                "INSERT INTO missing VALUES (1)".into(),
+            )
+            .await;
+            (cells, broken, good, sql)
+        });
+        let cells = cells.unwrap();
+        assert_eq!(cells.int, -9_007_199_254_740_993);
+        assert_eq!(cells.types, ["integer", "real", "text", "blob", "null"]);
+        assert!(matches!(
+            migrate_broken,
+            Err(DbError::Migration { version: 2, .. })
+        ));
+        assert_eq!(migrate_good, Ok(2));
+        assert!(matches!(sql, Err(DbError::Sql { .. })));
+    }
+
+    #[test]
     fn a_failed_batch_changes_nothing() {
         let t = TestRuntime::new();
         let fakes = fakes::install(&t);
