@@ -394,12 +394,26 @@ fn a_connection_that_stalls_in_the_upgrade_is_dropped() {
 
 // ----- byte fuzz ------------------------------------------------------------------------------
 
+/// How many junk connections the pre-upgrade fuzz opens.
+const JUNK_CONNECTIONS: usize = 150;
+
 #[test]
 fn byte_fuzz_before_the_upgrade_never_hurts_the_server() {
-    let f = start();
+    // This test is about what garbage does to a server, not about the connection limit
+    // (`connections_beyond_the_limit_are_dropped_on_accept` owns that). A socket counts against
+    // `max_connections` from accept until its thread has torn it down, a moment after the peer
+    // sees it close. With the default of 16, a burst of junk the machine is slow to reap can
+    // fill the table when the fresh client below arrives, and the server then refuses it, as
+    // documented. Room for every junk socket and that client at once rules it out, whatever the
+    // scheduler does.
+    let config = ServerConfig {
+        max_connections: JUNK_CONNECTIONS + 16,
+        ..quick()
+    };
+    let f = start_with(config, "dev");
     let addr = f.server.addr();
     let mut rng = Rng(0x5eed);
-    for i in 0..150 {
+    for i in 0..JUNK_CONNECTIONS {
         let mut bytes = if i % 3 == 0 {
             b"GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n".to_vec()
         } else {
@@ -408,6 +422,16 @@ fn byte_fuzz_before_the_upgrade_never_hurts_the_server() {
         bytes.extend(rng.junk(400));
         if let Ok(mut socket) = TcpStream::connect(addr) {
             let _ = socket.write_all(&bytes);
+            // Let the server end it. The side that closes first keeps the connection's port in
+            // TIME_WAIT for 30 s or more; if that is this client, 150 junk connections a run, run
+            // back to back, use up the ~16k ephemeral ports of the machine and every later
+            // connect fails with "Can't assign requested address". Garbage makes the server give
+            // up and close at once, so waiting for that leaves TIME_WAIT on the server's one
+            // listening port instead. The wait is bounded: a request that never ends its header
+            // block is legitimately waited on (until `handshake_timeout`), and a client that
+            // stops waiting closes first, as it always did.
+            let _ = socket.set_read_timeout(Some(Duration::from_millis(200)));
+            let _ = socket.read(&mut [0_u8; 64]);
         }
     }
     assert_healthy(&f);

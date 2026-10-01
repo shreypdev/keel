@@ -470,29 +470,5 @@ fn a_client_that_answers_pings_is_kept() {
     assert_eq!((status, dec::<i32>(&body)), (ReplyStatus::Ok, 3));
 }
 
-#[test]
-fn a_chatty_client_is_never_pinged() {
-    let config = ServerConfig {
-        ping_interval: Duration::from_millis(150),
-        ..quick()
-    };
-    let f = start_with(config, "dev");
-    let mut ws = RawWs::connect(f.server.addr());
-    ws.binary(&hello_bytes(f.schema()));
-    // A stream of ordinary messages keeps it alive without ever answering a ping.
-    let mut w = undra::wire::Writer::new();
-    undra::wire::Envelope::write(&mut w, Kind::TimerFired, 1, f.schema(), &enc(&1_u32));
-    for _ in 0..12 {
-        ws.binary(w.as_slice());
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    assert!(f.bridge.is_connected());
-    ws.tcp
-        .set_read_timeout(Some(Duration::from_millis(100)))
-        .unwrap();
-    let frames = ws.frames_until_end(Duration::from_millis(200));
-    assert!(
-        frames.iter().all(|frame| frame.opcode != 9),
-        "no ping was needed: {frames:?}"
-    );
-}
+// A client that keeps sending is never pinged: that needs time held still and moved by exact steps,
+// so it is a unit test of the keepalive schedule (`a_chatty_client_is_never_pinged` in `src/writer.rs`).

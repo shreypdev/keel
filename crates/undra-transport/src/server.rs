@@ -46,7 +46,9 @@ pub struct ServerConfig {
     /// core before the connection is dropped. Default 64 MiB.
     pub max_queued_bytes: usize,
     /// How many sockets (upgrading, attached or closing) are served at once; further ones are
-    /// dropped on accept. Default 16.
+    /// dropped on accept. A socket counts until its connection thread has finished tearing it
+    /// down, which can be a moment after the peer sees it close, so a burst of connections that
+    /// all fail can briefly use up slots a well-formed client would otherwise find. Default 16.
     pub max_connections: usize,
     /// Release the objects a client's constructors made when it disconnects (its observations
     /// and open calls are always ended). Default `true`.
