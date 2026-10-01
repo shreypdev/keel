@@ -231,7 +231,7 @@ Every suite is local; nothing needs the network after install.
 | Playground Android app on the real adapters (offline queue surviving a killed process) | `bash examples/playground/android/smoke.sh` (needs a booted emulator; it switches airplane mode on and off) | `SMOKE PASSED` |
 | Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` | 495 pass |
 | Swift runtime over the real C ABI table (the fixture core) | `bash crates/undra-ffi/tests/swift/run.sh` | 6 pass |
-| wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 29 pass |
+| wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 19 + 24 pass |
 | C host harness (through the fixture core's table, `undra_fixture_undra_api`) | `bash crates/undra-ffi/tests/c/run.sh` (add `UNDRA_C_SANITIZE=1` for ASan) | ok |
 | Contract scenarios ×3 platforms | `bash contract-tests/run-all.sh` | 57/57 pass (S01 to S18 and S26 "two cores", per platform) |
 | Two cores in one process (ADR-044): the playground core as `playground_a` and `playground_b` | `examples/two-cores/{ios,android,jvm,node}/run.sh` (iOS: the booted simulator, `CONFIGURATION=Release` for the fat-LTO cores; Android: the attached emulator) | `two-cores <platform>: passed` |
