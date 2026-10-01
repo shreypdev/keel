@@ -136,7 +136,19 @@ UNDRA-RN CHECK RN20 PASS Connectivity follows airplane mode: on: 'UNDRA-RN CONNE
 
 ## Suites (final, at the merge of `main`)
 
-COUNTS_PLACEHOLDER
+Run at `806c1c1` (main `3e8a304` merged: tooling, wasm-size) on this Mac:
+
+| Suite | Result |
+|---|---|
+| `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace` | 2,562 passed, 0 failed, 11 ignored (playground core 75, of which `platform` 6) |
+| `bash contract-tests/run-all.sh` | 18 x 3 = 54/54 |
+| `cpp/test/run.sh` (ASan + UBSan) | stores 13; host 20 (linked shim) + 20 (dlopen shim); `UndraJsi.cpp` and `UndraPlatformApple.mm` compile |
+| `android/test/run.sh` | 4 |
+| RN `npm test` / `npm run typecheck` / `npm run test:contract` | 59 / clean / 17 pass + S17 skipped (app-tested) |
+| TS runtime `npm test` (unchanged) | 1,128 |
+| `undra bindgen -C examples/playground --docs --check`; `node site/scripts/build-all.mjs` | up to date (schema hash `0xefd907be3070520a`); site up to date |
+| Devices, full builds after the merge | iPhone 17 Pro simulator `UNDRA-RN CHECKS 19/19 passed`; `undra-rn` emulator `UNDRA-RN CHECKS 20/20 passed` (the `undra-rn` emulator was shut down afterwards; `emulator-5554` untouched) |
 
 ## What the integrator owns
 
