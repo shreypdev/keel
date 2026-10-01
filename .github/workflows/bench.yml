@@ -36,6 +36,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Runner classes measured 3.5x-6.2x slower than the M5 host in Oct 2026 (signals/changeset_100/cell
+  # hit 6.2x on one runner), against the 5x assumption the host budgets were set with. 2x more
+  # headroom keeps the gates honest about a real regression while they stop failing on the slowest
+  # runner; the follow-up (bench review M1) is runner-measured baselines or ratio gates.
+  UNDRA_BENCH_SCALE: "2"
   CARGO_TERM_COLOR: always
 
 jobs:
