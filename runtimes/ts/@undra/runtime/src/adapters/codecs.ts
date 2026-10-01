@@ -11,6 +11,7 @@ import {
   type HttpResponse,
   NET_KINDS,
   type NetKind,
+  StorageError,
 } from "./types.js";
 
 /*
@@ -129,7 +130,7 @@ export const HttpErrorCodec: Codec<HttpError> = {
   },
 };
 
-/** `FsError { NotFound, Denied, Io(String) }`. */
+/** `FsError { NotFound, Denied, Io(String), Full, Unavailable(String) }`. */
 export const FsErrorCodec: Codec<FsError> = {
   encode(w, v) {
     if (v instanceof FsError.NotFound) {
@@ -138,6 +139,11 @@ export const FsErrorCodec: Codec<FsError> = {
       w.writeU16(1);
     } else if (v instanceof FsError.Io) {
       w.writeU16(2);
+      w.writeStr(v.value);
+    } else if (v instanceof FsError.Full) {
+      w.writeU16(3);
+    } else if (v instanceof FsError.Unavailable) {
+      w.writeU16(4);
       w.writeStr(v.value);
     } else {
       throw new TypeError(`unknown FsError variant: ${v.kind}`);
@@ -153,8 +159,52 @@ export const FsErrorCodec: Codec<FsError> = {
         return new FsError.Denied();
       case 2:
         return new FsError.Io(r.readStr());
+      case 3:
+        return new FsError.Full();
+      case 4:
+        return new FsError.Unavailable(r.readStr());
       default:
         throw new WireError({ code: "invalid_tag", tag, at, ty: "FsError" });
+    }
+  },
+};
+
+/** `StorageError { Unavailable(String), Full, Locked, Corrupt(String), Io(String) }` (ADR-049). */
+export const StorageErrorCodec: Codec<StorageError> = {
+  encode(w, v) {
+    if (v instanceof StorageError.Unavailable) {
+      w.writeU16(0);
+      w.writeStr(v.value);
+    } else if (v instanceof StorageError.Full) {
+      w.writeU16(1);
+    } else if (v instanceof StorageError.Locked) {
+      w.writeU16(2);
+    } else if (v instanceof StorageError.Corrupt) {
+      w.writeU16(3);
+      w.writeStr(v.value);
+    } else if (v instanceof StorageError.Io) {
+      w.writeU16(4);
+      w.writeStr(v.value);
+    } else {
+      throw new TypeError(`unknown StorageError variant: ${v.kind}`);
+    }
+  },
+  decode(r) {
+    const at = r.position;
+    const tag = r.readU16();
+    switch (tag) {
+      case 0:
+        return new StorageError.Unavailable(r.readStr());
+      case 1:
+        return new StorageError.Full();
+      case 2:
+        return new StorageError.Locked();
+      case 3:
+        return new StorageError.Corrupt(r.readStr());
+      case 4:
+        return new StorageError.Io(r.readStr());
+      default:
+        throw new WireError({ code: "invalid_tag", tag, at, ty: "StorageError" });
     }
   },
 };

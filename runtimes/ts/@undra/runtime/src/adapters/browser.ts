@@ -100,28 +100,33 @@ export function browserLifecycle(document?: DocumentLike): LifecycleAdapter {
  * The default adapters of a browser (SPEC 11): `fetch` for Http, IndexedDB
  * for Kv, WebCrypto plus IndexedDB for SecureStore, the origin private file
  * system for Fs, `setTimeout` for Timer, `navigator.onLine` and Page
- * Visibility for Connectivity and Lifecycle, the console for Log. An entry is
- * present only when the platform has what it needs, so this is safe to call
- * anywhere (Node, workers, tests): a missing capability leaves that port
- * unavailable instead of failing later. Clock and Rng are not listed; the
- * wasm core has built-in bindings for them.
+ * Visibility for Connectivity and Lifecycle, the console for Log. Safe to call
+ * anywhere (Node, workers, tests).
+ *
+ * The storage ports are always present (ADR-049): where the platform lacks what
+ * one needs, it answers every call with a typed failure that says so instead of
+ * leaving the port unregistered, so the core reads a reason and not "no adapter":
+ * Kv and SecureStore fail with `StorageError.Unavailable("needs IndexedDB")`,
+ * SecureStore with `Unavailable("needs a secure context")` without
+ * `crypto.subtle`, Fs with `FsError.Unavailable` without the origin private file
+ * system. Http, Connectivity and Lifecycle are present only when the platform has
+ * them. Clock and Rng are not listed; the wasm core has built-in bindings for them.
  */
 export function browserAdapters(): Partial<Adapters> {
   const g = globalThis as {
     fetch?: unknown;
-    indexedDB?: unknown;
-    crypto?: { subtle?: unknown };
-    navigator?: { onLine?: unknown; storage?: { getDirectory?: unknown } };
+    navigator?: { onLine?: unknown };
     document?: { visibilityState?: unknown };
     addEventListener?: unknown;
   };
-  const adapters: Partial<Adapters> = { timer: setTimeoutTimer(), log: consoleLog() };
+  const adapters: Partial<Adapters> = {
+    timer: setTimeoutTimer(),
+    log: consoleLog(),
+    kv: indexedDbKv(),
+    secureStore: webCryptoSecureStore(),
+    fs: opfsFs(),
+  };
   if (typeof g.fetch === "function") adapters.http = fetchHttp();
-  if (g.indexedDB !== undefined && g.indexedDB !== null) {
-    adapters.kv = indexedDbKv();
-    if (g.crypto?.subtle !== undefined) adapters.secureStore = webCryptoSecureStore();
-  }
-  if (typeof g.navigator?.storage?.getDirectory === "function") adapters.fs = opfsFs();
   if (typeof g.navigator?.onLine === "boolean" && typeof g.addEventListener === "function") {
     adapters.connectivity = browserConnectivity();
   }

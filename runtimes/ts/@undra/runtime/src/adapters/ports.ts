@@ -1,21 +1,32 @@
 import { UndraPortError } from "../errors.js";
 import type { PortImpl } from "../port.js";
 import { UndraReader, UndraWriter, codecs, encodeValue } from "../wire/index.js";
-import { AppStateCodec, FsErrorCodec, HttpErrorCodec, HttpRequestCodec, HttpResponseCodec, NetKindCodec } from "./codecs.js";
+import {
+  AppStateCodec,
+  FsErrorCodec,
+  HttpErrorCodec,
+  HttpRequestCodec,
+  HttpResponseCodec,
+  NetKindCodec,
+  StorageErrorCodec,
+} from "./codecs.js";
 import { PortIds } from "./ids.js";
 import {
   type AppState,
   type Adapters,
   type ClockAdapter,
   type FsAdapter,
-  FsError,
+  type FsError,
   type HttpAdapter,
   HttpError,
   type KvAdapter,
   type LogAdapter,
   type NetKind,
   type RngAdapter,
+  type StorageError,
   type TimerAdapter,
+  recognizedFsError,
+  recognizedStorageError,
 } from "./types.js";
 
 /*
@@ -36,22 +47,23 @@ function readArgs<T>(args: Uint8Array, read: (r: UndraReader) => T): T {
   return value;
 }
 
-/** Runs `run`, turning a typed failure into `UndraPortError` with the encoded error. */
-async function typed<T, E extends Error>(
-  run: () => Promise<T>,
-  isTyped: (error: unknown) => error is E,
-  encodeError: (error: E) => Uint8Array,
-): Promise<T> {
+/**
+ * Runs `run`, turning a typed failure into `UndraPortError` with the encoded error (the core gets port status
+ * 1). `recognize` says which failures are the port's typed error (`undefined`: not one); anything else is
+ * rethrown as it is, and the runtime reports it and answers the call as unavailable (status 2).
+ */
+async function typed<T, E>(run: () => Promise<T>, recognize: (error: unknown) => E | undefined, encodeError: (error: E) => Uint8Array): Promise<T> {
   try {
     return await run();
   } catch (error) {
-    if (isTyped(error)) throw new UndraPortError(encodeError(error));
+    const known = recognize(error);
+    if (known !== undefined) throw new UndraPortError(encodeError(known));
     throw error;
   }
 }
 
-const isHttpError = (error: unknown): error is HttpError => error instanceof HttpError;
-const isFsError = (error: unknown): error is FsError => error instanceof FsError;
+const isHttpError = (error: unknown): HttpError | undefined => (error instanceof HttpError ? error : undefined);
+const encodeStorageError = (error: StorageError): Uint8Array => encodeValue(StorageErrorCodec, error);
 
 /** The `Http` port over an {@link HttpAdapter}. An {@link HttpError} becomes the typed error of `Http.request`. */
 export function httpPort(http: HttpAdapter): PortImpl {
@@ -74,34 +86,53 @@ const stringList = codecs.vec(codecs.string);
 const optionBytes = codecs.option(codecs.bytes);
 
 function kvMethods(ids: typeof PortIds.Kv, kv: KvAdapter): PortImpl["methods"] {
+  const run = <T>(work: () => Promise<T>) => typed(work, recognizedStorageError, encodeStorageError);
   return {
-    [ids.get]: async (args) => encodeValue(optionBytes, await kv.get(readArgs(args, (r) => r.readStr()))),
-    [ids.set]: async (args) => {
+    [ids.get]: (args) => {
+      const key = readArgs(args, (r) => r.readStr());
+      return run(async () => encodeValue(optionBytes, await kv.get(key)));
+    },
+    [ids.set]: (args) => {
       const [key, value] = readArgs(args, (r) => [r.readStr(), codecs.bytes.decode(r)] as const);
-      await kv.set(key, value);
-      return EMPTY;
+      return run(async () => {
+        await kv.set(key, value);
+        return EMPTY;
+      });
     },
-    [ids.delete]: async (args) => {
-      await kv.delete(readArgs(args, (r) => r.readStr()));
-      return EMPTY;
+    [ids.delete]: (args) => {
+      const key = readArgs(args, (r) => r.readStr());
+      return run(async () => {
+        await kv.delete(key);
+        return EMPTY;
+      });
     },
-    [ids.list]: async (args) => encodeValue(stringList, await kv.list(readArgs(args, (r) => r.readStr()))),
+    [ids.list]: (args) => {
+      const prefix = readArgs(args, (r) => r.readStr());
+      return run(async () => encodeValue(stringList, await kv.list(prefix)));
+    },
   };
 }
 
-/** The `Kv` port over a {@link KvAdapter}. */
+/**
+ * The `Kv` port over a {@link KvAdapter}. A {@link StorageError} the adapter rejects with (or a raw
+ * `QuotaExceededError`, `ENOSPC` or `SecurityError`, see `StorageError.from`) becomes the typed error of the
+ * method (ADR-049); any other failure is reported and answered as unavailable.
+ */
 export function kvPort(kv: KvAdapter): PortImpl {
   return { sync: false, methods: kvMethods(PortIds.Kv, kv) };
 }
 
-/** The `SecureStore` port (same methods as `Kv`, its own ids) over a {@link KvAdapter}. */
+/** The `SecureStore` port (same methods and errors as `Kv`, its own ids) over a {@link KvAdapter}. */
 export function secureStorePort(store: KvAdapter): PortImpl {
   return { sync: false, methods: kvMethods(PortIds.SecureStore, store) };
 }
 
-/** The `Fs` port over an {@link FsAdapter}. An {@link FsError} becomes the typed error of the method. */
+/**
+ * The `Fs` port over an {@link FsAdapter}. An {@link FsError} (or a raw `QuotaExceededError` or `ENOSPC`, as
+ * `Full`) becomes the typed error of the method; any other failure is reported and answered as unavailable.
+ */
 export function fsPort(fs: FsAdapter): PortImpl {
-  const run = <T>(work: () => Promise<T>) => typed(work, isFsError, (e) => encodeValue(FsErrorCodec, e));
+  const run = <T>(work: () => Promise<T>) => typed(work, recognizedFsError, (e: FsError) => encodeValue(FsErrorCodec, e));
   return {
     sync: false,
     methods: {

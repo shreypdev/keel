@@ -1,4 +1,5 @@
 import { UndraError } from "../errors.js";
+import { errorMessage } from "../platform.js";
 
 /*
  * The standard ports of docs/SPEC.md section 8, as the host sees them: the
@@ -100,9 +101,12 @@ export namespace HttpError {
 }
 
 /** Discriminants of {@link FsError}. */
-export type FsErrorKind = "notFound" | "denied" | "io";
+export type FsErrorKind = "notFound" | "denied" | "io" | "full" | "unavailable";
 
-/** Why a file operation failed. An `Fs` adapter rejects with one of the variants. */
+/**
+ * Why a file operation failed. An `Fs` adapter rejects with one of the variants; `fsPort` sends it to the
+ * core as the typed error of the method.
+ */
 export abstract class FsError extends UndraError {
   declare readonly kind: FsErrorKind;
 }
@@ -132,6 +136,152 @@ export namespace FsError {
       super("io", `i/o error: ${value}`);
     }
   }
+
+  /** The disk or the storage quota is exhausted (`QuotaExceededError`, `ENOSPC`; ADR-049). */
+  export class Full extends FsError {
+    declare readonly kind: "full";
+    constructor() {
+      super("full", "the disk is full");
+    }
+  }
+
+  /** There is no file system in this context (no origin private file system), or no adapter; `value` says which (ADR-049). */
+  export class Unavailable extends FsError {
+    declare readonly kind: "unavailable";
+    constructor(readonly value: string) {
+      super("unavailable", `the file system is unavailable: ${value}`);
+    }
+  }
+}
+
+/** Discriminants of {@link StorageError}. */
+export type StorageErrorKind = "unavailable" | "full" | "locked" | "corrupt" | "io";
+
+/**
+ * Why a `Kv` or `SecureStore` operation failed (ADR-049). A storage adapter rejects with one of the variants;
+ * `kvPort` and `secureStorePort` send it to the core as the typed error of the method (port status 1), where
+ * the core's `Result<_, StorageError>` receives it. The core never panics over a storage failure.
+ *
+ * | Variant | Meaning | What the browser adapters map onto it |
+ * |---|---|---|
+ * | `Unavailable` | no backend in this context | no `indexedDB` ("needs IndexedDB"), no `crypto.subtle` ("needs a secure context"), a `SecurityError` |
+ * | `Full` | the quota or the disk is exhausted | `QuotaExceededError`, `ENOSPC` |
+ * | `Locked` | protected data cannot be read now | (not produced on the web) |
+ * | `Corrupt` | stored bytes that cannot be read back; the key is still there | an `OperationError` on decrypt, a value not in the stored format |
+ * | `Io` | anything else, with the platform's message | everything else |
+ *
+ * {@link StorageError.from} does that mapping for an adapter of your own.
+ */
+export abstract class StorageError extends UndraError {
+  declare readonly kind: StorageErrorKind;
+
+  /**
+   * `error` as a {@link StorageError}: itself when it is one; `Full` for a `QuotaExceededError` or an
+   * `ENOSPC` failure; `Unavailable` for a `SecurityError` (storage disabled for this origin or context);
+   * `Io` with its message for anything else. For the adapter of a storage API: `catch (e) { throw StorageError.from(e); }`.
+   */
+  static from(error: unknown): StorageError {
+    return recognizedStorageError(error) ?? new StorageError.Io(describe(error));
+  }
+}
+
+/** The variants of {@link StorageError}; the wire index is the order below (`undra-ports`). */
+export namespace StorageError {
+  /** No adapter is registered, or the platform has no backend in this context; `value` says which. */
+  export class Unavailable extends StorageError {
+    declare readonly kind: "unavailable";
+    constructor(readonly value: string) {
+      super("unavailable", `storage is unavailable: ${value}`);
+    }
+  }
+
+  /** The quota or the disk is exhausted. */
+  export class Full extends StorageError {
+    declare readonly kind: "full";
+    constructor() {
+      super("full", "the storage is full");
+    }
+  }
+
+  /** Protected data cannot be read now (before the device's first unlock, a key that needs user authentication). */
+  export class Locked extends StorageError {
+    declare readonly kind: "locked";
+    constructor() {
+      super("locked", "the storage is locked");
+    }
+  }
+
+  /** The stored bytes (or ciphertext) cannot be read back; the key is still there. */
+  export class Corrupt extends StorageError {
+    declare readonly kind: "corrupt";
+    constructor(readonly value: string) {
+      super("corrupt", `stored data is corrupt: ${value}`);
+    }
+  }
+
+  /** Any other failure; `value` is the platform's text. */
+  export class Io extends StorageError {
+    declare readonly kind: "io";
+    constructor(readonly value: string) {
+      super("io", `storage I/O error: ${value}`);
+    }
+  }
+}
+
+/** The `name` of a `DOMException` (or of any error object), and the `code` of a Node.js system error. */
+function errorName(error: unknown): { readonly name: unknown; readonly code: unknown } {
+  if (typeof error !== "object" || error === null) return { name: undefined, code: undefined };
+  const e = error as { name?: unknown; code?: unknown };
+  return { name: e.name, code: e.code };
+}
+
+/** The text of a failure, for the `Io` and `Unavailable` variants: its message, else its name. Never throws. */
+function describe(error: unknown): string {
+  const message = errorMessage(error);
+  if (message !== "") return message;
+  const { name } = errorName(error);
+  return typeof name === "string" && name !== "" ? name : "unknown failure";
+}
+
+/**
+ * The {@link StorageError} a failure of a storage API stands for when it is one this runtime recognises (a
+ * `StorageError`, a quota failure, a refused origin), else `undefined`. The storage ports use it to type what
+ * an adapter rejected with; anything it does not recognise is a bug in the adapter (logged, and answered as
+ * unavailable).
+ */
+export function recognizedStorageError(error: unknown): StorageError | undefined {
+  if (error instanceof StorageError) return error;
+  const { name, code } = errorName(error);
+  if (name === "QuotaExceededError" || code === "ENOSPC" || code === 22 /* QUOTA_EXCEEDED_ERR */) return new StorageError.Full();
+  if (name === "SecurityError") return new StorageError.Unavailable(describe(error));
+  return undefined;
+}
+
+/**
+ * The {@link FsError} a failure stands for when it is one `fsPort` recognises without an adapter's help: an
+ * `FsError`, or `Full` for a `QuotaExceededError` or an `ENOSPC` failure; else `undefined` (a bug in the
+ * adapter: logged and answered as unavailable).
+ */
+export function recognizedFsError(error: unknown): FsError | undefined {
+  if (error instanceof FsError) return error;
+  const { name, code } = errorName(error);
+  if (name === "QuotaExceededError" || code === "ENOSPC" || code === 22) return new FsError.Full();
+  return undefined;
+}
+
+/**
+ * `error` as an {@link FsError}: itself when it is one; `Full` for a `QuotaExceededError` or `ENOSPC`;
+ * `NotFound` for a `NotFoundError` or `ENOENT`; `Denied` for a `NotAllowedError`, a `SecurityError`, `EACCES`
+ * or `EPERM`; `Io` with its message for anything else.
+ */
+export function fsErrorFrom(error: unknown): FsError {
+  const recognized = recognizedFsError(error);
+  if (recognized !== undefined) return recognized;
+  const { name, code } = errorName(error);
+  if (name === "NotFoundError" || code === "ENOENT") return new FsError.NotFound();
+  if (name === "NotAllowedError" || name === "SecurityError" || code === "EACCES" || code === "EPERM") return new FsError.Denied();
+  if (name === "TypeMismatchError") return new FsError.Io(`wrong kind of entry: ${describe(error)}`);
+  return new FsError.Io(describe(error));
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +293,13 @@ export interface HttpAdapter {
   request(req: HttpRequest): Promise<HttpResponse>;
 }
 
-/** The `Kv` port, and the `SecureStore` port, which has the same shape. */
+/**
+ * The `Kv` port, and the `SecureStore` port, which has the same shape. Every method rejects with a
+ * {@link StorageError} when the storage fails (ADR-049); `kvPort` also understands a raw `QuotaExceededError`,
+ * `ENOSPC` or `SecurityError` (see {@link StorageError.from}). Any other rejection is a bug in the adapter:
+ * it is reported (an error-level log naming the port, and `onError`) and the core sees the port as
+ * unavailable for that call.
+ */
 export interface KvAdapter {
   /** The value stored under `key`, or `null`. */
   get(key: string): Promise<Uint8Array | null>;
@@ -155,7 +311,10 @@ export interface KvAdapter {
   list(prefix: string): Promise<string[]>;
 }
 
-/** The `Fs` port. Rejects with {@link FsError}. Paths are `/`-separated and relative to the adapter's root. */
+/**
+ * The `Fs` port. Rejects with {@link FsError} (`fsPort` also understands a raw `QuotaExceededError` or
+ * `ENOSPC` as `Full`, see {@link fsErrorFrom}). Paths are `/`-separated and relative to the adapter's root.
+ */
 export interface FsAdapter {
   read(path: string): Promise<Uint8Array>;
   write(path: string, data: Uint8Array): Promise<void>;

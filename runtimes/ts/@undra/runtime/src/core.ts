@@ -1,6 +1,6 @@
 import { browserAdapters } from "./adapters/browser.js";
 import { standardPorts, startEventSources, timerPort } from "./adapters/ports.js";
-import { PortIds } from "./adapters/ids.js";
+import { PortIds, standardMethodName } from "./adapters/ids.js";
 import { consoleLog } from "./adapters/system.js";
 import type { Adapters, AdapterOverrides } from "./adapters/types.js";
 import {
@@ -1093,12 +1093,18 @@ export class UndraCore {
     return { kind: "sync", reply: encodePortReply({ portCallId: call.portCallId, status: PortStatus.Ok, body: result }) };
   }
 
-  /** The `PortReply` for a port method that threw: its typed error, or "unavailable" after logging anything else. */
+  /**
+   * The `PortReply` for a port method that threw: its typed error (status 1), or "unavailable" (status 2) for
+   * anything else, which is a bug in the adapter (it must fail with its port's typed error, ADR-049): reported,
+   * with an error-level log that names the adapter (`Kv.get adapter`, or the ids of a custom port).
+   */
   #portFailure(call: PortCallPayload, error: unknown): Uint8Array {
     if (error instanceof UndraPortError) {
       return encodePortReply({ portCallId: call.portCallId, status: PortStatus.Error, body: error.body });
     }
-    this.#reportError(`port 0x${call.portId.toString(16)} method 0x${call.methodId.toString(16)}`, error);
+    const ids = `port 0x${call.portId.toString(16)} method 0x${call.methodId.toString(16)}`;
+    const standard = standardMethodName(call.portId, call.methodId);
+    this.#reportError(standard === undefined ? ids : `${standard} adapter (${ids}, answered as unavailable: an adapter must fail with its port's typed error)`, error);
     return encodePortReply({ portCallId: call.portCallId, status: PortStatus.Unavailable, body: NO_BYTES });
   }
 

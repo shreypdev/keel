@@ -30,3 +30,18 @@ export const PortIds = Object.freeze({
   Connectivity: port("Connectivity", ["changed"] as const),
   Lifecycle: port("Lifecycle", ["changed"] as const),
 });
+
+/**
+ * `"Kv.get"` for a method of a standard port, `undefined` for any other id: how the runtime names the adapter
+ * in what it logs (a port implementation that failed, ADR-049).
+ */
+export function standardMethodName(portId: number, methodId: number): string | undefined {
+  for (const [port, ids] of Object.entries(PortIds)) {
+    if (ids.portId !== portId) continue;
+    for (const [method, id] of Object.entries(ids)) {
+      if (method !== "portId" && id === methodId) return `${port}.${method}`;
+    }
+    return `${port} (method 0x${methodId.toString(16)})`;
+  }
+  return undefined;
+}

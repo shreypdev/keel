@@ -1,4 +1,4 @@
-import { type FsAdapter, FsError } from "./types.js";
+import { type FsAdapter, FsError, fsErrorFrom } from "./types.js";
 
 /** Options of {@link opfsFs}. */
 export interface OpfsFsOptions {
@@ -20,30 +20,17 @@ export function splitPath(path: string): string[] {
   return parts;
 }
 
-/** Maps what the File System Access API throws to {@link FsError}. */
-function mapError(error: unknown): FsError {
-  if (error instanceof FsError) return error;
-  const name = typeof error === "object" && error !== null ? (error as { name?: unknown }).name : undefined;
-  const text = error instanceof Error ? error.message : String(error);
-  switch (name) {
-    case "NotFoundError":
-      return new FsError.NotFound();
-    case "NotAllowedError":
-    case "SecurityError":
-      return new FsError.Denied();
-    case "TypeMismatchError":
-      return new FsError.Io(`wrong kind of entry: ${text}`);
-    default:
-      return new FsError.Io(text);
-  }
-}
+/** The text of `FsError.Unavailable` where the platform has no origin private file system (ADR-049). */
+export const NEEDS_OPFS = "needs the origin private file system";
 
 /**
  * The `Fs` port over the Origin Private File System. Paths are `/`-separated
  * and relative to the root; missing directories are created by `write`.
  * `list` returns the names of the entries (files and directories) in
- * ascending order. Errors are {@link FsError}: a missing entry is `NotFound`,
- * a refused permission `Denied`, anything else `Io`.
+ * ascending order. Errors are {@link FsError} (see `fsErrorFrom`): a missing
+ * entry is `NotFound`, a refused permission `Denied`, an exhausted quota `Full`
+ * (ADR-049), a platform without the origin private file system `Unavailable`,
+ * anything else `Io`.
  */
 export function opfsFs(options: OpfsFsOptions = {}): FsAdapter {
   let root: Promise<FileSystemDirectoryHandle> | null = null;
@@ -55,7 +42,7 @@ export function opfsFs(options: OpfsFsOptions = {}): FsAdapter {
       else {
         const storage = (globalThis as { navigator?: { storage?: StorageManager } }).navigator?.storage;
         if (storage === undefined || typeof storage.getDirectory !== "function") {
-          root = Promise.reject(new FsError.Io("the origin private file system is not available on this platform"));
+          root = Promise.reject(new FsError.Unavailable(NEEDS_OPFS));
         } else {
           root = storage.getDirectory();
         }
@@ -81,7 +68,7 @@ export function opfsFs(options: OpfsFsOptions = {}): FsAdapter {
     try {
       return await work();
     } catch (error) {
-      throw mapError(error);
+      throw fsErrorFrom(error);
     }
   };
 
