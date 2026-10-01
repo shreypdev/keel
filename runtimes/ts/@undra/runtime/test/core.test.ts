@@ -553,24 +553,27 @@ describe("handshake and lifetime", () => {
   });
 
   it("the first core loaded is shared, later ones are not, and closing it frees the slot", async () => {
-    expect(() => UndraCore.shared).toThrow(UndraError);
-    expect(() => UndraCore.shared).toThrow(/UndraCore\.load/);
+    expect(UndraCore.current).toBeNull();
+    expect(UndraCore.shared.closed).toBe(true);
+    await expect(UndraCore.shared.call(FREE, M.ADD, new Uint8Array(0))).rejects.toThrow(/UndraCore\.load/);
     const first = track(await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA }));
     const second = track(await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA }));
     expect(UndraCore.shared).toBe(first);
+    expect(UndraCore.current).toBe(first);
     second.close();
     expect(UndraCore.shared).toBe(first);
     first.close();
-    expect(() => UndraCore.shared).toThrow(UndraError);
+    expect(UndraCore.current).toBeNull();
+    expect(UndraCore.shared.closed).toBe(true);
     const third = track(await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA }));
     expect(UndraCore.shared).toBe(third);
   });
 
   it("shared: false keeps a core out of the slot; a failed start never takes it", async () => {
     await UndraCore.attach(new FakeCoreTransport({ schemaHash: 1n }), { expectedSchemaHash: SCHEMA }).catch(() => undefined);
-    expect(() => UndraCore.shared).toThrow(UndraError);
+    expect(UndraCore.current).toBeNull();
     track(await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA, shared: false }));
-    expect(() => UndraCore.shared).toThrow(UndraError);
+    expect(UndraCore.current).toBeNull();
   });
 
   it("load validates its options", async () => {

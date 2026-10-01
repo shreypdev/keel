@@ -70,6 +70,21 @@ export interface Transport {
   callSync?(payload: Uint8Array): Uint8Array;
   /** The core's statistics as JSON (`undra_stats_json`), or `null` when the transport cannot ask. */
   stats?(): Promise<string | null>;
+  /**
+   * The persisted state of every store (`undra_snapshot`, SPEC 5.9) as opaque bytes. Present on the
+   * wasm transports only: a transport without it makes `UndraCore.snapshot` reject with
+   * `UndraModeError`. Rejects with `UndraTransportError` when the channel is closed.
+   */
+  snapshot?(): Promise<Uint8Array>;
+  /**
+   * Rebuilds the stores from `bytes` (`undra_restore`) and resolves once the core has applied them;
+   * every change-set the restore produced has reached the handler by then. Rejects with
+   * `UndraRestoreError` when the core refuses the bytes (it is unchanged), with
+   * `UndraTransportError` when the channel is closed or cannot restore. Absent on a transport that
+   * cannot restore (`UndraCore.restore` then rejects with `UndraModeError`). A `Restore` envelope
+   * sent through {@link Transport.send} does the same without the acknowledgement.
+   */
+  restore?(bytes: Uint8Array): Promise<void>;
   /** Releases the channel. Idempotent; the handler's `closed` is not called. */
   close(): void;
 }
