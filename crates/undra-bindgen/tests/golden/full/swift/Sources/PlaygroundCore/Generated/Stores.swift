@@ -21,7 +21,7 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -36,7 +36,10 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-    public static func `open`(path: String, ctx: UndraCore = .shared) async throws -> TodoStore {
+    public static func `open`(
+        path: String,
+        ctx: UndraCore = UndraPlaygroundCore.core
+    ) async throws -> TodoStore {
         var w = UndraWriter()
         path.undraEncode(&w)
         let handle: UndraHandle

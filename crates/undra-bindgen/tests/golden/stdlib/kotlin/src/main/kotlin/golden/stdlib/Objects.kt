@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.map
 /** Talks to the server. */
 class Syncer private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraGoldenStdlib.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Syncer.TYPE_ID, UndraIds.Objects.Syncer.NEW, ByteArray(0)),
     )
@@ -104,7 +104,7 @@ class Syncer private constructor(core: UndraCore, handle: Long) : UndraObject(co
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(ctx: UndraCore = UndraCore.shared): Syncer {
+        fun create(ctx: UndraCore = UndraGoldenStdlib.core): Syncer {
             val handle = ctx.constructObject(UndraIds.Objects.Syncer.TYPE_ID, UndraIds.Objects.Syncer.NEW, ByteArray(0))
             return Syncer(ctx, handle)
         }

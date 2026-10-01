@@ -15,6 +15,7 @@ import {
   UndraWriter,
   decodeValue,
 } from "@undra/runtime";
+import { UndraGoldenStdlib } from "./core.js";
 import { SyncErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import { type Endpoint, EndpointCodec } from "./types.js";
@@ -26,7 +27,7 @@ export class Syncer extends UndraObject {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(core: UndraCore = UndraCore.shared): Promise<Syncer> {
+  static async create(core: UndraCore = UndraGoldenStdlib.core): Promise<Syncer> {
     let handle: bigint;
     try {
       handle = await core.construct(

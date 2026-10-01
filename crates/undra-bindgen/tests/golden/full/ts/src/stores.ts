@@ -15,6 +15,7 @@ import {
   decodePatch,
   decodeValue,
 } from "@undra/runtime";
+import { UndraPlaygroundCore } from "./core.js";
 import { TodoErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import { type Filter, FilterCodec, type Todo, TodoCodec } from "./types.js";
@@ -35,7 +36,7 @@ export class TodoStore extends UndraStore {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(core: UndraCore = UndraCore.shared): Promise<TodoStore> {
+  static async create(core: UndraCore = UndraPlaygroundCore.core): Promise<TodoStore> {
     let handle: bigint;
     try {
       handle = await core.construct(
@@ -55,7 +56,7 @@ export class TodoStore extends UndraStore {
    * @throws {TodoError}
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static async open(path: string, core: UndraCore = UndraCore.shared): Promise<TodoStore> {
+  static async open(path: string, core: UndraCore = UndraPlaygroundCore.core): Promise<TodoStore> {
     const w = new UndraWriter();
     w.writeStr(path);
     let handle: bigint;

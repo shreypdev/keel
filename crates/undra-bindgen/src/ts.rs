@@ -102,6 +102,7 @@ pub(crate) fn generate(model: &Model, cfg: &Generator) -> Vec<GeneratedFile> {
         ts.ports_file(),
         ts.queries_file(),
         ts.ids_file(),
+        ts.core_file(),
         ts.index_file(),
     ];
     files.push(GeneratedFile {
@@ -361,6 +362,19 @@ impl<'a> Ctx<'a> {
 
     fn rt_type(&mut self, name: &str) {
         self.imports.rt_types.insert(name.to_owned());
+    }
+
+    /// The core a generated API uses when it is given none: this package's own entry's (ADR-044),
+    /// imported from `core.ts`.
+    fn default_core(&mut self) -> String {
+        let entry = self.g.cfg.core_names().entry();
+        self.imports
+            .local
+            .entry("core")
+            .or_default()
+            .0
+            .insert(entry.clone());
+        format!("{entry}.core")
     }
 
     /// Imports the `UndraIds` namespace.
@@ -1053,10 +1067,11 @@ impl TsGen<'_> {
         let mut w = CodeWriter::new("  ");
         w.line("/**");
         w.line(" * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema");
-        w.line(" * hash to pass to `UndraCore.load` as `expectedSchemaHash`.");
+        w.line(" * hash and the namespace of the core these bindings belong to.");
         w.line(" */");
         w.block_with("export const UndraIds = {", "} as const;", |w| {
             w.line(format!("schemaHash: 0x{:016x}n,", m.schema_hash));
+            w.line(format!("namespace: \"{}\",", self.cfg.namespace));
             w.block_with("Objects: {", "},", |w| {
                 for o in m.all_objects() {
                     w.block_with(format!("{}: {{", o.name), "},", |w| {
@@ -1110,6 +1125,112 @@ impl TsGen<'_> {
         }
     }
 
+    // ===== core.ts ===========================================================
+
+    fn core_file(&self) -> GeneratedFile {
+        let names = self.cfg.core_names();
+        let entry = names.entry();
+        let namespace = names.namespace();
+        let mut w = CodeWriter::new("  ");
+        w.line(self.header());
+        w.blank();
+        w.line(format!(
+            "import {{ UndraCore, UndraError, type AttachOptions, type LoadOptions, type Transport }} from \"{RUNTIME}\";"
+        ));
+        w.line("import { UndraIds } from \"./ids.js\";");
+        w.blank();
+        w.line("/** The core `load` or `attach` gave this package, until it is closed. */");
+        w.line("let loaded: UndraCore | null = null;");
+        w.line("/** Set while `load` or `attach` is running, so a second one is refused. */");
+        w.line("let starting = false;");
+        w.blank();
+        w.block("function claim(): void", |w| {
+            w.block("if (starting || (loaded !== null && !loaded.closed))", |w| {
+                w.line(format!(
+                    "throw new UndraError(\"state\", \"the core `{namespace}` is already loaded: close it (core.close()) before loading it again\");"
+                ));
+            });
+            w.line("starting = true;");
+        });
+        w.blank();
+        w.block(
+            "async function started(start: Promise<UndraCore>): Promise<UndraCore>",
+            |w| {
+                w.line("try {");
+                w.line("  loaded = await start;");
+                w.line("  return loaded;");
+                w.line("} finally {");
+                w.line("  starting = false;");
+                w.line("}");
+            },
+        );
+        w.blank();
+        w.line("/**");
+        w.line(format!(
+            " * The core these bindings belong to, `{namespace}` (`[core] namespace` in undra.toml): `load` starts it,"
+        ));
+        w.line(" * and `core` is the core every generated class and function of this package uses unless it is given");
+        w.line(" * another one.");
+        w.line(" *");
+        w.line(" * ```ts");
+        w.line(format!(
+            " * await {entry}.load({{ mode: \"wasm-main\", wasm: new URL(\"{namespace}.wasm\", import.meta.url) }});"
+        ));
+        w.line(" * ```");
+        w.line(" */");
+        w.block_with(format!("export const {entry} = {{"), "};", |w| {
+            w.line(format!(
+                "/** The core's namespace: its wasm module is `{namespace}.wasm`, its native library `lib{namespace}`. */"
+            ));
+            w.line(format!("namespace: \"{namespace}\","));
+            w.line("/** The schema hash these bindings were generated for. */");
+            w.line("schemaHash: UndraIds.schemaHash,");
+            w.blank();
+            w.line("/**");
+            w.line(" * Loads the core (`UndraCore.load` with this package's schema hash) and makes it `core`. Rejects with");
+            w.line(" * `UndraSchemaMismatchError` when the core was built from another schema, and with `UndraError` while");
+            w.line(" * this core is already loaded.");
+            w.line(" */");
+            w.block_with(
+                "load(options: Omit<LoadOptions, \"expectedSchemaHash\">): Promise<UndraCore> {",
+                "},",
+                |w| {
+                    w.line("claim();");
+                    w.line(
+                        "return started(UndraCore.load({ ...options, expectedSchemaHash: UndraIds.schemaHash }));",
+                    );
+                },
+            );
+            w.blank();
+            w.line("/**");
+            w.line(" * Attaches the core over a transport you provide (React Native's `NativeTransport`, a test double),");
+            w.line(" * with this package's schema hash, and makes it `core`.");
+            w.line(" */");
+            w.block_with(
+                "attach(transport: Transport, options: Omit<AttachOptions, \"expectedSchemaHash\"> = {}): Promise<UndraCore> {",
+                "},",
+                |w| {
+                    w.line("claim();");
+                    w.line(
+                        "return started(UndraCore.attach(transport, { ...options, expectedSchemaHash: UndraIds.schemaHash }));",
+                    );
+                },
+            );
+            w.blank();
+            w.line("/**");
+            w.line(" * The loaded core, or, while none is loaded (or after it was closed), the closed placeholder");
+            w.line(" * `UndraCore.unloaded`, whose calls reject with `UndraCallError.Unavailable`.");
+            w.line(" */");
+            w.block_with("get core(): UndraCore {", "},", |w| {
+                w.line("return loaded !== null && !loaded.closed ? loaded : UndraCore.unloaded;");
+            });
+        });
+        GeneratedFile {
+            path: "src/core.ts".to_owned(),
+            contents: w.finish(),
+        }
+    }
+
     // ===== index.ts / package.json ===========================================
 
     fn index_file(&self) -> GeneratedFile {
@@ -1127,6 +1248,7 @@ impl TsGen<'_> {
             w.line(format!("export * from \"./{}.js\";", module.stem()));
         }
         w.line("export * from \"./ids.js\";");
+        w.line("export * from \"./core.js\";");
         GeneratedFile {
             path: "src/index.ts".to_owned(),
             contents: w.finish(),
@@ -1661,7 +1783,8 @@ impl<'a> Ctx<'a> {
         let handle = naming::avoid("handle", &taken_refs);
         let store = naming::avoid("store", &taken_refs);
         let mut params = self.param_list(&c.params);
-        params.push(format!("{core}: UndraCore = UndraCore.shared"));
+        let default_core = self.default_core();
+        params.push(format!("{core}: UndraCore = {default_core}"));
         let mut extra = Vec::new();
         if let Some(err) = &err {
             extra.push(format!("@throws {{{err}}}"));
@@ -1749,7 +1872,8 @@ impl<'a> Ctx<'a> {
         let mut params = self.param_list(c.params);
         if is_function {
             self.rt_value("UndraCore");
-            params.push(format!("{core}: UndraCore = UndraCore.shared"));
+            let default_core = self.default_core();
+            params.push(format!("{core}: UndraCore = {default_core}"));
         }
         let is_stream = ret.is_stream();
         if c.is_async && !is_stream {
@@ -2076,13 +2200,16 @@ impl<'a> Ctx<'a> {
     fn event_port(&mut self, w: &mut CodeWriter, p: &PortDef) {
         self.ids();
         self.rt_value("UndraCore");
+        let default_core = self.default_core();
         jsdoc(
             w,
             &p.docs,
             &["Sends the events of this port from the host to the core. A failure (a closed core) is logged and passed to `onError`; the methods do not throw.".to_owned()],
         );
         w.block(format!("export class {}Events", p.name), |w| {
-            w.line("constructor(private readonly core: UndraCore = UndraCore.shared) {}");
+            w.line(format!(
+                "constructor(private readonly core: UndraCore = {default_core}) {{}}"
+            ));
             for m in &p.methods {
                 w.blank();
                 jsdoc(w, &m.docs, &[]);
