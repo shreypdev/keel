@@ -104,6 +104,10 @@ Measured on the hello world, each on top of the previous one, `wasm-opt -Oz`, gz
 The playground (which declares queries, so lever B does not apply to it) goes from 573,795 / 218,487 to
 522,954 / 212,106 (−6.4 KB gzipped, lever A).
 
+The record `scripts/wasm-size.sh` wrote from the same tree is 227,227 / **95,768**: the template sits at
+another path there, and panic locations embed the build directory, so the number moves by tens of bytes
+with where the checkout lives (the `--remap-path-prefix` follow-up below would end that).
+
 **A. Sorting.** `slice::sort_by` instantiates a full driftsort per element type *and per closure*. The schema
 code now sorts through `undra_meta::sort`: the keys are collected, one bottom-up merge sort per key type
 (`&str`, `u16`) orders their indices stably, and a swap loop applies the permutation; a list already in order
@@ -181,7 +185,7 @@ Nothing in this ADR changes that path; both tests pass on the optimised build as
   `"gated": false`), measured when the TypeScript runtime's `node_modules` are installed.
 * `bench/budgets.toml` gets a `[size."web/hello-wasm"]` table: `budget_gzip_bytes = 120000`,
   `measured_gzip_bytes` (the record) and `tolerance = 0.05`. The gate fails when the gzipped size is over the
-  budget **or** more than 5% over the record: `min(120,000, record × 1.05)`, 100,629 bytes today. The
+  budget **or** more than 5% over the record: `min(120,000, floor(record × 1.05))`, 100,556 bytes today. The
   tolerance absorbs a toolchain update (rustc stable on the runner, a different zlib) and makes any real
   growth a decision: the change that adds 5 KB re-records the number in the same commit, where a reviewer
   sees it. The budgets parser (`bench/src/budget.rs`) reads the table strictly like the others, and rejects
@@ -192,6 +196,24 @@ Nothing in this ADR changes that path; both tests pass on the optimised build as
   writes the value of the `web-size` row of `site/data/bench.json` (the row keeps its shape and points at the
   record), and fills every `<!--measured:web-size-->` slot of the site and the README. The site workflow's
   "generated files are up to date" check covers README.md too, so a hand edit or a stale record fails CI.
+
+### 5. Finding what grew
+
+When the gate fails, attribute the bytes the way the table above was made:
+
+```bash
+scripts/wasm-size.sh                                   # builds target/wasm-size/hello
+SHIM=$(echo target/wasm-size/target/undra/*/shim/Cargo.toml)
+CARGO_PROFILE_RELEASE_WASM_STRIP=none cargo build --manifest-path "$SHIM" \
+  --target wasm32-unknown-unknown --profile release-wasm --lib --target-dir target/wasm-size/named
+wasm-opt -Oz -g --strip-dwarf --strip-producers --enable-bulk-memory --enable-nontrapping-float-to-int \
+  --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-reference-types \
+  target/wasm-size/named/wasm32-unknown-unknown/release-wasm/undra_core_*.wasm -o named.wasm
+twiggy top -n 40 named.wasm                            # cargo install twiggy (a tool, not a dependency)
+```
+
+Compare with the same recipe on the base commit; a lever's worth is its gzipped delta measured by the
+script, not twiggy's shallow bytes (gzip is not additive).
 
 ## Alternatives considered
 
@@ -239,7 +261,7 @@ Nothing in this ADR changes that path; both tests pass on the optimised build as
    statically imports the `wasm-worker` transport, which defeats the dynamic import in `core.ts` (Vite reports
    `INEFFECTIVE_DYNAMIC_IMPORT`), the `remote` transport is always bundled because the mode is a runtime
    string, and `core.ts` + `mirror.ts` are 47.7 KB of the bundle before minification; (b) restate it (24 KB);
-   (c) one first-load budget of 128 KB for both (120 + 8), 118.4 KB today. Recommended: (a), with the JS line
+   (c) one first-load budget of 128 KB for both (120 + 8), 118.3 KB today. Recommended: (a), with the JS line
    gated as a ratchet once E5b has set its own number.
 2. **The tolerance.** 5% of the record (4.8 KB today), or a budget-only gate (catches nothing until 120 KB).
    Recommended: 5%.

@@ -538,7 +538,7 @@ The Clock/Rng/Log ports have built-in wasm bindings over these imports so a web 
 
 `undra_alloc(len)` never returns 0: it traps (after a level-5 `log` record) when memory is exhausted and when `len` is a size no allocation can have (`>= 0x7fff_fff9` on wasm32); a host that does not check the result would otherwise write at linear address 0, the bottom of the shadow stack (the TypeScript runtime also refuses a 0). `port_call` returning 0 means the host called `undra_port_reply` for **that** `port_call_id` before returning; a reply for some other pending call does not count, and the call then fails instead of staying pending.
 
-Build: `--release`, `-C panic=abort`, `-C opt-level=z` or `s` (measured), `-C lto=fat`, `-Z`-free. `wasm-opt -Oz` when available. Panics call the `log` import with level 5 (fatal) before trapping so the host can restart from snapshot.
+Build: `--release`, `-C panic=abort`, `-C opt-level=z` or `s` (measured: `z` is 14 KB gzipped smaller on the hello world), `-C lto=fat`, `-Z`-free. `wasm-opt -Oz --strip-debug --strip-producers` when available (a warning when not; the size gate of §14 requires it). Panics call the `log` import with level 5 (fatal) before trapping so the host can restart from snapshot.
 
 ---
 
@@ -823,6 +823,7 @@ Schema extraction: `undra-cli` builds the core for the host as a cdylib, `dlopen
 * proptest round-trips for every wire type; byte-fuzz on `Reader`, `Envelope::parse`, change-set and patch decoders.
 * Golden tests for bindgen (three languages).
 * Contract scenarios (`contract-tests/scenarios.md`) executed by each runtime's test suite against the playground core: primitives round-trip, records/enums/errors, sync call, async call, error propagation, cancellation, stream with backpressure, store observe → initial change-set, transaction → single change-set, keyed patch, computed, query fetch/stale/refetch, optimistic mutation rollback, offline queue replay, snapshot/restore, schema mismatch rejection, panic containment.
+* Size (ADR-052): the hello-world web core (the `undra init` template, `undra build --platform web`, `wasm-opt -Oz`) gzipped with zlib at level 9 is at most 120,000 bytes and at most 5% over its recorded size (`scripts/wasm-size.sh`, `[size."web/hello-wasm"]` in `bench/budgets.toml`, the `size` job of `bench.yml`); the record, `bench/results/web-size.jsonl`, is the number the README and the site publish.
 * Benchmarks (criterion): wire encode/decode per type, dispatch overhead, change-set build for 100 signals, keyed patch on 10k items. Cross-boundary benchmarks per runtime with the numbers written to `bench/RESULTS.md`.
 * Every `pub` item documented. Every crate has a README with a 30-line example.
 

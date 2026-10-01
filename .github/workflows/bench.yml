@@ -45,6 +45,14 @@ name: Bench
 # platform (`bench/RESULTS.md`, "Harsh conditions").
 #
 # Every run uploads the JSON behind its numbers (UNDRA_BENCH_RESULTS_DIR) as an artifact.
+#
+# Size (the `size` job, ADR-052): scripts/wasm-size.sh builds the `undra init` template for the web
+# exactly as an app does (release-wasm, then wasm-opt -Oz from a pinned binaryen, so every run
+# measures the optimised module with the same optimiser) and fails when the gzipped wasm is over
+# `[size."web/hello-wasm"]` in bench/budgets.toml: the 120 KB budget, or 5% over the recorded size,
+# whichever is lower. A change that grows it on purpose re-records with `scripts/wasm-size.sh
+# --record` in the same commit. The JavaScript runtime's share is measured and recorded next to it,
+# not gated. Sizes do not depend on the runner's speed, so there is no scale and no baseline here.
 
 on:
   push:
@@ -121,4 +129,45 @@ jobs:
         with:
           name: bench-results
           path: bench-results
+          if-no-files-found: ignore
+
+  size:
+    name: Web size (hello-world wasm, gzip -9)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # The template's build lives in target/wasm-size/target; a key of its own keeps it apart
+          # from the budgets job's cache.
+          key: wasm-size
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: runtimes/ts/@undra/runtime/package-lock.json
+      # Pinned: wasm-opt's output size moves between binaryen releases, and Ubuntu's package is
+      # years behind the version the record was measured with.
+      - name: Install binaryen version_133
+        run: |
+          curl -sSfL https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz \
+            | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_133/bin" >> "$GITHUB_PATH"
+      - name: The TypeScript runtime's dependencies (its share is recorded next to the wasm)
+        working-directory: runtimes/ts/@undra/runtime
+        run: npm ci
+      - name: Size gate
+        run: |
+          wasm-opt --version
+          bash scripts/wasm-size.sh
+      - name: The JSON behind the number
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-size
+          path: bench-results/web-size.jsonl
           if-no-files-found: ignore
