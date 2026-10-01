@@ -144,6 +144,8 @@ writes them: crates and the workflow the exact release (`tag = "vX.Y.Z"`, `UNDRA
 `[undra] version` the release line (`^X.Y.0`, `X.Y.0`, `X.Y`) — a test ages a fresh `init` back to 0.0.9 pin by pin and
 checks the upgrade reproduces the six pin files **byte for byte**.
 
+* The shim and the dev runner (`target/undra/`) are generated from the core's own dependency (`UndraSource` from
+  `cargo metadata`), so they follow the core's pin; there is nothing of theirs to edit.
 * The version a project "is on" is the oldest *exact* pin (core crates, workflow), else the newest release line:
   `undra.toml`'s `0.1` must not drag the notes back to 0.0.
 * A `path` dependency anywhere (the core, `[undra] path`, a `-SNAPSHOT` Gradle runtime, a local Swift package, a
@@ -173,7 +175,7 @@ checks the upgrade reproduces the six pin files **byte for byte**.
 `cargo test -p undra-cli`: 329 pass (255 unit; 74 integration: `ci_workflow` 7, `doctor` 5, `upgrade` 12, `cli` 10,
 `diagnostics` 11, `build_systems` 6 which skip without the env, ...). `cargo test --workspace`: 2,441 pass, 0 fail,
 11 ignored; `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` clean. TypeScript runtime:
-990 tests, `npm run typecheck`, `npm run build`; `undra bindgen -C examples/playground --check --docs` up to date.
+990 tests, `npm run typecheck`, `npm run build` (the package has no linter: the typecheck is its gate); `undra bindgen -C examples/playground --check --docs` up to date.
 `node site/scripts/build-all.mjs` and `check-links.mjs` clean.
 
 ## Open items for the integrator
