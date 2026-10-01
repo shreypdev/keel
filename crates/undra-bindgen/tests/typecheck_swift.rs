@@ -61,10 +61,9 @@ fn stub_source(case: &str) -> String {
         .core_names()
         .api_symbol();
     format!(
-        "/* A stand-in for the core's entry point: the check never loads the core in process. */
-         const void *{symbol}(void);
-         const void *{symbol}(void) {{ return 0; }}
-"
+        "/* A stand-in for the core's entry point: the check never loads the core in process. */\n\
+         const void *{symbol}(void);\n\
+         const void *{symbol}(void) {{ return 0; }}\n"
     )
 }
 
@@ -266,7 +265,10 @@ fn the_scratch_package_names_one_target_per_case_and_one_executable_per_check() 
             ".target(name: \"{ffi}\", path: \"Sources/{ffi}\", publicHeadersPath: \"include\")"
         )));
     }
-    assert!(manifest.contains("\"PlaygroundCoreFFI\""), "the full case keeps its core's module name");
+    assert!(
+        manifest.contains("\"PlaygroundCoreFFI\""),
+        "the full case keeps its core's module name"
+    );
     for (case, fixture) in CHECKS {
         assert!(manifest.contains(&format!(
             ".executableTarget(name: \"{}\", dependencies: [\"{}\"",
