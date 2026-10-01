@@ -304,7 +304,8 @@ pub extern "C" fn undra_schema_hash() -> u64 {
     api::schema_hash()
 }
 
-/// `undra_schema_json() -> i32`: pointer to an `UndraBuf` holding the canonical schema JSON.
+/// `undra_schema_json() -> i32`: pointer to an `UndraBuf` holding the schema as JSON, doc comments
+/// included (`Schema::to_json`; see the native export of the same name).
 #[unsafe(no_mangle)]
 pub extern "C" fn undra_schema_json() -> *mut UndraBuf {
     ensure_initialized();

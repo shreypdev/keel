@@ -239,7 +239,7 @@ func success<Value, Failure: Error>(
 
 extension UndraCore {
     /// Emits `Connectivity.changed(online, kind)`, the way the platform's monitor would.
-    func emitConnectivity(online: Bool, kind: PortNetKind) {
+    func emitConnectivity(online: Bool, kind: NetKind) {
         event(
             port: StandardPorts.Connectivity.portId,
             method: StandardPorts.Connectivity.changed,

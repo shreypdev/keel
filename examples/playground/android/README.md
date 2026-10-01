@@ -27,6 +27,11 @@ the dev loop and makes a 96 MB APK (13 MB with the release core). `app/build.gra
 a path relative to the module (`../../build/android/jniLibs`); after every Android build `undra` checks that
 line and says so if the app would not package what it just built.
 
+The **device benchmark** (`scripts/bench-device.sh --device android`) is an instrumented test (`app/src/androidTest`) over the
+`benchmark` build type (`./gradlew :app:assembleBenchmark :app:assembleBenchmarkAndroidTest`: release, not debuggable, signed
+with the debug key); its runner is `app/src/main/kotlin/dev/undra/playground/bench/BenchRunner.kt`, and `UndraApp` records how
+long the first `UndraCore.load` took for the cold-start row.
+
 The Gradle project includes the Kotlin runtime from this checkout (`includeBuild`) and the generated bindings
 as the `:core-bindings` module, so a change to either shows up in the next build.
 

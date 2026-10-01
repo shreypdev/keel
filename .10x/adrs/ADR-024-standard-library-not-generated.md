@@ -92,3 +92,77 @@ standard types, the only `HttpRequest` a module can declare is the app's own, di
 and in Swift a declaration in the app's module wins over an imported name, so the ambiguity the README
 worries about does not arise. It is the runtime team's call; `stdlib::runtime_spelling` is the single
 place in bindgen that changes.
+
+## Amendment (2026-10-01): the Swift runtime exports the standard types
+
+Status: accepted. Answers the open question above. Touches SPEC 10.5, `undra_bindgen::stdlib`
+and `Model`, and `runtimes/swift/UndraRuntime` (`Core/StandardRecords.swift`). No wire, ABI or
+runtime-model change: the layouts and ids are the ones `StandardPortTests` already asserted.
+
+The body above is unchanged and describes what was decided on 2026-09-30; where it says the Swift
+runtime keeps seven of the eight types internal and that bindgen declares the ones something refers
+to, this section supersedes it.
+
+### What moved
+
+The seven internal, prefixed types became public API of `UndraRuntime`, with the names Kotlin and
+TypeScript already use:
+
+| Before (internal) | Now (public) |
+|---|---|
+| `PortHttpMethod` | `HttpMethod` |
+| `PortHeader` | `Header` |
+| `PortHttpRequest` | `HttpRequest` |
+| `PortHttpResponse` | `HttpResponse` |
+| `PortHttpError` | `HttpError` |
+| `PortFsError` | `FsError` |
+| `PortNetKind` | `NetKind` |
+| `UndraAppState` (public since v1) | `UndraAppState` (unchanged) |
+
+They live in `Core/StandardRecords.swift` with the hand-written codecs they always had (the
+`Wire/Foundation+Undra.swift` bridge holds their `LocalizedError` conformances, so the core stays
+Foundation-free) and have the shape generated code for `undra-ports` had: `Sendable`, `Hashable` and
+`Codable` structs and unit enums (`UndraRecord` / `UndraEnum`, `CaseIterable`), the two errors as
+`UndraError`s (so `UndraCallError.mapped(_:domain:)` takes them) with the messages of the Rust
+`#[error]` attributes, public initializers (`HttpRequest` defaults headers, body and timeout to
+nothing, as the Kotlin data class does), and doc comments from the Rust docs.
+
+### Decisions
+
+1. **The Rust names, unprefixed.** The open question's argument held: once generators declare no
+   standard type, the only `HttpRequest` a generated module can declare is the app's own,
+   differently shaped one, and a declaration in a module wins over an imported name inside that
+   module. The one place a public twin is ambiguous is code that imports both modules and writes
+   the bare name; the compiler says so and the fix is to qualify (`PlaygroundCore.HttpRequest`).
+   That is a rare, loud and local cost, against a permanent one: a second spelling of every
+   standard type for every Swift engineer, and generated code that differs from the other two
+   languages.
+2. **`AppState` stays `UndraAppState`.** It has been public under that name since v1, and an app's
+   own `AppState` model is the commonest type name in Swift: the ambiguity above would not be rare
+   for this one. `stdlib::runtime_spelling` is the single place that says so.
+3. **`NetKind.disconnected` is Rust's `NetKind::None`.** A case called `none` is ambiguous with
+   `Optional.none` wherever the value is optional (`NetKind?`). Generated code never names that
+   variant (placeholders use a type's first variant), so the spelling is the runtime's to choose;
+   it keeps the name the internal type had.
+4. **Bindgen declares nothing from the standard library, in any language.** `runtime_spelling` is
+   total over the table (it took a name and returned an `Option` only because Swift said `None`);
+   the "declare it when something refers to it" machinery in `Model::new` (`Pending`, the
+   reachability walk and its helpers, 130 lines net) is deleted. A record that holds a standard type derives
+   `Codable` again, because the runtime's records are `Codable`: before, the special case for
+   runtime types made it `false`, which the fallback-declared copies had hidden for seven of the
+   eight (the golden's `Connectivity`, with an `UndraAppState` field, gains `Codable`).
+
+### Consequences
+
+* Generated Swift for an app that mentions standard types shrinks: the `stdlib` golden by 275 lines,
+  the playground's `Errors.swift` by the 63 lines of its `HttpError`.
+* An app that answers `Http`, `Fs` or `Connectivity` itself no longer writes the wire types by hand:
+  the playground's `HttpWire.swift` (an 87-line copy of `HttpRequest`, `HttpResponse` and `Header`,
+  there only because they were internal) is gone, and `PlaygroundNetwork` decodes
+  `HttpRequest.undraDecoded(from:)` and answers `HttpResponse(...).undraEncoded()`.
+* The public API surface of the Swift runtime grows by seven types and their conformances, which
+  are now compatibility commitments (the wire layouts already were).
+* `tests/typecheck_swift.rs` compiles the generated Swift of every golden case (the `stdlib` case
+  refers to all eight types and declares none) against the real runtime, and
+  `PublicStandardTypesTests` is a plain `import`, not `@testable`, so either stops compiling if one
+  of the types or what generated code needs of it stops being public.

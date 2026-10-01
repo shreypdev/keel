@@ -1,0 +1,5 @@
+error[undra::C0003]: `cargo` was not found
+  = note: reading the core crate needs `cargo`, and it is not on your PATH
+  = help: install Rust with rustup: https://rustup.rs (then open a new terminal)
+          run `undra doctor` to check the rest of the toolchain
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0003

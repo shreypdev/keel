@@ -88,9 +88,10 @@ EXAMPLES
     undra bindgen --docs                   include the core's doc comments (see below)
 
 DOC COMMENTS
-    The library's own schema export is the canonical form that the schema hash is computed from, which
-    has no doc comments. --docs runs the core once more to read the full schema, so the generated code
-    carries the same documentation the Rust source has."
+    The core's schema carries the doc comments of the Rust source, and the generated code can carry them
+    too: with --docs every type, field, variant, method and port in the bindings is documented with the
+    text of its `///` comment. Without it the bindings have no doc comments, as before. The schema hash
+    covers neither, so the two outputs have the same hash and the same wire."
     )]
     Bindgen(BindgenArgs),
     /// Build the core for iOS, Android, the web or this machine.
@@ -229,7 +230,7 @@ pub struct BindgenArgs {
     #[arg(long)]
     pub check: bool,
 
-    /// Keep the core's doc comments in the bindings (runs the core to read the full schema).
+    /// Keep the core's doc comments in the bindings.
     #[arg(long)]
     pub docs: bool,
 

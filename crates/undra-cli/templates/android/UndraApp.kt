@@ -5,9 +5,11 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import @@KOTLIN_PACKAGE@@.UndraIds
+import dev.undra.android.ChoreographerFramePacer
 import dev.undra.runtime.ClosedReason
 import dev.undra.runtime.ConnectionState
 import dev.undra.runtime.LoadOptions
+import dev.undra.runtime.MirrorOptions
 import dev.undra.runtime.Mode
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.UndraException
@@ -19,6 +21,11 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Attaches the app to its Rust core once per process, before any store is created ([start], from the activity). The
  * core is `libundra_core.so`, which `undra build --platform android` writes to `build/android/jniLibs`.
+ *
+ * What the core produces on its own (timers, streams, port completions) is applied to the stores once per
+ * display frame, at the display's own frames: [ChoreographerFramePacer] (the `android-adapters` module) hands the
+ * mirror each vsync. Without it the runtime drains on a 60 Hz grid of its own, which is not aligned with the display
+ * (and wrong for a 90 or 120 Hz one). Replies and `callSync` on the main thread never wait for a frame either way.
  *
  * **Against `undra dev`** (debug builds, see [DevServer]) the core is the one `undra dev` serves, over a WebSocket:
  * edit the Rust, save, and the app is on the new core within a second, with no rebuild of the app. A dropped
@@ -78,6 +85,7 @@ class UndraApp : Application() {
                     mode = if (url == null) Mode.INPROC else Mode.REMOTE,
                     remoteUrl = url,
                     expectedSchemaHash = UndraIds.SCHEMA_HASH,
+                    mirror = MirrorOptions(framePacer = ChoreographerFramePacer()),
                     remoteTimeout = 5.seconds,
                     onConnectionChange = ::onConnection,
                 ),

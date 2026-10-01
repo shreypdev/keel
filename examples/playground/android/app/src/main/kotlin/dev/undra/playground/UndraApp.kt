@@ -57,6 +57,14 @@ class UndraApp : Application() {
     var devUrl: String? = null
         private set
 
+    /**
+     * How long `UndraCore.load` took in this process, in nanoseconds: the first load, which loads `libundra_core.so`,
+     * starts the core and checks the schema; `0` until a load has succeeded. Later loads (a dev server that restarted its
+     * core) do not change it. The device benchmark (`bench/BenchRunner`) reports it as the cold start.
+     */
+    var coreLoadNanos: Long = 0L
+        private set
+
     private val _connection = MutableStateFlow<ConnectionState>(ConnectionState.Connected)
 
     /** What the connection to `undra dev` is doing; always `Connected` for the in-process core. */
@@ -100,6 +108,7 @@ class UndraApp : Application() {
     private fun load(): Boolean {
         val url = devUrl
         return try {
+            val loadStarted = System.nanoTime()
             UndraCore.load(
                 LoadOptions(
                     mode = if (url == null) Mode.INPROC else Mode.REMOTE,
@@ -114,6 +123,7 @@ class UndraApp : Application() {
                     onConnectionChange = ::onConnection,
                 ),
             )
+            if (coreLoadNanos == 0L) coreLoadNanos = System.nanoTime() - loadStarted
             // Where the remote lists live: every request of the core goes to this address through the Http port.
             configureRemote(RemoteConfig(baseUrl = DemoServer.BASE_URL))
             _failure.value = null

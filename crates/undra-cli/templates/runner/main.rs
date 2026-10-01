@@ -115,8 +115,8 @@ fn main() {
     }
 
     if print_schema {
-        // The full schema, doc comments included (the C ABI's `undra_schema_json` is canonical
-        // JSON, which drops them).
+        // The full schema, doc comments included: what the C ABI's `undra_schema_json` returns
+        // too (compact there), kept so the two can be compared.
         println!("{}", undra_runtime::undra_meta::collect_schema("@@CORE_PACKAGE_RAW@@").to_json_pretty());
         return;
     }

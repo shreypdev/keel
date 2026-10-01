@@ -47,8 +47,12 @@ real hardware in the device phase (tracked in [`bench/RESULTS.md`](bench/RESULTS
 | One insert into an observed 10,000-row list | **6.3 µs** | ≤ 20 µs |
 | Change-set for 100 dirty signals | **2.3 µs** | ≤ 100 µs |
 | Cold start restoring 100 KB of state | **71 µs** | ≤ 3 ms |
-| Web runtime + hello-world core | **85 KB** gzipped wasm | ≤ 120 KB |
+| Web runtime + hello-world core | **135 KB** gzipped wasm (over budget; see below) | ≤ 120 KB |
 | Android core (`.so`, per ABI, release) | **831 KB** | ≤ 1.2 MB |
+
+The web size is honest and currently **over its 120 KB budget**: the 85 KB figure from the
+first launch predates the query layer and the ports facade; the lever (a build-time schema hash
+and a host-only schema export) is tracked as piece E5 in `.10x/specs/2026-10-01-v1x-default-choice-design.md`.
 
 ## Why you can trust it
 

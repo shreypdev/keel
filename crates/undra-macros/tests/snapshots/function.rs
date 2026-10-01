@@ -22,7 +22,9 @@ fn __undra_dispatch_fn_greet(
     ) -> ::undra::meta::DispatchOutcome {
         __undra_out(::undra::runtime::DispatchResult::BadRequest(__reason))
     }
-    fn __undra_assert_send<T: ::core::marker::Send>(_: &T) {}
+    fn _undra_error_E0022_the_future_of_an_async_method_must_be_Send<
+        T: ::core::marker::Send,
+    >(_: &T) {}
     let ::core::option::Option::Some(__rt) = __rt
         .downcast_ref::<::undra::runtime::Runtime>() else {
         return __undra_unknown();
@@ -64,7 +66,7 @@ fn __undra_dispatch_fn_greet(
                 }
             }
         };
-        __undra_assert_send(&__fut);
+        _undra_error_E0022_the_future_of_an_async_method_must_be_Send(&__fut);
         __undra_out(
             ::undra::runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut)),
         )
@@ -125,9 +127,15 @@ const _: () = {
                 "error[undra::E0064]: `GreetError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
-        if <GreetError>::UNDRA_TYPE_ID != ::undra::meta::ids::type_id("GreetError") {
+        let __undra_id = <GreetError>::UNDRA_TYPE_ID;
+        if __undra_id == 0 {
             ::core::panic!(
-                "error[undra::E0061]: the schema records this type as `GreetError`, but the type written here is not that type\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type GreetError = Other`), a renamed import (`use path::Other as GreetError`) or a type that is not declared with `#[undra::api]` makes the two differ, so the platforms would read the wrong layout\n  = help: write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[undra::api]` (`#[undra::error]` for errors)\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+                "error[undra::E0061]: `GreetError` is not a type declared with `#[undra::api]`\n  = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate\n  = help: add `#[undra::api]` to `GreetError`, or, if it is an alias, write the type it stands for where it is used\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+            );
+        }
+        if __undra_id != ::undra::meta::ids::type_id("GreetError") {
+            ::core::panic!(
+                "error[undra::E0061]: `GreetError` here is an alias or a renamed import of an Undra type that is declared under another name\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type GreetError = Other` or `use path::Other as GreetError` the platforms would be told `GreetError` and receive the layout of `Other`\n  = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct GreetError` if you mean a distinct type\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
             );
         }
         if !<GreetError>::UNDRA_IS_ERROR {

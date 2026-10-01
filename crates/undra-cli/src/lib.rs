@@ -35,9 +35,9 @@
 //! * R2 says `unsafe` lives in `undra-ffi` only; SPEC 13 has this crate `dlopen` the core, which
 //!   cannot be done safely. The one module that does it (`schema`) is `#![allow(unsafe_code)]`
 //!   with a `SAFETY` comment on every block; the rest of the crate denies `unsafe`.
-//! * The library's `undra_schema_json` is the canonical JSON, which has no doc comments and no
-//!   labels. `undra bindgen` adds the labels; `--docs` reads the full schema from the dev runner
-//!   instead when the generated code should carry the Rust docs.
+//! * The library's `undra_schema_json` is the whole schema, doc comments included, labelled with
+//!   the generic crate name `undra-core`; `undra bindgen` relabels it with the core's package
+//!   name and drops the docs unless `--docs` is given.
 
 mod adb;
 mod binary;
