@@ -2497,7 +2497,7 @@ In flight for the v1.x releases.
 - Real Android adaptersKv, SecureStore, Fs, Http, Connectivity and Lifecycle backed by the platform, installed with one call.
 - React Native (ADR-038)@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI.
 - No manual build stepA Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project; undra doctor names every fix.
-- The web bundle under its budget (ADR-052)135 KB gzipped today against a 120 KB budget; the levers, and a size gate so it never creeps back.
+- The web bundle under its budget (ADR-052)The hello-world wasm back under its 120 KB gzipped budget: the schema code shares one sort, and only a core that declares queries links the query runtime. CI measures it, and the JavaScript runtime it loads with, on every change.
 - Persisted-state migrations (ADR-037)A schema that changes shape still loads what the last version stored.
 - State-preserving reloadundra dev snapshots before a rebuild and restores after, so editing Rust never loses the screen you were on.
 

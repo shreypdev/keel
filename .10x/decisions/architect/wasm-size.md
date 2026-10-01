@@ -72,6 +72,12 @@ ADR: `.10x/adrs/ADR-052-web-bundle-size.md` (Accepted 2026-10-01 with four decis
 1. ~~ADR-052 open decisions 1-3~~: decided (see above). Follow-up piece **`ts-runtime-size`**: what a hello app
    ships of `@undra/runtime` from 22.5 KB to 16 KB gzipped, lowering `[size."web/hello-runtime-js"]` in the
    same commit.
+1a. **Blocking, after the merge with `main` (`38ea11d`)**: the merged hello world is 102,722 bytes gzipped (`main`
+   alone: 143,384) and what it ships of `@undra/runtime` 24,841, over the 24 KB of decision 2 (`main`'s parity
+   work grew the runtime by 2.3 KB after the decision's 22.5 KB was measured). The size job fails until the
+   JavaScript budget is restated (25 KB would leave 159 bytes of headroom; at 26 KB the ceiling is the budget, 1,159 bytes above the record) or
+   `ts-runtime-size` lands; then `scripts/wasm-size.sh --record` re-records both and `node
+   site/scripts/build-all.mjs` updates the README and site numbers.
 2. ~~`--remap-path-prefix`~~: done in the review, for every release build `undra build` runs (wasm, iOS,
    Android, host) through `build.rustflags` (or the user's `RUSTFLAGS` / `CARGO_ENCODED_RUSTFLAGS`); see
    ADR-052 and SPEC 7. It keeps the part of the path below the home directory, so the size still moves by

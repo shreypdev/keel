@@ -118,7 +118,12 @@ orders their indices stably, and a swap loop applies the permutation; a long lis
 pass. Only the insertion loop, the key collection and the swap loop are generic over the item type. The
 insertion path came second: with the merge path alone, the budgets test's cold start (which collects and
 hashes the schema) measured about 4 µs slower than `main` on the same machine, from three allocations per
-short list; with it, 75.8 / 76.4 µs against `main`'s 75.3 / 75.7 µs in alternating runs. Its result equals
+short list; with it, 75.8 / 76.4 µs against `main`'s 75.3 / 75.7 µs in alternating runs. (The review separated
+the two levers: with `sort_by` restored on the branch the same row is about 2.3 µs faster, median 73.4 against
+75.7 µs over four alternating rounds, so the sort still costs that much; the row matches `main` because lever B
+took the hydration task out of it, its core declaring no query. The sort alone, on record-sized items: 8 to 16
+unsorted items 1.4-2.3x `sort_by`'s time, reversed inputs past 16 items 3-6x, since the standard sort detects a
+descending run; random long inputs equal. Kept: 6.6 KB gzipped for about 2 µs of a 3 ms budget.) Its result equals
 `sort_by` on every input (an exhaustive test over all 5,040 arrangements of a list with duplicates, and long
 pseudo-random ones), so the canonical JSON and every schema hash are unchanged
 (`undra bindgen -C examples/playground --check --docs` passes against the committed bindings, hash `0x04d2adf769c58b9f`). Time stays
@@ -263,6 +268,14 @@ script, not twiggy's shallow bytes (gzip is not additive).
 * The hello-world web core is 95.7 KB gzipped (95,684 bytes; 228,532 raw), 80% of its budget; what the app
   ships of the JavaScript runtime is 22.5 KB (22,521 bytes), 94% of its 24 KB. A core without queries also
   starts faster and makes no `Kv` call at start-up.
+* **After the merge with `main` at `38ea11d`** (Track A's WeakCtx, write checks and typed stream failures,
+  the parity failure model, React Native), measured by the review: `main` alone builds the hello world at
+  372,540 / 143,384 bytes gzipped (it was 136,243 at `a0d638f`); with this ADR's levers 244,382 / **102,722**
+  (86% of the budget, but 7.4% over the pre-merge record, so the gate asks for a re-record); the JavaScript
+  runtime is **24,841** bytes, over decision 2's 24 KB (`main`'s parity work grew `@undra/runtime` by 2.3 KB).
+  The playground: `main` alone 591,974 / 226,344, merged 543,096 / 219,972 (lever A, −6.4 KB gzipped).
+  The record stays at its pre-merge values until the integrator restates the JavaScript budget (or lands
+  `ts-runtime-size`) and re-records both with `scripts/wasm-size.sh --record`.
 * An app that removes its last query or mutation leaves what it persisted (cache entries, the offline
   queue) in `Kv` unread: before, its next start-up deleted them as written under another schema hash; now
   nothing reads them until a version that declares a query again deletes them the same way. Nothing a

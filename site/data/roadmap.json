@@ -133,7 +133,7 @@
         },
         {
           "title": "The web bundle under its budget (ADR-052)",
-          "text": "135 KB gzipped today against a 120 KB budget; the levers, and a size gate so it never creeps back."
+          "text": "The hello-world wasm back under its 120 KB gzipped budget: the schema code shares one sort, and only a core that declares queries links the query runtime. CI measures it, and the JavaScript runtime it loads with, on every change."
         },
         {
           "title": "Persisted-state migrations (ADR-037)",
