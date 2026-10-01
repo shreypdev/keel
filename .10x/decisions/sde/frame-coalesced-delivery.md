@@ -148,3 +148,28 @@ measured per frame here (the device phase does that, on the blueprint's devices)
 * `typecheck_kotlin` in `undra-bindgen` silently skips on this machine: `kotlinc --version` exits 1 with Kotlin
   2.4.20, and the fallback looks in `/opt/gradle`. Run it with `GRADLE_HOME` pointing at the Gradle 8.14.3
   distribution (it passes); a follow-up could probe `kotlinc -version`.
+
+## Verification after merging `main` (`33e4172`: ADR-032 Swift error channel, ADR-033 wire magic, the stress harness, distribution)
+
+Merge conflicts: ADR-031 (kept the accepted version), SPEC §17.3 and Swift `LoadOptions`/`UndraCore` (both
+ADR-032's `onError` / `report` / `shared` placeholder and this piece's mirror options kept), the SDE index
+(main's copy carried stray `|||||||` merge markers; resolved to a clean list). Goldens and playground bindings
+regenerated through their mechanisms (the generated `Stress` now has ADR-032's throwing init and reporting
+command). The Kotlin runner runs S18 before S17, whose new last step (S17.6) shuts the core down.
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace` | 2,167 passed, 0 failed, 10 ignored |
+| `undra-bindgen` `typecheck_kotlin` with `GRADLE_HOME` | passed |
+| TS runtime `npm test` + typecheck | 927 passed |
+| Kotlin `scripts/test-local.sh` | 495 cases, 0 failed, 2 skipped |
+| Swift `swift test` | 421 passed (with ADR-032's tests) |
+| ffi wasm / C / Swift acceptance | 29 passed / ok / passed |
+| `contract-tests/run-all.sh` | 18 × 3: all pass (54/54) |
+| bench budget gate | 2 passed |
+| playground web | 64 passed, build ok |
+| `UNDRA_TEST_IOS=1 UNDRA_TEST_ANDROID=1` platform tests | 4 passed |
+| iOS: playground built for the iPhone 17 Pro simulator (the `CADisplayLink` path), four tabs launched and alive, no fault or Undra error in the log, XCUITest tour 5/5 | pass (screenshots outside the repo: `simctl` may not write into the worktree here, so `ios/smoke.sh`'s own screenshot step failed; its steps were run by hand) |
+| Android: release core, `assembleDebug` with `android-adapters`, installed on the emulator, four tabs alive, "Stream updates" applied live through `ChoreographerFramePacer`, no `FATAL EXCEPTION` | pass |
+
