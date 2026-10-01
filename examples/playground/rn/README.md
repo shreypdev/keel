@@ -36,4 +36,9 @@ A debug core works too (`undra build --platform rn` without `--release`); it is 
 the Bench screen shows. Metro (`npm start`) serves the TypeScript sources of the runtime, the module
 and the bindings directly (`metro.config.js`), so editing any of them needs no build step.
 
+To build, install, launch and check the app in one go (the iPhone simulator, or an emulator or phone that `adb`
+sees), `scripts/rn-device-checks.sh ios` or `scripts/rn-device-checks.sh android` from the repository root: it
+waits for the app's own `UNDRA-RN CHECKS 10/10 passed` line and exits non-zero otherwise. The
+`.github/workflows/rn-devices.yml` jobs run exactly that.
+
 `docs/REACT_NATIVE.md` is the guide: install, autolinking, the build, the dev loop, the limits.

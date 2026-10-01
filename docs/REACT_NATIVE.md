@@ -177,12 +177,44 @@ make its methods `async`.
 
 ## What is tested where
 
-| Layer | How | Command |
+| Layer | How | Command | In CI |
+|---|---|---|---|
+| The C++ host (inbox, ports, ownership, shutdown), both shims; the JSI layer compiled against React Native 0.87's headers with `-Werror` | against the real core, ASan + UBSan | `runtimes/rn/@undra/react-native/cpp/test/run.sh` | `ci.yml`, job "React Native (host + model)", every push and pull request (Linux, clang 18) |
+| `NativeTransport`, the frame scheduler, the polyfills, `loadNative` | a fake module, on Node | `npm test` in `runtimes/rn/@undra/react-native` | the same job |
+| Types of the package and its build config | `tsc`, against `@undra/runtime`'s sources and its emitted declarations (`npm run build` in `runtimes/ts/@undra/runtime` first) | `npm run typecheck` | the same job |
+| The contract scenarios S01..S18 | through `NativeTransport` over a stand-in of the module on the wasm core: 17 pass, S17 (native panic containment) is app-tested | `npm run test:contract` | the same job |
+| JSI, Hermes, `invokeAsync`, the vsync sources, both builds, native panic containment | the playground app's on-device checks RN01..RN10 (and the Bench screen's measurements): the app logs `UNDRA-RN CHECKS 10/10 passed` | `scripts/rn-device-checks.sh ios` (iPhone simulator) and `scripts/rn-device-checks.sh android` (emulator or phone) | `rn-devices.yml`: on demand, every Monday, and on pull requests that touch `runtimes/rn/**` or `examples/playground/rn/**` |
+
+The contract column proves `NativeTransport` and the module's rules as modelled by the stand-in, not the
+C++ module: that is the C++ host test plus RN01..RN10 on a device. Count it as "`NativeTransport` over a
+stand-in", never as a native column next to Swift and Kotlin.
+
+## What is verified
+
+Everything below was run on 2026-10-01 at `wt/react-native` with `main` merged in (the schema JSON, device
+bench, diagnostics and dev loop pieces), on a Mac (Apple clang, Xcode 26.6) shared with other agents' builds.
+
+| What | Where | Result |
 |---|---|---|
-| The C++ host (inbox, ports, ownership, shutdown), both shims | against the real core on the Mac, ASan + UBSan | `runtimes/rn/@undra/react-native/cpp/test/run.sh` |
-| `NativeTransport`, the frame scheduler, the polyfills, `loadNative` | a fake module, on Node | `npm test` in `runtimes/rn/@undra/react-native` |
-| The contract scenarios S01..S18 | through `NativeTransport` over a stand-in of the module on the wasm core: 17 pass, S17 (native panic containment) is app-tested | `npm run test:contract` |
-| JSI, Hermes, `invokeAsync`, the vsync sources, both builds, native panic containment | the playground app's on-device checks RN01..RN10 and measurements (Bench screen, `UNDRA-RN` log lines) | `examples/playground/rn/README.md` |
+| The C++ host, both shims, ASan + UBSan | macOS; also a clean `git clone` (Node 20) running the CI job's steps | 14 + 14 checks, `UndraJsi.cpp` compiles against 0.87's headers |
+| `NativeTransport` and friends | Node 24 and Node 20 | 39 tests; typecheck clean |
+| Contract scenarios through `NativeTransport` | Node 24 and Node 20 | 17 pass, S17 skipped (app-tested) |
+| The on-device checks, iOS | iPhone 17 Pro simulator (iOS 26.5), release core, Release app, `scripts/rn-device-checks.sh ios` | `CHECKS 10/10 passed` |
+| The on-device checks, Android | `undra-rn` emulator (arm64, API 35), release core, release APK, `scripts/rn-device-checks.sh android` | `CHECKS 10/10 passed` |
+| JavaScript reload, iOS | debug build on Metro, `POST /reload`: three reloads, one in the middle of the benchmarks (review, before the merge) | four runtimes in one process, 10/10 each |
+| JavaScript reload, Android, with the review's fixes | debug build on Metro, `POST /reload`, one process throughout: an idle reload, two in the middle of the benchmarks and two more in quick succession (6 runtimes); three reloads timed to land inside the self-checks (5 runtimes); then 20 in a row (21 runtimes) | every run that reached its end passed 10/10 (6, 2 and 21 runs; the interrupted ones print no verdict), no `CHECK ... FAIL`, no native crash in `logcat` |
+| Android frame source, per reload | the same reloads with a counter on the choreographer callbacks (not committed) | 0 callbacks pending when the source was destroyed in 66 reloads (26 plain, 40 with the 10k list's Stream running), `posted == ran` every time; the native heap read from `dumpsys meminfo` is flat within the noise (see below) |
+| `rn-devices.yml` and the CI job on a GitHub runner | not yet: a runner has not run them | the job's steps were run in a clean clone on the Mac (Linux-only parts, `apt` and `clang++-18`, were not) |
+
+On Android a callback posted with `AChoreographer_postFrameCallback` that is still pending when a reload
+quits the JS thread's looper never runs, and the one small allocation it carries (a `std::weak_ptr`, and
+the frame source's state it keeps alive, about 100 bytes) is not freed. That needs a frame requested in
+the instant of the teardown; it did not happen once in the 66 reloads above (the counter saw no pending
+callback each time the source was destroyed), and the native heap (`dumpsys meminfo`, Heap Alloc) was
+111.0 MB at launch and 98.8, 99.9, 100.0 and 99.4 MB after 5, 10, 15 and 20 reloads: the noise of a
+React Native reload (about a megabyte) is ten thousand times larger than that. It is a development-only cost, bounded by the
+number of reloads. The fix, if it is ever seen, is to pass an id instead of a pointer and keep the
+pending states in a table that the source's destructor empties.
 
 ## Troubleshooting
 

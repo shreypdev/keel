@@ -68,7 +68,10 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/undra-rn-checks.XXXXXX")"
 BG_PIDS=()
 cleanup() {
   local pid
-  for pid in ${BG_PIDS[@]+"${BG_PIDS[@]}"}; do kill "$pid" >/dev/null 2>&1 || true; done
+  for pid in ${BG_PIDS[@]+"${BG_PIDS[@]}"}; do
+    kill "$pid" >/dev/null 2>&1 || true
+    { wait "$pid"; } >/dev/null 2>&1 || true   # reaped here, so the shell does not print "Terminated"
+  done
   rm -rf "$WORK"
 }
 trap cleanup EXIT

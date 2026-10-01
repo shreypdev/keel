@@ -249,7 +249,13 @@ with `undra_buf_free`.
     middle of the benchmarks (a debug build on Metro) tore the core down with the runtime and the next
     `loadNative` started a fresh one in the same process (10/10 again). On iOS (review, 2026-10-01: a
     debug build on Metro, reloads through Metro's `/reload`) three reloads, one in the middle of the
-    benchmarks, gave four runtimes in the same process (one pid), 10/10 each.
+    benchmarks, gave four runtimes in the same process (one pid), 10/10 each. After the review's fixes and
+    the merge of `main` (2026-10-01): the same on Android, with 32 runtimes in three runs and 66 more
+    with a counter on the frame source (`.10x/decisions/sde/react-native.md`).
+  * CI: the first two layers and the typecheck run on every push and pull request (`ci.yml`, "React
+    Native (host + model)", Linux); the device layer is `scripts/rn-device-checks.sh`, run by
+    `.github/workflows/rn-devices.yml` on demand, weekly and on pull requests that touch the package or
+    the app (a macOS job on the iPhone simulator, a Linux job on an x86_64 emulator).
 * **Measurements** (release core, release app with Hermes bytecode; Apple M-series Mac, iPhone 17 Pro
   simulator on iOS 26.5 and an arm64 Android 15 emulator with 2 GB and a software GPU, on a machine
   shared with other agents' builds and emulators; medians, the range over three runs each, the Android
