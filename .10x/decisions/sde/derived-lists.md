@@ -34,7 +34,8 @@ source order with `Move` + `Update`). Branch `wt/derived-lists`.
 * **Playground.** `Todos` on recorded ops (`push`, `update_at`, `remove`, descending removes in one txn),
   `visible: DerivedList<Todo>` (`filter_with(&filter, ..)`), `remaining = derive().filter(..).count()`,
   `fill(count)`. Bindings regenerated: `visible`'s apply gains the patch case, `fill` appears; **schema hash
-  `0x933d362fb48d39ac`** (was `0xddcdea47fa95a8d4`). `BigList` unchanged (the brief does not ask).
+  `0xc5f05c376fde398c`** after the last merge of `main` (whose hash was `0xefd907be3070520a`; regenerated, not
+  hand-merged). `BigList` unchanged (the brief does not ask).
 * **Contract S19** on Swift, Kotlin and TypeScript (19 x 3). Step 9 replays a recording of the 60,000-op
   seeded run (below) through each runtime's own change-set decoder, `decodePatch` and `applyPatch`,
   checking every view's FNV-1a 64 after every change-set; TypeScript also through a `Mirror` drained at
@@ -100,9 +101,17 @@ Model runs: `tests/derived.rs` 1,500 cases by default; **100,000 cases once in d
    change (a panicking `Clone` leaves the item in the list and the taps stale; documented on `push`,
    `insert`, `update_at`).
 
-## Verification (after merging `main` at `e119d4c`)
+## Verification
 
-`cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo doc --workspace --no-deps`
+**After the last merge of `main` (`0aa98a4`, rn-adapters + dev-reload + the upgrade-test fix; bindings and
+site regenerated):** `cargo fmt --check`, clippy `-D warnings`, rustdoc `-D warnings` clean; `cargo test
+--workspace` 2,689 passed, 0 failed, 12 ignored (`UNDRA_REQUIRE_TOOLCHAINS=1`, tsc on PATH); `undra-signals`
+release, Track A release regressions, `sync_alloc` / `commit_alloc` / `derived_alloc` release, the wasm32 build
+of `undra-signals`, `bindgen --check --docs` (`0xc5f05c376fde398c`), site `build-all` + `check-links --words`
+(342 words): pass. The coordinator asked for the report before the platform half of that run finished, so
+the platform suites below are from the merge before it.
+
+**After merging `main` at `e119d4c`:** `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo doc --workspace --no-deps`
 with `-D warnings`: clean. `cargo test --workspace`: 2,683 passed, 0 failed (`UNDRA_REQUIRE_TOOLCHAINS=1`).
 `undra-signals` 382 in debug and in release; Track A's release regressions (`weak_ctx`, `computed_isolation`,
 `write_context`) pass; `sync_alloc`, `commit_alloc`, `derived_alloc` pass in release. TypeScript runtime
