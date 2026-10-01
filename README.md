@@ -185,7 +185,7 @@ hosted services, shared UI of any kind.
 | `crates/` | the 12 Rust crates: schema (`undra-meta`), wire codec, macros, signals, runtime, ports, query, ffi (the only `unsafe`), transport, bindgen, cli, facade |
 | `runtimes/` | the Swift, Kotlin and TypeScript runtime packages the generated code sits on |
 | `examples/playground` | the reference app: one core, three platforms, proof screenshots |
-| `contract-tests/` | the 17 scenarios + a runner per platform |
+| `contract-tests/` | the 18 scenarios + a runner per platform |
 | `bench/` | criterion benches + the budget gate; `RESULTS.md` has the numbers |
 | `docs/SPEC.md` | the binding specification (wire, ABI, runtime model, generated shapes) |
 | `.10x/` | the project's decision record: ADRs, reviews, status ledger |

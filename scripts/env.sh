@@ -52,3 +52,12 @@ if [ -z "${UNDRA_KOTLIN_STDLIB:-}" ]; then
   done
 fi
 unset _undra_jar _UNDRA_ROOT _UNDRA_TOOLS
+
+# Gradle and the Android SDK: the macOS Java stub answers `java` when JAVA_HOME is unset, and the
+# playground's Gradle build needs ANDROID_HOME (or sdk.dir in local.properties). Only set when present.
+if [ -z "${JAVA_HOME:-}" ] && [ -d /opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ]; then
+  export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+fi
+if [ -z "${ANDROID_HOME:-}" ] && [ -d /opt/homebrew/share/android-commandlinetools ]; then
+  export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+fi
