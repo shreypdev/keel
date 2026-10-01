@@ -77,7 +77,9 @@ waiting (up to 5 s) for the main thread from anywhere else.
   `undra.native.name` (default `undra_core`); `undra.native.path` is an absolute path that wins over the name. If the library
   cannot be loaded, `UndraNative.isAvailable` is `false` and `load` says how to fix it. The native runtime is process-global,
   so there is one `INPROC` core at a time per process. `close()` ends its work (ADR-034: `UndraNative.shutdown()` stops its
-  tasks, timers and port calls; in-flight calls fail as closed), and a later `load` starts a fresh core.
+  tasks, timers and port calls; in-flight calls fail as closed), **and waits for it**: it returns after the core's threads are
+  joined and the port callbacks running on other threads have returned, so it must not run under a lock a synchronous port
+  implementation needs. A later `load` starts a fresh core.
 * `REMOTE` (**development only**): `java.net.http.WebSocket` to `undra dev`, envelope framing of SPEC §3.2, `Hello` handshake
   with the schema check. `callSync` and `construct` block the calling thread for a network round trip (up to
   `remoteTimeout`). No snapshots, no statistics. Not available on Android (no `java.net.http`).

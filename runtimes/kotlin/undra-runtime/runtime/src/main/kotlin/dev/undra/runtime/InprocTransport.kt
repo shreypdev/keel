@@ -184,6 +184,11 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
         checkNotInCallback("close")
     }
 
+    /**
+     * Ends the native core and **waits for it**: [UndraNative.shutdown] returns after the core's threads are joined
+     * and the port callbacks running on other threads have returned (SPEC 6, host contract 5). Refused from a
+     * callback, where it would wait for its own thread.
+     */
     override fun close() {
         // Refused from a callback, like every native entry: the shutdown would wait for this very thread.
         checkNotInCallback("close")
@@ -197,6 +202,18 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
             native.shutdown()
         } finally {
             claimed.remove(native)
+        }
+    }
+
+    /** Cancels the core's stream [callId] from the delivery thread, unless this transport was closed meanwhile. */
+    private fun cancelAfterCallback(callId: Int) {
+        UndraDispatchers.delivery.execute {
+            if (closed.get()) return@execute
+            try {
+                native.cancel(callId)
+            } catch (e: Throwable) {
+                UndraLog.warn("cancelling the stream $callId after an unreadable item failed", e)
+            }
         }
     }
 
@@ -252,6 +269,11 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
                 // A failure, not flag 2: that one carries the stream's own typed error E (ADR-036).
                 val failure = StreamFailure(ReplyStatus.BAD_REQUEST, "the core sent a malformed stream item: ${e.message}", "")
                 target.onStreamItem(callId.toUInt(), StreamFlag.FAILED, failure.toByteArray())
+                // The collector is told the stream failed, but the core's side did not end: it keeps the stream open
+                // and waits for credit until shutdown. UndraCore treats a flag-3 item as the core's own end and sends
+                // no Cancel, so cancel it here, off the callback (a native call from one is refused, SPEC 6 host
+                // contract 4), like Swift's cancelDeferred.
+                cancelAfterCallback(callId)
             }
         }
 

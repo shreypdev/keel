@@ -238,6 +238,11 @@ class InprocTransportTests : Suite() {
             }
             // A well-formed flag-3 item passes through as it came; UndraCore decodes the failure.
             assertEq(Triple(7u, StreamFlag.FAILED, cancelled.toList()), events.items[4])
+            // The streams whose items could not be read are still open in the core, and UndraCore sends no Cancel
+            // for a flag-3 end, so the transport cancels them itself (off the callback); the ones that ended
+            // on the core's side are not cancelled.
+            eventually("the core's streams with unreadable items are cancelled") { native.cancels.toList().sorted() == listOf(5, 6) }
+            assertEq(emptyList<String>(), native.violations.toList(), "the cancel must not be a native call made from inside the callback")
         }
 
         case("a sync port answer is handed back through portSyncReply on the same thread") {
@@ -413,6 +418,7 @@ class InprocTransportTests : Suite() {
             val native = FakeNative()
             val core = UndraCore.attach(InprocTransport(native), LoadOptions(expectedSchemaHash = HASH, defaultAdapters = false), makeShared = false)
             core.use {
+                val garbledCallId = java.util.concurrent.atomic.AtomicReference<UInt>()
                 fun endWith(item: (callId: UInt) -> ByteArray): UndraReplyException {
                     native.onCall = { call ->
                         Thread {
@@ -439,7 +445,8 @@ class InprocTransportTests : Suite() {
                 }
                 assertEq(Payloads.PanicInfo("boom", "at core.rs:1"), panicked.panicInfo)
                 // An item the transport cannot read at all.
-                val garbled = endWith { id -> Codecs.u32.encodeToByteArray(id) + byteArrayOf(9) }
+                assertEq(emptyList<Int>(), native.cancels.toList(), "the core's own failures need no cancel")
+                val garbled = endWith { id -> garbledCallId.set(id); Codecs.u32.encodeToByteArray(id) + byteArrayOf(9) }
                 assertEq(ReplyStatus.BAD_REQUEST, garbled.status)
                 assertTrue(garbled.badRequestReason!!.startsWith("the core sent a malformed stream item: "), garbled.badRequestReason!!)
                 // A flag-3 item whose failure body cannot be read.
@@ -447,6 +454,10 @@ class InprocTransportTests : Suite() {
                 assertEq(ReplyStatus.BAD_REQUEST, badFailure.status)
                 assertTrue(badFailure.badRequestReason!!.startsWith("the core sent a malformed stream failure: "), badFailure.badRequestReason!!)
                 eventually("no stream is left pending") { core.stats().hostPendingCalls == 0 }
+                // Only the unreadable item leaves the core's stream open (L6): one cancel, for that call. A flag-3
+                // item the core sent itself (cancelled, panic, an unreadable failure body) ended the core's side.
+                eventually("the unreadable item's stream is cancelled once") { native.cancels.size == 1 }
+                assertEq(garbledCallId.get(), native.cancels.single().toUInt())
                 assertEq(emptyList<String>(), native.violations.toList())
             }
         }

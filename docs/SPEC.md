@@ -507,7 +507,7 @@ static native void   timerFired(int timerId);
 static native byte[] snapshot();
 static native int    restore(byte[] snapshot);
 static native String statsJson();
-static native void   shutdown();                                  // what undra_shutdown runs; releases the Callbacks global reference (ADR-034). Kotlin's UndraCore.close() of an in-process core calls it (never from a callback), and a later load starts a fresh core
+static native void   shutdown();                                  // what undra_shutdown runs; releases the Callbacks global reference (ADR-034). Kotlin's UndraCore.close() of an in-process core calls it (never from a callback) and waits for it (the core's threads are joined and running port callbacks have returned: not under a lock a sync port needs), and a later load starts a fresh core
 ```
 `ByteBuffer`s passed to callbacks are **direct** buffers over core memory valid only during the callback; the Kotlin runtime decodes immediately. `byte[]` arguments are copied once via `GetByteArrayRegion`. The JNI callbacks follow the host contract of §6. In particular a synchronous port is a two-call protocol with hidden per-thread state: the shim calls `portSyncReply()` on the same thread, right after `onPortCall` returned 0, and callbacks run concurrently, so an implementation must carry the reply in thread-local state (the shipped `InprocTransport` does, in a `ThreadLocal`), never in a shared field.
 

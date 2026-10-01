@@ -88,7 +88,9 @@ internal interface Transport : AutoCloseable {
 
     /**
      * Detaches from the core and, for an in-process core, ends its work (ADR-034). Idempotent. Pending
-     * calls are failed by [UndraCore], not here.
+     * calls are failed by [UndraCore], not here. An in-process transport **blocks until the native shutdown
+     * has finished** (the core's threads joined, port callbacks on other threads returned); [UndraCore.close]
+     * documents what that asks of the caller.
      */
     override fun close()
 }

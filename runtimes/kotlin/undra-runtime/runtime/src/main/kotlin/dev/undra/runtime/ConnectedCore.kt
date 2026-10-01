@@ -328,6 +328,11 @@ internal class ConnectedCore(
         shutDown(null)
     }
 
+    /**
+     * Fails everything pending, cancels the scope and closes the transport, in that order. For an in-process
+     * core the last step blocks until the native shutdown has finished (see [UndraCore.close]), which is why
+     * the pending calls are failed first: the shutdown's own answers have nowhere to go.
+     */
     private fun shutDown(cause: Throwable?) {
         // The cause must be visible before `closed` is, or a caller that sees the closed flag reports no cause.
         synchronized(closeLock) {

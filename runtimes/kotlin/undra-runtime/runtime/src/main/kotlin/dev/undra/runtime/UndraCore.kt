@@ -224,6 +224,13 @@ public open class UndraCore protected constructor() : AutoCloseable {
      * shut down (its tasks, timers and port calls stop), and a later [load] in the same process starts a
      * fresh one with fresh handles. Idempotent.
      *
+     * **For an in-process core, `close()` waits for the native shutdown**: it returns only after the core's
+     * own thread, its timer thread and its blocking pool have been joined and every port callback running
+     * on another thread has returned. So do not call it while holding a lock (or waiting on a latch, or
+     * inside a `runBlocking`) that a synchronous port implementation needs: the close would wait for the
+     * callback and the callback for the close, and a port callback that never returns keeps `close()` from
+     * returning. Over a remote transport `close()` only closes the connection.
+     *
      * @throws UndraException when called from inside a core callback (a synchronous port implementation),
      *   where the shutdown would wait for the very thread it runs on; the core is left open.
      */
