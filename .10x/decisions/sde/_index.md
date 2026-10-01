@@ -11,3 +11,4 @@ playground, bench. Per-piece notes land here as `<slug>.md` when each piece merg
 - `undra-cli.md` — the CLI: layout, shim/runner design, XCFramework and shell decisions, open items (2026-09-30).
 - `rename-undra.md` — the rename to Undra: the script, false positives, frozen wire magic, goldens, what was verified, what the integrator owns (2026-09-30).
 - `wire-magic.md` — the envelope magic becomes `UNDR` (ADR-033): where the four bytes lived, the near-miss tests, the vector drift fixed and checked in CI, what the site and in-flight branches still owe (2026-09-30).
+- `keepalive-test-clock.md` — `a_chatty_client_is_never_pinged` no longer depends on thread timing: the keepalive reads an injected clock, the test is a unit test with a manual clock; what stays real-time (2026-09-30).
