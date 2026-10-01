@@ -8,6 +8,7 @@
 //                     compiled only when `UNDRA_STUB_FFI` is defined (see below).
 //   UndraRuntime       Swift target: the wire layer, the runtime core (UndraCore, the in-process and
 //                     WebSocket transports, mirror, objects, stores, ports) and the default adapters.
+//   UndraTestKit       Swift target: the testing kit (PreviewCore, RecordedCore, PortRecorder, Replayer, the deterministic fakes).
 //   UndraRuntimeTests  XCTest target. Runs with `swift test` and needs neither the Rust core nor
 //                     the XCFramework (a scripted fake core stands in for it).
 //
@@ -35,6 +36,7 @@ let package = Package(
     ],
     products: [
         .library(name: "UndraRuntime", targets: ["UndraRuntime"]),
+        .library(name: "UndraTestKit", targets: ["UndraTestKit"]),
     ],
     targets: [
         .target(
@@ -47,6 +49,18 @@ let package = Package(
             name: "UndraRuntime",
             dependencies: ["UndraFFI"],
             path: "Sources/UndraRuntime"
+        ),
+        // The testing kit (docs/TESTING.md): preview cores, recorded cores, port record/replay. Built on the runtime's `package` seam
+        // (UndraTransport and UndraInbound), so it ships with the runtime's package and nothing else can reach that seam.
+        .target(
+            name: "UndraTestKit",
+            dependencies: ["UndraRuntime"],
+            path: "Sources/UndraTestKit"
+        ),
+        .testTarget(
+            name: "UndraTestKitTests",
+            dependencies: ["UndraTestKit", "UndraRuntime"],
+            path: "Tests/UndraTestKitTests"
         ),
         .testTarget(
             name: "UndraRuntimeTests",

@@ -231,6 +231,20 @@ public final class UndraCore: @unchecked Sendable {
         return core
     }
 
+    /// Puts a core of your own under an `UndraCore`: starts `transport`, checks the schema hash it reports against
+    /// `options.expectedSchemaHash`, registers the adapters of `options` and returns the core, which also becomes
+    /// `UndraCore.shared` if none is loaded. The testing kit's recorded core is made this way; the seam is `package`, so
+    /// only code of this package (the kit) can use it.
+    package static func attach(transport: any UndraTransport, options: LoadOptions) throws -> UndraCore {
+        let core = try connect(transport: transport, options: options)
+        sharedSlot.withLock { (slot: inout UndraCore?) -> Void in
+            if slot == nil {
+                slot = core
+            }
+        }
+        return core
+    }
+
     /// The platform name sent to the core in `RuntimeConfig` and `Hello`.
     static var platformName: String {
         #if os(iOS)
@@ -947,7 +961,7 @@ public final class UndraCore: @unchecked Sendable {
 // MARK: - Callbacks from the transport
 
 extension UndraCore: UndraInbound {
-    func onReply(callId: UInt32, payload: [UInt8]) {
+    package func onReply(callId: UInt32, payload: [UInt8]) {
         let reply: Wire.Reply
         do {
             reply = try Wire.Reply.decode(payload)
@@ -1005,11 +1019,11 @@ extension UndraCore: UndraInbound {
         }
     }
 
-    func onChangeSet(_ payload: [UInt8]) {
+    package func onChangeSet(_ payload: [UInt8]) {
         mirror.enqueue(payload)
     }
 
-    func onStreamItem(callId: UInt32, payload: [UInt8]) {
+    package func onStreamItem(callId: UInt32, payload: [UInt8]) {
         let item: Wire.StreamItem
         do {
             item = try Wire.StreamItem.decode(payload)
@@ -1064,7 +1078,7 @@ extension UndraCore: UndraInbound {
         return UndraReplyError(status: failure.status, body: failure.replyBody())
     }
 
-    func onPortCall(portId: UInt32, methodId: UInt32, portCallId: UInt32, args: [UInt8]) -> PortCallOutcome {
+    package func onPortCall(portId: UInt32, methodId: UInt32, portCallId: UInt32, args: [UInt8]) -> PortCallOutcome {
         let impl = state.withLock { (current: inout State) -> PortImpl? in
             return current.ports[portId]
         }
@@ -1110,7 +1124,7 @@ extension UndraCore: UndraInbound {
         }
     }
 
-    func onLog(level: UInt8, target: String, message: String) {
+    package func onLog(level: UInt8, target: String, message: String) {
         // Only `undra dev` says things to the developer; a core in this process never does (ADR-053).
         if target == Self.devNoticeTarget, transport.mode == .remote, let notify = onDevNotice {
             deferToQueue {
@@ -1131,7 +1145,7 @@ extension UndraCore: UndraInbound {
         UndraLog.forward(level: level, target: target, message: message)
     }
 
-    func onDisconnect(_ error: any Error) {
+    package func onDisconnect(_ error: any Error) {
         let reason: UndraClosedReason
         if let mismatch = error as? UndraSchemaMismatchError {
             reason = .schemaMismatch(expected: mismatch.expected, got: mismatch.got)
@@ -1143,7 +1157,7 @@ extension UndraCore: UndraInbound {
         closeForGood(reason, failing: error)
     }
 
-    func onReconnecting(attempt: Int, error: any Error) {
+    package func onReconnecting(attempt: Int, error: any Error) {
         let proceed = state.withLock { (current: inout State) -> Bool in
             if current.isShutDown {
                 return false
@@ -1162,7 +1176,7 @@ extension UndraCore: UndraInbound {
         setConnectionState(.reconnecting(attempt: attempt))
     }
 
-    func onReconnected() {
+    package func onReconnected() {
         let epoch = state.withLock { (current: inout State) -> Int in
             return current.lossEpoch
         }
@@ -1172,7 +1186,7 @@ extension UndraCore: UndraInbound {
         }
     }
 
-    func holdsObjects() -> Bool {
+    package func holdsObjects() -> Bool {
         return state.withLock { (current: inout State) -> Bool in
             return !current.constructed.isEmpty
         }
