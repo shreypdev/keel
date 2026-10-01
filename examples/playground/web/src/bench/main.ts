@@ -4,6 +4,7 @@ import { Bench, UndraIds } from "@playground/core";
 import wasmUrl from "../../../build/web/undra_core.wasm?url";
 import { memoryKv } from "../memory-kv";
 import { type BenchConfig, FULL, QUICK } from "./ops";
+import { RECOVERY_FULL, RECOVERY_QUICK, type RecoveryBenchResult, measureRecovery } from "./recovery";
 import { type RawResult, run } from "./runner";
 import { type Summary, summarize } from "./stats";
 
@@ -27,7 +28,19 @@ export interface UndraBenchApi {
   cold(): Promise<ColdSample>;
   /** `count` more cold starts in this page (the module is warm in the browser's caches by now), summarised. */
   reloads(count: number): Promise<{ readonly compile_ns: Summary; readonly load_ns: Summary }>;
+  /** The recovery rows of ADR-049 (`ts/snapshot_take_100kb`, `ts/recovery_restart_100kb`) on a core of their own; see `recovery.ts`. */
+  recovery(quick?: boolean): Promise<RecoveryBenchResult>;
 }
+
+/** The core's module, compiled once for the recovery rows. */
+async function compiledModule(): Promise<WebAssembly.Module> {
+  const response = await fetch(wasmUrl);
+  if (!response.ok) throw new Error(`GET ${wasmUrl} answered ${response.status}`);
+  return WebAssembly.compile(await response.arrayBuffer());
+}
+
+const recovery = async (quick = false): Promise<RecoveryBenchResult> =>
+  measureRecovery(await compiledModule(), quick ? RECOVERY_QUICK : RECOVERY_FULL, () => performance.now());
 
 declare global {
   interface Window {
@@ -68,6 +81,7 @@ async function start(): Promise<void> {
       cold: coldStart,
       reloads: async (count) => summarizeColds(await repeat(count)),
       run: () => Promise.reject(new Error("this page was opened with ?cold=1")),
+      recovery,
     };
     status.textContent = "ready (cold only)";
     return;
@@ -85,6 +99,7 @@ async function start(): Promise<void> {
     info,
     cold: coldStart,
     reloads: async (count) => summarizeColds(await repeat(count)),
+    recovery,
     run: (quick = false) => {
       const config: BenchConfig = quick ? QUICK : FULL;
       status.textContent = "running";
