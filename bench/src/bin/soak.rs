@@ -23,9 +23,10 @@
 //! * the worst post-warm-up second's p99 is more than 3x the median second's p99 (a spike
 //!   gate: the seconds after the warm-up are compared with each other, so one bad second fails
 //!   it and a slow, steady climb does not);
-//! * an invariant broke: a change-set out of order, a lost completion, the host's copy of the
-//!   list different from the core's (field for field, one applied patch per operation), the
-//!   stream more than one item ahead of its credit at the end of the run;
+//! * an invariant broke: a change-set out of order, a lost completion, the completions' total not
+//!   arriving as an exact count (`0, 1, 2, ..`), the host's copy of the list different from the
+//!   core's (field for field, one applied patch per operation), the stream more than one item
+//!   ahead of its credit at the end of the run;
 //! * a second's achieved rate was under half its target (the host could not carry the load);
 //!   under 95% only warns.
 //!
@@ -314,7 +315,7 @@ fn run(args: &Args) -> Result<Outcome, String> {
     let main = MainThread::new(stats.clone())
         .mirror(ListMirror::new(churn, 0))
         .track(ticker)
-        .track(fetcher)
+        .track_sequence(fetcher)
         .spawn(host.clone(), main_stop.clone());
     let completers = spawn_completers(&rt, &host);
 
@@ -688,6 +689,13 @@ fn run(args: &Args) -> Result<Outcome, String> {
                 totals.issued
             ),
             total == totals.issued && tracked(fetcher.0) == Some(totals.issued),
+        ),
+        (
+            format!(
+                "the store's total arrived as an exact count, one more each change-set ({} steps were not +1)",
+                stats.sequence_breaks.load(Ordering::Relaxed)
+            ),
+            stats.sequence_breaks.load(Ordering::Relaxed) == 0,
         ),
         (
             format!(

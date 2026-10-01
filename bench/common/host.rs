@@ -632,6 +632,9 @@ pub struct MainStats {
     pub out_of_order: AtomicU64,
     /// Change-sets that did not validate.
     pub malformed: AtomicU64,
+    /// Values of a sequenced store (see [`MainThread::track_sequence`]) that were not exactly
+    /// one more than the value before: a lost, repeated or reordered write.
+    pub sequence_breaks: AtomicU64,
     /// Drains that found something.
     pub frames: AtomicU64,
     /// The most change-sets one drain found: how deep the queue got.
@@ -685,9 +688,14 @@ pub struct MainThread {
     order: OrderChecker,
     mirror: Option<ListMirror>,
     tracked: Vec<(u64, Option<u64>)>,
+    /// Stores whose tracked `u64` must step by exactly one from change-set to change-set.
+    sequenced: Vec<u64>,
     /// Fault injection: swap the first two change-sets of the first frame that has two, so the
     /// order check can be shown to fail.
     swap_first_pair: bool,
+    /// Fault injection: never look at the second change-set of the first frame that has two, so
+    /// the loss checks can be shown to fail.
+    drop_second: bool,
 }
 
 /// What a [`MainThread`] ends with.
@@ -704,7 +712,9 @@ impl MainThread {
             order: OrderChecker::default(),
             mirror: None,
             tracked: Vec::new(),
+            sequenced: Vec::new(),
             swap_first_pair: false,
+            drop_second: false,
         }
     }
 
@@ -720,9 +730,26 @@ impl MainThread {
         self
     }
 
+    /// Like [`track`](MainThread::track), and every value of the store after the first must be
+    /// exactly one more than the one before it, in the order the change-sets were delivered. A
+    /// store whose every write adds one (the fixture's `Fetcher`: a completion adds the reply's
+    /// 1, a `bump` adds 1) then arrives as the gapless sequence `0, 1, 2, ..`: nothing lost,
+    /// nothing repeated, nothing reordered, and the last value is the total.
+    pub fn track_sequence(mut self, handle: Handle) -> MainThread {
+        self.tracked.push((handle.0, None));
+        self.sequenced.push(handle.0);
+        self
+    }
+
     /// Swaps the first two change-sets of the first frame that has two (fault injection).
     pub fn swap_first_pair(mut self) -> MainThread {
         self.swap_first_pair = true;
+        self
+    }
+
+    /// Never walks the second change-set of the first frame that has two (fault injection).
+    pub fn drop_second_of_first_frame(mut self) -> MainThread {
+        self.drop_second = true;
         self
     }
 
@@ -737,6 +764,16 @@ impl MainThread {
             all.swap(0, 1);
             self.swap_first_pair = false;
             self.walk(all.into_iter(), frame.len());
+        } else if self.drop_second && frame.len() >= 2 {
+            // Fault injection: the second change-set is lost on its way to the main thread.
+            let kept: Vec<&[u8]> = frame
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != 1)
+                .map(|(_, c)| c)
+                .collect();
+            self.drop_second = false;
+            self.walk(kept.into_iter(), frame.len());
         } else {
             self.walk(frame.iter(), frame.len());
         }
@@ -771,6 +808,11 @@ impl MainThread {
                         .find(|(handle, _)| *handle == entry.handle.0)
                 });
                 if let (Some(value), Some(slot)) = (value, slot) {
+                    if self.sequenced.contains(&entry.handle.0)
+                        && slot.1.is_some_and(|before| value != before.wrapping_add(1))
+                    {
+                        stats.sequence_breaks.fetch_add(1, Ordering::Relaxed);
+                    }
                     slot.1 = Some(value);
                 }
             }

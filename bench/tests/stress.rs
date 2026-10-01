@@ -460,24 +460,105 @@ fn the_completions_scenario_stops_near_its_deadline() {
     }
 }
 
-#[test]
-fn swapped_change_sets_fail_the_order_invariant() {
-    let _serial = serial();
+/// The words of every invariant that broke when `scenario` ran with `fault`.
+fn broken_by(scenario: fn(&StressConfig) -> StressReport, fault: Fault) -> Vec<String> {
     let cfg = StressConfig {
         duration: Duration::from_millis(200),
         rss: false,
-        fault: Fault::SwapChangeSets,
+        fault,
     };
-    let report = common::stress::completions(&cfg);
-    let broken: Vec<_> = report.broken().iter().map(|i| i.what.clone()).collect();
+    scenario(&cfg)
+        .broken()
+        .iter()
+        .map(|i| i.what.clone())
+        .collect()
+}
+
+#[test]
+fn swapped_change_sets_fail_the_order_invariants() {
+    let _serial = serial();
+    for scenario in [
+        common::stress::completions,
+        common::stress::completions_contended,
+    ] {
+        let broken = broken_by(scenario, Fault::SwapChangeSets);
+        assert!(
+            broken
+                .iter()
+                .any(|what| what.contains("nothing arrived out of order")),
+            "a main thread that swaps two change-sets must fail the order invariant: {broken:?}"
+        );
+        assert!(
+            broken.iter().any(|what| what.contains("exact count")),
+            "...and the total must stop arriving as a count: {broken:?}"
+        );
+        // Only those: nothing was lost and every call was answered.
+        assert_eq!(broken.len(), 2, "{broken:?}");
+    }
+}
+
+#[test]
+fn a_change_set_lost_on_the_way_to_the_ui_fails_the_loss_invariants() {
+    let _serial = serial();
+    for scenario in [
+        common::stress::completions,
+        common::stress::completions_contended,
+    ] {
+        let broken = broken_by(scenario, Fault::DropChangeSet);
+        assert!(
+            broken
+                .iter()
+                .any(|what| what.contains("the main thread saw every change-set")),
+            "{broken:?}"
+        );
+        assert!(
+            broken.iter().any(|what| what.contains("exact count")),
+            "{broken:?}"
+        );
+        // The core delivered and answered everything: only the UI side lost one.
+        assert_eq!(broken.len(), 2, "{broken:?}");
+    }
+}
+
+#[test]
+fn the_contended_scenario_really_has_two_threads_writing_one_store() {
+    // The point of the scenario: besides the completions that commit on the core thread, a host
+    // thread's `call_sync` writes land in the same store, and every one of them is accounted for.
+    let _serial = serial();
+    let cfg = StressConfig {
+        duration: Duration::from_millis(300),
+        rss: false,
+        fault: Fault::None,
+    };
+    let report = common::stress::completions_contended(&cfg);
+    assert!(report.broken().is_empty(), "{:?}", report.broken());
+    let writer = report
+        .notes
+        .iter()
+        .find(|n| n.starts_with("writer thread:"))
+        .expect("the scenario reports its writer");
     assert!(
-        broken
-            .iter()
-            .any(|what| what.contains("nothing arrived out of order")),
-        "a main thread that swaps two change-sets must fail the order invariant: {broken:?}"
+        !writer.contains(": 0 call_sync"),
+        "the writer never ran: {writer}"
     );
-    // Only that: nothing was lost and every call was answered.
-    assert_eq!(broken.len(), 1, "{broken:?}");
+    let writes: u64 = report
+        .invariants
+        .iter()
+        .find_map(|i| {
+            i.what
+                .strip_prefix("every write from the host thread succeeded (")
+        })
+        .and_then(|rest| rest.split_whitespace().next()?.parse().ok())
+        .expect("the writes invariant says how many");
+    assert!(writes > 0);
+    // More store writes than completions alone: the writer's are in the count.
+    let replies: u64 = report
+        .invariants
+        .iter()
+        .find_map(|i| i.what.strip_prefix("every call was answered ("))
+        .and_then(|rest| rest.split_whitespace().next()?.parse().ok())
+        .expect("the answered invariant says how many");
+    assert_eq!(report.ops, replies + writes);
 }
 
 /// A change-set of one entry for store `handle`, transaction `txn_id`.
@@ -654,9 +735,16 @@ const SITE_ROWS: &[(&str, &str, &str, &str, &str)] = &[
     (
         "completions/8_threads",
         "stress/completions",
-        "Concurrent completions: 8 threads, nothing lost or reordered",
+        "Concurrent completions: 8 threads, nothing lost",
         "completions",
         "call to reply",
+    ),
+    (
+        "completions/contended",
+        "stress/completions_contended",
+        "Contended completions: a host thread writing the same store, nothing lost or reordered",
+        "writes",
+        "completion call to reply",
     ),
 ];
 
