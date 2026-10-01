@@ -8,14 +8,12 @@
 //! identical is copied as bytes.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 
 use undra_meta::{ClosureField, TypeClosure, TypeRef};
 use undra_wire::{MAX_DEPTH, Reader, WireError, Writer};
 
 use super::{
-    HookSource, MigrateError, MigrationHook, decode_from, len_u32, not_structural, put_int,
-    put_missing, run_hook, widens,
+    HookSource, MigrateError, SortedEntries, len_u32, not_structural, put_missing, widens,
 };
 
 pub(super) struct Streamer<'a> {
@@ -97,21 +95,15 @@ impl<'a> Streamer<'a> {
             }
             (TypeRef::Map(old_k, old_v), TypeRef::Map(new_k, new_v)) => {
                 let count = r.read_count(2)?;
-                let mut sorted: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
+                let mut sorted = SortedEntries::default();
                 for _ in 0..count {
                     let mut kw = Writer::new();
                     self.convert(r, &mut kw, old_k, new_k, depth + 1, true)?;
                     let mut vw = Writer::new();
                     self.convert(r, &mut vw, old_v, new_v, depth + 1, true)?;
-                    if sorted.insert(kw.into_vec(), vw.into_vec()).is_some() {
-                        return Err(not_structural("two map keys became the same key"));
-                    }
+                    sorted.insert(kw.into_vec(), vw.into_vec())?;
                 }
-                w.write_len(len_u32(sorted.len())?);
-                for (k, v) in sorted {
-                    w.write_raw(&k);
-                    w.write_raw(&v);
-                }
+                sorted.write(w)?;
             }
             (TypeRef::F32, TypeRef::F64) => w.write_f64(f64::from(r.read_f32()?)),
             (TypeRef::Named(old_name), TypeRef::Named(new_name)) => {
@@ -131,9 +123,6 @@ impl<'a> Streamer<'a> {
                         if !hook_here {
                             return Err(error);
                         }
-                        // The value as it was stored, from its start, for the hook.
-                        let mut again = r.at(start);
-                        let value = decode_from(&mut again, old_ty, self.old, depth)?;
                         let from = self
                             .old
                             .narrowed(&TypeRef::named(old_name.clone()))
@@ -141,10 +130,11 @@ impl<'a> Streamer<'a> {
                         let Some(hook) = self.hooks.type_hook(new_name, from) else {
                             return Err(error);
                         };
-                        let MigrationHook::Value(run) = hook.hook else {
-                            return Err(error);
-                        };
-                        w.write_raw(&run_hook(hook.name, || run(&value))?);
+                        // The value as it was stored, from its start, for the hook.
+                        let mut again = r.at(start);
+                        skip(&mut again, old_ty, self.old, depth)?;
+                        let old = (again.consumed_since(start), old_ty, self.old);
+                        w.write_raw(&(hook.support.offer)(hook, Some(old))?);
                         // Leave the reader after the value whatever the failed attempt read.
                         *r = again;
                     }
@@ -155,7 +145,7 @@ impl<'a> Streamer<'a> {
                 skip(r, a, self.old, depth)?;
                 w.write_raw(span(r, start));
             }
-            (a, b) if widens(a, b) => put_int(w, read_int(r, a)?, b)?,
+            (a, b) if widens(a, b) => write_widened(w, read_int(r, a)?, b),
             _ => return Err(refuse()),
         }
         Ok(())
@@ -209,19 +199,21 @@ impl<'a> Streamer<'a> {
                 .convert_fields(r, w, &old_variant.fields, &new_variant.fields, depth)
                 .map_err(|e| e.within(&old_variant.name));
         }
+        // Rare enough to say generically (the path names the place): a type one of the two
+        // closures lacks, or a record that became an enum or the other way round.
         if self.new.record(new_name).is_none() && self.new.enum_def(new_name).is_none() {
-            return Err(not_structural(format!(
-                "the current schema has no record or enum `{new_name}`"
-            )));
+            return Err(not_structural(
+                "the current schema has no such record or enum",
+            ));
         }
         if self.old.record(old_name).is_none() && self.old.enum_def(old_name).is_none() {
-            return Err(MigrateError::new(format!(
-                "the stored description has no record or enum `{old_name}`"
-            )));
+            return Err(MigrateError::new(
+                "the stored description has no such record or enum",
+            ));
         }
-        Err(not_structural(format!(
-            "`{old_name}` and `{new_name}` are not both records or both enums"
-        )))
+        Err(not_structural(
+            "a record became an enum, or an enum a record",
+        ))
     }
 
     /// The fields of a record or variant, by name: the old ones are located first, then each new
@@ -267,6 +259,22 @@ impl<'a> Streamer<'a> {
     }
 }
 
+/// Writes `i`, read as a narrower integer type, as `ty`: `widens` holds, so it always fits (the
+/// checked `put_int` of the tree form is for values a hook built).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // lossless: `widens` holds
+fn write_widened(w: &mut Writer, i: i128, ty: &TypeRef) {
+    match ty {
+        TypeRef::I8 => w.write_i8(i as i8),
+        TypeRef::I16 => w.write_i16(i as i16),
+        TypeRef::I32 => w.write_i32(i as i32),
+        TypeRef::I64 => w.write_i64(i as i64),
+        TypeRef::U8 => w.write_u8(i as u8),
+        TypeRef::U16 => w.write_u16(i as u16),
+        TypeRef::U32 => w.write_u32(i as u32),
+        _ => w.write_u64(i as u64),
+    }
+}
+
 /// The bytes read since `start`.
 fn span<'r>(r: &Reader<'r>, start: usize) -> &'r [u8] {
     r.consumed_since(start)
@@ -282,11 +290,12 @@ fn read_int(r: &mut Reader<'_>, ty: &TypeRef) -> Result<i128, MigrateError> {
         TypeRef::U16 => i128::from(r.read_u16()?),
         TypeRef::U32 => i128::from(r.read_u32()?),
         TypeRef::U64 => i128::from(r.read_u64()?),
-        other => return Err(not_structural(format!("{other} is not an integer"))),
+        _ => return Err(not_structural("not an integer")),
     })
 }
 
-/// Reads past one value of `ty` (validating it like the decoder), allocating nothing.
+/// Reads past one value of `ty` (its lengths, counts, tags and variants checked; the bytes of a
+/// string or a primitive are left to whoever decodes the copy), allocating nothing.
 pub(super) fn skip(
     r: &mut Reader<'_>,
     ty: &TypeRef,
@@ -296,11 +305,10 @@ pub(super) fn skip(
     if depth > MAX_DEPTH {
         return Err(WireError::NestingTooDeep { at: r.position() }.into());
     }
+    // Lengths only: whoever decodes the copied bytes (the store's restore, the query client)
+    // validates them, so a string's UTF-8 or a duration's sign is not checked twice.
     match ty {
-        TypeRef::Bool => {
-            r.read_bool()?;
-        }
-        TypeRef::I8 | TypeRef::U8 => {
+        TypeRef::Bool | TypeRef::I8 | TypeRef::U8 => {
             r.read_u8()?;
         }
         TypeRef::I16 | TypeRef::U16 => {
@@ -309,19 +317,10 @@ pub(super) fn skip(
         TypeRef::I32 | TypeRef::U32 | TypeRef::F32 => {
             r.read_u32()?;
         }
-        TypeRef::I64 | TypeRef::U64 | TypeRef::F64 | TypeRef::Timestamp => {
+        TypeRef::I64 | TypeRef::U64 | TypeRef::F64 | TypeRef::Timestamp | TypeRef::Duration => {
             r.read_u64()?;
         }
-        TypeRef::Duration => {
-            let at = r.position();
-            if r.read_i64()? < 0 {
-                return Err(WireError::NegativeDuration { at }.into());
-            }
-        }
-        TypeRef::String => {
-            r.read_str()?;
-        }
-        TypeRef::Bytes => {
+        TypeRef::String | TypeRef::Bytes => {
             r.read_bytes()?;
         }
         TypeRef::Uuid => {
@@ -381,9 +380,7 @@ pub(super) fn skip(
             }
         }
         TypeRef::Unit | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
-            return Err(MigrateError::new(format!(
-                "{ty} is not a persisted value type"
-            )));
+            return Err(MigrateError::new("not a persisted value type"));
         }
     }
     Ok(())

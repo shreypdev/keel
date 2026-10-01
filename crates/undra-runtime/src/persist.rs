@@ -27,7 +27,6 @@
 //! against the bytes that remain before anything is allocated.
 
 use core::fmt;
-use std::collections::BTreeMap;
 
 use undra_meta::{
     ClosureEnum, ClosureField, ClosureRecord, ClosureRoot, TypeClosure, TypeRef, TypeRefMeta,
@@ -570,8 +569,44 @@ fn not_structural(message: impl Into<String>) -> MigrateError {
     MigrateError::new(message)
 }
 
+/// Encoded map entries in the order of their encoded keys (SPEC 3.1), each key once: a sorted
+/// list (entries usually arrive in order, so an insert is a push), not a map.
+#[derive(Default)]
+pub(crate) struct SortedEntries(Vec<(Vec<u8>, Vec<u8>)>);
+
+impl SortedEntries {
+    pub(crate) fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<(), MigrateError> {
+        match self.0.binary_search_by(|(k, _)| k.as_slice().cmp(&key)) {
+            Ok(_) => Err(not_structural("two map keys became the same key")),
+            Err(at) => {
+                self.0.insert(at, (key, value));
+                Ok(())
+            }
+        }
+    }
+
+    pub(crate) fn write(self, w: &mut Writer) -> Result<(), MigrateError> {
+        w.write_len(len_u32(self.0.len())?);
+        for (k, v) in self.0 {
+            w.write_raw(&k);
+            w.write_raw(&v);
+        }
+        Ok(())
+    }
+}
+
+/// An integer's text, through the 64-bit formatters (every integer here came from a 64-bit or
+/// narrower wire value; `i128`'s own formatter is a kilobyte of wasm).
+fn int_text(i: i128) -> String {
+    match (i64::try_from(i), u64::try_from(i)) {
+        (Ok(v), _) => v.to_string(),
+        (_, Ok(v)) => v.to_string(),
+        _ => "an integer wider than 64 bits".to_owned(),
+    }
+}
+
 fn put_int(w: &mut Writer, i: i128, ty: &TypeRef) -> Result<(), MigrateError> {
-    let out_of_range = || not_structural(format!("{i} does not fit {ty}"));
+    let out_of_range = || not_structural(format!("{} does not fit {ty}", int_text(i)));
     match ty {
         TypeRef::I8 => w.write_i8(i8::try_from(i).map_err(|_| out_of_range())?),
         TypeRef::I16 => w.write_i16(i16::try_from(i).map_err(|_| out_of_range())?),
@@ -651,21 +686,15 @@ fn put_value(
         }
         (TypeRef::Map(key, val), DynValue::Map(entries)) => {
             // Keys in the order of their encoded bytes (SPEC 3.1), each once.
-            let mut sorted: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
+            let mut sorted = SortedEntries::default();
             for (k, v) in entries {
                 let mut kw = Writer::new();
                 put_value(&mut kw, k, key, closure, depth + 1)?;
                 let mut vw = Writer::new();
                 put_value(&mut vw, v, val, closure, depth + 1)?;
-                if sorted.insert(kw.into_vec(), vw.into_vec()).is_some() {
-                    return Err(not_structural("two map keys became the same key"));
-                }
+                sorted.insert(kw.into_vec(), vw.into_vec())?;
             }
-            w.write_len(len_u32(sorted.len())?);
-            for (k, v) in sorted {
-                w.write_raw(&k);
-                w.write_raw(&v);
-            }
+            sorted.write(w)?;
         }
         (TypeRef::Named(name), _) => {
             if let Some(record) = closure.record(name) {
@@ -742,7 +771,7 @@ fn put_missing(w: &mut Writer, field: &ClosureField) -> Result<(), MigrateError>
         return Ok(());
     }
     Err(not_structural(
-        "the stored value has no such field and the field has no default (an `Option`, or `#[undra(default)]` with a zero value)",
+        "the stored value has no such field, and it has no default",
     ))
 }
 
@@ -987,21 +1016,15 @@ impl Converter<'_> {
                 let DynValue::Map(entries) = value else {
                     return Err(refuse());
                 };
-                let mut sorted: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
+                let mut sorted = SortedEntries::default();
                 for (k, v) in entries {
                     let mut kw = Writer::new();
                     self.convert(&mut kw, k, old_k, new_k, depth + 1, true)?;
                     let mut vw = Writer::new();
                     self.convert(&mut vw, v, old_v, new_v, depth + 1, true)?;
-                    if sorted.insert(kw.into_vec(), vw.into_vec()).is_some() {
-                        return Err(not_structural("two map keys became the same key"));
-                    }
+                    sorted.insert(kw.into_vec(), vw.into_vec())?;
                 }
-                w.write_len(len_u32(sorted.len())?);
-                for (k, v) in sorted {
-                    w.write_raw(&k);
-                    w.write_raw(&v);
-                }
+                sorted.write(w)?;
             }
             (TypeRef::F32, TypeRef::F64) => {
                 let DynValue::Float32(f) = value else {
@@ -1237,9 +1260,52 @@ pub struct Migration {
     pub returns: Option<TypeRefMeta>,
     /// The function.
     pub hook: MigrationHook,
+    /// What the runtime needs to offer a hook a value and to check it at start-up:
+    /// [`HOOK_SUPPORT`], named by the macro.
+    pub support: HookSupport,
 }
 
 inventory::collect!(Migration);
+
+/// The code a hook needs from this module, reached through the [`Migration`] the macro submits
+/// rather than named by the runtime, so a core without `#[undra::migrate]` hooks does not link
+/// it (the value decoder, the hook runner and the start-up check; ADR-052).
+#[derive(Clone, Copy)]
+pub struct HookSupport {
+    /// Offers a `ty` or signal hook the old value (its bytes, type and closure, decoded with
+    /// [`decode_dyn`]; `None` for a signal the snapshot lacks) and returns the hook's bytes.
+    pub offer: OfferFn,
+    /// The start-up E0066 check of one hook against the schema ([`check_migrations`]).
+    pub check: fn(&undra_meta::Schema, &Migration) -> Option<String>,
+}
+
+/// [`HookSupport::offer`].
+pub type OfferFn =
+    fn(&Migration, Option<(&[u8], &TypeRef, &TypeClosure)>) -> Result<Vec<u8>, MigrateError>;
+
+/// Decodes the old value and runs the hook ([`HookSupport::offer`]).
+fn offer(
+    hook: &Migration,
+    old: Option<(&[u8], &TypeRef, &TypeClosure)>,
+) -> Result<Vec<u8>, MigrateError> {
+    let value = match old {
+        Some((bytes, ty, closure)) => Some(decode_dyn(bytes, ty, closure)?),
+        None => None,
+    };
+    run_value_hook(hook, value.as_ref())
+}
+
+impl fmt::Debug for HookSupport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("HookSupport")
+    }
+}
+
+/// The [`HookSupport`] every `#[undra::migrate]` hook carries.
+pub const HOOK_SUPPORT: HookSupport = HookSupport {
+    offer,
+    check: check_one,
+};
 
 /// Every registered hook.
 pub fn migrations() -> impl Iterator<Item = &'static Migration> {
@@ -1316,7 +1382,7 @@ pub fn run_mutation_hook(hook: &Migration, old: &DynRecord) -> Result<DynRecord,
 pub fn check_migrations(schema: &undra_meta::Schema) -> Vec<String> {
     let mut problems = Vec::new();
     for hook in migrations() {
-        if let Some(problem) = check_one(schema, hook) {
+        if let Some(problem) = (hook.support.check)(schema, hook) {
             problems.push(problem);
         }
     }

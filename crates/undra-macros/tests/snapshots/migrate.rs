@@ -18,7 +18,8 @@ const _: () = {
         ::undra::runtime::persist::MigrationTarget::Type("Todo"), from :
         ::core::option::Option::Some(255u64), returns :
         ::core::option::Option::Some(::undra::meta::TypeRefMeta::Named("Todo")), hook :
-        ::undra::runtime::persist::MigrationHook::Value(__undra_migrate_todo_v1), }
+        ::undra::runtime::persist::MigrationHook::Value(__undra_migrate_todo_v1), support
+        : ::undra::runtime::persist::HOOK_SUPPORT, }
     }
 };
 #[doc(hidden)]
@@ -62,7 +63,8 @@ const _: () = {
         ::undra::runtime::persist::MigrationTarget::Signal { store : "Profile", signal :
         "age" }, from : ::core::option::Option::None, returns :
         ::core::option::Option::Some(::undra::meta::TypeRefMeta::F32), hook :
-        ::undra::runtime::persist::MigrationHook::Signal(__undra_migrate_age), }
+        ::undra::runtime::persist::MigrationHook::Signal(__undra_migrate_age), support :
+        ::undra::runtime::persist::HOOK_SUPPORT, }
     }
 };
 fn add_todo(old: &DynRecord) -> Result<DynRecord, MigrateError> {
@@ -76,6 +78,7 @@ const _: () = {
         ::core::concat!(::core::module_path!(), "::", "add_todo"), target :
         ::undra::runtime::persist::MigrationTarget::Mutation("add_todo"), from :
         ::core::option::Option::None, returns : ::core::option::Option::None, hook :
-        ::undra::runtime::persist::MigrationHook::Mutation(add_todo), }
+        ::undra::runtime::persist::MigrationHook::Mutation(add_todo), support :
+        ::undra::runtime::persist::HOOK_SUPPORT, }
     }
 };

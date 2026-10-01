@@ -730,6 +730,7 @@ static RENAME_HOOK: Migration = Migration {
     from: None,
     returns: None,
     hook: MigrationHook::Value(title_from_name),
+    support: HOOK_SUPPORT,
 };
 
 fn panicking(_: &DynValue) -> Result<Vec<u8>, MigrateError> {
@@ -742,6 +743,7 @@ static PANICKING_HOOK: Migration = Migration {
     from: None,
     returns: None,
     hook: MigrationHook::Value(panicking),
+    support: HOOK_SUPPORT,
 };
 
 /// The old `Todo` had `name` where the new one has `title`.
@@ -784,6 +786,7 @@ fn a_hook_restricted_to_another_fingerprint_does_not_run() {
         from: Some(42),
         returns: None,
         hook: MigrationHook::Value(title_from_name),
+        support: HOOK_SUPPORT,
     };
     let old = renamed_schema();
     let new = base_schema();
@@ -870,6 +873,7 @@ fn run_value_hook_and_mutation_hook() {
         from: None,
         returns: None,
         hook: MigrationHook::Signal(as_signal),
+        support: HOOK_SUPPORT,
     };
     assert_eq!(
         run_value_hook(&signal, None).unwrap(),
@@ -885,6 +889,7 @@ fn run_value_hook_and_mutation_hook() {
         from: None,
         returns: None,
         hook: MigrationHook::Mutation(add_due),
+        support: HOOK_SUPPORT,
     };
     let out = run_mutation_hook(
         &mutation,

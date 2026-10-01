@@ -19,8 +19,8 @@ use undra_meta::{
 };
 use undra_signals::ChangeSink;
 use undra_wire::payload::{
-    Call, CallTarget, PortReply, PortStatus, Reply, ReplyStatus, Snapshot, SnapshotType,
-    StoreSnapshot, StreamFailure, StreamFlag, StreamItem,
+    Call, CallTarget, PortReply, PortStatus, Reply, ReplyStatus, Snapshot, StoreSnapshot,
+    StreamFailure, StreamFlag, StreamItem,
 };
 use undra_wire::{Handle, Reader, Writer};
 
@@ -42,7 +42,7 @@ use crate::lazy::LazyList;
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
 use crate::object::{AnyObject, StoreObject, StoreRestorer, UndraObject, erased, store};
 use crate::object_table::{BadHandle, GENERATION_CEILING, ObjectTable};
-use crate::persist::{self, DynValue, RegisteredHooks};
+use crate::persist::{self, RegisteredHooks};
 use crate::ports::{
     Completion, Events, PortBinding, PortDispatch, PortDispatcher, PortError, PortFuture,
     PortTable, decode_dispatch_reply, decode_port_reply,
@@ -410,8 +410,8 @@ pub struct Runtime {
     table: DispatchTable,
     restorers: HashMap<u32, &'static StoreRestorer>,
     /// The fingerprint of a store type's signals (ADR-037), computed when a snapshot or a restore
-    /// first needs it (only for the types it holds).
-    store_fingerprints: Mutex<HashMap<u32, u64>>,
+    /// first needs it (only for the types it holds; a few, so a list, not a map).
+    store_fingerprints: Mutex<Vec<(u32, u64)>>,
     /// The last snapshot description: for which store types, and its bytes (a snapshot of the
     /// same set of types reuses it).
     description: Mutex<Option<(Vec<u32>, Arc<str>)>>,
@@ -483,25 +483,29 @@ struct Migration<'a> {
     description: Option<Result<StoresClosure, String>>,
     /// Per store type: the snapshot's closure (checked against its fingerprint) and today's, or
     /// why there are none. Many stores share a type; this is worked out once.
-    closures: HashMap<u32, Result<Arc<(TypeClosure, TypeClosure)>, String>>,
+    closures: Vec<(u32, OldAndNew)>,
 }
+
+/// A store type's closure in the snapshot and today's, or why there are none.
+type OldAndNew = Result<Arc<(TypeClosure, TypeClosure)>, String>;
 
 impl<'a> Migration<'a> {
     fn new(snapshot: &'a Snapshot) -> Migration<'a> {
         Migration {
             snapshot,
             description: None,
-            closures: HashMap::new(),
+            closures: Vec::new(),
         }
     }
 
     /// The old and the new closure of `type_id`'s signals.
+    #[inline(never)]
     fn closures(
         &mut self,
         rt: &Runtime,
         type_id: u32,
     ) -> Result<Arc<(TypeClosure, TypeClosure)>, String> {
-        if let Some(found) = self.closures.get(&type_id) {
+        if let Some((_, found)) = self.closures.iter().find(|(id, _)| *id == type_id) {
             return found.clone();
         }
         let recorded = self.snapshot.fingerprint(type_id).unwrap_or(0);
@@ -522,7 +526,7 @@ impl<'a> Migration<'a> {
                 .ok_or_else(|| "this build has no such store".to_owned())?;
             Ok(Arc::new((old, new)))
         })();
-        self.closures.insert(type_id, found.clone());
+        self.closures.push((type_id, found.clone()));
         found
     }
 
@@ -541,6 +545,7 @@ impl<'a> Migration<'a> {
     /// The body `StoreObject::restore` expects (`signal_count u32, signals x { signal_id u32, len
     /// u32, value }`, today's ids), built by name from a record whose store type's fingerprint
     /// differs from today's.
+    #[inline(never)]
     fn store_body(
         &mut self,
         rt: &Runtime,
@@ -609,6 +614,7 @@ impl<'a> Migration<'a> {
 
 /// One signal the snapshot has, converted to today's type: structurally (with `ty` hooks inside),
 /// else the store-and-signal hook, else the hook of its type (decision 5).
+#[inline(never)]
 fn convert_signal(
     store: &str,
     fingerprint: u64,
@@ -630,24 +636,18 @@ fn convert_signal(
         Ok(bytes) => return Ok(Some(bytes)),
         Err(error) => error,
     };
-    // Not structural: the hooks get the old value, decoded.
-    let value: DynValue =
-        persist::decode_dyn(bytes, &old_signal.ty, old).map_err(|e| e.to_string())?;
-    if let Some(hook) = persist::signal_hook(store, &signal.name, fingerprint) {
-        return persist::run_value_hook(hook, Some(&value))
-            .map(Some)
-            .map_err(|e| e.to_string());
-    }
-    let from = old.narrowed(&old_signal.ty).fingerprint();
-    if let Some(hook) = persist::root_type_hook(&signal.ty, from) {
-        return persist::run_value_hook(hook, Some(&value))
-            .map(Some)
-            .map_err(|e| e.to_string());
-    }
-    Err(format!(
-        "{} cannot become {}: {error}",
-        old_signal.ty, signal.ty
-    ))
+    // Not structural: the store-and-signal hook, else the type's, gets the old value, decoded
+    // (by the hook's own `support`: a core without hooks does not link the decoder).
+    let hook = persist::signal_hook(store, &signal.name, fingerprint).or_else(|| {
+        let from = old.narrowed(&old_signal.ty).fingerprint();
+        persist::root_type_hook(&signal.ty, from)
+    });
+    let Some(hook) = hook else {
+        return Err(error.to_string());
+    };
+    (hook.support.offer)(hook, Some((bytes, &old_signal.ty, old)))
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 /// A signal the snapshot lacks: its `#[undra(default)]` (left out of the body, the generated
@@ -661,7 +661,7 @@ fn missing_signal(
         return Ok(None);
     }
     if let Some(hook) = persist::signal_hook(store, &signal.name, fingerprint) {
-        return persist::run_value_hook(hook, None)
+        return (hook.support.offer)(hook, None)
             .map(Some)
             .map_err(|e| e.to_string());
     }
@@ -771,7 +771,7 @@ impl Runtime {
             events: Events::default(),
             table,
             restorers,
-            store_fingerprints: Mutex::new(HashMap::new()),
+            store_fingerprints: Mutex::new(Vec::new()),
             description: Mutex::new(None),
             stats_sections: Mutex::new(Vec::new()),
             port_dispatchers,
@@ -2408,11 +2408,16 @@ impl Runtime {
     /// The fingerprint of the store type `type_id`'s plain signals (ADR-037); `0` for a type the
     /// schema does not describe as a store (a hand-written restorer), as `snapshot` writes it.
     fn store_fingerprint(&self, type_id: u32) -> u64 {
-        if let Some(found) = self.store_fingerprints.lock().get(&type_id) {
-            return *found;
+        if let Some(&(_, found)) = self
+            .store_fingerprints
+            .lock()
+            .iter()
+            .find(|(id, _)| *id == type_id)
+        {
+            return found;
         }
         let fingerprint = self.schema.store_fingerprint(type_id).unwrap_or(0);
-        self.store_fingerprints.lock().insert(type_id, fingerprint);
+        self.store_fingerprints.lock().push((type_id, fingerprint));
         fingerprint
     }
 
@@ -2490,26 +2495,22 @@ impl Runtime {
                 ),
             }
         }
-        let types: Vec<SnapshotType> = type_ids
-            .iter()
-            .map(|&type_id| SnapshotType {
-                type_id,
-                fingerprint: self.store_fingerprint(type_id),
-            })
-            .collect();
         let description = self.snapshot_description(&type_ids);
         let mut out = Writer::with_capacity(
-            32 + types.len() * 12 + description.len() + chunks.iter().map(Vec::len).sum::<usize>(),
+            32 + type_ids.len() * 12
+                + description.len()
+                + chunks.iter().map(Vec::len).sum::<usize>(),
         );
         out.write_len(u32::try_from(chunks.len()).unwrap_or(u32::MAX));
         // Read after the stores were listed: the counter only grows, so the floor is at least
         // every generation in the snapshot (and every one issued before it was taken).
         out.write_u32(self.objects.generation_floor());
         out.write_u64(self.schema_hash);
-        out.write_len(u32::try_from(types.len()).unwrap_or(u32::MAX));
-        for t in &types {
-            out.write_u32(t.type_id);
-            out.write_u64(t.fingerprint);
+        // The type table (`SnapshotType`s): each store type once, with its fingerprint.
+        out.write_len(u32::try_from(type_ids.len()).unwrap_or(u32::MAX));
+        for &type_id in &type_ids {
+            out.write_u32(type_id);
+            out.write_u64(self.store_fingerprint(type_id));
         }
         out.write_str(&description);
         for chunk in &chunks {
@@ -2691,7 +2692,7 @@ impl Runtime {
                 WARN,
                 "undra::persist",
                 &format!(
-                    "restore: left out {} store(s) of type `{}`, which this build no longer has; their handles are stale",
+                    "restore: left out {} store(s) of `{}`, a type this build does not have",
                     dropped.handles.len(),
                     dropped.name
                 ),
@@ -2755,7 +2756,7 @@ impl Runtime {
                             WARN,
                             "undra::runtime",
                             &format!(
-                                "restore: handle {handle:?} was observed as another store type than the `{}` restored there; its observation is dropped",
+                                "restore: {handle:?} was observed as another store type than `{}`; not re-observed",
                                 object.undra_type_name()
                             ),
                         );

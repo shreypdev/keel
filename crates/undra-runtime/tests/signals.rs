@@ -658,7 +658,7 @@ fn a_store_type_this_build_no_longer_has_is_left_out_and_reported() {
         t.host()
             .take_logs()
             .iter()
-            .any(|l| l.message.contains("left out 1 store(s) of type `Removed`")),
+            .any(|l| l.message.contains("left out 1 store(s) of `Removed`")),
         "reported"
     );
 }

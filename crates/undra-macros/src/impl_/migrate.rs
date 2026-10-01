@@ -396,6 +396,7 @@ pub(crate) fn expand(attr: TokenStream, item: syn::ItemFn) -> syn::Result<TokenS
                     from: #from,
                     returns: #returns,
                     hook: #hook_tokens,
+                    support: #runtime::persist::HOOK_SUPPORT,
                 }
             }
         };
