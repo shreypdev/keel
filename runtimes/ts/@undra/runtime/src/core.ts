@@ -691,7 +691,7 @@ export class UndraCore {
    * asynchronous port registered after load is announced to the worker.
    */
   registerPort(portId: number, impl: PortImpl): void {
-    if (impl.sync && this.#transport.answersSyncPorts === false) throw new UndraError("options", syncPortRefusal(portId));
+    if (impl.sync && this.#transport.answersSyncPorts === false) throw new UndraError("options", syncPortRefusal(portId, impl));
     this.#ports.set(portId, impl);
     if (!this.#closed && this.#started) this.#transport.portsChanged?.(this.#asyncPortIds());
   }
@@ -858,7 +858,7 @@ export class UndraCore {
    */
   #checkWorkerPorts(): void {
     for (const [portId, impl] of this.#ports) {
-      if (impl.sync) throw new UndraError("options", syncPortRefusal(portId));
+      if (impl.sync) throw new UndraError("options", syncPortRefusal(portId, impl));
     }
     const given = (["clock", "rng", "timer"] as const).filter((name) => this.#options.adapters?.[name] != null);
     if (given.length > 0) {
@@ -1421,12 +1421,13 @@ export class UndraCore {
   #onPortCall(call: PortCallPayload): PortOutcome {
     // A reply that settles after a restart belongs to a call of the instance that trapped: never deliver it to the new one.
     const epoch = this.#epoch;
-    return dispatchPortCall(this.#ports.get(call.portId), call, {
+    const impl = this.#ports.get(call.portId);
+    return dispatchPortCall(impl, call, {
       later: (reply) => {
         if (epoch === this.#epoch) this.#sendPortReply(reply);
       },
       untyped: (failed, error) => {
-        this.#reportError(portOperation(failed), error);
+        this.#reportError(portOperation(failed, impl), error);
       },
     });
   }

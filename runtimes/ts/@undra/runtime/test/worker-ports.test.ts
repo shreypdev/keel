@@ -449,6 +449,14 @@ describe("over a real channel, with UndraCore on the main thread", () => {
     worker.close();
   });
 
+  it("the refusal uses the port's name when its adapter carries one (generated adapters do)", async () => {
+    const w = await overChannel({}, {});
+    expect(() => w.core.registerPort(STUB.PORT_ID, { name: "Locale", sync: true, methods: {} })).toThrow(
+      "the Locale port (0xc0dec0de) is synchronous",
+    );
+    w.close();
+  });
+
   it("registerPort of a sync port after load throws, naming it; an async one is announced to the worker and crosses", async () => {
     const w = await overChannel({}, {});
     expect(() => w.core.registerPort(STUB.PORT_ID, { sync: true, methods: { [STUB.PORT_METHOD]: (args) => args } })).toThrow(/worker\.ports/);

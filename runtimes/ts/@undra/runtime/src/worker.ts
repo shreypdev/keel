@@ -225,7 +225,7 @@ export function runWorker(scope: WorkerScope): () => void {
             }
           },
           untyped: (failed, error) => {
-            handler.log(4, "undra::worker", `${portOperation(failed)} failed: ${errorMessage(error)}`);
+            handler.log(4, "undra::worker", `${portOperation(failed, local)} failed: ${errorMessage(error)}`);
           },
         });
       }

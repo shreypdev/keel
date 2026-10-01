@@ -16,6 +16,7 @@ export interface Locale extends UndraPort {
 /** Adapts an implementation of `Locale` to `UndraCore.registerPort(UndraIds.Ports.Locale.portId, ..)`. */
 export function localePortImpl(impl: Locale): PortImpl {
   return {
+    name: "Locale",
     sync: true,
     methods: {
       [UndraIds.Ports.Locale.hello]: () => {

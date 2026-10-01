@@ -21,6 +21,12 @@
  * that id is implemented there.
  */
 export interface PortImpl {
+  /**
+   * The port's name (`"Locale"`), for what the runtime says about it: the refusal of a synchronous port in
+   * `wasm-worker` mode, a failure of the implementation. Generated adapters set it; without it the runtime names
+   * the port by its id.
+   */
+  readonly name?: string;
   /** Whether every method answers synchronously. */
   readonly sync: boolean;
   /** Implementations by method id. */

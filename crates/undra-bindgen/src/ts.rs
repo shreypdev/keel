@@ -2048,6 +2048,8 @@ impl<'a> Ctx<'a> {
             |w| {
                 w.line("return {");
                 w.indented(|w| {
+                    // The port's name: what the runtime says when it refuses or reports the port (ADR-049).
+                    w.line(format!("name: \"{}\",", p.name));
                     w.line(format!("sync: {sync},"));
                     w.line("methods: {");
                     w.indented(|w| {

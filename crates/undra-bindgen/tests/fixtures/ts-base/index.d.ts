@@ -41,6 +41,8 @@ export type CallTargetRef =
   | { readonly target: CallTarget.ObjectMethod; readonly handle: Handle };
 
 export interface PortImpl {
+  /** Addition (ADR-049): the port's name, for the runtime's messages. */
+  readonly name?: string;
   readonly sync: boolean;
   readonly methods: Readonly<Record<number, (args: Uint8Array) => Uint8Array | Promise<Uint8Array>>>;
 }

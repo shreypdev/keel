@@ -24,6 +24,7 @@ export interface Uploader extends UndraPort {
 /** Adapts an implementation of `Uploader` to `UndraCore.registerPort(UndraIds.Ports.Uploader.portId, ..)`. */
 export function uploaderPortImpl(impl: Uploader): PortImpl {
   return {
+    name: "Uploader",
     sync: false,
     methods: {
       [UndraIds.Ports.Uploader.upload]: async (args) => {
