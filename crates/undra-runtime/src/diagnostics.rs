@@ -18,7 +18,9 @@ use std::sync::OnceLock;
 use undra_meta::ids;
 use undra_wire::Writer;
 
-use crate::guard::{Frame, PanicReport};
+#[cfg(not(target_family = "wasm"))]
+use crate::guard::Frame;
+use crate::guard::PanicReport;
 
 /// The port id of the standard `Diagnostics` port (`fnv1a32("port.Diagnostics")`).
 pub const DIAGNOSTICS_PORT: u32 = ids::port_id("Diagnostics");
@@ -58,6 +60,7 @@ pub fn install_frame_source(source: &'static dyn FrameSource) {
 }
 
 /// The addresses of the calling thread's stack (empty without a [`FrameSource`]).
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn capture_addresses(max: usize) -> Vec<u64> {
     SOURCE
         .get()
@@ -88,6 +91,7 @@ pub(crate) fn identity() -> CoreIdentity {
 }
 
 /// Whether `symbol` belongs to the machinery between a panic and the hook that reports it.
+#[cfg(not(target_family = "wasm"))]
 fn is_machinery(symbol: &str) -> bool {
     [
         "std::panicking::",
@@ -104,6 +108,7 @@ fn is_machinery(symbol: &str) -> bool {
 /// Adds the addresses to the frames named from the backtrace text (a debug build), aligned from
 /// the outermost frame (both stacks were taken inside the hook and share their bottom), and drops
 /// the panic machinery from the top.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn name_frames(mut parsed: Vec<Frame>, addresses: &[u64], max: usize) -> Vec<Frame> {
     let (n, m) = (parsed.len(), addresses.len());
     for i in 0..n.min(m) {

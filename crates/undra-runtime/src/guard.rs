@@ -26,6 +26,7 @@ use std::panic::{self, AssertUnwindSafe, PanicHookInfo};
 use std::sync::Once;
 
 /// The most frames a report carries.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) const MAX_FRAMES: usize = 48;
 
 /// One frame of a caught panic: what `PanicFrame` of `undra-ports` encodes.
@@ -132,6 +133,7 @@ fn capture_frames(_text: &str) -> Vec<Frame> {
 
 /// Reads the frames out of the text of a `std::backtrace::Backtrace`: a line `N: symbol`, then
 /// optionally `at file:line:col`.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn parse_backtrace(text: &str) -> Vec<Frame> {
     let mut frames: Vec<Frame> = Vec::new();
     for line in text.lines() {
@@ -161,6 +163,7 @@ pub(crate) fn parse_backtrace(text: &str) -> Vec<Frame> {
 }
 
 /// `file:line:col` into the file and the line.
+#[cfg(not(target_family = "wasm"))]
 fn split_location(at: &str) -> (&str, Option<u32>) {
     let mut parts = at.rsplitn(3, ':');
     let last = parts.next().and_then(|p| p.parse::<u32>().ok());

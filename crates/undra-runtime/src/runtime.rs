@@ -1224,6 +1224,11 @@ impl Runtime {
     /// log record. A report that itself panics, or one made while a report is being delivered,
     /// is dropped: there is nowhere left to say so but the log, which already has it.
     fn emit_report(&self, operation: &str, report: &PanicReport) {
+        // A wasm core aborts on a panic: there is nothing to report from here (the host builds the
+        // report from the FATAL record, ADR-046 decision 4.4), and nothing of this is linked.
+        if cfg!(target_family = "wasm") {
+            return;
+        }
         thread_local! {
             static REPORTING: Cell<bool> = const { Cell::new(false) };
         }
@@ -2639,6 +2644,12 @@ impl Runtime {
             PortStatus::Error => Err(PortError::Failed(reply.body.to_vec())),
             PortStatus::Unavailable => Err(PortError::Unavailable),
         };
+        // The answer to a fire-and-forget call (a log record, a panic report) is of no interest to
+        // anyone, and acting on it would log "no port call 0 is pending": one more record (SPEC 6,
+        // host contract 6). A remote client answers these like any port call.
+        if reply.port_call_id == FIRE_AND_FORGET {
+            return;
+        }
         Stats::inc(&self.stats.port_replies);
         let id = reply.port_call_id;
         match self.finish_port_call(id, result) {
