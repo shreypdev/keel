@@ -9,67 +9,26 @@ on:
 jobs:
   diag:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        vm: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Versions
+      - name: Hardware
         run: |
-          sw_vers
-          node --version
-          swift --version
+          sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize || true
           uname -a
-      - name: When is the session let go? Four variants in one VM
-        continue-on-error: true
+      - name: The echo test with each variant of the adapter's close
+        working-directory: runtimes/swift/UndraRuntime
         run: |
-          node contract-tests/servers/realtime-server.mjs --port 0 > "$RUNNER_TEMP/s.out" 2>&1 &
-          sleep 2
-          PORT="$(grep READY "$RUNNER_TEMP/s.out" | cut -d' ' -f2)"
-          cat > "$RUNNER_TEMP/main.swift" <<'SWIFT'
-          import Foundation
-
-          final class Delegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
-              var opened: CheckedContinuation<Void, Never>?
-              func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol p: String?) { opened?.resume(); opened = nil }
-          }
-
-          func record(_ port: String) async -> String {
-              var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/stats")!)
-              req.cachePolicy = .reloadIgnoringLocalCacheData
-              guard let (d, _) = try? await URLSession.shared.data(for: req),
-                    let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-                    let cs = j["connections"] as? [[String: Any]],
-                    let last = cs.last(where: { ($0["path"] as? String) == "/ws/echo" }) else { return "?" }
-              return last["closeCode"] is NSNull ? "NO-FRAME" : "frame \(last["closeCode"]!)"
-          }
-
-          func trial(_ port: String, invalidate: String) async -> String {
-              let d = Delegate()
-              let session = URLSession(configuration: .default, delegate: d, delegateQueue: OperationQueue())
-              let task = session.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)/ws/echo")!)
-              task.maximumMessageSize = 16 * 1024 * 1024
-              await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in d.opened = c; task.resume() }
-              task.cancel(with: .normalClosure, reason: Data("done".utf8))
-              switch invalidate {
-              case "at once": session.finishTasksAndInvalidate()
-              case "after 500ms": try? await Task.sleep(nanoseconds: 500_000_000); session.finishTasksAndInvalidate()
-              case "after 500ms (cancel)": try? await Task.sleep(nanoseconds: 500_000_000); session.invalidateAndCancel()
-              default: break   // never in the trial
-              }
-              try? await Task.sleep(nanoseconds: 700_000_000)
-              let r = await record(port)
-              if invalidate == "never" { session.finishTasksAndInvalidate() }
-              return r
-          }
-
-          let port = CommandLine.arguments[1]
-          for variant in ["at once", "after 500ms", "after 500ms (cancel)", "never"] {
-              var out: [String] = []
-              for _ in 0..<4 { out.append(await trial(port, invalidate: variant)) }
-              print("session let go \(variant): " + out.joined(separator: " | "))
-          }
-          SWIFT
-          swiftc -swift-version 5 -o "$RUNNER_TEMP/diag" "$RUNNER_TEMP/main.swift"
-          "$RUNNER_TEMP/diag" "$PORT"
+          swift build --build-tests 2>&1 | tail -1
+          for v in base delayinv predelay ping pingdelayinv; do
+            for t in testEchoTextAndBinaryAndAClientClose testAConnectionTheCoreLetsGoIsClosedGoingAway; do
+              if UNDRA_WS_VARIANT=$v swift test --skip-build --filter URLSessionWebSocketAdapterTests/$t > "$RUNNER_TEMP/out.txt" 2>&1; then echo "VARIANT $v $t: PASS"; else echo "VARIANT $v $t: FAIL"; fi
+            done
+          done

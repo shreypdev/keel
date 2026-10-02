@@ -175,9 +175,27 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
             return
         }
         let closeCode = URLSessionWebSocketTask.CloseCode(rawValue: Int(code)) ?? .normalClosure
-        wsdbg("cancel(with: \(closeCode.rawValue)) now; task.state=\(task.state.rawValue)")
+        let variant = ProcessInfo.processInfo.environment["UNDRA_WS_VARIANT"] ?? "base"
+        if variant.contains("predelay") {
+            try? await Task.sleep(nanoseconds: 30_000_000)
+        }
+        if variant.contains("ping") {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let once = Guarded(false)
+                task.sendPing { _ in
+                    if once.withLock({ (done: inout Bool) -> Bool in let was = done; done = true; return was }) == false { continuation.resume() }
+                }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+                    if once.withLock({ (done: inout Bool) -> Bool in let was = done; done = true; return was }) == false { continuation.resume() }
+                }
+            }
+        }
+        wsdbg("cancel(with: \(closeCode.rawValue)) now; task.state=\(task.state.rawValue) variant=\(variant)")
         task.cancel(with: closeCode, reason: reason.isEmpty ? nil : Data(reason.utf8))
         wsdbg("cancel(with:) returned; task.state=\(task.state.rawValue) closeCode=\(task.closeCode.rawValue)")
+        if variant.contains("delayinv") {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
         // Lets the close frame go out, then releases the delegate.
         session.finishTasksAndInvalidate()
     }
@@ -295,7 +313,9 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
             opening.resume(returning: .failure(URLSessionWebSocketConnection.refusal(task: task, error: error)))
         }
         // The task is over: let the session (and with it this delegate) go.
-        session.finishTasksAndInvalidate()
+        if !(ProcessInfo.processInfo.environment["UNDRA_WS_VARIANT"] ?? "").contains("delayinv") {
+            session.finishTasksAndInvalidate()
+        }
     }
 
     /// Why a handshake failed: the HTTP status of a refused upgrade, else a network failure.
