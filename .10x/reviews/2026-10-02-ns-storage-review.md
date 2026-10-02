@@ -5,11 +5,11 @@ at `bc6061d` (`main` `3fc8b7f` merged), reviewed with `main` at `d1b35b5` (ios-f
 surfaces only):** the namespace as a path component; byte compatibility across hosts; migration of nothing and the
 playground's `smoke.sh`; the matrix · **Read:** ADR-044 amendment A "as built", `.10x/decisions/sde/ns-storage.md`, SPEC 8's rule
 table and the diff of the TypeScript, Swift, Kotlin, `android-adapters` and React Native (C++, Objective-C++, Java) halves ·
-**Fixes:** `44fc93a` (F1, F2, F5, F6), `8804894` (F4, regenerated after `main` was merged), `b058bf8` (the TypeScript check made smaller, F3); `main` merged at `ca93c1d`.
+**Fixes:** `44fc93a` (F1, F2, F5, F6), `8804894` (F4, regenerated after `main` was merged), `b058bf8` (the TypeScript check made smaller, F3); `main` merged at `ca93c1d` and again at `180c022` (`ts-size-e4`, `5f8c868`; see "The second merge").
 
 ## Verdict
 
-**Merge after one decision (F3, the web JavaScript gate), which is the integrator's, not the reviewer's.** The design is right
+**Merge.** The one open item at first review (F3, the web JavaScript gate) is closed by `main`'s `ts-size-e4`, merged at `180c022`: the hello-world JS is 21,336 against the new gate of 21,500. The design is right
 and the implementation is careful: every default store is under the namespace, nothing of an app's own adapter moves, the
 Apple casing deviation is correct and found the hard way, and the byte layouts of the React Native module and the native
 shells agree. What the review found is at the edges, not in the middle:
@@ -23,7 +23,7 @@ shells agree. What the review found is at the edges, not in the middle:
   does) failed **19 tests** (`run_ts` 8, `typecheck_ts` 11): the generated TypeScript passes `namespace`, the hand-written
   `tests/fixtures/ts-base/index.d.ts` did not declare it, and `ts-run/objects.mjs` still expected the old `attach` options.
   The implementer's "bindgen passes" was a run in which those toolchain tests skip.
-* **F3 (Medium, open).** The hello-world JavaScript is over its gate: see "The JavaScript number".
+* **F3 (Medium, closed by the merge).** The hello-world JavaScript was over its old gate (26,138 as delivered, 26,221 after the review's slimming, against 26,000); `ts-size-e4` re-based the gate on the up-front chunk, and the namespace now fits (see "The JavaScript number").
 * **F4 (Medium, fixed).** The site's generated files were stale (`reference/typescript.html`, `llms-full.txt`,
   `search-index.json`): CI's "Generated files are up to date" step would have failed.
 * **F5 (Low, fixed).** `examples/playground/android/smoke.sh` still looked for `undra-playground.sqlite`; the file is
@@ -39,7 +39,7 @@ No data-loss, wire, ABI or schema finding: the contract grid is unchanged and pa
 |---|---|---|---|---|
 | F1 | Medium | namespace from outside the table not validated | `runtimes/ts/@undra/runtime/src/adapters/names.ts:35` (`checkNamespace`, called by `storeName`/`storePath`, so every IndexedDB/OPFS name), `core.ts` (`attach` async); `runtimes/swift/.../Adapters/StorageLocations.swift:49` (`CoreNamespace`), `Core/UndraCore.swift` (`load`, `connect`), `Core/Errors.swift` (`invalidNamespace`); `runtimes/kotlin/.../runtime/CoreNamespace.kt`, `UndraCore.kt` (`start`, `attach`), `adapters/JvmAdapters.kt` (`defaultDataDir`), `android-adapters/.../Android{Kv,Fs,SecureStore,Db}Adapter.kt`; `runtimes/rn/.../cpp/UndraDefaults.h` (`validStorageNamespace`, both `makePlatform`s), `android/.../StoreNames.java` | fixed, tests per host |
 | F2 | High (CI) | 19 bindgen tests fail with toolchains required | `crates/undra-bindgen/tests/fixtures/ts-base/index.d.ts`, `tests/fixtures/ts-run/objects.mjs:93` | fixed (148 pass) |
-| F3 | Medium | web hello-world JS over its gate | `bench/budgets.toml:707` | open, decision |
+| F3 | Medium | web hello-world JS over its gate | `bench/budgets.toml:707` | closed by `ts-size-e4` (21,336 of 21,500) |
 | F4 | Medium | site's generated files stale | `site/reference/typescript.html`, `site/llms-full.txt`, `site/search-index.json` | fixed |
 | F5 | Low | `smoke.sh` expects the old database file name | `examples/playground/android/smoke.sh:186` | fixed (not run: it toggles airplane mode on the shared AVD) |
 | F6 | Low | SPEC 8 `Db` paragraph says the old paths and "share by design" | `docs/SPEC.md:678` | fixed |
@@ -109,7 +109,7 @@ was merged, "post" after.
 | `cargo test -p undra-bindgen -p undra-cli` (pre, first run) | 516 pass, **19 fail** (F2), 2 ignored |
 | `cargo test -p undra-bindgen` (post, after F2) | 148 pass, 0 fail |
 | `undra bindgen --check --docs` playground, cookbook, fieldbook, two-cores a and b (post) | all five "up to date" |
-| TypeScript runtime `vitest run` + `tsc --noEmit` (post) | 1,495 pass (1,442 + 53: 52 hostile-namespace cases, 1 for `_`), clean |
+| TypeScript runtime `vitest run` + `tsc --noEmit` | 1,495 pass before the second merge (1,442 + 53: 52 hostile-namespace cases, 1 for `_`); **1,580 after it**, clean |
 | Swift `swift test` | 680 pass pre (676 + 4), 686 post (ios-floor added 6), 0 fail |
 | Kotlin `scripts/test-local.sh`, brew 2.4.20 and the 2.0.21 compiler of Gradle 8.14.3 | 756 cases, 0 failed, 2 skipped, under both (755 + 1); testkit 30 |
 | `android-adapters` `:android-adapters:test` | 145 per variant, debug and release, 0 failed, 1 skipped each |
@@ -119,7 +119,7 @@ was merged, "post" after.
 | React Native `android/test/run.sh` | pass (the new store-name checks included) |
 | `bash contract-tests/run-all.sh` (post; the TypeScript column again after the last runtime edit) | **74/74** (S01–S26, S21/S22 TypeScript only) |
 | `examples/two-cores` JVM and Node (post) | `passed`, with the `Kv:` lines (own value back, a key only A wrote is not B's, two stores) |
-| `scripts/wasm-size.sh` | wasm **116,857** B gz, gate 120,000: ok; hello JS **26,221** B gz, gate 26,000: **OVER by 221** (F3) |
+| `scripts/wasm-size.sh` (after `ts-size-e4`) | wasm **116,857** B gz, gate 120,000: ok; hello JS **21,336** B gz, gate 21,500 (record 21,173): ok. Before it: JS 26,221 against 26,000, over |
 | site `build-all` + `check-links --words` | three generated files regenerated and committed (F4); links ok, landing prose 342 of 350 words |
 
 Not run, said so: `scripts/rn-device-checks.sh` (the implementer's 24/24 and 25/25 stand; my changes touch only the namespace refusal
@@ -129,28 +129,42 @@ before the paths those checks exercise), `examples/two-cores` iOS and Android (s
 ## The JavaScript number (F3)
 
 What a hello-world app ships of `@undra/runtime` (`scripts/web-size-runtime.mjs`, gzip level 9), measured per commit with the same
-Vite:
+Vite, under the gate of the day:
 
-| Tree | gz bytes | against the 26,000 gate |
+| Tree | gz bytes | gate |
 |---|---|---|
-| `main` before the piece (`3fc8b7f`, the recorded 25,996) | 25,996 | 4 under |
+| `main` before the piece (`3fc8b7f`, the recorded value) | 25,996 | 26,000 (4 under) |
 | the piece as delivered (`bc6061d`) | 26,138 | **138 over** (the piece had not run the gate) |
-| the review's first validation (long messages, helper) | 26,503 | 503 over |
-| **this branch** (one regex in `storeName`/`storePath`, async `attach`, no `optional()` helper) | **26,221** | **221 over** |
+| the review's first validation | 26,503 | 503 over |
+| this branch before the second merge | 26,221 | 221 over |
+| **this branch with `ts-size-e4`** (`180c022`) | **21,336** | **21,500: ok** (record 21,173, so the namespace costs 163) |
 
-The namespace costs the main entry 225 bytes in all (`names.ts`, the `bind` calls in `core.ts`, the OPFS directory walk, the options
-plumbing): the piece's 142, and the review's validation net of its slimming, 83. `bench/budgets.toml` says "the next change to the hello runtime pays
-for itself, or `ts-runtime-size` lands", and the gate is R9, so it is **not** raised here. What is left to decide: (a) a restatement
-of ADR-052's decision 2 (it was 8 KB, then 24, then 26) to 26,300 with `scripts/wasm-size.sh --record` in the same commit, or (b)
-landing `ts-runtime-size` first and merging this after. Cheaper levers exist inside the piece (drop `UndraCore.namespace` from the
-hot path, fold the two `bind` call sites into one helper, flatten the OPFS walk to one `getDirectoryHandle` chain) but they are
-tens of bytes each, not 221.
+I did not raise the old budget (R9); `ts-size-e4` made the question moot by counting the up-front chunk only and loading the four default
+ports lazily.
+
+## The second merge (`ts-size-e4`)
+
+Conflicts in `core.ts`, `adapters/browser.ts` and `.10x/decisions/sde/_index.md`, resolved by taking `main`'s rewrite and
+re-applying the namespace on top of it:
+
+* **The validation stays up front.** `UndraCore.load` and `UndraCore.attach` (now `async`, so a bad namespace rejects) call
+  `checkNamespace` first, before any transport or adapter exists. It cannot live in the stores' names any more: with the default ports
+  lazy, `storeName`/`storePath` run at the first Kv, SecureStore or Fs call, long after `attach` returned. They still check
+  (the factories are public), as the second line.
+* **The namespace reaches the lazily loaded adapters.** `defaultPorts(given, namespace)` passes it to `standardPort(key, adapter,
+  namespace)`, which builds `indexedDbKv({ namespace })`, `webCryptoSecureStore({ namespace })` and `opfsFs({ namespace })` on the first
+  call. The existing two-cores test (two real `attach`es over the real port plumbing, a key written through each core's Kv port, two
+  IndexedDB databases) goes through exactly that path and passes; so do the 52 hostile-namespace cases.
+* `UndraCore.namespace` and the two `PortImpl.bind` call sites moved onto `main`'s `private _x` fields; `browserAdapters({ namespace })`
+  (public) keeps its option.
+* The merge touched no Swift, Kotlin, React Native or Rust source, so those suites were not re-run. After it: `cargo test -p undra-bindgen`
+  148 pass; `undra bindgen --check --docs` clean on all five packages; contract grid **74/74** (S01-S26); React Native `vitest` 88; two-cores
+  Node passes; site `build-all` leaves nothing to commit and `check-links --words` passes.
 
 ## Open items
 
-1. **F3**, the web JavaScript gate (above): a decision, one commit either way.
-2. The migration notice (section 3): recorded, not built.
-3. `smoke.sh` on the AVD (airplane mode) and `rn-device-checks.sh`/two-cores iOS and Android were not re-run by the reviewer.
-4. No in-process Swift ↔ C++ Kv round trip; parity is by vectors, literals and the device checks.
-5. Two cores loaded without a namespace share `_`: documented, deliberately not an error (a scripted test transport is the
+1. The migration notice (section 3): recorded, not built.
+2. `smoke.sh` on the AVD (airplane mode) and `rn-device-checks.sh`/two-cores iOS and Android were not re-run by the reviewer.
+3. No in-process Swift ↔ C++ Kv round trip; parity is by vectors, literals and the device checks.
+4. Two cores loaded without a namespace share `_`: documented, deliberately not an error (a scripted test transport is the
    case that has none).
