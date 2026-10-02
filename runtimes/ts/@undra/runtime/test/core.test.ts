@@ -14,6 +14,7 @@ import {
   type StreamFailure,
   WireError,
   codecs,
+  decodeCancel,
   decodeValue,
   encodeReply,
   encodeValue,
@@ -303,6 +304,29 @@ describe("call cancellation", () => {
     fake.reply(1, ReplyStatus.Ok, encodeValue(codecs.u64, 55n));
     await fake.settle();
     expect(fake.released).toEqual([]);
+  });
+
+  it("a transport that answers the cancel inside the send does not turn the abort into the core's CancelledByCore (objects-followups O7)", async () => {
+    // `wasm-main` runs the core in process: its answer to a Cancel (status 3) arrives before `send` returns.
+    for (const withOrphan of [false, true]) {
+      const { fake, core } = await setup({ synchronous: true });
+      fake.on(M.SLOW, (_c, r) => {
+        r.defer();
+      });
+      const send = fake.send.bind(fake);
+      fake.send = (kind, payload) => {
+        send(kind, payload);
+        if (kind === Kind.Cancel) fake.emitRawReply(encodeReply({ callId: decodeCancel(payload).callId, status: ReplyStatus.Cancelled }));
+      };
+      const controller = new AbortController();
+      const reason = new Error("navigated away");
+      const call = core.call(FREE, M.SLOW, new Uint8Array(0), controller.signal, withOrphan ? reclaim(core, 0) : undefined);
+      const assertion = expect(call, withOrphan ? "with a way to give references back" : "without").rejects.toBe(reason);
+      controller.abort(reason);
+      await assertion;
+      expect((await core.stats()).pendingCalls).toBe(0);
+      expect(core.closed).toBe(false);
+    }
   });
 
   it("the default abort reason is an AbortError", async () => {

@@ -1299,17 +1299,19 @@ export class UndraCore {
       if (signal !== undefined) {
         const onAbort = (): void => {
           if (this._pending.get(callId) !== entry) return;
-          try {
-            this._transport.send(Kind.Cancel, encodeCancel({ callId }));
-          } catch {
-            // The channel is gone; the core cancels with it.
-          }
+          // Before the cancel goes out: a transport that answers a cancel inside the send (`wasm-main`) must find
+          // the call already abandoned, so the caller sees its abort reason and not the core's `CancelledByCore`.
           if (orphan === undefined) this._pending.delete(callId);
           else {
             // The core may have answered before it saw the cancel: that reply, if it is a success, still carries
             // references the host owns. It is the entry's answer, and `orphan` gives them back.
             entry.resolve = orphan;
             entry.reject = () => {};
+          }
+          try {
+            this._transport.send(Kind.Cancel, encodeCancel({ callId }));
+          } catch {
+            // The channel is gone; the core cancels with it.
           }
           reject(abortReason(signal));
         };
