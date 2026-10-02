@@ -230,7 +230,8 @@ jobs:
         working-directory: runtimes/ts/@undra/runtime
         run: |
           set -euo pipefail
-          # The build is `tsc` alone; no dependency's install script gets to run on a release build.
+          # The build is `tsc` twice and the rename pass of the production flavour (ADR-057, scripts/build.mjs, which
+          # reads oxc through rolldown's prebuilt binding); no dependency's install script gets to run on a release build.
           npm ci --ignore-scripts
           npm run build
           npm pack --pack-destination "$GITHUB_WORKSPACE/npm/tarballs" --silent
