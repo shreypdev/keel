@@ -613,3 +613,12 @@ and every string of 16 printable bytes or more is the same in both (`build_web.r
 `the_web_module_does_not_depend_on_where_the_project_lives`). The gate's number can still move by a few bytes with the path
 the repository is checked out at (the Undra crates' ids); it no longer moves by hundreds. Debuggers: the DWARF paths are the
 labels too (`--remap-path-scope=object`), and `.lldbinit` does not map them back (it did not map `~` either).
+
+**Measured (review, same source at four checkout paths, before the merge with `types-paging`):** 119,927 (`.work/objects-followups`),
+119,931 (`.work/s1`), 119,818 (a 68-character name), and `main` + this fix 119,842 against this piece 119,931 at one path: the
+piece's own cost is **+89 bytes**; before the fix the same source moved 120,031 / 119,856 between two paths, in order of the
+path's length. What is left (up to 113 bytes, in no order) is the crate identities above. **After the merge** (`main` `94b87ba`,
+recorded 116,628 at its own path without the remap): wasm **116,864** gzipped at `.work/objects-followups` (gate 120,000), and the
+JavaScript up front **22,105**, 5 over its 22,100 (`types-paging`'s 22,068 plus this piece's +39): trimmed to **22,100** by letting an
+aborted call settle its promise before the cancel goes out (no no-op `reject` on the abandoned entry) and by the shorter name of
+the restart counter (`_era`). That is no headroom: the next change to the chunk makes room or restates the budget here.
