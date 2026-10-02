@@ -45,7 +45,8 @@ function entryOf(native: FakeNative): NativeCoreEntry & { attached: number; core
     core: null,
     async attach(transport: Transport, options?: Omit<AttachOptions, "expectedSchemaHash">): Promise<UndraCore> {
       this.attached++;
-      this.core = await UndraCore.attach(transport, { ...options, expectedSchemaHash: native.hash });
+      // As the generated entry's `attach` does: its hash and its namespace.
+      this.core = await UndraCore.attach(transport, { ...options, expectedSchemaHash: native.hash, namespace: native.namespace });
       return this.core;
     },
   };
@@ -77,6 +78,18 @@ describe("loadNative", () => {
     expect(again).not.toBe(core);
     expect(entry.attached).toBe(2);
     expect(installs).toEqual(["fake_core"]);
+  });
+
+  test("the core knows its namespace, the entry's, which the default stores are kept under (ADR-044 amendment A)", async () => {
+    const native = new FakeNative("core_ns");
+    linkCores(native);
+    // An entry without `attach`: loadNative attaches the transport itself, with the entry's namespace.
+    const bare = track(await loadNative({ namespace: native.namespace, schemaHash: native.hash }, { adapters: { http: null } }));
+    expect(bare.namespace).toBe("core_ns");
+    bare.close();
+    // An entry like a generated one fills its namespace in (`UndraIds.namespace`).
+    const generated = track(await loadNative(entryOf(native), { adapters: { http: null } }));
+    expect(generated.namespace).toBe("core_ns");
   });
 
   test("through the generated entry, the core is the bindings' default core", async () => {
