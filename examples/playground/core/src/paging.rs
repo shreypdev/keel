@@ -240,3 +240,143 @@ pub fn set_ticker_failing(ctx: &Ctx, failing: bool) {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = failing;
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use undra::runtime::testing::TestRuntime;
+
+    use super::*;
+
+    #[test]
+    fn the_library_has_ten_thousand_books_and_a_lazy_view_of_the_even_rows_of_its_source() {
+        let t = TestRuntime::new();
+        let library = Library::new(t.ctx());
+        assert_eq!(library.count(), LIBRARY_LEN);
+        assert_eq!(library.books.len(), 10_000);
+        assert!(library.evens.is_view() && !library.books.is_view());
+        // The view pages through the derived index: the even ids of the 20 source rows.
+        let ids: Vec<u32> = library.evens.to_vec().iter().map(|i| i.id).collect();
+        assert_eq!(ids, (1..=10).map(|n| n * 2).collect::<Vec<_>>());
+        let before = (library.books.version(), library.evens.version());
+        library.add_rows(5);
+        assert_eq!(library.count(), 10_005);
+        assert_eq!(library.books.get(10_004).unwrap().id, 10_005);
+        assert!(library.books.version() > before.0 && library.evens.version() >= before.1);
+        library.drop_source(20);
+        assert!(library.evens.is_empty() || library.evens.len() <= 3);
+    }
+
+    #[test]
+    fn writes_check_their_index_and_reset_replaces_the_list() {
+        let t = TestRuntime::new();
+        let library = Library::new(t.ctx());
+        assert_eq!(
+            library.rename(10_000, "x".into()),
+            Err(ListError::OutOfRange {
+                index: 10_000,
+                len: 10_000
+            })
+        );
+        library.rename(3, "renamed".into()).unwrap();
+        let row = library.books.get(3).unwrap();
+        assert_eq!((row.label.as_str(), row.version), ("renamed", 1));
+        library.remove_at(0).unwrap();
+        assert_eq!(library.books.get(0).unwrap().id, 2);
+        library.reset(7);
+        assert_eq!(library.count(), 7);
+        assert!(library.remove_at(7).is_err());
+    }
+
+    /// Lets the 20 ms of "latency" of a fetch pass and runs what that wakes.
+    fn settle(t: &TestRuntime) {
+        t.run_pending();
+        t.advance(Duration::from_millis(25));
+        t.run_pending();
+    }
+
+    #[test]
+    fn the_feed_grows_a_page_at_a_time_and_a_refetch_finds_only_what_changed() {
+        let t = TestRuntime::new();
+        let ctx = t.ctx();
+        let feed = ctx.query().infinite::<FeedQuery>((false,));
+        settle(&t);
+        assert_eq!(feed.data().get().len(), PAGE as usize);
+        assert!(feed.has_next_page().get());
+        feed.fetch_next_page();
+        settle(&t);
+        let rows = feed.data().get();
+        assert_eq!(rows.len(), 2 * PAGE as usize);
+        assert_eq!(
+            rows.iter().map(|r| r.id).collect::<Vec<_>>(),
+            (1..=100).collect::<Vec<_>>()
+        );
+        // Only the even rows change when the revision does: a refetch re-chains the two pages.
+        touch_feed(&ctx, 7);
+        feed.refetch();
+        settle(&t);
+        settle(&t);
+        let rows = feed.data().get();
+        assert_eq!(rows.len(), 2 * PAGE as usize);
+        assert!(
+            rows.iter()
+                .all(|r| r.version == if r.id % 2 == 0 { 7 } else { 0 })
+        );
+        // The even-only feed is another cache entry with its own rows.
+        let evens = ctx.query().infinite::<FeedQuery>((true,));
+        settle(&t);
+        let rows = evens.data().get();
+        assert_eq!(rows.len(), PAGE as usize);
+        assert_eq!(rows[0].id, 2);
+        assert_eq!(rows[49].id, 100);
+    }
+
+    #[test]
+    fn the_feed_ends_after_the_last_row() {
+        let t = TestRuntime::new();
+        let feed = t.ctx().query().infinite::<FeedQuery>((false,));
+        settle(&t);
+        for _ in 0..(LIST_LEN / PAGE) {
+            if !feed.has_next_page().get() {
+                break;
+            }
+            feed.fetch_next_page();
+            settle(&t);
+        }
+        assert_eq!(feed.data().get().len(), LIST_LEN as usize);
+        assert!(!feed.has_next_page().get());
+    }
+
+    #[test]
+    fn the_ticker_polls_a_second_after_each_fetch_and_reports_a_failure() {
+        let t = TestRuntime::new();
+        let ctx = t.ctx();
+        let ticker = ctx.query().observe::<TickerQuery>(());
+        t.run_pending();
+        assert_eq!(ticker.data().get(), Some(1));
+        assert_eq!(ticker_fetches(&ctx), 1);
+        t.advance(Duration::from_millis(999));
+        t.run_pending();
+        assert_eq!(ticker_fetches(&ctx), 1, "not before the interval");
+        t.advance(Duration::from_millis(2));
+        t.run_pending();
+        assert_eq!(ticker.data().get(), Some(2));
+        set_ticker_failing(&ctx, true);
+        t.advance(Duration::from_secs(1));
+        t.run_pending();
+        assert_eq!(ticker_fetches(&ctx), 3);
+        assert_eq!(ticker.error().get(), Some(TickError::Failing));
+        // A failure does not stop the polling; the next success clears the error.
+        set_ticker_failing(&ctx, false);
+        t.advance(Duration::from_secs(1));
+        t.run_pending();
+        assert_eq!(ticker.data().get(), Some(4));
+        assert_eq!(ticker.error().get(), None);
+        // Nobody watching, nobody polling.
+        drop(ticker);
+        t.advance(Duration::from_secs(5));
+        t.run_pending();
+        assert_eq!(ticker_fetches(&ctx), 4);
+    }
+}
