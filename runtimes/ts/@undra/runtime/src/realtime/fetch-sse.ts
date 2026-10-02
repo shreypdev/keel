@@ -83,7 +83,7 @@ class FetchStream implements SseStream {
       try {
         text = chunk.done ? this.#decoder.decode() : this.#decoder.decode(chunk.value, { stream: true });
       } catch {
-        this.#end = new SseError.Protocol(msg(123));
+        this.#end = new SseError.Protocol("the event stream is not UTF-8");
         this.#abort();
         continue;
       }
@@ -126,7 +126,7 @@ export function fetchSse(options: FetchSseOptions = {}): SseAdapter {
   return {
     async open(url, headers, lastEventId) {
       const doFetch = options.fetch ?? (globalThis as { fetch?: FetchLike }).fetch;
-      if (doFetch === undefined) throw new SseError.Refused(null, msg(124));
+      if (doFetch === undefined) throw new SseError.Refused(null, "this platform has no fetch");
       const sent: Array<[string, string]> = [
         ["Accept", "text/event-stream"],
         ["Cache-Control", "no-cache"],
@@ -147,12 +147,12 @@ export function fetchSse(options: FetchSseOptions = {}): SseAdapter {
       };
       const status = response.status;
       if (status < 200 || status > 299 || status === 204) {
-        fail(new SseError.Refused(status, msg(125, status, response.statusText ? ` ${response.statusText}` : "")));
+        fail(new SseError.Refused(status, `the server answered ${status}${response.statusText ? ` ${response.statusText}` : ""}`));
       }
       const type = response.headers.get("content-type") ?? "";
-      if (essence(type) !== "text/event-stream") fail(new SseError.Protocol(msg(126, type === "" ? "no content type" : type)));
+      if (essence(type) !== "text/event-stream") fail(new SseError.Protocol(`expected text/event-stream, got ${type === "" ? "no content type" : type}`));
       const body = response.body;
-      if (body === null) return fail(new SseError.Protocol(msg(127)));
+      if (body === null) return fail(new SseError.Protocol("the answer has no body"));
       return new FetchStream(body.getReader(), controller, lastEventId);
     },
   };

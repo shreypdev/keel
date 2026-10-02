@@ -114,6 +114,30 @@ describe("the development and the production flavour throw the same errors", () 
     expect(worded, "most of the sample is worded by the runtime").toBeGreaterThan(15);
   });
 
+  it("text that leaves the runtime as data is the same sentence in both: a port error's field (the core receives it) and a close frame's reason (the peer does)", async () => {
+    /** The data texts of one flavour: public constants of `./realtime`, and the fields of port errors the adapters raise. */
+    const texts = async (flavour: "development" | "production"): Promise<Record<string, unknown>> => {
+      await runtime(flavour);
+      const realtime = await import("../src/realtime.js");
+      const db = await import("../src/db.js");
+      const { fetchHttp } = await import("../src/adapters/http.js");
+      const field = (error: unknown): Record<string, string> => fields(error);
+      return {
+        didNotKeepUp: realtime.DID_NOT_KEEP_UP,
+        headersRefused: realtime.HEADERS_REFUSED,
+        badDbName: await caught(() => db.validateDbName("..")).then(field),
+        badMigration: await caught(() => db.validateMigrations([{ version: 2, sql: "" }, { version: 1, sql: "" }] as never)).then(field),
+        // A platform without fetch: the HttpError the core receives.
+        noFetch: await caught(() => fetchHttp({ fetch: "none" as never }).request({ url: "https://x.test/" } as never)).then(field),
+      };
+    };
+    const dev = await texts("development");
+    const prod = await texts("production");
+    expect(dev.didNotKeepUp).toBe("the core did not keep up");
+    expect(prod).toEqual(dev);
+    expect(JSON.stringify(prod), "no T code in data").not.toMatch(/T\d{4}/);
+  });
+
   it("a production message carries the core's own text as a value, the code as the key: a panic message travels as it is", async () => {
     const prod = await runtime("production");
     const panicked = new prod.UndraCallError.Panicked("index out of bounds: 7", "at core::foo");

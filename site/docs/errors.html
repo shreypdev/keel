@@ -534,8 +534,8 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <tr><td>undra.toml says Undra is at /somewhere/else, but the core's <code>undra</code> dependency is at &lt;repo&gt;</td><td>the library Undra ships is built from the same Undra as the core, and the platform runtimes come from <code>[undra] path</code>; if they differ, the core and the apps would speak different wire formats</td><td>make them agree: set <code>path</code> of the core's <code>undra</code> dependency and <code>[undra] path</code> in undra.toml to the same checkout (or remove <code>[undra] path</code> to use released runtimes)</td></tr>
 </tbody></table></div>
 <h2 id="runtime-messages">Runtime messages<a class="anchor" href="#runtime-messages" aria-label="Link to this section">#</a></h2>
-<p>The JavaScript runtime (<code>@undra/runtime</code>) throws and logs these. Its <strong>production build</strong> (what <code>vite build</code>, webpack in production mode and anything else that asks for neither the <code>development</code> nor the <code>react-native</code> condition resolve) says a code, the values and a link instead of a sentence, so a page does not carry the prose of an error whose class, <code>kind</code> and fields it already has: <code>T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017</code>. Its <strong>development build</strong> (Vite's dev server, Vitest, React Native) says the sentence. Both throw the same classes with the same <code>kind</code> and fields; only <code>message</code> differs, so nothing a program can branch on changes. Codes are never reused.</p>
-<h3 id="runtime-messages-table">The T codes (245)<a class="anchor" href="#runtime-messages-table" aria-label="Link to this section">#</a></h3>
+<p>The JavaScript runtime (<code>@undra/runtime</code>) throws and logs these. Its <strong>production build</strong> (what <code>vite build</code>, webpack in production mode and anything else that asks for neither the <code>development</code> nor the <code>react-native</code> condition resolve) says a code, the values and a link instead of a sentence, so a page does not carry the prose of an error whose class, <code>kind</code> and fields it already has: <code>T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017</code>. Its <strong>development build</strong> (Vite's dev server, Vitest, React Native) says the sentence. Both throw the same classes with the same <code>kind</code> and fields; only <code>message</code> differs, so nothing a program can branch on changes. Text the runtime hands on as data, the field of a port's typed error (which the core receives) and a WebSocket close frame's reason (which the peer receives), is not a message: it is the same sentence in both builds. Codes are never reused.</p>
+<h3 id="runtime-messages-table">The T codes (167)<a class="anchor" href="#runtime-messages-table" aria-label="Link to this section">#</a></h3>
 <p>The sentence is what the development build says; <code>{0}</code>, <code>{1}</code>, ... are the values the production message lists, in that order.</p>
 <div class="table-wrap"><table><thead><tr><th>Code</th><th>The development build says</th><th>Raised by</th></tr></thead><tbody>
 <tr id="T0001"><td><a href="#T0001"><code>T0001</code></a></td><td>unknown {0} variant: {1}</td><td>adapters/codecs.ts: TypeError; adapters/events.ts: RangeError</td></tr>
@@ -544,23 +544,9 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <tr id="T0004"><td><a href="#T0004"><code>T0004</code></a></td><td>unknown SseError variant: {0}</td><td>adapters/codecs.ts: TypeError</td></tr>
 <tr id="T0005"><td><a href="#T0005"><code>T0005</code></a></td><td>unknown DbValue variant: {0}</td><td>adapters/codecs.ts: TypeError</td></tr>
 <tr id="T0006"><td><a href="#T0006"><code>T0006</code></a></td><td>unknown DbError variant: {0}</td><td>adapters/codecs.ts: TypeError</td></tr>
-<tr id="T0007"><td><a href="#T0007"><code>T0007</code></a></td><td>needs the origin private file system</td><td>adapters/fs.ts: VariableDeclaration</td></tr>
-<tr id="T0008"><td><a href="#T0008"><code>T0008</code></a></td><td>the path is empty</td><td>adapters/fs.ts: FsError.Io</td></tr>
-<tr id="T0009"><td><a href="#T0009"><code>T0009</code></a></td><td>fetch is not available on this platform</td><td>adapters/http.ts: HttpError.Network</td></tr>
-<tr id="T0010"><td><a href="#T0010"><code>T0010</code></a></td><td>could not open IndexedDB database {0}</td><td>adapters/idb.ts: Error</td></tr>
-<tr id="T0011"><td><a href="#T0011"><code>T0011</code></a></td><td>opening IndexedDB database {0} is blocked by another connection</td><td>adapters/idb.ts: Error</td></tr>
-<tr id="T0012"><td><a href="#T0012"><code>T0012</code></a></td><td>IndexedDB request failed</td><td>adapters/idb.ts: Error</td></tr>
-<tr id="T0013"><td><a href="#T0013"><code>T0013</code></a></td><td>IndexedDB transaction failed</td><td>adapters/idb.ts: Error</td></tr>
-<tr id="T0014"><td><a href="#T0014"><code>T0014</code></a></td><td>IndexedDB transaction aborted</td><td>adapters/idb.ts: Error</td></tr>
-<tr id="T0015"><td><a href="#T0015"><code>T0015</code></a></td><td>a stored value is not binary</td><td>adapters/idb.ts: TypeError</td></tr>
-<tr id="T0016"><td><a href="#T0016"><code>T0016</code></a></td><td>{0} is not bytes</td><td>adapters/kv.ts: StorageError.Corrupt</td></tr>
-<tr id="T0017"><td><a href="#T0017"><code>T0017</code></a></td><td>IndexedDB cursor failed</td><td>adapters/kv.ts: Error</td></tr>
 <tr id="T0018"><td><a href="#T0018"><code>T0018</code></a></td><td>namespace {0} is not [a-z][a-z0-9_]{0,31}</td><td>adapters/names.ts: UndraError(&quot;options&quot;)</td></tr>
 <tr id="T0019"><td><a href="#T0019"><code>T0019</code></a></td><td>Rng.fill: {0} bytes requested, the limit is {1}</td><td>adapters/ports.ts: RangeError</td></tr>
 <tr id="T0020"><td><a href="#T0020"><code>T0020</code></a></td><td>{0}: {1} ({2})</td><td>adapters/ports.ts: log</td></tr>
-<tr id="T0021"><td><a href="#T0021"><code>T0021</code></a></td><td>needs a secure context</td><td>adapters/secure.ts: VariableDeclaration</td></tr>
-<tr id="T0022"><td><a href="#T0022"><code>T0022</code></a></td><td>{0} is not in the secure-store format</td><td>adapters/secure.ts: StorageError.Corrupt</td></tr>
-<tr id="T0023"><td><a href="#T0023"><code>T0023</code></a></td><td>{0} does not decrypt</td><td>adapters/secure.ts: StorageError.Corrupt</td></tr>
 <tr id="T0024"><td><a href="#T0024"><code>T0024</code></a></td><td>WebCrypto is required (crypto.getRandomValues)</td><td>adapters/system.ts: VariableDeclaration</td></tr>
 <tr id="T0025"><td><a href="#T0025"><code>T0025</code></a></td><td>a typed error that does not decode ({0} bytes)</td><td>call-error.ts: UndraCallError.Malformed</td></tr>
 <tr id="T0026"><td><a href="#T0026"><code>T0026</code></a></td><td>a stream without an error type ended with a typed error item ({0} bytes)</td><td>call-error.ts: UndraCallError.Malformed</td></tr>
@@ -596,31 +582,6 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <tr id="T0056"><td><a href="#T0056"><code>T0056</code></a></td><td>the core sent a truncated reply</td><td>core.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
 <tr id="T0057"><td><a href="#T0057"><code>T0057</code></a></td><td>the core sent reply status {0}</td><td>core.ts: UndraTransportError(&quot;protocol&quot;); stream-support.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
 <tr id="T0058"><td><a href="#T0058"><code>T0058</code></a></td><td>this method is a stream; call it with UndraCore.stream</td><td>core.ts: UndraError(&quot;state&quot;)</td></tr>
-<tr id="T0059"><td><a href="#T0059"><code>T0059</code></a></td><td>this database worker keeps the databases of the core <code>{0}</code> ({1}), not those of <code>{2}</code>: give each core its own waSqliteDb(), or set <code>directory</code></td><td>db-worker.ts: DbError.Unavailable</td></tr>
-<tr id="T0060"><td><a href="#T0060"><code>T0060</code></a></td><td>wa-sqlite could not start ({0}): {1}</td><td>db-worker.ts: DbError.Unavailable</td></tr>
-<tr id="T0061"><td><a href="#T0061"><code>T0061</code></a></td><td>invalid database name {0}: use 1 to 64 of A-Z a-z 0-9 . _ - (not starting with .), or &quot;:memory:&quot;</td><td>db/binding.ts: DbError.Unavailable</td></tr>
-<tr id="T0062"><td><a href="#T0062"><code>T0062</code></a></td><td>migration versions must strictly increase, starting at 1</td><td>db/binding.ts: DbError.Migration</td></tr>
-<tr id="T0063"><td><a href="#T0063"><code>T0063</code></a></td><td>migration versions must be at most {0}: SQLite keeps the version in a signed 32-bit integer (PRAGMA user_version)</td><td>db/binding.ts: DbError.Migration</td></tr>
-<tr id="T0064"><td><a href="#T0064"><code>T0064</code></a></td><td>no open database or transaction {0}</td><td>db/binding.ts: DbError.Unavailable</td></tr>
-<tr id="T0065"><td><a href="#T0065"><code>T0065</code></a></td><td>transaction {0} is over</td><td>db/binding.ts: DbError.Unavailable</td></tr>
-<tr id="T0066"><td><a href="#T0066"><code>T0066</code></a></td><td>the database is at version {0}, newer than the newest migration ({1})</td><td>db/binding.ts: DbError.Migration</td></tr>
-<tr id="T0067"><td><a href="#T0067"><code>T0067</code></a></td><td>the core went away while the database opened</td><td>db/binding.ts: DbError.Unavailable</td></tr>
-<tr id="T0068"><td><a href="#T0068"><code>T0068</code></a></td><td>a transaction cannot begin inside a transaction</td><td>db/binding.ts: DbError.Sql</td></tr>
-<tr id="T0069"><td><a href="#T0069"><code>T0069</code></a></td><td>node:sqlite returned a value of an unknown kind ({0})</td><td>db/node-sqlite.ts: DbError.Sql</td></tr>
-<tr id="T0070"><td><a href="#T0070"><code>T0070</code></a></td><td>the database is closed</td><td>db/node-sqlite.ts: DbError.Unavailable; db/wa-sqlite-engine.ts: DbError.Unavailable</td></tr>
-<tr id="T0071"><td><a href="#T0071"><code>T0071</code></a></td><td>the SQL holds no statement</td><td>db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql</td></tr>
-<tr id="T0072"><td><a href="#T0072"><code>T0072</code></a></td><td>only one statement per call: use a migration for several</td><td>db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql</td></tr>
-<tr id="T0073"><td><a href="#T0073"><code>T0073</code></a></td><td>the statement has {0} parameters, {1} were given</td><td>db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql</td></tr>
-<tr id="T0074"><td><a href="#T0074"><code>T0074</code></a></td><td>node:sqlite is not available (Node 22.5 or later): {0}</td><td>db/node-sqlite.ts: DbError.Unavailable</td></tr>
-<tr id="T0075"><td><a href="#T0075"><code>T0075</code></a></td><td>cannot create {0}: {1}</td><td>db/node-sqlite.ts: DbError.Unavailable</td></tr>
-<tr id="T0076"><td><a href="#T0076"><code>T0076</code></a></td><td>the database worker has no connection {0}</td><td>db/protocol.ts: DbError.Unavailable</td></tr>
-<tr id="T0077"><td><a href="#T0077"><code>T0077</code></a></td><td>the database worker failed{0}</td><td>db/protocol.ts: fail</td></tr>
-<tr id="T0078"><td><a href="#T0078"><code>T0078</code></a></td><td>the database worker sent a message that could not be read</td><td>db/protocol.ts: fail</td></tr>
-<tr id="T0079"><td><a href="#T0079"><code>T0079</code></a></td><td>the database worker could not start: {0}</td><td>db/protocol.ts: fail</td></tr>
-<tr id="T0080"><td><a href="#T0080"><code>T0080</code></a></td><td>the database worker cannot take the call: {0}</td><td>db/protocol.ts: DbError.Unavailable</td></tr>
-<tr id="T0081"><td><a href="#T0081"><code>T0081</code></a></td><td>parameter {0} is out of range</td><td>db/wa-sqlite-engine.ts: sqliteError</td></tr>
-<tr id="T0082"><td><a href="#T0082"><code>T0082</code></a></td><td>parameter {0} could not be bound</td><td>db/wa-sqlite-engine.ts: sqliteError</td></tr>
-<tr id="T0083"><td><a href="#T0083"><code>T0083</code></a></td><td>this platform has no Worker: pass <code>worker</code></td><td>db/wa-sqlite.ts: Error</td></tr>
 <tr id="T0084"><td><a href="#T0084"><code>T0084</code></a></td><td>the dev server no longer has this core's objects (it was restarted, or the session expired); load a new core</td><td>errors-rare.ts: Parameter</td></tr>
 <tr id="T0085"><td><a href="#T0085"><code>T0085</code></a></td><td>the Undra core rejected the snapshot (code {0}); a rejected restore leaves the core unchanged</td><td>errors-rare.ts: super(&quot;restore&quot;)</td></tr>
 <tr id="T0086"><td><a href="#T0086"><code>T0086</code></a></td><td>the call failed with a typed error</td><td>errors.ts: ReturnStatement</td></tr>
@@ -651,48 +612,10 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <tr id="T0111"><td><a href="#T0111"><code>T0111</code></a></td><td>this Node has no {0}</td><td>node-builtin.ts: Error</td></tr>
 <tr id="T0112"><td><a href="#T0112"><code>T0112</code></a></td><td>the runtime's {0} could not be loaded: {1}</td><td>on-demand.ts: UndraTransportError(&quot;closed&quot;)</td></tr>
 <tr id="T0113"><td><a href="#T0113"><code>T0113</code></a></td><td>{0} method 0x{1}</td><td>port-dispatch.ts: ReturnStatement</td></tr>
-<tr id="T0114"><td><a href="#T0114"><code>T0114</code></a></td><td>this platform cannot send WebSocket headers: put the credential in the URL or a subprotocol</td><td>realtime/browser-websocket.ts: VariableDeclaration</td></tr>
-<tr id="T0115"><td><a href="#T0115"><code>T0115</code></a></td><td>the core did not keep up</td><td>realtime/browser-websocket.ts: VariableDeclaration</td></tr>
-<tr id="T0116"><td><a href="#T0116"><code>T0116</code></a></td><td>a binary message arrived as a Blob: the platform ignored binaryType &quot;arraybuffer&quot;</td><td>realtime/browser-websocket.ts: WsError.Protocol</td></tr>
-<tr id="T0117"><td><a href="#T0117"><code>T0117</code></a></td><td>the connection dropped without a close frame (1006)</td><td>realtime/browser-websocket.ts: WsError.Network</td></tr>
-<tr id="T0118"><td><a href="#T0118"><code>T0118</code></a></td><td>the WebSocket is not open</td><td>realtime/browser-websocket.ts: WsError.Network; realtime/node-websocket.ts: WsError.Network</td></tr>
-<tr id="T0119"><td><a href="#T0119"><code>T0119</code></a></td><td>the connection closed while a message was queued</td><td>realtime/browser-websocket.ts: WsError.Network; realtime/node-websocket.ts: WsError.Network</td></tr>
-<tr id="T0120"><td><a href="#T0120"><code>T0120</code></a></td><td>this platform has no WebSocket</td><td>realtime/browser-websocket.ts: WsError.Refused</td></tr>
-<tr id="T0121"><td><a href="#T0121"><code>T0121</code></a></td><td>the WebSocket could not connect</td><td>realtime/browser-websocket.ts: VariableDeclaration</td></tr>
 <tr id="T0122"><td><a href="#T0122"><code>T0122</code></a></td><td>the events of this stream were already taken</td><td>realtime/fetch-sse.ts: TypeError</td></tr>
-<tr id="T0123"><td><a href="#T0123"><code>T0123</code></a></td><td>the event stream is not UTF-8</td><td>realtime/fetch-sse.ts: SseError.Protocol</td></tr>
-<tr id="T0124"><td><a href="#T0124"><code>T0124</code></a></td><td>this platform has no fetch</td><td>realtime/fetch-sse.ts: SseError.Refused</td></tr>
-<tr id="T0125"><td><a href="#T0125"><code>T0125</code></a></td><td>the server answered {0}{1}</td><td>realtime/fetch-sse.ts: SseError.Refused</td></tr>
-<tr id="T0126"><td><a href="#T0126"><code>T0126</code></a></td><td>expected text/event-stream, got {0}</td><td>realtime/fetch-sse.ts: SseError.Protocol</td></tr>
-<tr id="T0127"><td><a href="#T0127"><code>T0127</code></a></td><td>the answer has no body</td><td>realtime/fetch-sse.ts: SseError.Protocol</td></tr>
 <tr id="T0128"><td><a href="#T0128"><code>T0128</code></a></td><td>the messages of this connection were already taken</td><td>realtime/inbox.ts: TypeError</td></tr>
 <tr id="T0129"><td><a href="#T0129"><code>T0129</code></a></td><td>a next() is already pending</td><td>realtime/inbox.ts: TypeError</td></tr>
 <tr id="T0130"><td><a href="#T0130"><code>T0130</code></a></td><td>ByteQueue.at past the end</td><td>realtime/node-websocket.ts: RangeError</td></tr>
-<tr id="T0131"><td><a href="#T0131"><code>T0131</code></a></td><td>the connection dropped without a close frame</td><td>realtime/node-websocket.ts: this.#dropped</td></tr>
-<tr id="T0132"><td><a href="#T0132"><code>T0132</code></a></td><td>a frame has reserved bits set</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0133"><td><a href="#T0133"><code>T0133</code></a></td><td>the server masked a frame</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0134"><td><a href="#T0134"><code>T0134</code></a></td><td>a frame of {0} bytes is larger than the limit ({1})</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0135"><td><a href="#T0135"><code>T0135</code></a></td><td>a control frame is fragmented or longer than 125 bytes</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0136"><td><a href="#T0136"><code>T0136</code></a></td><td>unknown control opcode {0}</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0137"><td><a href="#T0137"><code>T0137</code></a></td><td>a new message started inside a fragmented one</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0138"><td><a href="#T0138"><code>T0138</code></a></td><td>a continuation frame without a message</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0139"><td><a href="#T0139"><code>T0139</code></a></td><td>unknown data opcode {0}</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0140"><td><a href="#T0140"><code>T0140</code></a></td><td>a message is larger than the limit ({0} bytes)</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0141"><td><a href="#T0141"><code>T0141</code></a></td><td>a text message is not UTF-8</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0142"><td><a href="#T0142"><code>T0142</code></a></td><td>a close frame with a one-byte payload</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0143"><td><a href="#T0143"><code>T0143</code></a></td><td>a close reason is not UTF-8</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
-<tr id="T0144"><td><a href="#T0144"><code>T0144</code></a></td><td>invalid URL: {0}</td><td>realtime/node-websocket.ts: WsError.Refused; realtime/sse.ts: SseError.Refused; realtime/websocket.ts: WsError.Refused</td></tr>
-<tr id="T0145"><td><a href="#T0145"><code>T0145</code></a></td><td>nodeWebSocket needs Node ({0})</td><td>realtime/node-websocket.ts: WsError.Refused</td></tr>
-<tr id="T0146"><td><a href="#T0146"><code>T0146</code></a></td><td>the server's Sec-WebSocket-Accept does not match the key</td><td>realtime/node-websocket.ts: WsError.Protocol</td></tr>
-<tr id="T0147"><td><a href="#T0147"><code>T0147</code></a></td><td>the server chose a subprotocol that was not offered: {0}</td><td>realtime/node-websocket.ts: WsError.Protocol</td></tr>
-<tr id="T0148"><td><a href="#T0148"><code>T0148</code></a></td><td>the server answered the upgrade with {0} {1}</td><td>realtime/node-websocket.ts: PropertyAccessExpression</td></tr>
-<tr id="T0149"><td><a href="#T0149"><code>T0149</code></a></td><td>no event stream {0}</td><td>realtime/sse.ts: SseError.Network</td></tr>
-<tr id="T0150"><td><a href="#T0150"><code>T0150</code></a></td><td>a next is already pending on stream {0}</td><td>realtime/sse.ts: SseError.Protocol</td></tr>
-<tr id="T0151"><td><a href="#T0151"><code>T0151</code></a></td><td>the core went away while the stream opened</td><td>realtime/sse.ts: SseError.Network</td></tr>
-<tr id="T0152"><td><a href="#T0152"><code>T0152</code></a></td><td>no WebSocket connection {0}</td><td>realtime/websocket.ts: WsError.Network</td></tr>
-<tr id="T0153"><td><a href="#T0153"><code>T0153</code></a></td><td>a receive is already pending on connection {0}</td><td>realtime/websocket.ts: WsError.Protocol</td></tr>
-<tr id="T0154"><td><a href="#T0154"><code>T0154</code></a></td><td>the connection ended</td><td>realtime/websocket.ts: WsError.Network</td></tr>
-<tr id="T0155"><td><a href="#T0155"><code>T0155</code></a></td><td>the core went away while the connection opened</td><td>realtime/websocket.ts: WsError.Network</td></tr>
 <tr id="T0156"><td><a href="#T0156"><code>T0156</code></a></td><td>the wasm core trapped and was restarted from its last snapshot; this call may or may not have run before the trap, and it is not retried ({0})</td><td>recovery.ts: UndraTransportError(&quot;restarted&quot;)</td></tr>
 <tr id="T0157"><td><a href="#T0157"><code>T0157</code></a></td><td>the wasm core trapped ({0}) and was restarted from no snapshot</td><td>recovery.ts: BinaryExpression</td></tr>
 <tr id="T0158"><td><a href="#T0158"><code>T0158</code></a></td><td>a snapshot of {0} bytes was not kept for crash recovery: it is larger than maxSnapshotBytes ({1}); the previous one stays (said once)</td><td>recovery.ts: log</td></tr>
@@ -740,8 +663,8 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <tr id="T0200"><td><a href="#T0200"><code>T0200</code></a></td><td>the core returned a null UndraBuf</td><td>transport/wasm-main.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
 <tr id="T0201"><td><a href="#T0201"><code>T0201</code></a></td><td>the core is not started</td><td>transport/wasm-main.ts: ConditionalExpression; transport/wasm-worker.ts: ConditionalExpression</td></tr>
 <tr id="T0202"><td><a href="#T0202"><code>T0202</code></a></td><td>the wasm core trapped: {0}</td><td>transport/wasm-main.ts: UndraTransportError(&quot;trap&quot;)</td></tr>
-<tr id="T0203"><td><a href="#T0203"><code>T0203</code></a></td><td>the core does not export undra_snapshot</td><td>transport/wasm-snapshot.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
-<tr id="T0204"><td><a href="#T0204"><code>T0204</code></a></td><td>the core does not export undra_restore</td><td>transport/wasm-snapshot.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0203"><td><a href="#T0203"><code>T0203</code></a></td><td>the core does not export undra_snapshot</td><td>transport/wasm-main.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0204"><td><a href="#T0204"><code>T0204</code></a></td><td>the core does not export undra_restore</td><td>transport/wasm-main.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
 <tr id="T0205"><td><a href="#T0205"><code>T0205</code></a></td><td>the worker gave an incomplete answer</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
 <tr id="T0206"><td><a href="#T0206"><code>T0206</code></a></td><td>worker.ports needs this @undra/runtime's worker script (protocol 3)</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
 <tr id="T0207"><td><a href="#T0207"><code>T0207</code></a></td><td>the worker sent an <code>envelopes</code> message without a list of envelopes</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
@@ -782,7 +705,6 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <tr id="T0242"><td><a href="#T0242"><code>T0242</code></a></td><td>the worker was not started with recovery</td><td>worker.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
 <tr id="T0243"><td><a href="#T0243"><code>T0243</code></a></td><td>the wasm core trapped ({0}) and was restarted from a snapshot {1} ms old</td><td>recovery.ts: UndraCoreRestarted</td></tr>
 <tr id="T0244"><td><a href="#T0244"><code>T0244</code></a></td><td>keyed patch operation #{0} ({1}) index {2} is out of bounds for a list of length {3}</td><td>wire/errors.ts: PatchError</td></tr>
-<tr id="T0245"><td><a href="#T0245"><code>T0245</code></a></td><td>this Node's node:sqlite does not keep text that holds U+0000 (it cuts it at the first one): the Db port carries text exactly, so it needs a newer Node (24 does)</td><td>db/node-sqlite.ts: DbError.Unavailable</td></tr>
 </tbody></table></div>
 <h3 id="wire-failures">Wire failures<a class="anchor" href="#wire-failures" aria-label="Link to this section">#</a></h3>
 <p>A <code>WireError</code> says its code and fields in a production build (<code>wire: code=unexpected_eof at=12 needed=3 — link</code>); the development build says the sentence below, with the values in braces.</p>

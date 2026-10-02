@@ -36,7 +36,9 @@ In a **production build of a TypeScript app**, `error.message` of what the runti
 for a decoding failure. The sentence is on the errors page ("Runtime messages") and is what the development build says (Vite's dev
 server, Vitest, React Native: the `development` and `react-native` export conditions). Nothing a program branches on changes: the
 class, `kind`, `reason`, `status` and every field are the same, and the core's own text (a panic message, a refusal reason) travels as
-a value inside the message. Branch on those, never on the text.
+a value inside the message. Branch on those, never on the text. What the runtime hands the core as data is not a message and says its
+sentence in both builds: the field of a port's typed error (`WsError.Closed(1008, "the core did not keep up")`, `DbError.Sql(..)`, ..),
+as the Swift and Kotlin adapters send theirs.
 
 Argument validation is not an outcome of the call. A value the wire cannot represent (a negative `Duration`, a map with
 two keys that encode alike, a TypeScript `number` outside a `u8`) is a programming error: it propagates unchanged

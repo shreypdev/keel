@@ -1,5 +1,4 @@
 import { type Header, type HttpAdapter, HttpError, type HttpRequest, type HttpResponse } from "./types.js";
-import { msg } from "../messages.js";
 
 /** Options of {@link fetchHttp}. */
 export interface FetchHttpOptions {
@@ -29,7 +28,7 @@ export function fetchHttp(options: FetchHttpOptions = {}): HttpAdapter {
   return {
     async request(req: HttpRequest): Promise<HttpResponse> {
       const doFetch = options.fetch ?? (globalThis as { fetch?: typeof fetch }).fetch;
-      if (typeof doFetch !== "function") throw new HttpError.Network(msg(9));
+      if (typeof doFetch !== "function") throw new HttpError.Network("fetch is not available on this platform");
       let url: URL;
       try {
         url = new URL(req.url);

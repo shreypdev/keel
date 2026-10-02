@@ -2,7 +2,6 @@ import { type Header, WsError, type WsMessage } from "../adapters/types.js";
 import { errorMessage } from "../platform.js";
 import { Inbox } from "./inbox.js";
 import type { WebSocketAdapter, WebSocketConnection } from "./websocket.js";
-import { msg } from "../messages.js";
 
 /** What {@link browserWebSocket} needs of a WHATWG `WebSocket` (browsers, Node 22+'s global, React Native's). */
 export interface PlatformWebSocket {
@@ -59,10 +58,10 @@ export interface BrowserWebSocketOptions {
 }
 
 /** The message of a connect with headers on a platform that cannot send them (ADR-047 §5). */
-export const HEADERS_REFUSED = msg(114);
+export const HEADERS_REFUSED = "this platform cannot send WebSocket headers: put the credential in the URL or a subprotocol";
 
 /** The close reason of a connection whose core stopped reading (ADR-047 §3). */
-export const DID_NOT_KEEP_UP = msg(115);
+export const DID_NOT_KEEP_UP = "the core did not keep up";
 
 const OPEN = 1;
 const MAX_OUTBOUND = 1 << 20;
@@ -142,7 +141,7 @@ class BrowserConnection implements WebSocketConnection {
       message = { kind: "binary", value: new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice() };
       size = data.byteLength;
     } else {
-      this.#inbox.fail(new WsError.Protocol(msg(116)));
+      this.#inbox.fail(new WsError.Protocol("a binary message arrived as a Blob: the platform ignored binaryType \"arraybuffer\""));
       closeSocket(this.#socket, 1003, "");
       return;
     }
@@ -158,7 +157,7 @@ class BrowserConnection implements WebSocketConnection {
 
   /** The socket closed: a close frame is `Closed(code, reason)`, 1006 (no close frame) is `Network`. */
   ended(code: number, reason: string): void {
-    if (code === 1006) this.#inbox.fail(new WsError.Network(msg(117)));
+    if (code === 1006) this.#inbox.fail(new WsError.Network("the connection dropped without a close frame (1006)"));
     else this.#inbox.fail(new WsError.Closed(code, reason));
   }
 
@@ -169,7 +168,7 @@ class BrowserConnection implements WebSocketConnection {
   async send(message: WsMessage): Promise<void> {
     const end = this.#inbox.end;
     if (end !== null) throw end;
-    if (this.#closedByCore || this.#socket.readyState !== OPEN) throw new WsError.Network(msg(118));
+    if (this.#closedByCore || this.#socket.readyState !== OPEN) throw new WsError.Network("the WebSocket is not open");
     try {
       this.#socket.send(message.value);
     } catch (error) {
@@ -179,7 +178,7 @@ class BrowserConnection implements WebSocketConnection {
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       const failed = this.#inbox.end;
       if (failed !== null) throw failed;
-      if (this.#socket.readyState !== OPEN) throw new WsError.Network(msg(119));
+      if (this.#socket.readyState !== OPEN) throw new WsError.Network("the connection closed while a message was queued");
     }
   }
 
@@ -216,7 +215,7 @@ export function browserWebSocket(options: BrowserWebSocketOptions = {}): WebSock
   return {
     connect(url, protocols, headers) {
       const Socket = options.WebSocket ?? (globalThis as { WebSocket?: WebSocketConstructorLike }).WebSocket;
-      if (Socket === undefined) return Promise.reject(new WsError.Refused(null, msg(120)));
+      if (Socket === undefined) return Promise.reject(new WsError.Refused(null, "this platform has no WebSocket"));
       const passHeaders = (options.headers ?? (isBrowser() ? "refuse" : "pass")) === "pass";
       if (headers.length > 0 && !passHeaders) return Promise.reject(new WsError.Refused(null, HEADERS_REFUSED));
       return new Promise<WebSocketConnection>((resolve, reject) => {
@@ -233,7 +232,7 @@ export function browserWebSocket(options: BrowserWebSocketOptions = {}): WebSock
         socket.binaryType = "arraybuffer";
         const connection = new BrowserConnection(socket, maxMessages, maxBytes);
         let opened = false;
-        let failure = msg(121);
+        let failure = "the WebSocket could not connect";
         socket.addEventListener("open", () => {
           opened = true;
           resolve(connection);

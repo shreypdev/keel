@@ -1,6 +1,5 @@
 import type { DbAdapter } from "./binding.js";
 import { type DbWorkerLike, workerDbAdapter } from "./protocol.js";
-import { msg } from "../messages.js";
 
 /** Options of {@link waSqliteDb}. */
 export interface WaSqliteDbOptions {
@@ -34,7 +33,7 @@ export function waSqliteDb(options: WaSqliteDbOptions = {}): DbAdapter {
   return workerDbAdapter(() => {
     const given = options.worker;
     if (given !== undefined) return typeof given === "function" ? given() : given;
-    if (typeof Worker !== "function") throw new Error(msg(83));
+    if (typeof Worker !== "function") throw new Error("this platform has no Worker: pass `worker`");
     return new Worker(new URL("../db-worker.js", import.meta.url), { type: "module" }) as DbWorkerLike;
   });
 }

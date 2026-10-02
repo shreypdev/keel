@@ -9,7 +9,6 @@ import { type DbWorkerScope, serveDb } from "./db/protocol.js";
 import { waSqliteEngine } from "./db/wa-sqlite-engine.js";
 import { nodeBuiltin } from "./node-builtin.js";
 import { errorMessage } from "./platform.js";
-import { msg } from "./messages.js";
 
 /*
  * `@undra/runtime/db-worker`: SQLite for the browser's `Db` port (ADR-048 §7), wa-sqlite's
@@ -119,14 +118,14 @@ export function waSqliteAdapter(options: WaSqliteAdapterOptions = {}): DbAdapter
         engine = load(wanted);
       } else if (options.directory === undefined && storage === "opfs" && served !== namespace) {
         throw new DbError.Unavailable(
-          msg(59, served, storePath(served ?? undefined, "db"), namespace),
+          `this database worker keeps the databases of the core \`${served}\` (${storePath(served ?? undefined, "db")}), not those of \`${namespace}\`: give each core its own waSqliteDb(), or set \`directory\``,
         );
       }
       let ready: DbAdapter;
       try {
         ready = await engine;
       } catch (error) {
-        throw new DbError.Unavailable(msg(60, storage, errorMessage(error)));
+        throw new DbError.Unavailable(`wa-sqlite could not start (${storage}): ${errorMessage(error)}`);
       }
       return ready.open(name);
     },

@@ -24,23 +24,23 @@ const MESSAGES: Readonly<Record<number, string | null>> = {
   4: "unknown SseError variant: {0}", // adapters/codecs.ts: TypeError
   5: "unknown DbValue variant: {0}", // adapters/codecs.ts: TypeError
   6: "unknown DbError variant: {0}", // adapters/codecs.ts: TypeError
-  7: "needs the origin private file system", // adapters/fs.ts: VariableDeclaration
-  8: "the path is empty", // adapters/fs.ts: FsError.Io
-  9: "fetch is not available on this platform", // adapters/http.ts: HttpError.Network
-  10: "could not open IndexedDB database {0}", // adapters/idb.ts: Error
-  11: "opening IndexedDB database {0} is blocked by another connection", // adapters/idb.ts: Error
-  12: "IndexedDB request failed", // adapters/idb.ts: Error
-  13: "IndexedDB transaction failed", // adapters/idb.ts: Error
-  14: "IndexedDB transaction aborted", // adapters/idb.ts: Error
-  15: "a stored value is not binary", // adapters/idb.ts: TypeError
-  16: "{0} is not bytes", // adapters/kv.ts: StorageError.Corrupt
-  17: "IndexedDB cursor failed", // adapters/kv.ts: Error
+  7: null, // retired: adapters/fs.ts says it in both flavours (data: a port error's field, which the core receives)
+  8: null, // retired: adapters/fs.ts says it in both flavours (data: a port error's field, which the core receives)
+  9: null, // retired: adapters/http.ts says it in both flavours (data: a port error's field, which the core receives)
+  10: null, // retired: adapters/idb.ts says it in both flavours (data: a port error's field, which the core receives)
+  11: null, // retired: adapters/idb.ts says it in both flavours (data: a port error's field, which the core receives)
+  12: null, // retired: adapters/idb.ts says it in both flavours (data: a port error's field, which the core receives)
+  13: null, // retired: adapters/idb.ts says it in both flavours (data: a port error's field, which the core receives)
+  14: null, // retired: adapters/idb.ts says it in both flavours (data: a port error's field, which the core receives)
+  15: null, // retired: adapters/idb.ts says it in both flavours (data: a port error's field, which the core receives)
+  16: null, // retired: adapters/kv.ts says it in both flavours (data: a port error's field, which the core receives)
+  17: null, // retired: adapters/kv.ts says it in both flavours (data: a port error's field, which the core receives)
   18: "namespace {0} is not [a-z][a-z0-9_]{0,31}", // adapters/names.ts: UndraError("options")
   19: "Rng.fill: {0} bytes requested, the limit is {1}", // adapters/ports.ts: RangeError
   20: "{0}: {1} ({2})", // adapters/ports.ts: log
-  21: "needs a secure context", // adapters/secure.ts: VariableDeclaration
-  22: "{0} is not in the secure-store format", // adapters/secure.ts: StorageError.Corrupt
-  23: "{0} does not decrypt", // adapters/secure.ts: StorageError.Corrupt
+  21: null, // retired: adapters/secure.ts says it in both flavours (data: a port error's field, which the core receives)
+  22: null, // retired: adapters/secure.ts says it in both flavours (data: a port error's field, which the core receives)
+  23: null, // retired: adapters/secure.ts says it in both flavours (data: a port error's field, which the core receives)
   24: "WebCrypto is required (crypto.getRandomValues)", // adapters/system.ts: VariableDeclaration
   25: "a typed error that does not decode ({0} bytes)", // call-error.ts: UndraCallError.Malformed
   26: "a stream without an error type ended with a typed error item ({0} bytes)", // call-error.ts: UndraCallError.Malformed
@@ -76,31 +76,31 @@ const MESSAGES: Readonly<Record<number, string | null>> = {
   56: "the core sent a truncated reply", // core.ts: UndraTransportError("protocol")
   57: "the core sent reply status {0}", // core.ts: UndraTransportError("protocol"); stream-support.ts: UndraTransportError("protocol")
   58: "this method is a stream; call it with UndraCore.stream", // core.ts: UndraError("state")
-  59: "this database worker keeps the databases of the core `{0}` ({1}), not those of `{2}`: give each core its own waSqliteDb(), or set `directory`", // db-worker.ts: DbError.Unavailable
-  60: "wa-sqlite could not start ({0}): {1}", // db-worker.ts: DbError.Unavailable
-  61: "invalid database name {0}: use 1 to 64 of A-Z a-z 0-9 . _ - (not starting with .), or \":memory:\"", // db/binding.ts: DbError.Unavailable
-  62: "migration versions must strictly increase, starting at 1", // db/binding.ts: DbError.Migration
-  63: "migration versions must be at most {0}: SQLite keeps the version in a signed 32-bit integer (PRAGMA user_version)", // db/binding.ts: DbError.Migration
-  64: "no open database or transaction {0}", // db/binding.ts: DbError.Unavailable
-  65: "transaction {0} is over", // db/binding.ts: DbError.Unavailable
-  66: "the database is at version {0}, newer than the newest migration ({1})", // db/binding.ts: DbError.Migration
-  67: "the core went away while the database opened", // db/binding.ts: DbError.Unavailable
-  68: "a transaction cannot begin inside a transaction", // db/binding.ts: DbError.Sql
-  69: "node:sqlite returned a value of an unknown kind ({0})", // db/node-sqlite.ts: DbError.Sql
-  70: "the database is closed", // db/node-sqlite.ts: DbError.Unavailable; db/wa-sqlite-engine.ts: DbError.Unavailable
-  71: "the SQL holds no statement", // db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql
-  72: "only one statement per call: use a migration for several", // db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql
-  73: "the statement has {0} parameters, {1} were given", // db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql
-  74: "node:sqlite is not available (Node 22.5 or later): {0}", // db/node-sqlite.ts: DbError.Unavailable
-  75: "cannot create {0}: {1}", // db/node-sqlite.ts: DbError.Unavailable
-  76: "the database worker has no connection {0}", // db/protocol.ts: DbError.Unavailable
-  77: "the database worker failed{0}", // db/protocol.ts: fail
-  78: "the database worker sent a message that could not be read", // db/protocol.ts: fail
-  79: "the database worker could not start: {0}", // db/protocol.ts: fail
-  80: "the database worker cannot take the call: {0}", // db/protocol.ts: DbError.Unavailable
-  81: "parameter {0} is out of range", // db/wa-sqlite-engine.ts: sqliteError
-  82: "parameter {0} could not be bound", // db/wa-sqlite-engine.ts: sqliteError
-  83: "this platform has no Worker: pass `worker`", // db/wa-sqlite.ts: Error
+  59: null, // retired: db-worker.ts says it in both flavours (data: a port error's field, which the core receives)
+  60: null, // retired: db-worker.ts says it in both flavours (data: a port error's field, which the core receives)
+  61: null, // retired: db/binding.ts says it in both flavours (data: a port error's field, which the core receives)
+  62: null, // retired: db/binding.ts says it in both flavours (data: a port error's field, which the core receives)
+  63: null, // retired: db/binding.ts says it in both flavours (data: a port error's field, which the core receives)
+  64: null, // retired: db/binding.ts says it in both flavours (data: a port error's field, which the core receives)
+  65: null, // retired: db/binding.ts says it in both flavours (data: a port error's field, which the core receives)
+  66: null, // retired: db/binding.ts says it in both flavours (data: a port error's field, which the core receives)
+  67: null, // retired: db/binding.ts says it in both flavours (data: a port error's field, which the core receives)
+  68: null, // retired: db/binding.ts says it in both flavours (data: a port error's field, which the core receives)
+  69: null, // retired: db/node-sqlite.ts says it in both flavours (data: a port error's field, which the core receives)
+  70: null, // retired: db/node-sqlite.ts says it in both flavours (data: a port error's field, which the core receives)
+  71: null, // retired: db/node-sqlite.ts says it in both flavours (data: a port error's field, which the core receives)
+  72: null, // retired: db/node-sqlite.ts says it in both flavours (data: a port error's field, which the core receives)
+  73: null, // retired: db/node-sqlite.ts says it in both flavours (data: a port error's field, which the core receives)
+  74: null, // retired: db/node-sqlite.ts says it in both flavours (data: a port error's field, which the core receives)
+  75: null, // retired: db/node-sqlite.ts says it in both flavours (data: a port error's field, which the core receives)
+  76: null, // retired: db/protocol.ts says it in both flavours (data: a port error's field, which the core receives)
+  77: null, // retired: db/protocol.ts says it in both flavours (data: a port error's field, which the core receives)
+  78: null, // retired: db/protocol.ts says it in both flavours (data: a port error's field, which the core receives)
+  79: null, // retired: db/protocol.ts says it in both flavours (data: a port error's field, which the core receives)
+  80: null, // retired: db/protocol.ts says it in both flavours (data: a port error's field, which the core receives)
+  81: null, // retired: db/wa-sqlite-engine.ts says it in both flavours (data: a port error's field, which the core receives)
+  82: null, // retired: db/wa-sqlite-engine.ts says it in both flavours (data: a port error's field, which the core receives)
+  83: null, // retired: db/wa-sqlite.ts says it in both flavours (data: a port error's field, which the core receives)
   84: "the dev server no longer has this core's objects (it was restarted, or the session expired); load a new core", // errors-rare.ts: Parameter
   85: "the Undra core rejected the snapshot (code {0}); a rejected restore leaves the core unchanged", // errors-rare.ts: super("restore")
   86: "the call failed with a typed error", // errors.ts: ReturnStatement
@@ -131,48 +131,48 @@ const MESSAGES: Readonly<Record<number, string | null>> = {
   111: "this Node has no {0}", // node-builtin.ts: Error
   112: "the runtime's {0} could not be loaded: {1}", // on-demand.ts: UndraTransportError("closed")
   113: "{0} method 0x{1}", // port-dispatch.ts: ReturnStatement
-  114: "this platform cannot send WebSocket headers: put the credential in the URL or a subprotocol", // realtime/browser-websocket.ts: VariableDeclaration
-  115: "the core did not keep up", // realtime/browser-websocket.ts: VariableDeclaration
-  116: "a binary message arrived as a Blob: the platform ignored binaryType \"arraybuffer\"", // realtime/browser-websocket.ts: WsError.Protocol
-  117: "the connection dropped without a close frame (1006)", // realtime/browser-websocket.ts: WsError.Network
-  118: "the WebSocket is not open", // realtime/browser-websocket.ts: WsError.Network; realtime/node-websocket.ts: WsError.Network
-  119: "the connection closed while a message was queued", // realtime/browser-websocket.ts: WsError.Network; realtime/node-websocket.ts: WsError.Network
-  120: "this platform has no WebSocket", // realtime/browser-websocket.ts: WsError.Refused
-  121: "the WebSocket could not connect", // realtime/browser-websocket.ts: VariableDeclaration
+  114: null, // retired: realtime/browser-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  115: null, // retired: realtime/browser-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  116: null, // retired: realtime/browser-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  117: null, // retired: realtime/browser-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  118: null, // retired: realtime/browser-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  119: null, // retired: realtime/browser-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  120: null, // retired: realtime/browser-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  121: null, // retired: realtime/browser-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
   122: "the events of this stream were already taken", // realtime/fetch-sse.ts: TypeError
-  123: "the event stream is not UTF-8", // realtime/fetch-sse.ts: SseError.Protocol
-  124: "this platform has no fetch", // realtime/fetch-sse.ts: SseError.Refused
-  125: "the server answered {0}{1}", // realtime/fetch-sse.ts: SseError.Refused
-  126: "expected text/event-stream, got {0}", // realtime/fetch-sse.ts: SseError.Protocol
-  127: "the answer has no body", // realtime/fetch-sse.ts: SseError.Protocol
+  123: null, // retired: realtime/fetch-sse.ts says it in both flavours (data: a port error's field, which the core receives)
+  124: null, // retired: realtime/fetch-sse.ts says it in both flavours (data: a port error's field, which the core receives)
+  125: null, // retired: realtime/fetch-sse.ts says it in both flavours (data: a port error's field, which the core receives)
+  126: null, // retired: realtime/fetch-sse.ts says it in both flavours (data: a port error's field, which the core receives)
+  127: null, // retired: realtime/fetch-sse.ts says it in both flavours (data: a port error's field, which the core receives)
   128: "the messages of this connection were already taken", // realtime/inbox.ts: TypeError
   129: "a next() is already pending", // realtime/inbox.ts: TypeError
   130: "ByteQueue.at past the end", // realtime/node-websocket.ts: RangeError
-  131: "the connection dropped without a close frame", // realtime/node-websocket.ts: this.#dropped
-  132: "a frame has reserved bits set", // realtime/node-websocket.ts: this.#fail
-  133: "the server masked a frame", // realtime/node-websocket.ts: this.#fail
-  134: "a frame of {0} bytes is larger than the limit ({1})", // realtime/node-websocket.ts: this.#fail
-  135: "a control frame is fragmented or longer than 125 bytes", // realtime/node-websocket.ts: this.#fail
-  136: "unknown control opcode {0}", // realtime/node-websocket.ts: this.#fail
-  137: "a new message started inside a fragmented one", // realtime/node-websocket.ts: this.#fail
-  138: "a continuation frame without a message", // realtime/node-websocket.ts: this.#fail
-  139: "unknown data opcode {0}", // realtime/node-websocket.ts: this.#fail
-  140: "a message is larger than the limit ({0} bytes)", // realtime/node-websocket.ts: this.#fail
-  141: "a text message is not UTF-8", // realtime/node-websocket.ts: this.#fail
-  142: "a close frame with a one-byte payload", // realtime/node-websocket.ts: this.#fail
-  143: "a close reason is not UTF-8", // realtime/node-websocket.ts: this.#fail
-  144: "invalid URL: {0}", // realtime/node-websocket.ts: WsError.Refused; realtime/sse.ts: SseError.Refused; realtime/websocket.ts: WsError.Refused
-  145: "nodeWebSocket needs Node ({0})", // realtime/node-websocket.ts: WsError.Refused
-  146: "the server's Sec-WebSocket-Accept does not match the key", // realtime/node-websocket.ts: WsError.Protocol
-  147: "the server chose a subprotocol that was not offered: {0}", // realtime/node-websocket.ts: WsError.Protocol
-  148: "the server answered the upgrade with {0} {1}", // realtime/node-websocket.ts: PropertyAccessExpression
-  149: "no event stream {0}", // realtime/sse.ts: SseError.Network
-  150: "a next is already pending on stream {0}", // realtime/sse.ts: SseError.Protocol
-  151: "the core went away while the stream opened", // realtime/sse.ts: SseError.Network
-  152: "no WebSocket connection {0}", // realtime/websocket.ts: WsError.Network
-  153: "a receive is already pending on connection {0}", // realtime/websocket.ts: WsError.Protocol
-  154: "the connection ended", // realtime/websocket.ts: WsError.Network
-  155: "the core went away while the connection opened", // realtime/websocket.ts: WsError.Network
+  131: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  132: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  133: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  134: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  135: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  136: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  137: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  138: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  139: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  140: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  141: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  142: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  143: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  144: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  145: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  146: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  147: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  148: null, // retired: realtime/node-websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  149: null, // retired: realtime/sse.ts says it in both flavours (data: a port error's field, which the core receives)
+  150: null, // retired: realtime/sse.ts says it in both flavours (data: a port error's field, which the core receives)
+  151: null, // retired: realtime/sse.ts says it in both flavours (data: a port error's field, which the core receives)
+  152: null, // retired: realtime/websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  153: null, // retired: realtime/websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  154: null, // retired: realtime/websocket.ts says it in both flavours (data: a port error's field, which the core receives)
+  155: null, // retired: realtime/websocket.ts says it in both flavours (data: a port error's field, which the core receives)
   156: "the wasm core trapped and was restarted from its last snapshot; this call may or may not have run before the trap, and it is not retried ({0})", // recovery.ts: UndraTransportError("restarted")
   157: "the wasm core trapped ({0}) and was restarted from no snapshot", // recovery.ts: BinaryExpression
   158: "a snapshot of {0} bytes was not kept for crash recovery: it is larger than maxSnapshotBytes ({1}); the previous one stays (said once)", // recovery.ts: log
@@ -262,7 +262,7 @@ const MESSAGES: Readonly<Record<number, string | null>> = {
   242: "the worker was not started with recovery", // worker.ts: UndraTransportError("unsupported")
   243: "the wasm core trapped ({0}) and was restarted from a snapshot {1} ms old", // recovery.ts: UndraCoreRestarted
   244: "keyed patch operation #{0} ({1}) index {2} is out of bounds for a list of length {3}", // wire/errors.ts: PatchError
-  245: "this Node's node:sqlite does not keep text that holds U+0000 (it cuts it at the first one): the Db port carries text exactly, so it needs a newer Node (24 does)", // db/node-sqlite.ts: DbError.Unavailable
+  245: null, // retired: db/node-sqlite.ts says it in both flavours (data: a port error's field, which the core receives)
 };
 
 /**

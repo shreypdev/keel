@@ -3060,9 +3060,9 @@ the core and the project disagree about where Undra comes from, or the project i
 
 ## Runtime messages
 
-The JavaScript runtime (`@undra/runtime`) throws and logs these. Its **production build** (what `vite build`, webpack in production mode and anything else that asks for neither the `development` nor the `react-native` condition resolve) says a code, the values and a link instead of a sentence, so a page does not carry the prose of an error whose class, `kind` and fields it already has: `T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017`. Its **development build** (Vite's dev server, Vitest, React Native) says the sentence. Both throw the same classes with the same `kind` and fields; only `message` differs, so nothing a program can branch on changes. Codes are never reused.
+The JavaScript runtime (`@undra/runtime`) throws and logs these. Its **production build** (what `vite build`, webpack in production mode and anything else that asks for neither the `development` nor the `react-native` condition resolve) says a code, the values and a link instead of a sentence, so a page does not carry the prose of an error whose class, `kind` and fields it already has: `T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017`. Its **development build** (Vite's dev server, Vitest, React Native) says the sentence. Both throw the same classes with the same `kind` and fields; only `message` differs, so nothing a program can branch on changes. Text the runtime hands on as data, the field of a port's typed error (which the core receives) and a WebSocket close frame's reason (which the peer receives), is not a message: it is the same sentence in both builds. Codes are never reused.
 
-### The T codes (245)
+### The T codes (167)
 
 The sentence is what the development build says; `{0}`, `{1}`, ... are the values the production message lists, in that order.
 
@@ -3074,23 +3074,9 @@ The sentence is what the development build says; `{0}`, `{1}`, ... are the value
 | [`T0004`](https://shreypdev.github.io/undra/docs/errors.html#T0004) | unknown SseError variant: {0} | adapters/codecs.ts: TypeError |
 | [`T0005`](https://shreypdev.github.io/undra/docs/errors.html#T0005) | unknown DbValue variant: {0} | adapters/codecs.ts: TypeError |
 | [`T0006`](https://shreypdev.github.io/undra/docs/errors.html#T0006) | unknown DbError variant: {0} | adapters/codecs.ts: TypeError |
-| [`T0007`](https://shreypdev.github.io/undra/docs/errors.html#T0007) | needs the origin private file system | adapters/fs.ts: VariableDeclaration |
-| [`T0008`](https://shreypdev.github.io/undra/docs/errors.html#T0008) | the path is empty | adapters/fs.ts: FsError.Io |
-| [`T0009`](https://shreypdev.github.io/undra/docs/errors.html#T0009) | fetch is not available on this platform | adapters/http.ts: HttpError.Network |
-| [`T0010`](https://shreypdev.github.io/undra/docs/errors.html#T0010) | could not open IndexedDB database {0} | adapters/idb.ts: Error |
-| [`T0011`](https://shreypdev.github.io/undra/docs/errors.html#T0011) | opening IndexedDB database {0} is blocked by another connection | adapters/idb.ts: Error |
-| [`T0012`](https://shreypdev.github.io/undra/docs/errors.html#T0012) | IndexedDB request failed | adapters/idb.ts: Error |
-| [`T0013`](https://shreypdev.github.io/undra/docs/errors.html#T0013) | IndexedDB transaction failed | adapters/idb.ts: Error |
-| [`T0014`](https://shreypdev.github.io/undra/docs/errors.html#T0014) | IndexedDB transaction aborted | adapters/idb.ts: Error |
-| [`T0015`](https://shreypdev.github.io/undra/docs/errors.html#T0015) | a stored value is not binary | adapters/idb.ts: TypeError |
-| [`T0016`](https://shreypdev.github.io/undra/docs/errors.html#T0016) | {0} is not bytes | adapters/kv.ts: StorageError.Corrupt |
-| [`T0017`](https://shreypdev.github.io/undra/docs/errors.html#T0017) | IndexedDB cursor failed | adapters/kv.ts: Error |
 | [`T0018`](https://shreypdev.github.io/undra/docs/errors.html#T0018) | namespace {0} is not [a-z][a-z0-9_]{0,31} | adapters/names.ts: UndraError("options") |
 | [`T0019`](https://shreypdev.github.io/undra/docs/errors.html#T0019) | Rng.fill: {0} bytes requested, the limit is {1} | adapters/ports.ts: RangeError |
 | [`T0020`](https://shreypdev.github.io/undra/docs/errors.html#T0020) | {0}: {1} ({2}) | adapters/ports.ts: log |
-| [`T0021`](https://shreypdev.github.io/undra/docs/errors.html#T0021) | needs a secure context | adapters/secure.ts: VariableDeclaration |
-| [`T0022`](https://shreypdev.github.io/undra/docs/errors.html#T0022) | {0} is not in the secure-store format | adapters/secure.ts: StorageError.Corrupt |
-| [`T0023`](https://shreypdev.github.io/undra/docs/errors.html#T0023) | {0} does not decrypt | adapters/secure.ts: StorageError.Corrupt |
 | [`T0024`](https://shreypdev.github.io/undra/docs/errors.html#T0024) | WebCrypto is required (crypto.getRandomValues) | adapters/system.ts: VariableDeclaration |
 | [`T0025`](https://shreypdev.github.io/undra/docs/errors.html#T0025) | a typed error that does not decode ({0} bytes) | call-error.ts: UndraCallError.Malformed |
 | [`T0026`](https://shreypdev.github.io/undra/docs/errors.html#T0026) | a stream without an error type ended with a typed error item ({0} bytes) | call-error.ts: UndraCallError.Malformed |
@@ -3126,31 +3112,6 @@ The sentence is what the development build says; `{0}`, `{1}`, ... are the value
 | [`T0056`](https://shreypdev.github.io/undra/docs/errors.html#T0056) | the core sent a truncated reply | core.ts: UndraTransportError("protocol") |
 | [`T0057`](https://shreypdev.github.io/undra/docs/errors.html#T0057) | the core sent reply status {0} | core.ts: UndraTransportError("protocol"); stream-support.ts: UndraTransportError("protocol") |
 | [`T0058`](https://shreypdev.github.io/undra/docs/errors.html#T0058) | this method is a stream; call it with UndraCore.stream | core.ts: UndraError("state") |
-| [`T0059`](https://shreypdev.github.io/undra/docs/errors.html#T0059) | this database worker keeps the databases of the core `{0}` ({1}), not those of `{2}`: give each core its own waSqliteDb(), or set `directory` | db-worker.ts: DbError.Unavailable |
-| [`T0060`](https://shreypdev.github.io/undra/docs/errors.html#T0060) | wa-sqlite could not start ({0}): {1} | db-worker.ts: DbError.Unavailable |
-| [`T0061`](https://shreypdev.github.io/undra/docs/errors.html#T0061) | invalid database name {0}: use 1 to 64 of A-Z a-z 0-9 . _ - (not starting with .), or ":memory:" | db/binding.ts: DbError.Unavailable |
-| [`T0062`](https://shreypdev.github.io/undra/docs/errors.html#T0062) | migration versions must strictly increase, starting at 1 | db/binding.ts: DbError.Migration |
-| [`T0063`](https://shreypdev.github.io/undra/docs/errors.html#T0063) | migration versions must be at most {0}: SQLite keeps the version in a signed 32-bit integer (PRAGMA user_version) | db/binding.ts: DbError.Migration |
-| [`T0064`](https://shreypdev.github.io/undra/docs/errors.html#T0064) | no open database or transaction {0} | db/binding.ts: DbError.Unavailable |
-| [`T0065`](https://shreypdev.github.io/undra/docs/errors.html#T0065) | transaction {0} is over | db/binding.ts: DbError.Unavailable |
-| [`T0066`](https://shreypdev.github.io/undra/docs/errors.html#T0066) | the database is at version {0}, newer than the newest migration ({1}) | db/binding.ts: DbError.Migration |
-| [`T0067`](https://shreypdev.github.io/undra/docs/errors.html#T0067) | the core went away while the database opened | db/binding.ts: DbError.Unavailable |
-| [`T0068`](https://shreypdev.github.io/undra/docs/errors.html#T0068) | a transaction cannot begin inside a transaction | db/binding.ts: DbError.Sql |
-| [`T0069`](https://shreypdev.github.io/undra/docs/errors.html#T0069) | node:sqlite returned a value of an unknown kind ({0}) | db/node-sqlite.ts: DbError.Sql |
-| [`T0070`](https://shreypdev.github.io/undra/docs/errors.html#T0070) | the database is closed | db/node-sqlite.ts: DbError.Unavailable; db/wa-sqlite-engine.ts: DbError.Unavailable |
-| [`T0071`](https://shreypdev.github.io/undra/docs/errors.html#T0071) | the SQL holds no statement | db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql |
-| [`T0072`](https://shreypdev.github.io/undra/docs/errors.html#T0072) | only one statement per call: use a migration for several | db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql |
-| [`T0073`](https://shreypdev.github.io/undra/docs/errors.html#T0073) | the statement has {0} parameters, {1} were given | db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql |
-| [`T0074`](https://shreypdev.github.io/undra/docs/errors.html#T0074) | node:sqlite is not available (Node 22.5 or later): {0} | db/node-sqlite.ts: DbError.Unavailable |
-| [`T0075`](https://shreypdev.github.io/undra/docs/errors.html#T0075) | cannot create {0}: {1} | db/node-sqlite.ts: DbError.Unavailable |
-| [`T0076`](https://shreypdev.github.io/undra/docs/errors.html#T0076) | the database worker has no connection {0} | db/protocol.ts: DbError.Unavailable |
-| [`T0077`](https://shreypdev.github.io/undra/docs/errors.html#T0077) | the database worker failed{0} | db/protocol.ts: fail |
-| [`T0078`](https://shreypdev.github.io/undra/docs/errors.html#T0078) | the database worker sent a message that could not be read | db/protocol.ts: fail |
-| [`T0079`](https://shreypdev.github.io/undra/docs/errors.html#T0079) | the database worker could not start: {0} | db/protocol.ts: fail |
-| [`T0080`](https://shreypdev.github.io/undra/docs/errors.html#T0080) | the database worker cannot take the call: {0} | db/protocol.ts: DbError.Unavailable |
-| [`T0081`](https://shreypdev.github.io/undra/docs/errors.html#T0081) | parameter {0} is out of range | db/wa-sqlite-engine.ts: sqliteError |
-| [`T0082`](https://shreypdev.github.io/undra/docs/errors.html#T0082) | parameter {0} could not be bound | db/wa-sqlite-engine.ts: sqliteError |
-| [`T0083`](https://shreypdev.github.io/undra/docs/errors.html#T0083) | this platform has no Worker: pass `worker` | db/wa-sqlite.ts: Error |
 | [`T0084`](https://shreypdev.github.io/undra/docs/errors.html#T0084) | the dev server no longer has this core's objects (it was restarted, or the session expired); load a new core | errors-rare.ts: Parameter |
 | [`T0085`](https://shreypdev.github.io/undra/docs/errors.html#T0085) | the Undra core rejected the snapshot (code {0}); a rejected restore leaves the core unchanged | errors-rare.ts: super("restore") |
 | [`T0086`](https://shreypdev.github.io/undra/docs/errors.html#T0086) | the call failed with a typed error | errors.ts: ReturnStatement |
@@ -3181,48 +3142,10 @@ The sentence is what the development build says; `{0}`, `{1}`, ... are the value
 | [`T0111`](https://shreypdev.github.io/undra/docs/errors.html#T0111) | this Node has no {0} | node-builtin.ts: Error |
 | [`T0112`](https://shreypdev.github.io/undra/docs/errors.html#T0112) | the runtime's {0} could not be loaded: {1} | on-demand.ts: UndraTransportError("closed") |
 | [`T0113`](https://shreypdev.github.io/undra/docs/errors.html#T0113) | {0} method 0x{1} | port-dispatch.ts: ReturnStatement |
-| [`T0114`](https://shreypdev.github.io/undra/docs/errors.html#T0114) | this platform cannot send WebSocket headers: put the credential in the URL or a subprotocol | realtime/browser-websocket.ts: VariableDeclaration |
-| [`T0115`](https://shreypdev.github.io/undra/docs/errors.html#T0115) | the core did not keep up | realtime/browser-websocket.ts: VariableDeclaration |
-| [`T0116`](https://shreypdev.github.io/undra/docs/errors.html#T0116) | a binary message arrived as a Blob: the platform ignored binaryType "arraybuffer" | realtime/browser-websocket.ts: WsError.Protocol |
-| [`T0117`](https://shreypdev.github.io/undra/docs/errors.html#T0117) | the connection dropped without a close frame (1006) | realtime/browser-websocket.ts: WsError.Network |
-| [`T0118`](https://shreypdev.github.io/undra/docs/errors.html#T0118) | the WebSocket is not open | realtime/browser-websocket.ts: WsError.Network; realtime/node-websocket.ts: WsError.Network |
-| [`T0119`](https://shreypdev.github.io/undra/docs/errors.html#T0119) | the connection closed while a message was queued | realtime/browser-websocket.ts: WsError.Network; realtime/node-websocket.ts: WsError.Network |
-| [`T0120`](https://shreypdev.github.io/undra/docs/errors.html#T0120) | this platform has no WebSocket | realtime/browser-websocket.ts: WsError.Refused |
-| [`T0121`](https://shreypdev.github.io/undra/docs/errors.html#T0121) | the WebSocket could not connect | realtime/browser-websocket.ts: VariableDeclaration |
 | [`T0122`](https://shreypdev.github.io/undra/docs/errors.html#T0122) | the events of this stream were already taken | realtime/fetch-sse.ts: TypeError |
-| [`T0123`](https://shreypdev.github.io/undra/docs/errors.html#T0123) | the event stream is not UTF-8 | realtime/fetch-sse.ts: SseError.Protocol |
-| [`T0124`](https://shreypdev.github.io/undra/docs/errors.html#T0124) | this platform has no fetch | realtime/fetch-sse.ts: SseError.Refused |
-| [`T0125`](https://shreypdev.github.io/undra/docs/errors.html#T0125) | the server answered {0}{1} | realtime/fetch-sse.ts: SseError.Refused |
-| [`T0126`](https://shreypdev.github.io/undra/docs/errors.html#T0126) | expected text/event-stream, got {0} | realtime/fetch-sse.ts: SseError.Protocol |
-| [`T0127`](https://shreypdev.github.io/undra/docs/errors.html#T0127) | the answer has no body | realtime/fetch-sse.ts: SseError.Protocol |
 | [`T0128`](https://shreypdev.github.io/undra/docs/errors.html#T0128) | the messages of this connection were already taken | realtime/inbox.ts: TypeError |
 | [`T0129`](https://shreypdev.github.io/undra/docs/errors.html#T0129) | a next() is already pending | realtime/inbox.ts: TypeError |
 | [`T0130`](https://shreypdev.github.io/undra/docs/errors.html#T0130) | ByteQueue.at past the end | realtime/node-websocket.ts: RangeError |
-| [`T0131`](https://shreypdev.github.io/undra/docs/errors.html#T0131) | the connection dropped without a close frame | realtime/node-websocket.ts: this.#dropped |
-| [`T0132`](https://shreypdev.github.io/undra/docs/errors.html#T0132) | a frame has reserved bits set | realtime/node-websocket.ts: this.#fail |
-| [`T0133`](https://shreypdev.github.io/undra/docs/errors.html#T0133) | the server masked a frame | realtime/node-websocket.ts: this.#fail |
-| [`T0134`](https://shreypdev.github.io/undra/docs/errors.html#T0134) | a frame of {0} bytes is larger than the limit ({1}) | realtime/node-websocket.ts: this.#fail |
-| [`T0135`](https://shreypdev.github.io/undra/docs/errors.html#T0135) | a control frame is fragmented or longer than 125 bytes | realtime/node-websocket.ts: this.#fail |
-| [`T0136`](https://shreypdev.github.io/undra/docs/errors.html#T0136) | unknown control opcode {0} | realtime/node-websocket.ts: this.#fail |
-| [`T0137`](https://shreypdev.github.io/undra/docs/errors.html#T0137) | a new message started inside a fragmented one | realtime/node-websocket.ts: this.#fail |
-| [`T0138`](https://shreypdev.github.io/undra/docs/errors.html#T0138) | a continuation frame without a message | realtime/node-websocket.ts: this.#fail |
-| [`T0139`](https://shreypdev.github.io/undra/docs/errors.html#T0139) | unknown data opcode {0} | realtime/node-websocket.ts: this.#fail |
-| [`T0140`](https://shreypdev.github.io/undra/docs/errors.html#T0140) | a message is larger than the limit ({0} bytes) | realtime/node-websocket.ts: this.#fail |
-| [`T0141`](https://shreypdev.github.io/undra/docs/errors.html#T0141) | a text message is not UTF-8 | realtime/node-websocket.ts: this.#fail |
-| [`T0142`](https://shreypdev.github.io/undra/docs/errors.html#T0142) | a close frame with a one-byte payload | realtime/node-websocket.ts: this.#fail |
-| [`T0143`](https://shreypdev.github.io/undra/docs/errors.html#T0143) | a close reason is not UTF-8 | realtime/node-websocket.ts: this.#fail |
-| [`T0144`](https://shreypdev.github.io/undra/docs/errors.html#T0144) | invalid URL: {0} | realtime/node-websocket.ts: WsError.Refused; realtime/sse.ts: SseError.Refused; realtime/websocket.ts: WsError.Refused |
-| [`T0145`](https://shreypdev.github.io/undra/docs/errors.html#T0145) | nodeWebSocket needs Node ({0}) | realtime/node-websocket.ts: WsError.Refused |
-| [`T0146`](https://shreypdev.github.io/undra/docs/errors.html#T0146) | the server's Sec-WebSocket-Accept does not match the key | realtime/node-websocket.ts: WsError.Protocol |
-| [`T0147`](https://shreypdev.github.io/undra/docs/errors.html#T0147) | the server chose a subprotocol that was not offered: {0} | realtime/node-websocket.ts: WsError.Protocol |
-| [`T0148`](https://shreypdev.github.io/undra/docs/errors.html#T0148) | the server answered the upgrade with {0} {1} | realtime/node-websocket.ts: PropertyAccessExpression |
-| [`T0149`](https://shreypdev.github.io/undra/docs/errors.html#T0149) | no event stream {0} | realtime/sse.ts: SseError.Network |
-| [`T0150`](https://shreypdev.github.io/undra/docs/errors.html#T0150) | a next is already pending on stream {0} | realtime/sse.ts: SseError.Protocol |
-| [`T0151`](https://shreypdev.github.io/undra/docs/errors.html#T0151) | the core went away while the stream opened | realtime/sse.ts: SseError.Network |
-| [`T0152`](https://shreypdev.github.io/undra/docs/errors.html#T0152) | no WebSocket connection {0} | realtime/websocket.ts: WsError.Network |
-| [`T0153`](https://shreypdev.github.io/undra/docs/errors.html#T0153) | a receive is already pending on connection {0} | realtime/websocket.ts: WsError.Protocol |
-| [`T0154`](https://shreypdev.github.io/undra/docs/errors.html#T0154) | the connection ended | realtime/websocket.ts: WsError.Network |
-| [`T0155`](https://shreypdev.github.io/undra/docs/errors.html#T0155) | the core went away while the connection opened | realtime/websocket.ts: WsError.Network |
 | [`T0156`](https://shreypdev.github.io/undra/docs/errors.html#T0156) | the wasm core trapped and was restarted from its last snapshot; this call may or may not have run before the trap, and it is not retried ({0}) | recovery.ts: UndraTransportError("restarted") |
 | [`T0157`](https://shreypdev.github.io/undra/docs/errors.html#T0157) | the wasm core trapped ({0}) and was restarted from no snapshot | recovery.ts: BinaryExpression |
 | [`T0158`](https://shreypdev.github.io/undra/docs/errors.html#T0158) | a snapshot of {0} bytes was not kept for crash recovery: it is larger than maxSnapshotBytes ({1}); the previous one stays (said once) | recovery.ts: log |
@@ -3270,8 +3193,8 @@ The sentence is what the development build says; `{0}`, `{1}`, ... are the value
 | [`T0200`](https://shreypdev.github.io/undra/docs/errors.html#T0200) | the core returned a null UndraBuf | transport/wasm-main.ts: UndraTransportError("protocol") |
 | [`T0201`](https://shreypdev.github.io/undra/docs/errors.html#T0201) | the core is not started | transport/wasm-main.ts: ConditionalExpression; transport/wasm-worker.ts: ConditionalExpression |
 | [`T0202`](https://shreypdev.github.io/undra/docs/errors.html#T0202) | the wasm core trapped: {0} | transport/wasm-main.ts: UndraTransportError("trap") |
-| [`T0203`](https://shreypdev.github.io/undra/docs/errors.html#T0203) | the core does not export undra_snapshot | transport/wasm-snapshot.ts: UndraTransportError("unsupported") |
-| [`T0204`](https://shreypdev.github.io/undra/docs/errors.html#T0204) | the core does not export undra_restore | transport/wasm-snapshot.ts: UndraTransportError("unsupported") |
+| [`T0203`](https://shreypdev.github.io/undra/docs/errors.html#T0203) | the core does not export undra_snapshot | transport/wasm-main.ts: UndraTransportError("unsupported") |
+| [`T0204`](https://shreypdev.github.io/undra/docs/errors.html#T0204) | the core does not export undra_restore | transport/wasm-main.ts: UndraTransportError("unsupported") |
 | [`T0205`](https://shreypdev.github.io/undra/docs/errors.html#T0205) | the worker gave an incomplete answer | transport/wasm-worker.ts: UndraTransportError("protocol") |
 | [`T0206`](https://shreypdev.github.io/undra/docs/errors.html#T0206) | worker.ports needs this @undra/runtime's worker script (protocol 3) | transport/wasm-worker.ts: UndraTransportError("unsupported") |
 | [`T0207`](https://shreypdev.github.io/undra/docs/errors.html#T0207) | the worker sent an `envelopes` message without a list of envelopes | transport/wasm-worker.ts: UndraTransportError("protocol") |
@@ -3312,7 +3235,6 @@ The sentence is what the development build says; `{0}`, `{1}`, ... are the value
 | [`T0242`](https://shreypdev.github.io/undra/docs/errors.html#T0242) | the worker was not started with recovery | worker.ts: UndraTransportError("unsupported") |
 | [`T0243`](https://shreypdev.github.io/undra/docs/errors.html#T0243) | the wasm core trapped ({0}) and was restarted from a snapshot {1} ms old | recovery.ts: UndraCoreRestarted |
 | [`T0244`](https://shreypdev.github.io/undra/docs/errors.html#T0244) | keyed patch operation #{0} ({1}) index {2} is out of bounds for a list of length {3} | wire/errors.ts: PatchError |
-| [`T0245`](https://shreypdev.github.io/undra/docs/errors.html#T0245) | this Node's node:sqlite does not keep text that holds U+0000 (it cuts it at the first one): the Db port carries text exactly, so it needs a newer Node (24 does) | db/node-sqlite.ts: DbError.Unavailable |
 
 ### Wire failures
 

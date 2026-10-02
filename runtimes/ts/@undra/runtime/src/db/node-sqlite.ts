@@ -4,7 +4,6 @@ import type { DbAdapter, DbConnection } from "./binding.js";
 import { nodeBuiltin } from "../node-builtin.js";
 import { sqliteError } from "./errors.js";
 import { isTrivia, scanParameters } from "./sql.js";
-import { msg } from "../messages.js";
 
 /*
  * `nodeSqliteDb()`: the Db adapter of Node, over the built-in `node:sqlite` (`DatabaseSync`, Node
@@ -66,7 +65,7 @@ function fromNode(value: unknown): DbValue {
   if (typeof value === "number") return { kind: "real", value };
   if (typeof value === "string") return { kind: "text", value };
   if (value instanceof Uint8Array) return { kind: "blob", value };
-  throw new DbError.Sql(msg(69, typeof value));
+  throw new DbError.Sql(`node:sqlite returned a value of an unknown kind (${typeof value})`);
 }
 
 /** The text {@link requireTextWithNul} sends through `node:sqlite`: U+0000 in the middle of it. */
@@ -90,7 +89,7 @@ function requireTextWithNul(db: NodeDatabase): void {
     throw translate(error);
   }
   if (row?.[0] !== PROBE || row[1] !== 3n) {
-    throw new DbError.Unavailable(msg(245));
+    throw new DbError.Unavailable("this Node's node:sqlite does not keep text that holds U+0000 (it cuts it at the first one): the Db port carries text exactly, so it needs a newer Node (24 does)");
   }
 }
 
@@ -105,8 +104,8 @@ class NodeSqliteConnection implements DbConnection {
 
   /** Prepares exactly one statement and the arguments that bind `params` to it positionally. */
   #prepare(sql: string, params: readonly DbValue[]): { readonly statement: NodeStatement; readonly args: unknown[] } {
-    if (this.#closed) throw new DbError.Unavailable(msg(70));
-    if (isTrivia(sql)) throw new DbError.Sql(msg(71));
+    if (this.#closed) throw new DbError.Unavailable("the database is closed");
+    if (isTrivia(sql)) throw new DbError.Sql("the SQL holds no statement");
     let statement: NodeStatement;
     try {
       statement = this.#db.prepare(sql);
@@ -115,9 +114,9 @@ class NodeSqliteConnection implements DbConnection {
     }
     const source = statement.sourceSQL;
     const rest = sql.startsWith(source) ? sql.slice(source.length) : "";
-    if (!isTrivia(rest)) throw new DbError.Sql(msg(72));
+    if (!isTrivia(rest)) throw new DbError.Sql("only one statement per call: use a migration for several");
     const { count, named } = scanParameters(source);
-    if (params.length !== count) throw new DbError.Sql(msg(73, count, params.length));
+    if (params.length !== count) throw new DbError.Sql(`the statement has ${count} parameters, ${params.length} were given`);
     // node:sqlite binds anonymous values to the indices without a :name/@name/$name, in order, and
     // named ones through an object (SQLite's own numbering, so `?NNN` and repeats bind as SQLite says).
     const anonymous: NodeSqlValue[] = [];
@@ -155,7 +154,7 @@ class NodeSqliteConnection implements DbConnection {
   }
 
   async executeScript(sql: string): Promise<void> {
-    if (this.#closed) throw new DbError.Unavailable(msg(70));
+    if (this.#closed) throw new DbError.Unavailable("the database is closed");
     try {
       this.#db.exec(sql);
     } catch (error) {
@@ -206,7 +205,7 @@ export function nodeSqliteDb(options: NodeSqliteDbOptions): DbAdapter {
       try {
         sqlite = nodeBuiltin<NodeSqliteModule>("node:sqlite");
       } catch (error) {
-        throw new DbError.Unavailable(msg(74, errorMessage(error)));
+        throw new DbError.Unavailable(`node:sqlite is not available (Node 22.5 or later): ${errorMessage(error)}`);
       }
       let path = ":memory:";
       if (name !== ":memory:") {
@@ -215,7 +214,7 @@ export function nodeSqliteDb(options: NodeSqliteDbOptions): DbAdapter {
           await made;
         } catch (error) {
           made = null;
-          throw new DbError.Unavailable(msg(75, directory, errorMessage(error)));
+          throw new DbError.Unavailable(`cannot create ${directory}: ${errorMessage(error)}`);
         }
         path = `${directory}/${name}.sqlite`;
       }

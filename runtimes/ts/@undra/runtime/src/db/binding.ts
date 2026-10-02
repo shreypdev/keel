@@ -5,7 +5,6 @@ import { UndraPortError } from "../errors.js";
 import { errorMessage } from "../platform.js";
 import type { PortImpl } from "../port.js";
 import { UndraReader, codecs, encodeValue } from "../wire/index.js";
-import { msg } from "../messages.js";
 
 /**
  * SQLite on the platform, for the core's `Db` port (ADR-048): opens a database by name. Implement
@@ -66,7 +65,7 @@ export function validateDbName(name: string): void {
   const valid = name === ":memory:" || (/^[A-Za-z0-9._-]{1,64}$/.test(name) && !name.startsWith("."));
   if (!valid) {
     throw new DbError.Unavailable(
-      msg(61, JSON.stringify(name)),
+      `invalid database name ${JSON.stringify(name)}: use 1 to 64 of A-Z a-z 0-9 . _ - (not starting with .), or ":memory:"`,
     );
   }
 }
@@ -75,11 +74,11 @@ export function validateDbName(name: string): void {
 export function validateMigrations(migrations: readonly DbMigration[]): void {
   let last = 0;
   for (const { version } of migrations) {
-    if (version <= last) throw new DbError.Migration(version, msg(62));
+    if (version <= last) throw new DbError.Migration(version, "migration versions must strictly increase, starting at 1");
     if (version > MAX_MIGRATION_VERSION) {
       throw new DbError.Migration(
         version,
-        msg(63, MAX_MIGRATION_VERSION),
+        `migration versions must be at most ${MAX_MIGRATION_VERSION}: SQLite keeps the version in a signed 32-bit integer (PRAGMA user_version)`,
       );
     }
     last = version;
@@ -189,7 +188,7 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
     return run;
   };
 
-  const noSuch = (id: number): DbError => new DbError.Unavailable(msg(64, id));
+  const noSuch = (id: number): DbError => new DbError.Unavailable(`no open database or transaction ${id}`);
 
   /** The database or transaction `id` names. */
   const target = (id: number): { readonly db: Database; readonly tx: Transaction | null } => {
@@ -197,7 +196,7 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
     if (tx !== undefined) return { db: tx.db, tx };
     const db = databases.get(id);
     if (db !== undefined && !db.closed) return { db, tx: null };
-    if (db === undefined && id > 0 && id < next) throw new DbError.Unavailable(msg(65, id));
+    if (db === undefined && id > 0 && id < next) throw new DbError.Unavailable(`transaction ${id} is over`);
     throw noSuch(id);
   };
 
@@ -285,7 +284,7 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
       const newest = wanted.at(-1)?.version ?? 0;
       const refuseNewer = (current: number): void => {
         if (wanted.length > 0 && current > newest) {
-          throw new DbError.Migration(current, msg(66, current, newest));
+          throw new DbError.Migration(current, `the database is at version ${current}, newer than the newest migration (${newest})`);
         }
       };
       let version = firstInteger(await conn.query("PRAGMA user_version", []));
@@ -323,7 +322,7 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
           version = last.version;
         }
       }
-      if (epoch !== asked) throw new DbError.Unavailable(msg(67));
+      if (epoch !== asked) throw new DbError.Unavailable("the core went away while the database opened");
       const id = next++;
       databases.set(id, { id, conn, closed: false, tx: null, waiters: new Set(), tail: Promise.resolve() });
       return { db: id, version };
@@ -354,7 +353,7 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
         const id = readArgs(args, (r) => r.readU32());
         return typed(async () => {
           const { db, tx } = target(id);
-          if (tx !== null) throw new DbError.Sql(msg(68));
+          if (tx !== null) throw new DbError.Sql("a transaction cannot begin inside a transaction");
           const started = await whenIdle(db, () => {
             const begun: Transaction = { id: next++, db };
             transactions.set(begun.id, begun);

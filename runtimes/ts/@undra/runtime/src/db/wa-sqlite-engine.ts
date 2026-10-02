@@ -2,7 +2,6 @@ import { DbError, type DbExecuted, type DbRows, type DbValue } from "../adapters
 import { errorMessage } from "../platform.js";
 import type { DbAdapter, DbConnection } from "./binding.js";
 import { sqliteError } from "./errors.js";
-import { msg } from "../messages.js";
 
 /*
  * The Db adapter over wa-sqlite's API (ADR-048 §7), written against the part of `SQLiteAPI` it uses
@@ -109,13 +108,13 @@ class WaSqliteConnection implements DbConnection {
    * positionally, runs `use` on it and finalizes it.
    */
   async #statement<T>(sql: string, params: readonly DbValue[], use: (stmt: number) => Promise<T>): Promise<T> {
-    if (this.#closed) throw new DbError.Unavailable(msg(70));
+    if (this.#closed) throw new DbError.Unavailable("the database is closed");
     const api = this.#api;
     const text = api.str_new(this.#db, sql);
     let stmt = 0;
     try {
       const prepared = await api.prepare_v2(this.#db, api.str_value(text));
-      if (prepared === null) throw new DbError.Sql(msg(71));
+      if (prepared === null) throw new DbError.Sql("the SQL holds no statement");
       stmt = prepared.stmt;
       let rest: { readonly stmt: number } | null;
       try {
@@ -125,10 +124,10 @@ class WaSqliteConnection implements DbConnection {
       }
       if (rest !== null) {
         if (rest.stmt !== 0) await api.finalize(rest.stmt);
-        throw new DbError.Sql(msg(72));
+        throw new DbError.Sql("only one statement per call: use a migration for several");
       }
       const count = api.bind_parameter_count(stmt);
-      if (params.length !== count) throw new DbError.Sql(msg(73, count, params.length));
+      if (params.length !== count) throw new DbError.Sql(`the statement has ${count} parameters, ${params.length} were given`);
       params.forEach((value, index) => {
         const at = index + 1;
         let rc: number;
@@ -149,8 +148,8 @@ class WaSqliteConnection implements DbConnection {
             rc = bindBytes(this.#module, stmt, at, value.value, "blob");
             break;
         }
-        if (rc === SQLITE_RANGE) throw sqliteError(rc, msg(81, at));
-        if (rc !== 0) throw sqliteError(rc, msg(82, at));
+        if (rc === SQLITE_RANGE) throw sqliteError(rc, `parameter ${at} is out of range`);
+        if (rc !== 0) throw sqliteError(rc, `parameter ${at} could not be bound`);
       });
       return await use(stmt);
     } catch (error) {
@@ -210,7 +209,7 @@ class WaSqliteConnection implements DbConnection {
   }
 
   async executeScript(sql: string): Promise<void> {
-    if (this.#closed) throw new DbError.Unavailable(msg(70));
+    if (this.#closed) throw new DbError.Unavailable("the database is closed");
     await guarded(() => this.#api.exec(this.#db, sql));
   }
 
