@@ -5,7 +5,8 @@
 #
 #   scripts/ci-local.sh                      all jobs, in a clone of HEAD (committed files only: CI sees nothing else)
 #   scripts/ci-local.sh --slow               the slow-runner pass: the timing-sensitive test suites (the Swift, Kotlin and
-#                                            TypeScript runtimes, bench/tests, the dev-reload tests) with 8 CPU burners at
+#                                            TypeScript runtimes, the contract grid, the Rust workspace's tests but those that
+#                                            drive a compiler, bench/tests, the dev-reload tests) with 8 CPU burners at
 #                                            normal priority and four test threads, three rounds; --burners N changes the 8
 #   scripts/ci-local.sh --only ci/ts,ci/rust    some jobs (a job is <workflow>/<id>, or just <id>)
 #   scripts/ci-local.sh --skip bench/budgets    all but some

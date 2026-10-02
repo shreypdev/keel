@@ -14,10 +14,11 @@
 #                          [--slow [--rounds 3] [--burners 8]] [--list] [-v] [--logs DIR]
 #
 # `--slow` is the slow-runner pass: only the steps in SLOW_STEPS (the timing-sensitive test suites: the Swift, Kotlin and
-# TypeScript runtime tests and the contract grid's runners) and the Rust test targets in SLOW_EXTRA (bench/tests, the dev-reload
-# tests) run, each with CPU burners (`yes`, at normal priority, `--burners`, default 8) occupying the cores for the length of the
-# step, RUST_TEST_THREADS=4 and CARGO_BUILD_JOBS=4 (a hosted runner has four vCPUs), repeated `--rounds` times. The heavy
-# `cargo test --workspace` is not among them: it is a build of the whole workspace, and starved it tells nothing about timing.
+# TypeScript runtime tests, the contract grid's runners, the real-time recipe) and the Rust tests in SLOW_EXTRA (the workspace's
+# tests but those that drive a compiler, bench/tests, the dev-reload tests) run, each with CPU burners (`yes`, at normal priority, `--burners`, default 8) occupying the cores for the length of the
+# step, RUST_TEST_THREADS=4 and CARGO_BUILD_JOBS=4 (a hosted runner has four vCPUs), repeated `--rounds` times. The
+# workflow's `cargo test --workspace` is not run as such: the tests of the three packages that drive a compiler are a build, and
+# starved they tell nothing about timing (SLOW_EXTRA).
 # Nothing here runs under `taskpolicy -b`: that class of QoS together with burners at normal priority leaves the test with no CPU
 # at all (a step that would take a minute does not finish). It reuses what a normal pass built and installed in the same clone
 # (run that first), so what is slowed is the tests and not the compiler. A test that fails only there depends on the speed of
@@ -76,6 +77,7 @@ module CiLocal
 
   # The timing-sensitive test steps: what `--slow` runs. "workflow/job" => step-name patterns.
   SLOW_STEPS = {
+    "ci/rust" => [/\AThe real-time recipe/],
     "ci/ts" => [/\ATest\z/, /\ATesting kit/, /\ADevtools page/],
     "ci/kotlin" => [/\ATest \(incl\. JNI smoke/],
     "ci/wasm-ffi" => [/\Awasm acceptance/],
@@ -86,11 +88,17 @@ module CiLocal
     "two-cores/jvm-and-node" => [/\AJVM\z/, /\ANode\z/]
   }.freeze
 
-  # Rust test targets that are timing-sensitive, run by `--slow` in place of the whole workspace: "workflow/job" => [name, command].
-  # They run in the job's environment after its provisioning, as steps of their own (they are not in the workflow: the
-  # workflow's `cargo test --workspace` runs them with everything else, which is why the slow pass runs them alone).
+  # The Rust tests `--slow` runs in place of the workflow's `cargo test --workspace`: "workflow/job" => [name, command]. They run
+  # in the job's environment after its provisioning, as steps of their own (they are not in the workflow, whose
+  # `cargo test --workspace` runs them with everything else). What is left out is the three packages whose tests drive a
+  # compiler (undra-bindgen's goldens and typechecks, undra-macros' trybuild cases, undra-cli's `undra build`s): starved, those
+  # are a build, and they assert nothing about time. Every other package's tests run, because many read the clock (undra-ffi,
+  # undra-runtime, undra-query and undra-transport bound waits and deadlines); bench/tests and the dev-server tests of undra-cli
+  # run as steps of their own.
   SLOW_EXTRA = {
     "ci/rust" => [
+      ["the workspace's tests but those that drive a compiler (undra-bindgen, undra-macros, undra-cli)",
+       "cargo test --no-fail-fast --workspace --exclude undra-bindgen --exclude undra-macros --exclude undra-cli --exclude undra-bench"],
       ["bench/tests: the stress scenarios, their fault-injection tests and the budgets (debug)", "cargo test --no-fail-fast -p undra-bench --tests"],
       ["undra-cli: the dev-server and dev-reload tests", "cargo test --no-fail-fast -p undra-cli --test dev --test dev_reload --test dev_devtools"]
     ]

@@ -288,8 +288,9 @@ scripts/ci-local.sh --here --only ci/ts           # quick, in this checkout (dir
 ```
 
 The slow-runner pass is what finds the failures that only a slower machine shows: the timing-sensitive suites (the TypeScript
-runtime, the Swift and Kotlin runtimes, the contract grid, the React Native model, and of the Rust workspace only `bench/tests`
-and the dev-reload tests of `undra-cli`: the heavy `cargo test --workspace` is a build, and starved it says nothing about timing)
+runtime, the Swift and Kotlin runtimes, the contract grid, the React Native model, the real-time recipe, and the Rust workspace's
+tests but those of the three packages that drive a compiler (`undra-bindgen`, `undra-macros`, `undra-cli`: starved, those are a
+build and say nothing about timing; `bench/tests` and the dev-reload tests of `undra-cli` run on their own))
 run three rounds with 8 CPU burners (`yes` at normal priority, `--burners N`; started and killed by the script for the length of
 each step, your own processes only, and they stop within a second of the script whatever happens to it), four test threads
 (`RUST_TEST_THREADS=4`: a hosted runner has four vCPUs) and four build jobs. Every `cargo test` runs with `--no-fail-fast`, so one
