@@ -2,7 +2,7 @@ import { lightAdapters } from "./adapters/browser-events.js";
 import { UNNAMED_NAMESPACE, checkNamespace } from "./adapters/names.js";
 import { defaultPorts } from "./adapters/default-ports.js";
 import { startEventSources } from "./adapters/events.js";
-import { PortIds } from "./adapters/ids.js";
+import { TIMER_PORT } from "./adapters/port-literals.js";
 import { WEB_CRYPTO_REQUIRED, consoleLog, hasCryptoRandom } from "./adapters/system.js";
 import type { Adapters, AdapterOverrides, UndraBackgroundReport, UndraBackgroundStats, UndraPanicReport } from "./adapters/types.js";
 import {
@@ -1076,7 +1076,7 @@ export class UndraCore {
     if (ports !== undefined && this._transport.mode === "remote" && this._options.adapters?.timer) {
       // A native core normally times itself; an explicit Timer adapter is a request to serve its Timer port.
       this._ports.set(
-        PortIds.Timer.portId,
+        TIMER_PORT,
         ports.timerPort(this._options.adapters.timer, (timerId) => {
           try {
             this.timerFired(timerId);

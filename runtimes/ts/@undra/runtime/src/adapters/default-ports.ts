@@ -1,5 +1,5 @@
 import type { PortImpl } from "../port.js";
-import { PortIds } from "./ids.js";
+import { FS_PORT, HTTP_PORT, KV_PORT, SECURE_STORE_PORT } from "./port-literals.js";
 import type { AdapterOverrides, FsAdapter, HttpAdapter, KvAdapter } from "./types.js";
 
 /*
@@ -15,40 +15,33 @@ type Method = (args: Uint8Array) => Promise<Uint8Array>;
 
 /** The adapters of {@link AdapterOverrides} that back a default port, with the port each backs. */
 const DEFAULT_PORTS = [
-  ["http", "Http"],
-  ["kv", "Kv"],
-  ["secureStore", "SecureStore"],
-  ["fs", "Fs"],
+  ["http", "Http", HTTP_PORT],
+  ["kv", "Kv", KV_PORT],
+  ["secureStore", "SecureStore", SECURE_STORE_PORT],
+  ["fs", "Fs", FS_PORT],
 ] as const;
 
 /** A port that builds its implementation on the first call and keeps it (a failed build is tried again by the next call). */
-function lazyPort(name: string, ids: Readonly<Record<string, number>>, build: () => Promise<PortImpl>): PortImpl {
+function lazyPort(name: string, build: () => Promise<PortImpl>): PortImpl {
   let built: Promise<PortImpl> | undefined;
   const load = (): Promise<PortImpl> =>
     (built ??= build().catch((error: unknown) => {
       built = undefined;
       throw error;
     }));
-  const methods: Record<number, Method> = {};
-  for (const [key, id] of Object.entries(ids)) {
-    if (key !== "portId") methods[id] = async (args) => (await (await load()).methods[id]?.(args)) ?? new Uint8Array(0);
-  }
+  // Any method id: the real port answers once it is loaded (an id it does not have answers empty, as before).
+  const methods = new Proxy({} as Record<number, Method>, {
+    get: (_, id) => async (args: Uint8Array) => (await (await load()).methods[Number(id)]?.(args)) ?? new Uint8Array(0),
+  });
   return { name, sync: false, methods };
 }
 
-/**
- * The default ports for a core started with `given` (`LoadOptions.adapters`): the port of an adapter that
- * is `null` is left out, one that is given is served over it, the rest over the browser's own (Http only
- * where there is a global `fetch`). `namespace` is the core's: the browser's own Kv, SecureStore and Fs, built on the first
- * call, keep their data under it (SPEC 8, ADR-044 amendment A; the caller has checked it).
- */
 export function defaultPorts(given: AdapterOverrides | undefined, namespace?: string): Map<number, PortImpl> {
   const ports = new Map<number, PortImpl>();
-  for (const [key, name] of DEFAULT_PORTS) {
+  for (const [key, name, portId] of DEFAULT_PORTS) {
     const adapter: Given = given?.[key];
     if (adapter === null || (adapter === undefined && key === "http" && typeof (globalThis as { fetch?: unknown }).fetch !== "function")) continue;
-    const ids = PortIds[name];
-    ports.set(ids.portId, lazyPort(name, ids, () => import("./standard.js").then((m) => m.standardPort(key, adapter, namespace))));
+    ports.set(portId, lazyPort(name, () => import("./standard.js").then((m) => m.standardPort(key, adapter, namespace))));
   }
   return ports;
 }
