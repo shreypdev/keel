@@ -27,7 +27,7 @@ use undra_meta::{
     TypeRef,
 };
 
-use crate::model::{Ret, parse_message, query_handle_name};
+use crate::model::{Callee, Ret, names, parse_message, query_handle_name};
 use crate::naming;
 use crate::stdlib;
 
@@ -523,7 +523,9 @@ impl<'a> Checker<'a> {
         for o in &s.objects {
             self.bad_ident("an object", &o.name);
             for m in o.constructors.iter().chain(&o.methods) {
-                self.bad_ident(&format!("object {}", o.name), &m.name);
+                // An instantiation of a generic method is named `pinned<Todo>`: the native name
+                // is the generic method's own (ADR-058).
+                self.bad_ident(&format!("object {}", o.name), m.names().native);
                 for p in &m.params {
                     self.bad_ident(&format!("object {}, method {}", o.name, m.name), &p.name);
                 }
@@ -535,7 +537,7 @@ impl<'a> Checker<'a> {
             }
         }
         for f in &s.functions {
-            self.bad_ident("a function", &f.name);
+            self.bad_ident("a function", f.names().native);
             for p in &f.params {
                 self.bad_ident(&format!("function {}", f.name), &p.name);
             }
@@ -761,6 +763,47 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// The id constants of the instantiations of generic functions are named after the function
+    /// and the type (`newest_Todo`, ADR-058), in camelCase for Swift and TypeScript and in
+    /// UPPER_SNAKE_CASE for Kotlin: a collision with another id constant is E0051. Collisions among
+    /// definitions that are not instantiations are the member checks' business and are not
+    /// repeated here.
+    fn unique_ids_of_instantiations<'n>(
+        &mut self,
+        at: &str,
+        items: impl Iterator<Item = (&'n str, bool, String)>,
+    ) {
+        let items: Vec<(&str, bool, String)> = items.collect();
+        for (why, convert) in [
+            (
+                "id constants are named in camelCase in Swift and TypeScript, and the id of an instantiation of a generic function names the function and the type",
+                naming::camel as fn(&str) -> String,
+            ),
+            (
+                "id constants are named UPPER_SNAKE_CASE in Kotlin, and the id of an instantiation of a generic function names the function and the type",
+                naming::upper_snake as fn(&str) -> String,
+            ),
+        ] {
+            let mut by_converted: BTreeMap<String, Vec<(&str, bool)>> = BTreeMap::new();
+            for (name, generic, id) in &items {
+                by_converted
+                    .entry(convert(id))
+                    .or_default()
+                    .push((name, *generic));
+            }
+            for (converted, group) in by_converted {
+                if group.len() > 1 && group.iter().any(|(_, generic)| *generic) {
+                    self.errors.push(BindgenError::NameCollision {
+                        at: at.to_owned(),
+                        names: group.iter().map(|(name, _)| (*name).to_owned()).collect(),
+                        converted,
+                        why: why.to_owned(),
+                    });
+                }
+            }
+        }
+    }
+
     fn check_fields(&mut self, at: &str, fields: &[FieldDef]) {
         self.unique(
             at,
@@ -857,8 +900,14 @@ impl<'a> Checker<'a> {
             };
             members.push((c.name.as_str(), name));
         }
+        // The instantiations of one generic method share the native name (ADR-058): it is one
+        // member, presented as an overload set.
+        let mut families: HashSet<&str> = HashSet::new();
         for m in &object.methods {
-            members.push((m.name.as_str(), naming::camel(&m.name)));
+            let n = names(&m.name, m.generic.as_ref());
+            if m.generic.is_none() || families.insert(n.native) {
+                members.push((m.name.as_str(), naming::camel(n.native)));
+            }
         }
         if let Some(store) = &object.store {
             for g in &store.signals {
@@ -877,7 +926,15 @@ impl<'a> Checker<'a> {
                 .constructors
                 .iter()
                 .chain(&object.methods)
-                .map(|m| (m.name.as_str(), naming::upper_snake(&m.name))),
+                .map(|m| (m.name.as_str(), naming::upper_snake(&m.names().id))),
+        );
+        self.unique_ids_of_instantiations(
+            &at,
+            object
+                .constructors
+                .iter()
+                .chain(&object.methods)
+                .map(|m| (m.name.as_str(), m.generic.is_some(), m.names().id)),
         );
         for (source, converted) in &members {
             if RESERVED_MEMBERS.contains(&converted.as_str()) {
@@ -1087,16 +1144,34 @@ impl<'a> Checker<'a> {
     /// functions, ports become adapter functions.
     fn check_top_level_values(&mut self) {
         let s = self.schema;
-        let mut names: Vec<(&str, String)> = Vec::new();
+        let mut native_names: Vec<(&str, String)> = Vec::new();
+        // The instantiations of one generic function share the native name (ADR-058): it is one
+        // function, presented as an overload set.
+        let mut families: HashSet<&str> = HashSet::new();
         for f in &s.functions {
-            names.push((f.name.as_str(), naming::camel(&f.name)));
+            let n = names(&f.name, f.generic.as_ref());
+            if f.generic.is_none() || families.insert(n.native) {
+                native_names.push((f.name.as_str(), naming::camel(n.native)));
+            }
         }
+        self.unique_ids_of_instantiations(
+            "the schema",
+            s.functions
+                .iter()
+                .map(|f| (f.name.as_str(), f.generic.is_some(), f.names().id))
+                .chain(
+                    s.queries
+                        .iter()
+                        .filter(|q| q.kind == QueryKind::Mutation)
+                        .map(|q| (q.name.as_str(), false, q.name.clone())),
+                ),
+        );
         for q in s.queries.iter().filter(|q| q.kind == QueryKind::Mutation) {
-            names.push((q.name.as_str(), naming::camel(&q.name)));
+            native_names.push((q.name.as_str(), naming::camel(&q.name)));
         }
         for p in &s.ports {
             if p.kind != PortKind::Event {
-                names.push((
+                native_names.push((
                     p.name.as_str(),
                     format!("{}PortImpl", naming::camel(&p.name)),
                 ));
@@ -1105,7 +1180,7 @@ impl<'a> Checker<'a> {
         self.unique(
             "the schema",
             "functions, mutations and port adapters are top-level functions named in camelCase",
-            names.into_iter(),
+            native_names.into_iter(),
         );
     }
 
