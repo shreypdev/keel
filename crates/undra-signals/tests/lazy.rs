@@ -596,7 +596,8 @@ fn a_view_whose_derived_index_rebuilds_announces_a_newer_version_than_a_page_in_
     f.rig.run(|| {
         txn(|| {
             for i in 0..5_000_u32 {
-                f.source.push(todo(10_000 + i, &format!("r{i:05}"), i % 3 == 0));
+                f.source
+                    .push(todo(10_000 + i, &format!("r{i:05}"), i % 3 == 0));
             }
         });
     });
@@ -612,7 +613,10 @@ fn a_view_whose_derived_index_rebuilds_announces_a_newer_version_than_a_page_in_
         let (header, rows) = page(&*source, offset, limit);
         assert_eq!(header.version, inv.version);
         assert_eq!(header.total as usize, expected.len());
-        assert_eq!(rows, expected[page_window(expected.len(), offset, limit)].to_vec());
+        assert_eq!(
+            rows,
+            expected[page_window(expected.len(), offset, limit)].to_vec()
+        );
     }
 }
 
