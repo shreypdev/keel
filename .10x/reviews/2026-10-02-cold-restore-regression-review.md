@@ -288,3 +288,70 @@ should say that the Android half did not run.
   double hash the record lists as open.
 * Whether the Android size difference of M1 changes sign between clean builds of one commit (one build per commit
   here; the second branch run reused the first build).
+
+## Re-verification (2026-10-02, after the fix round at 47b5f1a)
+
+Same reviewer, own repros, the fix round `439f1ad..47b5f1a` (`dd90071`, `209c2ff`, `a2f75d7`, `47b5f1a`). Nothing
+fixed or committed here. Load average 9 to 33 during this pass (it is given with each timing).
+
+| # | Verdict | Evidence |
+|---|---|---|
+| M1 | **CLOSED** | `cargo test -p undra-cli --test symbols shipped_artefacts -- --nocapture` with `emulator-5554` listed by `adb devices`: `1 passed`, and every half compared. Web 1,020,843 with symbols against 1,018,229 without (2,614 bytes, 0.257%; 3,072 against 3,052 functions); Android arm64 2,721,448 both ways, x86_64 2,882,576 against 2,882,560 (16 larger with symbols, inside the 256); iOS app 2,521,544 both ways; host dylib 2,559,120 without, 2,559,080 with. The record now says the first round ran without a device. |
+| L1 | **CLOSED** for what it reported (the schema hash and the exchange form) | The scratch-copy experiment again, on the crate at `47b5f1a`: adding `Set(Box<TypeRef>)` now stops at three places, `closure_json.rs:164` (the writer) among them. With the edit the new comment asks for (the payload written): `set<u8>` and `set<string>` hash differently, the exchange form equals `serde_json`'s and reads back. A silent wrong *schema hash* needs someone to put the new variant into the list of leaves under a comment that says not to. A silent wrong *fingerprint* is still reachable, outside the writer: R1 below. |
+| L2 | **CLOSED** | In a scratch worktree of `47b5f1a` with `canonical_json` put back on the doc-stripped, sorted clone through `serde_json` (the body of `canonical_json_by_serde`), `UNDRA_BENCH_BASELINE=apple-m5-pro UNDRA_BENCH_FILTER=cold_start`, three runs interleaved with the branch at load 13 to 19: `snapshot/cold_start_schema_hash` 87.58 to 88.42 µs, **1.83x to 1.85x, `budgets ... FAILED` 3 of 3**; the branch 48.43 to 48.60 µs, 1.01x to 1.02x, `ok` 3 of 3. The record's "88 µs, 1.84x" is exact. The same ratio fails CI's gate against the parent commit. The hand-added baseline row is consistent with the file's writer (below). One overstatement in the row's comment: R2. |
+| L3 | **CLOSED** | `builds/web.rs` now gives the 2026-10-02 measurement (0.22% to 0.26%, about twenty functions of 3,070) and points at the test; the test comment says "about twenty functions more" and that the reason is not known. Checked against today's artefacts: 0.257%, 3,072 and 3,052; the module with names is 1,407,649 bytes (37.9% over the shipped one, the comment's 38%), the DWARF module 6.4 MB. |
+| N1 | Answer accurate | Left as is, with the reason: `equal_keyed_schema` in `canonical.rs` has 40 records, 20 enums of up to 22 variants, 18 objects and 17-item lists with repeated names, and the branch compares it with the oracle; `sort.rs`'s property tests run to 80 items. My mutation (a sort wrong only past 19 items) is caught by exactly those tests. |
+| N4 | Answer accurate | The record and Finding 8 now say the figures are quiet-machine numbers and quote the review's. This pass, branch, filtered runs at load 13 to 19: 84.67 to 87.42 µs (1.24x to 1.28x) and 93.12 to 95.04 µs (1.16x to 1.18x). |
+| N5 | Answer accurate | One sentence, true. |
+
+**M1, the comment and the tolerance.** The measurements in the new comment are the ones I took (main: x86_64 32 and
+arm64 16 bytes smaller with symbols; this branch: x86_64 16 larger, arm64 equal). One clause is not exact, and it
+repeats a sentence of this report: "every other section has the same size". `llvm-readelf -S` on today's four
+libraries, section by section: `.text` differs by 16 bytes on x86_64 and not at all on arm64; `.shstrtab` is 0x113
+with symbols and 0x118 without on **both** ABIs (the stripped copy's name table is rewritten 5 bytes shorter); and
+`.relro_padding` differs by 16 on x86_64, which occupies no file bytes. So the file-size difference is `.text` plus
+alignment, as the comment concludes, but two other sections do differ. Note, CONFIRMED; my attack 6 text above has the
+same flaw.
+
+256 bytes still catches what that half exists to catch. The shipped copy is `llvm-strip --strip-debug
+--strip-unneeded` of the library Cargo made; in the unstripped x86_64 library `.symtab` is 153,192 bytes, `.strtab`
+537,007, and the smallest debug section (`.debug_abbrev`) 1,488, the others 54 KB to 6.2 MB. Losing either flag, or
+any one section surviving, is at least 5.8 times the tolerance and normally thousands of times. What it no longer
+catches is growth of 1 to 256 bytes, which is the class the measured noise is in (16 and 32 bytes); the pipeline adds
+no small section of its own (no `.gnu_debuglink`). The tolerance is 8 times the largest difference seen.
+
+**L2, the baseline row by hand.** `bench/src/baseline.rs` writes `[meta]` and the rows from `BTreeMap`s (name order)
+with `p50_ns` at one decimal. A probe test in the scratch worktree: `Baseline::parse` of the committed file then
+`to_text()` reproduces it byte for byte, before the fix round (55 bench rows, 12 meta keys) and after (56 and 13). So
+the hand edit is exactly what the recorder would have written for that row, and a later recording diffs only where a
+number moves; `record()` never writes the `added_cold_start_schema_hash` key, so `overlay` keeps it. Recording through
+the tool instead (`UNDRA_BENCH_RECORD` with a filter) would have overwritten `rustc`, `date`, `git` and the load keys
+with today's and so misdescribed the other 55 rows; by hand, with the note, is the more honest of the two. The value
+is not padded: 47,869.5 ns recorded, 48.43 to 48.86 µs measured here on a busier machine. `budget_ns = 240000` is the
+file's usual 5x. The workload's runtime is a zero-thread one, dropped (and so shut down) inside the setup closure;
+nothing outlives the row.
+
+### New findings
+
+| # | Sev | Status | Where | Finding |
+|---|---|---|---|---|
+| R1 | Low, pre-existing (integrator; not this piece's diff) | CONFIRMED (scratch copy of `47b5f1a`) | `crates/undra-meta/src/closure.rs:496` (the collector's `_ => {}`), `crates/undra-meta/src/closure_json.rs:595-603` (the reader's `_ =>` arms) | The fix's comment says the writer "decides the schema hash and the fingerprints". The writer is guarded now; what feeds the fingerprints is not. With `Set(Box<TypeRef>)` added and every compiler-forced edit made correctly, 141 unit tests pass and: (a) the closure of a store holding `set<R>` has `"records":[]`, so its fingerprint does **not** move when `R.x` goes from `u8` to `string` (for `vec<R>` it does): a snapshot written with the old `R` would be taken as compatible; (b) `{"kind":"set","of":{"kind":"u8"}}` written by `TypeClosure::canonical_json` reads back through `TypeClosure::from_json` as `Stream(U8)`. Both are ADR-037 code this piece did not touch. The same remedy as L1 applies (name the leaves; index the reader by variant, not by "everything else"). |
+| R2 | Note | CONFIRMED | `bench/common/workloads.rs`, the comment of `snapshot/cold_start_schema_hash` | "the canonical form going back through a clone of the schema **or** through `serde` ... fails the baseline gates here": the clone alone does not. With `schema_json::canonical(&self.canonicalized())` (the clone and its sorts kept, the new writer on it) the row reads 69.96 to 71.48 µs, 1.46x to 1.49x, `budgets ... ok` 3 of 3 at load 10. Clone and `serde` together fail, as L2 asked. |
+| R3 | Note | CONFIRMED | `UNDRA_BENCH_BASELINE=apple-m5-pro cargo test -p undra-bench --test budgets --release`, unfiltered | At load 22 to 33 it passed 1 run of 3. The failures move between runs and are rows this piece cannot touch (`wire/bytes_1kb/roundtrip` 1.50x, `signals/changeset_100/decode` 1.72x, `stress/firehose/*` 1.57x to 1.88x, two ratios); in the worst run the two cold-start rows read 1.59x and 1.68x and the new row 66.67 µs, 1.39x. The third run passed every row (new row 48.86 µs, 1.02x; cold start 88.88 µs, 1.31x and 95.17 µs, 1.18x). Load, not the fix round: the baseline gate needs the quiet machine the record names. |
+| R4 | Note | THEORY (from the per-KB timing) | the new row | The row is not normalised by schema size: it is 1.2 µs per KB of what the bench binary registers, so harness fixtures move it as they moved the cold-start rows, and about 20 KB more canonical schema (60 KB against today's 40.6) reaches the 1.5x host gate with no code change. It will need re-recording when the harness grows; that is the ramp of Finding 8 again, now visible in one row. |
+
+### What was run in this pass
+
+* `cargo test -p undra-meta`: 141 + 7 + 2 + 21 pass. `cargo clippy -p undra-meta -p undra-cli -p undra-bench
+  --all-targets -- -D warnings`: clean. `cargo fmt --check`: clean. `undra-meta` for wasm32 and clippy's
+  `incompatible_msrv`: clean.
+* The differential harness against the crate at `47b5f1a`: 80,000 fuzzed schemas (990,327 derived closures, 7.9 GB),
+  the 16,400 order schemas, 200,000 closures, every Unicode scalar value (3,336,192 strings), the integer boundaries,
+  19 committed schema files and the playground's collected schema, the three canonical goldens: all identical to
+  `a309e9f` and to `serde_json`. The digests of seeds 1 and 99 are the ones taken at `439f1ad`
+  (`0xccee4c654014bde3`, `0x48f151a76a403a7f`): `dd90071` changed no byte the writer produces.
+* The symbols size test with the emulator online (it reused the builds already made at this commit: 12 s), the
+  budgets test filtered (6 branch runs, 6 mutated runs) and unfiltered (3 runs), the two scratch-copy experiments.
+
+Not checked in this pass: the wasm32 run of the harness (only `type_ref`'s leaf arm changed, and the host digests are
+unchanged), `scripts/wasm-size.sh`, the full workspace suite, the platform runtimes and the contract tests.
