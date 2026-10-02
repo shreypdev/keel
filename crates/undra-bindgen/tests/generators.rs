@@ -55,9 +55,15 @@ fn the_typescript_entry_passes_the_stream_feature_exactly_when_the_schema_has_a_
                 "import { UndraCore, UndraError, streams, type AttachOptions, type LoadOptions, type Transport } from \"@undra/runtime\";",
                 "{name}"
             );
-            assert_eq!(entry.matches("features: [streams]").count(), 2, "{name}: load and attach");
             assert_eq!(
-                entry.matches("\"expectedSchemaHash\" | \"namespace\" | \"features\"").count(),
+                entry.matches("features: [streams]").count(),
+                2,
+                "{name}: load and attach"
+            );
+            assert_eq!(
+                entry
+                    .matches("\"expectedSchemaHash\" | \"namespace\" | \"features\"")
+                    .count(),
                 2,
                 "{name}: the option a generated entry fills in is not one the app passes"
             );
@@ -68,12 +74,27 @@ fn the_typescript_entry_passes_the_stream_feature_exactly_when_the_schema_has_a_
                 "import { UndraCore, UndraError, type AttachOptions, type LoadOptions, type Transport } from \"@undra/runtime\";",
                 "{name}"
             );
-            assert!(!entry.contains("features"), "{name}: no feature without a stream");
-            assert!(!entry.contains("streams"), "{name}: no stream support without a stream");
-            assert_eq!(entry.matches("\"expectedSchemaHash\" | \"namespace\">").count(), 2, "{name}");
+            assert!(
+                !entry.contains("features"),
+                "{name}: no feature without a stream"
+            );
+            assert!(
+                !entry.contains("streams"),
+                "{name}: no stream support without a stream"
+            );
+            assert_eq!(
+                entry
+                    .matches("\"expectedSchemaHash\" | \"namespace\">")
+                    .count(),
+                2,
+                "{name}"
+            );
         }
     }
-    assert!(with >= 4 && without >= 4, "the cases cover both ({with} with a stream, {without} without)");
+    assert!(
+        with >= 4 && without >= 4,
+        "the cases cover both ({with} with a stream, {without} without)"
+    );
 }
 
 // ----- layout ---------------------------------------------------------------------------

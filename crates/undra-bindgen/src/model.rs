@@ -523,7 +523,8 @@ impl Model {
     /// first stream (ADR-057).
     #[must_use]
     pub fn has_streams(&self) -> bool {
-        let is_stream = |returns: &TypeRef| Ret::classify(returns).is_some_and(|ret| ret.is_stream());
+        let is_stream =
+            |returns: &TypeRef| Ret::classify(returns).is_some_and(|ret| ret.is_stream());
         self.all_objects()
             .flat_map(|object| &object.methods)
             .any(|method| is_stream(&method.returns))
