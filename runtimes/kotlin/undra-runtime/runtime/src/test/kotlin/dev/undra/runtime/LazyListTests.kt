@@ -898,6 +898,11 @@ class LazyListTests : Suite() {
                 assertEq(null, store.books[0])
                 eventually("the first page arrives, asked of the page server the full value named") { store.books[0] != null }
                 assertEq(Handle(a), server.requests.first().handle)
+                // Reading row 0 asks for its page and, in the same turn, the page after it (prefetch). They go out one after the other
+                // from one flush, so when the first row shows the second request may not have been made yet; cleared too early it would
+                // land in the log of the new page server below, as a call to the old one.
+                eventually("the page after the first was asked for too") { server.requests.size >= 2 }
+                assertTrue(server.requests.all { it.handle == Handle(a) }, "before the restore, every page call goes to the first page server: ${server.requests}")
 
                 // A restore: a new page server, then an invalidation, in one drain: [Full(b), Inv].
                 server.requests.clear()
