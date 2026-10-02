@@ -1,5 +1,5 @@
 import { UndraRestoreError, UndraTransportError } from "../errors.js";
-import type { WasmHost, WasmMainOptions } from "./wasm-main.js";
+import type { HostAdapters, HostOptions, WasmHost } from "./wasm-main.js";
 
 /*
  * Snapshot, restore and the twin of the in-process host (ADR-049, ADR-057), as functions over it: a page that never takes a
@@ -33,5 +33,9 @@ export function restoreInto(host: WasmHost, bytes: Uint8Array): void {
  * runs on (ADR-049, `crashRecovery`). `host` stays dead.
  */
 export function twin<T extends WasmHost>(host: T): T {
-  return new (host.constructor as new (options: WasmMainOptions) => T)({ ...host._options, wasm: host._module ?? host._options.wasm });
+  return new (host.constructor as new (options: HostOptions, adapters: HostAdapters, onError: ((error: unknown) => void) | undefined) => T)(
+    { ...host._options, wasm: host._module ?? host._options.wasm },
+    host._adapters,
+    host._onError,
+  );
 }

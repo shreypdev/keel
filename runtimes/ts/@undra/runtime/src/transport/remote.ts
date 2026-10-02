@@ -1,3 +1,4 @@
+import type { LoadOptions } from "../core.js";
 import { UndraError, UndraSchemaMismatchError, UndraSessionLostError, UndraTransportError } from "../errors.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 import { RUNTIME_VERSION } from "../version.js";
@@ -14,7 +15,8 @@ import {
   encodeHello,
   encodePortReply,
 } from "../wire/index.js";
-import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
+import { framed } from "./framed.js";
+import type { CoreTransport, PortOutcome, Transport, TransportHandler } from "./transport.js";
 
 /** The parts of the WebSocket API this transport uses (a browser `WebSocket`, Node 22's global, or a test double). */
 export interface WebSocketLike {
@@ -456,4 +458,24 @@ export class RemoteTransport implements Transport {
       this.#post(Kind.PortReply, encodePortReply({ portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));
     }
   }
+}
+
+/**
+ * The transport `UndraCore.load` makes for `mode: "remote"` (ADR-057): this module maps the options and checks the one its mode
+ * needs, so a page that never asks for it does not carry them, and hands the core the transport already framed, so the adapter
+ * that frames its messages arrives in the same fetch wave as this module.
+ */
+export function remoteTransport(options: LoadOptions): CoreTransport {
+  if (options.url === undefined) throw new UndraError("options", "mode 'remote' needs the `url` option");
+  return framed(
+    new RemoteTransport({
+      url: options.url,
+      expectedSchemaHash: options.expectedSchemaHash,
+      ...(options.platform !== undefined && { platform: options.platform }),
+      ...(options.devtools !== undefined && { devtools: options.devtools }),
+      ...(options.webSocket !== undefined && { webSocket: options.webSocket }),
+      ...(options.handshakeTimeoutMs !== undefined && { handshakeTimeoutMs: options.handshakeTimeoutMs }),
+      ...(options.reconnect !== undefined && { reconnect: options.reconnect }),
+    }),
+  );
 }

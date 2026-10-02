@@ -1,4 +1,5 @@
 import type { PortImpl } from "../port.js";
+import { onDemand } from "../on-demand.js";
 import { QUIETLY_UNAVAILABLE } from "../port-dispatch.js";
 import { FS_PORT, HTTP_PORT, KV_PORT, SECURE_STORE_PORT } from "./port-literals.js";
 import type { AdapterOverrides, FsAdapter, HttpAdapter, KvAdapter } from "./types.js";
@@ -58,7 +59,7 @@ export function defaultPorts(given: AdapterOverrides | undefined, namespace?: st
   for (const [key, name, portId] of DEFAULT_PORTS) {
     const adapter: Given = given?.[key];
     if (adapter === null || (adapter === undefined && key === "http" && typeof (globalThis as { fetch?: unknown }).fetch !== "function")) continue;
-    ports.set(portId, lazyPort(name, () => import("./standard.js").then((m) => m.standardPort(key, adapter, namespace))));
+    ports.set(portId, lazyPort(name, () => onDemand("default ports", () => import("./standard.js")).then((m) => m.standardPort(key, adapter, namespace))));
   }
   return ports;
 }

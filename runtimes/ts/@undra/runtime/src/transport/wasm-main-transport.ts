@@ -9,7 +9,7 @@ import {
   decodeTimerFired,
 } from "../wire/index.js";
 import type { Transport } from "./transport.js";
-import { WasmHost } from "./wasm-main.js";
+import { WasmHost, type WasmMainOptions } from "./wasm-main.js";
 import { restoreInto, takeSnapshot, twin } from "./wasm-snapshot.js";
 
 export type { WasmMainOptions, WasmSource } from "./wasm-main.js";
@@ -21,6 +21,11 @@ export type { WasmMainOptions, WasmSource } from "./wasm-main.js";
  * decoder (ADR-057); this class is what the worker script, recovery, tests and `UndraCore.attach(new WasmMainTransport(..))` use.
  */
 export class WasmMainTransport extends WasmHost implements Transport {
+  /** @param options See {@link WasmMainOptions}. */
+  constructor(options: WasmMainOptions) {
+    super(options, options, options.onError);
+  }
+
   send(kind: Kind, payload: Uint8Array): void {
     switch (kind) {
       case Kind.Call:

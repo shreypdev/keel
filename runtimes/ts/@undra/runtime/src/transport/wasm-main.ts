@@ -54,6 +54,12 @@ export interface WasmMainOptions {
   readonly onError?: (error: unknown) => void;
 }
 
+/** The options of {@link WasmMainOptions} that `UndraCore.load`'s own options also carry: what a host reads (ADR-057). */
+export type HostOptions = Pick<WasmMainOptions, "wasm" | "expectedSchemaHash" | "platform" | "devtools" | "logLevel">;
+
+/** The adapters a host takes (`WasmMainOptions` has them at the top; `UndraCore.load` has them merged apart). */
+export type HostAdapters = Partial<Pick<WasmMainOptions, "clock" | "rng" | "timer">>;
+
 /** The exports of an Undra core module (SPEC 7) that this transport uses. @internal Typed for `wasm-snapshot.ts`. */
 export interface CoreExports {
   readonly memory: WebAssembly.Memory;
@@ -176,7 +182,11 @@ export class WasmHost implements CoreTransport {
   readonly synchronous = true;
 
   /** The options the host was made with. @internal Read by `wasm-snapshot.ts` (`twin`). */
-  readonly _options: WasmMainOptions;
+  readonly _options: HostOptions;
+  /** @internal Read by `wasm-snapshot.ts` (`twin`). */
+  readonly _adapters: HostAdapters;
+  /** @internal Read by `wasm-snapshot.ts` (`twin`). */
+  readonly _onError: ((error: unknown) => void) | undefined;
   private readonly _clock: ClockAdapter;
   private _rng: RngAdapter | null;
   private readonly _timer: TimerAdapter;
@@ -195,12 +205,19 @@ export class WasmHost implements CoreTransport {
   /** The compiled module, kept so that a restart instantiates it again without compiling (ADR-049, `twin`). @internal Read by `wasm-snapshot.ts`. */
   _module: WebAssembly.Module | null = null;
 
-  /** @param options See {@link WasmMainOptions}. */
-  constructor(options: WasmMainOptions) {
+  /**
+   * @param options See {@link WasmMainOptions}. `UndraCore.load` passes its own `LoadOptions` (the fields this host reads are
+   * the same: `wasm`, `expectedSchemaHash`, `platform`, `devtools`, `logLevel`), so the first chunk spells no option mapping.
+   * @param adapters Where the Clock, Rng and Timer adapters are, when not in `options`: the merged adapters of `load` (ADR-057).
+   * @param onError Where failures with no caller go: an import handler that threw, a timer or poll that trapped.
+   */
+  constructor(options: HostOptions, adapters: HostAdapters = {}, onError?: (error: unknown) => void) {
     this._options = options;
-    this._clock = options.clock ?? systemClock();
-    this._timer = options.timer ?? setTimeoutTimer();
-    this._rng = options.rng ?? null;
+    this._adapters = adapters;
+    this._onError = onError;
+    this._clock = adapters.clock ?? systemClock();
+    this._timer = adapters.timer ?? setTimeoutTimer();
+    this._rng = adapters.rng ?? null;
   }
 
   /** The instantiated module (after `start`); for devtools and tests. */
@@ -424,7 +441,7 @@ export class WasmHost implements CoreTransport {
   }
 
   private _report(error: unknown): void {
-    this._options.onError?.(error);
+    this._onError?.(error);
   }
 
   // ----- the `undra` import object ----------------------------------------------------

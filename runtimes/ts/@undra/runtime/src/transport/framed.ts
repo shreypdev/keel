@@ -3,6 +3,7 @@ import type { Adapters } from "../adapters/types.js";
 import type { UndraCallError } from "../call-error.js";
 import type { AttachOptions, UndraCore } from "../core.js";
 import { UndraTransportError } from "../errors.js";
+import { onDemand } from "../on-demand.js";
 import type { PortImpl } from "../port.js";
 import { type HelloPayload, Kind, encodeCancel, encodeEvent, encodeObserve, encodeRelease, encodeStreamCredit, encodeTimerFired } from "../wire/index.js";
 import type { CoreTransport, Transport } from "./transport.js";
@@ -123,7 +124,7 @@ export const extension: CoreExtension = {
       core._log(3, "undra::worker", `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`);
     }
     // A wasm core needs neither port: it traps instead of reporting.
-    const built = core.mode.startsWith("wasm") ? undefined : await import("../adapters/ports.js");
+    const built = core.mode.startsWith("wasm") ? undefined : await onDemand("port adapters", () => import("../adapters/ports.js"));
     built?.serveDiagnostics(core, ports, options.onPanic, adapters.log);
     return () => {
       if (built !== undefined && core.mode === "remote" && options.adapters?.timer) {

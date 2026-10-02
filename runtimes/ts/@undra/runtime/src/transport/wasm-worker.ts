@@ -1,3 +1,5 @@
+import { WEB_CRYPTO_REQUIRED, hasCryptoRandom } from "../adapters/system.js";
+import type { LoadOptions, WorkerModeOptions } from "../core.js";
 import { UndraError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
 import { isTrap } from "../panic.js";
 import { errorMessage, hostPlatform } from "../platform.js";
@@ -13,9 +15,10 @@ import {
   encodePortReply,
 } from "../wire/index.js";
 import type { PortImpl } from "../port.js";
-import { syncPortRefusal } from "../port-dispatch.js";
+import { portName } from "../port-dispatch.js";
 import type { RestartResult, SnapshotPolicy } from "../recovery.js";
-import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
+import { framed } from "./framed.js";
+import type { CoreTransport, PortOutcome, Transport, TransportHandler } from "./transport.js";
 import type { WasmSource } from "./wasm-main.js";
 import { type HostToWorker, WORKER_PROTOCOL_VERSION, type WorkerFailure, type WorkerToHost, type WorkerWasm } from "./worker-protocol.js";
 
@@ -512,4 +515,40 @@ export class WasmWorkerTransport implements Transport {
       this.#post(Kind.PortReply, encodePortReply({ portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));
     }
   }
+}
+
+/**
+ * The text of the error that refuses a synchronous port on a thread the core cannot wait for (`wasm-worker`, ADR-049): the port
+ * and the fix (the other fix, mode `"wasm-main"`, is in the docs of `registerPort`). Here, with the transport that raises it.
+ */
+function syncPortRefusal(portId: number, impl?: Pick<PortImpl, "name">): string {
+  return `${portName(portId, impl)} is synchronous: in wasm-worker mode, register it in LoadOptions.worker.ports`;
+}
+
+/**
+ * The transport `UndraCore.load` makes for `mode: "wasm-worker"` (ADR-057): this module maps the options and makes the checks of
+ * its own mode, so a page that never asks for it does not carry them, and hands the core the transport already framed, so the
+ * adapter that frames its messages arrives in the same fetch wave as this module. `recovery` is the policy the worker keeps
+ * snapshots by (data, not code).
+ */
+export function workerTransport(options: LoadOptions, recovery: WasmWorkerOptions["recovery"]): CoreTransport {
+  if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-worker' needs the `wasm` option");
+  // Checked here, before the worker is spawned; the worker reads its own `crypto` (ADR-049).
+  if (!hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
+  // A Worker (anything with `postMessage`) or a function creating one is `{ create }` in short.
+  const worker = options.worker;
+  const { create, ports } = (typeof worker === "object" && !("postMessage" in worker) ? worker : { create: worker }) as WorkerModeOptions;
+  return framed(
+    new WasmWorkerTransport({
+      wasm: options.wasm,
+      expectedSchemaHash: options.expectedSchemaHash,
+      ...(create && { worker: create }),
+      ...(ports !== undefined && { ports }),
+      ...(recovery && { recovery }),
+      ...(options.platform !== undefined && { platform: options.platform }),
+      ...(options.devtools !== undefined && { devtools: options.devtools }),
+      ...(options.logLevel !== undefined && { logLevel: options.logLevel }),
+      ...(options.handshakeTimeoutMs !== undefined && { startTimeoutMs: options.handshakeTimeoutMs }),
+    }),
+  );
 }
