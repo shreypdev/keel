@@ -19,11 +19,7 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      # What the site's cards and README read (site/scripts/build-numbers.mjs, build-trust.mjs): the size records, the
-      # harsh-conditions result files, and the scenarios the contract grid is drawn from (site/data/tests.json is in site/**).
-      - "bench/results/web-size.jsonl"
-      - "bench/results/android-size.jsonl"
-      - "bench/results/*.json"
+      - "bench/results/**"
       - "contract-tests/scenarios.md"
       - "README.md"
       - ".github/workflows/site.yml"
@@ -37,11 +33,7 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      # What the site's cards and README read (site/scripts/build-numbers.mjs, build-trust.mjs): the size records, the
-      # harsh-conditions result files, and the scenarios the contract grid is drawn from (site/data/tests.json is in site/**).
-      - "bench/results/web-size.jsonl"
-      - "bench/results/android-size.jsonl"
-      - "bench/results/*.json"
+      - "bench/results/**"
       - "contract-tests/scenarios.md"
       - "README.md"
       - ".github/workflows/site.yml"
@@ -75,7 +67,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
           cache-dependency-path: examples/playground/web/package-lock.json
       # wasm-opt: `undra build` runs it over the core when it is installed.
@@ -85,8 +77,11 @@ jobs:
       # 1. The playground: one Rust core, compiled to wasm, under a React UI.
       - name: Build the playground core (wasm32)
         run: cargo run -p undra-cli -- build --platform web -C examples/playground
-      # The app installs what it imports, `wa-sqlite` (the optional peer of the runtime's Db worker) and `react` included,
-      # and its Vite config resolves them to its own copies: the runtime's node_modules is not needed here.
+      # The playground imports the runtime from the workspace, and the runtime's Db worker imports
+      # its optional peer wa-sqlite: without the runtime's own install, vite cannot resolve it.
+      - name: Install the TypeScript runtime's dependencies
+        working-directory: runtimes/ts/@undra/runtime
+        run: npm ci
       - name: Build the playground web app
         working-directory: examples/playground/web
         run: |
@@ -152,7 +147,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
       - name: Submit the sitemap's URLs to IndexNow
         continue-on-error: true
         run: node site/scripts/indexnow.mjs
