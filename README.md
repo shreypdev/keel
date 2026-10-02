@@ -55,7 +55,7 @@ The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.
 a change that takes it over 120 KB or more than 5% over its record
 ([`bench/results/web-size.jsonl`](bench/results/web-size.jsonl), [ADR-052](.10x/adrs/ADR-052-web-bundle-size.md)).
 The JavaScript runtime the page loads up front with it is gated the same way:
-<!--measured:web-runtime-js-->21.7 KB<!--/measured--> gzipped against a @@JSKB@@ budget (the
+<!--measured:web-runtime-js-->21.7 KB<!--/measured--> gzipped against a 22.1 KB budget (the
 blueprint's 8 KB predates the transports, reconnect, coalescing, worker mode and the typed error
 channel; the transports and the default ports load when an app asks for them, and are not in it).
 

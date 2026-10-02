@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 /*
  * What a page loads up front is what `UndraCore` reaches by static imports (ADR-052: the hello page's JavaScript is gated at
- * 21,700 bytes gzipped, `scripts/web-size-runtime.mjs`). The modules below are code a hello page never runs, so the core
+ * 22,100 bytes gzipped, `scripts/web-size-runtime.mjs`). The modules below are code a hello page never runs, so the core
  * fetches each by a dynamic `import()` when it needs it; one static import of any of them, from the core or from anything the
  * core reaches, puts it in the first chunk, whole. This test is the cheap guard of that (the gate itself needs a build).
  */

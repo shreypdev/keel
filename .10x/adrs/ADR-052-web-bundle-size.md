@@ -532,11 +532,12 @@ gate's own build):
 
 The README's and the site's numbers come from the record as before.
 
-## Review note (2026-10-02, `prod-ops` adversarial review): D1, the gate is 21,700
+## Review note (2026-10-02, `prod-ops` adversarial review): the JavaScript gate is 22,100; the wasm is back under 120,000
 
-The rule (R9): growth of `web/hello-runtime-js` is allowed only for behaviour a hello app gets at load. The review took the
-amendment above item by item (the ablation's numbers, gzipped, overlapping) and moved what a hello app never runs out of the
-first chunk:
+Measured on `prod-ops` merged with `main` at `f9a37a8` (objects-callbacks in), with the gate's own script.
+
+**D1, the JavaScript up front.** The rule (R9): growth of `web/hello-runtime-js` is allowed only for behaviour a hello
+app gets at load. The amendment above, item by item (its ablation's numbers, gzipped, overlapping):
 
 | Item | Bytes | Verdict |
 |---|---|---|
@@ -547,11 +548,25 @@ first chunk:
 | `runInBackground` | 112 | **Lazy** (`background.js`, 281 bytes on demand). A hello core has no background task, so `background.pending` is 0 and the window never calls it. The window fetches the chunk at the first hide with work pending; `visibilitychange` to hidden precedes `pagehide` and `freeze` (a page is frozen only when hidden), and the debounced persistence is flushed by the core on `Lifecycle.Background` itself, not by the run. The amendment's objection (a fetch at `pagehide` is unreliable) holds only for a browser that fires `pagehide` without hiding first, where the page is going away and the replay's network calls could not finish either. A failed chunk fetch rejects the call with an `UndraCallError` (to `onError` in the window), like the other lazy chunks. |
 | The `Diagnostics` registration | 56 | **Lazy** (`serveDiagnostics` in the `ports` chunk). Only a native core runs it, and that chunk is already fetched before the transport starts; a wasm page ships none of it. |
 
-Measured on the review's tree with the gate's own script: **21,666** bytes gzipped (was 21,756; -90), `lazy_gzipped` 24,246.
-`up-front.test.ts` now also fails if `core.ts` statically reaches `background.ts`. The budget is **21,700**, the record
-rounded up to the next hundred (the 5% tolerance stays): 22,000 would have left 334 bytes of unexplained room, which is not a
-test.
+On `prod-ops` alone that took the chunk from 21,756 to 21,666 (-90). On the merged tree: **22,001** bytes gzipped, against
+**21,672** for `main` (objects-callbacks' record): this piece is **+329**, the four kept items. The budget is **22,100**, the
+record rounded up to the next hundred (the 5% tolerance stays); 22,000 would already fail. Both pieces' bytes, for the
+integrator: `main` before either 21,336; objects-callbacks +336 (21,672, its note above: the identity map, the mirror's
+callback entries, the handle layout); prod-ops +329 (22,001: the trap-report trigger, the page window with
+`pagehide`/`freeze`, the stats fields). `up-front.test.ts` also fails if `core.ts` statically reaches `background.ts`.
 
-For the integrator (the `objects-callbacks` review has the same question, with +504 measured against `main`'s 21,336): the
-two pieces' up-front costs are not additive (gzip), so the merged tree is measured once both are in, and the gate is that
-number rounded up to the next hundred, with each piece's items listed here or in that review's note.
+**The wasm (a finding of the review, fixed).** Merged with `main`, the hello wasm measured **121,164** gzipped, 1,164 over
+the 120,000 budget: `main` was at 119,055 and this piece added 2,109. Where (named builds, twiggy, then the script's
+gzipped deltas): the standard function `run_background`, generated as an `async fn`, linked its future, its reply encoding
+and its dispatcher into every core (-745 when removed); the wasm hook's `in <operation>` naming (-78); and, the most, the
+report paths of a *caught* panic (`report_from`, the frames, the reporting at every guard), which a wasm core can never
+run: with `panic = "abort"` nothing catches a panic there. Two changes, no behaviour lost:
+
+1. `guarded` is `Ok(f())` on wasm (the hook still logs the FATAL record before the trap), so no reporting path of a caught
+   panic is linked into a wasm core: -1,137 bytes gzipped (part of it `main`'s own dead paths).
+2. `run_background`'s dispatcher is written by hand in `undra-ports` (the same declaration, so the schema and its hash are
+   unchanged): a runtime with no background task answers an idle report synchronously
+   (`Runtime::background_call`), and the asynchronous run is reachable only through `Runtime::add_background_task`: -378.
+
+The hello wasm is **119,654** gzipped (+599 on `main`: the standard surface every schema carries, R1 and ADR-024, the idle
+dispatcher, the FATAL record's `at`/`in` trailer); the budget stays 120,000.

@@ -33,6 +33,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 
 use crate::ctx::Ctx;
+use crate::dispatch::DispatchResult;
 use crate::runtime::Runtime;
 use crate::stats::Stats;
 use crate::timer::Timers;
@@ -130,17 +131,23 @@ pub(crate) struct Registered {
 pub type Runner =
     for<'a> fn(&'a Ctx, Duration) -> Pin<Box<dyn Future<Output = BackgroundTotals> + Send + 'a>>;
 
+/// What starts the call of the standard function `run_background` once a task exists: the
+/// asynchronous run, linked only through [`Runtime::add_background_task`].
+type Start = fn(&Runtime, u64) -> DispatchResult;
+
 /// The tasks of one runtime, in registration order.
 #[derive(Default)]
 pub(crate) struct Registry {
     tasks: Mutex<Vec<Registered>>,
     runner: std::sync::OnceLock<Runner>,
+    start: std::sync::OnceLock<Start>,
 }
 
 impl Registry {
     /// Registers a task unless one of that name exists.
     pub(crate) fn add(&self, name: &'static str, pending: PendingFn, run: RunFn) {
         let _ = self.runner.set(run_boxed);
+        let _ = self.start.set(start_call);
         let mut tasks = self.tasks.lock();
         if tasks.iter().all(|t| t.name != name) {
             tasks.push(Registered { name, pending, run });
@@ -324,6 +331,28 @@ fn stats_section(runtime: &Runtime) -> Option<String> {
     ))
 }
 
+/// The body of `run_background`'s reply: the four fields of `undra_ports::BackgroundReport`
+/// (`finished bool, replayed u32, refetched u32, still_pending u32`), encoded by hand because
+/// `undra-ports` depends on this crate (a test of `undra-ports` decodes it with the record).
+fn encode_totals(totals: &BackgroundTotals) -> Vec<u8> {
+    let mut w = undra_wire::Writer::with_capacity(13);
+    w.write_bool(totals.finished);
+    w.write_u32(totals.replayed);
+    w.write_u32(totals.refetched);
+    w.write_u32(totals.still_pending);
+    w.into_vec()
+}
+
+/// [`run`] as the asynchronous call of `run_background`: what [`Runtime::background_call`] returns
+/// once a task is registered.
+fn start_call(runtime: &Runtime, deadline_ms: u64) -> DispatchResult {
+    let ctx = runtime.ctx();
+    DispatchResult::Async(Box::pin(async move {
+        let totals = run(&ctx, Duration::from_millis(deadline_ms)).await;
+        Ok(encode_totals(&totals))
+    }))
+}
+
 /// [`run`] as a [`Runner`].
 fn run_boxed<'a>(
     ctx: &'a Ctx,
@@ -356,6 +385,19 @@ impl Runtime {
             name: "background",
             json: stats_section,
         });
+    }
+
+    /// What the call of the standard function `run_background(deadline_ms)` is (its dispatcher in
+    /// `undra-ports` decodes the argument and asks this). A runtime with no background task answers
+    /// at once with an idle report (`finished`, nothing done): neither the run nor an asynchronous
+    /// call is linked into a core that never registers a task (ADR-052, linked by use). Otherwise the
+    /// call runs the tasks inside the window and replies with what they did.
+    #[must_use]
+    pub fn background_call(&self, deadline_ms: u64) -> DispatchResult {
+        match self.background.start.get() {
+            Some(start) => start(self, deadline_ms),
+            None => DispatchResult::Sync(Ok(encode_totals(&BackgroundTotals::IDLE))),
+        }
     }
 
     /// The work the background tasks say is waiting.

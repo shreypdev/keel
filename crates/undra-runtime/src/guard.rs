@@ -22,7 +22,9 @@
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::panic::{self, AssertUnwindSafe, PanicHookInfo};
+#[cfg(not(target_family = "wasm"))]
+use std::panic::AssertUnwindSafe;
+use std::panic::{self, PanicHookInfo};
 use std::sync::Once;
 
 /// The most frames a report carries.
@@ -261,6 +263,7 @@ pub(crate) fn install_hook() {
 }
 
 /// Builds the report for a caught panic payload.
+#[cfg(not(target_family = "wasm"))]
 fn report_from(payload: Box<dyn Any + Send>) -> PanicReport {
     if let Some(carried) = payload.downcast_ref::<CarriedPanic>() {
         return carried.0.clone();
@@ -289,6 +292,19 @@ fn report_from(payload: Box<dyn Any + Send>) -> PanicReport {
 }
 
 /// Runs `f`, converting a panic into a [`PanicReport`].
+///
+/// On wasm (`panic = "abort"`) nothing can catch a panic: the hook logs it and the module traps
+/// before `catch_unwind` could return, so a guard is `Ok(f())` there, and none of the paths that
+/// report a caught panic is linked into a wasm core (ADR-052: the hello world does not pay for
+/// what it can never run).
+#[cfg(target_family = "wasm")]
+pub(crate) fn guarded<R>(f: impl FnOnce() -> R) -> Result<R, PanicReport> {
+    install_hook();
+    Ok(f())
+}
+
+/// Runs `f`, converting a panic into a [`PanicReport`].
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn guarded<R>(f: impl FnOnce() -> R) -> Result<R, PanicReport> {
     install_hook();
     STATE.with(|state| {
