@@ -69,3 +69,22 @@ as-built record in ADR-044 amendment A.
   and `AndroidDbAdapter(context)` no longer exist (they take the namespace): public-API changes of a library nothing has released.
 * `PortImpl.bind` is the one new TypeScript runtime member; a wa-sqlite worker serves one core's directory and refuses another
   namespace (typed `DbError.Unavailable`).
+
+## Verification (on the Mac, the `undra` AVD for the shared emulator, `undra-rn` for the RN device checks)
+
+| Suite | Result |
+|---|---|
+| Swift `swift test` | 676 pass (`NamespaceStorageTests` 7, `UndraCoreEntryTests` 8) |
+| Kotlin runtime `scripts/test-local.sh`, brew's 2.4.20 and CI's 2.0.21 | 755 cases, 0 failed, 2 skipped (the native smoke needs the fixture library); testkit 30 |
+| `android-adapters` `:android-adapters:test` (debug and release) | 288 results, 0 failed, 2 skipped |
+| `android-adapters` `:android-adapters:connectedAndroidTest` on the `undra` AVD | 151 tests, BUILD SUCCESSFUL (the first run found the Keystore test still reading the old alias; fixed) |
+| TypeScript runtime `vitest run` | 1,442 pass (10 new in `namespace-storage.test.ts`), `tsc` clean |
+| React Native: `vitest run` / `cpp/test/run.sh` / `android/test/run.sh` | 88 pass (1 new) / exit 0 (stores 15, Db 15, shims 33 each, the Apple platform 13 on a Mac) / 8 checks |
+| bindgen `cargo test -p undra-bindgen`, `undra bindgen --check --docs` on playground, cookbook, fieldbook, two-cores a and b | pass, clean |
+| Contract `contract-tests/run-all.sh` | 74/74 (S01–S26, S21/S22 TypeScript only) |
+| `examples/two-cores` iOS (Debug), Android, JVM, Node | `passed`, the `Kv:` lines included |
+| `scripts/rn-device-checks.sh ios` / `android --target emulator-5556` | 24/24 / 25/25 (RN12 and RN13 name the per-namespace Keystore alias, directories and database file) |
+
+The iOS device checks failed once, usefully: with the lowercase `undra` they stopped at the first `Kv` write
+(`cannot create …/undra/playground_core: No such file or directory`) on a simulator container that held the older `Undra`.
+Apple went back to `Undra`; the same checks then passed.
