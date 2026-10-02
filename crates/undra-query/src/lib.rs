@@ -102,7 +102,7 @@
 //!   and its observer's own polling interval), a restore re-issues the handle under the **same
 //!   value** from that record, and the object is built again when the platform first uses the
 //!   handle (it observes it, calls `refetch`): the platform runs no code of its own
-//!   (ADR-059, [`revive`](crate::revive)). A handle that is alive in the runtime being restored (a
+//!   (ADR-059). A handle that is alive in the runtime being restored (a
 //!   time travel) is not touched at all.
 //! * **Linked by use.** Because the layer and the hook are submitted by `#[undra::query]` and
 //!   `#[undra::mutation]`, not by this crate, a core that declares neither does not link the
