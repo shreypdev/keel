@@ -15,6 +15,7 @@ import {
   type NetKind,
   type RngAdapter,
   type TimerAdapter,
+  type UndraPanicReport,
 } from "@undra/runtime";
 import { compareUtf8 } from "./hex.js";
 
@@ -531,6 +532,57 @@ export class CaptureLog implements LogAdapter {
   }
 }
 
+/**
+ * A `Diagnostics` that keeps every panic report it is told (ADR-046): the fake of the port a native core calls once per
+ * panic it contained, and what a wasm core's trap report goes to. Pass `diagnostics.onPanic` as `LoadOptions.onPanic`
+ * (`PreviewCore` does), or register {@link CaptureDiagnostics.panicked} behind the `Diagnostics` port of a core of your own.
+ * The same as `undra::ports::fakes::CaptureDiagnostics` of the Rust kit.
+ *
+ * ```ts
+ * const fakes = createFakes();
+ * // ... a panicking call ...
+ * expect(fakes.diagnostics.last?.operation).toBe("Todos.add");
+ * ```
+ */
+export class CaptureDiagnostics {
+  readonly #reports: UndraPanicReport[] = [];
+
+  /** `Diagnostics.panicked`: keeps the report. */
+  panicked(report: UndraPanicReport): void {
+    this.#reports.push(report);
+  }
+
+  /** `LoadOptions.onPanic`, bound to this fake: `UndraCore.load({ onPanic: fakes.diagnostics.onPanic })`. */
+  readonly onPanic = (report: UndraPanicReport): void => {
+    this.panicked(report);
+  };
+
+  /** Every report so far, oldest first. */
+  get reports(): readonly UndraPanicReport[] {
+    return this.#reports;
+  }
+
+  /** How many reports there are. */
+  get length(): number {
+    return this.#reports.length;
+  }
+
+  /** The most recent report, or `undefined`. */
+  get last(): UndraPanicReport | undefined {
+    return this.#reports[this.#reports.length - 1];
+  }
+
+  /** Removes and returns every report so far. */
+  take(): UndraPanicReport[] {
+    return this.#reports.splice(0);
+  }
+
+  /** Forgets every report. */
+  clear(): void {
+    this.#reports.length = 0;
+  }
+}
+
 /** A source of connectivity changes a test or a preview drives: `set` reports the new state to every subscriber. */
 export class ScriptedConnectivity implements ConnectivityAdapter {
   #online = true;
@@ -602,6 +654,7 @@ export interface Fakes {
   readonly clock: FakeClock;
   readonly rng: SeededRng;
   readonly log: CaptureLog;
+  readonly diagnostics: CaptureDiagnostics;
   readonly http: FakeHttp;
   readonly kv: MemKv;
   readonly secureStore: MemSecureStore;
@@ -616,6 +669,7 @@ export function createFakes(): Fakes {
     clock: new FakeClock(),
     rng: new SeededRng(),
     log: new CaptureLog(),
+    diagnostics: new CaptureDiagnostics(),
     http: new FakeHttp(),
     kv: new MemKv(),
     secureStore: new MemSecureStore(),

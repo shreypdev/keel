@@ -1,6 +1,6 @@
 import { fnv1a32 } from "@undra/runtime";
 
-/** `(trait, methods)` of the ten standard ports (docs/SPEC.md section 8). */
+/** `(trait, methods)` of the eleven standard ports (docs/SPEC.md section 8; `Diagnostics` is ADR-046's). */
 const STANDARD: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["Clock", ["now_ms", "monotonic_ns"]],
   ["Rng", ["fill"]],
@@ -12,6 +12,7 @@ const STANDARD: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["Timer", ["set"]],
   ["Connectivity", ["changed"]],
   ["Lifecycle", ["changed"]],
+  ["Diagnostics", ["panicked"]],
 ];
 
 /** `"Http.request"` for the standard port method `(port, method)`, `undefined` for anything else. The ids stay authoritative; the name is for the person reading a recording. */
