@@ -60,6 +60,11 @@ integrated here.
 
 ## Verification (after merging `main` at 5f5c3fb: derived-lists S19, abi-table S26 and the per-core namespaces)
 
+`main` then took devtools (70fda02); it merged without a conflict and touched no runtime, binding or schema, so
+the Rust gates were run again on it (fmt, clippy, rustdoc, `cargo test --workspace --no-fail-fast`: 2,848
+passed, 0 failed, 15 ignored, 156 suites), with `undra bindgen --check --docs`, the site build and the TypeScript
+contract column (23/23); the table below is the run after the first merge.
+
 | Check | Result |
 |---|---|
 | `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, wasm32 clippy of `undra-ffi`, `cargo doc -D warnings` | clean |
