@@ -54,9 +54,10 @@ export function adopt<T extends UndraObject>(core: UndraCore, handle: Handle, ty
     core._giveBack(handle);
     return found as T;
   }
-  // A wrapper that was collected before its finalizer ran still has its mirror registration; the finalizer only gives
-  // its reference back once a newer wrapper holds the handle (`collected`).
-  if (ref !== undefined && found === undefined) core.mirror.unregister(handle);
+  // A wrapper that was collected before its finalizer ran still has its mirror registration (whether or not a sweep
+  // dropped its entry since); the finalizer only gives its reference back once a newer wrapper holds the handle
+  // (`collected`). Without a live wrapper, any registration of the handle is that dead wrapper's.
+  if (found === undefined) core.mirror.unregister(handle);
   const made = new (type as unknown as new (core: UndraCore, handle: Handle) => T)(core, handle);
   core._held(handle);
   live.set(handle, new WeakRef(made));

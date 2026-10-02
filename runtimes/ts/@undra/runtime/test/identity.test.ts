@@ -156,6 +156,29 @@ describe("adopt", () => {
     expect(newer.closed).toBe(false);
   });
 
+  it.skipIf(gc === undefined)("re-adopts a store whose collected wrapper's entry was swept before its finalizer ran", async () => {
+    const { fake, core } = await setup();
+    const original = (() => new WeakRef(adopt(core, 0x64n, CounterStore)))();
+    await macrotask(); // a WeakRef keeps its target for the job that made it
+    gc?.();
+    expect(original.deref(), "collected").toBeUndefined();
+    // Collected, finalizer not run yet: the map grows to 64 and its sweep drops the dead entry, while the
+    // collected store's mirror registration is still there (only its finalizer, or adopt, removes it).
+    for (let i = 1n; i < 64n; i++) adopt(core, 0x1000n + i, Thing).close();
+    expect(core.mirror.has(0x64n)).toBe(true);
+    // A reply carries the handle again (the core still counts the collected wrapper's reference).
+    fake.released.length = 0;
+    const newer = adopt(core, 0x64n, CounterStore);
+    expect(core.mirror.has(0x64n), "the new wrapper is mirrored").toBe(true);
+    for (let i = 0; i < 10; i++) {
+      gc?.();
+      await macrotask();
+    }
+    expect(fake.released, "the collected wrapper's reference, once").toEqual([0x64n]);
+    expect(newer.closed).toBe(false);
+    expect(core.mirror.has(0x64n), "the new wrapper keeps its registration").toBe(true);
+  });
+
   it("measures host-side adopt (a new wrapper, then the identity hit)", async () => {
     const { core } = await setup(true);
     const rounds = 20_000;
