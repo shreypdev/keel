@@ -1,10 +1,10 @@
 {
   "note": "The landing page's test-count card and contract grid, and the same numbers in README.md, rendered by site/scripts/build-trust.mjs. Update this file after a merge that moves them (the integrator's matrix line in .10x/status.md is the source) and run node site/scripts/build-all.mjs. The grid's scenarios and which platform runs each come from contract-tests/scenarios.md; cellsPassing must equal the number of cells it defines, or the build fails.",
   "source": "https://github.com/shreypdev/undra/blob/main/.10x/status.md",
-  "asOf": "2026-10-02, .10x/status.md checkpoint 26",
+  "asOf": "2026-10-02, the ci-green branch (.10x/decisions/sde/ci-green.md): the suites run on this Mac under Rust 1.99.0 and Node 24",
   "suites": [
-    { "name": "Rust", "slug": "rust", "count": 3536 },
-    { "name": "TypeScript", "slug": "typescript", "count": 1856 },
+    { "name": "Rust", "slug": "rust", "count": 3537 },
+    { "name": "TypeScript", "slug": "typescript", "count": 1858 },
     { "name": "Kotlin", "slug": "kotlin", "count": 881 },
     { "name": "Swift", "slug": "swift", "count": 870 },
     { "name": "React Native", "slug": "react-native", "count": 110 }

@@ -14,10 +14,10 @@ error[E0277]: error[undra::E0001]: `uuid::Uuid` cannot cross the boundary by val
    = help: the following other types implement trait `Encode`:
              &T
              ()
+             (A,)
              (A, B)
              (A, B, C)
              (A, B, C, D)
-             (A,)
              Account
              AppState
            and $N others
@@ -34,10 +34,10 @@ error[E0277]: error[undra::E0001]: `uuid::Uuid` cannot cross the boundary by val
    = help: the trait `undra::undra_wire::Decode` is not implemented for `uuid::Uuid`
    = help: the following other types implement trait `undra::undra_wire::Decode`:
              ()
+             (A,)
              (A, B)
              (A, B, C)
              (A, B, C, D)
-             (A,)
              Account
              AppState
              BTreeMap<K, V>

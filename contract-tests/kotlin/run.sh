@@ -148,7 +148,7 @@ UNDRA_CONTRACT_PHASE=B java -Xmx1g -Djava.library.path="$CORE_B" -cp "$CP" dev.u
 "$REPO/contract-tests/check.sh" kotlin "$OUT/run.log" || status=1
 
 # --- 5. the testing kit against the same core (not part of the grid) -------------------------------------------
-echo "==> running the testing kit against ${LIB#"$REPO"/}"
+echo "==> running the testing kit against ${LIB_DIR#"$REPO"/}"
 java -Xmx1g -Djava.library.path="$LIB_DIR" \
   -cp "$OUT/runtime/main:$KIT:$CLASSES:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES" \
   dev.undra.contract.TestKitMainKt 2>&1 | tee "$OUT/testkit.log" || status=$?

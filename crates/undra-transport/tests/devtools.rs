@@ -931,7 +931,14 @@ fn a_page_cannot_reach_the_core_through_its_socket_whatever_it_sends() {
     let _ = page.ws.send(Message::Binary(vec![1; 200 * 1024]));
     assert!(closed_within(&mut page, Duration::from_secs(5)));
 
-    // The core and the app client did not notice: nothing was called, nothing was restored.
+    // The core and the app client did not notice: nothing was called, nothing was restored. A page's leaving
+    // is not nothing: the last one out gives the app's observations back to the runtime, which answers each with
+    // the signal's value (`Hub::release_observation`). The hub has let go when it says it is idle, those values
+    // are queued for the app by then, and the round trip below, behind them, takes them out of the way: how long
+    // the server takes to notice the last close is the machine's business, not this test's.
+    fx.eventually("the hub to let go of the last page", |fx| {
+        !fx.bridge.devtools_attached()
+    });
     assert_eq!(value(&mut app), 10, "the Call envelope was not executed");
     assert_eq!(
         stat(&fx.rt, "calls") - calls_before,
@@ -1249,9 +1256,22 @@ fn restarted(
 
 /// Pipelines `n` `add(1)` calls on `counter` (a commit each) and waits for every reply.
 fn storm(app: &mut TestClient, counter: u64, n: usize) {
+    storm_paced(app, counter, n, 500, |_| {});
+}
+
+/// Pipelines `n` `add(1)` calls on `counter` (a commit each), `batch` in flight at a time, and waits for every reply;
+/// `after_batch` is told how many commits the batch made once its replies are in (a test that has a page reading
+/// holds the next batch back until the page has what this one made).
+fn storm_paced(
+    app: &mut TestClient,
+    counter: u64,
+    n: usize,
+    batch: usize,
+    mut after_batch: impl FnMut(usize),
+) {
     let mut sent = 0;
     while sent < n {
-        let batch = 500.min(n - sent);
+        let batch = batch.min(n - sent);
         let ids: Vec<u32> = (0..batch)
             .map(|_| {
                 let id = app.next_call_id();
@@ -1269,8 +1289,39 @@ fn storm(app: &mut TestClient, counter: u64, n: usize) {
         for id in ids {
             assert_eq!(app.await_reply(id).0, undra::wire::payload::ReplyStatus::Ok);
         }
+        after_batch(batch);
         sent += batch;
     }
+}
+
+/// Sets the label of `counter` `n` times, each to a different text of `size` bytes (a number and
+/// padding), `BATCH` calls in flight at a time; returns the last text.
+fn storm_labels(app: &mut TestClient, counter: u64, n: usize, size: usize) -> String {
+    const BATCH: usize = 50;
+    let text = |i: usize| format!("{i:06}{}", "x".repeat(size - 6));
+    let mut sent = 0;
+    while sent < n {
+        let batch = BATCH.min(n - sent);
+        let ids: Vec<u32> = (sent..sent + batch)
+            .map(|i| {
+                let id = app.next_call_id();
+                app.send_call(
+                    undra::wire::payload::CallTarget::Method {
+                        handle: undra::wire::Handle(counter),
+                        method_id: SET_LABEL,
+                    },
+                    id,
+                    &enc(&text(i)),
+                );
+                id
+            })
+            .collect();
+        for id in ids {
+            assert_eq!(app.await_reply(id).0, undra::wire::payload::ReplyStatus::Ok);
+        }
+        sent += batch;
+    }
+    text(n - 1)
 }
 
 /// Reads the page until it has been quiet for `quiet`.
@@ -1291,11 +1342,69 @@ fn a_commit_storm_costs_steps_by_time_not_by_commit_and_the_ring_stays_bounded()
     page.step();
     drain_page(&mut page, Duration::from_millis(200));
 
+    // The storm is paced by the page's own reads: `BATCH` commits, then the page reads until it has all of them,
+    // then the next batch. A page that reads at its own speed (a 4-core runner, a laptop under load) therefore
+    // misses nothing, whatever that speed is: the queue the server keeps per page holds one batch and never
+    // overflows, so "a page that reads misses nothing" is a property of the server and not of how fast this
+    // machine drains a socket. How long the storm takes is then the machine's business, and the step bound below
+    // is stated against the elapsed time, which is what the claim is about (a step per window, not per commit).
     const N: usize = 20_000;
+    const BATCH: usize = 256;
+    const DEADLINE: Duration = Duration::from_secs(600);
     let started = Instant::now();
-    storm(&mut app, counter, N);
+    let mut got: Vec<ServerMsg> = Vec::new();
+    let mut received = 0;
+    storm_paced(&mut app, counter, N, BATCH, |made| {
+        let want = received + made;
+        while received < want {
+            let left = DEADLINE.saturating_sub(started.elapsed());
+            let msg = page
+                .next_within(left.max(Duration::from_millis(1)))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the page received {received} of {want} commit change-sets after {:?} (it was dropped, \
+                         or {DEADLINE:?} is not enough on this machine)",
+                        started.elapsed()
+                    )
+                });
+            if matches!(
+                msg,
+                ServerMsg::ChangeSet {
+                    delivery: Delivery::Commit,
+                    ..
+                }
+            ) {
+                received += 1;
+            }
+            got.push(msg);
+        }
+    });
     let storm_took = started.elapsed();
-    let got = drain_page(&mut page, Duration::from_millis(700));
+    // The final state's step arrives one coalescing window after the last commit (the snapshot is taken by
+    // time): wait for it, then for a quiet 700 ms, so the statistics that follow are in `got` too.
+    let last_seq = got
+        .iter()
+        .filter_map(|m| match m {
+            ServerMsg::ChangeSet { seq, .. } => Some(*seq),
+            _ => None,
+        })
+        .max()
+        .unwrap();
+    let covered = |got: &[ServerMsg]| {
+        got.iter()
+            .any(|m| matches!(m, ServerMsg::Step(s) if s.through_seq == last_seq))
+    };
+    while !covered(&got) {
+        let left = DEADLINE.saturating_sub(started.elapsed());
+        match page.next_within(left.max(Duration::from_millis(1))) {
+            Some(msg) => got.push(msg),
+            None => panic!(
+                "no step covering the last commit (seq {last_seq}) after {:?}",
+                started.elapsed()
+            ),
+        }
+    }
+    got.extend(drain_page(&mut page, Duration::from_millis(700)));
     let elapsed = started.elapsed();
 
     let commits = got
@@ -1338,14 +1447,6 @@ fn a_commit_storm_costs_steps_by_time_not_by_commit_and_the_ring_stays_bounded()
         steps.len()
     );
     // The page is not left behind: the last step covers the last commit.
-    let last_seq = got
-        .iter()
-        .filter_map(|m| match m {
-            ServerMsg::ChangeSet { seq, .. } => Some(*seq),
-            _ => None,
-        })
-        .max()
-        .unwrap();
     assert_eq!(
         steps.last().unwrap().through_seq,
         last_seq,
@@ -1395,9 +1496,13 @@ fn a_page_that_stops_reading_is_dropped_and_the_core_and_the_app_do_not_wait_for
     app.recv_kind(Kind::ChangeSet);
     let mut page = Page::connect(&fx);
     page.step();
-    // The page does not read from here on.
+    // The page does not read from here on. What a socket holds before the writer blocks is the machine's:
+    // a few hundred KiB on macOS, several MiB on Linux, whose loopback buffers grow with the traffic. So the
+    // commits are big (16 KiB each, 48 MiB in all, every one different: the same value is not a change) and
+    // what is sent is far more than any socket holds, as the app-side test of a slow client sends far
+    // more than the queue holds (`a_client_that_stops_reading_is_dropped_and_never_blocks_the_core`).
     let started = Instant::now();
-    storm(&mut app, b, 40_000);
+    let last = storm_labels(&mut app, b, 3_000, 16 * 1024);
     let took = started.elapsed();
     assert!(
         took < Duration::from_secs(60),
@@ -1407,7 +1512,10 @@ fn a_page_that_stops_reading_is_dropped_and_the_core_and_the_app_do_not_wait_for
         !fx.bridge.devtools_attached()
     });
     // The app converged and is sent only its own signal; nothing of B reached it.
-    assert_eq!(i32_of(&app.method(b, GET, &[]).1), 40_000);
+    assert_eq!(
+        String::decode_exact(&app.method(b, GET_LABEL, &[]).1).unwrap(),
+        last
+    );
     app.method(a, ADD, &enc(&1_i32));
     drain(&mut app);
     assert_eq!(

@@ -3,9 +3,10 @@
 The definition of "the platforms agree" (SPEC section 14): thirty-four scenarios (S34 is not assigned), run
 against the **real playground core** (`examples/playground/core`) through the real boundary: S01 to S20, S23 to
 S33 (the opt-in ports of ADR-047 and ADR-048, two cores, objects as parameters and returns, host callbacks, the
-panic report and the background run of ADR-046, newtypes and generics, paged queries and lazy lists, polling) and
-S35 (query handles across a restore, ADR-059) by each platform runtime, S21 and S22 (web worker mode and crash
-recovery, ADR-049) by TypeScript only, 98 cells in all.
+panic report and the background run of ADR-046, newtypes, generic instantiations and leaf types, paged queries, lazy
+lists and polling) and S35 (query handles across a restore, ADR-059) by each platform runtime, S21 and S22 (web
+worker mode and crash recovery, ADR-049) by TypeScript only, 98 cells in all (34 on TypeScript, 32 each on Kotlin and
+Swift).
 
 | Directory | Platform | Boundary | Run |
 |---|---|---|---|
@@ -33,5 +34,5 @@ contract-tests/run-all.sh ts kotlin  # a subset
   ordinary check in a scenario or in the runtime's own tests.
 * `wire-vectors.json` is the shared byte-level vector table the three runtimes' codec tests read.
 
-Environment: Node 22+, Rust with `wasm32-unknown-unknown`, `kotlinc` (set `UNDRA_KOTLIN_STDLIB` and
+Environment: Node 24, Rust with `wasm32-unknown-unknown`, `kotlinc` (set `UNDRA_KOTLIN_STDLIB` and
 `UNDRA_KOTLINX_COROUTINES`, see `scripts/env.sh`), JDK 17, and full Xcode for the Swift runner.

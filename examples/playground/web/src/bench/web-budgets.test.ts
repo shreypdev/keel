@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadWebBudgets, parseWebBudgets } from "../../../../../scripts/web-budgets.mjs";
+import { benchScale, loadWebBudgets, parseWebBudgets } from "../../../../../scripts/web-budgets.mjs";
 import { WEB_BUDGET_IDS } from "./ops";
 
 describe("the web call path's budgets (bench/budgets.toml)", () => {
@@ -21,11 +21,26 @@ describe("the web call path's budgets (bench/budgets.toml)", () => {
   });
 
   it("has a budget for every row the device bench holds to one, and each is at least what was measured", () => {
-    const rows = loadWebBudgets();
+    const rows = loadWebBudgets(1);
     for (const id of WEB_BUDGET_IDS) {
       const row = rows[id];
       expect(row, `bench/budgets.toml has no [web."${id}"]`).toBeDefined();
       if (row?.measuredNs !== undefined) expect(row.budgetNs).toBeGreaterThanOrEqual(row.measuredNs);
+    }
+  });
+
+  it("scales every budget by UNDRA_BENCH_SCALE as the host budgets are, and refuses a scale that is not a positive number", () => {
+    expect(benchScale({})).toBe(1);
+    expect(benchScale({ UNDRA_BENCH_SCALE: "2" })).toBe(2);
+    expect(benchScale({ UNDRA_BENCH_SCALE: "2.5" })).toBe(2.5);
+    for (const bad of ["", "0", "-2", "fast", "2x", "NaN", "Infinity", "0x10"]) {
+      expect(() => benchScale({ UNDRA_BENCH_SCALE: bad }), `\`${bad}\``).toThrow(/UNDRA_BENCH_SCALE must be a positive number/);
+    }
+    const base = loadWebBudgets(1);
+    const doubled = loadWebBudgets(2);
+    for (const [id, row] of Object.entries(base)) {
+      expect(doubled[id]?.budgetNs).toBe(row.budgetNs * 2);
+      expect(doubled[id]?.measuredNs).toBe(row.measuredNs);
     }
   });
 });

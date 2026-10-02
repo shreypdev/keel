@@ -165,6 +165,7 @@ fn write_playground(root: &Path, own_workspace: bool) {
         root.join("core/Cargo.toml"),
         format!(
             "[package]\nname = \"playground-core\"\nversion = \"0.1.0\"\nedition = \"2024\"\nrust-version = \"1.85\"\npublish = false\n\n\
+[lints.rust]\nunexpected_cfgs = {{ level = \"warn\", check-cfg = [\"cfg(playground_v2)\"] }}\n\n\
 [dependencies]\nundra = {{ path = \"{}\", features = [\"websocket\", \"sse\", \"db\", \"uuid\", \"chrono\", \"rust_decimal\", \"bytes\"] }}\nuuid = {{ version = \"1\", default-features = false }}\nchrono = {{ version = \"0.4\", default-features = false }}\nrust_decimal = {{ version = \"1\", default-features = false }}\nbytes = {{ version = \"1\", default-features = false }}\nserde = {{ version = \"1\", features = [\"derive\"] }}\nserde_json = \"1\"\n{}",
             repo.join("crates/undra").display(),
             // Below this repository's `target/`, the copy would be taken for a member of its workspace.

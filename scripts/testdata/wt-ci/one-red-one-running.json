@@ -1,0 +1,5 @@
+[
+  {"workflowName":"CI","status":"completed","conclusion":"failure","createdAt":"2026-10-02T14:00:00Z","databaseId":201},
+  {"workflowName":"Bench","status":"in_progress","conclusion":"","createdAt":"2026-10-02T14:00:01Z","databaseId":202},
+  {"workflowName":"Two cores","status":"completed","conclusion":"success","createdAt":"2026-10-02T14:00:02Z","databaseId":203}
+]
