@@ -1,0 +1,103 @@
+name: Diag WebSocket close
+
+# TEMPORARY (ci-green): what does a client-initiated close do on the hosted macOS 15 runner? Removed before the branch lands.
+on:
+  push:
+    branches: ["wt/ci-green"]
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Versions
+        run: |
+          sw_vers
+          node --version
+          swift --version
+          uname -a
+      - name: The failing XCTest class alone
+        continue-on-error: true
+        working-directory: runtimes/swift/UndraRuntime
+        run: swift test --filter URLSessionWebSocketAdapterTests 2>&1 | grep -E "error:|Executed|passed|failed" | cut -c1-400
+      - name: A standalone client, close variants
+        continue-on-error: true
+        run: |
+          node contract-tests/servers/realtime-server.mjs --port 0 > "$RUNNER_TEMP/server.out" 2>&1 &
+          sleep 2
+          PORT="$(grep READY "$RUNNER_TEMP/server.out" | cut -d' ' -f2)"
+          echo "server on $PORT"
+          cat > "$RUNNER_TEMP/diag.swift" <<'SWIFT'
+          import Foundation
+
+          final class Delegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+              let name: String
+              var log: [String] = []
+              let lock = NSLock()
+              var opened: CheckedContinuation<Void, Never>?
+              init(_ name: String) { self.name = name }
+              func note(_ s: String) { lock.lock(); log.append(String(format: "%.3f ", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1000)) + s); lock.unlock() }
+              func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol p: String?) { note("didOpen"); opened?.resume(); opened = nil }
+              func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith code: URLSessionWebSocketTask.CloseCode, reason: Data?) { note("didClose code=\(code.rawValue)") }
+              func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) { note("didComplete error=\(String(describing: error))") }
+          }
+
+          func stats(_ port: String, _ path: String) async -> String {
+              var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/stats")!)
+              req.cachePolicy = .reloadIgnoringLocalCacheData
+              guard let (d, _) = try? await URLSession.shared.data(for: req),
+                    let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                    let cs = j["connections"] as? [[String: Any]] else { return "no stats" }
+              guard let last = cs.last(where: { ($0["path"] as? String) == path }) else { return "no connection" }
+              return "id=\(last["id"]!) closeCode=\(last["closeCode"] ?? "nil") clientClosed=\(last["clientClosed"] ?? "?")"
+          }
+
+          func run(_ port: String, _ variant: String, pendingReceive: Bool, invalidate: String, send: Bool) async {
+              let d = Delegate(variant)
+              let session = URLSession(configuration: .default, delegate: d, delegateQueue: OperationQueue())
+              let task = session.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)/ws/echo")!)
+              await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in d.opened = c; task.resume() }
+              if send {
+                  try? await task.send(.string("hello"))
+                  _ = try? await task.receive()
+              }
+              var pending: Task<String, Never>?
+              if pendingReceive { pending = Task { do { _ = try await task.receive(); return "got" } catch { return "receive failed: \(error)" } } }
+              try? await Task.sleep(nanoseconds: 50_000_000)
+              d.note("cancel(with: 1000)")
+              task.cancel(with: .normalClosure, reason: Data("done".utf8))
+              switch invalidate {
+              case "finish": session.finishTasksAndInvalidate()
+              case "cancel": session.invalidateAndCancel()
+              default: break
+              }
+              try? await Task.sleep(nanoseconds: 300_000_000)
+              let at300 = await stats(port, "/ws/echo")
+              try? await Task.sleep(nanoseconds: 1_500_000_000)
+              let at1800 = await stats(port, "/ws/echo")
+              let p = pending == nil ? "" : (await pending!.value)
+              print("== \(variant)  [send=\(send) pendingReceive=\(pendingReceive) invalidate=\(invalidate)]")
+              print("   server @300ms:  \(at300)")
+              print("   server @1.8s:   \(at1800)")
+              print("   pending receive: \(p)")
+              print("   task state: \(task.state.rawValue) closeCode=\(task.closeCode.rawValue)")
+              d.lock.lock(); for l in d.log { print("   delegate: \(l)") }; d.lock.unlock()
+              session.invalidateAndCancel()
+          }
+
+          let port = CommandLine.arguments[1]
+          await run(port, "A cancel, no traffic", pendingReceive: false, invalidate: "none", send: false)
+          await run(port, "B cancel after echo", pendingReceive: false, invalidate: "none", send: true)
+          await run(port, "C cancel after echo, pending receive", pendingReceive: true, invalidate: "none", send: true)
+          await run(port, "D as C then finishTasksAndInvalidate at once (the adapter)", pendingReceive: true, invalidate: "finish", send: true)
+          await run(port, "E as B then finishTasksAndInvalidate at once", pendingReceive: false, invalidate: "finish", send: true)
+          await run(port, "F as C then invalidateAndCancel at once", pendingReceive: true, invalidate: "cancel", send: true)
+          SWIFT
+          mv "$RUNNER_TEMP/diag.swift" "$RUNNER_TEMP/main.swift"
+          swiftc -swift-version 5 -o "$RUNNER_TEMP/diag" "$RUNNER_TEMP/main.swift"
+          "$RUNNER_TEMP/diag" "$PORT"
