@@ -41,7 +41,7 @@ Native macOS is the reference environment. `source scripts/env.sh` puts everythi
 PATH (rustup, brew JDK 17 + Kotlin, the kotlinx-coroutines jar, a `DEVELOPER_DIR`
 fallback when xcode-select still points at CommandLineTools). Machine setup, every
 suite's run command, and the known gotchas are in `docs/ONBOARDING.md`; `undra doctor`
-diagnoses a machine. Rust stable (1.98+) with the wasm32/iOS/Android targets installed —
+diagnoses a machine. Rust stable (1.99+; CI pins 1.99.0) with the wasm32/iOS/Android targets installed —
 no build-std, no nightly, except Miri/ASan jobs in CI. Full Xcode is required for Swift
 tests and simulators; Android work needs the SDK + NDK r27 + the `undra` AVD.
 
@@ -49,6 +49,12 @@ tests and simulators; Android work needs the SDK + NDK r27 + the `undra` AVD.
 
 One piece, one worktree, one adversarial review, one merge, then clean up —
 `docs/AGENT_WORKFLOW.md` is the binding process (scripts/wt.sh new/merge/rm/clean).
+No piece lands on `main` unless CI is green on its branch's exact head: review → merge `main` into the branch →
+`git push origin wt/<slug>` → CI green on that head → fast-forward → clean up (`scripts/wt.sh merge` refuses
+otherwise; `--no-ci` is for state-only commits). An agent's piece is not done until that run is green. Before pushing a
+branch run `scripts/ci-local.sh` (every CI, Bench, Two cores and Site step, in a clone of your commit; `--slow` for the
+slow-runner pass). `scripts/wt.sh merge` ends by pushing `main`, verifying `origin/main` has the head and deleting the
+piece's remote and local branches, worktree and helper branches (merged ones only); `wt.sh clean` sweeps the rest.
 State files under `.10x/` are the team's memory: after a piece merges, the integrator
 updates `.10x/status.md` and `.10x/handoff.md` and commits `state(<piece>): …`;
 worktree authors record their piece in `.10x/decisions/<role>/<slug>.md` and never touch

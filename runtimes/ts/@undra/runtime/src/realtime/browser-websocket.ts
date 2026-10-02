@@ -243,6 +243,11 @@ export function browserWebSocket(options: BrowserWebSocketOptions = {}): WebSock
         socket.addEventListener("error", (event) => {
           const message = (event as Partial<ErrorEvent>).message;
           if (typeof message === "string" && message.length > 0) failure = message;
+          // The standard fires `error` and then `close` for a connection that failed before it opened, but not every
+          // WebSocket does the second: Node 22's (undici 6) fires only `error` for a refused upgrade and for a host
+          // that does not resolve, and a connect that waited for `close` would never settle. `error` before `open` is
+          // the failure; the `close` that may follow finds the promise settled.
+          if (!opened) reject(new WsError.Refused(null, failure));
         });
         socket.addEventListener("close", (event) => {
           const { code, reason } = event as CloseEvent;

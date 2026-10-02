@@ -47,15 +47,30 @@ export function parseWebBudgets(text) {
 }
 
 /**
- * The web budgets of this checkout's bench/budgets.toml, each multiplied by `UNDRA_BENCH_SCALE` (a slower machine, the
- * same rule the host budgets use) when it is set.
+ * `UNDRA_BENCH_SCALE` of `env`: the factor a slower machine multiplies every latency ceiling by, `1` when it is unset.
+ * It is read as `bench/tests/budgets.rs` reads it: a positive, finite decimal number, and anything else (an empty
+ * string, `fast`, `0`, `-2`) is an error, so a typo cannot quietly leave a budget unscaled or switch it off.
  *
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {number}
+ */
+export function benchScale(env = process.env) {
+  const text = env.UNDRA_BENCH_SCALE;
+  if (text === undefined) return 1;
+  const scale = /^\+?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$/.test(text) ? Number(text) : Number.NaN;
+  if (!(Number.isFinite(scale) && scale > 0)) throw new Error(`UNDRA_BENCH_SCALE must be a positive number, not \`${text}\``);
+  return scale;
+}
+
+/**
+ * The web budgets of this checkout's bench/budgets.toml, each multiplied by `scale` (by default `UNDRA_BENCH_SCALE`: a
+ * slower machine, the same rule the host budgets use, applied to ceilings and to nothing else).
+ *
+ * @param {number} [scale]
  * @returns {Record<string, { budgetNs: number, measuredNs: number | undefined }>}
  */
-export function loadWebBudgets() {
-  const scale = Number(process.env.UNDRA_BENCH_SCALE ?? 1);
+export function loadWebBudgets(scale = benchScale()) {
   const rows = parseWebBudgets(readFileSync(BUDGETS_PATH, "utf8"));
-  const factor = Number.isFinite(scale) && scale > 0 ? scale : 1;
-  for (const row of Object.values(rows)) row.budgetNs *= factor;
+  for (const row of Object.values(rows)) row.budgetNs *= scale;
   return rows;
 }
