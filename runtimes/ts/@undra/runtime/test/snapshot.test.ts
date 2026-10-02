@@ -398,7 +398,7 @@ describe("the worker transport's requests", () => {
     );
     expect(error).toBeInstanceOf(UndraTransportError);
     expect((error as UndraTransportError).reason).toBe("unsupported");
-    expect((error as Error).message).toMatch(/older than this runtime/);
+    expect((error as Error).message).toMatch(/worker\.ports needs this @undra\/runtime's worker script/);
     expect(received.map((m) => (m as { t: string }).t), "init, then the worker is closed").toEqual(["init", "close"]);
     // The same worker without worker.ports still loads (its other features degrade as before).
     const ok = new WasmWorkerTransport({ wasm: new Uint8Array(8), expectedSchemaHash: SCHEMA, worker: silentWorker(["snapshot"]).worker });

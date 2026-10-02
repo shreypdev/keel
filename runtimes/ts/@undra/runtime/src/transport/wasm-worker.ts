@@ -233,12 +233,7 @@ export class WasmWorkerTransport implements Transport {
             if (this.#options.ports !== undefined && message.features?.includes("ports") !== true) {
               settle(() => {
                 this.close();
-                reject(
-                  new UndraTransportError(
-                    "unsupported",
-                    "the worker script is older than this runtime (it does not answer ports in the worker, worker protocol 3), so LoadOptions.worker.ports cannot be used: serve the worker script of the same @undra/runtime version",
-                  ),
-                );
+                reject(new UndraTransportError("unsupported", "worker.ports needs this @undra/runtime's worker script (protocol 3)"));
               });
               return;
             }

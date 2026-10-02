@@ -671,9 +671,11 @@ measured = 1.43
 # persistence-v2 (ADR-037, ADR-049): snapshot layout 2 and the migrating restore (closures, the canonical
 # description, the streamed converter) are in every core, since `undra_restore` is; 102,722 -> 119,565.
 # Hooks, the value decoder and the E0066 check are linked only by a core that has a `#[undra::migrate]`.
+# After main's ABI table (ADR-044) the merged core measured 120,188, over the budget; the persistence-v2 review
+# links the standard ports' Rust dispatchers by use (ADR-052 note): 116,731.
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 119565
+measured_gzip_bytes = 116731
 tolerance = 0.05
 
 # What a hello-world app ships of the JavaScript runtime: `@undra/runtime` as the template's
@@ -684,8 +686,9 @@ tolerance = 0.05
 # the parity failure model (its error channel added the bytes) at 26 KB; the follow-up piece
 # `ts-runtime-size` targets 16 KB. Gated like the wasm. Re-recorded by persistence-v2 (ADR-049: typed storage
 # errors, worker protocol 3, the snapshot layout-2 codec; crash recovery is `crashRecovery()`, which only an app
-# that imports it ships): 24,841 -> 25,906.
+# that imports it ships): 24,841 -> 25,906; after main's ABI table and the review's worker refusal, 25,984
+# (16 bytes under the budget: the next change to the hello runtime pays for itself, or `ts-runtime-size` lands).
 [size."web/hello-runtime-js"]
 budget_gzip_bytes = 26000
-measured_gzip_bytes = 25906
+measured_gzip_bytes = 25984
 tolerance = 0.05
