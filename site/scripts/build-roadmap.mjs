@@ -31,5 +31,11 @@ const ld = { "@context": "https://schema.org", "@type": "ItemList", name: "Undra
 const file = join(SITE, "roadmap", "index.html");
 let html = read(file);
 html = replaceRegion(html, "roadmap", sections.join("\n"), "  ");
+// The page's "Last updated" date is the data's `updated`, so the two cannot disagree.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const [y, m, d] = data.updated.split("-").map(Number);
+if (!y || !m || !d) throw new Error(`roadmap.json: updated must be YYYY-MM-DD, got ${data.updated}`);
+if (!/<!--updated-->[^<]*<!--\/updated-->/.test(html)) throw new Error("roadmap/index.html has no <!--updated-->..<!--/updated--> slot");
+html = html.replace(/<!--updated-->[^<]*<!--\/updated-->/, `<!--updated-->${d} ${MONTHS[m - 1]} ${y}<!--/updated-->`);
 html = replaceRegion(html, "roadmap-ld", `<script type="application/ld+json">\n${JSON.stringify(ld)}\n</script>`, "");
 console.log(writeIfChanged(file, html) ? "build-roadmap: updated site/roadmap/index.html" : "build-roadmap: up to date");
