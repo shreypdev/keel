@@ -42,7 +42,7 @@ export class PortRecorder {
 
   /** `impl` with every method recording its calls. */
   wrap(port: number, impl: PortImpl): PortImpl {
-    const methods: Record<number, (args: Uint8Array, portCallId: number) => Uint8Array | Promise<Uint8Array>> = {};
+    const methods: Record<number, (args: Uint8Array, portCallId?: number) => Uint8Array | Promise<Uint8Array>> = {};
     for (const [key, method] of Object.entries(impl.methods)) {
       const methodId = Number(key);
       methods[methodId] = (args, portCallId) => {
