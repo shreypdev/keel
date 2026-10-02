@@ -100,7 +100,7 @@ async function ready<T extends UndraObject>(core: UndraCore, handle: Handle, typ
  * returned, exactly as a constructed one is. Rejects with `UndraCallError` when the store cannot be observed, and with
  * a transport `protocol` error (mapped to `Malformed`) for a body that does not hold one handle.
  */
-export function adoptObject<T extends UndraObject>(core: UndraCore, body: Uint8Array, type: UndraObjectClass<T>): Promise<T> {
+export async function adoptObject<T extends UndraObject>(core: UndraCore, body: Uint8Array, type: UndraObjectClass<T>): Promise<T> {
   const r = new UndraReader(body);
   const handle = readHandle(r);
   r.finish();
