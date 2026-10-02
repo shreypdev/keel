@@ -1,5 +1,5 @@
 import { installNative, loadNative, nativePlatformDefaults, reactNativeHttp, type NativeTransport } from '@undra/react-native';
-import type { HttpAdapter, UndraCore } from '@undra/runtime';
+import type { HttpAdapter, UndraCore, UndraPanicReport } from '@undra/runtime';
 import { BigList, Device, Todos, UndraPlaygroundCore, kvGet, kvPut } from '@playground/core';
 
 /** What the screens share: the core and its long-lived stores. */
@@ -16,6 +16,19 @@ export interface Playground {
   readonly startupMs: number;
   /** A fresh token of this launch, which the checks write into the stores (and the device script looks for). */
   readonly nonce: string;
+  /** Every panic report the core handed to `onPanic` (ADR-046), oldest first: what an app would send to its crash reporter. */
+  readonly panics: readonly UndraPanicReport[];
+}
+
+/** A panic report as the lines the Bench screen shows (and the device log carries): what panicked, where, in which build. */
+export function describePanic(report: UndraPanicReport): string {
+  const frames = report.frames.slice(0, 3).map(f => `0x${f.address.toString(16)}${f.symbol === null ? '' : ` ${f.symbol}`}${f.file === null ? '' : ` ${f.file}:${f.line ?? '?'}`}`);
+  return [
+    report.message,
+    `at ${report.location === '' ? 'no location' : report.location}, in ${report.operation === '' ? 'nothing' : report.operation}, thread ${report.thread}`,
+    `${report.namespace} ${report.coreVersion}, schema 0x${report.schemaHash.toString(16)}, image ${report.imageId === '' ? 'unknown' : `${report.imageId.slice(0, 12)}…`}`,
+    `${report.frames.length} frame${report.frames.length === 1 ? '' : 's'}${frames.length > 0 ? `: ${frames.join(' | ')}` : ''}`,
+  ].join('\n');
 }
 
 /** Where the app's evidence lines go: the device log (`UNDRA-RN ...`) and the Bench screen. */
@@ -46,12 +59,20 @@ const fromBytes = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
  * Android) through the generated entry, so it is `UndraPlaygroundCore.core`, and creates the stores
  * the screens show.
  */
-export async function startUndra(log: Log): Promise<Playground> {
+export async function startUndra(log: Log, onPanic?: (report: UndraPanicReport) => void): Promise<Playground> {
   const started = performance.now();
+  const panics: UndraPanicReport[] = [];
   const nonce = `${Date.now().toString(36)}${Math.floor(Math.random() * 0xffffff).toString(36)}`;
   const core = await loadNative(UndraPlaygroundCore, {
     adapters: { http: taggedHttp() },
     onError: error => log(`UNDRA-RN error ${String(error)}`),
+    // Each panic the native core contained (ADR-046): where an app would call its crash reporter. The core reports it
+    // through its Diagnostics port; the module queues it for the JS thread, once.
+    onPanic: report => {
+      panics.push(report);
+      log(`UNDRA-RN PANIC ${report.operation} ${report.message} at ${report.location}`);
+      onPanic?.(report);
+    },
   });
   log(
     `UNDRA-RN loaded core=${UndraPlaygroundCore.namespace} mode=${core.mode} platform=${core.hello.platform} schema=0x${core.hello.schemaHash.toString(16)} abi=${core.hello.undraVersion} hermes=${String(
@@ -82,7 +103,7 @@ export async function startUndra(log: Log): Promise<Playground> {
   log(
     `UNDRA-RN stores observed: todos=${todos.todos.get().length} biglist rows=${bigList.items.get().length} count=${bigList.count.get()} in ${startupMs.toFixed(1)} ms`,
   );
-  return { core, todos, bigList, device, startupMs, nonce };
+  return { core, todos, bigList, device, startupMs, nonce, panics };
 }
 
 /** The transport's native counters, when the core is the native one. */

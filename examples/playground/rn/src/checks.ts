@@ -134,13 +134,24 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
   ],
   [
     'RN04',
-    'panic containment: status 2, the core keeps working',
-    async core => {
+    'panic containment: status 2, the panic report, the core keeps working',
+    async (core, playground) => {
+      const reports = playground.panics.length;
       const error = await rejects(() => explode('on purpose', core));
       // The core answers status 2 on the wire; the generated binding maps it onto the closed set (ADR-032, amendment A).
       expect(error instanceof UndraCallError.Panicked, `UndraCallError.Panicked (status 2), got ${String(error)}`);
       expect((await add(1, 1, core)) === 2, 'the core still answers');
-      return 'explode() -> UndraCallError.Panicked (status 2); add(1, 1) = 2 afterwards';
+      // ADR-046: the same panic, once, through `onPanic` on the JS thread, with where it happened and in which build.
+      await sleep(50);
+      expect(playground.panics.length === reports + 1, `one panic report through onPanic, got ${playground.panics.length - reports}`);
+      const report = playground.panics[reports]!;
+      expect(report.message.includes('on purpose'), `the panic message: ${report.message}`);
+      expect(/\.rs:\d+:\d+$/.test(report.location), `the panic location (file:line:column): ${report.location}`);
+      expect(report.operation === 'explode', `what was running: ${report.operation}`);
+      expect(report.thread !== '' && report.namespace === UndraPlaygroundCore.namespace && report.coreVersion !== '', `thread, namespace and version: ${report.thread} ${report.namespace} ${report.coreVersion}`);
+      expect(report.schemaHash === UndraIds.schemaHash, 'the core schema hash');
+      expect(report.frames.length > 0, 'frames');
+      return `explode() -> UndraCallError.Panicked (status 2); onPanic: ${report.operation} at ${report.location}, ${report.frames.length} frames, thread ${report.thread}; add(1, 1) = 2 afterwards`;
     },
   ],
   [

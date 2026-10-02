@@ -2,6 +2,7 @@ import { UndraCallError } from "@undra/runtime";
 import { useSignal } from "@undra/runtime/react";
 import { explode } from "@playground/core";
 import { useState } from "react";
+import { describePanic } from "../panic-log";
 import { describeRestart } from "../recovery-log";
 import type { Playground } from "../undra";
 
@@ -12,6 +13,7 @@ import type { Playground } from "../undra";
  */
 export function DebugPanel({ playground }: { readonly playground: Playground }) {
   const restarts = useSignal(playground.restarts.entries) ?? [];
+  const panic = useSignal(playground.panics.last);
   const connection = useSignal(playground.core.connection);
   const [outcome, setOutcome] = useState<string | null>(null);
   const wasm = playground.core.mode !== "remote";
@@ -47,6 +49,14 @@ export function DebugPanel({ playground }: { readonly playground: Playground }) 
           {outcome}
         </span>
       </div>
+      {panic !== null && (
+        <>
+          <p className="note">The last panic report (<code>onPanic</code>, what a crash reporter would receive):</p>
+          <pre className="muted" data-testid="debug-panic">
+            {describePanic(panic).join("\n")}
+          </pre>
+        </>
+      )}
       <p data-testid="debug-restarts">
         {restarts.length === 0 ? "No restarts." : `${restarts.length === 1 ? "1 restart" : `${restarts.length} restarts`}:`}
       </p>

@@ -13,6 +13,7 @@ import wasmUrl from "../../build/web/playground_core.wasm?url";
 import { onDevNotice, showDevConnection } from "./dev-banner";
 import { memoryKv } from "./memory-kv";
 import { INBOX, PlaygroundServer, REMOTE_BASE_URL } from "./playground-server";
+import { PanicLog } from "./panic-log";
 import { RECOVERY, RestartLog } from "./recovery-log";
 
 /**
@@ -30,6 +31,8 @@ export interface Playground {
   readonly server: PlaygroundServer;
   /** The restarts of the wasm core after a crash (ADR-049), for the debug panel. */
   readonly restarts: RestartLog;
+  /** The panic reports of the core (ADR-046), for the debug panel: the last one, where an app would send each to its crash reporter. */
+  readonly panics: PanicLog;
   /** The core itself (`UndraPlaygroundCore.core` becomes a closed placeholder if it goes down for good; this does not). */
   readonly core: UndraCore;
 }
@@ -46,11 +49,13 @@ function onError(unhandled: UndraUnhandledError): void {
 }
 
 /**
- * What a panic of the wasm core is handed to (ADR-046): the core's own panic record and the trap's frames, before the
- * runtime restarts the core. Where an app would call its crash reporter.
+ * What a panic of the core is handed to (ADR-046), once per panic, before the runtime restarts a wasm core: the message, where
+ * and in what it happened, the frames and which build of which core. Where an app would call its crash reporter (Sentry,
+ * `reportError`); the playground logs it and shows the last one in the debug panel.
  */
-function onPanic(report: UndraPanicReport): void {
-  console.error(`the Undra core panicked: ${report.message}`, report.frames);
+function onPanic(report: UndraPanicReport, panics: PanicLog): void {
+  console.error(`the Undra core panicked: ${report.message} (${report.location}, in ${report.operation})`, report);
+  panics.record(report);
 }
 
 /**
@@ -70,6 +75,7 @@ function onPanic(report: UndraPanicReport): void {
 export async function startUndra(): Promise<Playground> {
   const server = new PlaygroundServer();
   const restarts = new RestartLog();
+  const panics = new PanicLog();
   let inbox: RemoteTodosQueryHandle | undefined;
   const adapters = { http: server, kv: memoryKv() };
   // Development builds only (`vite dev`): a production page that took its core's address from a link would hand
@@ -84,6 +90,8 @@ export async function startUndra(): Promise<Playground> {
       url: devUrl,
       adapters,
       onError,
+      // A native core reports each panic it contained through its Diagnostics port.
+      onPanic: (report) => onPanic(report, panics),
       // `undra dev` carries the core's state across a rebuild and the runtime reconnects by itself, so the page
       // usually stays where it is. When the state could not be carried (a change the stores cannot follow, a state too big), the
       // runtime finds a new core and says so: reload the page onto it.
@@ -100,7 +108,9 @@ export async function startUndra(): Promise<Playground> {
       wasm: new URL(wasmUrl, location.href),
       adapters,
       onError,
-      onPanic,
+      onPanic: (report) => onPanic(report, panics),
+      // The core's name for the panic report (a wasm module does not carry it).
+      namespace: UndraPlaygroundCore.namespace,
       // A panic traps a wasm core: restart it from its last snapshot instead of leaving the page dead (ADR-049).
       recovery: crashRecovery(RECOVERY),
       onCoreRestarted: (event) => {
@@ -119,7 +129,7 @@ export async function startUndra(): Promise<Playground> {
     RemoteTodosQueryHandle.create(INBOX),
   ]);
   inbox = inboxQuery;
-  return { todos, bigList, inbox: inboxQuery, server, restarts, core };
+  return { todos, bigList, inbox: inboxQuery, server, restarts, panics, core };
 }
 
 /**
