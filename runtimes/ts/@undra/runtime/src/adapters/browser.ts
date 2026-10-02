@@ -96,11 +96,27 @@ export function browserLifecycle(document?: DocumentLike): LifecycleAdapter {
   };
 }
 
+/** Options of {@link browserAdapters}. */
+export interface BrowserAdaptersOptions {
+  /**
+   * The namespace of the core the defaults are made for (`LoadOptions.namespace`, `UndraIds.namespace`): the stores of
+   * `Kv`, `SecureStore` and `Fs` are per namespace, `undra.<namespace>.kv` and so on (SPEC 8, ADR-044 amendment A), so
+   * two cores of one page never share them. Default `"_"`.
+   */
+  readonly namespace?: string | undefined;
+}
+
+/** `{ namespace }` without the key when it is unset (`exactOptionalPropertyTypes`). */
+function optional(options: { readonly namespace: string | undefined }): { readonly namespace?: string } {
+  return options.namespace === undefined ? {} : { namespace: options.namespace };
+}
+
 /**
  * The default adapters of a browser (SPEC 11): `fetch` for Http, IndexedDB
  * for Kv, WebCrypto plus IndexedDB for SecureStore, the origin private file
  * system for Fs, `setTimeout` for Timer, `navigator.onLine` and Page
- * Visibility for Connectivity and Lifecycle, the console for Log. Safe to call
+ * Visibility for Connectivity and Lifecycle, the console for Log.
+ * The stores of Kv, SecureStore and Fs are per core namespace (`undra.<namespace>.kv`, ..., `undra/<namespace>/fs`). Safe to call
  * anywhere (Node, workers, tests).
  *
  * The storage ports are always present (ADR-049): where the platform lacks what
@@ -112,7 +128,8 @@ export function browserLifecycle(document?: DocumentLike): LifecycleAdapter {
  * system. Http, Connectivity and Lifecycle are present only when the platform has
  * them. Clock and Rng are not listed; the wasm core has built-in bindings for them.
  */
-export function browserAdapters(): Partial<Adapters> {
+export function browserAdapters(options: BrowserAdaptersOptions = {}): Partial<Adapters> {
+  const { namespace } = options;
   const g = globalThis as {
     fetch?: unknown;
     navigator?: { onLine?: unknown };
@@ -122,9 +139,9 @@ export function browserAdapters(): Partial<Adapters> {
   const adapters: Partial<Adapters> = {
     timer: setTimeoutTimer(),
     log: consoleLog(),
-    kv: indexedDbKv(),
-    secureStore: webCryptoSecureStore(),
-    fs: opfsFs(),
+    kv: indexedDbKv(optional({ namespace })),
+    secureStore: webCryptoSecureStore(optional({ namespace })),
+    fs: opfsFs(optional({ namespace })),
   };
   if (typeof g.fetch === "function") adapters.http = fetchHttp();
   if (typeof g.navigator?.onLine === "boolean" && typeof g.addEventListener === "function") {

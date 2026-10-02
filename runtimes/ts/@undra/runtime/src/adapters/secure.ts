@@ -1,5 +1,6 @@
 import { NEEDS_INDEXED_DB, indexedDbKv } from "./kv.js";
 import { openDatabase, result } from "./idb.js";
+import { storeName } from "./names.js";
 import { type KvAdapter, StorageError } from "./types.js";
 
 /** Where the master key of {@link webCryptoSecureStore} is kept between sessions. */
@@ -12,10 +13,12 @@ export interface KeyStore {
 
 /** Options of {@link webCryptoSecureStore}. */
 export interface WebCryptoSecureStoreOptions {
-  /** Where the ciphertext lives. Default: an IndexedDB database named `"undra-secure"`. */
+  /** Where the ciphertext lives. Default: an IndexedDB database named `"undra.<namespace>.secure"`. */
   readonly kv?: KvAdapter;
-  /** Where the master key lives. Default: another IndexedDB database, `"undra-secure-keys"`. */
+  /** Where the master key lives. Default: another IndexedDB database, `"undra.<namespace>.secure-keys"`. */
   readonly keyStore?: KeyStore;
+  /** The namespace of the core the default databases are made for (SPEC 8, ADR-044 amendment A). Default `"_"`; ignored by a `kv` or `keyStore` you give. */
+  readonly namespace?: string;
   /** The WebCrypto implementation; default the global `crypto`. */
   readonly crypto?: Crypto;
   /** The IndexedDB implementation for the defaults; default the global `indexedDB`. */
@@ -31,11 +34,11 @@ const IV_BYTES = 12;
 const ENCODER = new TextEncoder();
 
 /** The default key store: an IndexedDB object store holding the non-extractable `CryptoKey` (browsers can structured-clone it). */
-function indexedDbKeyStore(factory: IDBFactory | undefined): KeyStore {
+function indexedDbKeyStore(factory: IDBFactory | undefined, name: string): KeyStore {
   let database: Promise<IDBDatabase> | null = null;
   const open = (): Promise<IDBDatabase> => {
     if (factory === undefined) return Promise.reject(new StorageError.Unavailable(NEEDS_INDEXED_DB));
-    return (database ??= openDatabase(factory, "undra-secure-keys", ["keys"]));
+    return (database ??= openDatabase(factory, name, ["keys"]));
   };
   return {
     async load() {
@@ -72,8 +75,8 @@ function indexedDbKeyStore(factory: IDBFactory | undefined): KeyStore {
  */
 export function webCryptoSecureStore(options: WebCryptoSecureStoreOptions = {}): KvAdapter {
   const factory = options.indexedDB ?? (globalThis as { indexedDB?: IDBFactory | null }).indexedDB ?? undefined;
-  const kv = options.kv ?? indexedDbKv({ name: "undra-secure", store: "secure", ...(factory ? { indexedDB: factory } : {}) });
-  const keyStore = options.keyStore ?? indexedDbKeyStore(factory);
+  const kv = options.kv ?? indexedDbKv({ name: storeName(options.namespace, "secure"), store: "secure", ...(factory ? { indexedDB: factory } : {}) });
+  const keyStore = options.keyStore ?? indexedDbKeyStore(factory, storeName(options.namespace, "secure-keys"));
   let master: Promise<CryptoKey> | null = null;
 
   const webcrypto = (): Crypto => {

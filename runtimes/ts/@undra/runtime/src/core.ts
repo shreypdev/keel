@@ -1,4 +1,5 @@
 import { browserAdapters } from "./adapters/browser.js";
+import { UNNAMED_NAMESPACE } from "./adapters/names.js";
 import { standardPorts, startEventSources, timerPort } from "./adapters/ports.js";
 import { PortIds } from "./adapters/ids.js";
 import { WEB_CRYPTO_REQUIRED, consoleLog, hasCryptoRandom } from "./adapters/system.js";
@@ -106,6 +107,14 @@ export type ConnectionState =
 export interface AttachOptions {
   /** The schema hash of the generated bindings (`UndraIds.schemaHash`); a core built from another schema is refused. */
   readonly expectedSchemaHash: bigint;
+  /**
+   * The namespace of the core (`UndraIds.namespace`, `[core] namespace` in undra.toml), which the default `Kv`, `SecureStore`,
+   * `Fs` and `Db` stores are kept under: IndexedDB `undra.<namespace>.kv`, the origin-private-file-system directory
+   * `undra/<namespace>/fs`, and so on (SPEC 8, ADR-044 amendment A), so two cores of one page never share a store. The
+   * generated entry (`Undra<Namespace>.load`, `.attach`) fills it in. Default `"_"`. An adapter you give (`adapters`,
+   * `ports`) keeps its own location.
+   */
+  readonly namespace?: string;
   /**
    * Adapters to use instead of the browser defaults (`browserAdapters()`):
    * a value replaces the default of that port, `null` removes it. `timer`,
@@ -362,7 +371,7 @@ export class UndraCore {
    * random source (`wasm-main` only).
    */
   static async load(options: LoadOptions): Promise<UndraCore> {
-    const adapters = mergeAdapters(browserAdapters(), options.adapters);
+    const adapters = mergeAdapters(browserAdapters({ namespace: options.namespace }), options.adapters);
     // The worker keeps the snapshots of a core in `wasm-worker` mode: it is told the policy (data, not code).
     const recovery = options.recovery?.options;
     let transport: Transport;
@@ -434,7 +443,7 @@ export class UndraCore {
    * `Hello`.
    */
   static attach(transport: Transport, options: AttachOptions): Promise<UndraCore> {
-    return UndraCore.#attach(transport, options, mergeAdapters(browserAdapters(), options.adapters));
+    return UndraCore.#attach(transport, options, mergeAdapters(browserAdapters({ namespace: options.namespace }), options.adapters));
   }
 
   static async #attach(transport: Transport, options: AttachOptions, adapters: Partial<Adapters>): Promise<UndraCore> {
@@ -513,8 +522,19 @@ export class UndraCore {
     });
     for (const [portId, impl] of standardPorts(adapters)) this.#ports.set(portId, impl);
     if (options.ports !== undefined) {
-      for (const [portId, impl] of Object.entries(options.ports)) this.#ports.set(Number(portId), impl);
+      for (const [portId, impl] of Object.entries(options.ports)) {
+        this.#ports.set(Number(portId), impl);
+        impl.bind?.({ namespace: this.namespace });
+      }
     }
+  }
+
+  /**
+   * The namespace of the core: the one its generated entry loaded it under ({@link AttachOptions.namespace}), `"_"`
+   * when it was loaded without one. The default stores are kept under it (ADR-044 amendment A).
+   */
+  get namespace(): string {
+    return this.#options.namespace ?? UNNAMED_NAMESPACE;
   }
 
   /** The mode of the transport (`"wasm-main"`, `"wasm-worker"`, `"remote"`, or a custom one). */
@@ -697,6 +717,7 @@ export class UndraCore {
   registerPort(portId: number, impl: PortImpl): void {
     this.#transport.portAdded?.(portId, impl);
     this.#ports.set(portId, impl);
+    impl.bind?.({ namespace: this.namespace });
   }
 
   /**

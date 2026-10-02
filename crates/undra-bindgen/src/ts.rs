@@ -1187,32 +1187,32 @@ impl TsGen<'_> {
             w.line("schemaHash: UndraIds.schemaHash,");
             w.blank();
             w.line("/**");
-            w.line(" * Loads the core (`UndraCore.load` with this package's schema hash) and makes it `core`. Rejects with");
-            w.line(" * `UndraSchemaMismatchError` when the core was built from another schema, and with `UndraError` while");
-            w.line(" * this core is already loaded.");
+            w.line(" * Loads the core (`UndraCore.load` with this package's schema hash and namespace) and makes it `core`. Rejects");
+            w.line(" * with `UndraSchemaMismatchError` when the core was built from another schema, and with `UndraError` while");
+            w.line(" * this core is already loaded. The default stores are kept under the namespace (`undra.<namespace>.kv`, ...).");
             w.line(" */");
             w.block_with(
-                "async load(options: Omit<LoadOptions, \"expectedSchemaHash\">): Promise<UndraCore> {",
+                "async load(options: Omit<LoadOptions, \"expectedSchemaHash\" | \"namespace\">): Promise<UndraCore> {",
                 "},",
                 |w| {
                     w.line("claim();");
                     w.line(
-                        "return started(UndraCore.load({ ...options, expectedSchemaHash: UndraIds.schemaHash }));",
+                        "return started(UndraCore.load({ ...options, expectedSchemaHash: UndraIds.schemaHash, namespace: UndraIds.namespace }));",
                     );
                 },
             );
             w.blank();
             w.line("/**");
             w.line(" * Attaches the core over a transport you provide (React Native's `NativeTransport`, a test double),");
-            w.line(" * with this package's schema hash, and makes it `core`.");
+            w.line(" * with this package's schema hash and namespace, and makes it `core`.");
             w.line(" */");
             w.block_with(
-                "async attach(transport: Transport, options: Omit<AttachOptions, \"expectedSchemaHash\"> = {}): Promise<UndraCore> {",
+                "async attach(transport: Transport, options: Omit<AttachOptions, \"expectedSchemaHash\" | \"namespace\"> = {}): Promise<UndraCore> {",
                 "},",
                 |w| {
                     w.line("claim();");
                     w.line(
-                        "return started(UndraCore.attach(transport, { ...options, expectedSchemaHash: UndraIds.schemaHash }));",
+                        "return started(UndraCore.attach(transport, { ...options, expectedSchemaHash: UndraIds.schemaHash, namespace: UndraIds.namespace }));",
                     );
                 },
             );

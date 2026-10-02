@@ -1,10 +1,13 @@
 import { committed, openDatabase, result, toBytes } from "./idb.js";
+import { storeName } from "./names.js";
 import { type KvAdapter, StorageError } from "./types.js";
 
 /** Options of {@link indexedDbKv}. */
 export interface IndexedDbKvOptions {
-  /** Database name. Default `"undra-kv"`. */
+  /** Database name. Default `"undra.<namespace>.kv"` (SPEC 8, ADR-044 amendment A). */
   readonly name?: string;
+  /** The namespace of the core the default database name is made for. Default `"_"`; ignored when `name` is given. */
+  readonly namespace?: string;
   /** Object store name. Default `"kv"`. */
   readonly store?: string;
   /** The IndexedDB implementation; default the global `indexedDB`. */
@@ -34,7 +37,7 @@ async function storage<T>(work: () => Promise<T>): Promise<T> {
  * refused origin with `Unavailable`, anything else with `Io` and the browser's text.
  */
 export function indexedDbKv(options: IndexedDbKvOptions = {}): KvAdapter {
-  const name = options.name ?? "undra-kv";
+  const name = options.name ?? storeName(options.namespace, "kv");
   const store = options.store ?? "kv";
   let database: Promise<IDBDatabase> | null = null;
 

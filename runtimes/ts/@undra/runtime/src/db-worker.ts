@@ -2,6 +2,7 @@ import SQLiteESMFactory from "wa-sqlite/dist/wa-sqlite.mjs";
 import { AccessHandlePoolVFS } from "wa-sqlite/src/examples/AccessHandlePoolVFS.js";
 import { MemoryVFS } from "wa-sqlite/src/examples/MemoryVFS.js";
 import { Factory } from "wa-sqlite/src/sqlite-api.js";
+import { UNNAMED_NAMESPACE, storePath } from "./adapters/names.js";
 import { DbError } from "./adapters/types.js";
 import type { DbAdapter } from "./db/binding.js";
 import { type DbWorkerScope, serveDb } from "./db/protocol.js";
@@ -37,7 +38,12 @@ export interface WaSqliteAdapterOptions {
    * Node).
    */
   readonly storage?: "opfs" | "memory";
-  /** The OPFS directory of the databases (each one is `<directory>/…` in the pool's files). Default `undra/db`. */
+  /**
+   * The OPFS directory of the databases (each one is `<directory>/…` in the pool's files). Default
+   * `undra/<namespace>/db`, the namespace being that of the core that opens the database (ADR-044 amendment A): two
+   * cores of one page never share a database, and each has a pool of its own (`undra/_/db` for a core without a
+   * namespace).
+   */
   readonly directory?: string;
   /**
    * The `wa-sqlite.wasm` to load: its bytes, or its URL. Default: the file next to wa-sqlite's glue
@@ -75,9 +81,10 @@ const FILES_PER_DATABASE = 3;
  */
 export function waSqliteAdapter(options: WaSqliteAdapterOptions = {}): DbAdapter {
   const storage = options.storage ?? "opfs";
-  const directory = options.directory ?? "undra/db";
   let engine: Promise<DbAdapter> | null = null;
-  const load = async (): Promise<DbAdapter> => {
+  /** The core whose pool the engine holds (`undra/<namespace>/db`): the first to open a database. */
+  let served: string | null = null;
+  const load = async (directory: string): Promise<DbAdapter> => {
     const module = await SQLiteESMFactory(moduleConfig(options.wasm));
     const api = Factory(module);
     const path = (name: string): string => `/${name}`;
@@ -94,8 +101,18 @@ export function waSqliteAdapter(options: WaSqliteAdapterOptions = {}): DbAdapter
     });
   };
   return {
-    async open(name) {
-      engine ??= load();
+    async open(name, scope) {
+      const namespace = scope?.namespace ?? UNNAMED_NAMESPACE;
+      if (engine === null) {
+        // The pool of the first core to ask: one worker serves one core's directory (the pool holds it open), and
+        // every core of a page has a worker of its own (`waSqliteDb()` makes one per core).
+        served = namespace;
+        engine = load(options.directory ?? storePath(namespace, "db"));
+      } else if (options.directory === undefined && storage === "opfs" && served !== namespace) {
+        throw new DbError.Unavailable(
+          `this database worker keeps the databases of the core \`${served}\` (${storePath(served ?? undefined, "db")}), not those of \`${namespace}\`: give each core its own waSqliteDb(), or set \`directory\``,
+        );
+      }
       let ready: DbAdapter;
       try {
         ready = await engine;

@@ -16,8 +16,18 @@ export interface DbAdapter {
    * Opens (creating it if needed) database `name`: `":memory:"` for a private in-memory one, else a
    * file named after it in the adapter's directory. `name` was checked by the binding. Rejects with
    * a {@link DbError} (`Unavailable` for a file that cannot be opened).
+   *
+   * `scope` says which core asks: an adapter whose default location depends on the core (the browser's
+   * wa-sqlite, `undra/<namespace>/db`) uses `scope.namespace` for it (ADR-044 amendment A); an adapter that
+   * was given its location ignores it.
    */
-  open(name: string): Promise<DbConnection>;
+  open(name: string, scope?: DbScope): Promise<DbConnection>;
+}
+
+/** Which core opens a database: what {@link DbAdapter.open} is told besides the name. */
+export interface DbScope {
+  /** The namespace of the core (`UndraCore.namespace`). */
+  readonly namespace: string;
 }
 
 /**
@@ -165,6 +175,8 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
   let next = 1;
   /** Bumped by `dispose`: an open that was under way then closes its connection instead of registering it. */
   let epoch = 0;
+  /** Which core the port is registered with (`bind`); unknown before it is. */
+  let scope: DbScope | undefined;
 
   /** Runs `op` on `db`'s queue, after everything queued before it. */
   const enqueue = <T>(db: Database, op: () => Promise<T>): Promise<T> => {
@@ -264,7 +276,7 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
     validateDbName(name);
     validateMigrations(wanted);
     const asked = epoch;
-    const conn = await adapter.open(name);
+    const conn = await adapter.open(name, scope);
     try {
       await conn.query("PRAGMA foreign_keys = ON", []);
       await conn.query("PRAGMA busy_timeout = 5000", []);
@@ -401,6 +413,9 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
     dispose() {
       epoch++;
       for (const db of databases.values()) if (!db.closed) void closeDatabase(db);
+    },
+    bind(host) {
+      scope = { namespace: host.namespace };
     },
   };
 }
