@@ -13,14 +13,16 @@
 //! must have at least one field (E0007): zero-width items defeat length validation (SPEC 3.1).
 
 use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote, quote_spanned};
+use quote::{ToTokens, format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::visit_mut::VisitMut;
 use syn::{Fields, ItemEnum, ItemStruct};
 
 use super::attrs::{Site, take};
 use super::check::Checks;
-use super::common::{check_generics, derived, derives, field_meta, item_root, submit};
+use super::common::{
+    GenericOn, check_generics_on, derived, derives, field_meta, item_root, submit,
+};
 use super::diag::{Diag, Errors, code};
 use super::error::{ErrorAttr, take_field_attrs, take_message};
 use super::naming::unraw;
@@ -161,6 +163,7 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
     } else {
         TokenStream::new()
     };
+    // A failed type is not a map key worth a second error either.
     quote! {
         #[allow(dead_code)]
         impl #impl_generics #name #type_generics #where_clause {
@@ -169,6 +172,7 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
             #is_error_const
             #fields_stub
         }
+        impl #impl_generics #wire::leaf::MapKey for #name #type_generics #where_clause {}
         impl #impl_generics #wire::Encode for #name #type_generics #where_clause {
             fn encode(&self, __w: &mut #wire::Writer) {}
         }
@@ -275,105 +279,424 @@ fn error_attribute_misplaced(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Records
+// How a struct or an enum is expanded
 // ---------------------------------------------------------------------------------------------
 
-/// Expands `#[undra::api]` on a struct.
-pub(crate) fn expand_struct(
-    args_root: Option<Root>,
-    mut item: ItemStruct,
-) -> syn::Result<TokenStream> {
-    let mut errors = Errors::new();
-    let root = item_root(&mut item.attrs, args_root, &mut errors);
-    check_generics(&item.generics, &item.ident.to_string(), &mut errors);
-    let fields = match &mut item.fields {
+/// How a struct or an enum is expanded.
+#[derive(Clone, Debug)]
+pub(crate) enum Expand {
+    /// An ordinary record, enum or error: the item, its codecs, its registration and its checks.
+    Plain,
+    /// A generic template (`#[undra::api(generic)]`, ADR-042): the item, codecs generic over its
+    /// type parameters and the hidden `macro_rules!` that instantiates it. Nothing is registered:
+    /// a template has no wire identity of its own.
+    Template,
+    /// One instantiation (`#[undra::api] pub type TodoPage = Page<Todo>;`): no item and no codecs
+    /// (the template's serve), but the registration of `TodoPage`, the inherent constants that let
+    /// a signature spell the alias, and the checks of the type arguments.
+    Instance(Instance),
+}
+
+/// What an [`Expand::Instance`] knows about where it comes from.
+#[derive(Clone, Debug)]
+pub(crate) struct Instance {
+    /// The docs of the record: the alias's own, else the template's.
+    pub(crate) docs: String,
+    /// The template's name (`Page`), for the E0070 constant.
+    pub(crate) template: String,
+}
+
+/// What the fields of a struct make it.
+enum Body {
+    /// `struct Todo { .. }`: a record.
+    Record(Vec<FieldModel>),
+    /// `struct UserId(pub Uuid);`: a transparent record of one field named `value` (ADR-042).
+    Newtype(FieldModel),
+}
+
+impl Body {
+    fn fields(&self) -> &[FieldModel] {
+        match self {
+            Body::Record(fields) => fields,
+            Body::Newtype(field) => std::slice::from_ref(field),
+        }
+    }
+}
+
+/// The two fixes of a struct that has the wrong shape (E0007).
+const SHAPE_HELP: &str = "one field: a newtype, `struct Meters(pub f64);` (it crosses as the `f64`); several: named fields, `struct Pair { first: A, second: B }`; for a marker with no data, an enum with a unit variant";
+
+/// The reason a record needs a field (SPEC 3.1).
+const ZERO_WIDTH: &str = "a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a `Vec` of them would accept any count from a four-byte message";
+
+/// The one field of a newtype.
+fn parse_newtype_field(field: &mut syn::Field, self_name: &str, errors: &mut Errors) -> FieldModel {
+    take(&mut field.attrs, Site::NOTHING, errors);
+    let kty = match map_field(&field.ty, "value", self_name) {
+        Ok(kty) => kty,
+        Err(err) => {
+            // The help of a trait object in a field names a field; a newtype has none.
+            let err = if err.diag.code == code::E0012 {
+                let diag = Diag::new(
+                    code::E0012,
+                    err.diag.what.clone(),
+                    err.diag.why.clone(),
+                    "make the type this newtype wraps a concrete `#[undra::api]` type, or an enum listing the cases you need",
+                );
+                err.with_diag(diag)
+            } else {
+                err
+            };
+            errors.push(err.into_error());
+            KType::Unit
+        }
+    };
+    FieldModel {
+        ident: None,
+        name: "value".to_owned(),
+        ty: field.ty.clone(),
+        kty,
+        default: false,
+        docs: super::attrs::docs(&field.attrs),
+        from: false,
+        source: false,
+    }
+}
+
+/// The fields of a struct, or the E0007 for a shape that is neither a record nor a newtype.
+fn parse_struct_body(item: &mut ItemStruct, errors: &mut Errors) -> Body {
+    let self_name = unraw(&item.ident);
+    match &mut item.fields {
         Fields::Named(named) => {
             if named.named.is_empty() {
                 errors.push(item_shape(
                     &format!("record `{}` has no fields", item.ident),
                     &item.ident,
-                    "a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a `Vec` of them would accept any count from a four-byte message",
+                    ZERO_WIDTH,
                     "add a field, or use an enum with a unit variant if you need a marker",
                 ));
             }
-            parse_fields(
+            Body::Record(parse_fields(
                 named.named.iter_mut(),
-                &unraw(&item.ident),
+                &self_name,
                 Mode::Api,
                 Helpers::Ignore,
-                &mut errors,
-            )
+                errors,
+            ))
+        }
+        Fields::Unnamed(unnamed) if unnamed.unnamed.len() == 1 => Body::Newtype(
+            parse_newtype_field(&mut unnamed.unnamed[0], &self_name, errors),
+        ),
+        Fields::Unnamed(unnamed) if unnamed.unnamed.is_empty() => {
+            errors.push(item_shape(
+                &format!("tuple struct `{}` has no fields", item.ident),
+                &item.ident,
+                ZERO_WIDTH,
+                SHAPE_HELP,
+            ));
+            Body::Record(Vec::new())
+        }
+        Fields::Unnamed(unnamed) => {
+            errors.push(item_shape(
+                &format!(
+                    "tuple struct `{}` with {} fields cannot be a record",
+                    item.ident,
+                    unnamed.unnamed.len()
+                ),
+                unnamed,
+                "the schema names every field so the other languages can generate properties, and tuple fields have no names; only a tuple struct with exactly one field is a newtype, which crosses as the type it wraps",
+                SHAPE_HELP,
+            ));
+            Body::Record(Vec::new())
         }
         Fields::Unit => {
             errors.push(item_shape(
                 &format!("unit struct `{}` cannot be a record", item.ident),
                 &item.ident,
-                "a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a `Vec` of them would accept any count from a four-byte message",
-                "add a field, or use an enum with a unit variant if you need a marker",
+                ZERO_WIDTH,
+                SHAPE_HELP,
             ));
-            Vec::new()
+            Body::Record(Vec::new())
         }
-        Fields::Unnamed(unnamed) => {
-            errors.push(item_shape(
-                &format!("tuple struct `{}` cannot be a record", item.ident),
-                unnamed,
-                "the schema names every field so the other languages can generate properties; tuple fields have no names",
-                "use named fields: `struct Meters { value: f64 }`",
-            ));
-            Vec::new()
-        }
-    };
+    }
+}
+
+/// `impl<..> Trait for Name<..>` headers of a template: the declared parameters with `bound`
+/// added to each type parameter.
+fn bounded(generics: &syn::Generics, bound: &TokenStream) -> syn::Generics {
+    let mut generics = generics.clone();
+    for param in generics.type_params_mut() {
+        let bound: syn::TypeParamBound =
+            syn::parse2(bound.clone()).expect("a path is a type parameter bound");
+        param.bounds.push(bound);
+    }
+    generics
+}
+
+// ---------------------------------------------------------------------------------------------
+// Records
+// ---------------------------------------------------------------------------------------------
+
+/// Expands `#[undra::api]` on a struct.
+pub(crate) fn expand_struct(args_root: Option<Root>, item: ItemStruct) -> syn::Result<TokenStream> {
+    expand_struct_as(args_root, item, Expand::Plain)
+}
+
+/// Expands a struct as a record, a generic template or an instantiation (see [`Expand`]).
+pub(crate) fn expand_struct_as(
+    args_root: Option<Root>,
+    mut item: ItemStruct,
+    expand: Expand,
+) -> syn::Result<TokenStream> {
+    let mut errors = Errors::new();
+    let root = item_root(&mut item.attrs, args_root, &mut errors);
+    let template = matches!(expand, Expand::Template);
+    let params = type_param_names(&item.generics);
+    match &expand {
+        Expand::Plain => check_generics_on(
+            &item.generics,
+            &item.ident.to_string(),
+            GenericOn::Data,
+            &mut errors,
+        ),
+        Expand::Template => super::generic::check_template_generics(
+            &item.generics,
+            &item.ident.to_string(),
+            &mut errors,
+        ),
+        Expand::Instance(_) => {}
+    }
+    // What a template's macro carries: the item as written, helpers and all.
+    let definition = template.then(|| item.clone());
+    let body = parse_struct_body(&mut item, &mut errors);
+    if template {
+        super::generic::check_parameter_use(body.fields(), &params, &mut errors);
+    }
     errors.finish()?;
 
     let wire = root.wire();
     let meta = root.meta();
     let name = &item.ident;
     let name_str = unraw(name);
-    let docs = super::attrs::docs(&item.attrs);
+    let docs = match &expand {
+        Expand::Instance(instance) => instance.docs.clone(),
+        _ => super::attrs::docs(&item.attrs),
+    };
     let meta_static = format_ident!("__UNDRA_META_{}", name_str);
+    let fields = body.fields();
+    let newtype = matches!(body, Body::Newtype(_));
 
-    let encode_fields = fields.iter().map(|f| {
-        let ident = f.ident.as_ref().expect("named field");
-        quote_spanned! {f.ty.span()=> #wire::Encode::encode(&self.#ident, __w); }
-    });
-    let decode_fields = fields.iter().map(|f| {
-        let ident = f.ident.as_ref().expect("named field");
-        let ty = &f.ty;
-        quote_spanned! {f.ty.span()=> #ident: <#ty as #wire::Decode>::decode(__r)? }
-    });
-    let min_len = fields.iter().map(|f| {
-        let ty = &f.ty;
-        quote_spanned! {f.ty.span()=> + <#ty as #wire::Decode>::MIN_ENCODED_LEN }
-    });
-    // What a keyed list (`#[undra(key = "..")]` in a store) needs of its item: the field names. The
-    // store looks the key up in this constant, so a key that names no field is a branded error
-    // listing these names, and only then reads the field (`undra_meta::keys`). A constant is
-    // all a record pays for it: nothing is generated per field.
-    let field_names = fields.iter().map(|f| &f.name);
-    let field_metas = fields
-        .iter()
-        .map(|f| field_meta(&meta, &f.name, &f.kty, f.default, &f.docs));
-    let derived = derived();
-    let registration = submit(&root, "Record", &meta_static);
-    let mut checks = Checks::for_type(name);
-    for f in &fields {
+    let mut checks = match &expand {
+        Expand::Plain => Checks::for_type(name),
+        Expand::Template => Checks::for_template(name, params.clone()),
+        Expand::Instance(_) => Checks::for_instance(name),
+    };
+    for f in fields {
         checks.ty(&f.ty, &f.kty);
     }
     let checks = checks.emit(&root);
 
-    Ok(quote! {
-        #item
+    // The registration of a record and of an instantiation (a template has none).
+    let field_metas = fields
+        .iter()
+        .map(|f| field_meta(&meta, &f.name, &f.kty, f.default, &f.docs));
+    let registration = submit(&root, "Record", &meta_static);
+    let registered = quote! {
+        #[allow(non_upper_case_globals)]
+        static #meta_static: #meta::RecordMeta = #meta::RecordMeta {
+            name: #name_str,
+            type_id: #meta::ids::type_id(#name_str),
+            fields: &[ #(#field_metas),* ],
+            transparent: #newtype,
+            docs: #docs,
+        };
+        #registration
+    };
 
-        impl #name {
-            /// The stable Undra type id: `fnv1a32` of the type name.
-            pub const UNDRA_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
-            /// The names of the fields, in declaration order (see `undra_meta::keys`).
-            #[doc(hidden)]
-            pub const __UNDRA_FIELDS: &'static [&'static str] = &[ #(#field_names),* ];
+    // What a keyed list (`#[undra(key = "..")]` in a store) needs of its item: the field names.
+    // The store looks the key up in this constant, so a key that names no field is a branded
+    // error listing these names, and only then reads the field (`undra_meta::keys`). A newtype
+    // has no named field to key by.
+    let field_names: Vec<&String> = match &body {
+        Body::Record(fields) => fields.iter().map(|f| &f.name).collect(),
+        Body::Newtype(_) => Vec::new(),
+    };
+    let constants = quote! {
+        /// The stable Undra type id: `fnv1a32` of the type name.
+        pub const UNDRA_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
+        /// The names of the fields, in declaration order (see `undra_meta::keys`).
+        #[doc(hidden)]
+        pub const __UNDRA_FIELDS: &'static [&'static str] = &[ #(#field_names),* ];
+    };
+
+    let derived = derived();
+    match expand {
+        Expand::Plain => {
+            let codecs = struct_codecs(&wire, &Header::plain(name), fields, newtype);
+            let newtype_impl = if newtype {
+                newtype_impl(&wire, &Header::plain(name), fields[0].ty.to_token_stream())
+            } else {
+                TokenStream::new()
+            };
+            Ok(quote! {
+                #item
+
+                impl #name {
+                    #constants
+                }
+
+                #codecs
+                #newtype_impl
+                #registered
+                #checks
+            })
         }
+        Expand::Template => {
+            let encode_generics = bounded(&item.generics, &quote!(#wire::Encode));
+            let decode_generics = bounded(&item.generics, &quote!(#wire::Decode));
+            let header = Header::template(name, &item.generics, &encode_generics, &decode_generics);
+            let codecs = struct_codecs(&wire, &header, fields, newtype);
+            let newtype_impl = if newtype {
+                newtype_impl(&wire, &header, fields[0].ty.to_token_stream())
+            } else {
+                TokenStream::new()
+            };
+            let definition = definition.expect("a template keeps its definition");
+            let instantiator = super::generic::template_macro(
+                &root,
+                &syn::Item::Struct(definition),
+                &params,
+                &docs,
+            );
+            let _ = &derived;
+            Ok(quote! {
+                #item
 
+                #codecs
+                #newtype_impl
+                #checks
+                #instantiator
+            })
+        }
+        Expand::Instance(instance) => {
+            let rule = super::generic::duplicate_alias_constant(&instance.template);
+            Ok(quote! {
+                impl #name {
+                    #constants
+                    #rule
+                }
+
+                #registered
+                #checks
+            })
+        }
+    }
+}
+
+/// The names of the type parameters of `generics`.
+pub(crate) fn type_param_names(generics: &syn::Generics) -> Vec<String> {
+    generics.type_params().map(|p| unraw(&p.ident)).collect()
+}
+
+/// Where a pair of codec impls goes: `impl Encode for Todo`, or, for a template,
+/// `impl<T: Encode> Encode for Page<T>`.
+struct Header {
+    /// The type the impls are for: `Todo`, `Page<T>`.
+    ty: TokenStream,
+    /// The generics of `impl<..> Encode`, with their bounds.
+    encode: TokenStream,
+    /// The generics of `impl<..> Decode`, with their bounds.
+    decode: TokenStream,
+    /// The generics of any other `impl<..>` (the declared ones).
+    plain: TokenStream,
+}
+
+impl Header {
+    fn plain(name: &syn::Ident) -> Header {
+        Header {
+            ty: quote!(#name),
+            encode: TokenStream::new(),
+            decode: TokenStream::new(),
+            plain: TokenStream::new(),
+        }
+    }
+
+    fn template(
+        name: &syn::Ident,
+        declared: &syn::Generics,
+        encode: &syn::Generics,
+        decode: &syn::Generics,
+    ) -> Header {
+        let (_, ty_generics, _) = declared.split_for_impl();
+        let (declared_impl, _, _) = declared.split_for_impl();
+        let (encode_impl, _, _) = encode.split_for_impl();
+        let (decode_impl, _, _) = decode.split_for_impl();
+        Header {
+            ty: quote!(#name #ty_generics),
+            encode: quote!(#encode_impl),
+            decode: quote!(#decode_impl),
+            plain: quote!(#declared_impl),
+        }
+    }
+}
+
+/// `impl Newtype for UserId`: what `MapKey` reads to decide whether the newtype is a key.
+fn newtype_impl(wire: &TokenStream, header: &Header, inner: TokenStream) -> TokenStream {
+    let ty = &header.ty;
+    let generics = &header.plain;
+    quote! {
+        #[automatically_derived]
+        impl #generics #wire::leaf::Newtype for #ty {
+            type Inner = #inner;
+        }
+    }
+}
+
+/// `Encode` and `Decode` of a record: its fields in order, or, for a newtype, its one field.
+fn struct_codecs(
+    wire: &TokenStream,
+    header: &Header,
+    fields: &[FieldModel],
+    newtype: bool,
+) -> TokenStream {
+    let derived = derived();
+    let ty_name = &header.ty;
+    let encode_generics = &header.encode;
+    let decode_generics = &header.decode;
+    let (encode_fields, decode_construct, min_len) = if newtype {
+        let field = &fields[0];
+        let inner = &field.ty;
+        (
+            vec![quote_spanned! {inner.span()=> #wire::Encode::encode(&self.0, __w); }],
+            quote_spanned! {inner.span()=> Self(<#inner as #wire::Decode>::decode(__r)?) },
+            quote_spanned! {inner.span()=> <#inner as #wire::Decode>::MIN_ENCODED_LEN },
+        )
+    } else {
+        let encode_fields: Vec<TokenStream> = fields
+            .iter()
+            .map(|f| {
+                let ident = f.ident.as_ref().expect("named field");
+                quote_spanned! {f.ty.span()=> #wire::Encode::encode(&self.#ident, __w); }
+            })
+            .collect();
+        let decode_fields = fields.iter().map(|f| {
+            let ident = f.ident.as_ref().expect("named field");
+            let ty = &f.ty;
+            quote_spanned! {f.ty.span()=> #ident: <#ty as #wire::Decode>::decode(__r)? }
+        });
+        let min_len = fields.iter().map(|f| {
+            let ty = &f.ty;
+            quote_spanned! {f.ty.span()=> + <#ty as #wire::Decode>::MIN_ENCODED_LEN }
+        });
+        (
+            encode_fields,
+            quote! { Self { #(#decode_fields),* } },
+            quote! { 0usize #(#min_len)* },
+        )
+    };
+    quote! {
         #derived
-        impl #wire::Encode for #name {
+        impl #encode_generics #wire::Encode for #ty_name {
             #[allow(unused_variables)]
             fn encode(&self, __w: &mut #wire::Writer) {
                 #(#encode_fields)*
@@ -381,27 +704,15 @@ pub(crate) fn expand_struct(
         }
 
         #derived
-        impl #wire::Decode for #name {
-            const MIN_ENCODED_LEN: usize = 0usize #(#min_len)*;
+        impl #decode_generics #wire::Decode for #ty_name {
+            const MIN_ENCODED_LEN: usize = #min_len;
 
             #[allow(unused_variables)]
             fn decode(__r: &mut #wire::Reader<'_>) -> ::core::result::Result<Self, #wire::WireError> {
-                ::core::result::Result::Ok(Self { #(#decode_fields),* })
+                ::core::result::Result::Ok(#decode_construct)
             }
         }
-
-        #[allow(non_upper_case_globals)]
-        static #meta_static: #meta::RecordMeta = #meta::RecordMeta {
-            name: #name_str,
-            type_id: #meta::ids::type_id(#name_str),
-            fields: &[ #(#field_metas),* ],
-            transparent: false,
-            docs: #docs,
-        };
-        #registration
-
-        #checks
-    })
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -532,15 +843,49 @@ pub(crate) fn variant_pattern(variant: &VariantModel, bindings: &[syn::Ident]) -
 /// Expands `#[undra::api]` (`Mode::Api`) or `#[undra::error]` (`Mode::Error`) on an enum.
 pub(crate) fn expand_enum(
     args_root: Option<Root>,
+    item: ItemEnum,
+    mode: Mode,
+) -> syn::Result<TokenStream> {
+    expand_enum_as(args_root, item, mode, Expand::Plain)
+}
+
+/// Expands an enum as an enum, a generic template or an instantiation (see [`Expand`]).
+pub(crate) fn expand_enum_as(
+    args_root: Option<Root>,
     mut item: ItemEnum,
     mode: Mode,
+    expand: Expand,
 ) -> syn::Result<TokenStream> {
     let mut errors = Errors::new();
     let root = item_root(&mut item.attrs, args_root, &mut errors);
-    check_generics(&item.generics, &item.ident.to_string(), &mut errors);
+    let template = matches!(expand, Expand::Template);
+    let params = type_param_names(&item.generics);
+    match &expand {
+        Expand::Plain => check_generics_on(
+            &item.generics,
+            &item.ident.to_string(),
+            if mode == Mode::Error {
+                GenericOn::Error
+            } else {
+                GenericOn::Data
+            },
+            &mut errors,
+        ),
+        Expand::Template => super::generic::check_template_generics(
+            &item.generics,
+            &item.ident.to_string(),
+            &mut errors,
+        ),
+        Expand::Instance(_) => {}
+    }
+    let definition = template.then(|| item.clone());
     let variants = parse_variants(&mut item, mode, &mut errors);
     if mode == Mode::Error {
         super::error::validate(&variants, &mut errors);
+    }
+    if template {
+        let fields: Vec<&FieldModel> = variants.iter().flat_map(|v| &v.fields).collect();
+        super::generic::check_parameter_use(fields, &params, &mut errors);
     }
     errors.finish()?;
 
@@ -548,7 +893,10 @@ pub(crate) fn expand_enum(
     let meta = root.meta();
     let name = item.ident.clone();
     let name_str = unraw(&name);
-    let docs = super::attrs::docs(&item.attrs);
+    let docs = match &expand {
+        Expand::Instance(instance) => instance.docs.clone(),
+        _ => super::attrs::docs(&item.attrs),
+    };
     let meta_static = format_ident!("__UNDRA_META_{}", name_str);
     let is_error = mode == Mode::Error;
 
@@ -630,49 +978,24 @@ pub(crate) fn expand_enum(
     };
     let derived = derived();
     let registration = submit(&root, "Enum", &meta_static);
-    let mut checks = Checks::for_type(&name);
+    let mut checks = match &expand {
+        Expand::Plain => Checks::for_type(&name),
+        Expand::Template => Checks::for_template(&name, params.clone()),
+        Expand::Instance(_) => Checks::for_instance(&name),
+    };
     for f in variants.iter().flat_map(|v| &v.fields) {
         checks.ty(&f.ty, &f.kty);
     }
     let checks = checks.emit(&root);
 
-    Ok(quote! {
-        #item
-
-        impl #name {
-            /// The stable Undra type id: `fnv1a32` of the type name.
-            pub const UNDRA_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
-            /// Whether this is a `#[undra::error]` enum (what a `Result` may throw).
-            #[doc(hidden)]
-            pub const UNDRA_IS_ERROR: bool = #is_error;
-        }
-
-        #derived
-        impl #wire::Encode for #name {
-            fn encode(&self, __w: &mut #wire::Writer) {
-                match self {
-                    #(#encode_arms)*
-                }
-            }
-        }
-
-        #derived
-        impl #wire::Decode for #name {
-            const MIN_ENCODED_LEN: usize = 2;
-
-            fn decode(__r: &mut #wire::Reader<'_>) -> ::core::result::Result<Self, #wire::WireError> {
-                let __at = __r.position();
-                match __r.read_u16()? {
-                    #(#decode_arms)*
-                    __tag => ::core::result::Result::Err(#wire::WireError::InvalidTag {
-                        tag: ::core::primitive::u32::from(__tag),
-                        at: __at,
-                        ty: #name_str,
-                    }),
-                }
-            }
-        }
-
+    let constants = quote! {
+        /// The stable Undra type id: `fnv1a32` of the type name.
+        pub const UNDRA_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
+        /// Whether this is a `#[undra::error]` enum (what a `Result` may throw).
+        #[doc(hidden)]
+        pub const UNDRA_IS_ERROR: bool = #is_error;
+    };
+    let registered = quote! {
         #[allow(non_upper_case_globals)]
         static #meta_static: #meta::EnumMeta = #meta::EnumMeta {
             name: #name_str,
@@ -682,11 +1005,93 @@ pub(crate) fn expand_enum(
             docs: #docs,
         };
         #registration
+    };
 
-        #extras
+    let codecs = |header: &Header| {
+        let ty_name = &header.ty;
+        let encode_generics = &header.encode;
+        let decode_generics = &header.decode;
+        quote! {
+            #derived
+            impl #encode_generics #wire::Encode for #ty_name {
+                fn encode(&self, __w: &mut #wire::Writer) {
+                    match self {
+                        #(#encode_arms)*
+                    }
+                }
+            }
 
-        #checks
-    })
+            #derived
+            impl #decode_generics #wire::Decode for #ty_name {
+                const MIN_ENCODED_LEN: usize = 2;
+
+                fn decode(__r: &mut #wire::Reader<'_>) -> ::core::result::Result<Self, #wire::WireError> {
+                    let __at = __r.position();
+                    match __r.read_u16()? {
+                        #(#decode_arms)*
+                        __tag => ::core::result::Result::Err(#wire::WireError::InvalidTag {
+                            tag: ::core::primitive::u32::from(__tag),
+                            at: __at,
+                            ty: #name_str,
+                        }),
+                    }
+                }
+            }
+        }
+    };
+
+    match expand {
+        Expand::Plain => {
+            let codecs = codecs(&Header::plain(&name));
+            Ok(quote! {
+                #item
+
+                impl #name {
+                    #constants
+                }
+
+                #codecs
+
+                #registered
+
+                #extras
+
+                #checks
+            })
+        }
+        Expand::Template => {
+            let encode_generics = bounded(&item.generics, &quote!(#wire::Encode));
+            let decode_generics = bounded(&item.generics, &quote!(#wire::Decode));
+            let header =
+                Header::template(&name, &item.generics, &encode_generics, &decode_generics);
+            let codecs = codecs(&header);
+            let definition = definition.expect("a template keeps its definition");
+            let instantiator =
+                super::generic::template_macro(&root, &syn::Item::Enum(definition), &params, &docs);
+            Ok(quote! {
+                #item
+
+                #codecs
+
+                #checks
+
+                #instantiator
+            })
+        }
+        Expand::Instance(instance) => {
+            let rule = super::generic::duplicate_alias_constant(&instance.template);
+            Ok(quote! {
+                impl #name {
+                    #constants
+                    #rule
+                }
+
+                #registered
+
+                #checks
+            })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -729,12 +1134,85 @@ mod tests {
     }
 
     #[test]
-    fn tuple_struct_is_e0007() {
-        let out = expand("struct P(i32);");
+    fn a_tuple_struct_of_one_field_is_a_newtype() {
+        let out = expand("pub struct UserId(pub Uuid);");
+        for needle in [
+            "::undra::wire::Encode::encode(&self.0, __w);",
+            "::core::result::Result::Ok(Self(<Uuid as ::undra::wire::Decode>::decode(__r)?))",
+            "const MIN_ENCODED_LEN: usize = <Uuid as ::undra::wire::Decode>::MIN_ENCODED_LEN;",
+            "pub const UNDRA_TYPE_ID: u32 = ::undra::meta::ids::type_id(\"UserId\")",
+            "transparent: true",
+            "name: \"value\"",
+            "ty: ::undra::meta::TypeRefMeta::Uuid",
+            "impl ::undra::wire::leaf::Newtype for UserId { type Inner = Uuid; }",
+            "::undra::meta::Registration::Record",
+        ] {
+            assert!(has(&out, needle), "missing `{needle}` in {out}");
+        }
+        // No `From`, `Deref` or accessor: the author's API decisions.
+        for absent in ["impl From", "Deref", "fn value"] {
+            assert!(!has(&out, absent), "{absent} in {out}");
+        }
+    }
+
+    #[test]
+    fn a_newtype_of_a_non_leaf_keeps_its_inner_type_checks() {
+        let out = expand("struct Wrapped(Vec<Option<UserId>>);");
         assert!(
-            out.starts_with("error[undra::E0007]: tuple struct `P`"),
+            has(&out, "<crate::UserId>") || has(&out, "let __undra_id = <UserId>::UNDRA_TYPE_ID;"),
             "{out}"
         );
+        assert!(has(&out, "type Inner = Vec<Option<UserId>>;"), "{out}");
+    }
+
+    #[test]
+    fn newtype_inner_types_follow_the_field_rules() {
+        for (src, code) in [
+            ("struct N(());", "E0001"),
+            ("struct N(&str);", "E0001"),
+            ("struct N(Option<Option<u8>>);", "E0063"),
+            ("struct N(Box<dyn Any>);", "E0012"),
+            ("struct N(Lazy<u8>);", "E0001"),
+            ("struct N(Signal<u8>);", "E0001"),
+            ("struct N(Arc<dyn Listener>);", "E0004"),
+            ("struct N(HashMap<f64, u8>);", "E0006"),
+        ] {
+            let out = expand(src);
+            assert!(
+                out.contains(&format!("error[undra::{code}]")),
+                "{src}: {out}"
+            );
+        }
+        assert!(expand("struct N(Box<dyn Any>);").contains("make the type this newtype wraps"));
+    }
+
+    #[test]
+    fn a_unit_struct_or_a_wide_tuple_struct_names_both_fixes() {
+        for src in [
+            "struct P;",
+            "struct P();",
+            "struct P(i32, i32);",
+            "struct P(i32, i32, u8);",
+        ] {
+            let out = expand(src);
+            assert!(out.starts_with("error[undra::E0007]"), "{src}: {out}");
+            assert!(
+                out.contains("one field: a newtype, `struct Meters(pub f64);`")
+                    && out.contains("several: named fields"),
+                "{src}: {out}"
+            );
+        }
+        assert!(
+            expand("struct P(i32, i32);")
+                .contains("tuple struct `P` with 2 fields cannot be a record")
+        );
+        assert!(expand("struct P;").contains("unit struct `P` cannot be a record"));
+    }
+
+    #[test]
+    fn a_newtype_field_takes_no_undra_options() {
+        let out = expand("struct N(#[undra(default)] u8);");
+        assert!(out.contains("E0008"), "{out}");
     }
 
     #[test]
@@ -755,9 +1233,11 @@ mod tests {
     }
 
     #[test]
-    fn generic_struct_is_e0002() {
+    fn generic_struct_is_e0002_and_points_at_the_template() {
         let out = expand("struct P<T> { x: T }");
         assert!(out.starts_with("error[undra::E0002]"), "{out}");
+        assert!(out.contains("#[undra::api(generic)]"), "{out}");
+        assert!(out.contains("pub type TodoPage = Page<Todo>;"), "{out}");
     }
 
     fn expand_enum_src(src: &str, mode: Mode) -> String {

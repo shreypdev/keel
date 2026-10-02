@@ -1522,6 +1522,7 @@ dependencies = [
  "syn 2.0.119",
  "trybuild",
  "undra",
+ "uuid",
 ]
 
 [[package]]

@@ -8,6 +8,9 @@
 //! |---|---|---|
 //! | `#[undra::api]` | struct | `Encode`, `Decode`, `UNDRA_TYPE_ID`, `RecordMeta` + registration |
 //! | `#[undra::api]` | enum | the same with a `u16` variant index; `EnumMeta` |
+//! | `#[undra::api]` | struct with one unnamed field | a newtype: a transparent record that crosses as its inner type (ADR-042) |
+//! | `#[undra::api(generic)]` | struct or enum with type parameters | a template: the item, generic codecs, a hidden `macro_rules!`; registers nothing |
+//! | `#[undra::api]` | `type TodoPage = Page<Todo>;` | a named instantiation of a template: `RecordMeta` / `EnumMeta` for `TodoPage` |
 //! | `#[undra::error]` | enum | as an enum, plus `Display`, `Error`, `From` for `#[from]` |
 //! | `#[undra::api]` | `impl Type { .. }` | `UndraObject`, the dispatcher, `ObjectMeta` |
 //! | `#[undra::api]` | free `fn` | the dispatcher, `FunctionMeta` |
@@ -95,6 +98,17 @@ use proc_macro::TokenStream;
 #[proc_macro_attribute]
 pub fn api(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_::expand_api(attr.into(), item.into()).into()
+}
+
+/// What the hidden `macro_rules!` of a `#[undra::api(generic)]` type calls to instantiate it
+/// (ADR-042): not written by hand.
+///
+/// Takes the template's definition with the type arguments substituted, under the name of the
+/// alias (`#[undra::api] pub type TodoPage = Page<Todo>;`), and registers that record or enum.
+#[doc(hidden)]
+#[proc_macro]
+pub fn __instantiate(input: TokenStream) -> TokenStream {
+    impl_::expand_instantiate(input.into()).into()
 }
 
 /// Marks an error enum: everything `#[undra::api]` does for an enum, plus `Display` from

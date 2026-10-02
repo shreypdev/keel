@@ -121,11 +121,15 @@ impl KType {
         }
     }
 
-    /// Whether this type may be a map key (SPEC 2.1: `String`, integers, `Bool`, `Uuid`).
+    /// Whether this type may be a map key (SPEC 2.1: `String`, integers, `Bool`, `Uuid`, and a
+    /// newtype of one of those). A `Named` type is accepted here: the syntax cannot tell a
+    /// newtype from a record, so the trait bound the checks emit (`MapKey`, see `check.rs`)
+    /// decides, and refuses a record or a newtype of a non-key with the same code (E0006).
     pub(crate) fn is_valid_map_key(&self) -> bool {
         matches!(
             self,
-            KType::String
+            KType::Named(_)
+                | KType::String
                 | KType::Bool
                 | KType::I8
                 | KType::I16
@@ -348,7 +352,7 @@ pub(crate) fn ty_string(ty: &impl ToTokens) -> String {
     s
 }
 
-const ALLOWED_SET: &str = "bool, i8..i64, u8..u64, f32, f64, String, Bytes, Vec<T>, Option<T>, HashMap<K, V>, BTreeMap<K, V>, Duration, Timestamp, Uuid, and types declared with #[undra::api]";
+const ALLOWED_SET: &str = "bool, i8..i64, u8..u64, f32, f64, String, Bytes, Vec<T>, Option<T>, HashMap<K, V>, BTreeMap<K, V>, Duration, Timestamp, Uuid, Decimal, and types declared with #[undra::api] (records, enums, newtypes and named instantiations of generic data types)";
 
 /// Maps the type of a record or variant field. A trait object anywhere inside is reported as
 /// E0012 on the whole field type, as in the blueprint's example.
@@ -586,6 +590,12 @@ const NOT_OBJECTS: &[&str] = &[
     "Duration",
     "Timestamp",
     "Uuid",
+    "Decimal",
+    "DateTime",
+    "OffsetDateTime",
+    "UtcDateTime",
+    "TimeDelta",
+    "PhantomData",
     "Vec",
     "Option",
     "Box",
@@ -621,6 +631,12 @@ const NOT_OBJECTS: &[&str] = &[
     "Pin",
     "Self",
 ];
+
+/// Whether `name` is a standard library or built-in type name that Undra gives a meaning of its own
+/// (so it is never a generic data type of the user's).
+pub(crate) fn is_std_type_name(name: &str) -> bool {
+    NOT_OBJECTS.contains(&name)
+}
 
 /// The name of the object a plain type path spells (`Mailbox`, `crate::mail::Mailbox`): the last
 /// segment, when the path has no arguments and does not name a built-in. Whether it really is an
@@ -982,6 +998,11 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
     let args = type_args(last, ty)?;
     let bare = last.arguments.is_none();
 
+    // The types of the opt-in leaf features (`chrono`, `time`, ..): ADR-042 decision 4.
+    if let Some(result) = foreign_leaf(path, ty, &name, &args) {
+        return result;
+    }
+
     // Primitives and the wire leaf types take no arguments.
     if bare {
         let leaf = match name.as_str() {
@@ -1020,7 +1041,7 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
             ty,
             format!("`{name}` cannot cross the boundary"),
             "Swift, Kotlin and TypeScript have no portable 128-bit integer",
-            "use two `u64` halves, or `Uuid` for identifiers",
+            "use `Decimal` for an exact number (an amount of money: its `rust_decimal` feature maps `rust_decimal::Decimal` onto it), `Uuid` for a 128-bit id, or a newtype of `String` for an identifier (`struct AccountId(pub String);`)",
         )),
         ("char", 0) => Err(unsupported(
             ty,
@@ -1083,8 +1104,8 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
                     Diag::new(
                         code::E0006,
                         format!("`{}` cannot be a map key", ty_string(args[0])),
-                        "map keys must be `String`, an integer, `bool` or `Uuid`: those compare and hash identically on every platform (floats and composite keys do not)",
-                        "use one of those key types, or a `Vec` of records with an explicit key field",
+                        "map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not)",
+                        "use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field",
                     ),
                 ));
             }
@@ -1247,13 +1268,167 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
             ),
         )),
         (_, 0) if bare => Ok(KType::Named(strip_raw(&name))),
-        _ => Err(unsupported(
+        _ if NOT_OBJECTS.contains(&name.as_str()) => Err(unsupported(
             ty,
-            format!("generic type `{}` cannot cross the boundary", ty_string(ty)),
-            "the schema has no way to name an instantiated generic type",
-            "declare a concrete `#[undra::api]` type for this instantiation",
+            format!("`{}` cannot cross the boundary", ty_string(ty)),
+            "this type is not one of the types the schema describes, or is spelled with the wrong number of arguments",
+            &format!("write one of the supported types here: {ALLOWED_SET}"),
         )),
+        _ => Err(generic_spelled(ty, last, &args)),
     }
+}
+
+/// E0002 for a generic type written with its arguments: a data type is instantiated once, under a
+/// name of its own, and the name is what a signature spells (ADR-042 decision 2.3).
+fn generic_spelled(ty: &Type, last: &syn::PathSegment, args: &[&Type]) -> TyErr {
+    let alias: String = args
+        .iter()
+        .map(|arg| alias_hint(arg))
+        .chain(std::iter::once(strip_raw(&last.ident.to_string())))
+        .collect();
+    TyErr::new(
+        ty,
+        Diag::new(
+            code::E0002,
+            format!("generic type `{}` cannot cross the boundary", ty_string(ty)),
+            "the schema has no way to name an instantiated generic type: every instantiation is a named type of its own, which the platforms generate",
+            format!(
+                "declare `#[undra::api] pub type {alias} = {};` (`{}` must be a struct or enum marked `#[undra::api(generic)]`) and write `{alias}` here",
+                ty_string(ty),
+                strip_raw(&last.ident.to_string()),
+            ),
+        ),
+    )
+}
+
+/// The words of a type argument that name an alias: `Todo` for `Todo`, `VecTodo` for
+/// `Vec<Todo>`.
+fn alias_hint(ty: &Type) -> String {
+    match ty {
+        Type::Path(path) => path
+            .path
+            .segments
+            .last()
+            .map(|seg| {
+                let args = match &seg.arguments {
+                    PathArguments::AngleBracketed(args) => args
+                        .args
+                        .iter()
+                        .filter_map(|arg| match arg {
+                            GenericArgument::Type(ty) => Some(alias_hint(ty)),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => String::new(),
+                };
+                format!("{}{args}", strip_raw(&seg.ident.to_string()))
+            })
+            .unwrap_or_default(),
+        Type::Group(group) => alias_hint(&group.elem),
+        Type::Paren(paren) => alias_hint(&paren.elem),
+        _ => String::new(),
+    }
+}
+
+/// Whether a leaf feature of `undra` (mirrored by a feature of this crate, see `Cargo.toml`) is on.
+fn leaf_feature(feature: &str) -> bool {
+    match feature {
+        "uuid" => cfg!(feature = "uuid"),
+        "chrono" => cfg!(feature = "chrono"),
+        "time" => cfg!(feature = "time"),
+        "rust_decimal" => cfg!(feature = "rust_decimal"),
+        "bytes" => cfg!(feature = "bytes"),
+        _ => false,
+    }
+}
+
+/// A type of a leaf feature: the schema type it crosses as when the feature is on, E0001 naming
+/// the feature when it is off (one error, instead of the three the compiler would add for a type
+/// that does not implement `Encode`, `Decode` and `WireLeaf`).
+fn needs_feature(ty: &Type, feature: &str, kty: KType) -> Result<KType, TyErr> {
+    if leaf_feature(feature) {
+        return Ok(kty);
+    }
+    let shown = ty_string(ty);
+    Err(TyErr::new(
+        ty,
+        Diag::new(
+            code::E0001,
+            format!("`{shown}` needs the `{feature}` feature of `undra`"),
+            format!(
+                "`{feature}`'s types cross as the wire type they stand for (`{shown}` as `{}`), but the dependency is opt-in, so a core that does not use it does not build it; no clock or randomness feature of `{feature}` is enabled either way",
+                leaf_wire_name(&kty),
+            ),
+            format!(
+                "enable it: `undra = {{ version = \"..\", features = [\"{feature}\"] }}` in Cargo.toml (if you name the Undra crates directly with `crate = \"..\"`, enable `{feature}` on `undra-wire` and `undra-macros`)"
+            ),
+        ),
+    ))
+}
+
+fn leaf_wire_name(kty: &KType) -> &'static str {
+    match kty {
+        KType::Timestamp => "Timestamp",
+        KType::Duration => "Duration",
+        KType::Uuid => "Uuid",
+        KType::Decimal => "Decimal",
+        KType::Bytes => "Bytes",
+        _ => "its wire type",
+    }
+}
+
+/// The spellings of the opt-in leaf types (ADR-042 decision 4). A name only one crate has
+/// (`DateTime<Utc>`, `OffsetDateTime`, `TimeDelta`) is recognised wherever it is written; a name
+/// the built-in leaf also has (`Uuid`, `Decimal`, `Bytes`, `Duration`) only when the path names the
+/// crate (`uuid::Uuid`): a bare `Uuid` maps as the built-in one, and the membership check of
+/// `check.rs` decides whether it really is.
+fn foreign_leaf(
+    path: &syn::TypePath,
+    ty: &Type,
+    name: &str,
+    args: &[&Type],
+) -> Option<Result<KType, TyErr>> {
+    let segments = &path.path.segments;
+    let crate_of = |expected: &str| segments.len() == 2 && segments[0].ident == expected;
+    let bare = args.is_empty();
+    match name {
+        "DateTime" => Some(date_time(ty, args)),
+        "OffsetDateTime" | "UtcDateTime" if bare => {
+            Some(needs_feature(ty, "time", KType::Timestamp))
+        }
+        "TimeDelta" if bare => Some(needs_feature(ty, "chrono", KType::Duration)),
+        "Duration" if bare && crate_of("time") => Some(needs_feature(ty, "time", KType::Duration)),
+        "Duration" if bare && crate_of("chrono") => {
+            Some(needs_feature(ty, "chrono", KType::Duration))
+        }
+        "Uuid" if bare && crate_of("uuid") => Some(needs_feature(ty, "uuid", KType::Uuid)),
+        "Decimal" if bare && crate_of("rust_decimal") => {
+            Some(needs_feature(ty, "rust_decimal", KType::Decimal))
+        }
+        "Bytes" if bare && crate_of("bytes") => Some(needs_feature(ty, "bytes", KType::Bytes)),
+        _ => None,
+    }
+}
+
+/// `DateTime<Utc>` is a `Timestamp`; any other time zone is E0001 ("offsets do not cross").
+fn date_time(ty: &Type, args: &[&Type]) -> Result<KType, TyErr> {
+    let is_utc = |arg: &&Type| {
+        matches!(arg, Type::Path(path) if path.qself.is_none()
+            && path.path.segments.last().is_some_and(|seg| seg.ident == "Utc" && seg.arguments.is_none()))
+    };
+    if args.len() == 1 && args.iter().all(is_utc) {
+        return needs_feature(ty, "chrono", KType::Timestamp);
+    }
+    let shown = ty_string(ty);
+    Err(TyErr::new(
+        ty,
+        Diag::new(
+            code::E0001,
+            format!("`{shown}` cannot cross the boundary"),
+            "a `Timestamp` is an instant in milliseconds since the Unix epoch, in UTC; a date-time with a local time zone or a fixed offset has no one value every platform reads alike, and the offset itself would be lost",
+            "convert to `Utc` (`value.with_timezone(&Utc)`) and spell `DateTime<Utc>`; offsets do not cross",
+        ),
+    ))
 }
 
 fn strip_raw(name: &str) -> String {
@@ -1567,6 +1742,20 @@ mod tests {
         }
     }
 
+    /// The syntax cannot tell a newtype from a record: a `Named` key passes here, and the
+    /// `MapKey` bound the checks emit decides (E0006 at compile time, `check.rs`).
+    #[test]
+    fn a_named_key_is_left_to_the_map_key_bound() {
+        assert_eq!(
+            field("HashMap<UserId, Todo>").unwrap(),
+            KType::Map(boxed(named("UserId")), boxed(named("Todo")))
+        );
+        assert_eq!(
+            field("BTreeMap<crate::ids::UserId, u8>").unwrap(),
+            KType::Map(boxed(named("UserId")), boxed(KType::U8))
+        );
+    }
+
     #[test]
     fn invalid_map_keys_are_e0006() {
         for key in [
@@ -1574,9 +1763,10 @@ mod tests {
             "f32",
             "Bytes",
             "Vec<u8>",
-            "Todo",
             "Option<String>",
             "Duration",
+            "Decimal",
+            "Timestamp",
         ] {
             assert_eq!(
                 code_of(field(&format!("HashMap<{key}, u8>"))),
@@ -1740,7 +1930,6 @@ mod tests {
             "PathBuf",
             "Instant",
             "SystemTime",
-            "Page<Todo>",
             "Signal<i32>",
             "Computed<i32>",
             "Lazy<Todo>",
@@ -1812,8 +2001,210 @@ mod tests {
     #[test]
     fn generic_user_types_are_rejected_but_plain_ones_are_named() {
         assert_eq!(field("Todo").unwrap(), named("Todo"));
-        assert_eq!(code_of(field("Page<Todo>")), code::E0001);
+        assert_eq!(code_of(field("Page<Todo>")), code::E0002);
         assert_eq!(code_of(field("Wrapper<'a, Todo>")), code::E0003);
+        // A standard type with the wrong number of arguments is not a missing alias.
+        assert_eq!(code_of(field("Vec<u8, u8, u8>")), code::E0001);
+    }
+
+    #[test]
+    fn a_generic_spelled_directly_names_the_alias_to_declare() {
+        let err = field("Page<Todo>").unwrap_err();
+        assert_eq!(err.diag.code, code::E0002);
+        assert_eq!(
+            err.diag.what,
+            "generic type `Page<Todo>` cannot cross the boundary"
+        );
+        assert!(
+            err.diag
+                .help
+                .contains("declare `#[undra::api] pub type TodoPage = Page<Todo>;`"),
+            "{}",
+            err.diag.help
+        );
+        assert!(
+            err.diag.help.contains("write `TodoPage` here"),
+            "{}",
+            err.diag.help
+        );
+        assert!(
+            err.diag.help.contains("#[undra::api(generic)]"),
+            "{}",
+            err.diag.help
+        );
+        let err = field("crate::model::Loadable<Vec<Todo>>").unwrap_err();
+        assert!(
+            err.diag
+                .help
+                .contains("pub type VecTodoLoadable = crate::model::Loadable<Vec<Todo>>;"),
+            "{}",
+            err.diag.help
+        );
+        let err = field("Pair<Todo, u8>").unwrap_err();
+        assert!(
+            err.diag.help.contains("type Todou8Pair")
+                || err.diag.help.contains("TodoU8Pair")
+                || err.diag.help.contains("Pair<Todo, u8>")
+        );
+    }
+
+    #[test]
+    fn decimal_and_the_leaf_spellings_map_to_their_wire_leaf() {
+        assert_eq!(field("Decimal").unwrap(), KType::Decimal);
+        assert_eq!(field("undra::Decimal").unwrap(), KType::Decimal);
+        assert_eq!(field("std::time::Duration").unwrap(), KType::Duration);
+        assert_eq!(field("core::time::Duration").unwrap(), KType::Duration);
+        // `Decimal` is not a map key.
+        assert_eq!(code_of(field("HashMap<Decimal, u8>")), code::E0006);
+    }
+
+    #[test]
+    fn a_date_time_is_a_timestamp_only_in_utc() {
+        for src in [
+            "DateTime<Local>",
+            "chrono::DateTime<chrono::FixedOffset>",
+            "DateTime<Tz>",
+            "DateTime",
+            "DateTime<Utc, Utc>",
+        ] {
+            let err = field(src).unwrap_err();
+            assert_eq!(err.diag.code, code::E0001, "{src}");
+            assert!(
+                err.diag.help.contains("convert to `Utc`"),
+                "{src}: {}",
+                err.diag.help
+            );
+            assert!(
+                err.diag.help.contains("offsets do not cross"),
+                "{src}: {}",
+                err.diag.help
+            );
+        }
+    }
+
+    #[cfg(not(feature = "chrono"))]
+    #[test]
+    fn the_chrono_spellings_name_the_feature_when_it_is_off() {
+        for (src, spelled) in [
+            ("DateTime<Utc>", "DateTime<Utc>"),
+            (
+                "chrono::DateTime<chrono::Utc>",
+                "chrono::DateTime<chrono::Utc>",
+            ),
+            ("TimeDelta", "TimeDelta"),
+            ("chrono::Duration", "chrono::Duration"),
+        ] {
+            let err = field(src).unwrap_err();
+            assert_eq!(err.diag.code, code::E0001, "{src}");
+            assert_eq!(
+                err.diag.what,
+                format!("`{spelled}` needs the `chrono` feature of `undra`")
+            );
+            assert!(
+                err.diag.help.contains("features = [\"chrono\"]"),
+                "{src}: {}",
+                err.diag.help
+            );
+        }
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn the_chrono_spellings_are_leaves_when_the_feature_is_on() {
+        assert_eq!(field("DateTime<Utc>").unwrap(), KType::Timestamp);
+        assert_eq!(
+            field("chrono::DateTime<chrono::Utc>").unwrap(),
+            KType::Timestamp
+        );
+        assert_eq!(field("TimeDelta").unwrap(), KType::Duration);
+        assert_eq!(field("chrono::Duration").unwrap(), KType::Duration);
+    }
+
+    #[cfg(not(feature = "time"))]
+    #[test]
+    fn the_time_spellings_name_the_feature_when_it_is_off() {
+        for src in [
+            "OffsetDateTime",
+            "time::OffsetDateTime",
+            "UtcDateTime",
+            "time::Duration",
+        ] {
+            let err = field(src).unwrap_err();
+            assert_eq!(err.diag.code, code::E0001, "{src}");
+            assert!(
+                err.diag
+                    .what
+                    .ends_with("needs the `time` feature of `undra`"),
+                "{src}: {}",
+                err.diag.what
+            );
+        }
+    }
+
+    #[cfg(feature = "time")]
+    #[test]
+    fn the_time_spellings_are_leaves_when_the_feature_is_on() {
+        assert_eq!(field("OffsetDateTime").unwrap(), KType::Timestamp);
+        assert_eq!(field("time::UtcDateTime").unwrap(), KType::Timestamp);
+        assert_eq!(field("time::Duration").unwrap(), KType::Duration);
+    }
+
+    #[cfg(not(feature = "uuid"))]
+    #[test]
+    fn a_qualified_uuid_crate_type_names_its_feature_but_a_bare_uuid_is_the_builtin() {
+        let err = field("uuid::Uuid").unwrap_err();
+        assert!(
+            err.diag
+                .what
+                .ends_with("needs the `uuid` feature of `undra`"),
+            "{}",
+            err.diag.what
+        );
+        // `Uuid` alone may be either: the membership check of `check.rs` tells them apart.
+        assert_eq!(field("Uuid").unwrap(), KType::Uuid);
+        assert_eq!(field("undra::Uuid").unwrap(), KType::Uuid);
+    }
+
+    #[cfg(not(feature = "rust_decimal"))]
+    #[test]
+    fn a_qualified_rust_decimal_names_its_feature() {
+        let err = field("rust_decimal::Decimal").unwrap_err();
+        assert!(
+            err.diag
+                .what
+                .ends_with("needs the `rust_decimal` feature of `undra`"),
+            "{}",
+            err.diag.what
+        );
+        assert_eq!(field("Decimal").unwrap(), KType::Decimal);
+    }
+
+    #[cfg(not(feature = "bytes"))]
+    #[test]
+    fn a_qualified_bytes_crate_type_names_its_feature() {
+        let err = field("bytes::Bytes").unwrap_err();
+        assert!(
+            err.diag
+                .what
+                .ends_with("needs the `bytes` feature of `undra`"),
+            "{}",
+            err.diag.what
+        );
+        assert_eq!(field("Bytes").unwrap(), KType::Bytes);
+    }
+
+    #[test]
+    fn the_128_bit_integers_point_at_decimal_and_a_string_newtype() {
+        for src in ["i128", "u128"] {
+            let err = field(src).unwrap_err();
+            assert_eq!(err.diag.code, code::E0001);
+            assert!(err.diag.help.contains("`Decimal`"), "{}", err.diag.help);
+            assert!(
+                err.diag.help.contains("newtype of `String`"),
+                "{}",
+                err.diag.help
+            );
+        }
     }
 
     #[test]

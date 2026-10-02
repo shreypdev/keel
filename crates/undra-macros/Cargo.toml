@@ -17,9 +17,22 @@ syn = { workspace = true, features = ["visit-mut"] }
 quote.workspace = true
 proc-macro2.workspace = true
 
+# Mirrors of the leaf-type features of `undra` (ADR-042), which forwards each of them here and to
+# `undra-wire`. A macro cannot ask whether a crate has a feature, so it carries its own copy: with
+# the feature off, a spelling that only that crate has (`DateTime<Utc>`) is one error naming the
+# feature, instead of the three the compiler would add. Only `undra` needs to set them.
+[features]
+uuid = []
+chrono = []
+time = []
+rust_decimal = []
+bytes = []
+
 [dev-dependencies]
 prettyplease.workspace = true
 trybuild.workspace = true
+# The compile-fail tests of the opt-in leaf types (a `uuid::Uuid` without the `uuid` feature).
+uuid = { version = "1", default-features = false }
 # Generated code names `::undra::{wire, meta, runtime, signals, query}`; the tests run it
 # against the real facade, so what the macros emit is checked against the real runtime.
 undra = { workspace = true }

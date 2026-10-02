@@ -197,9 +197,23 @@ fn e0007_unsupported_shapes() {
     expect(
         "E0007",
         api(quote!(
-            pub struct S(u8);
+            pub struct S(u8, u8);
         )),
         "struct S",
+    );
+    expect(
+        "E0007",
+        api(quote!(
+            pub struct Marker;
+        )),
+        "struct Marker",
+    );
+    expect(
+        "E0007",
+        api(quote!(
+            pub type Id = u64;
+        )),
+        "type Id",
     );
     expect(
         "E0007",

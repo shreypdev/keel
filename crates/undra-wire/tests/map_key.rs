@@ -2,8 +2,8 @@
 //! at every key position of a `#[undra::api]` type. A negative case (a type that is not a key
 //! is E0006) is a compile-fail test of `undra-macros`.
 
-use undra_wire::leaf::{MapKey, Newtype};
 use undra_wire::Uuid;
+use undra_wire::leaf::{MapKey, Newtype};
 
 fn is_key<K: MapKey + ?Sized>() {}
 

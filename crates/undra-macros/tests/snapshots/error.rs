@@ -215,8 +215,12 @@ const _: () = {
         A: ?::core::marker::Sized + __UndraSameAs<B>,
         B: ?::core::marker::Sized,
     {}
+    fn __undra_leaf<A, K>()
+    where
+        A: ?::core::marker::Sized + ::undra::wire::leaf::WireLeaf<K>,
+    {}
     fn __undra_identity() {
-        __undra_same::<Uuid, ::undra::wire::Uuid>();
+        __undra_leaf::<Uuid, ::undra::wire::leaf::kinds::Uuid>();
         __undra_same::<u16, ::core::primitive::u16>();
         __undra_same::<String, ::std::string::String>();
     }

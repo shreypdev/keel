@@ -39,12 +39,12 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | Code | Meaning |
 /// |---|---|
 /// | E0001 | unsupported type in a public position |
-/// | E0002 | generic parameter |
+/// | E0002 | generic parameter, or a generic type spelled with its arguments: only `#[undra::api(generic)]` data types are instantiated, by a named alias (ADR-042) |
 /// | E0003 | lifetime in a public signature |
 /// | E0004 | a trait object, `dyn` or `impl Trait` that is not a callback parameter, or a callback where one may not stand (ADR-041) |
 /// | E0005 | `Result` / `Stream` outside return position |
-/// | E0006 | map key type not allowed |
-/// | E0007 | unsupported item shape or placement of an Undra attribute (addition) |
+/// | E0006 | map key type not allowed: `String`, integers, `bool`, `Uuid` and newtypes of those are keys |
+/// | E0007 | unsupported item shape or placement of an Undra attribute: a unit struct or a tuple struct of two or more fields, an alias that is not an instantiation (addition) |
 /// | E0008 | unknown or misplaced `#[undra(..)]` attribute or macro argument (addition) |
 /// | E0010 | invalid `#[undra::error]` variant |
 /// | E0011 | store and `#[undra::api(store)]` impl block disagree |
@@ -63,13 +63,14 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0050 | duplicate type name, id or variant index (schema validation; addition) |
 /// | E0051 | a name that collides after case conversion or is not an identifier (schema validation; addition) |
 /// | E0052 | an item named like a standard library item, with another id (schema validation; addition) |
-/// | E0060 | a spelling that looks like a built-in Undra type is another type (addition) |
+/// | E0060 | a spelling that looks like a built-in Undra type is another type: a type that is not the wire leaf it is spelled as (addition) |
 /// | E0061 | the name written is not the declared name of the type, or the type is not declared with `#[undra::api]` (addition) |
 /// | E0062 | a port call could not be answered and its method has no error channel: a runtime message (addition) |
 /// | E0063 | nested `Option<Option<T>>` (addition) |
 /// | E0064 | an object (`#[undra::api] impl`) used where a value is expected, or a value used as an object, or an object where objects may not stand (ADR-040) |
 /// | E0065 | a signal of a store written off its owning runtime's core (ADR-035): a runtime message |
 /// | E0066 | a `#[undra::migrate]` hook with a wrong target or shape (ADR-037; addition) |
+/// | E0070 | a named instantiation of a generic data type (`type TodoPage = Page<Todo>`) that is declared twice or outside the crate of its template (addition) |
 /// | E0071 | a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041) |
 pub(crate) mod code {
     pub(crate) const E0001: &str = "E0001";
@@ -100,6 +101,7 @@ pub(crate) mod code {
     pub(crate) const E0063: &str = "E0063";
     pub(crate) const E0064: &str = "E0064";
     pub(crate) const E0066: &str = "E0066";
+    pub(crate) const E0070: &str = "E0070";
     pub(crate) const E0071: &str = "E0071";
 }
 
