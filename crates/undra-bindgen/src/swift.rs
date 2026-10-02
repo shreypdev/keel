@@ -1441,12 +1441,6 @@ impl SwiftGen<'_> {
             let item_ty = t.ty(item);
             let suffix = format!(" -> AsyncThrowingStream<{item_ty}, Error>");
             w.call_block(head, &params, suffix, false, |w| {
-                let args = if handover {
-                    // A stream method cannot throw: no checks, and nothing given back on a refusal.
-                    self.handover(w, c.params, &writer, &core, false).args
-                } else {
-                    self.encode_args(w, c.params, &writer)
-                };
                 // `UndraCore.stream` decodes an item when the consumer asks for it, which is what
                 // makes the core's credit follow the consumer (docs/SPEC.md section 3.7).
                 let map_error = match &err {
@@ -1455,14 +1449,41 @@ impl SwiftGen<'_> {
                     ),
                     None => "mapError: { UndraCallError.mapped(streamFailure: $0) }".to_owned(),
                 };
-                let call_args = vec![
-                    target.clone(),
-                    format!("method: {mid}"),
-                    format!("args: {args}"),
-                    format!("decode: {{ try {} }}", t.decode_all(item, "$0")),
-                    map_error,
-                ];
-                w.call(format!("return {core}.stream"), &call_args, "", false);
+                // A stream method cannot throw. An object of another core is refused before the
+                // call is sent, so that failure is the stream's: it fails at its first element. The
+                // callbacks it lends go back when the core refuses the stream (`lending:`).
+                let refusable = objects::params_hand_objects(c.params);
+                let open = |w: &mut CodeWriter| {
+                    let given = if handover {
+                        self.handover(w, c.params, &writer, &core, true)
+                    } else {
+                        objects::Handover {
+                            args: self.encode_args(w, c.params, &writer),
+                            lending: None,
+                        }
+                    };
+                    let mut call_args = vec![
+                        target.clone(),
+                        format!("method: {mid}"),
+                        format!("args: {}", given.args),
+                    ];
+                    call_args.extend(given.lending.map(|l| format!("lending: {l}")));
+                    call_args.push(format!("decode: {{ try {} }}", t.decode_all(item, "$0")));
+                    call_args.push(map_error.clone());
+                    w.call(format!("return {core}.stream"), &call_args, "", false);
+                };
+                if refusable {
+                    w.line("do {");
+                    w.indented(open);
+                    w.line("} catch {");
+                    w.indented(|w| {
+                        let failed = map_error.replacen("mapError: ", "", 1);
+                        w.line(format!("return {core}.failedStream(error, mapError: {failed})"));
+                    });
+                    w.line("}");
+                } else {
+                    open(w);
+                }
             });
             return;
         }

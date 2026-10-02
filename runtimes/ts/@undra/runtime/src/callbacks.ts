@@ -369,6 +369,37 @@ export async function lending<R>(core: UndraCore, send: (lend: Lend) => Promise<
 }
 
 /**
+ * {@link lending} for a stream: `open` encodes the arguments, lending each callback through the function it is given,
+ * and opens the call (`UndraCore.stream`). Every iteration of the result opens the call again, so each lends the
+ * callbacks once more; the references go back when the stream never opened (the encoding failed, the core is closed or
+ * unreachable) or the core refused it (reply status 5), and stay with the core after anything else: once an item
+ * arrived, or the stream ended or failed in the core, the core owns them and gives them back with `__release`.
+ */
+export function lendingStream(core: UndraCore, open: (lend: Lend) => AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      const lent: bigint[] = [];
+      let served = false;
+      try {
+        for await (const item of open((impl, callback) => {
+          const instance = lend(core, impl, callback);
+          lent.push(instance);
+          return instance;
+        })) {
+          served = true;
+          yield item;
+        }
+        served = true;
+      } catch (error) {
+        const reached = error instanceof UndraReplyError && error.status !== ReplyStatus.BadRequest;
+        if (!served && !reached) for (const instance of lent) giveBack(core, instance);
+        throw error;
+      }
+    },
+  };
+}
+
+/**
  * What a generated weak wrapper's `async` method answers once its target was collected: a rejection the bridge turns
  * into "unavailable" for the core, with nothing reported.
  */

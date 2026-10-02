@@ -184,6 +184,69 @@
           "is_async": false,
           "takes_ctx": false,
           "docs": "Tells the optional `listener` the upload is over."
+        },
+        {
+          "name": "follow",
+          "method_id": 1314733378,
+          "params": [
+            {
+              "name": "watch",
+              "ty": {
+                "kind": "object",
+                "of": "Watch"
+              }
+            },
+            {
+              "name": "listener",
+              "ty": {
+                "kind": "callback",
+                "of": "UploadListener"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "stream",
+            "of": {
+              "kind": "u32"
+            }
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Follows the progress of `watch`, telling `listener`."
+        },
+        {
+          "name": "follow_checked",
+          "method_id": 1218104800,
+          "params": [
+            {
+              "name": "listener",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "callback",
+                  "of": "UploadListener"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "stream",
+                "of": {
+                  "kind": "u32"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "UploadError"
+              }
+            ]
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Follows the uploads, telling `listener`; a stream that can fail to open."
         }
       ],
       "store": null,
@@ -228,6 +291,28 @@
       "is_async": false,
       "takes_ctx": false,
       "docs": "Calls `listener` once and returns how many arguments it had."
+    },
+    {
+      "name": "tail",
+      "method_id": 1970959823,
+      "params": [
+        {
+          "name": "listener",
+          "ty": {
+            "kind": "callback",
+            "of": "UploadListener"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "stream",
+        "of": {
+          "kind": "u32"
+        }
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "docs": "Tells `listener` about every upload as it happens."
     }
   ],
   "ports": [

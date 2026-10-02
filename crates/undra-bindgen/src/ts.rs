@@ -2038,15 +2038,34 @@ impl<'a> Ctx<'a> {
             let head = format!("{prefix}{function_kw}{name}");
             let suffix = format!(": AsyncIterable<{item_ty}>");
             w.call_block(head, &params, suffix, true, |w| {
-                let args = self.encode_args(w, c.params, &writer, &core, None);
                 self.needs_decode_stream = true;
+                if lends {
+                    // Every iteration opens the call again, so each one lends the callbacks once
+                    // more and gives them back when the core refuses it (ADR-041).
+                    self.rt_value("lendingStream");
+                    w.line(format!(
+                        "const {source} = lendingStream({core}, ({lend}) => {{"
+                    ));
+                    w.indented(|w| {
+                        let args = self.encode_args(w, c.params, &writer, &core, Some(&lend));
+                        w.call(
+                            format!("return {core}.stream"),
+                            &[target.clone(), id.clone(), args],
+                            ";",
+                            true,
+                        );
+                    });
+                    w.line("});");
+                } else {
+                    let args = self.encode_args(w, c.params, &writer, &core, None);
+                    w.call(
+                        format!("const {source} = {core}.stream"),
+                        &[target.clone(), id.clone(), args],
+                        ";",
+                        true,
+                    );
+                }
                 let codec = self.codec(item);
-                w.call(
-                    format!("const {source} = {core}.stream"),
-                    &[target.clone(), id.clone(), args],
-                    ";",
-                    true,
-                );
                 let mapped = self.mapped(err.as_deref(), "error", true);
                 let call_args = vec![source.clone(), codec, format!("(error) => {mapped}")];
                 w.call("return decodeStream", &call_args, ";", true);

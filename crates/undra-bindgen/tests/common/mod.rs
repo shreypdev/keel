@@ -1905,6 +1905,25 @@ fn object_graph() -> Schema {
                 TypeRef::result(opt(obj("Thread")), named("MailError")),
                 false,
             ),
+            method(
+                "Account",
+                "follow",
+                "Follows the unread count of `target` and, when there is one, of `extra`.",
+                vec![
+                    param("target", obj("Mailbox")),
+                    param("extra", opt(obj("Mailbox"))),
+                ],
+                TypeRef::Stream(Box::new(TypeRef::U32)),
+                false,
+            ),
+            method(
+                "Account",
+                "follow_checked",
+                "Follows `boxes`; a stream that can fail to open.",
+                vec![param("boxes", TypeRef::vec(obj("Mailbox")))],
+                TypeRef::result(TypeRef::Stream(Box::new(TypeRef::U32)), named("MailError")),
+                false,
+            ),
         ],
     ));
     s.objects.push(object(
@@ -1955,6 +1974,13 @@ fn object_graph() -> Schema {
             param("folder", TypeRef::String),
         ],
         obj("Mailbox"),
+        false,
+    ));
+    s.functions.push(function(
+        "follow_all",
+        "Follows the unread count of every mailbox of `account`.",
+        vec![param("account", obj("Account"))],
+        TypeRef::Stream(Box::new(TypeRef::U32)),
         false,
     ));
     s
@@ -2094,6 +2120,28 @@ fn callbacks() -> Schema {
                 TypeRef::Unit,
                 false,
             ),
+            method(
+                "Uploader",
+                "follow",
+                "Follows the progress of `watch`, telling `listener`.",
+                vec![
+                    param("watch", obj("Watch")),
+                    param("listener", cb("UploadListener")),
+                ],
+                TypeRef::Stream(Box::new(TypeRef::U32)),
+                false,
+            ),
+            method(
+                "Uploader",
+                "follow_checked",
+                "Follows the uploads, telling `listener`; a stream that can fail to open.",
+                vec![param("listener", opt(cb("UploadListener")))],
+                TypeRef::result(
+                    TypeRef::Stream(Box::new(TypeRef::U32)),
+                    named("UploadError"),
+                ),
+                false,
+            ),
         ],
     ));
     s.objects.push(object(
@@ -2107,6 +2155,13 @@ fn callbacks() -> Schema {
         "Calls `listener` once and returns how many arguments it had.",
         vec![param("listener", cb("UploadListener"))],
         TypeRef::U32,
+        false,
+    ));
+    s.functions.push(function(
+        "tail",
+        "Tells `listener` about every upload as it happens.",
+        vec![param("listener", cb("UploadListener"))],
+        TypeRef::Stream(Box::new(TypeRef::U32)),
         false,
     ));
     s

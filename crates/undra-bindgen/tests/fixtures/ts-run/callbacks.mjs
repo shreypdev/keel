@@ -178,4 +178,86 @@ assert.deepEqual(heard, [["finished", "x"], ["confirm", "y"]]);
 core.replies.push(encodeValue(codecs.u32, 3));
 assert.equal(await objects.withListener(listener, core), 3);
 
+// Streams that take callbacks and objects (objects-followups O1). The call is made, and the callbacks are lent,
+// when the stream is iterated; one the core refuses gives the reference back, anything else leaves it with the core.
+const streams = new FakeCore();
+const streamRegistry = rt.callbacks(streams);
+const streamer = await objects.Uploader.create(null, streams);
+const collect = async (iterable) => {
+  const items = [];
+  for await (const item of iterable) items.push(item);
+  return items;
+};
+const u32 = (n) => encodeValue(codecs.u32, n);
+const lent = () => streamRegistry.count(listener);
+streams.replies.push(encodeValue(codecs.u64, 80n));
+const followed = await streamer.watch(listener); // an object of this core to pass; `watch` lent the listener once
+assert.equal(lent(), 1);
+const sent = streams.calls.length;
+streams.streams.push([u32(1), u32(2)], [u32(3)]);
+const follow = () => streamer.follow(followed, listener);
+const pending = follow();
+assert.equal(streams.calls.length, sent, "nothing is sent until the stream is iterated");
+assert.equal(lent(), 1, "and nothing is lent");
+assert.deepEqual(await collect(pending), [1, 2]);
+assert.equal(lent(), 2, "one crossing, one reference");
+assert.deepEqual(await collect(follow()), [3]);
+assert.equal(lent(), 3, "the next stream is another crossing");
+const written = streams.calls.at(-1).args;
+assert.equal(written.length, 32, "the watch's handle and the listener's instance");
+
+// A refused stream (status 5 at its first element) gives its reference back; so does one that never opened.
+streams.streams.push([new UndraReplyError(ReplyStatus.BadRequest, new Uint8Array(0))]);
+await assert.rejects(collect(follow()), (e) => e instanceof rt.UndraCallError.Refused);
+assert.equal(lent(), 3, "the refused crossing was given back");
+streams.streams.push([new rt.UndraTransportError("closed", "the core is closed")]);
+await assert.rejects(collect(follow()), (e) => e instanceof rt.UndraCallError.Unavailable);
+assert.equal(lent(), 3, "a stream that never opened gave its reference back");
+
+// Anything that reached the core leaves the reference with it: a failure it produced, an item, the end.
+streams.streams.push([new UndraReplyError(ReplyStatus.Cancelled, new Uint8Array(0))]);
+await assert.rejects(collect(follow()), (e) => e instanceof rt.UndraCallError.CancelledByCore);
+assert.equal(lent(), 4, "the core owns the reference of a stream it cancelled");
+streams.streams.push([u32(9), new UndraReplyError(ReplyStatus.Cancelled, new Uint8Array(0))]);
+await assert.rejects(collect(follow()));
+assert.equal(lent(), 5, "a stream that delivered an item and then failed keeps it");
+streams.streams.push([]);
+assert.deepEqual(await collect(follow()), []);
+assert.equal(lent(), 6, "a stream that ended without an item kept it too");
+// A consumer that leaves the loop early, and one whose own loop body throws, are not refusals either.
+streams.streams.push([u32(1), u32(2), u32(3)]);
+for await (const _ of follow()) break;
+assert.equal(lent(), 7);
+streams.streams.push([u32(1), u32(2)]);
+await assert.rejects(
+  (async () => {
+    for await (const _ of follow()) throw new rt.UndraError("state", "the loop body failed");
+  })(),
+  (e) => e instanceof rt.UndraError,
+);
+assert.equal(lent(), 8, "the core still owns the reference whatever the consumer did");
+
+// An optional callback that is absent lends nothing; a checked stream is refused like any other.
+streams.streams.push([u32(5)]);
+assert.deepEqual(await collect(streamer.followChecked(null)), [5]);
+assert.equal(lent(), 8);
+streams.streams.push([new UndraReplyError(ReplyStatus.BadRequest, new Uint8Array(0))]);
+await assert.rejects(collect(streamer.followChecked(listener)), (e) => e instanceof rt.UndraCallError.Refused);
+assert.equal(lent(), 8, "refused: given back");
+
+// An object of another core is refused when the stream is iterated, before anything is lent or sent.
+const other = new FakeCore();
+const stranger = await objects.Uploader.create(null, other);
+other.replies.push(encodeValue(codecs.u64, 90n));
+const strangerWatch = await stranger.watch(listener);
+const before = streams.calls.length;
+await assert.rejects(collect(streamer.follow(strangerWatch, listener)), (e) => e instanceof rt.UndraCallError.Refused);
+assert.equal(streams.calls.length, before, "nothing was sent");
+assert.equal(lent(), 8, "and nothing was lent");
+
+// A free function stream lends too.
+streams.streams.push([u32(4)]);
+assert.deepEqual(await collect(objects.tail(listener, streams)), [4]);
+assert.equal(lent(), 9);
+
 console.log("ok");

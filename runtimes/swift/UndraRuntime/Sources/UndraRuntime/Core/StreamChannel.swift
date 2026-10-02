@@ -37,6 +37,8 @@ final class StreamChannel: @unchecked Sendable {
     }
 
     let callId: UInt32
+    /// The callback instances the stream's arguments carry: given back when the core refuses the stream.
+    let lent: LentInstances?
     private let inner = Guarded<Inner>(Inner())
     private let onCredit: @Sendable (UInt32, UInt32) -> Void
     private let onClose: @Sendable (UInt32) -> Void
@@ -47,10 +49,12 @@ final class StreamChannel: @unchecked Sendable {
     ///     stops before the stream ended.
     init(
         callId: UInt32,
+        lent: LentInstances? = nil,
         onCredit: @escaping @Sendable (UInt32, UInt32) -> Void,
         onClose: @escaping @Sendable (UInt32) -> Void
     ) {
         self.callId = callId
+        self.lent = lent
         self.onCredit = onCredit
         self.onClose = onClose
     }

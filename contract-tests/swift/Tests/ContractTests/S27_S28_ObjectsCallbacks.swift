@@ -210,6 +210,30 @@ extension ContractScenarios {
             // 8. A foreign object is refused before anything is sent (the two cores of S26).
             try s27ForeignObjects()
 
+            // 8a. A stream takes a child (objects-followups O1): it borrows it while it runs, and a stale one
+            //     refuses the stream (it fails at its first element) without owing anything.
+            let streamShelf = try workshop.shelf(name: "stream")
+            streamShelf.stock(count: 3)
+            let refsStream = refs()
+            var tallied: [UInt32] = []
+            for try await count in workshop.tally(shelf: streamShelf, steps: 3) {
+                tallied.append(count)
+            }
+            try checkEqual(tallied, [3, 3, 3], "tally(shelf, 3)")
+            try checkEqual(refs(), refsStream, "host_refs after a stream borrowed a shelf")
+            let closedShelf = try workshop.shelf(name: "closed-for-stream")
+            closedShelf.close()
+            do {
+                for try await _ in workshop.tally(shelf: closedShelf, steps: 1) {}
+                throw ScenarioFailure(description: "tally on a closed shelf did not fail")
+            } catch let error as UndraCallError {
+                guard case .refused = error else {
+                    throw ScenarioFailure(description: "tally on a closed shelf failed with \(error), not .refused")
+                }
+            }
+            try checkEqual(refs(), refsStream, "host_refs after a refused stream")
+            streamShelf.close()
+
             // 9. Statistics: host_refs, and a handle given back twice over-releases nothing.
             try check(refs() > 0, "host_refs is reported")
             let refs9 = refs()
@@ -363,6 +387,29 @@ extension ContractScenarios {
 
             // 9. A background interface is not delivered through the drain: the playground has none
             //    (the golden case `callbacks` and CallbackTests cover it).
+
+            // 10. A stream takes a callback (objects-followups O1): the core holds the reference while the stream
+            //     runs and lets go when it ends; a stream the core refuses gives it back.
+            rep.lines = []
+            var walked: [UInt32] = []
+            for try await step in workshop.walk(steps: 3, reporter: rep) {
+                walked.append(step)
+            }
+            try checkEqual(walked, [1, 2, 3], "walk(3)")
+            try await waitUntil("the walk's notes") { rep.lines.count == 3 }
+            try checkEqual(rep.lines, ["walk 1 of 3", "walk 2 of 3", "walk 3 of 3"], "the notes of walk(3), in order")
+            try await waitUntil("the walk's reference to come back") { registry.count(of: rep) == 0 }
+            let rep10 = ScenarioReporter()
+            do {
+                for try await _ in stale.walk(steps: 1, reporter: rep10) {}
+                throw ScenarioFailure(description: "walk on a closed workshop did not fail")
+            } catch let error as UndraCallError {
+                guard case .refused = error else {
+                    throw ScenarioFailure(description: "walk on a closed workshop failed with \(error), not .refused")
+                }
+            }
+            try checkEqual(registry.count(of: rep10), 0, "the refused stream's reporter is not in the registry")
+            try await waitUntil("the registry back at its baseline after the streams") { registry.liveCount == baseline }
         }
     }
 }

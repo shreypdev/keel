@@ -13,6 +13,9 @@ import dev.undra.runtime.wire.Payloads.ChangeOp
 import dev.undra.runtime.wire.Payloads.ReplyStatus
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.encodeToByteArray
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 
 private fun ByteArray.hex(): String = joinToString("") { "%02x".format(it) }
@@ -41,6 +44,7 @@ private class FakeMirror : Mirror() {
 private class FakeCore : UndraCore() {
     val calls = mutableListOf<Pair<UInt, String>>()
     val replies = ArrayDeque<Any>()
+    val streams = ArrayDeque<List<Any>>()
     val releases = mutableListOf<Long>()
     val observed = mutableListOf<Long>()
     val reports = mutableListOf<Pair<String, Throwable>>()
@@ -60,6 +64,17 @@ private class FakeCore : UndraCore() {
     }
 
     override suspend fun call(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray = callSync(target, methodId, args)
+
+    override fun stream(target: CallTarget, methodId: UInt, args: ByteArray): Flow<ByteArray> {
+        calls += methodId to args.hex()
+        val items = streams.removeFirstOrNull() ?: emptyList()
+        return flow {
+            for (item in items) {
+                if (item is Throwable) throw item
+                emit(item as ByteArray)
+            }
+        }
+    }
 
     override fun construct(typeId: UInt, methodId: UInt, args: ByteArray): Long = nextHandle++
 
@@ -156,6 +171,25 @@ fun main() {
     core.answer(100L)
     expect(mailboxOf(account, "inbox", core) === inbox, "mailboxOf returns the live wrapper")
     expectEq(core.calls.last().second.take(16), handleHex(account.handle), "mailboxOf writes the account's handle first")
+
+    // Streams that take objects (objects-followups O1): the handles are written after the check, and an object
+    // of another core is refused before anything is sent.
+    core.streams.add(listOf(Codecs.u32.encodeToByteArray(1u), Codecs.u32.encodeToByteArray(2u)))
+    expectEq(runBlocking { account.follow(inbox, null).toList() }, listOf(1u, 2u), "follow(inbox, null)")
+    expectEq(core.calls.last(), UndraIds.Objects.Account.FOLLOW to (handleHex(100L) + "00"), "follow's arguments")
+    core.streams.add(listOf(Codecs.u32.encodeToByteArray(3u)))
+    expectEq(runBlocking { account.followChecked(boxes).toList() }, listOf(3u), "followChecked(boxes)")
+    expectEq(core.calls.last().second, "02000000" + handleHex(100L) + handleHex(101L), "followChecked's arguments")
+    core.streams.add(listOf(Codecs.u32.encodeToByteArray(4u)))
+    expectEq(runBlocking { followAll(account, core).toList() }, listOf(4u), "followAll(account)")
+    val streamed = core.calls.size
+    try {
+        account.follow(foreign, null)
+        throw AssertionError("follow with a foreign mailbox did not fail")
+    } catch (e: UndraCallError.Refused) {
+        expect(e.reason.contains("Mailbox"), "the refusal names the class: ${e.reason}")
+    }
+    expectEq(core.calls.size, streamed, "nothing sent for a foreign object in a stream")
 
     // Closing gives back the wrapper's one reference; the next return is a new wrapper.
     val released = core.releases.size

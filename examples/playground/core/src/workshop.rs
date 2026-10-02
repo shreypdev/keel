@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
 
 use undra::prelude::*;
-use undra::runtime::PortError;
+use undra::runtime::{PortError, Stream};
 
 /// What a reporter's `confirm` can fail with.
 #[undra::error]
@@ -285,6 +285,26 @@ impl Workshop {
         u32::try_from(watchers.len()).unwrap_or(u32::MAX)
     }
 
+    /// Reads how many items `shelf` holds, once per step for `steps` steps: a stream that takes an
+    /// object, which the core holds (borrowed from the platform) while the stream runs.
+    pub fn tally(&self, shelf: Arc<Shelf>, steps: u32) -> impl Stream<Item = u32> + Send + 'static {
+        Tally { shelf, left: steps }
+    }
+
+    /// Walks `steps` steps, telling `reporter` a note at each one and yielding the step number: a
+    /// stream that takes a callback, whose reference is the core's until the stream ends or is dropped.
+    pub fn walk(
+        &self,
+        steps: u32,
+        reporter: Arc<dyn Reporter>,
+    ) -> impl Stream<Item = u32> + Send + 'static {
+        Walk {
+            step: 0,
+            steps,
+            reporter,
+        }
+    }
+
     /// How many reporters are subscribed.
     pub fn watching(&self) -> u32 {
         u32::try_from(
@@ -294,6 +314,51 @@ impl Workshop {
                 .len(),
         )
         .unwrap_or(u32::MAX)
+    }
+}
+
+/// The stream of [`Workshop::tally`].
+struct Tally {
+    shelf: Arc<Shelf>,
+    left: u32,
+}
+
+impl Stream for Tally {
+    type Item = u32;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<u32>> {
+        if self.left == 0 {
+            return std::task::Poll::Ready(None);
+        }
+        self.left -= 1;
+        std::task::Poll::Ready(Some(self.shelf.items.get()))
+    }
+}
+
+/// The stream of [`Workshop::walk`].
+struct Walk {
+    step: u32,
+    steps: u32,
+    reporter: Arc<dyn Reporter>,
+}
+
+impl Stream for Walk {
+    type Item = u32;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<u32>> {
+        if self.step >= self.steps {
+            return std::task::Poll::Ready(None);
+        }
+        self.step += 1;
+        let (step, steps) = (self.step, self.steps);
+        self.reporter.note(format!("walk {step} of {steps}"));
+        std::task::Poll::Ready(Some(step))
     }
 }
 
@@ -384,6 +449,32 @@ mod tests {
         assert_eq!(w.watching(), 0);
         assert_eq!(w.announce("again".to_owned()), 0);
         assert_eq!(reporter.lines.lock().unwrap().len(), 1);
+    }
+
+    /// Drains a stream on this thread (nothing here waits for another).
+    fn drain<S: Stream<Item = u32>>(stream: S) -> Vec<u32> {
+        let mut stream = Box::pin(stream);
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        let mut items = Vec::new();
+        while let std::task::Poll::Ready(Some(item)) = stream.as_mut().poll_next(&mut cx) {
+            items.push(item);
+        }
+        items
+    }
+
+    #[test]
+    fn a_stream_can_hold_a_shelf_and_a_reporter() {
+        let t = TestRuntime::new();
+        let w = workshop(&t);
+        let shelf = w.shelf("a".to_owned());
+        shelf.stock(4);
+        assert_eq!(drain(w.tally(Arc::clone(&shelf), 3)), [4, 4, 4]);
+        let reporter = Arc::new(Recorder::default());
+        assert_eq!(drain(w.walk(2, reporter.clone())), [1, 2]);
+        assert_eq!(
+            *reporter.lines.lock().unwrap(),
+            ["walk 1 of 2", "walk 2 of 2"]
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 
 use undra::meta::{PortKind, TypeRef, collect_schema, ids};
-use undra::runtime::{Ctx, Port, PortError};
+use undra::runtime::{Ctx, Port, PortError, Stream};
 use undra::wire::{Decode, Encode, Handle, Writer};
 use undra_macros as k;
 
@@ -118,6 +118,43 @@ impl Uploader {
     pub fn with_token(&self, provider: Arc<dyn TokenProvider>, other: &Watch) -> u32 {
         let _ = (provider, other);
         1
+    }
+
+    /// A stream that takes an object and a callback: the proxy lives as long as the stream does.
+    pub fn follow(
+        &self,
+        watch: &Watch,
+        listener: Arc<dyn UploadListener>,
+    ) -> impl Stream<Item = u32> + Send + 'static {
+        Following {
+            next: 0,
+            id: watch.id(),
+            listener,
+        }
+    }
+}
+
+/// The stream of `follow`: tells its listener about each item it yields.
+struct Following {
+    next: u32,
+    id: u32,
+    listener: Arc<dyn UploadListener>,
+}
+
+impl Stream for Following {
+    type Item = u32;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<u32>> {
+        if self.next >= 2 {
+            return std::task::Poll::Ready(None);
+        }
+        self.next += 1;
+        let (item, id) = (self.next, self.id);
+        self.listener.progress(u64::from(item), u64::from(id));
+        std::task::Poll::Ready(Some(item))
     }
 }
 
@@ -594,7 +631,10 @@ fn a_constructor_that_fails_after_making_its_proxies_is_not_a_refusal() {
     let first = rt
         .call_object("Gauge", "new", 0, &args(|w| 31_u64.encode(w)))
         .sync_ok();
-    assert!(u64::decode_exact(&first).unwrap() > 0, "the first Gauge is published");
+    assert!(
+        u64::decode_exact(&first).unwrap() > 0,
+        "the first Gauge is published"
+    );
     rt.port_calls();
 
     // The second one reuses the first one's signal, which belongs to a store already.
@@ -602,7 +642,8 @@ fn a_constructor_that_fails_after_making_its_proxies_is_not_a_refusal() {
         .call_object("Gauge", "new", 0, &args(|w| 32_u64.encode(w)))
         .failed();
     assert!(
-        reason.contains("store `Gauge` could not attach its signals") && reason.contains("already attached"),
+        reason.contains("store `Gauge` could not attach its signals")
+            && reason.contains("already attached"),
         "{reason}"
     );
     let calls = rt.port_calls();
@@ -612,4 +653,71 @@ fn a_constructor_that_fails_after_making_its_proxies_is_not_a_refusal() {
         "the core released the proxy it made, once: {calls:?}"
     );
     assert!(is_release(&calls[0], 32), "{:?}", calls[0]);
+}
+
+/// Objects-followups O1, the core's half: a stream that takes a callback resolves its object
+/// parameter and makes its proxy only once the call is accepted, so a refused stream owns nothing
+/// (the host gives its reference back), and an accepted one holds the proxy until the stream is
+/// dropped, which releases it.
+#[test]
+fn a_stream_with_object_and_callback_parameters_owns_nothing_until_it_is_accepted() {
+    let rt = Runtime::new();
+    let up = uploader(&rt);
+    let watch = u64::decode_exact(
+        &rt.call_object("Uploader", "watch", up, &args(|w| 50_u64.encode(w)))
+            .sync_ok(),
+    )
+    .unwrap();
+    rt.port_calls();
+
+    // A stale object parameter refuses the stream before the proxy exists.
+    let stale = watch + (1 << 40);
+    let reason = rt
+        .call_object(
+            "Uploader",
+            "follow",
+            up,
+            &args(|w| {
+                stale.encode(w);
+                51_u64.encode(w);
+            }),
+        )
+        .bad_request();
+    assert!(
+        reason.contains("argument `watch` of `Uploader.follow`"),
+        "{reason}"
+    );
+    assert!(
+        rt.port_calls().iter().all(|c| !is_release(c, 51)),
+        "a refused stream made no proxy, so it has nothing to release"
+    );
+
+    // An accepted one holds the proxy while it runs and releases it with the stream.
+    let outcome = rt.call_object(
+        "Uploader",
+        "follow",
+        up,
+        &args(|w| {
+            watch.encode(w);
+            52_u64.encode(w);
+        }),
+    );
+    let items = outcome.run_stream();
+    assert_eq!(
+        items
+            .into_iter()
+            .map(|i| u32::decode_exact(&i.unwrap()).unwrap())
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+    let calls = rt.port_calls();
+    let told: Vec<_> = calls
+        .iter()
+        .filter(|c| c.method_id == method("progress"))
+        .collect();
+    assert_eq!(told.len(), 2, "the listener heard each item: {calls:?}");
+    assert!(
+        calls.iter().filter(|c| is_release(c, 52)).count() == 1,
+        "the proxy is released exactly once when the stream is dropped: {calls:?}"
+    );
 }

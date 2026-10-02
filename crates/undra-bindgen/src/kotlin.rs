@@ -1754,10 +1754,13 @@ impl<'a> Ctx<'a> {
                     );
                 } else {
                     // Every collection sends the call again, and every crossing lends the
-                    // callbacks once more (ADR-041).
+                    // callbacks once more (ADR-041). A reference goes back only for a failure of
+                    // the call itself: what could not be sent (the arguments' encoding) or what the
+                    // core refused, which `Flow.catch` sees because it handles the upstream's
+                    // exceptions alone: not the collector's, and not the decoding of an item the
+                    // core did send (the core owns the references by then).
                     self.import("kotlinx.coroutines.flow.emitAll");
                     self.import("kotlinx.coroutines.flow.flow");
-                    self.import("dev.undra.runtime.UndraException");
                     let (inner_core, inner_target) = match site {
                         Site::Method { owner, .. } => (
                             format!("this@{owner}.core"),
@@ -1768,24 +1771,29 @@ impl<'a> Ctx<'a> {
                     w.line(format!("val {stream_var} = flow {{"));
                     w.indented(|w| {
                         objects::lend(w, &inner_core, &lent);
-                        w.line("try {");
+                        let items = naming::avoid("items", &taken_refs);
+                        w.line(format!("val {items} = try {{"));
                         w.indented(|w| {
                             let args = self.encode_call_args(w, c.params, &writer, &lent);
-                            let items = naming::avoid("items", &taken_refs);
                             w.call(
-                                format!("val {items} = {inner_core}.stream"),
+                                format!("{inner_core}.stream"),
                                 &[inner_target.clone(), id.clone(), args],
                                 "",
                                 true,
                             );
-                            w.line(format!("emitAll({items})"));
                         });
-                        w.line(format!("}} catch ({failure}: UndraException) {{"));
+                        w.line(format!("}} catch ({failure}: Exception) {{"));
                         w.indented(|w| {
                             objects::give_back(w, &inner_core, &failure, &lent);
                             w.line(format!("throw {failure}"));
                         });
                         w.line("}");
+                        w.line(format!("emitAll({items}.catch {{ {failure} ->"));
+                        w.indented(|w| {
+                            objects::give_back(w, &inner_core, &failure, &lent);
+                            w.line(format!("throw {failure}"));
+                        });
+                        w.line("})");
                     });
                     w.line("}");
                 }

@@ -583,8 +583,12 @@ public final class UndraCore: @unchecked Sendable {
     /// the stream's own typed error arrives as `status == .error` with the encoded `E` in `body`;
     /// a stream the core ended itself as `.cancelled`, one that panicked as `.panic` and one the
     /// core refused as `.badRequest`, each with the body a reply of that status carries.
-    public func stream(_ target: CallTarget, method: UInt32, args: [UInt8]) -> AsyncThrowingStream<[UInt8], any Error> {
-        return stream(target, method: method, args: args, decode: { $0 })
+    ///
+    /// `lending` lists the callback instances the arguments carry (``UndraCallbacks/lend(_:)``): a stream the core
+    /// refuses (status 5), or whose call never reaches it, holds none of them, and they are given back; any other
+    /// outcome means the core owns them (ADR-041).
+    public func stream(_ target: CallTarget, method: UInt32, args: [UInt8], lending: [UInt64?] = []) -> AsyncThrowingStream<[UInt8], any Error> {
+        return stream(target, method: method, args: args, lending: lending, decode: { $0 })
     }
 
     /// Opens a stream and returns its items decoded, with the same flow control as
@@ -602,14 +606,16 @@ public final class UndraCore: @unchecked Sendable {
     ///     instance) into the error the consumer sees. The default passes it through; generated
     ///     code passes `UndraCallError.mapped(streamFailure:)` or
     ///     `UndraCallError.mapped(streamFailure:domain:)`.
+    ///   - lending: the callback instances the arguments carry, as for ``stream(_:method:args:lending:)``.
     public func stream<Item: Sendable>(
         _ target: CallTarget,
         method: UInt32,
         args: [UInt8],
+        lending: [UInt64?] = [],
         decode: @escaping @Sendable ([UInt8]) throws -> Item,
         mapError: @escaping @Sendable (any Error) -> any Error = { $0 }
     ) -> AsyncThrowingStream<Item, any Error> {
-        let consumer = openStream(target, method: method, args: args)
+        let consumer = openStream(target, method: method, args: args, lent: LentInstances(lending, to: callbacks))
         return AsyncThrowingStream<Item, any Error>(unfolding: {
             do {
                 guard let body = try await consumer.next() else {
@@ -627,19 +633,46 @@ public final class UndraCore: @unchecked Sendable {
         })
     }
 
+    /// A stream that fails with `error` (through `mapError`) when its consumer asks for the first element: what
+    /// generated code returns for a stream method whose call could not be made at all (an object argument of another
+    /// core is refused before anything is sent, so nothing was lent or opened).
+    public func failedStream<Item: Sendable>(
+        _ error: any Error,
+        mapError: @escaping @Sendable (any Error) -> any Error = { $0 }
+    ) -> AsyncThrowingStream<Item, any Error> {
+        let channel = StreamChannel(callId: 0, onCredit: { _, _ in }, onClose: { _ in })
+        channel.finish(.failed(error))
+        let consumer = StreamConsumer(channel)
+        return AsyncThrowingStream<Item, any Error>(unfolding: {
+            do {
+                _ = try await consumer.next()
+                return nil
+            } catch {
+                throw mapError(error)
+            }
+        })
+    }
+
     /// Sends the call that opens a stream, grants its initial credit and returns the consumer end.
-    private func openStream(_ target: CallTarget, method: UInt32, args: [UInt8]) -> StreamConsumer {
+    private func openStream(
+        _ target: CallTarget,
+        method: UInt32,
+        args: [UInt8],
+        lent: LentInstances? = nil
+    ) -> StreamConsumer {
         UndraCore.checkMethod(target, method)
         let callId: UInt32
         do {
             callId = try reserveCallId()
         } catch {
+            lent?.giveBack()
             let channel = StreamChannel(callId: 0, onCredit: { _, _ in }, onClose: { _ in })
             channel.finish(.failed(error))
             return StreamConsumer(channel)
         }
         let channel = StreamChannel(
             callId: callId,
+            lent: lent,
             onCredit: { [weak self] id, credit in
                 self?.transport.streamCredit(callId: id, credit: credit)
             },
@@ -657,6 +690,7 @@ public final class UndraCore: @unchecked Sendable {
             transport.streamCredit(callId: callId, credit: StreamChannel.initialCredit)
         } else {
             removePending(callId)
+            lent?.giveBack()
             channel.finish(.failed(notSent()))
         }
         return StreamConsumer(channel)
@@ -1165,6 +1199,10 @@ extension UndraCore: UndraInbound {
             case .ok:
                 channel.finish(.failed(UndraProtocolError.notAStream(callId: callId)))
             case .error, .panic, .cancelled, .badRequest:
+                if reply.status == .badRequest {
+                    // A refused stream transferred nothing: the callbacks it lent go back (ADR-041).
+                    channel.lent?.giveBack()
+                }
                 channel.finish(.failed(UndraReplyError(status: reply.status, body: Array(reply.body))))
             }
         }

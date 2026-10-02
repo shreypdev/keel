@@ -171,6 +171,8 @@ export interface CallbackInterface<T extends object> {
 export type Lend = <T extends object>(impl: T, callback: CallbackInterface<T>) => bigint;
 /** Addition (ADR-041): sends a call whose arguments lend callbacks; a refused or unsent call gives them back. */
 export declare function lending<R>(core: UndraCore, send: (lend: Lend) => Promise<R>, signal?: AbortSignal): Promise<R>;
+/** Addition (ADR-041): `lending` for a stream: every iteration lends again, and a refused or unopened stream gives back. */
+export declare function lendingStream(core: UndraCore, open: (lend: Lend) => AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array>;
 /** Addition (ADR-041): lends a callback to a core outside `lending` (a stream's arguments). */
 export declare function lend<T extends object>(core: UndraCore, impl: T, callback: CallbackInterface<T>): bigint;
 /** Addition (ADR-041): what a weak wrapper's async method answers once its target is gone. */

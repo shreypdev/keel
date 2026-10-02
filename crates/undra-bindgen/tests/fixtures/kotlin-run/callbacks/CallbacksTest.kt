@@ -17,6 +17,9 @@ import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.decodeAll
 import dev.undra.runtime.wire.encodeToByteArray
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 
 private fun ByteArray.hex(): String = joinToString("") { "%02x".format(it) }
@@ -33,6 +36,7 @@ private class FakeCore : UndraCore() {
     val calls = mutableListOf<Pair<UInt, String>>()
     val constructed = mutableListOf<String>()
     val replies = ArrayDeque<Any>()
+    val streams = ArrayDeque<List<Any>>()
     val reports = mutableListOf<String>()
     var nextHandle = 1L
 
@@ -48,6 +52,17 @@ private class FakeCore : UndraCore() {
     }
 
     override suspend fun call(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray = callSync(target, methodId, args)
+
+    override fun stream(target: CallTarget, methodId: UInt, args: ByteArray): Flow<ByteArray> {
+        calls += methodId to args.hex()
+        val items = streams.removeFirstOrNull() ?: emptyList()
+        return flow {
+            for (item in items) {
+                if (item is Throwable) throw item
+                emit(item as ByteArray)
+            }
+        }
+    }
 
     override fun construct(typeId: UInt, methodId: UInt, args: ByteArray): Long {
         constructed += args.hex()
@@ -84,6 +99,8 @@ private fun refused(): UndraReplyException {
 }
 
 private fun u64(v: ULong): String = Codecs.u64.encodeToByteArray(v).hex()
+
+private fun handleHex(handle: Long): String = Codecs.handle.encodeToByteArray(handle).hex()
 
 fun main() {
     val core = FakeCore()
@@ -135,6 +152,77 @@ fun main() {
     expectEq(core.calls.last().second, "00", "notify(null)")
     core.replies.addLast(Codecs.u32.encodeToByteArray(1u))
     expectEq(withListener(listener, core), 1u, "a free function takes a callback")
+
+    // Streams that take callbacks (objects-followups O1). Every collection lends once; a stream the core refuses (or
+    // that never reached it) gives the reference back, and anything the core served leaves it there: its own
+    // failures, the decoding of an item it sent, and what the collector does.
+    core.streams.clear()
+    val streamListener = Listener()
+    val count = { core.callbacks.count(streamListener) }
+    core.replies.addLast(Codecs.handle.encodeToByteArray(51L))
+    val followed = uploader.watch(streamListener)
+    expectEq(count(), 1, "watch lent the listener once")
+    val u32 = { n: UInt -> Codecs.u32.encodeToByteArray(n) }
+    val follow = uploader.follow(followed, streamListener)
+    expectEq(count(), 1, "nothing is lent until the stream is collected")
+    core.streams.add(listOf(u32(1u), u32(2u)))
+    expectEq(runBlocking { follow.toList() }, listOf(1u, 2u), "follow's items")
+    expectEq(count(), 2, "one crossing, one reference")
+    core.streams.add(listOf(u32(3u)))
+    expectEq(runBlocking { follow.toList() }, listOf(3u), "a cold flow: the next collection is another crossing")
+    expectEq(count(), 3, "lent again")
+    val streamInstance = core.callbacks.instanceOf(streamListener) ?: throw AssertionError("the listener is lent")
+    expectEq(core.calls.last().second, handleHex(51L) + u64(streamInstance), "the object's handle, then the instance")
+
+    // Refused: given back. A failure the core produced, an item, a failing decode and a throwing collector: kept.
+    core.streams.add(listOf(refused()))
+    try {
+        runBlocking { follow.toList() }
+        throw AssertionError("a refused stream did not fail")
+    } catch (e: UndraCallError.Refused) {
+        // expected
+    }
+    expectEq(count(), 3, "the refused stream's reference was given back")
+    core.streams.add(listOf(UndraReplyException(ReplyStatus.CANCELLED, ByteArray(0))))
+    try {
+        runBlocking { follow.toList() }
+        throw AssertionError("a cancelled stream did not fail")
+    } catch (e: UndraCallError.CancelledByCore) {
+        // expected
+    }
+    expectEq(count(), 4, "the core owns the reference of a stream it cancelled")
+    core.streams.add(listOf(ByteArray(1)))
+    try {
+        runBlocking { follow.toList() }
+        throw AssertionError("an item that does not decode did not fail")
+    } catch (e: UndraCallError.Malformed) {
+        // expected
+    }
+    expectEq(count(), 5, "an item the core sent that does not decode (not a refusal) leaves the reference with it")
+    core.streams.add(listOf(u32(7u)))
+    try {
+        runBlocking { follow.collect { throw UndraCallError.Refused("the collector's own failure") } }
+        throw AssertionError("a throwing collector did not fail")
+    } catch (e: UndraCallError.Refused) {
+        expectEq(e.reason, "the collector's own failure", "the collector's failure passes through")
+    }
+    expectEq(count(), 6, "a collector that throws a runtime exception is not the core refusing the stream")
+
+    // An optional callback that is absent lends nothing; the checked stream is refused like the others.
+    core.streams.add(listOf(u32(5u)))
+    expectEq(runBlocking { uploader.followChecked(null).toList() }, listOf(5u), "followChecked(null)")
+    expectEq(count(), 6, "nothing lent")
+    core.streams.add(listOf(refused()))
+    try {
+        runBlocking { uploader.followChecked(streamListener).toList() }
+        throw AssertionError("a refused checked stream did not fail")
+    } catch (e: UndraCallError.Refused) {
+        // expected
+    }
+    expectEq(count(), 6, "given back")
+    core.streams.add(listOf(u32(4u)))
+    expectEq(runBlocking { tail(streamListener, core).toList() }, listOf(4u), "a free function stream lends too")
+    expectEq(count(), 7, "lent")
 
     // The bridges decode the core's calls and answer for the implementation.
     fun args(write: UndraWriter.() -> Unit): UndraReader = UndraReader(UndraWriter().apply(write).toByteArray())

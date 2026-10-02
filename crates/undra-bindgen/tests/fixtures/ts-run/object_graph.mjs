@@ -100,4 +100,33 @@ assert.equal(reopened.handle, 40n);
 core.replies.push(handle(0n));
 await assert.rejects(account.mailbox("x"), (e) => e instanceof rt.UndraCallError.Malformed);
 
+// Streams that take objects (objects-followups O1): the handles are written after the check; an object of another
+// core is refused before anything is sent.
+const u32 = (n) => encodeValue(codecs.u32, n);
+const collect = async (iterable) => {
+  const items = [];
+  for await (const item of iterable) items.push(item);
+  return items;
+};
+core.streams.push([u32(1), u32(2)]);
+assert.deepEqual(await collect(account.follow(reopened, null)), [1, 2]);
+assert.deepEqual(core.calls.at(-1), {
+  target: { target: CallTarget.ObjectMethod, handle: 7n },
+  methodId: UndraIds.Objects.Account.follow,
+  args: "2800000000000000" + "00",
+});
+core.streams.push([u32(3)]);
+assert.deepEqual(await collect(account.follow(reopened, drafts)), [3]);
+assert.equal(core.calls.at(-1).args, "2800000000000000" + "01" + "2900000000000000");
+core.streams.push([u32(4)]);
+assert.deepEqual(await collect(account.followChecked([reopened, drafts])), [4]);
+assert.equal(core.calls.at(-1).args, "02000000" + "2800000000000000" + "2900000000000000");
+core.streams.push([u32(5)]);
+assert.deepEqual(await collect(objects.followAll(account, core)), [5]);
+assert.equal(core.calls.at(-1).args, "0700000000000000");
+const streamed = core.calls.length;
+assert.throws(() => account.follow(foreign, null), (e) => e instanceof rt.UndraCallError.Refused);
+assert.throws(() => account.followChecked([reopened, foreign]), (e) => e instanceof rt.UndraCallError.Refused);
+assert.equal(core.calls.length, streamed, "nothing was sent");
+
 console.log("ok");

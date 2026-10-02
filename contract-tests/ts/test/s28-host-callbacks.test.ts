@@ -225,6 +225,26 @@ test("S28 host callbacks", async () => {
     watchWeak.close();
   });
 
+  await step("10. a stream takes a callback: held by the core while it runs, given back when it ends or is refused", async () => {
+    const rep10 = new Recorder();
+    const walked: number[] = [];
+    for await (const stepNumber of w.walk(3, rep10)) walked.push(stepNumber);
+    expect(walked).toEqual([1, 2, 3]);
+    await waitFor("the notes of walk(3)", () => rep10.lines.length === 3);
+    expect(rep10.lines).toEqual(["walk 1 of 3", "walk 2 of 3", "walk 3 of 3"]);
+    await waitFor("the registry to let go of the walk's reporter", () => registry.count(rep10) === 0, { timeoutMs: 1_000 });
+    const closed = await Workshop.create(core);
+    closed.close();
+    const rep10b = new Recorder();
+    const refused = (async () => {
+      for await (const _ of closed.walk(1, rep10b)) void _;
+    })();
+    await expect(refused).rejects.toBeInstanceOf(UndraCallError.Refused);
+    expect(registry.count(rep10b), "the refused stream's reporter is not in the registry").toBe(0);
+    await sleep(50);
+    expect(reported(), "no __release came for it (an over-release would be reported)").toEqual([]);
+  });
+
   await step("9. a background callback is not delivered through the drain", () => {
     // The playground has no background-delivery interface (scenarios.md); the golden case `callbacks` and the
     // runtime's own tests cover `background`.

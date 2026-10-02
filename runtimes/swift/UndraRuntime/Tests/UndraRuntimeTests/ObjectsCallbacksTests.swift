@@ -684,6 +684,95 @@ final class CallbackTests: XCTestCase {
         XCTAssertThrowsError(try core.callSync(.freeFunction(methodId: 1), method: 1, args: args(unsent), lending: [unsent]))
         XCTAssertEqual(core.callbacks.count(of: rep), 0, "a call that never reached the core transfers nothing")
     }
+
+    /// Objects-followups O1: a stream that lends a callback gives it back when the core refuses it (status 5), or
+    /// when the call never reaches the core, and keeps it for everything else.
+    func testAStreamTheCoreRefusesOrNeverReceivedGivesItsCallbacksBack() async throws {
+        let rep = Recorder()
+        // Refused: the open reply is status 5.
+        transport.onCall = { call, fake in
+            fake.deliver(Wire.Reply(callId: call.callId, status: .badRequest, body: ArraySlice(UndraWriter.encodedString("stale handle"))))
+            return true
+        }
+        let refused = core.callbacks.lend(rep)
+        do {
+            for try await _ in core.stream(.freeFunction(methodId: 1), method: 1, args: args(refused), lending: [refused], decode: { $0 }) {}
+            XCTFail("a refused stream did not fail")
+        } catch let error as UndraReplyError {
+            XCTAssertEqual(error.status, .badRequest)
+        }
+        XCTAssertEqual(core.callbacks.count(of: rep), 0, "a refusal transfers nothing")
+
+        // Opened and served: the core owns the reference, whether the stream ends or the consumer stops.
+        transport.onCall = { call, fake in
+            fake.openStream(call.callId, items: [[1], [2]])
+            return true
+        }
+        let served = core.callbacks.lend(rep)
+        var items: [[UInt8]] = []
+        for try await item in core.stream(.freeFunction(methodId: 1), method: 1, args: args(served), lending: [served], decode: { $0 }) {
+            items.append(item)
+        }
+        XCTAssertEqual(items, [[1], [2]])
+        XCTAssertEqual(core.callbacks.count(of: rep), 1, "the core owns what it opened a stream with")
+
+        // A failure the core produced after it read the arguments keeps the reference too.
+        transport.onCall = { call, fake in
+            fake.openStream(call.callId, items: [], ending: .failure(Wire.StreamFailure(status: .cancelled, message: "restore", detail: "")))
+            return true
+        }
+        let cancelled = core.callbacks.lend(rep)
+        do {
+            for try await _ in core.stream(.freeFunction(methodId: 1), method: 1, args: args(cancelled), lending: [cancelled], decode: { $0 }) {}
+            XCTFail("a cancelled stream did not fail")
+        } catch {
+            // expected
+        }
+        XCTAssertEqual(core.callbacks.count(of: rep), 2)
+
+        // A consumer whose decode fails ends a stream the core served: not a refusal.
+        transport.onCall = { call, fake in
+            fake.openStream(call.callId, items: [[9]])
+            return true
+        }
+        let decoded = core.callbacks.lend(rep)
+        do {
+            for try await _ in core.stream(.freeFunction(methodId: 1), method: 1, args: args(decoded), lending: [decoded], decode: { (_: [UInt8]) throws -> UInt8 in throw Unexpected() }) {}
+            XCTFail("a failing decode did not fail the stream")
+        } catch {
+            // expected
+        }
+        XCTAssertEqual(core.callbacks.count(of: rep), 3, "an item the core sent that does not decode leaves the reference with it")
+
+        // Never sent: the core is gone.
+        core.shutdown()
+        XCTAssertEqual(core.callbacks.liveCount, 0)
+        let unsent = core.callbacks.lend(rep)
+        do {
+            for try await _ in core.stream(.freeFunction(methodId: 1), method: 1, args: args(unsent), lending: [unsent], decode: { $0 }) {}
+            XCTFail("a stream on a closed core did not fail")
+        } catch {
+            // expected
+        }
+        XCTAssertEqual(core.callbacks.count(of: rep), 0, "a stream that never reached the core transfers nothing")
+    }
+
+    /// A stream whose call could not be made (an object of another core) fails at its first element.
+    func testAFailedStreamThrowsTheMappedErrorAtItsFirstElement() async throws {
+        let stream: AsyncThrowingStream<UInt8, Error> = core.failedStream(
+            UndraCallError.refused(reason: "another core"),
+            mapError: { UndraCallError.mapped(streamFailure: $0) }
+        )
+        do {
+            for try await _ in stream {
+                XCTFail("a failed stream yielded")
+            }
+            XCTFail("a failed stream ended without failing")
+        } catch let error as UndraCallError {
+            XCTAssertEqual(error, .refused(reason: "another core"))
+        }
+        XCTAssertTrue(transport.calls.isEmpty, "nothing was sent")
+    }
 }
 
 /// What `LoadOptions.onError` received.

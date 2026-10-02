@@ -26,6 +26,11 @@ pub(super) struct Handover {
     pub lending: Option<String>,
 }
 
+/// Whether `params` include an object, whose check (`requireOwn`) can throw.
+pub(super) fn params_hand_objects(params: &[ParamDef]) -> bool {
+    params.iter().any(|p| ObjectUse::of(&p.ty).is_some())
+}
+
 /// Whether `params` hand an object or a callback to the core.
 pub(super) fn hands_over(params: &[ParamDef]) -> bool {
     params
@@ -44,7 +49,7 @@ impl SwiftGen<'_> {
 
     /// Writes, inside the call's `do`, the checks of the object arguments, what keeps them alive until
     /// the call is sent, the lending of the callbacks and the encoding of every argument. `checks` is
-    /// off where the generated function cannot throw (a stream method).
+    /// off where nothing can throw and nothing is kept alive for the call.
     pub(super) fn handover(
         &self,
         w: &mut CodeWriter,

@@ -12,6 +12,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import dev.undra.twocores.a.Shelf as ShelfA
 import dev.undra.twocores.a.Workshop as WorkshopA
@@ -135,6 +136,18 @@ fun s27ObjectsCross(w: World) {
 
     // 8. A foreign object is refused before anything is sent (S26's two cores, package A's classes on both).
     foreignObjects()
+
+    // 8a. A stream takes a child (objects-followups O1): it borrows it while it runs, a stale one refuses the stream.
+    val streamShelf = onMain { workshop.shelf("stream") }
+    onMain { streamShelf.stock(3u) }
+    val beforeStream = w.stats().hostRefs
+    expectEq("tally(shelf, 3)", listOf(3u, 3u, 3u), runBlocking { workshop.tally(streamShelf, 3u).toList() })
+    expectEq("host_refs after a stream borrowed a shelf", beforeStream, w.stats().hostRefs)
+    val closedShelf = onMain { workshop.shelf("closed-for-stream") }
+    closedShelf.close()
+    expectFailsAsync<UndraCallError.Refused>("tally on a closed shelf") { workshop.tally(closedShelf, 1u).toList() }
+    expectEq("host_refs after a refused stream", beforeStream, w.stats().hostRefs)
+    streamShelf.close()
 
     // 9. Statistics: UndraStats reports host_refs; closing twice gives back one reference, a raw double release none more.
     expectEq("UndraStats.hostRefs", w.stats().hostRefs, core.stats().hostRefs)

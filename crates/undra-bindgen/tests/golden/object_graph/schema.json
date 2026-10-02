@@ -241,6 +241,72 @@
           "is_async": false,
           "takes_ctx": false,
           "docs": "Finds a thread, if it exists."
+        },
+        {
+          "name": "follow",
+          "method_id": 1891956163,
+          "params": [
+            {
+              "name": "target",
+              "ty": {
+                "kind": "object",
+                "of": "Mailbox"
+              }
+            },
+            {
+              "name": "extra",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "object",
+                  "of": "Mailbox"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "stream",
+            "of": {
+              "kind": "u32"
+            }
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Follows the unread count of `target` and, when there is one, of `extra`."
+        },
+        {
+          "name": "follow_checked",
+          "method_id": 2492453997,
+          "params": [
+            {
+              "name": "boxes",
+              "ty": {
+                "kind": "vec",
+                "of": {
+                  "kind": "object",
+                  "of": "Mailbox"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "stream",
+                "of": {
+                  "kind": "u32"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "MailError"
+              }
+            ]
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Follows `boxes`; a stream that can fail to open."
         }
       ],
       "store": null,
@@ -366,6 +432,28 @@
       "is_async": false,
       "takes_ctx": false,
       "docs": "The mailbox of `account` for `folder`."
+    },
+    {
+      "name": "follow_all",
+      "method_id": 2611662384,
+      "params": [
+        {
+          "name": "account",
+          "ty": {
+            "kind": "object",
+            "of": "Account"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "stream",
+        "of": {
+          "kind": "u32"
+        }
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "docs": "Follows the unread count of every mailbox of `account`."
     }
   ],
   "ports": [],

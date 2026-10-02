@@ -209,6 +209,25 @@ test("S27 objects cross", async () => {
     }
   });
 
+  await step("8a. a stream takes a child: borrowed while it runs; a stale one refuses the stream", async () => {
+    const streamShelf = await w.shelf("stream");
+    streamShelf.stock(3);
+    await waitFor("the stock to land", () => streamShelf.items.peek() === 3);
+    const before = await refs(core);
+    const tallied: number[] = [];
+    for await (const count of w.tally(streamShelf, 3)) tallied.push(count);
+    expect(tallied).toEqual([3, 3, 3]);
+    expect((await refs(core)).hostRefs, "a stream borrows its shelf").toBe(before.hostRefs);
+    const closedShelf = await w.shelf("closed-for-stream");
+    closedShelf.close();
+    const refused = (async () => {
+      for await (const _ of w.tally(closedShelf, 1)) void _;
+    })();
+    await expect(refused).rejects.toBeInstanceOf(UndraCallError.Refused);
+    expect((await refs(core)).hostRefs, "a refused stream owes nothing").toBe(before.hostRefs);
+    streamShelf.close();
+  });
+
   await step("9. statistics: host_refs is the sum; a wrapper releases at most once", async () => {
     const before = await refs(core);
     const e = await w.shelf("e");

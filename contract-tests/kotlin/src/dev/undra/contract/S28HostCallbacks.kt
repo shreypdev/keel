@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -125,6 +126,20 @@ fun s28HostCallbacks(w: World) {
         awaitEq("the registry back at its baseline", baseline) { callbacks.liveCount }
         expectEq("reports at the end", emptyList<String>(), w.takeUnhandled().map { it.operation })
         // 9. No background-delivery interface in the playground: covered by the golden case and the runtime's tests.
+
+        // 10. A stream takes a callback (objects-followups O1): the core holds the reference while the stream runs and
+        //     lets go when it ends; a stream the core refuses gives it back.
+        val r10 = RecordingReporter(null)
+        expectEq("walk(3)", listOf(1u, 2u, 3u), runBlocking { workshop.walk(3u, r10).toList() })
+        awaitEq("the notes of walk(3)", (1..3).map { "note walk $it of 3" }) { r10.notes() }
+        awaitEq("the registry's count of the walk's reporter once the stream ended", 0) { callbacks.count(r10) }
+        val closed10 = onMain { Workshop() }
+        closed10.close()
+        val r10b = RecordingReporter(null)
+        expectFailsAsync<UndraCallError.Refused>("walk on a closed workshop") { closed10.walk(1u, r10b).toList() }
+        expectEq("the registry's count of the refused stream's reporter", 0, callbacks.count(r10b))
+        awaitEq("the registry back at its baseline after the streams", baseline) { callbacks.liveCount }
+        expectEq("reports after the streams", emptyList<String>(), w.takeUnhandled().map { it.operation })
     } finally {
         workshop.close()
     }
