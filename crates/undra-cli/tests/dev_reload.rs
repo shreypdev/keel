@@ -808,7 +808,7 @@ fn a_snapshot_the_new_core_refuses_falls_back_to_fresh_state_and_says_why() {
     ) + "\nimpl Counter {\n    fn refuse(_ctx: Ctx, _count: Signal<i32>, _changes: Signal<u32>) -> Self {\n        panic!(\"this build refuses every snapshot\")\n    }\n}\n";
     assert_ne!(original, edited);
     std::fs::write(&counter_rs, edited).unwrap();
-    let restarted = dev.wait_restart_changing_schema(dev.hash, BUILD);
+    let restarted = dev.wait_line("Restarted: ws://", BUILD);
     eprintln!("{restarted}");
     assert!(
         restarted.contains("state reset: the core refused the snapshot"),
