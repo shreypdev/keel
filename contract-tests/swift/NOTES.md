@@ -1,9 +1,9 @@
 # Swift contract runner: notes
 
-`run.sh` runs the scenarios of `../scenarios.md` that Swift runs (S01 to S20, S23 to S33: `UndraRuntime` over
+`run.sh` runs the scenarios of `../scenarios.md` that Swift runs (S01 to S20, S23 to S35: `UndraRuntime` over
 the C ABI table, the real playground core through `libplayground_core.dylib` and, for S26, `libplayground_a.dylib` and
 `libplayground_b.dylib` in the same process, the bindings `undra bindgen` generated) and pipes the `SCENARIO` lines
-through `../check.sh swift`. The build-B steps of S14 and S15 run in a second process over the second build of the
+through `../check.sh swift`. The build-B steps of S14, S15 and S35 run in a second process over the second build of the
 core (see "Two builds" below).
 
 ## Layout
@@ -11,7 +11,7 @@ core (see "Two builds" below).
 | Path | What |
 |---|---|
 | `Tests/ContractTests/Harness/` | the fakes of scenarios.md: `ManualClock`, `FakeServer` (the `Http` port), `MemoryKv` (records every operation, fails on demand with a `StorageError`), `CapturingLog`, `PortCalls` (`CountingAdapter`, which counts the calls each adapter receives), `RealtimeServer` (starts `../servers/realtime-server.mjs` with Node for S23 and S24 and reads its `/stats`), `Fixture` (the one core of the process, its adapters and its `LoadOptions`) and `Handover` (what build A leaves for the build-B process) |
-| `Tests/ContractTests/MigrationBuildB.swift` | not a scenario of its own: the build-B steps of S14 (8, 9) and S15 (12 to 14), run by `run.sh` in a second process and skipped in the main run |
+| `Tests/ContractTests/MigrationBuildB.swift` | not a scenario of its own: the build-B steps of S14 (8, 9), S15 (12 to 14) and S35 (10), run by `run.sh` in a second process and skipped in the main run |
 | `Tests/ContractTests/ApplyReportTests.swift` | not a scenario: a generated store skips a change it cannot decode and reports it through `onError` (ADR-032, decision 6); it runs before the scenarios, on the core they share |
 | `Tests/ContractTests/ContractScenarios.swift` and `S*.swift` | one XCTest per scenario, `testS07_streamWithBackpressure` and so on, in one class so that XCTest's alphabetical order is the order of the ids |
 | `Packages/PlaygroundCore` | a symlink to `examples/playground/generated/swift`, see below |
@@ -26,7 +26,7 @@ package's own relative path to the runtime (`../../../../runtimes/swift/UndraRun
 to the same package as the one this manifest names (otherwise SwiftPM warns of conflicting
 identities, "will be escalated to an error").
 
-## Two builds (S14 steps 7 to 9, S15 steps 11 to 14)
+## Two builds (S14 steps 7 to 9, S15 steps 11 to 14, S35 step 10)
 
 `run.sh` builds the core twice: build B first (`UNDRA_PLAYGROUND_V2=1 undra build --platform host`, which
 the core's `build.rs` turns into `cfg(playground_v2)`; the CLI rebuilds when only that variable changes),
@@ -35,9 +35,10 @@ stops if the two libraries are identical.
 
 The main `swift test` runs S01 to S20 against build A. S14 step 7 writes `.build/migration/s14.json` (every
 key and value of the harness `Kv` once both notes wait in the queue, and the `Idempotency-Key` of the failed
-`save_note` POST); S15 step 11 writes `s15.json` (snapshots `P` and `L` and the `Profile` handle). Each
-scenario deletes its file first, and `run.sh` deletes the directory before the run, so a failed scenario
-never hands over an older run's data.
+`save_note` POST); S15 step 11 writes `s15.json` (snapshots `P` and `L` and the `Profile` handle); S35 step 2
+writes `s35.json` (the snapshot taken with the query handles alive, in hex, and the raw handles of the remote,
+ticker, feed, library and roster wrappers). Each scenario deletes its file first, and `run.sh` deletes the
+directory before the run, so a failed scenario never hands over an older run's data.
 
 Then `run.sh` copies build B's library over `.build/core/libundra_core.dylib` and runs `swift test
 --skip-build --filter MigrationBuildB` with `UNDRA_CONTRACT_PHASE=B`: the same test bundle, relaunched,
@@ -46,10 +47,10 @@ with the generated hash), loads build B with the hash it reports and with a fres
 `FakeServer`, `CapturingLog` and a `MemoryKv` holding exactly the handed-over contents (and no injected
 failure), emits `Connectivity.changed(false, None)` right after the load, and drives the core through
 `UndraCore`'s raw API (`configure_remote`, `storage_status`, `add` and `Profile.describe` by `fnv1a32` id;
-the generated `StorageStatus` only as a codec). It prints `SCENARIO S14 FAIL` / `SCENARIO S15 FAIL` lines
-when a build-B step fails and an informational `MIGRATION S14 build B ok: <the dead letter>` /
-`MIGRATION S15 build B ok` otherwise; its output is appended to `.build/contract.log`, which `check.sh`
-reads (the last line of an id counts). Build A's library is put back afterwards, also when something
+the generated `StorageStatus` only as a codec). It prints `SCENARIO S14 FAIL` / `SCENARIO S15 FAIL` /
+`SCENARIO S35 FAIL` lines when a build-B step fails and an informational `MIGRATION S14 build B ok: <the dead
+letter>` / `MIGRATION S15 build B ok` / `MIGRATION S35 build B ok` otherwise; its output is appended to
+`.build/contract.log`, which `check.sh` reads (the last line of an id counts). Build A's library is put back afterwards, also when something
 fails. A filtered `run.sh` (any arguments) skips this phase.
 
 ## S31 (newtypes, generic instantiations, leaf types)
@@ -62,6 +63,33 @@ scale a test sends is only the one it wrote through the codec, and echoes are co
 once more through the generated `Ledger` class. The wire `Duration` of the receipt is `Swift.Duration` or, under `--floor`,
 `UndraDuration` (`#if UNDRA_FLOOR`, as in S01). The scenario opens accounts in the shared core, so it expects to be the first to use
 the ledger's free functions in the process (`balances()` has exactly its two keys).
+
+## S35 (query handles across a restore, ADR-059)
+
+`S35_QueryHandles.swift` runs steps 1 to 9 through the generated bindings (`RemoteTodosQueryHandle`, `TickerQueryHandle`,
+`FeedQueryHandle`, `Library`, `RosterQueryHandle`, `Counter`, `Probe`) on the shared core; step 10 is `MigrationBuildB`'s
+`queryHandleSteps` in the second process, which drives build B through `RawStore(core:adopting:)` (a mirror registration for a
+handle the runner did not construct) and the raw ids (`fnv1a32("query.refetch")` is the id of `refetch` on every query handle).
+
+* **What the mirror applied during a restore (steps 3 and 8)** is recorded by a `MirrorTap`: one more function in the handle's
+  registration (`Mirror.register(_:owner:_:)`), next to the generated wrapper's own `apply`, so it sees every entry the wrapper
+  does and works for both generated shapes (`@Observable` and, under `--floor`, `ObservableObject`). A control keeps it honest:
+  the `Counter`'s tap must have seen the restore deliver the counter's values. "The same object" is the identity map's live
+  wrapper of the handle (`core.identities.live(handle) === wrapper`).
+* **Quiet windows.** After each restore of steps 3 and 8 and after step 10's restore the runner lets 200 ms pass before it reads
+  the GET count and the taps: a fetch a restore started would be made by the core's executor, after the call returned.
+* **`live_handles` in step 3** is the reading before the restore less one: the `Probe`, the one object the restore makes stale
+  (the scenario text says so since the TypeScript column found it). Step 8 compares the second restore with the first.
+* **Step 10 runs on a second core of build B**, loaded after the first was shut down (the in-process runtime loads one core at a time and a
+  new load starts fresh, S17; TypeScript boots a second wasm instance). The first core, which S14 and S15 used, is not "a runtime that
+  never held the handles": S15's restore of snapshot `P` leaves it holding the `Todos`, `Counter`, `BigList` and `Profile` stores of
+  build A's S15, and S35's restore drops them, so the growth of `live_handles` it reads would be 7 less their number (4, measured). The
+  second core starts with an empty `Kv` and a `FakeServer` of its own, so S35 depends on nothing the earlier steps did, and the growth
+  is exactly 7 (`Counter`, `Library`, its two page servers, the three query handles).
+* **Step 10 sets the host's state itself** (`Connectivity` online, `Lifecycle` `Active`: what polling needs) and reads `live_handles`
+  and the GET counts (every GET of the core, and those of `/lists/s35/todos`) just before its restore.
+* **The remote handle's first answer** needs a reply that is not instant (the runner delays it 100 ms), or the fetch's result could
+  be folded with the first change-set by the mirror's drain and the `fetching` entry would never be seen.
 
 ## S29 and S30 (ADR-046)
 

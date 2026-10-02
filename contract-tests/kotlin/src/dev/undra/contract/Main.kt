@@ -8,7 +8,7 @@ import kotlin.system.exitProcess
 private const val SCENARIO_LIMIT_MS: Long = 120_000L
 
 /**
- * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S20 and S23 to S34 on the JVM
+ * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S20 and S23 to S35 on the JVM
  * over JNI against the real `libplayground_core` of the playground core (and, for S26, `libplayground_a` and
  * `libplayground_b`; S27 uses them again) and prints one line per scenario,
  * `SCENARIO S07 PASS|FAIL <title>` (or `SKIP <reason>`), which `contract-tests/check.sh kotlin` reads. Exits 1 if any fails.
@@ -16,8 +16,8 @@ private const val SCENARIO_LIMIT_MS: Long = 120_000L
  * With `UNDRA_CONTRACT_ONLY=S29,S30` it runs only those scenarios (and S16, which loads the core): for working on one scenario; the
  * run is not a verdict, `check.sh` reports the others missing.
  *
- * With `UNDRA_CONTRACT_PHASE=B` (and build B's library on `java.library.path`) it runs only the build-B steps of S14
- * and S15 instead ([migrationBuildB]), which print nothing but `FAIL` lines for those two ids.
+ * With `UNDRA_CONTRACT_PHASE=B` (and build B's library on `java.library.path`) it runs only the build-B steps of S14, S15
+ * and S35 instead ([migrationBuildB]), which print nothing but `FAIL` lines for those three ids.
  */
 fun main() {
     // The default file-backed adapters (Fs, SecureStore) stay in a throwaway directory.

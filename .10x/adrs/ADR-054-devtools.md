@@ -151,3 +151,16 @@ None touches the wire, the ABI or a generated shape.
 * **The app's notice** says how many stores a time travel dropped, as the page's answer does.
 * **A worker that dies closes the pages** (they reconnect and get a new one); the hub stays active until the last has left,
   so the app client is never sent what it did not observe.
+
+## Amendment (2026-10-02, ADR-059): time travel leaves live query handles alone
+
+Decision 4's sentence "Everything ADR-053 says about what a restore carries applies: objects that are not stores and query
+handles go stale" is amended by [ADR-059](ADR-059-transient-handles-across-restore.md) (the text above is left as written).
+Objects that are not stores and are not re-creatable still go stale. A query handle does not: a restore into the runtime that
+holds a live query handle leaves it exactly as it is, so a time travel sends no change-set for it, makes no refetch, keeps its
+polling and any fetch in flight and the pages of an infinite query, **also for a handle created after the step** (a query
+handle has no state in the snapshot for a restore to put back; dropping it would break a screen for nothing). The one handle
+a time travel can still remove is one whose slot a store of the step needs (the slot was reused since): it is listed in
+`RestoreReport::displaced` and added to the count of stores built since the step that the page's answer and the app's notice
+report. The hub's store list leaves the snapshot's recreation records out, since they are not stores to list or observe
+(observing one would build it), and the count of stores built since a step ignores them.

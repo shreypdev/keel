@@ -88,8 +88,6 @@ export interface Mirror {
 /** Addition (ADR-031): what a generated store tells its base class (its `no_coalesce` signals). */
 export interface StoreOptions {
   readonly noCoalesce?: readonly number[];
-  /** Addition (ADR-049): the recorded constructor call of a query handle, which the runtime re-creates after a restart. */
-  readonly recreate?: { readonly typeId: number; readonly methodId: number; readonly args: Uint8Array };
 }
 
 export declare class UndraCore {

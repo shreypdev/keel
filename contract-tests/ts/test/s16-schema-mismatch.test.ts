@@ -95,7 +95,7 @@ test("S16 schema mismatch rejection", async () => {
     }
     const queryIds = UndraIds.Queries as Readonly<Record<string, number>>;
     const handles = Object.entries(UndraIds.Objects).filter(([name]) => isHandle(name));
-    expect(handles.map(([name]) => name).sort(), "the query handles of the bindings").toEqual(["FeedQueryHandle", "RemoteTodosQueryHandle", "TickerQueryHandle"]);
+    expect(handles.map(([name]) => name).sort(), "the query handles of the bindings").toEqual(["FeedQueryHandle", "RemoteTodosQueryHandle", "RosterQueryHandle", "TickerQueryHandle"]);
     for (const [name, ids] of handles) {
       const query = name.slice(0, -"QueryHandle".length);
       expect(ids.typeId, `type id of ${name}`).toBe(queryIds[`${query.charAt(0).toLowerCase()}${query.slice(1)}`]);

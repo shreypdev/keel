@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   CallTarget,
   ChangeOp,
@@ -86,6 +86,12 @@ function fakeStore(core: UndraCore, handle: Handle): Array<[number, number]> {
 }
 
 const tick = (ms = 0): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Waits until what the drain delivers is there, then the check holds. The delivery is a frame or a microtask away, a few
+ * milliseconds on an idle machine and more on a loaded one: a fixed wait failed under load (the check says what arrives,
+ * not when; 10 s only catches a delivery that never comes).
+ */
+const arrived = (check: () => void): Promise<void> => vi.waitFor(check, { timeout: 10_000, interval: 5 });
 
 describe("start", () => {
   test("hands the core an encoded RuntimeConfig and the schema's port plan", async () => {
@@ -174,8 +180,7 @@ describe("one module, several transports", () => {
     // The running core still hears what its core says.
     const applied = fakeStore(core, 9n);
     native.queue(RecordKind.ChangeSet, changeSet(1n, 9n, 0, 7), "core");
-    await tick(10);
-    expect(applied).toEqual([[0, 7]]);
+    await arrived(() => expect(applied).toEqual([[0, 7]]));
   });
 
   test("a sync call or a snapshot after this runtime's core was stopped under it is a typed 'closed' error", async () => {
@@ -351,15 +356,13 @@ describe("ports", () => {
     const { core, native } = await attach();
     core.registerPort(0x1ebeb908, { sync: false, methods: { 0x1ab1bc95: async (args) => new Uint8Array([args.length]) } });
     native.queue(RecordKind.PortCall, new Uint8Array([...le([0x1ebeb908, "u32"], [0x1ab1bc95, "u32"], [12, "u32"]), 9, 9]), "core");
-    await tick(5);
-    expect(native.portReplies).toEqual([new Uint8Array([...le([12, "u32"], [PortStatus.Ok, "u8"]), 2])]);
+    await arrived(() => expect(native.portReplies).toEqual([new Uint8Array([...le([12, "u32"], [PortStatus.Ok, "u8"]), 2])]));
   });
 
   test("a port nobody implements is answered unavailable", async () => {
     const { native } = await attach();
     native.queue(RecordKind.PortCall, le([0xbad, "u32"], [1, "u32"], [13, "u32"]), "core");
-    await tick(5);
-    expect(native.portReplies).toEqual([le([13, "u32"], [PortStatus.Unavailable, "u8"])]);
+    await arrived(() => expect(native.portReplies).toEqual([le([13, "u32"], [PortStatus.Unavailable, "u8"])]));
   });
 
   test("a JS sync port answers on the JS thread with a complete PortReply", async () => {
@@ -378,8 +381,7 @@ describe("ports", () => {
     w.writeStr("undra::react-native");
     w.writeStr("hello");
     native.queue(RecordKind.Log, w.finish(), "core");
-    await tick(5);
-    expect(logs).toEqual([[3, "undra::react-native", "hello"]]);
+    await arrived(() => expect(logs).toEqual([[3, "undra::react-native", "hello"]]));
   });
 });
 
@@ -436,9 +438,10 @@ describe("robustness", () => {
     core.mirror.register(2n, (_s, _op, value) => seen.push(decodeValue(codecs.u32, value)));
     native.queue(RecordKind.ChangeSet, changeSet(1n, 1n, 0, 1), "core");
     native.queue(RecordKind.ChangeSet, changeSet(2n, 2n, 0, 2), "core");
-    await tick(10);
-    expect(seen).toEqual([2]);
-    expect(errors.length).toBeGreaterThan(0);
+    await arrived(() => {
+      expect(seen).toEqual([2]);
+      expect(errors.length).toBeGreaterThan(0);
+    });
   });
 });
 

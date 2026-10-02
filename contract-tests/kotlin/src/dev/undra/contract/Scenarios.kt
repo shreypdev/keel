@@ -17,8 +17,8 @@ private fun scenario(id: String, title: String, body: (World) -> Unit): Scenario
  * The scenarios in the order they run. S16 is first because it is the one that loads the core:
  * its failing load has to come before the load the others use (`UndraCore.load` leaves nothing behind when
  * it fails), and the others need the core it loads. S17 is last because its last steps shut that core down
- * (S17.6) and load and close a fresh one (S17.7), so S18, S19, S20, S29, S30, the opt-in ports' S23 to S25 and S26 run before
- * it. The build-B steps of S14 and S15 run in a second JVM ([migrationBuildB]).
+ * (S17.6) and load and close a fresh one (S17.7), so S18, S19, S20, S29, S30, the opt-in ports' S23 to S25, S26 and S35 run
+ * before it. The build-B steps of S14, S15 and S35 run in a second JVM ([migrationBuildB]).
  */
 val SCENARIOS: List<Scenario> = listOf(
     Scenario("S16", "schema mismatch rejection", ::s16SchemaMismatch),
@@ -58,5 +58,7 @@ val SCENARIOS: List<Scenario> = listOf(
     scenario("S32", "paged queries and lazy lists", ::s32Paging),
     scenario("S33", "polling", ::s33Polling),
     scenario("S34", "generic functions, objects and stores", ::s34Generic),
+    // S35 (ADR-059) restores into this core and closes everything it opens; its step 10 runs in the second JVM ([migrationBuildB]).
+    scenario("S35", "query handles across a restore", ::s35QueryHandles),
     scenario("S17", "panic containment", ::s17Panic),
 )

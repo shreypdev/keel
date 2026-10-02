@@ -50,8 +50,8 @@ export abstract class UndraObject {
   /** The core this object lives in. */
   readonly core: UndraCore;
   /**
-   * The handle of the object inside the core. It changes only when crash recovery re-creates a query handle
-   * (ADR-049): code that keeps the raw handle instead of the object goes stale then.
+   * The handle of the object inside the core. It never changes: a restore re-issues the handle of a store or a
+   * query handle under the same value (ADR-022, ADR-059), and an object that is not carried over goes stale instead.
    */
   readonly handle: Handle;
   private _undraClosed = false;
@@ -82,18 +82,6 @@ export abstract class UndraObject {
   }
 }
 
-/**
- * Moves `object` to `handle`, a new object crash recovery created in the core in its place (a re-created query handle,
- * ADR-049); the handle it had is not released (the instance that issued it is gone).
- *
- * @internal Used by `crashRecovery` only.
- */
-export function _rebindObject(object: UndraObject, handle: Handle): void {
-  leaks?.unregister(object);
-  (object as { handle: Handle }).handle = handle;
-  leaks?.register(object, { core: new WeakRef(object.core), handle, era: object.core._era }, object);
-}
-
 /** What a generated store tells its base class about itself. */
 export interface StoreOptions {
   /**
@@ -101,21 +89,6 @@ export interface StoreOptions {
    * every value of these instead of the last one per frame (docs/SPEC.md section 11).
    */
   readonly noCoalesce?: readonly number[];
-  /**
-   * The constructor call that made this store, for a store the runtime re-creates after a crash recovery instead of
-   * restoring it (ADR-049): a query handle, which a snapshot leaves out. Generated query handles pass it.
-   */
-  readonly recreate?: RecreateCall;
-}
-
-/** A recorded constructor call: what `UndraCore.construct` was given (ADR-049, re-created query handles). */
-export interface RecreateCall {
-  /** The object type. */
-  readonly typeId: number;
-  /** The constructor. */
-  readonly methodId: number;
-  /** The encoded arguments. */
-  readonly args: Uint8Array;
 }
 
 /**
@@ -146,7 +119,6 @@ export abstract class UndraStore extends UndraObject {
       },
       options.noCoalesce === undefined ? {} : { noCoalesce: options.noCoalesce },
     );
-    if (options.recreate !== undefined) core._recreatable(this, options.recreate);
   }
 
   /**

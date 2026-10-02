@@ -100,6 +100,9 @@ pub struct QueryVTable {
     pub(crate) decode_data: fn(&[u8]) -> Result<Erased, WireError>,
     /// Observes the query with encoded parameters: what a platform constructor call does.
     pub(crate) open: OpenFn,
+    /// Whether encoded parameters decode (a restore checks a record's parameters with it, so the
+    /// handle can be opened later without failing on them).
+    pub(crate) check_params: fn(&[u8]) -> Result<(), WireError>,
 }
 
 /// The type-erased half of one `#[undra::mutation]`. Built with [`MutationRegistration::of`].
@@ -137,6 +140,7 @@ impl<Q: QueryDef> QueryHolder<Q> {
             Some(paged) => paged.open,
             None => open_erased::<Q>,
         },
+        check_params: check_params_erased::<Q>,
     };
 }
 
@@ -156,6 +160,10 @@ fn fetch_erased<Q: QueryDef>(ctx: Ctx, params: &[u8]) -> BoxFuture<Outcome> {
             Box::pin(async move { Err(Failure::Broken(message)) })
         }
     }
+}
+
+fn check_params_erased<Q: QueryDef>(params: &[u8]) -> Result<(), WireError> {
+    Q::Params::decode_exact(params).map(|_| ())
 }
 
 fn open_erased<Q: QueryDef>(
@@ -228,6 +236,15 @@ pub(crate) fn mutation_vtable<M: MutationDef>() -> &'static MutationVTable {
 /// only for a [`QueryDef`] the macro did not generate, and then submit the query runtime's
 /// dispatch layer next to it (`undra::query::__private::LAYER`, as the macro does, ADR-052):
 /// without the layer no platform call reaches the registration.
+///
+/// **Across a restore (ADR-059).** The reviver that builds a platform-constructed handle of the query
+/// again is added to a runtime together with its query client, which the macros' start-up hook
+/// reaches when the runtime starts. A core whose only queries are hand-written has no such hook:
+/// its reviver exists from the client's first use (`ctx.query()`, a platform constructing a
+/// handle), so a snapshot restored before that handles the record as a store type the runtime does
+/// not have (left out, reported in `RestoreReport::dropped`, the handle stays stale). Submit
+/// [`__private::HYDRATE`](crate::__private::HYDRATE) next to the registration, as the macros do, to
+/// have it from the start.
 pub struct QueryRegistration {
     vtable: &'static QueryVTable,
 }

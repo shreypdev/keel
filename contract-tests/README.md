@@ -1,11 +1,12 @@
 # Contract tests
 
-The definition of "the platforms agree" (SPEC section 14): thirty-three scenarios, run against the **real
-playground core** (`examples/playground/core`) through the real boundary: S01 to S20 and S23 to S33 (the opt-in
+The definition of "the platforms agree" (SPEC section 14): thirty-five scenarios, run against the **real
+playground core** (`examples/playground/core`) through the real boundary: S01 to S20 and S23 to S35 (the opt-in
 ports of ADR-047 and ADR-048, two cores, objects as parameters and returns, host callbacks, the panic report and
 the background run of ADR-046, newtypes, generic instantiations and leaf types, paged queries, lazy lists and
-polling) by each platform runtime, S21 and S22 (web worker mode and crash recovery, ADR-049) by TypeScript only,
-95 cells in all (33 on TypeScript, 31 each on Kotlin and Swift).
+polling, generic functions, objects and stores (ADR-058), query handles across a restore (ADR-059)) by each platform
+runtime, S21 and S22 (web worker mode and crash recovery, ADR-049) by TypeScript only, 101 cells in all (35 on
+TypeScript, 33 each on Kotlin and Swift).
 
 | Directory | Platform | Boundary | Run |
 |---|---|---|---|
@@ -22,8 +23,8 @@ contract-tests/run-all.sh ts kotlin  # a subset
   harness (manual clock, in-memory `Http` server, `Kv`, `Log`, `Connectivity`) every runner implements.
 * Every runner prints `SCENARIO S07 PASS|FAIL|SKIP <title>` lines; `check.sh <platform>` fails unless every
   scenario of that platform passes.
-* S14 and S15 also run against a second build of the core (build B, `UNDRA_PLAYGROUND_V2=1`; ADR-037): see
-  "Two builds" in `scenarios.md`.
+* S14, S15 and S35 also run against a second build of the core (build B, `UNDRA_PLAYGROUND_V2=1`; ADR-037,
+  ADR-059): see "Two builds" in `scenarios.md`.
 * Each runner builds the core it needs with the `undra` CLI (`undra build -C examples/playground --platform
   web|host`) and uses the bindings `undra bindgen` generated (`examples/playground/generated`), plus the runtime's
   own API for what bindings do not expose (raw signal updates, statistics, snapshots, schema checks).

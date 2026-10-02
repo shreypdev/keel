@@ -562,7 +562,7 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 </tbody></table></div>
 <h2 id="runtime-messages">Runtime messages<a class="anchor" href="#runtime-messages" aria-label="Link to this section">#</a></h2>
 <p>The JavaScript runtime (<code>@undra/runtime</code>) throws and logs these. Its <strong>production build</strong> (what <code>vite build</code>, webpack in production mode and anything else that asks for neither the <code>development</code> nor the <code>react-native</code> condition resolve) says a code, the values and a link instead of a sentence, so a page does not carry the prose of an error whose class, <code>kind</code> and fields it already has: <code>T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017</code>. Its <strong>development build</strong> (Vite's dev server, Vitest, React Native) says the sentence. Both throw the same classes with the same <code>kind</code> and fields; only <code>message</code> differs, so nothing a program can branch on changes. Text the runtime hands on as data, the field of a port's typed error (which the core receives) and a WebSocket close frame's reason (which the peer receives), is not a message: it is the same sentence in both builds. Codes are never reused.</p>
-<h3 id="runtime-messages-table">The T codes (168)<a class="anchor" href="#runtime-messages-table" aria-label="Link to this section">#</a></h3>
+<h3 id="runtime-messages-table">The T codes (166)<a class="anchor" href="#runtime-messages-table" aria-label="Link to this section">#</a></h3>
 <p>The sentence is what the development build says; <code>{0}</code>, <code>{1}</code>, ... are the values the production message lists, in that order.</p>
 <div class="table-wrap"><table><thead><tr><th>Code</th><th>The development build says</th><th>Raised by</th></tr></thead><tbody>
 <tr id="T0001"><td><a href="#T0001"><code>T0001</code></a></td><td>unknown {0} variant: {1}</td><td>adapters/codecs.ts: TypeError; adapters/events.ts: RangeError</td></tr>
@@ -653,8 +653,6 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <tr id="T0163"><td><a href="#T0163"><code>T0163</code></a></td><td>the wasm core could not be restarted: {0}</td><td>recovery.ts: this.#log</td></tr>
 <tr id="T0164"><td><a href="#T0164"><code>T0164</code></a></td><td>{0}: {1} call(s) in flight failed, {2} object(s) went stale</td><td>recovery.ts: this.#log</td></tr>
 <tr id="T0165"><td><a href="#T0165"><code>T0165</code></a></td><td>the onCoreRestarted handler threw: {0}</td><td>recovery.ts: this.#log</td></tr>
-<tr id="T0166"><td><a href="#T0166"><code>T0166</code></a></td><td>re-creating a query handle after a restart (type 0x{0})</td><td>recovery.ts: core.report</td></tr>
-<tr id="T0167"><td><a href="#T0167"><code>T0167</code></a></td><td>observing a re-created query handle after a restart</td><td>recovery.ts: core.report</td></tr>
 <tr id="T0168"><td><a href="#T0168"><code>T0168</code></a></td><td>the core answered a stream call with a plain result</td><td>stream-support.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
 <tr id="T0169"><td><a href="#T0169"><code>T0169</code></a></td><td>the core sent a truncated stream item</td><td>stream-support.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
 <tr id="T0170"><td><a href="#T0170"><code>T0170</code></a></td><td>the core sent a malformed stream failure: {0}</td><td>stream-support.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>

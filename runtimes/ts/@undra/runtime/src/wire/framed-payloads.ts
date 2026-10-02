@@ -527,7 +527,10 @@ export interface SnapshotPayload {
   readonly types: readonly SnapshotType[];
   /** The canonical JSON description of the store types' closures (ADR-037), opaque to hosts. */
   readonly description: string;
-  /** Every store in the snapshot. */
+  /**
+   * Every record in the snapshot: a store's, and the recreation record of each query handle (ADR-059), which has one
+   * signal whose id is `0xFFFF_FFFE` and whose value says what the handle is made of. Hosts need not tell them apart.
+   */
   readonly stores: readonly SnapshotStore[];
 }
 

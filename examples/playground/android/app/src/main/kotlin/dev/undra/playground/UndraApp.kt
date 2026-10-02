@@ -23,7 +23,9 @@ import dev.undra.runtime.adapters.ConnectivityEvents
 import dev.undra.runtime.adapters.UndraPanicReport
 import dev.undra.work.UndraWork
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -90,6 +92,14 @@ class UndraApp : Application() {
 
     /** What the connection to `undra dev` is doing; always `Connected` for the in-process core. */
     val connection: StateFlow<ConnectionState> get() = _connection
+
+    /** Whether the connection dropped and has not come back yet (touched on the runtime's threads, one at a time). */
+    @Volatile private var reconnecting = false
+
+    private val _reconnected = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** Emits each time the runtime is connected again to a core that `undra dev` reloaded with its state kept, once the server's address has been told to it again. */
+    val reconnected: SharedFlow<Unit> get() = _reconnected
 
     private val _epoch = MutableStateFlow(0)
 
@@ -197,9 +207,23 @@ class UndraApp : Application() {
     private fun onConnection(state: ConnectionState) {
         Log.i(TAG, "connection: $state")
         _connection.value = state
-        if (state is ConnectionState.Closed && state.reason == ClosedReason.SESSION_LOST) {
-            // `undra dev` restarted the core: its objects are gone. Load the new one, then start over on it.
-            main.post { reloadWhenReachable() }
+        if (state is ConnectionState.Reconnecting) reconnecting = true
+        if (state is ConnectionState.Closed) {
+            reconnecting = false
+            if (state.reason == ClosedReason.SESSION_LOST) {
+                // `undra dev` restarted the core: its objects are gone. Load the new one, then start over on it.
+                main.post { reloadWhenReachable() }
+            }
+        }
+        if (state is ConnectionState.Connected && reconnecting) {
+            reconnecting = false
+            // A core `undra dev` reloaded keeps its stores and its query handles (ADR-059), but not what it holds outside them:
+            // the server's address is set by a call, so tell it again (off the runtime's thread: the call waits for the core's
+            // answer), then let the screens fetch what they tried before it knew.
+            main.post {
+                configureRemote(RemoteConfig(baseUrl = server.start()))
+                _reconnected.tryEmit(Unit)
+            }
         }
     }
 

@@ -59,6 +59,9 @@ pub struct Snapshot {
     pub bytes: Vec<u8>,
     /// How many stores they hold.
     pub stores: usize,
+    /// How many query handles they hold (recreation records, ADR-059): not stores, but the new core
+    /// re-issues them, so a core with only those still has something to carry.
+    pub queries: usize,
     /// The session the client left (token and the handles of the objects it made), if any.
     pub session: Option<(String, Vec<u64>)>,
     /// Whether every call that was open had finished when the client was closed.
@@ -84,7 +87,12 @@ impl Snapshot {
 pub struct Restored {
     /// Stores restored.
     pub stores: usize,
-    /// Objects the client held that are not carried over (plain objects, query handles).
+    /// Query handles the client holds that the new core re-issued (ADR-059): each is built again when
+    /// the client observes it, with no code of the app. Handles the client had released are not
+    /// counted: the runner released them at once.
+    pub queries: usize,
+    /// Objects the client held that are not carried over: plain objects, objects a method returned,
+    /// stores and query handles the rebuild removed or refused.
     pub lost: usize,
     /// Bytes of snapshot.
     pub bytes: usize,
@@ -120,9 +128,16 @@ impl Outcome {
                 cancelled,
                 dropped,
             } => {
+                let mut what = Vec::new();
+                if restored.stores > 0 || restored.queries == 0 {
+                    what.push(plural(restored.stores, "store", "stores"));
+                }
+                if restored.queries > 0 {
+                    what.push(plural(restored.queries, "query handle", "query handles"));
+                }
                 let mut text = format!(
                     "state kept ({}, {}, restored in {})",
-                    plural(restored.stores, "store", "stores"),
+                    what.join(", "),
                     kib(restored.bytes),
                     took(restored.micros)
                 );
@@ -282,7 +297,7 @@ pub fn swap<O: Ops>(
     };
     ops.stop(old);
     let outcome = match taken {
-        Ok(snapshot) if snapshot.stores == 0 => Outcome::NothingToKeep,
+        Ok(snapshot) if snapshot.stores == 0 && snapshot.queries == 0 => Outcome::NothingToKeep,
         Ok(snapshot) => match ops.restore(&mut new, old_hash, &snapshot) {
             Ok(restored) => Outcome::Kept {
                 restored,
@@ -322,6 +337,7 @@ mod tests {
         Snapshot {
             bytes: vec![0; 8],
             stores,
+            queries: 0,
             session: Some(("tok".into(), vec![1])),
             settled: true,
             cancelled: 0,
@@ -337,6 +353,7 @@ mod tests {
                 snapshot: Ok(snapshot(2)),
                 restore: Ok(Restored {
                     stores: 2,
+                    queries: 0,
                     lost: 0,
                     bytes: 8,
                     micros: 5,
@@ -520,6 +537,35 @@ mod tests {
         assert_eq!(outcome(swapped), Outcome::NothingToKeep);
     }
 
+    /// A core whose only state is the query handles an open screen holds (a remote-data app with no
+    /// store) still has something to carry: the new core re-issues them (ADR-059).
+    #[test]
+    fn an_old_core_with_only_query_handles_still_has_something_to_carry() {
+        let mut fake = Fake::ok();
+        fake.snapshot = Ok(Snapshot {
+            queries: 1,
+            ..snapshot(0)
+        });
+        fake.restore = Ok(Restored {
+            stores: 0,
+            queries: 1,
+            lost: 0,
+            bytes: 8,
+            micros: 5,
+        });
+        let swapped = run(&mut fake, true);
+        assert_eq!(
+            fake.steps,
+            ["standby", "snapshot", "stop-old", "restore(0xaa)", "listen"]
+        );
+        let kept = outcome(swapped);
+        assert!(matches!(kept, Outcome::Kept { .. }));
+        assert_eq!(
+            kept.describe(),
+            "state kept (1 query handle, 1 KiB, restored in 5 \u{b5}s)"
+        );
+    }
+
     #[test]
     fn a_core_that_cannot_listen_is_the_error_it_always_was() {
         let mut fake = Fake::ok();
@@ -533,6 +579,7 @@ mod tests {
         let kept = Outcome::Kept {
             restored: Restored {
                 stores: 3,
+                queries: 0,
                 lost: 2,
                 bytes: 209_008,
                 micros: 189,
@@ -543,6 +590,41 @@ mod tests {
         assert_eq!(
             kept.describe(),
             "state kept (3 stores, 205 KiB, restored in 189 \u{b5}s); 2 objects not carried over: their handles are stale, the app creates them again; 1 call still running when the core was replaced was cancelled; 2 calls sent during the reload were not run"
+        );
+        // The query handles the app holds carry over and are counted next to the stores (ADR-059); the
+        // objects not carried over no longer include them.
+        let with_handles = Outcome::Kept {
+            restored: Restored {
+                stores: 2,
+                queries: 1,
+                lost: 0,
+                bytes: 1_024,
+                micros: 2_400,
+            },
+            cancelled: 0,
+            dropped: 0,
+        };
+        assert_eq!(
+            with_handles.describe(),
+            "state kept (2 stores, 1 query handle, 1 KiB, restored in 2.4 ms)"
+        );
+        let plural_handles = Outcome::Kept {
+            restored: Restored {
+                stores: 1,
+                queries: 3,
+                lost: 0,
+                bytes: 1_024,
+                micros: 1,
+            },
+            cancelled: 0,
+            dropped: 0,
+        };
+        assert!(
+            plural_handles
+                .describe()
+                .starts_with("state kept (1 store, 3 query handles, "),
+            "{}",
+            plural_handles.describe()
         );
         assert_eq!(
             Outcome::Reset("schema changed (was 0x1, now 0x2)".into()).describe(),

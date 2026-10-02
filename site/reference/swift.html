@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Swift reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xe0a0c81a2ba27ff9</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x3c17cd5f59bb6f68</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="core">The core<a class="anchor" href="#core" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another.</p>
@@ -740,7 +740,7 @@ extension WorkshopError: CustomStringConvertible, LocalizedError {
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
 <p class="ref-names"><code>Live</code> <code>Probe</code> <code>RecentTodos</code> <code>Watch</code> <code>add</code> <code>addLater</code> <code>area</code> <code>balances</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>dbCells</code> <code>dbMigrate</code> <code>dbRun</code> <code>deposit</code> <code>draft</code> <code>echoAccount</code> <code>echoCents</code> <code>echoComposite</code> <code>echoDecimal</code> <code>echoFigure</code> <code>echoPrice</code> <code>echoPrimitives</code> <code>echoReceipt</code> <code>explode</code> <code>explodeDetached</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>loadableStatement</code> <code>localizedGreeting</code> <code>newest</code> <code>openAccount</code> <code>ownerOf</code> <code>parseCount</code> <code>ping</code> <code>recentTodos</code> <code>sampleReceipt</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>setTickerFailing</code> <code>sseFollow</code> <code>statement</code> <code>storageStatus</code> <code>tickerFetches</code> <code>touchFeed</code> <code>version</code> <code>wsEcho</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>496 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>498 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Objects.swift" rel="noopener">Objects.swift</a></span></div><pre><code data-lang="swift">public final class Live: UndraObject, @unchecked Sendable {
     /// No connection yet.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
@@ -864,8 +864,10 @@ public func area(_ figure: Figure, ctx: UndraCore = UndraPlaygroundCore.core) th
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
 public func balances(ctx: UndraCore = UndraPlaygroundCore.core) throws -&gt; [AccountId: Price]
 
-/// Tells the core where the server is. Call it once at start-up, before anything observes
-/// [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
+/// Tells the core where the server is. Call it at start-up, before anything observes
+/// [`remote_todos`], and again whenever the core is a new one that kept its stores (after a dev
+/// reload or a web crash restart): the address lives in the core outside any store, so a snapshot
+/// does not carry it. Calling it again points the core elsewhere (cached data stays until it goes
 /// stale).
 /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
 public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = UndraPlaygroundCore.core)
@@ -1798,8 +1800,8 @@ public final class WeakReporter: Reporter, UndraWeakMainCallback {
 </details>
 <h2 id="queries">Queries<a class="anchor" href="#queries" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.</p>
-<p class="ref-names"><code>FeedQueryHandle</code> <code>RemoteTodosQueryHandle</code> <code>TickerQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code> <code>saveNote</code> <code>tagNote</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>146 lines</span></summary>
+<p class="ref-names"><code>FeedQueryHandle</code> <code>RemoteTodosQueryHandle</code> <code>RosterQueryHandle</code> <code>TickerQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code> <code>saveNote</code> <code>tagNote</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>179 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Queries.swift" rel="noopener">Queries.swift</a></span></div><pre><code data-lang="swift">/// Observes the `feed` query (cache key `feed/{even_only}`).
 /// Constructing it registers an observer and fetches when the data is stale or missing.
 /// The query is paged: `data` grows by one page each time `fetchNextPage()` completes.
@@ -1865,6 +1867,39 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(list: String, ctx: UndraCore = UndraPlaygroundCore.core) throws
+
+    /// Fetches again now, even if the data is fresh.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func refetch()
+
+    /// Marks the cached entry stale; it refetches while observed.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func invalidate()
+
+    /// Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+    /// The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+    /// An interval below 1 second or above 7 days is clamped to that range.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func setPollInterval(_ interval: Duration?)
+}
+
+/// Observes the `roster` query (cache key `roster:{team}`).
+/// Constructing it registers an observer and fetches when the data is stale or missing.
+@MainActor @Observable
+public final class RosterQueryHandle: UndraStore, @unchecked Sendable {
+    /// The latest successful result, if any.
+    public private(set) var data: [String]?
+    /// Where the query is in its fetch lifecycle.
+    public private(set) var status: QueryStatus
+    /// The error of the latest failed fetch, cleared by the next success.
+    public private(set) var error: RemoteError?
+    /// Whether a fetch is in flight (also true while refetching stale data).
+    public private(set) var fetching: Bool
+    /// When `data` was last updated.
+    public private(set) var updatedAt: Date?
+
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public convenience init(team: UInt32, ctx: UndraCore = UndraPlaygroundCore.core) throws
 
     /// Fetches again now, even if the data is fresh.
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
@@ -1951,11 +1986,11 @@ public func tagNote(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>276 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>284 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift" rel="noopener">Ids.swift</a></span></div><pre><code data-lang="swift">/// Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
 /// hash and the namespace of the core these bindings belong to.
 public enum UndraIds {
-    public static let schemaHash: UInt64 = 0xe0a0c81a2ba27ff9
+    public static let schemaHash: UInt64 = 0x3c17cd5f59bb6f68
     public static let namespace = "playground_core"
 
     public enum Objects {
@@ -2131,6 +2166,13 @@ public enum UndraIds {
             public static let invalidate: UInt32 = 0x44cec2fa
             public static let setPollInterval: UInt32 = 0xe327e53b
         }
+        public enum RosterQueryHandle {
+            public static let typeId: UInt32 = 0xaa41fecc
+            public static let new: UInt32 = 0xaa41fecc
+            public static let refetch: UInt32 = 0x21d1b9e2
+            public static let invalidate: UInt32 = 0x44cec2fa
+            public static let setPollInterval: UInt32 = 0xe327e53b
+        }
         public enum TickerQueryHandle {
             public static let typeId: UInt32 = 0x38de4411
             public static let new: UInt32 = 0x38de4411
@@ -2223,6 +2265,7 @@ public enum UndraIds {
         public static let patchRemoteTodo: UInt32 = 0x77fe653e
         public static let postRemoteTodo: UInt32 = 0x5c84eed2
         public static let remoteTodos: UInt32 = 0x2a794167
+        public static let roster: UInt32 = 0xaa41fecc
         public static let saveNote: UInt32 = 0xaef633c6
         public static let tagNote: UInt32 = 0xb9224861
         public static let ticker: UInt32 = 0x38de4411

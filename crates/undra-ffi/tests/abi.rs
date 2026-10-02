@@ -1306,6 +1306,70 @@ fn snapshot_and_restore_round_trip_and_reject_garbage() {
     assert_eq!(status, ReplyStatus::Ok);
 }
 
+/// ADR-059: a recreation record the core refuses (its reviver says no) or does not know is not an error
+/// of the snapshot: `undra_restore` answers 0, the stores come back, and the record's handle is stale.
+#[test]
+fn a_recreation_record_the_core_cannot_honour_is_not_a_restore_error() {
+    use undra::runtime::Reviver;
+    use undra::wire::payload::{RECREATION_FIELD, SnapshotType, StoreSnapshot};
+
+    const REFUSED: u32 = 0x00c0_ffee;
+    const UNKNOWN: u32 = 0x00c0_ffef;
+    let host = Embedder::start();
+    // A reviver that claims `REFUSED` and refuses every record, as the query runtime's would one
+    // whose parameter types changed.
+    Runtime::global()
+        .expect("the embedder's runtime")
+        .add_reviver(Reviver {
+            name: "abi-test",
+            object_name: "AbiTest",
+            fingerprint: |_, type_id| (type_id == REFUSED).then_some(7),
+            check: |_, _, _| Err("refused by the test".to_owned()),
+            revive: |_, _, _| Err("never built".to_owned()),
+        });
+    let counter = host.construct("Counter", &[]);
+    for _ in 0..3 {
+        host.sync(method(counter, "Counter", "bump"), &[]);
+    }
+    let mut forged = Snapshot::decode(&mut Reader::new(&take(undra_snapshot()))).expect("layout 2");
+    let floor = forged.generation_floor;
+    for (at, type_id) in [(1_u32, REFUSED), (2, UNKNOWN)] {
+        forged.types.push(SnapshotType {
+            type_id,
+            fingerprint: 7,
+        });
+        forged.stores.push(StoreSnapshot {
+            handle: Handle::new(10 + at, floor + u64::from(at)),
+            type_id,
+            signals: vec![(RECREATION_FIELD, vec![1, 0])],
+        });
+    }
+    forged.generation_floor = floor + 2;
+    let mut w = Writer::new();
+    forged.encode(&mut w);
+    host.sync(method(counter, "Counter", "bump"), &[]); // 4: the restore must put 3 back
+    assert_eq!(
+        restore(w.as_slice()),
+        0,
+        "refused and unknown records are not a restore error"
+    );
+    undra_observe(counter.0, 0, 1);
+    let cs = host.cap.wait_change_set();
+    assert_eq!(u32::decode_exact(&cs.entries[0].value).unwrap(), 3);
+    // Neither record's handle is live.
+    for at in [1_u32, 2] {
+        let (status, _) = host.sync(
+            method(
+                Handle::new(10 + at, floor + u64::from(at)),
+                "Counter",
+                "bump",
+            ),
+            &[],
+        );
+        assert_eq!(status, ReplyStatus::BadRequest);
+    }
+}
+
 /// L1: the generation counter outlives `undra_shutdown`, so a snapshot taken with no runtime
 /// carries the true process-wide floor (not 0), and a runtime started afterwards continues above
 /// it: a handle from before the shutdown never names anything in the new one (ADR-022).

@@ -416,7 +416,12 @@ stale (a store restored from an older snapshot, a handle reissued after release)
 a valid `undra_wire::payload::Snapshot` (tested by decoding it): `count u32`, then
 `generation_floor u64` (ADR-040; the generation counter's high-water mark, read after the stores were
 listed, so it is at least every generation in the snapshot), then the records. A cell that panics
-or writes a malformed record is skipped and logged. Non-store objects are not included.
+or writes a malformed record is skipped and logged. Non-store objects are not included, except
+the re-creatable ones (ADR-059): after the stores, one **recreation record** (`UndraObjectDyn::recreation`,
+the record shape of a store with one field under `RECREATION_FIELD`) for every object the host holds a
+reference to that has one, and every dormant handle, with its type added to the type table once and the
+fingerprint of its reviver. They are written only when a `Reviver` was added (`Runtime::add_reviver`: link by
+use), by `recreation.rs`.
 
 **Restore** (`Runtime::restore`), all-or-nothing:
 
@@ -438,7 +443,15 @@ or writes a malformed record is skipped and logged. Non-store objects are not in
    issued before the snapshot, between it and the restore, or before a crash can be issued again,
    ADR-022), clear the table (every old handle becomes stale; old stores are detached; the observed
    sets are remembered per handle), and `insert_at` every store at its original index and
-   generation.
+   generation. With a reviver added (ADR-059, `recreation.rs`), the table keeps the live
+   re-creatable objects (`ObjectTable::clear_keeping`: same entry, references, observation), except
+   one whose slot a store of the snapshot needs (`displaced`), and each accepted recreation record
+   whose handle is not live is placed as a dormant entry after the stores. Page servers of the
+   restored stores are registered last, so they cannot take a slot a later entry needs.
+   A recreation record is *checked* in step 2 (reviver found, fingerprint equal, `check` passes) and
+   never built; a record that fails is refused and reported, not a restore error. The object of a
+   dormant handle is built in the same entry when the host first uses it (`observe`, `Runtime::object`,
+   `Runtime::param`).
 4. Re-observe, for every restored store whose handle had observations before, exactly those
    signals: inside one `undra_signals::txn`, one `StoreCell::observe_and_deliver` per store, so
    each store gets **one change-set** with its signals' current values, built and handed to the
@@ -559,7 +572,7 @@ panics instead of hanging when nothing can make progress.
 | new | (none) | `InitHook`, `Runtime::extension`, `Runtime::new` | `undra-query` needs a hydrate hook and a place to keep the `QueryClient` (SPEC 9) |
 | new | (none) | `Notify`, `LazyList`, `StoreRestorer`, `Ctx::enter` | required by the task; see the crate docs |
 | 5.6 | dispatch by the static `Registration` tables only | plus `DispatchLayer` (inventory): a call the static table cannot route (unknown function, unknown constructor type, a method on an object whose type has no registered dispatcher) is offered to each layer; a layer answers `Unknown` for ids it does not serve | `undra-query` serves one handle type and one mutation function per user query, ids that exist only as generic instantiations and that must not enter the schema (bindgen synthesizes them from `QueryMeta`); layers see no `sync_only` metadata, so an async answer to `call_sync` is refused after the fact |
-| 5.9 | every store is snapshotted | `UndraObjectDyn::transient()`: a store that answers `true` is left out of `snapshot()` | query handles are views of the query cache; without this a snapshot with an open handle could not be restored (`UnknownStoreType`) |
+| 5.9 | every store is snapshotted | `UndraObjectDyn::transient()`: a store that answers `true` is left out of `snapshot()` as a store; its `recreation()` (query handles: their parameters) is kept as a recreation record instead (ADR-059) | query handles are views of the query cache; without this a snapshot with an open handle could not be restored (`UnknownStoreType`), and with only this their handles were stale after every restore |
 
 Known limitations, each deliberate for v1:
 

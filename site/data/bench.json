@@ -67,7 +67,7 @@
     {
       "id": "web-size",
       "operation": "Web core, hello world: the wasm alone, gzipped",
-      "value": 116.2,
+      "value": 118.4,
       "unit": "KB",
       "budget": 120,
       "budgetUnit": "KB",

@@ -245,7 +245,9 @@ nothing from the text of a message.
   `restarted` (they may or may not have run, and nothing retries them); `onPanic` gets the panic report first, then
   `onCoreRestarted` and `onError` get one `UndraCoreRestarted` (an `UndraUnhandledError` whose `error` is `panicked`)
   saying how old the snapshot was, how many calls were rejected and how many objects went stale. A call on an object
-  that is not a store (a query handle excepted, which is re-created) is then `refused`. One trap more than
+  that is not a store and not a query handle is then `refused`, and so is one on a query handle created after the last
+  snapshot; every other query handle keeps its handle and its wrapper (the core re-issues it from the snapshot and builds
+  it again when the recovery observes it, ADR-059), and a call on it works. One trap more than
   `maxRestarts` within `perMs` and the core stays closed, as without recovery.
 * In `wasm-worker` mode a synchronous port must run in the worker (`worker: { ports }`, SPEC 17.1): registering one on
   the main thread fails `load` with `UndraError("options")` (and a later `registerPort` throws it), naming the port,

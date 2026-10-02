@@ -183,8 +183,8 @@ const MESSAGES: Readonly<Record<number, string | null>> = {
   163: "the wasm core could not be restarted: {0}", // recovery.ts: this.#log
   164: "{0}: {1} call(s) in flight failed, {2} object(s) went stale", // recovery.ts: this.#log
   165: "the onCoreRestarted handler threw: {0}", // recovery.ts: this.#log
-  166: "re-creating a query handle after a restart (type 0x{0})", // recovery.ts: core.report
-  167: "observing a re-created query handle after a restart", // recovery.ts: core.report
+  166: null, // retired: ADR-059 (reload-handles) re-issues a query handle on restore, so recovery no longer re-creates one
+  167: null, // retired: ADR-059 (reload-handles) re-issues a query handle on restore, so recovery no longer re-creates one
   168: "the core answered a stream call with a plain result", // stream-support.ts: UndraTransportError("protocol")
   169: "the core sent a truncated stream item", // stream-support.ts: UndraTransportError("protocol")
   170: "the core sent a malformed stream failure: {0}", // stream-support.ts: UndraTransportError("protocol")

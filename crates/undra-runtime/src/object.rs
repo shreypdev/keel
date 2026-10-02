@@ -12,6 +12,10 @@
 //!   type). It lets the runtime treat any `Arc<dyn Any>` of that type as a store (find its
 //!   [`StoreCell`] without generics) and rebuild stores from a snapshot knowing only their
 //!   type id.
+//! * [`Reviver`] is what a layered crate adds to a runtime
+//!   ([`Runtime::add_reviver`](crate::Runtime::add_reviver)) to build objects that are not stores
+//!   again after a restore, from the record their [`recreation`](UndraObjectDyn::recreation) wrote
+//!   (ADR-059: query handles).
 
 use std::any::Any;
 use std::sync::Arc;
@@ -73,13 +77,27 @@ pub trait UndraObjectDyn: Send + Sync + 'static {
         None
     }
 
-    /// Whether the object is derived state that a snapshot leaves out. `false` for everything
-    /// `#[undra::store]` generates. `undra-query`'s query handles answer `true`: they are views
-    /// of the query cache, which a restore does not rebuild, so the platform re-creates them
-    /// (their handles are stale after a restore, exactly like a plain object's, SPEC 5.9)
-    /// instead of the whole restore failing for lack of a `StoreRestorer`.
+    /// Whether the object is derived state that a snapshot does not carry **as a store**. `false`
+    /// for everything `#[undra::store]` generates. `undra-query`'s query handles answer `true`:
+    /// they are views of the query cache, which a restore does not rebuild, so a snapshot leaves
+    /// them out of its stores (instead of the whole restore failing for lack of a
+    /// `StoreRestorer`) and keeps what they are made of as a recreation record instead
+    /// ([`recreation`](UndraObjectDyn::recreation), ADR-059).
     fn transient(&self) -> bool {
         false
+    }
+
+    /// What a snapshot keeps of an object that is not snapshotted as a store but can be built
+    /// again from what it was made of (ADR-059): a query handle's parameters. The bytes are the
+    /// business of the [`Reviver`] that claims the object's type id; a restore re-issues the
+    /// object's handle from them and the object is built again when the host first uses the
+    /// handle. `None` (the default) for everything else: its handle is stale after a restore into
+    /// another runtime.
+    ///
+    /// Called without any lock of the runtime held (it may take the lock of whatever the object
+    /// is a view of).
+    fn recreation(&self) -> Option<Vec<u8>> {
+        None
     }
 }
 
@@ -102,6 +120,89 @@ impl dyn AnyObject {
     /// Returns the object as an `Arc<T>` if that is its concrete type.
     pub fn downcast<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
         self.shared().downcast::<T>().ok()
+    }
+}
+
+/// Builds objects again from the recreation records a snapshot kept
+/// ([`UndraObjectDyn::recreation`], ADR-059). A layered crate adds one to a runtime with
+/// [`Runtime::add_reviver`](crate::Runtime::add_reviver) (the runtime keeps one per name), the way
+/// it adds a stats section: the code behind it is linked only into a core that adds one.
+///
+/// A restore asks the reviver three things about each record before it re-issues the record's
+/// handle, and refuses the record (the handle stays stale, the restore goes on) when the answer
+/// is no: whether it builds objects of the record's type at all, whether the fingerprint of what
+/// the record depends on is still the one the snapshot was written with, and whether the record
+/// is well formed ([`check`](Reviver::check)). Nothing is built, and no port is called, until the
+/// host first uses the handle ([`revive`](Reviver::revive)).
+#[derive(Clone, Copy)]
+pub struct Reviver {
+    /// The reviver's identity, and what logs call it. A runtime keeps one reviver per name.
+    pub name: &'static str,
+    /// What a re-issued handle reports as its object's type name until it is built
+    /// (`UndraObjectDyn::undra_type_name`), as `"QueryHandle"` does.
+    pub object_name: &'static str,
+    /// Whether this reviver builds objects of `type_id`, and if so the fingerprint of what their
+    /// record depends on (for a query handle: the closure of the query's parameters). A snapshot
+    /// stores it per type; a restore refuses the records of a type whose current fingerprint is
+    /// another. Read from the schema only, and cached per type id by the runtime.
+    pub fingerprint: fn(&crate::Runtime, u32) -> Option<u64>,
+    /// Checks a record without building anything and without calling a port (a restore must be a
+    /// function of the state and the snapshot, R12): `Err` refuses the record. A record that
+    /// passes must not fail to build later because of its bytes.
+    pub check: fn(&crate::Runtime, u32, &[u8]) -> Result<(), String>,
+    /// Builds the object of a record that passed [`check`](Reviver::check). Called when the host
+    /// first uses the handle, with the core lock held and the runtime current, as in a dispatched
+    /// call: the same ports and the same rules as the constructor call the host made the first
+    /// time. `Err` (or a panic) makes the handle stale for good.
+    pub revive: ReviveFn,
+}
+
+/// The signature of [`Reviver::revive`].
+type ReviveFn = fn(&crate::Runtime, u32, &[u8]) -> Result<Arc<dyn AnyObject>, String>;
+
+impl std::fmt::Debug for Reviver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Reviver")
+            .field("name", &self.name)
+            .field("object_name", &self.object_name)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What a restore puts behind a re-issued handle until the host uses it: the record, and who
+/// builds the object from it (ADR-059). The object table holds it like any object, so the handle
+/// is live: it counts, routes by its type id, and is carried on by the next snapshot.
+pub(crate) struct Dormant {
+    pub(crate) type_id: u32,
+    pub(crate) record: Vec<u8>,
+    pub(crate) reviver: Reviver,
+}
+
+/// The [`AnyObject`] of a [`Dormant`] entry (it downcasts to `Dormant`, which is how a use of the
+/// handle finds it).
+pub(crate) struct DormantObject(pub(crate) Arc<Dormant>);
+
+impl UndraObjectDyn for DormantObject {
+    fn undra_type_id(&self) -> u32 {
+        self.0.type_id
+    }
+
+    fn undra_type_name(&self) -> &'static str {
+        self.0.reviver.object_name
+    }
+
+    fn transient(&self) -> bool {
+        true
+    }
+
+    fn recreation(&self) -> Option<Vec<u8>> {
+        Some(self.0.record.clone())
+    }
+}
+
+impl AnyObject for DormantObject {
+    fn shared(&self) -> Arc<dyn Any + Send + Sync> {
+        self.0.clone()
     }
 }
 

@@ -81,6 +81,7 @@ export async function startUndra(): Promise<Playground> {
   const restarts = new RestartLog();
   const panics = new PanicLog();
   let inbox: RemoteTodosQueryHandle | undefined;
+  let reconnecting = false;
   const adapters = { http: server, kv: memoryKv() };
   const ports = optInPorts();
   // Development builds only (`vite dev`): a production page that took its core's address from a link would hand
@@ -106,6 +107,15 @@ export async function startUndra(): Promise<Playground> {
       },
       // What the dev server says about a reload ("Reloaded, state kept"), for the status bar.
       onDevNotice,
+      // The reloaded core kept its stores and its query handles, but not what it holds outside them (the server's address,
+      // ADR-049): once the runtime is connected again, tell it where the server is, then fetch the query (it tried before it knew).
+      onConnectionChange: (state) => {
+        if (state.kind === "reconnecting") reconnecting = true;
+        if (state.kind === "connected" && reconnecting) {
+          reconnecting = false;
+          void configureRemote({ baseUrl: REMOTE_BASE_URL }).then(() => inbox?.refetch());
+        }
+      },
     });
     showDevConnection(core, devUrl);
   } else {

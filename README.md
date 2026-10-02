@@ -51,7 +51,7 @@ phone, so no device target is claimed as met:
 | Filtered view of a 10,000-row list, one row changed (158 bytes on the wire, was 353 KB) | **392 ns** | ≤ 1 µs |
 | Change-set for 100 dirty signals | **2.3 µs** | ≤ 100 µs |
 | Cold start restoring 100 KB of state | **85 µs** | ≤ 3 ms |
-| Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->116.2 KB<!--/measured-->** gzipped | ≤ 120 KB |
+| Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->118.4 KB<!--/measured-->** gzipped | ≤ 120 KB |
 | Android core (`.so`, arm64-v8a, release, hello world) | **<!--measured:android-size-->978.6 KB<!--/measured-->** | ≤ 1.2 MB |
 
 The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.sh) builds the
@@ -70,13 +70,13 @@ Sustained-load results (a firehose, keyed churn, fan-out, a 60-second soak) are 
 
 ## Why you can trust it
 
-* **<!--trust:tests-total-->7,256<!--/trust--> tests across the platforms** — Rust
-  <!--trust:tests-rust-->3,537<!--/trust--> · TypeScript <!--trust:tests-typescript-->1,858<!--/trust--> ·
+* **<!--trust:tests-total-->7,414<!--/trust--> tests across the platforms** — Rust
+  <!--trust:tests-rust-->3,689<!--/trust--> · TypeScript <!--trust:tests-typescript-->1,864<!--/trust--> ·
   Kotlin <!--trust:tests-kotlin-->881<!--/trust--> · Swift <!--trust:tests-swift-->870<!--/trust--> ·
   React Native <!--trust:tests-react-native-->110<!--/trust--> — the counts at the last merge, after the full matrix
   ran (the ledger is [`.10x/status.md`](.10x/status.md)).
-* **<!--trust:scenarios-->34<!--/trust--> wire-level contract scenarios, run on every platform**
-  (<!--trust:cells-->98<!--/trust-->/<!--trust:cells-->98<!--/trust--> cells pass; two scenarios are about the web
+* **<!--trust:scenarios-->35<!--/trust--> wire-level contract scenarios, run on every platform**
+  (<!--trust:cells-->101<!--/trust-->/<!--trust:cells-->101<!--/trust--> cells pass; two scenarios are about the web
   host and run on TypeScript only): sync/async calls, typed errors, cancellation, stream backpressure, keyed patches,
   optimistic rollback, offline queue replay, snapshot/restore, schema-mismatch rejection, panic containment, a
   coalesced 1,000-transaction burst applied in one drain, a derived keyed list whose 60,000 recorded operations replay
@@ -207,7 +207,8 @@ Added since, each with its page:
 * **React Native** — the same bindings and TypeScript mirror over a TurboModule on the C ABI, with the ten
   default adapters: [docs/REACT_NATIVE.md](docs/REACT_NATIVE.md).
 * **Devtools with time travel** — a page served by `undra dev`: live stores, a change-set timeline you can scrub,
-  port and query logs, behind a per-run token; state is kept across a rebuild: [docs/DEV_LOOP.md](docs/DEV_LOOP.md).
+  port and query logs, behind a per-run token; state, and the query handles on screen, are kept across a rebuild:
+  [docs/DEV_LOOP.md](docs/DEV_LOOP.md).
 * **Derived lists** — a filtered or sorted view of a keyed list costs what changed (158 bytes, not 353 KB, for one
   edited row in 10,000): [docs](https://shreypdev.github.io/undra/docs/concepts.html#derived-lists).
 * **WebSocket, SSE and Db ports** — opt-in real-time streams and SQL over SQLite with deterministic fakes on every
@@ -231,7 +232,6 @@ Added since, each with its page:
 Open, with the work done around it (the same list as the [roadmap](https://shreypdev.github.io/undra/roadmap/)):
 
 * Benchmark rows from physical phones; today's device rows are a simulator, an emulator and headless Chromium.
-* Query handles across an `undra dev` reload (stores survive; query handles need a decision record).
 * The `undra-compose` and `android-adapters` tests in CI (they pass locally and on the emulator).
 
 Waiting on a release, an account or a decision: the `v1.0.0` tag and its channels (brew, npm, curl; the
@@ -249,7 +249,7 @@ package (see [`docs/blueprint.html`](docs/blueprint.html)).
 | `crates/` | the 13 Rust crates: schema (`undra-meta`), wire codec, macros, signals, runtime, ports, query, testkit, ffi (the only `unsafe`), transport, bindgen, cli, facade |
 | `runtimes/` | the Swift, Kotlin, TypeScript and React Native runtime packages the generated code sits on |
 | `examples/` | `playground` (the reference app: one core, three platforms and React Native, proof screenshots), `cookbook`, `fieldbook` (a sample app), `two-cores`, `ios15-sample` |
-| `contract-tests/` | the <!--trust:scenarios-->34<!--/trust--> scenarios + a runner per platform |
+| `contract-tests/` | the <!--trust:scenarios-->35<!--/trust--> scenarios + a runner per platform |
 | `bench/` | criterion benches + the budget gate; `RESULTS.md` has the numbers |
 | `docs/SPEC.md` | the binding specification (wire, ABI, runtime model, generated shapes) |
 | `.10x/` | the project's decision record: ADRs, reviews, status ledger |

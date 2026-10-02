@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>TypeScript reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xe0a0c81a2ba27ff9</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x3c17cd5f59bb6f68</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="entry">Entry point<a class="anchor" href="#entry" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The package entry: it re-exports every file below.</p>
@@ -682,7 +682,7 @@ export const WorkshopErrorCodec: Codec&lt;WorkshopError&gt;;
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and an async function for each free Rust function.</p>
 <p class="ref-names"><code>Live</code> <code>Probe</code> <code>RecentTodos</code> <code>Watch</code> <code>add</code> <code>addLater</code> <code>area</code> <code>balances</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>dbCells</code> <code>dbMigrate</code> <code>dbRun</code> <code>deposit</code> <code>draft</code> <code>echoAccount</code> <code>echoCents</code> <code>echoComposite</code> <code>echoDecimal</code> <code>echoFigure</code> <code>echoPrice</code> <code>echoPrimitives</code> <code>echoReceipt</code> <code>explode</code> <code>explodeDetached</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>loadableStatement</code> <code>localizedGreeting</code> <code>newest</code> <code>openAccount</code> <code>ownerOf</code> <code>parseCount</code> <code>ping</code> <code>recentTodos</code> <code>sampleReceipt</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>setTickerFailing</code> <code>sseFollow</code> <code>statement</code> <code>storageStatus</code> <code>tickerFetches</code> <code>touchFeed</code> <code>version</code> <code>wsEcho</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>766 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>768 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/objects.ts" rel="noopener">objects.ts</a></span></div><pre><code data-lang="ts">export class Live extends UndraObject {
   /**
    * No connection yet.
@@ -875,8 +875,10 @@ export function balances(
 ): Promise&lt;Map&lt;AccountId, Price&gt;&gt;;
 
 /**
- * Tells the core where the server is. Call it once at start-up, before anything observes
- * [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
+ * Tells the core where the server is. Call it at start-up, before anything observes
+ * [`remote_todos`], and again whenever the core is a new one that kept its stores (after a dev
+ * reload or a web crash restart): the address lives in the core outside any store, so a snapshot
+ * does not carry it. Calling it again points the core elsewhere (cached data stays until it goes
  * stale).
  * A failure is logged and passed to `onError`; the returned promise never rejects.
  */
@@ -2188,8 +2190,8 @@ export const ReporterCallback: CallbackInterface&lt;Reporter&gt;;
 </details>
 <h2 id="queries">Queries<a class="anchor" href="#queries" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.</p>
-<p class="ref-names"><code>FeedQueryHandle</code> <code>RemoteTodosQueryHandle</code> <code>TickerQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code> <code>saveNote</code> <code>tagNote</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>189 lines</span></summary>
+<p class="ref-names"><code>FeedQueryHandle</code> <code>RemoteTodosQueryHandle</code> <code>RosterQueryHandle</code> <code>TickerQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code> <code>saveNote</code> <code>tagNote</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>232 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/queries.ts" rel="noopener">queries.ts</a></span></div><pre><code data-lang="ts">/**
  * Observes the `feed` query (cache key `feed/{even_only}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
@@ -2265,6 +2267,49 @@ export class RemoteTodosQueryHandle extends UndraStore {
     list: string,
     core: UndraCore = UndraPlaygroundCore.core,
   ): Promise&lt;RemoteTodosQueryHandle&gt;;
+
+  /**
+   * Fetches again now, even if the data is fresh.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  refetch(): Promise&lt;void&gt;;
+
+  /**
+   * Marks the cached entry stale; it refetches while observed.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  invalidate(): Promise&lt;void&gt;;
+
+  /**
+   * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+   * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+   * An interval below 1 second or above 7 days is clamped to that range.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  setPollInterval(ms: Duration | null): Promise&lt;void&gt;;
+}
+
+/**
+ * Observes the `roster` query (cache key `roster:{team}`).
+ * Constructing it registers an observer and fetches when the data is stale or missing.
+ */
+export class RosterQueryHandle extends UndraStore {
+  /** The latest successful result, if any. */
+  readonly data: Signal&lt;string[] | null&gt;;
+  /** Where the query is in its fetch lifecycle. */
+  readonly status: Signal&lt;QueryStatus&gt;;
+  /** The error of the latest failed fetch, cleared by the next success. */
+  readonly error: Signal&lt;RemoteError | null&gt;;
+  /** Whether a fetch is in flight (also true while refetching stale data). */
+  readonly fetching: Signal&lt;boolean&gt;;
+  /** When `data` was last updated. */
+  readonly updatedAt: Signal&lt;Timestamp | null&gt;;
+
+  /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
+  static create(
+    team: number,
+    core: UndraCore = UndraPlaygroundCore.core,
+  ): Promise&lt;RosterQueryHandle&gt;;
 
   /**
    * Fetches again now, even if the data is fresh.
@@ -2384,13 +2429,13 @@ export function tagNote(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>273 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>281 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/ids.ts" rel="noopener">ids.ts</a></span></div><pre><code data-lang="ts">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
  * hash and the namespace of the core these bindings belong to.
  */
 export const UndraIds = {
-  schemaHash: 0xe0a0c81a2ba27ff9n,
+  schemaHash: 0x3c17cd5f59bb6f68n,
   namespace: "playground_core",
   Objects: {
     Live: {
@@ -2565,6 +2610,13 @@ export const UndraIds = {
       invalidate: 0x44cec2fa,
       setPollInterval: 0xe327e53b,
     },
+    RosterQueryHandle: {
+      typeId: 0xaa41fecc,
+      new: 0xaa41fecc,
+      refetch: 0x21d1b9e2,
+      invalidate: 0x44cec2fa,
+      setPollInterval: 0xe327e53b,
+    },
     TickerQueryHandle: {
       typeId: 0x38de4411,
       new: 0x38de4411,
@@ -2643,6 +2695,7 @@ export const UndraIds = {
     patchRemoteTodo: 0x77fe653e,
     postRemoteTodo: 0x5c84eed2,
     remoteTodos: 0x2a794167,
+    roster: 0xaa41fecc,
     saveNote: 0xaef633c6,
     tagNote: 0xb9224861,
     ticker: 0x38de4411,

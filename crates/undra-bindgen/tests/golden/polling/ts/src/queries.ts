@@ -34,31 +34,24 @@ export class HeadlinesQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.HeadlinesQueryHandle.typeId,
-        methodId: UndraIds.Objects.HeadlinesQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
   static async create(core: UndraCore = UndraGoldenPolling.core): Promise<HeadlinesQueryHandle> {
-    const args = new Uint8Array(0);
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.HeadlinesQueryHandle.typeId,
         UndraIds.Objects.HeadlinesQueryHandle.new,
-        args,
+        new Uint8Array(0),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new HeadlinesQueryHandle(core, handle, args);
+    const store = new HeadlinesQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }
@@ -168,31 +161,24 @@ export class StatusQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.StatusQueryHandle.typeId,
-        methodId: UndraIds.Objects.StatusQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
   static async create(core: UndraCore = UndraGoldenPolling.core): Promise<StatusQueryHandle> {
-    const args = new Uint8Array(0);
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.StatusQueryHandle.typeId,
         UndraIds.Objects.StatusQueryHandle.new,
-        args,
+        new Uint8Array(0),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new StatusQueryHandle(core, handle, args);
+    const store = new StatusQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }
@@ -302,14 +288,8 @@ export class TickerQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.TickerQueryHandle.typeId,
-        methodId: UndraIds.Objects.TickerQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
@@ -320,18 +300,17 @@ export class TickerQueryHandle extends UndraStore {
   ): Promise<TickerQueryHandle> {
     const w = new UndraWriter();
     w.writeStr(symbol);
-    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.TickerQueryHandle.typeId,
         UndraIds.Objects.TickerQueryHandle.new,
-        args,
+        w.finish(),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new TickerQueryHandle(core, handle, args);
+    const store = new TickerQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }

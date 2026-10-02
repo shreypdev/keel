@@ -54,7 +54,7 @@ fetched and searched. Verdicts:
 | MI01 | The catalogue's matrix lists 36 things a team needs | cat:380-417 | REPO | A | verified cat:380-417 |
 | MI02 | On 1 October Undra was marked as having 10 of them, part of 9 and none of 16, with one not applicable | cat:382-417, "Undra today" column, tallied in section 11 | REPO | A | verified, re-tallied: yes = rows 1, 2, 3, 5, 6, 7, 19, 20, 21, 25; part. = 4, 8, 14, 15, 23, 26, 27, 31, 34; no = 9-13, 16-18, 22, 24, 28-30, 32, 33, 35; n/a = 36. Row 2 ("yes native · part. web") counts as yes, which flatters the 1 October baseline, not today |
 | MI03 | Since then every code piece of the v1.x program has merged, each feature after an adversarial review recorded in the repository. *Was: "Since then the pieces below have merged, each after an adversarial review"* | stat:512 ("Every code piece of the v1.1/v1.2 program is merged"); stat:305-512, one review per feature row | REPO | A | **corrected**: two small fix pieces merged without a review (swift-fs, stat:400; dev-reload-flake, stat:462), so "each" is scoped to features |
-| MI07 | At the last merge the contract grid passed 95 of 95 cells over 33 scenarios | stat:511 ("contracts 95/95 (S01–S33)"); sc:561, :578 (S21 and S22 are TypeScript only: 31 × 3 + 2 = 95) | REPO | fact-check | **added**; verified stat:511 |
+| MI07 | At the last merge the contract grid passed 101 of 101 cells over 35 scenarios, and the test suites ran 3,689 Rust, 1,864 TypeScript, 881 Kotlin, 870 Swift and 110 React Native tests. *Was: "95 of 95 cells over 33 scenarios", with 3,536 / 1,856 / 881 / 870 / 110* | `site/data/tests.json` (the numbers the page renders through `build-trust.mjs` slots); `contract-tests/scenarios.md` (S01 to S35; S21 and S22 TypeScript only: 33 × 3 + 2 = 101); `.10x/reviews/2026-10-02-reload-handles-review.md` (Counts) | REPO | fact-check | **corrected** (2026-10-02, the reload-handles merge, after generics-fn-obj's S34 and reload-handles' S35): the sentence is now generated from `site/data/tests.json`, so it follows each merge |
 | MI08 | the test suites ran 3,536 Rust, 1,856 TypeScript, 881 Kotlin, 870 Swift and 110 React Native tests | stat:511 ("Rust 3,536 · TS 1,856 + 37 · Kotlin 881 + 32 · Swift 870 · RN 110"; the +37 and +32 are separate suites the post does not count) | REPO | fact-check | **added**; verified stat:511 |
 | MI04 | Counting again today: 28 solved, 5 partial, 2 open and 1 left out by decision. *Was: 27 solved, 6 partial, 2 open (22 solved, 7 partial, 6 open in the draft)* | section 11, re-derived row by row against `main` `da4fbbe` | DER | A-judge | **corrected**: six rows moved with what merged after the draft (T10, T13, T17, T22, T23, T33); T22 moved again with ADR-058 (generic functions, objects and stores), partial to solved |
 | MI05 | The table groups the 36 rows into 12 classes | the row labels cover 1-36 once each: 3-6, 1-2, 21-23, 7-10, 11/12/14, 15-16, 18-19, 20/24/30, 25-29 + 36, 31-32, 13/17/33/34, 35 | REPO | A | verified (counted: 4+2+3+4+3+2+2+3+6+2+4+1 = 36) |
@@ -144,10 +144,10 @@ fetched and searched. Verdicts:
 | M06-F2 | Flutter hot reload skips native code | F3 | DOC | A-cat | verified F3: "If you've changed native code (such as Kotlin, Java, Swift, or Objective-C), you must perform a full restart" |
 | M06-F3 | React Native Fast Refresh can fall back to a full reload | R8 | DOC | A-cat | verified R8: "Fast Refresh will fall back to doing a full reload" |
 | M06-N1 | Undra: `undra dev` reconnects | adr-051:35-36; cli.html; rev:dev-loop | REPO | A | verified |
-| M06-N2 | keeps state across a rebuild | adr-053; docs/DEV_LOOP.md:88 | REPO | A | verified |
-| M06-N3 | devtools with time travel | adr-054; docs/DEV_LOOP.md:225-242 | REPO | A | verified |
+| M06-N2 | keeps state across a rebuild | adr-053; docs/DEV_LOOP.md:89 | REPO | A | verified |
+| M06-N3 | devtools with time travel | adr-054; docs/DEV_LOOP.md:246-263 | REPO | A | verified |
 | M06-N4 | Gradle, Xcode and Vite run `undra build` | rev:tooling; stat:375; cli.html | REPO | A | verified stat:375 |
-| M06-N5 | Not yet: query handles across a reload | stat:391 ("query handles do not survive a reload (needs its own ADR)"); docs/DEV_LOOP.md:254 | REPO | A | verified; still open at stat:512 |
+| M06-N5 | Undra: query handles are carried too, so a screen that shows a query keeps working across a reload; a query without `persist` shows loading once. *Was: "Not yet: query handles across a reload"* | adr-059 (decisions 1 to 6; sections 2 and 3); docs/DEV_LOOP.md:110-126, :323-324; SPEC:441, :495-509, :748-755; proven by `crates/undra-cli/tests/dev_reload.rs` (the Remote-tab case against a real `undra dev`), `crates/undra-query/tests/restore.rs`, `crates/undra-runtime/tests/recreation.rs` and contract scenario S35 (`sc`) | REPO | A | **corrected** (`reload-handles`, 2026-10-02): the claim was open (stat:391, "still open at stat:512") and is shipped by ADR-059; the piece's adversarial review checks the files named |
 
 ### Class 7: Testing and previews (rows 18, 19)
 
@@ -291,14 +291,15 @@ fetched and searched. Verdicts:
 | ID | Claim as written | Source | Basis | Checked by | Fact-check |
 |---|---|---|---|---|---|
 | D01 | the app on a simulator, an emulator or a page reconnects by itself, with exponential backoff from 250 ms to 5 s. *Was: "on the simulator, the phone or the page"* | adr-051:35-36 (`initialDelay` 250 ms, `maxDelay` 5 s); rev:dev-reload and stat:391 (proven on the iOS simulator, the `undra` AVD and the web) | REPO | A | **corrected**: no physical phone has run it; backoff verified adr-051:35-36 |
-| D02 | and observes its stores again | adr-051; docs/DEV_LOOP.md:178 | REPO | A | verified |
+| D02 | and observes its stores again | adr-051; docs/DEV_LOOP.md:199 | REPO | A | verified |
 | D03 | the core's state is snapshotted in memory before the rebuild and restored into the new core before it listens | cli.html ("snapshotted in this process's memory, never on disk, and restored into the new core"); adr-053 | REPO | A | verified |
-| D04 | the dev bar says "Reloaded, state kept" or why not | docs/DEV_LOOP.md:88-94 | REPO | A | verified |
+| D04 | the dev bar says "Reloaded, state kept" or why not | docs/DEV_LOOP.md:89-98 | REPO | A | verified |
 | D05 | the playground's 204 KiB snapshot restores in 1.6 ms inside `undra dev`, which runs a debug build of the core (189 µs in a release build). *Was: "restores in 189 µs" (release core, in process)* | adr-053:355-357 ("inside the dev runner (a *debug* build of the core) `restore` takes 1.6 ms"); sde:dev-reload:83-84 | REPO | A | **corrected**: the dev loop runs the debug core, so 1.6 ms is the number a developer meets; 189 µs kept as the release figure |
 | D06 | 74 ms pass from suspending the old core to the new one listening | sde:dev-reload:81; adr-053:357-358 | REPO | A | verified |
-| D07 | a page served by `undra dev` shows every store's live value and a timeline of every change-set | docs/DEV_LOOP.md:233-242; adr-054 | REPO | A | verified |
-| D08 | a scrubber restores the core to an earlier step while the app follows | docs/DEV_LOOP.md:237-240 | REPO | A | verified |
-| D09 | it sits behind a per-run token | docs/DEV_LOOP.md:262-264 | REPO | A | verified |
+| D07 | a page served by `undra dev` shows every store's live value and a timeline of every change-set | docs/DEV_LOOP.md:254-263; adr-054 | REPO | A | verified |
+| D08 | a scrubber restores the core to an earlier step while the app follows | docs/DEV_LOOP.md:258-261 | REPO | A | verified |
+| D09 | it sits behind a per-run token | docs/DEV_LOOP.md:285-287 | REPO | A | verified |
+| D10 | a screen that shows a query is carried too: its query handle comes back on the same handle, with no code in the app for the handle (a value the app set by a call outside its stores, such as a server's address, is told to the new core again: the playground's three apps do it on reconnect), and its next fetch runs the code that was just rebuilt | adr-059 (section 3, "Dev reload, same schema", implementation note 10); docs/DEV_LOOP.md ("State the core holds outside its stores"); SPEC:509; `crates/undra-cli/tests/dev_reload.rs`, `crates/undra-query/tests/restore.rs` | REPO | A | **added** (`reload-handles`, 2026-10-02) |
 
 ### Shipping an update, and shipping the app
 
@@ -355,7 +356,7 @@ fetched and searched. Verdicts:
 | O16 | the write replays, and the screen refetches only the mutation's own key | q:88-89 | REPO | A | verified |
 | O17 | the web database serves one tab per origin | db.html; stat:453 | REPO | A | verified |
 | O18 | a migration that contains its own `COMMIT` is open | stat:453 ("Open: a migration containing its own `COMMIT`"); no later checkpoint closes it | REPO | A | verified |
-| O35 | `undra dev` carries the stores across a reload but not query handles, which need a decision record of their own | stat:391; docs/DEV_LOOP.md:254 | REPO | fact-check | **added**; verified |
+| O35 | After an `undra dev` reload a query without `persist` shows loading once, because a snapshot carries no query data, and an object that is neither a store nor a query handle is not carried over. *Was: "`undra dev` carries the stores across a reload but not query handles, which need a decision record of their own"* | adr-059 (scope: "the query cache itself", user objects deferred; Consequences); docs/DEV_LOOP.md:110-126, :323-324; `crates/undra-query/tests/restore.rs`, `crates/undra-runtime/tests/recreation.rs` | REPO | fact-check | **corrected** (`reload-handles`, 2026-10-02): the limit that was open is shipped (M06-N5); this is the limit that remains |
 | O19 | the binding call path is over its targets: 0.32 to 0.44 µs for the runtime's synchronous call in Chromium against 80 ns. *Was: "3.2 to 3.9 µs through the generated TypeScript against 80 ns"* | res:929, :988 (the 80 ns target is the in-thread `callSync` row's; the generated call's row has none, res:928) | REPO | A | **corrected**: the numbers moved with ADR-056, and the target belongs to the synchronous row |
 | O20 | about 300 ns on the iOS simulator against 60 ns | res:880, :961 (294 to 302 ns; target ≤ 60 ns) | REPO | A | verified |
 | O21 | on React Native, 100,000 updates a second do not fit a frame | was: docs/REACT_NATIVE.md | REPO | A | **removed**: false since ADR-056 (docs/REACT_NATIVE.md:253-265: about 5 ms of a 16.7 ms frame on the simulator); the new figure is B18 |
@@ -420,6 +421,7 @@ site-relative link.
   the migration guides (stat:444) from Next; "A first-party inspector" left Later (devtools shipped, ADR-054); the stale "102.7 KB" is gone;
   ADR-044, ADR-045 and ADR-056 added to Since v1.0; `updated` 2026-10-02.
 * `site/data/pending.json`: `docs/realtime.html` is live; the entry is removed.
+* After the fact-check pass (2026-10-02, `reload-handles`, ADR-059): the dev-loop matrix cell (M06-N5), the dev-loop paragraph (D10) and the "Built, with a known limit" bullet (O35) changed because query handles now survive a reload; `site/data/roadmap.json` moved "Query handles across a dev reload" from Open items to Since v1.0 and `site/docs/web.html` says that a web crash restart keeps query handles on their own handle. The 36-row tally is unchanged (row 15 was already solved, T15).
 
 ## 11. The 36-row tally behind MI02 and MI04
 
@@ -444,7 +446,7 @@ was right for `d1b35b5`; six rows moved with the pieces merged after it).
 | T13 | 13 OS background execution | no | **solved** (was open). Caveat: the iOS handler cannot run under BGTaskScheduler in the simulator | adr-046 §3 and amendment items 6-10; sc:830 (S30); production.html#background; stat:491 | REPO | fact-check | **corrected** |
 | T14 | 14 Default HTTP, storage and connectivity adapters on iOS, Android and web | part. | solved | rev:android-adapters; stat:351, :399; ports.html | REPO | A | verified |
 | T15 | 15 Live reload of shared logic on a device, keeping state | part. | solved | adr-051, adr-053; rev:dev-reload; stat:391 (iOS simulator, `undra` AVD, web; no physical phone, D01) | REPO | A | verified (scope noted) |
-| T16 | 16 State inspector, transaction timeline, time travel | no | solved | adr-054; docs/DEV_LOOP.md:225-260; rev:devtools | REPO | A | verified |
+| T16 | 16 State inspector, transaction timeline, time travel | no | solved | adr-054; docs/DEV_LOOP.md:246-283; rev:devtools | REPO | A | verified |
 | T17 | 17 Step-debug from UI code into shared code | no | **solved** (was open). Scope: tested with LLDB on the host and the iOS simulator; Android Studio and Chrome documented | adr-046 §2 and amendment items 12, 16; sde:prod-ops:65, :106; production.html#debugging | REPO | fact-check | **corrected** |
 | T18 | 18 Previews and UI tests without the real core | no | solved | adr-055; docs/TESTING.md; rev:testkit | REPO | A | verified |
 | T19 | 19 Deterministic tests (virtual time, fake I/O) | yes | solved | cat:141 (E19); adr-055 | REPO | A | verified |

@@ -1557,6 +1557,10 @@ pub(crate) fn shared_of(runtime: &Runtime) -> Arc<Shared> {
         name: "query",
         json: crate::stats_section,
     });
+    // What builds query handles again after a restore (ADR-059): added here, with the stats
+    // section, so a core that never uses the client links none of it, and before any restore (the
+    // `HYDRATE` init hook reaches here when the runtime starts).
+    runtime.add_reviver(crate::revive::REVIVER);
     runtime
         .extension_with(|| Ext(Arc::new(Shared::new())))
         .0

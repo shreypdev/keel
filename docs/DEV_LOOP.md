@@ -6,7 +6,8 @@ per platform, which URL each platform uses, how state is carried across a rebuil
 to check when it does not.
 
 The designs are [ADR-051](../.10x/adrs/ADR-051-dev-client-reconnect-and-session-resume.md) (reconnect and session
-resume) and [ADR-053](../.10x/adrs/ADR-053-state-preserving-reload.md) (state across a rebuild). The wire is
+resume) and [ADR-053](../.10x/adrs/ADR-053-state-preserving-reload.md) (state across a rebuild) and
+[ADR-059](../.10x/adrs/ADR-059-transient-handles-across-restore.md) (query handles across a rebuild). The wire is
 unchanged (SPEC section 3.2): a client that does none of this still works.
 
 ## What it does
@@ -82,11 +83,14 @@ You see this:
 ```
 ==> Change detected, rebuilding
     built in 0.5s
-Restarted: ws://127.0.0.1:7443  (schema hash 0x...); state kept (3 stores, 205 KiB, restored in 0.2 ms); 1 object not carried over: their handles are stale, the app creates them again; connected apps reconnect by themselves
+Restarted: ws://127.0.0.1:7443  (schema hash 0x...); state kept (3 stores, 1 query handle, 205 KiB, restored in 0.2 ms); connected apps reconnect by themselves
 ```
 
 and each app's dev bar says the same for four seconds: **`Reloaded, state kept`**, with `(N objects not carried over)` when
-that applies and `(N calls lost in the reload)` when a call was cut off (below). Whatever stops the state from being carried falls back to the loop as it was before: the old core stops, the
+that applies and `(N calls lost in the reload)` when a call was cut off (below). The objects not carried over are the ones
+that are still stale after the reload: plain objects, objects a method returned, and a query handle the rebuilt core
+could not honour; the query handles that carry over are counted in the terminal line (`1 query handle`), not as lost. The
+terminal says it as `; 1 object not carried over: their handles are stale, the app creates them again`. Whatever stops the state from being carried falls back to the loop as it was before: the old core stops, the
 new one starts fresh, and the line says why (`state reset: ...`):
 
 | The line says | Why | What the app does |
@@ -103,10 +107,32 @@ new one starts fresh, and the line says why (`state reset: ...`):
 * **Stores** carry over, with their handles, so everything the app constructed (`Todos`, a counter, a 10,000-row list)
   is where it was: the mirrors converge on the restored values, and commands work at once. Computed signals are
   recomputed by the store's `restore` hook (the same code as its constructor).
-* **Objects that are not stores, and query handles**, do not. Their handles are stale after a reload: a call on one fails
-  with `UndraCallError.Refused` (the core's status 5), the line above counts them, and the app creates them again. **A
-  stale query handle: run the query again** (construct the query handle again, for example by re-mounting the screen that
-  owns it); until then the screen keeps the last values it had and `refetch()` is refused.
+* **Query handles** carry over too, with their handles (ADR-059): the snapshot keeps what each handle is made of (its
+  parameters, and the polling interval its screen set), the new core re-issues the handle, and builds it when the app's
+  reconnect observes it again. A query screen (the playground's Remote tab) keeps working with **no code of its own for
+  the handle**: the tab observes it again after the reconnect, `refetch()` and pull-to-refresh are accepted, and polling
+  runs, all on the code that was just rebuilt (the one thing the app does is below: state held outside the stores). What
+  the screen shows meanwhile depends on the query:
+  * a query **without `persist`** shows its **loading state once**, then the data the rebuilt code fetched: a query's data
+    is never in the snapshot, and the old process's cache is gone with it;
+  * a query **with `persist`** shows the data its last fetch stored as soon as the app's `Kv` has answered, and its `stale`
+    window decides whether it also refetches;
+  * an **infinite** query comes back with its persisted pages, or with its first page, and loads the rest on demand
+    (`fetchNextPage`, `loadMore`, `useLoadMore`), not back to the depth it had.
+
+  A query handle the app released after the snapshot is not built again: it costs one inert entry in the new core, and
+  `undra dev` releases it at the reload. Across a schema change that keeps the query and the types of its parameters
+  the handle carries over; a query whose parameter types changed, or that you removed, is **not** carried over: its
+  handle is refused (status 5) and the line counts it.
+* **Objects that are not stores and are not query handles** (a plain object, an object a method returned) do not. Their
+  handles are stale after a reload: a call on one fails with `UndraCallError.Refused` (the core's status 5), the line above
+  counts them, and the app creates them again (it calls the method that returned the object again, or constructs it again).
+  A store's `Lazy<T>` list carries over with its store and pages again.
+* **State the core holds outside its stores** does not: a snapshot is the stores, so a value that a call put in a runtime
+  extension (the playground's `configureRemote`, which sets the server's address) is gone from a rebuilt core. Tell the
+  new core again when the runtime is connected again, and fetch what the screen tried before it knew (the playground's
+  three apps do this when their connection goes from `reconnecting` back to `connected`: `configureRemote(..)`, then
+  `refetch()`). A web core restarted after a crash is the same case (ADR-049's `onCoreRestarted`).
 * **Tasks, timers and streams** do not: a task is a future, not data. A call that is running when the core is replaced gets
   up to two seconds to finish (so an `async` command in the middle of a port call completes); one that does not is cancelled
   and fails as `Unavailable`, and a store it half-wrote keeps that value (a `loading = true` nobody clears: tap again). A store
@@ -116,7 +142,8 @@ new one starts fresh, and the line says why (`state reset: ...`):
   closes. A command that fails that way is only logged (the connection state already says the core is reconnecting), so
   the `Restarted:` line and the dev bar count such calls together with the cancelled ones: `1 call sent during the reload
   was not run`, `(2 calls lost in the reload)`. The state is the state before them: tap again.
-* **The query cache and the offline queue** are not store state: queries refetch when observed again.
+* **The query cache and the offline queue** are not store state: a query handle that is observed again fetches (a
+  persisted entry is read back from `Kv` first). The offline queue is persisted by its own rules.
 * **State reached by old logic** is restored into new logic; that is what a reload is. If it confuses you, relaunch the app
   (a new session replaces the carried one and builds fresh stores on the new code), or run `undra dev --no-keep-state`.
 
@@ -127,10 +154,10 @@ lines, and nothing else: no port, no file. It is internal, and documented here b
 
 ```
 undra dev -> runner  (stdin)                     runner -> undra dev  (stdout)
-  snapshot                                         UNDRA-DEV snapshot ok <settled> <cancelled> <not run> <stores> <bytes> <token|-> <handles|-> <hex>
+  snapshot                                         UNDRA-DEV snapshot ok <settled> <cancelled> <not run> <stores> <query handles> <bytes> <token|-> <handles|-> <hex>
                                                    UNDRA-DEV snapshot failed <reason>
   state <old-hash> <lost calls> <token|-> <handles|-> <hex>
-                                                   UNDRA-DEV restored <stores> <lost objects> <bytes> <microseconds>
+                                                   UNDRA-DEV restored <stores> <query handles> <lost objects> <bytes> <microseconds>
                                                    UNDRA-DEV reset <reason>
   reset <reason>                                   (nothing)
   listen                                           UNDRA-DEV ready <ws-url> <schema-hash>
@@ -251,8 +278,10 @@ The page keeps the dark and light themes of the site (it follows the system; the
 
 **What time travel is.** A restore replaces the core's stores with the snapshot of the step and re-issues their handles, so
 the app's references keep working and its mirrors converge through the change-sets the restore emits, like a reload
-(the rules of "What carries over" above apply: objects that are not stores and query handles go stale). Stores built
-*after* the step are dropped (the answer says how many, and so does the app's dev bar; the app's references to them are stale). Calls running on a replaced
+(the rules of "What carries over" above apply: plain objects and objects a method returned go stale). **Live query
+handles are left alone** (ADR-059): no change-set, no refetch, polling continues, also for a handle created after the
+step. Stores built *after* the step are dropped (the answer says how many, and so does the app's dev bar; the app's
+references to them are stale; a query handle whose slot a restored store needed is dropped too and counted with them). Calls running on a replaced
 store are cancelled. The history is kept in the dev server (200 steps, 32 MiB, 4 MiB a step; a bigger state is listed but
 cannot be restored), records only while a page is open, and starts again after a reload (the page draws a divider). While a
 page is open the server observes every store, so a computed nobody shows is evaluated. Snapshots are taken after a burst of
@@ -297,7 +326,8 @@ compiled into the runner `undra dev` generates; a production core has no dev ser
 | `adb reverse` fails or `--android` finds nothing | `adb devices`: a device must say `device`, not `unauthorized` or `offline`. With several devices set `ANDROID_SERIAL`. |
 | A web page does not reconnect | The page must be allowed to reach the address (`undra dev` accepts pages on this machine and private networks); try `127.0.0.1`, not `localhost`, and a plain `ws://` URL from an `http://` page. |
 | The app's screen resets after every save | Read the `Restarted:` line: it says whether the state was carried and, if not, why (a schema change the state cannot follow, a state over 16 MiB, `--no-keep-state`). The app's dev bar says it too. |
-| `1 object not carried over`, and `refetch` is refused with a stale handle | A query handle (or another object that is not a store) does not survive a reload. Run the query again: construct the query handle again, for example by re-mounting its screen. |
+| `1 object not carried over`, and a call on it is refused with a stale handle | A plain object (or an object a method returned) does not survive a reload: construct it again, or call the method that returned it again. A query handle does survive; it is counted here only when the rebuilt core could not honour it (the query was removed, or the types of its parameters changed): construct that one again. |
+| A query screen shows `loading` for a moment after a save | Expected for a query without `persist`: its data is not in the snapshot, so the rebuilt core fetches it again and the screen shows the new data when it arrives. A query with `persist` shows its stored data instead. |
 | A spinner or a `loading` flag stays on after a save | A call that was still running when the core was replaced was cancelled and left its store at the value it had written; trigger the action again. |
 | A tap right as you saved did nothing; the bar said `(1 call lost in the reload)` | Calls made while the old core was being swapped out are not run (their writes are not in the carried state); tap again. |
 

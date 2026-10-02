@@ -73,6 +73,12 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     /** The cached `inbox` list: constructing it starts a fetch if the data is missing or stale. */
     val query = RemoteTodosQueryHandle.create(LIST)
 
+    init {
+        // A core `undra dev` reloaded is told the server's address again once the runtime is back, after the first fetch of the
+        // handle it kept had failed for want of it (ADR-059): fetch again.
+        viewModelScope.launch { undra.reconnected.collect { query.refetch() } }
+    }
+
     /** The text field. */
     var draft by mutableStateOf("")
 

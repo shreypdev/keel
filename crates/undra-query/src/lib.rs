@@ -97,8 +97,13 @@
 //!   this is in the runtime's static dispatch table (see `ADR-018` in `.10x/adrs`): the macros
 //!   submit a [`QueryRegistration`] / [`MutationRegistration`] per definition, and with it this
 //!   crate's `undra_runtime::DispatchLayer` and its start-up `undra_runtime::InitHook` (the runtime
-//!   keeps one of each per name). Query handles are transient: a snapshot leaves them out and the
-//!   platform re-creates them after a restore.
+//!   keeps one of each per name). A query handle is a view of the cache, not state: a snapshot
+//!   does not carry it as a store but keeps a small record of what it is made of (its parameters
+//!   and its observer's own polling interval), a restore re-issues the handle under the **same
+//!   value** from that record, and the object is built again when the platform first uses the
+//!   handle (it observes it, calls `refetch`): the platform runs no code of its own
+//!   (ADR-059). A handle that is alive in the runtime being restored (a
+//!   time travel) is not touched at all.
 //! * **Linked by use.** Because the layer and the hook are submitted by `#[undra::query]` and
 //!   `#[undra::mutation]`, not by this crate, a core that declares neither does not link the
 //!   query runtime at all, and its start-up reads nothing from `Kv` (ADR-052: the layer was
@@ -151,6 +156,7 @@ mod persist;
 mod poll;
 mod queue;
 mod retry;
+mod revive;
 mod shared;
 mod status;
 mod storage;

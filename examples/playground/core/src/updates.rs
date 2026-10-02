@@ -10,6 +10,7 @@
 //! | store [`Legacy`] | `score: i32` | `score: String` | a snapshot holding one is refused: `RestoreError::Incompatible` (`undra_restore` code 7) |
 //! | mutation [`save_note`] | `(list, text)` | `(list, text, pinned: Option<bool>)` | a queued call migrates (`pinned` is `None`) and replays |
 //! | mutation [`tag_note`] | `(list, id: u32)` | `(list, id: String)` | a queued call is dead-lettered, never lost |
+//! | query [`roster`] | `(team: u32)` | `(team: String)` | a snapshot's query handle is refused: its parameters changed (ADR-059) |
 //!
 //! Everything else is the same in both builds, and so are the names, so a runner drives build B
 //! through the raw API with the ids it already knows. [`storage_status`] reports what the query
@@ -136,6 +137,13 @@ mod build {
     pub async fn tag_note(ctx: &Ctx, list: String, id: u32) -> Result<bool, RemoteError> {
         post_note(ctx, &list, format!("tag:{id}")).await
     }
+
+    /// The members of team `team`, which build A names by number. A query handle for it is what a
+    /// snapshot of build A carries into build B (ADR-059), which changes the parameter's type.
+    #[undra::query(key = "roster:{team}", stale = "30s")]
+    pub async fn roster(_ctx: &Ctx, team: u32) -> Result<Vec<String>, RemoteError> {
+        Ok(vec![format!("team {team}")])
+    }
 }
 
 #[cfg(playground_v2)]
@@ -217,9 +225,18 @@ mod build {
     pub async fn tag_note(ctx: &Ctx, list: String, id: String) -> Result<bool, RemoteError> {
         post_note(ctx, &list, format!("tag:{id}")).await
     }
+
+    /// The members of team `team`; build B names a team by a `String`, so build A's query handles
+    /// for it are refused when a snapshot is restored (ADR-059).
+    #[undra::query(key = "roster:{team}", stale = "30s")]
+    pub async fn roster(_ctx: &Ctx, team: String) -> Result<Vec<String>, RemoteError> {
+        Ok(vec![format!("team {team}")])
+    }
 }
 
-pub use build::{Legacy, Profile, SaveNoteMutation, TagNoteMutation, save_note, tag_note};
+pub use build::{
+    Legacy, Profile, RosterQuery, SaveNoteMutation, TagNoteMutation, roster, save_note, tag_note,
+};
 
 /// The app's own synchronous port (ADR-049 decision 2): how the platform says hello in the
 /// user's language. In the TypeScript `wasm-worker` mode a synchronous port is answered in the

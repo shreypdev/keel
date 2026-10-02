@@ -38,7 +38,10 @@ struct PlaygroundApp: App {
                 RootView(model: model)
                     .id(epoch)
                     .safeAreaInset(edge: .top, spacing: 0) { DevStatusBar().id(epoch) }
-                    .task { UndraBootstrap.coreLost = { Task { await reload() } } }
+                    .task {
+                        UndraBootstrap.coreLost = { Task { await reload() } }
+                        UndraBootstrap.coreReconnected = { self.model?.inbox.refetch() }
+                    }
             }
         }
     }

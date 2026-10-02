@@ -992,4 +992,8 @@ impl<Q: InfiniteQueryDef> HandleOps for InfiniteHandle<Q> {
     fn make_cell(&self) -> Result<Arc<StoreCell>, SignalsError> {
         InfiniteHandle::make_cell(self)
     }
+
+    fn recreation(&self) -> Vec<u8> {
+        self.link.recreation()
+    }
 }

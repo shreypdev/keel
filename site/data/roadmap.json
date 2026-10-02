@@ -64,7 +64,7 @@
       "items": [
         {
           "title": "The contract grid, grown to every feature",
-          "text": "Thirty-three scenarios run against the real core, 95 of 95 cells passing at the last merge (the web-only two on TypeScript alone)."
+          "text": "Thirty-five scenarios run against the real core, 101 of 101 cells passing at the last merge (the web-only two on TypeScript alone)."
         },
         {
           "title": "Frame-coalesced delivery (ADR-031)",
@@ -183,6 +183,10 @@
           "text": "A generated TypeScript call went from 3.2–3.5 µs to 0.47–0.68 µs in headless Chromium, and React Native's mirror work at 100,000 updates a second from about 22 ms to about 5 ms a frame on the iPhone simulator."
         },
         {
+          "title": "Query handles across a reload (ADR-059)",
+          "text": "A query handle keeps working on the same handle across an undra dev reload, a devtools time travel, a web crash restart and an app's own restore, with no app code for the handle."
+        },
+        {
           "title": "The JavaScript runtime at 16 KB (ADR-057)",
           "text": "What a hello-world page loads up front of @undra/runtime went from 22.1 KB to 15.8 KB gzipped without removing behaviour: what a page cannot run or has not asked for loads with the thing that needs it, the production build says error codes with a link where the development build says sentences, and the page that uses every feature loads less than before."
         }
@@ -198,10 +202,6 @@
         {
           "title": "Rows from physical devices",
           "text": "The device benchmarks run on the iPhone simulator, the Android emulator and headless Chromium, and are labelled so; rows from real phones are owed, and no device target is claimed as met."
-        },
-        {
-          "title": "Query handles across a dev reload",
-          "text": "undra dev keeps the stores across a rebuild but not query handles, which need a decision record of their own."
         },
         {
           "title": "Android module tests in CI",

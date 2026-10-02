@@ -41,14 +41,8 @@ export class TodosQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.TodosQueryHandle.typeId,
-        methodId: UndraIds.Objects.TodosQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
@@ -59,18 +53,17 @@ export class TodosQueryHandle extends UndraStore {
   ): Promise<TodosQueryHandle> {
     const w = new UndraWriter();
     w.writeU32(page);
-    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.TodosQueryHandle.typeId,
         UndraIds.Objects.TodosQueryHandle.new,
-        args,
+        w.finish(),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new TodosQueryHandle(core, handle, args);
+    const store = new TodosQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }
