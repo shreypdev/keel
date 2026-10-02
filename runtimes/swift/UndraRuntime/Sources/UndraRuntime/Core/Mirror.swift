@@ -6,13 +6,16 @@
 // the stores that own the observable state live.
 //
 // A *drain* applies the queue. It folds the queued entries per signal `(handle, signal)` in
-// arrival order without decoding any value: a full value (op 0) or a lazy invalidation (op 2)
-// supersedes everything queued earlier for the signal, and consecutive keyed patches (op 1)
-// become one patch (the counts add up, the ops follow each other: SPEC 3.8 applies ops one after
-// the other, each index relative to the list the previous op left, so the concatenation is the
-// same change). Each signal is therefore applied at most twice per drain, its last full value and
-// then its merged patch, signals in the order of their first entry. Signals a store declared
-// `no_coalesce` are applied entry by entry instead.
+// arrival order without decoding any value: a full value (op 0) supersedes everything queued
+// earlier for the signal, and consecutive keyed patches (op 1) become one patch (the counts add
+// up, the ops follow each other: SPEC 3.8 applies ops one after the other, each index relative to
+// the list the previous op left, so the concatenation is the same change). A lazy invalidation
+// (op 2) supersedes only the earlier lazy invalidations of its signal, never a full value: the
+// full value of a `Lazy<T>` carries the page server's handle, an invalidation only a length and a
+// version (ADR-043, ADR-031 amendment). Each signal is therefore applied at most three times per
+// drain: its last full value, then its merged patch, then its last lazy invalidation (a signal is
+// a keyed list or a lazy list, never both, so in practice at most twice), signals in the order of
+// their first entry. Signals a store declared `no_coalesce` are applied entry by entry instead.
 //
 // Drains are frame-aligned (`FrameScheduler`): what the core produces on its own waits for the
 // next display frame. Replies, synchronous calls made on the main thread and `observe` drain
@@ -40,10 +43,11 @@ public typealias MirrorApply = @MainActor @Sendable (UInt32, ChangeOp, inout Und
 /// the counters and the drain listeners are safe from any thread; applying (`flush()`) is
 /// main-actor only.
 ///
-/// A drain applies, for each signal, its last full value and then the keyed patches that followed
-/// it merged into one, so a store sees the state after every change-set the drain consumed but not
-/// the states in between (SwiftUI renders once per frame in any case). Signals registered as
-/// `noCoalesce` see every entry.
+/// A drain applies, for each signal, its last full value, then the keyed patches that followed
+/// it merged into one, then its last lazy invalidation (which supersedes earlier invalidations
+/// only, never the full value that carries a lazy list's page server), so a store sees the state
+/// after every change-set the drain consumed but not the states in between (SwiftUI renders once
+/// per frame in any case). Signals registered as `noCoalesce` see every entry.
 public final class Mirror: @unchecked Sendable {
     // MARK: Limits
 
@@ -279,7 +283,7 @@ public final class Mirror: @unchecked Sendable {
     /// callback; it never calls into the core.
     ///
     /// The entry table is parsed here, once; a malformed change-set is logged and dropped whole
-    /// (a change-set is a transaction). Keyed patches of a signal waiting for a full value are
+    /// (a change-set is a transaction). Everything but a full value, for a signal waiting for one, is
     /// discarded. When the queue passes its bound it is folded in place, on this thread.
     func enqueue(_ payload: [UInt8]) {
         var parsed: [Entry] = []
@@ -301,7 +305,7 @@ public final class Mirror: @unchecked Sendable {
             current.queuedEntries += parsed.count
             for entry in parsed {
                 if !current.awaiting.isEmpty, current.awaiting[entry.key] != nil {
-                    if entry.op == .keyedPatch {
+                    if entry.op != .fullValue {
                         continue
                     }
                     current.awaiting[entry.key] = nil
@@ -594,6 +598,11 @@ public final class Mirror: @unchecked Sendable {
                     registration.apply(slot.key.signal, .keyedPatch, &reader)
                     applied += 1
                 }
+                if let invalidation = slot.invalidated {
+                    var reader = UndraReader(slice: invalidation.value)
+                    registration.apply(slot.key.signal, invalidation.op, &reader)
+                    applied += 1
+                }
             case .single(let entry):
                 if let invocation = entry.invocation {
                     if invocation.deliver() {
@@ -652,9 +661,12 @@ public final class Mirror: @unchecked Sendable {
     /// One signal as a drain or a compaction folds it.
     private struct Slot {
         let key: Key
-        /// The last full value or lazy invalidation; everything that arrived before it is
-        /// superseded.
+        /// The last full value; everything that arrived before it is superseded (a lazy
+        /// invalidation included).
         var full: Entry?
+        /// The last lazy invalidation since the last full value: it supersedes only earlier
+        /// invalidations, and is applied after `full` (which carries the handle it needs).
+        var invalidated: Entry?
         /// The keyed patches that arrived after `full`, whole (count and ops), in arrival order.
         var patches: [ArraySlice<UInt8>] = []
         /// Sum of the patches' op counts.
@@ -670,11 +682,17 @@ public final class Mirror: @unchecked Sendable {
 
         mutating func setFull(_ entry: Entry) {
             full = entry
+            invalidated = nil
             if !patches.isEmpty {
                 patches.removeAll()
             }
             ops = 0
             opBytes = 0
+        }
+
+        /// Keeps `entry`, a lazy invalidation, in place of the one before it.
+        mutating func setInvalidated(_ entry: Entry) {
+            invalidated = entry
         }
 
         /// Appends a keyed patch; `false` if it cannot be merged (shorter than its 4-byte count,
@@ -697,6 +715,7 @@ public final class Mirror: @unchecked Sendable {
         /// Forgets what the slot holds (its signal waits for a full value).
         mutating func clear() {
             full = nil
+            invalidated = nil
             patches.removeAll()
             ops = 0
             opBytes = 0
@@ -773,7 +792,7 @@ public final class Mirror: @unchecked Sendable {
             let key = entry.key
             if !folded.waiting.isEmpty, folded.waiting.contains(key) {
                 // Relative to a list this host never had: wait for a full value.
-                if entry.op == .keyedPatch {
+                if entry.op != .fullValue {
                     continue
                 }
                 folded.waiting.remove(key)
@@ -798,12 +817,17 @@ public final class Mirror: @unchecked Sendable {
                 folded.units.append(.slot(at))
             }
             folded.slots[at].entries += 1
-            if entry.op != .keyedPatch {
+            switch entry.op {
+            case .fullValue:
                 folded.slots[at].setFull(entry)
-            } else if !folded.slots[at].addPatch(entry.value) {
-                folded.slots[at].clear()
-                folded.waiting.insert(key)
-                folded.unmergeable.append(key)
+            case .lazyListInvalidated:
+                folded.slots[at].setInvalidated(entry)
+            case .keyedPatch:
+                if !folded.slots[at].addPatch(entry.value) {
+                    folded.slots[at].clear()
+                    folded.waiting.insert(key)
+                    folded.unmergeable.append(key)
+                }
             }
         }
         return folded
@@ -846,6 +870,11 @@ public final class Mirror: @unchecked Sendable {
                 queue.append(Entry(handle: slot.key.handle, signal: slot.key.signal, op: .keyedPatch, value: value))
                 bytes += entryOverhead + value.count
             }
+            if let invalidation = slot.invalidated {
+                let value = ArraySlice(Array(invalidation.value))
+                queue.append(Entry(handle: slot.key.handle, signal: slot.key.signal, op: invalidation.op, value: value))
+                bytes += entryOverhead + value.count
+            }
         }
         current.queue = queue
         current.queueBytes = bytes
@@ -865,7 +894,7 @@ public final class Mirror: @unchecked Sendable {
         var bytes = 0
         for entry in current.queue {
             if !open.isEmpty, open.contains(entry.key) {
-                if entry.op == .keyedPatch {
+                if entry.op != .fullValue {
                     continue
                 }
                 open.remove(entry.key)

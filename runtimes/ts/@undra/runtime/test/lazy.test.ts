@@ -537,12 +537,14 @@ describe.each([
       expect(list.length.peek()).toBe(100);
     });
 
-    it("an invalidation before any value is ignored", async () => {
+    it("an invalidation before any value is reported and ignored: there is no page server to read from", async () => {
       const base = await lazyCore({ synchronous });
       const list = new LazyList<number>(base.core, codecs.i32);
       list.applyInvalidated(reader(encodeLazyInvalidated({ len: 5, version: 2n })));
       expect(list.length.peek()).toBe(0);
       expect(list.get(0)).toBeUndefined();
+      expect(base.errors.length).toBe(1);
+      expect(((base.errors[0] as { cause?: UndraTransportError }).cause as UndraTransportError).reason).toBe("protocol");
     });
 
     it("a core that is closed reports instead of throwing", async () => {
