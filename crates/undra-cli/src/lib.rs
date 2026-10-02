@@ -50,6 +50,7 @@ mod cli;
 mod commands;
 pub mod config;
 mod detect;
+mod devtools;
 pub mod error;
 mod fsutil;
 mod migrations;

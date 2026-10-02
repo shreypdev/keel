@@ -32,6 +32,8 @@ if [ "$WHICH" = all ] || [ "$WHICH" = ts ]; then
   cp -R runtimes/ts/@undra/runtime "$WORK/ts"
   (cd "$WORK/ts" && npm ci --no-audit --no-fund --ignore-scripts >/dev/null && npx tsc -p tsconfig.build.json --outDir "$WORK/ts-dist")
   ( node crates/undra-transport/interop/ts.mjs "$BIN" "$WORK/ts-dist" )
+  # The same runtime as the app client of a server with a devtools page attached: a time travel.
+  ( node crates/undra-transport/interop/ts-devtools.mjs "$BIN" "$WORK/ts-dist" )
 fi
 
 if [ "$WHICH" = all ] || [ "$WHICH" = kotlin ]; then

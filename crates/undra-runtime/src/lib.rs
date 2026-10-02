@@ -84,7 +84,7 @@ pub use config::{
 };
 pub use ctx::{Closed, Ctx, CtxScope, Gone, WeakCtx, WeakSleep};
 pub use dispatch::{DispatchBytes, DispatchLayer, DispatchResult};
-pub use ext::{InitHook, StatsSection};
+pub use ext::{InitHook, InspectFn, StatsSection};
 pub use host::{Host, PortCallOutcome};
 pub use lazy::{LazyList, LazyListInner};
 pub use object::{

@@ -9,9 +9,85 @@
 //!   hook receives the [`Ctx`] with the core lock held and may spawn tasks (hydration is async).
 
 use core::any::{Any, TypeId};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+
+use parking_lot::Mutex;
 
 use crate::ctx::Ctx;
+
+/// What an inspector answers with: one JSON document describing a part of the runtime's state
+/// (ADR-054). It runs on whatever thread asks (the dev server's devtools hub), never with the
+/// core lock held by the caller, and must not call back into the runtime or block.
+pub type InspectFn = Arc<dyn Fn() -> String + Send + Sync>;
+
+/// One registered inspector.
+struct Slot {
+    name: &'static str,
+    inspect: InspectFn,
+    /// Set by the first panic: a broken inspector is not called again (each call would pay for a
+    /// backtrace) until it is registered anew.
+    broken: AtomicBool,
+}
+
+/// What asking an inspector came to.
+pub(crate) enum Answer {
+    /// No inspector has that name, or it panicked before and is skipped.
+    None,
+    /// Its document.
+    Document(String),
+    /// It panicked just now: the caller reports it, once.
+    Panicked(crate::guard::PanicReport),
+}
+
+/// The inspectors registered with a runtime, by name. Dev tooling reads them; nothing in the
+/// core does.
+#[derive(Default)]
+pub(crate) struct Inspectors {
+    list: Mutex<Vec<Arc<Slot>>>,
+}
+
+impl Inspectors {
+    /// Registers `inspect` under `name`, replacing an earlier one of the same name.
+    pub(crate) fn register(&self, name: &'static str, inspect: InspectFn) {
+        let slot = Arc::new(Slot {
+            name,
+            inspect,
+            broken: AtomicBool::new(false),
+        });
+        let mut list = self.list.lock();
+        match list.iter_mut().find(|s| s.name == name) {
+            Some(existing) => *existing = slot,
+            None => list.push(slot),
+        }
+    }
+
+    /// The document `name` produces now. A panic is contained: it is returned to the caller to
+    /// report, and the inspector is not asked again.
+    pub(crate) fn inspect(&self, name: &str) -> Answer {
+        let Some(slot) = self.list.lock().iter().find(|s| s.name == name).cloned() else {
+            return Answer::None;
+        };
+        if slot.broken.load(Ordering::Acquire) {
+            return Answer::None;
+        }
+        // Outside the lock: an inspector may take locks of its own, and registering from inside
+        // one would otherwise deadlock.
+        let f = slot.inspect.clone();
+        match crate::guard::guarded(move || f()) {
+            Ok(document) => Answer::Document(document),
+            Err(report) => {
+                slot.broken.store(true, Ordering::Release);
+                Answer::Panicked(report)
+            }
+        }
+    }
+
+    /// The names registered, in registration order.
+    pub(crate) fn names(&self) -> Vec<&'static str> {
+        self.list.lock().iter().map(|s| s.name).collect()
+    }
+}
 
 /// Something to run once for every new runtime. Submit with `inventory::submit!`.
 ///

@@ -116,6 +116,7 @@ mod defs;
 mod dispatch;
 mod erased;
 mod handle;
+mod inspect;
 mod key;
 mod mutation;
 mod persist;

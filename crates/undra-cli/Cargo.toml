@@ -34,4 +34,6 @@ libloading = { workspace = true }
 # a platform runtime does.
 tungstenite = { workspace = true }
 undra-wire = { workspace = true }
+# The devtools test speaks the page's protocol (ADR-054) with the server's own message types.
+undra-transport = { workspace = true }
 serde_json = { workspace = true }

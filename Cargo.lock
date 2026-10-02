@@ -1255,6 +1255,7 @@ dependencies = [
  "tungstenite",
  "undra-bindgen",
  "undra-meta",
+ "undra-transport",
  "undra-wire",
 ]
 

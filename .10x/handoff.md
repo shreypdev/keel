@@ -25,14 +25,30 @@ until after v2.
 device-bench (E1; the honest web size is 135 KB gzipped, over budget — E5), diagnostics (D1), dev-loop
 (B1, B2, ADR-051), parity (C3, C4: the Kotlin/TS error channel), react-native (G1, ADR-038; G1b default
 adapters, E4 Hermes cost and a site page are open), android-adapters (M1 Maven publishing open), runtime-lifecycle (Track A: ADR-034/035/036 + the
-ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5), wasm-size (E5, ADR-052; `ts-runtime-size` owed), dev-reload (B3, ADR-053), rn-adapters (G1b), swift-fs, derived-lists (E2, ADR-039), abi-table (ADR-044; `ns-storage` owed). Main moves with each checkpoint. CI pins Rust 1.98.1
+ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5), wasm-size (E5, ADR-052; `ts-runtime-size` owed), dev-reload (B3, ADR-053), rn-adapters (G1b), swift-fs, derived-lists (E2, ADR-039), abi-table (ADR-044; `ns-storage` owed), devtools (B4, ADR-054: sonnet review `.10x/reviews/2026-10-02-devtools-review.md`, 3 Medium fixed — the one 404, a silent panicking inspector, cache sampling under its lock; Rust 2,789 · contracts 60/60). Main moves with each checkpoint. CI pins Rust 1.98.1
 (1.99.0 broke it on 2026-10-01; the bump is a deliberate piece: four workflow pins, `rustup update`,
 `TRYBUILD=overwrite` goldens, bench re-baseline).
 
-**Merge queue (cross-merge main on the branch, full matrix, fast-forward).** Every branch below lives in
-`/Users/shrey/Desktop/src/.work/<name>` with its record in `.10x/decisions/sde/<name>.md` there:
-6. `persistence-v2` (ADR-037 + ADR-049 A6/A7; implementing).
-Each still needs its adversarial review (opus) before merging, except 1 and 2 which have one.
+**Merge queue (cross-merge main on the branch, full matrix, fast-forward).** Each branch lives in
+`/Users/shrey/Desktop/src/.work/<name>` with its record in `.10x/decisions/sde/<name>.md` there. State on
+2026-10-02 when the usage budget ran low (5-hour cap, then the weekly cap; agents stop mid-step and resume
+with their context when told to):
+2. `testkit` (F1/F2, ADR-055): **implemented and complete** at `ea5cc38` (18 commits, main `1b9b605` is an
+   ancestor, matrix green: Rust 2,756, Swift 551, Kotlin 656, TS 1,133 + kit 26, contracts 60/60; `undra dev
+   --record`, the three kits, `docs/TESTING.md`, a site page). Needs its review (sonnet is enough), then
+   fast-forward. The `dev_reload` tests are load-sensitive on a busy machine (fail on main too under load 13+).
+3. `ports-v2` → record as **ports** (G2/G3): **implemented and complete** at `9cece1b` (main `70fda02` is an
+   ancestor; ADR-047/048 still Proposed — flip to Accepted at review). WebSocket, Sse and Db ports behind
+   cargo features (standard hash unchanged `0x35fae635f80025f2`), adapters on Swift/Kotlin/Android/TS/RN,
+   S23–S25 on three columns (23/23 each), bench rows under budget, hello-world wasm/JS unchanged, playground
+   Notes + Live tabs; the founder approved rusqlite/libsqlite3-sys (dev-only), sqlite-jdbc (test-only) and
+   wa-sqlite (dev dep) directly. Needs an opus review (new boundary surface: the batched pull as credit, Db
+   transactions, the typed ends, the wa-sqlite worker), then fast-forward. Playground hash `0x88d07d5fc9a2d4b4`.
+4. `persistence-v2` → record as **persistence** (ADR-037/049 Accepted; implemented, 77 commits; opus review
+   started with the cross-merge of the ABI table — 506 files mid-merge when the budget ran out). The review
+   brief: size gate first (the hello-world wasm sat 435 B under budget before the cross), then migrating
+   restore integrity, the hand-written JSON writer, storage errors on every column, web recovery.
+Order to land: 1, 2, 3, 4 (4 is the largest cross). Then the follow-ups below.
 
 **Also owed:** the Rust 1.99.0 bump (ci.yml header says how; do it when no worktree is mid-build);
 `ts-runtime-size` (16 KB target);  a custom port in the playground for the reference's Ports section; `undra bindgen --declarations`.
