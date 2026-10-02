@@ -436,7 +436,7 @@ mod tests {
         // `generic(T = [..])` as the attribute argument of `#[undra::api]`.
         let mut found = Vec::new();
         let parser = syn::meta::parser(|meta| {
-            found.extend(super::super::attrs::generic_lists(&meta).map_err(|e| e)?);
+            found.extend(super::super::attrs::generic_lists(&meta)?);
             Ok(())
         });
         syn::parse::Parser::parse_str(parser, src).expect("a list");
