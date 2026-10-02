@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// The six screens, one per tab. Launch with `-tab remote` (or `todos`, `counter`, `biglist`,
-/// `notes`, `workshop`) to start on another one: `xcrun simctl launch booted dev.undra.playground -tab remote`.
+/// The nine screens, one per tab. Launch with `-tab remote` (or `todos`, `counter`, `biglist`,
+/// `notes`, `workshop`, `library`, `feed`, `ticker`) to start on another one: `xcrun simctl launch booted dev.undra.playground -tab remote`.
 struct RootView: View {
     /// A tab of the app; the raw value is what `-tab` takes.
     enum Tab: String {
-        case todos, counter, biglist, remote, notes, workshop
+        case todos, counter, biglist, remote, notes, workshop, library, feed, ticker
     }
 
     let model: PlaygroundModel
@@ -31,6 +31,15 @@ struct RootView: View {
             WorkshopScreen(workshop: model.workshop, left: model.leftShelf, right: model.rightShelf)
                 .tabItem { Label("Workshop", systemImage: "hammer").accessibilityIdentifier("tab-workshop") }
                 .tag(Tab.workshop)
+            LibraryScreen(library: model.library)
+                .tabItem { Label("Library", systemImage: "books.vertical").accessibilityIdentifier("tab-library") }
+                .tag(Tab.library)
+            FeedScreen(all: model.feed, even: model.evenFeed)
+                .tabItem { Label("Feed", systemImage: "text.append").accessibilityIdentifier("tab-feed") }
+                .tag(Tab.feed)
+            TickerScreen()
+                .tabItem { Label("Ticker", systemImage: "timer").accessibilityIdentifier("tab-ticker") }
+                .tag(Tab.ticker)
         }
     }
 }

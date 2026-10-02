@@ -47,6 +47,22 @@ final class LazyListTests: XCTestCase {
         XCTAssertEqual(rig.server.pages(), [4, 5, 6, 2, 3, 7], "reading the prefetched pages asked for their neighbours, each page once")
     }
 
+    func testEveryPageCallIsCountedInTheStats() async throws {
+        let rig = try LazyRig(rows: 500)
+        XCTAssertEqual(rig.core.stats().hostPageCalls, 0)
+        rig.read(260)
+        XCTAssertEqual(rig.core.stats().hostPageCalls, 3, "three pages, one call each")
+        XCTAssertEqual(rig.core.stats().hostPageCalls, rig.server.offsets.count)
+        _ = rig.list[1]
+        XCTAssertEqual(rig.core.stats().hostPageCalls, 3, "a read only queues")
+        // The asynchronous path counts too.
+        let remote = try LazyRig(rows: 100, direct: false)
+        _ = remote.list[0]
+        remote.turns.run()
+        let asked = await waitUntil { remote.core.stats().hostPageCalls == 2 }
+        XCTAssertTrue(asked)
+    }
+
     func testFirstAndLastPagesPrefetchOnlyTheirOneNeighbour() throws {
         let rig = try LazyRig(rows: 120)
         rig.read(0)

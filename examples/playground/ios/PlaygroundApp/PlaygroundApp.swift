@@ -2,7 +2,7 @@ import UndraRuntime
 import PlaygroundCore
 import SwiftUI
 
-/// The playground: five small screens over one Rust core. Everything they show is state that lives
+/// The playground: small screens over one Rust core. Everything they show is state that lives
 /// in the core (`Todos`, `Counter`, `BigList`, a cached server list, notes in SQLite); the views only
 /// read it and call its methods.
 @main
@@ -73,6 +73,11 @@ final class PlaygroundModel {
     /// Two shelves the workshop hands out: child stores, one wrapper each however often asked for.
     let leftShelf: Shelf
     let rightShelf: Shelf
+    /// A lazy list of ten thousand books the Library screen pages through (ADR-043).
+    let library: Library
+    /// The infinite feed, all rows and the even rows only (two parameters, two cache entries).
+    let feed: FeedQueryHandle
+    let evenFeed: FeedQueryHandle
 
     init() throws {
         todos = try Todos()
@@ -83,5 +88,8 @@ final class PlaygroundModel {
         workshop = try Workshop()
         leftShelf = try workshop.shelf(name: "left")
         rightShelf = try workshop.shelf(name: "right")
+        library = try Library()
+        feed = try FeedQueryHandle(evenOnly: false)
+        evenFeed = try FeedQueryHandle(evenOnly: true)
     }
 }
