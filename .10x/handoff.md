@@ -39,24 +39,32 @@ Landed: devtools, persistence, testkit, docs-v1x, ports (all reviewed) (ADR-037/
 green on its pushed head (`scripts/wt.sh merge` enforces it once `ci-green` lands; agents push their own
 `wt/<name>` branch and iterate until CI, Bench, Two cores and Site are green); (2) Fable designs where the
 difficulty is in deciding, a cheaper model implements, then an adversarial review. In flight:
-- `ci-green` — every red CI job at its root cause, Rust 1.99.0 pins, Node 24, the merge gate. Pushed at
-  `b5ded91`: Bench and Two cores green; CI had three red jobs left (Rust on Linux, the macOS Swift tests, React
-  Native); the agent pushes and watches its own fixes. Merge it first; `main` is red until then.
-- `diagram-rn` — React Native as the fourth frame of the landing diagram (`fbf8d7a`, fable-reviewed from
-  screenshots); merge main into it once `ci-green` lands, push, Site green, fast-forward.
+- **Landed:** `ci-green` (`fc326d6`: main green, Rust 1.99.0, Node 24, the gate in `scripts/wt.sh merge`) and
+  `diagram-rn` (`b7efd61`, the first piece through the gate). `main` is `b7efd61` plus state commits.
+- **The gate costs a CI cycle (about 30 minutes) per push, so:** a branch must contain `main` to merge, which
+  means every commit on `main` sends each waiting piece back through a merge and a run; batch state commits with
+  a merge, never push to a branch whose run is in flight, and pre-merge the next ready piece onto the one in CI.
+  Tests: no absolute time bound (measure against a reference armed beside the thing, or count events), wait for
+  what is in flight to land before changing a fake, commit by path. Stress loops must not leave `yes` burners.
 - `reload-handles` — ADR-059 (Fable design, prototyped): query handles survive every restore path through an
-  in-band snapshot record and build-on-first-use; sonnet implementing; removes the TS replay; S35.
-- `generics-fn-obj` — ADR-058 (Fable design, prototyped): generic functions monomorphised from a declared list,
-  generic objects/stores through an alias; sonnet implementing; S34; E0072/E0074.
+  in-band snapshot record and build-on-first-use; implemented, opus review verdict merge (5 review tests added);
+  the reviewer merges main, pushes once and watches CI; removes the TS replay; S35.
+- `generics-fn-obj` — landed at `aa04821` (status checkpoint 30). `generics-followups` closes the review's L6,
+  L7 and L8.
 - `ts-runtime-16k` — ADR-057 (Fable design, 15 measured levers: 22,100 → 15,958 B, 15,384 with Vite's preload
-  helper apart); sonnet implementing; gates: runtime 16,000, first-load 16,600, all-features 42,400.
+  helper apart); sonnet implementing, the 16,000 gate is met on the branch; adversarial review next; gates:
+  runtime 16,000, with the helper 16,600, all-features 42,400.
+- `test-pacing` — the tests that still fail on time alone under a throttled local pass (status checkpoint 29
+  lists them) and `ci-local`'s gaps (`--no-fail-fast`, a `--slow` pass that does not starve).
+- **Founder, 2026-10-02 (afternoon):** start nothing new; finish what is in flight with every review finding
+  addressed and tell him. He then protects `main`, and from then on every change lands through a pull request
+  (`scripts/wt.sh merge` pushes `main` directly and will need a PR flow: propose it, do not start it unasked).
 - **On hold by the founder (2026-10-02):** the Android emulator CI job for `android-adapters`, `android-work`
   and `undra-compose`. Do not start it. Finish everything else in flight first, then tell him all is done and
   ask whether to start it. Priority order: CI green on main, then the other work in progress. Each implemented piece still gets its adversarial review before the merge.
 - A separate session is bisecting a cold-start restore slowdown (two rows 1.7–1.8x the machine baseline).
 
-**Also owed:** the Rust 1.99.0 bump (ci.yml header says how; do it when no worktree is mid-build);
-  a custom port in the playground for the reference's Ports section; `undra bindgen --declarations`.
+**Also owed:** a custom port in the playground for the reference's Ports section; `undra bindgen --declarations`.
 
 **Next:** wave 0 of `.10x/specs/2026-10-01-boundary-surface-plan.md` (`abi-table` ADR-044 — after
 Track A and RN merge, it rewrites the FFI they touch; `ios-floor` ADR-045 — after parity;

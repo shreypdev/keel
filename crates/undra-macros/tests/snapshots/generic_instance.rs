@@ -7,6 +7,10 @@ impl TodoPage {
     /// The names of the fields, in declaration order (see `undra_meta::keys`).
     #[doc(hidden)]
     pub const __UNDRA_FIELDS: &'static [&'static str] = &["items", "next", "by_name"];
+    /// The declared name of the instantiation, for a signature that names it
+    /// through a generic application (`Page<T>` in a generic function).
+    #[doc(hidden)]
+    pub const UNDRA_TYPE_NAME: &'static str = "TodoPage";
 }
 #[allow(non_upper_case_globals)]
 static __UNDRA_META_TodoPage: ::undra::meta::RecordMeta = ::undra::meta::RecordMeta {

@@ -31,6 +31,7 @@ static __UNDRA_META_port_Connectivity: ::undra::meta::PortMeta = ::undra::meta::
             is_async: false,
             takes_ctx: false,
             coalesce: false,
+            generic: ::core::option::Option::None,
             docs: "",
         },
     ],

@@ -1,0 +1,14 @@
+error[E0425]: cannot find type `Order` in this scope
+  --> tests/ui/generic_object_alias_where_its_types_are_not_in_scope.rs:24:34
+   |
+24 |         pub fn put(&self, order: Order) {}
+   |                                  ^^^^^ not found in this scope
+...
+35 | #[k::api]
+   | --------- in this attribute macro expansion
+   |
+   = note: this error originates in the macro `::undra::__instantiate` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider importing this struct
+   |
+ 6 + use crate::model::Order;
+   |

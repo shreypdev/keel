@@ -65,6 +65,37 @@ test("the playground runs: todos, counter, 10k list, remote", async ({ page }) =
     await shot("todos");
   });
 
+  await test.step("todos: the generic code of the core: newest, a selection store, draft (ADR-058)", async () => {
+    // `newest("Todo", rows)`: the core says which row is the newest, the page only shows it.
+    await expect(page.getByTestId("todo-latest")).toHaveText("Latest: Write the smoke test");
+    await expect(page.getByTestId("todo-selected-count")).toHaveText("0 selected");
+    // Ticking is `TodoSelection.toggle(row)`: a keyed insert into the selection store's `rows`, one count.
+    await page.getByTestId("todo-select").first().check();
+    await expect(page.getByTestId("todo-selected-count")).toHaveText("1 selected");
+    await expect(page.getByTestId("todo-picked")).toContainText("Read the spec");
+    // `draft("Todo", title)`: a to-do the core made and did not store: ticked, not in the list.
+    await page.getByTestId("todo-input").fill("A drafted to-do");
+    await page.getByTestId("todo-new-draft").click();
+    await expect(page.getByTestId("todo-selected-count")).toHaveText("2 selected");
+    await expect(page.getByTestId("todo-picked")).toContainText("A drafted to-do");
+    await expect(page.getByTestId("todo-item")).toHaveCount(2);
+    await page.getByTestId("todo-select-clear").click();
+    await expect(page.getByTestId("todo-selected-count")).toHaveText("0 selected");
+    // Select all, then remove what is selected: the selection store drives a command on the other store.
+    await page.getByTestId("todo-select-all").click();
+    await expect(page.getByTestId("todo-selected-count")).toHaveText("2 selected");
+    await page.getByTestId("todo-remove-selected").click();
+    await expect(page.getByTestId("todo-item")).toHaveCount(0);
+    await expect(page.getByTestId("todo-selected-count")).toHaveText("0 selected");
+    await expect(page.getByTestId("todo-latest")).toHaveText("Nothing yet");
+    // Back to two items for the views below.
+    for (const title of ["Read the spec", "Write the smoke test"]) {
+      await page.getByTestId("todo-input").fill(title);
+      await page.getByTestId("todo-add").click();
+    }
+    await expect(page.getByTestId("todo-item")).toHaveCount(2);
+  });
+
   // ---- Counter -----------------------------------------------------------------------------
   await test.step("counter: increment and decrement, parity from the core", async () => {
     await page.getByTestId("tab-counter").click();
@@ -349,6 +380,17 @@ test("live and notes: the core's WebSocket echoes through the browser, and its S
   await page.getByTestId("notes-toggle").first().click();
   await expect(page.getByTestId("notes-toggle").first()).toBeChecked();
   await expect(page.getByTestId("notes-error")).toHaveCount(0);
+  // The notes' selection is the same generic `Selection<T>` the to-do screen uses, instantiated for notes (ADR-058):
+  // its own store and handle, `newest("Note", rows)` for the line, `draft("Note", title)` for a note not in the database.
+  await expect(page.getByTestId("note-latest")).toHaveText("Latest: Write the report");
+  await page.getByTestId("notes-select").last().check();
+  await expect(page.getByTestId("note-selected-count")).toHaveText("1 selected");
+  await expect(page.getByTestId("note-picked")).toHaveText("Write the report");
+  await page.getByTestId("note-new-draft").click();
+  await expect(page.getByTestId("note-selected-count")).toHaveText("2 selected");
+  await expect(page.getByTestId("notes-item")).toHaveCount(2);
+  await page.getByTestId("note-select-clear").click();
+  await expect(page.getByTestId("note-selected-count")).toHaveText("0 selected");
   await page.screenshot({ path: `${PROOF}web-notes.png`, fullPage: true });
   await page.reload();
   await expect(page.getByTestId("notes-version")).toHaveText("schema version 2");

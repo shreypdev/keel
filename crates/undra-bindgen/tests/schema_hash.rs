@@ -24,7 +24,8 @@ const HASHES_BEFORE_NO_COALESCE: &[(&str, u64)] = &[
 /// before the field to compare with.
 /// `object_graph` and `callbacks` (ADR-040, ADR-041) are new: they use the types and port kind that
 /// no earlier schema had; so are the cases of ADR-042 and ADR-043 (`newtypes`, `generics`, `decimal`,
-/// `polling`, `infinite`, `lazy`).
+/// `polling`, `infinite`, `lazy`) and of ADR-058 (`generic_functions`, `generic_objects`: the
+/// `generic` label is part of the canonical form only when set).
 const CASES_AFTER_NO_COALESCE: &[&str] = &[
     "stdlib",
     "recursive",
@@ -36,6 +37,8 @@ const CASES_AFTER_NO_COALESCE: &[&str] = &[
     "polling",
     "infinite",
     "lazy",
+    "generic_functions",
+    "generic_objects",
 ];
 
 #[test]

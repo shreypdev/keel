@@ -57,5 +57,6 @@ val SCENARIOS: List<Scenario> = listOf(
     scenario("S31", "newtypes, generic instantiations and leaf types", ::s31Ledger),
     scenario("S32", "paged queries and lazy lists", ::s32Paging),
     scenario("S33", "polling", ::s33Polling),
+    scenario("S34", "generic functions, objects and stores", ::s34Generic),
     scenario("S17", "panic containment", ::s17Panic),
 )

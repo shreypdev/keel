@@ -26,6 +26,13 @@
 //! * **Newtypes.** `#[undra::api] pub struct UserId(pub Uuid);` (exactly one field) crosses as its
 //!   inner type: the same bytes, a distinct type on every platform. It may be a map key when its
 //!   inner type is (`HashMap<UserId, User>`), checked by the compiler; a newtype of `Decimal` is not.
+//! * **Generic functions, methods, objects and stores** (ADR-058) cross as instantiations the core
+//!   declares: `#[undra::api(generic(T = [Todo, Note]))] pub fn newest<T: Row>(..)` is one function
+//!   per listed type (`newest<Todo>`), and a store or an object written once for several row types
+//!   is a template, `#[undra::store(generic)] pub struct Selection<T>` with
+//!   `#[undra::api(store, generic)] impl<T: Row> Selection<T>`, instantiated by an alias,
+//!   `#[undra::api] pub type TodoSelection = Selection<Todo>;`. The schema holds concrete
+//!   definitions only: the platforms call each instantiation with its own id.
 //! * **Generic data types** are instantiated under a name:
 //!   `#[undra::api(generic)] pub struct Page<T> { .. }` is a template that registers nothing, and
 //!   `#[undra::api] pub type TodoPage = Page<Todo>;` registers `TodoPage` as a record like any other.
@@ -45,6 +52,10 @@
 //! 292 years) as the largest. `time` values are normalised to UTC. A `chrono::DateTime` in another time
 //! zone than `Utc` does not cross (E0001): convert it with `with_timezone(&Utc)`.
 
+/// The macro the local macro of a `#[undra::store(generic)]` struct calls to export the store's
+/// template (ADR-058). Not written by hand.
+#[doc(hidden)]
+pub use undra_macros::__compose_store;
 /// The macro a `#[undra::api(generic)]` template calls to register one instantiation (ADR-042).
 /// Not written by hand.
 #[doc(hidden)]
@@ -86,6 +97,6 @@ pub mod prelude {
     pub use undra_query::CtxQuery;
     pub use undra_runtime::persist::{DynRecord, DynValue, MigrateError};
     pub use undra_runtime::{Ctx, Gone, WeakCtx};
-    pub use undra_signals::{Computed, DerivedList, Effect, Lazy, Signal, txn};
+    pub use undra_signals::{Computed, DerivedList, Effect, Lazy, Signal, SignalValue, txn};
     pub use undra_wire::{Bytes, Decimal, Handle, Timestamp, Uuid};
 }

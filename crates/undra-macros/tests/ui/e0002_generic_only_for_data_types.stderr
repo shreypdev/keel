@@ -16,36 +16,36 @@ error: error[undra::E0002]: generic parameter `E` on `Failure`
 16 | pub enum Failure<E> {
    |                  ^
 
-error: error[undra::E0002]: generic parameter `T` on `get`
-         = note: the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed
-         = help: remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`)
+error: error[undra::E0002]: generic parameter `T` on `get` has no list of types
+         = note: the schema describes concrete functions and the platforms call them by id: a generic function crosses once for each type it is declared for, and its callers are on the platforms, where the core cannot see them
+         = help: list the types the platforms may use: `#[undra(generic(T = [Todo, Note]))]` on the method; each becomes a method of its own, `pinned<Todo>` and `pinned<Note>`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
   --> tests/ui/e0002_generic_only_for_data_types.rs:30:16
    |
 30 |     pub fn get<T>(&self, value: T) -> u8 {
    |                ^
 
-error: error[undra::E0002]: generic parameter `T` on `first`
-         = note: the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed
-         = help: remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`)
+error: error[undra::E0002]: generic parameter `T` on `first` has no list of types
+         = note: the schema describes concrete functions and the platforms call them by id: a generic function crosses once for each type it is declared for, and its callers are on the platforms, where the core cannot see them
+         = help: list the types the platforms may use: `#[undra::api(generic(T = [Todo, Note]))]`; each becomes a function of its own, `newest<Todo>` and `newest<Note>`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
   --> tests/ui/e0002_generic_only_for_data_types.rs:36:14
    |
 36 | pub fn first<T>(items: Vec<T>) -> u8 {
    |              ^
 
-error: error[undra::E0002]: generic parameter `T` on `Counter`
-         = note: the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed
-         = help: remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`)
+error: error[undra::E0002]: generic parameter `T` on the store `Counter`
+         = note: the schema describes concrete objects: a generic object crosses once per instantiation, each under a name of its own, which the platforms generate a class for
+         = help: write `#[undra::store(generic)]`, mark its impl block `#[undra::api(store, generic)]` and declare each instantiation: `#[undra::api] pub type TodoSelection = Selection<Todo>;`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
   --> tests/ui/e0002_generic_only_for_data_types.rs:41:20
    |
 41 | pub struct Counter<T> {
    |                    ^
 
-error: error[undra::E0002]: generic parameter `T` on `Sink`
-         = note: the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed
-         = help: remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`)
+error: error[undra::E0002]: generic parameter `T` on the port `Sink`
+         = note: the platform implements the trait by its name, once per instance, and nothing names an instantiation it could implement
+         = help: declare one trait per type (`TodoListener`), or pass a record or an enum that covers the cases
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
   --> tests/ui/e0002_generic_only_for_data_types.rs:48:16
    |

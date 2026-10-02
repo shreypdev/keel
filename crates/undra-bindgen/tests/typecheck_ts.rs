@@ -72,7 +72,9 @@ ts_cases!(
     decimal,
     polling,
     infinite,
-    lazy
+    lazy,
+    generic_functions,
+    generic_objects
 );
 
 #[test]
@@ -135,5 +137,52 @@ export const idOf = (account: Account): UserId => account.id;
     });
     if let Err(diagnostics) = typecheck("newtypes-nominal", &files) {
         panic!("the newtypes are not nominal:\n{diagnostics}");
+    }
+}
+
+/// A generic function is a closed overload set in TypeScript (ADR-058): the literal and the argument types of one
+/// instantiation go together, the implementation signature that takes any of them is not callable, and the per-instantiation
+/// functions and methods are not exported. Each `@ts-expect-error` below must be an error (tsc reports an unused directive
+/// otherwise), and everything else must compile.
+#[test]
+fn generic_functions_are_closed_overload_sets_in_typescript() {
+    if ts_runtime_declarations().is_none() {
+        skip("no TypeScript compiler (tsc) found");
+        return;
+    }
+    let schema = common::case("generic_functions");
+    let generator = common::generator_for("generic_functions", &schema);
+    let mut files = generator.typescript(&schema).unwrap();
+    files.push(GeneratedFile {
+        path: "src/misuse.ts".to_owned(),
+        contents: r#"import { type Library, draft, newest } from "./objects.js";
+import * as objects from "./objects.js";
+import type { Note, Todo } from "./types.js";
+
+declare const todos: Todo[];
+declare const notes: Note[];
+declare const library: Library;
+
+export const latest: Promise<Todo | null> = newest("Todo", todos);
+export const latestNote: Promise<Note | null> = newest("Note", notes);
+export const blank: Promise<Note> = draft("Note");
+export const pinned: Promise<Todo[]> = library.pinned("Todo");
+// @ts-expect-error the literal says `Todo`, the rows are notes
+newest("Todo", notes);
+// @ts-expect-error a type that is not listed has no overload
+draft("Draft");
+// @ts-expect-error the implementation signature is not one of the overloads
+newest("Todo" as "Todo" | "Note", todos);
+// @ts-expect-error the overload says what comes back
+export const wrong: Promise<Todo> = draft("Note");
+// @ts-expect-error the per-instantiation function is not exported
+objects.newestTodo(todos);
+// @ts-expect-error the per-instantiation method is private
+library.pinnedTodo();
+"#
+        .to_owned(),
+    });
+    if let Err(diagnostics) = typecheck("generic-functions-closed", &files) {
+        panic!("the overload sets of generic functions are not closed:\n{diagnostics}");
     }
 }

@@ -1,0 +1,53 @@
+error: error[undra::E0002]: generic parameter `T` on the store `Selection`
+         = note: the schema describes concrete objects: a generic object crosses once per instantiation, each under a name of its own, which the platforms generate a class for
+         = help: write `#[undra::store(generic)]`, mark its impl block `#[undra::api(store, generic)]` and declare each instantiation: `#[undra::api] pub type TodoSelection = Selection<Todo>;`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+ --> tests/ui/e0002_generic_objects_without_the_marker.rs:9:22
+  |
+9 | pub struct Selection<T> {
+  |                      ^
+
+error: error[undra::E0002]: generic parameter `T` on the impl block of `Cache`
+         = note: the schema describes concrete objects: a generic object crosses once per instantiation, each under a name of its own, which the platforms generate a class for
+         = help: mark the block `#[undra::api(generic)]` (`#[undra::api(store, generic)]` for a store) and declare each instantiation: `#[undra::api] pub type TodoSelection = Selection<Todo>;`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_objects_without_the_marker.rs:17:6
+   |
+17 | impl<T> Cache<T> {
+   |      ^
+
+error: error[undra::E0002]: generic type `Cache<u32>` in `#[undra::api] impl`
+         = note: the schema describes concrete objects: a generic object crosses once per instantiation, each under a name of its own, which the platforms generate a class for
+         = help: write the block once for the type with its own parameters, `#[undra::api(generic)] impl<T> Cache<T> { .. }`, and declare the instantiation: `#[undra::api] pub type TodoCache = Cache<u32>;`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_objects_without_the_marker.rs:33:6
+   |
+33 | impl Cache<u32> {
+   |      ^^^^^^^^^^
+
+error: error[undra::E0002]: generic parameter `T` on the query `rows`
+         = note: a query is cached, persisted and invalidated under its name and key, and the schema describes one result type for it; a list of types would make several queries that share one name
+         = help: write one query per type (`todo_rows`, `note_rows`) and share the body in a generic Rust function they both call
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_objects_without_the_marker.rs:40:19
+   |
+40 | pub async fn rows<T>(ctx: &Ctx) -> Result<Vec<u32>, undra::runtime::PortError> {
+   |                   ^
+
+error: error[undra::E0002]: generic parameter `T` on the mutation `save`
+         = note: a mutation is queued, replayed and persisted under its name, and the schema describes one input and one result type for it; a list of types would make several mutations that share one name
+         = help: write one mutation per type (`save_todo`, `save_note`) and share the body in a generic Rust function they both call
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_objects_without_the_marker.rs:45:19
+   |
+45 | pub async fn save<T>(ctx: &Ctx) -> Result<u32, undra::runtime::PortError> {
+   |                   ^
+
+error: error[undra::E0002]: generic parameter `T` on the callback `Listener`
+         = note: the platform implements the trait by its name, once per instance, and nothing names an instantiation it could implement
+         = help: declare one trait per type (`TodoListener`), or pass a record or an enum that covers the cases
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_objects_without_the_marker.rs:50:20
+   |
+50 | pub trait Listener<T> {
+   |                    ^

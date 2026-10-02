@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
+import dev.undra.playground.core.TodoSelection
 import dev.undra.playground.core.Todos
 import dev.undra.playground.core.UndraIds
 import dev.undra.testkit.RecordedCore
@@ -21,7 +22,7 @@ private fun recordedTodos(startAtMs: Long?, playToEnd: Boolean): TodosViewModel 
         val json = context.assets.open("session-todos.json").bufferedReader().use { it.readText() }
         val recorded = RecordedCore.load(json, UndraIds.SCHEMA_HASH, ReplayOptions(startAtMs = startAtMs), makeShared = false)
         if (playToEnd) recorded.playAll()
-        TodosViewModel(Todos(recorded.core))
+        TodosViewModel(Todos(recorded.core), TodoSelection(recorded.core))
     }
 }
 

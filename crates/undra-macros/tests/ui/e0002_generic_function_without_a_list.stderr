@@ -1,0 +1,26 @@
+error: error[undra::E0002]: generic parameter `T` on `newest` has no list of types
+         = note: the schema describes concrete functions and the platforms call them by id: a generic function crosses once for each type it is declared for, and its callers are on the platforms, where the core cannot see them
+         = help: list the types the platforms may use: `#[undra::api(generic(T = [Todo, Note]))]`; each becomes a function of its own, `newest<Todo>` and `newest<Note>`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_function_without_a_list.rs:15:15
+   |
+15 | pub fn newest<T: Clone>(rows: Vec<T>) -> Option<T> {
+   |               ^^^^^^^^
+
+error: error[undra::E0002]: generic parameter `T` on `pinned` has no list of types
+         = note: the schema describes concrete functions and the platforms call them by id: a generic function crosses once for each type it is declared for, and its callers are on the platforms, where the core cannot see them
+         = help: list the types the platforms may use: `#[undra(generic(T = [Todo, Note]))]` on the method; each becomes a method of its own, `pinned<Todo>` and `pinned<Note>`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_function_without_a_list.rs:27:19
+   |
+27 |     pub fn pinned<T: Default>(&self) -> Vec<T> {
+   |                   ^^^^^^^^^^
+
+error: error[undra::E0002]: generic parameter `T` on the constructor `create`
+         = note: a constructor returns the object, and the object has no such parameter: the platforms could not say which `create` they mean
+         = help: take a concrete type or an enum of the cases; make the object generic if the parameter belongs to it
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_function_without_a_list.rs:36:19
+   |
+36 |     pub fn create<T>(seed: T) -> Self {
+   |                   ^

@@ -88,6 +88,7 @@ static __UNDRA_META_fn_greet: ::undra::meta::FunctionMeta = ::undra::meta::Funct
     ),
     is_async: true,
     takes_ctx: true,
+    generic: ::core::option::Option::None,
     docs: "Greets.",
     dispatch: __undra_dispatch_fn_greet,
 };

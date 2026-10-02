@@ -28,8 +28,11 @@
 //! | `impl Stream<Item = T>` | `Stream(T)` (return types only) |
 //! | any other path `a::b::Name` | `Named("Name")` |
 
+use std::cell::RefCell;
+
 use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, quote};
+use syn::visit_mut::{self, VisitMut};
 use syn::{GenericArgument, PathArguments, ReturnType, Type, TypeParamBound};
 
 use super::diag::{Diag, code};
@@ -65,6 +68,91 @@ pub(crate) enum KType {
     Object(std::string::String),
     /// A host callback interface passed in as a parameter (ADR-041).
     Callback(std::string::String),
+    /// A generic data type applied to a substituted type (`Page<Todo>` in the signature of an
+    /// instantiation of `fn first<T>() -> Page<T>`), named by the alias that declares it: the name
+    /// is read from the type by the compiler (ADR-058 section 4).
+    NamedOf(Box<Type>),
+    /// A generic object applied to a substituted type (`Arc<Selection<Todo>>`), named by its alias.
+    ObjectOf(Box<Type>),
+}
+
+/// What a generic type applied to a type parameter (`Page<T>`, `Arc<Selection<T>>`) means in the
+/// signature being mapped (ADR-058 section 4). The syntax cannot name the alias that declares the
+/// instantiation, but the compiler can: inside an instantiation it is read from the type.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Applications {
+    /// A signature written by hand: `Page<Todo>` is E0002 and the alias is spelled.
+    #[default]
+    Refuse,
+    /// The generic signature of a template: an application that mentions one of these type
+    /// parameters is accepted (an instantiation names it); the others are refused as written.
+    Template(Vec<String>),
+    /// The signature of one instantiation: an application with a substituted argument (a
+    /// `None`-delimited group) is named through its alias.
+    Instance,
+}
+
+thread_local! {
+    static APPLICATIONS: RefCell<Applications> = const { RefCell::new(Applications::Refuse) };
+}
+
+/// Restores the previous meaning of a generic application when dropped (see [`applications`]).
+pub(crate) struct ApplicationsGuard(Applications);
+
+impl Drop for ApplicationsGuard {
+    fn drop(&mut self) {
+        let previous = std::mem::take(&mut self.0);
+        APPLICATIONS.with(|cell| *cell.borrow_mut() = previous);
+    }
+}
+
+/// What a generic type applied to a type parameter means until the guard is dropped.
+pub(crate) fn applications(mode: Applications) -> ApplicationsGuard {
+    ApplicationsGuard(APPLICATIONS.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), mode)))
+}
+
+/// Whether `ty`, written with arguments (`Page<T>`, `Page<Todo>` with a substituted `Todo`), is a
+/// generic application the signature being mapped names through its alias.
+fn is_application(args: &[&Type]) -> bool {
+    struct Mentions<'a> {
+        params: &'a [String],
+        group: bool,
+        found: bool,
+    }
+    impl VisitMut for Mentions<'_> {
+        fn visit_type_mut(&mut self, ty: &mut Type) {
+            match ty {
+                Type::Group(_) if self.group => self.found = true,
+                Type::Path(path)
+                    if !self.params.is_empty()
+                        && path.qself.is_none()
+                        && path.path.segments.len() == 1
+                        && path.path.segments[0].arguments.is_none()
+                        && self.params.iter().any(|p| path.path.segments[0].ident == p) =>
+                {
+                    self.found = true;
+                }
+                _ => {}
+            }
+            visit_mut::visit_type_mut(self, ty);
+        }
+    }
+    APPLICATIONS.with(|cell| {
+        let (params, group): (Vec<String>, bool) = match &*cell.borrow() {
+            Applications::Refuse => return false,
+            Applications::Template(params) => (params.clone(), false),
+            Applications::Instance => (Vec::new(), true),
+        };
+        let mut mentions = Mentions {
+            params: &params,
+            group,
+            found: false,
+        };
+        for arg in args {
+            mentions.visit_type_mut(&mut (*arg).clone());
+        }
+        mentions.found
+    })
 }
 
 impl KType {
@@ -118,6 +206,26 @@ impl KType {
             KType::Named(name) => quote!(#meta::TypeRefMeta::Named(#name)),
             KType::Object(name) => quote!(#meta::TypeRefMeta::Object(#name)),
             KType::Callback(name) => quote!(#meta::TypeRefMeta::Callback(#name)),
+            // The name is a constant of the instantiation's inherent impl, read from the type;
+            // the fallback is the empty string, which the identity checks turn into E0002.
+            KType::NamedOf(ty) => quote! {
+                #meta::TypeRefMeta::Named({
+                    trait __UndraNameFallback {
+                        const UNDRA_TYPE_NAME: &'static str = "";
+                    }
+                    impl<__UndraT: ?::core::marker::Sized> __UndraNameFallback for __UndraT {}
+                    <#ty>::UNDRA_TYPE_NAME
+                })
+            },
+            KType::ObjectOf(ty) => quote! {
+                #meta::TypeRefMeta::Object({
+                    trait __UndraNameFallback {
+                        const __UNDRA_OBJECT_NAME: &'static str = "";
+                    }
+                    impl<__UndraT: ?::core::marker::Sized> __UndraNameFallback for __UndraT {}
+                    <#ty>::__UNDRA_OBJECT_NAME
+                })
+            },
         }
     }
 
@@ -129,6 +237,7 @@ impl KType {
         matches!(
             self,
             KType::Named(_)
+                | KType::NamedOf(_)
                 | KType::String
                 | KType::Bool
                 | KType::I8
@@ -438,7 +547,7 @@ pub(crate) fn map_type<'a>(ty: &Type, cx: impl Into<Cx<'a>>, allow: Allow) -> Re
             ),
         )),
         Type::Reference(reference) => match object_reference(reference, allow) {
-            Some(name) => Ok(KType::Object(name)),
+            Some(object) => Ok(object),
             None => Err(reference_in_list(reference, ty, allow)
                 .unwrap_or_else(|| reference_error(ty, reference))),
         },
@@ -654,19 +763,40 @@ fn object_path_name(path: &syn::TypePath) -> Option<String> {
 }
 
 /// `&T` where an object may be taken by reference (a parameter, alone or in an `Option`): the
-/// object's name. A lifetime, `&mut` and a built-in element are not objects, and keep the
-/// reference diagnostics.
-fn object_reference(reference: &syn::TypeReference, allow: Allow) -> Option<String> {
+/// object. A lifetime, `&mut` and a built-in element are not objects, and keep the reference
+/// diagnostics.
+fn object_reference(reference: &syn::TypeReference, allow: Allow) -> Option<KType> {
     if !matches!(allow.object, Objects::Param | Objects::InnerRef) {
         return None;
     }
     if reference.lifetime.is_some() || reference.mutability.is_some() {
         return None;
     }
-    match &*reference.elem {
-        Type::Path(path) => object_path_name(path),
+    let mut elem = &*reference.elem;
+    while let Type::Group(group) = elem {
+        elem = &group.elem;
+    }
+    match elem {
+        Type::Path(path) => object_path_name(path)
+            .map(KType::Object)
+            .or_else(|| object_application(path)),
         _ => None,
     }
+}
+
+/// A generic object applied to a type parameter (`Selection<T>`): named through its alias by the
+/// compiler (ADR-058 section 4).
+fn object_application(path: &syn::TypePath) -> Option<KType> {
+    if path.qself.is_some() {
+        return None;
+    }
+    let last = path.path.segments.last()?;
+    if NOT_OBJECTS.contains(&last.ident.to_string().as_str()) {
+        return None;
+    }
+    let args = type_args(last, &Type::Path(path.clone())).ok()?;
+    (!args.is_empty() && is_application(&args))
+        .then(|| KType::ObjectOf(Box::new(Type::Path(path.clone()))))
 }
 
 /// `&T` of an object inside a `Vec`: the way to write a list of objects is `Vec<Arc<T>>`.
@@ -695,8 +825,12 @@ fn reference_in_list(reference: &syn::TypeReference, ty: &Type, allow: Allow) ->
 /// `Arc<..>`: an object (`Arc<T>`) or a callback (`Arc<dyn Trait>`), where one may stand.
 fn map_arc(inner: &Type, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result<KType, TyErr> {
     let mut inner = inner;
-    while let Type::Paren(p) = inner {
-        inner = &p.elem;
+    loop {
+        match inner {
+            Type::Paren(p) => inner = &p.elem,
+            Type::Group(g) => inner = &g.elem,
+            _ => break,
+        }
     }
     match inner {
         Type::TraitObject(object) => {
@@ -708,6 +842,9 @@ fn map_arc(inner: &Type, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result<KType, T
                 Callbacks::Param | Callbacks::Inner => Ok(KType::Callback(name)),
                 Callbacks::No => Err(callback_refusal(ty, cx.pos, &name)),
             }
+        }
+        Type::Path(path) if allow.object != Objects::No && object_application(path).is_some() => {
+            Ok(object_application(path).expect("checked"))
         }
         Type::Path(path) => match object_path_name(path) {
             Some(name) if allow.object != Objects::No => Ok(KType::Object(name)),
@@ -1280,6 +1417,7 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
             "this type is not one of the types the schema describes, or is spelled with the wrong number of arguments",
             &format!("write one of the supported types here: {ALLOWED_SET}"),
         )),
+        _ if is_application(&args) => Ok(KType::NamedOf(Box::new(ty.clone()))),
         _ => Err(generic_spelled(ty, last, &args, cx.self_name)),
     }
 }

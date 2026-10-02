@@ -49,6 +49,7 @@ static __UNDRA_META_port_Http: ::undra::meta::PortMeta = ::undra::meta::PortMeta
             is_async: true,
             takes_ctx: false,
             coalesce: false,
+            generic: ::core::option::Option::None,
             docs: "Sends a request.",
         },
         ::undra::meta::MethodMeta {
@@ -64,6 +65,7 @@ static __UNDRA_META_port_Http: ::undra::meta::PortMeta = ::undra::meta::PortMeta
             is_async: true,
             takes_ctx: false,
             coalesce: false,
+            generic: ::core::option::Option::None,
             docs: "",
         },
     ],

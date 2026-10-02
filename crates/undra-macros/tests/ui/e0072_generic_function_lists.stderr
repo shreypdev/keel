@@ -1,0 +1,80 @@
+error: error[undra::E0072]: `generic(U = [..])` on `wrong_parameter`, which has no type parameter `U`
+         = note: the list says which types a type parameter of the function is instantiated with; `wrong_parameter` declares `T`
+         = help: write `generic(T = [Todo, Note])`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072
+  --> tests/ui/e0072_generic_function_lists.rs:21:18
+   |
+21 | #[k::api(generic(U = [Todo]))]
+   |                  ^
+
+error: error[undra::E0072]: `generic(T = [..])` on `no_parameter`, which has no type parameter `T`
+         = note: the list says which types a type parameter of the function is instantiated with; `no_parameter` declares none
+         = help: remove `generic(..)`, or add the type parameter
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072
+  --> tests/ui/e0072_generic_function_lists.rs:27:18
+   |
+27 | #[k::api(generic(T = [Todo]))]
+   |                  ^
+
+error: error[undra::E0072]: the list of `T` on `empty` is empty
+         = note: a generic function crosses once per listed type; with no type it would not cross at all
+         = help: list at least one type, `generic(T = [Todo])`, or remove `#[undra::api]` if the function is not for the platforms
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072
+  --> tests/ui/e0072_generic_function_lists.rs:33:18
+   |
+33 | #[k::api(generic(T = []))]
+   |                  ^
+
+error: error[undra::E0072]: `Todo` is listed twice for `T` on `repeated`
+         = note: each listed type becomes one function, `repeated<Todo>`, and two functions cannot share that name
+         = help: remove one of them
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072
+  --> tests/ui/e0072_generic_function_lists.rs:39:29
+   |
+39 | #[k::api(generic(T = [Todo, Todo]))]
+   |                             ^^^^
+
+error: error[undra::E0072]: `Vec<Todo>` cannot be listed for `T` on `unnamed`
+         = note: each instantiation is presented under the name of its type (`draft(Todo.self)` in Swift, `draft(Todo::class)` in Kotlin, `draft("Todo")` in TypeScript), so a listed type is a value type declared with `#[undra::api]`: a record, an enum, a newtype or a named instantiation
+         = help: list the element type and write `Vec<T>` in the signature, or give the type a name: `#[undra::api] pub struct Todos(pub Vec<Todo>);`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072
+  --> tests/ui/e0072_generic_function_lists.rs:45:23
+   |
+45 | #[k::api(generic(T = [Vec<Todo>, u32, String, Arc<Todo>]))]
+   |                       ^^^^^^^^^
+
+error: error[undra::E0072]: `u32` cannot be listed for `T` on `unnamed`
+         = note: each instantiation is presented under the name of its type (`draft(Todo.self)` in Swift, `draft(Todo::class)` in Kotlin, `draft("Todo")` in TypeScript), so a listed type is a value type declared with `#[undra::api]`: a record, an enum, a newtype or a named instantiation
+         = help: list the element type and write `Vec<T>` in the signature, or give the type a name: `#[undra::api] pub struct Todos(pub Vec<Todo>);`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072
+  --> tests/ui/e0072_generic_function_lists.rs:45:34
+   |
+45 | #[k::api(generic(T = [Vec<Todo>, u32, String, Arc<Todo>]))]
+   |                                  ^^^
+
+error: error[undra::E0072]: `String` cannot be listed for `T` on `unnamed`
+         = note: each instantiation is presented under the name of its type (`draft(Todo.self)` in Swift, `draft(Todo::class)` in Kotlin, `draft("Todo")` in TypeScript), so a listed type is a value type declared with `#[undra::api]`: a record, an enum, a newtype or a named instantiation
+         = help: list the element type and write `Vec<T>` in the signature, or give the type a name: `#[undra::api] pub struct Todos(pub Vec<Todo>);`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072
+  --> tests/ui/e0072_generic_function_lists.rs:45:39
+   |
+45 | #[k::api(generic(T = [Vec<Todo>, u32, String, Arc<Todo>]))]
+   |                                       ^^^^^^
+
+error: error[undra::E0072]: `Arc<Todo>` cannot be listed for `T` on `unnamed`
+         = note: each instantiation is presented under the name of its type (`draft(Todo.self)` in Swift, `draft(Todo::class)` in Kotlin, `draft("Todo")` in TypeScript), so a listed type is a value type declared with `#[undra::api]`: a record, an enum, a newtype or a named instantiation
+         = help: list the element type and write `Vec<T>` in the signature, or give the type a name: `#[undra::api] pub struct Todos(pub Vec<Todo>);`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072
+  --> tests/ui/e0072_generic_function_lists.rs:45:47
+   |
+45 | #[k::api(generic(T = [Vec<Todo>, u32, String, Arc<Todo>]))]
+   |                                               ^^^^^^^^^
+
+error: error[undra::E0072]: `link` has two type parameters, `A` and `B`
+         = note: a generic function crosses with one type parameter: each listed type is one function, and several parameters would need a list of pairs
+         = help: keep one parameter generic and write the other type out, or declare one function per pair
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072
+  --> tests/ui/e0072_generic_function_lists.rs:52:12
+   |
+52 | pub fn link<A, B>(a: A, b: B) -> u32 {
+   |            ^^^^^^

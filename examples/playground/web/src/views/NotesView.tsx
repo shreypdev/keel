@@ -1,7 +1,8 @@
 import { useSignal, useUndra } from "@undra/runtime/react";
-import { Notes } from "@playground/core";
+import { type Note, NoteSelection, Notes, draft as draftRow, newest } from "@playground/core";
 import { useEffect, useState } from "react";
 import { describe } from "./LiveView";
+import { SelectionBar } from "./SelectionBar";
 
 type Opening = { readonly kind: "opening" } | { readonly kind: "open"; readonly version: number } | { readonly kind: "failed"; readonly message: string };
 
@@ -12,10 +13,18 @@ type Opening = { readonly kind: "opening" } | { readonly kind: "open"; readonly 
  * dedicated worker over the origin private file system, so the notes survive a reload. The list
  * changes only after the database did: `add` and `toggle` are statements in the core, and the
  * mirror shows their result.
+ *
+ * The strip under the list is the generic code of the core (ADR-058): the ticks live in a `NoteSelection` (the same
+ * `Selection<T>` the to-do screen instantiates for to-dos), "Latest" is `newest("Note", rows)` and "New draft" is
+ * `draft("Note", title)`.
  */
 export function NotesView() {
   const notes = useUndra(Notes);
   const list = useSignal(notes?.notes);
+  const selection = useUndra(NoteSelection);
+  const picked = useSignal(selection?.rows);
+  const pickedCount = useSignal(selection?.count);
+  const [latest, setLatest] = useState<Note | null>(null);
   const [opening, setOpening] = useState<Opening>({ kind: "opening" });
   const [draft, setDraft] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
@@ -35,6 +44,19 @@ export function NotesView() {
       current = false;
     };
   }, [notes]);
+
+  useEffect(() => {
+    let current = true;
+    newest("Note", list ?? []).then(
+      (row) => {
+        if (current) setLatest(row);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [list]);
 
   const run = (work: () => Promise<unknown>): void => {
     work().then(
@@ -83,9 +105,29 @@ export function NotesView() {
               {problem}
             </p>
           )}
+          {selection !== undefined && (
+            <SelectionBar
+              kind="note"
+              count={pickedCount}
+              latest={latest?.title ?? null}
+              picked={(picked ?? []).map((note) => ({ key: String(note.id), title: note.title }))}
+              onSelectAll={() => void selection.selectAll(list ?? [])}
+              onClear={() => void selection.clear()}
+              // A draft is a note the core made but did not store: it is ticked, not saved to the database.
+              onNew={() => void draftRow("Note", draft.trim() === "" ? "Untitled" : draft.trim()).then((row) => selection.toggle(row))}
+            />
+          )}
           <ul className="list">
             {(list ?? []).map((note) => (
               <li key={String(note.id)} data-testid="notes-item">
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${note.title}`}
+                  checked={(picked ?? []).some((row) => row.id === note.id)}
+                  disabled={selection === undefined}
+                  data-testid="notes-select"
+                  onChange={() => void selection?.toggle(note)}
+                />
                 <label>
                   <input type="checkbox" data-testid="notes-toggle" checked={note.done} onChange={() => run(() => notes.toggle(note.id))} />
                   <span className={note.done ? "done" : undefined}>{note.title}</span>

@@ -1,21 +1,43 @@
 import { UndraCallError } from "@undra/runtime";
-import { useSignal } from "@undra/runtime/react";
-import { type Filter, TodoError, type Todos } from "@playground/core";
-import { useState } from "react";
+import { useSignal, useUndra } from "@undra/runtime/react";
+import { type Filter, TodoError, TodoSelection, type Todo, type Todos, draft as draftRow, newest } from "@playground/core";
+import { useEffect, useState } from "react";
+import { SelectionBar } from "./SelectionBar";
 
 const FILTERS: readonly Filter[] = ["all", "active", "done"];
 
 /**
  * The `Todos` store. `visible` and `remaining` are computed in the core and arrive in the same
  * change-set as the write that changed them; this view only reads them.
+ *
+ * The strip under the list is the generic code of the core (ADR-058): the ticks live in a `TodoSelection` (this view
+ * owns it), the "Latest" line is `newest("Todo", rows)` and "New draft" is `draft("Todo", title)`.
  */
 export function TodosView({ todos }: { readonly todos: Todos }) {
   const visible = useSignal(todos.visible);
   const filter = useSignal(todos.filter);
   const remaining = useSignal(todos.remaining);
   const everything = useSignal(todos.todos);
+  const selection = useUndra(TodoSelection);
+  const picked = useSignal(selection?.rows);
+  const pickedCount = useSignal(selection?.count);
+  const [latest, setLatest] = useState<Todo | null>(null);
   const [draft, setDraft] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+
+  // The newest to-do is the core's to say: one call of the function `newest`, for the type named first.
+  useEffect(() => {
+    let current = true;
+    newest("Todo", everything).then(
+      (row) => {
+        if (current) setLatest(row);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [everything]);
 
   const add = async (): Promise<void> => {
     try {
@@ -72,12 +94,43 @@ export function TodosView({ todos }: { readonly todos: Todos }) {
           Clear done
         </button>
       </div>
+      {selection !== undefined && (
+        <SelectionBar
+          kind="todo"
+          count={pickedCount}
+          latest={latest?.title ?? null}
+          picked={(picked ?? []).map((todo) => ({ key: todo.id, title: todo.title }))}
+          onSelectAll={() => void selection.selectAll(visible)}
+          onClear={() => void selection.clear()}
+          // A draft is a to-do the core made but did not store: it is ticked, not added to the list.
+          onNew={() => void draftRow("Todo", draft.trim() === "" ? "Untitled" : draft.trim()).then((row) => selection.toggle(row))}
+        >
+          <button
+            disabled={(pickedCount ?? 0) === 0}
+            data-testid="todo-remove-selected"
+            onClick={() => {
+              for (const todo of picked ?? []) void todos.remove(todo.id);
+              void selection.clear();
+            }}
+          >
+            Remove selected
+          </button>
+        </SelectionBar>
+      )}
       {visible.length === 0 ? (
         <p className="empty">{everything.length === 0 ? "Nothing to do. Add something above." : `No ${filter} items.`}</p>
       ) : (
         <ul className="list">
           {visible.map((todo) => (
             <li key={todo.id} data-testid="todo-item" data-done={todo.done}>
+              <input
+                type="checkbox"
+                aria-label={`Select ${todo.title}`}
+                checked={(picked ?? []).some((row) => row.id === todo.id)}
+                disabled={selection === undefined}
+                data-testid="todo-select"
+                onChange={() => void selection?.toggle(todo)}
+              />
               <label>
                 <input type="checkbox" checked={todo.done} data-testid="todo-toggle" onChange={() => void todos.toggle(todo.id)} />
                 <span className={todo.done ? "done" : undefined}>{todo.title}</span>

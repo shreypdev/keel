@@ -30,7 +30,9 @@ use undra_meta::{
 };
 
 use crate::emit::CodeWriter;
-use crate::model::{self, Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, parse_message};
+use crate::model::{
+    self, Callee, Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, parse_message,
+};
 
 #[path = "kotlin_callbacks.rs"]
 mod callbacks;
@@ -948,7 +950,7 @@ impl KtGen<'_> {
                         for method in o.constructors.iter().chain(&o.methods) {
                             w.line(format!(
                                 "const val {}: UInt = {}",
-                                naming::upper_snake(&method.name),
+                                naming::upper_snake(&method.names().id),
                                 hex(method.method_id)
                             ));
                         }
@@ -960,7 +962,7 @@ impl KtGen<'_> {
                 for f in &m.functions {
                     w.line(format!(
                         "const val {}: UInt = {}",
-                        naming::upper_snake(&f.name),
+                        naming::upper_snake(&f.names().id),
                         hex(f.method_id)
                     ));
                 }
@@ -1591,7 +1593,7 @@ impl<'a> Ctx<'a> {
                         w,
                         &callable,
                         &Site::Method {
-                            id: format!("{ids}.{}", naming::upper_snake(&m.name)),
+                            id: format!("{ids}.{}", naming::upper_snake(&m.names().id)),
                             owner: o.name.clone(),
                         },
                     );
@@ -1807,7 +1809,7 @@ impl<'a> Ctx<'a> {
     }
 
     fn function(&mut self, w: &mut CodeWriter, f: &FunctionDef, ids: &str) {
-        let id = format!("{ids}.{}", naming::upper_snake(&f.name));
+        let id = format!("{ids}.{}", naming::upper_snake(&f.names().id));
         self.callable(w, &Callable::from_function(f), &Site::Function { id });
     }
 
@@ -1833,7 +1835,7 @@ impl<'a> Ctx<'a> {
                     format!("CallTarget.ObjectMethod(Handle(this.handle), {id})"),
                     id.clone(),
                     false,
-                    format!("{owner}.{}", naming::camel(c.name)),
+                    format!("{owner}.{}", naming::camel(c.native)),
                 )
             }
             Site::Function { id } => (
@@ -1841,11 +1843,19 @@ impl<'a> Ctx<'a> {
                 format!("CallTarget.FreeFunction({id})"),
                 id.clone(),
                 true,
-                naming::camel(c.name),
+                naming::camel(c.native),
             ),
         };
         self.import("dev.undra.runtime.wire.Payloads.CallTarget");
         let mut params = self.param_list(c.params);
+        // An instantiation of a generic function whose type parameter no argument fixes names it in
+        // a leading parameter that is never encoded: `draft(type: KClass<Todo>)` (ADR-058).
+        if let Some(token) = c.token {
+            self.import("kotlin.reflect.KClass");
+            let token_name = naming::avoid("type", &taken_refs);
+            let shown = self.ty(&TypeRef::Named(token.to_owned()), &Shadow::new());
+            params.insert(0, format!("{token_name}: KClass<{shown}>"));
+        }
         if is_function {
             self.import("dev.undra.runtime.UndraCore");
             params.push(format!("{core}: UndraCore = {}", self.g.default_core()));
@@ -1875,7 +1885,14 @@ impl<'a> Ctx<'a> {
             }
         }
         kdoc(w, c.docs, &extra);
-        let name = ident(c.name);
+        // Each instantiation of a generic function is an overload of the function's own name; the
+        // JVM signatures of two of them may be the same after erasure (`List<Todo>` and
+        // `List<Note>`), so every one has a JVM name of its own, whether or not it needs it: the
+        // output does not depend on which types erase alike (ADR-058).
+        if let Some(jvm_name) = &c.jvm_name {
+            w.line(format!("@JvmName({})", kt_string(jvm_name)));
+        }
+        let name = ident(c.native);
 
         let lent = objects::lent(c.params, &taken_refs);
         let object_args = objects::object_args(c.params);
@@ -2315,7 +2332,14 @@ impl<'a> Ctx<'a> {
 
 /// A method or free function, whichever the schema calls it.
 struct Callable<'a> {
-    name: &'a str,
+    /// What the native name derives from: the generic function's own name for an instantiation
+    /// (ADR-058), the schema name otherwise.
+    native: &'a str,
+    /// The type a leading `KClass` token names, for an instantiation of a generic function whose
+    /// type parameter no argument fixes.
+    token: Option<&'a str>,
+    /// The JVM name of an instantiation (`newestTodo`).
+    jvm_name: Option<String>,
     params: &'a [ParamDef],
     returns: &'a TypeRef,
     is_async: bool,
@@ -2327,8 +2351,11 @@ struct Callable<'a> {
 
 impl<'a> Callable<'a> {
     fn from_method(m: &'a MethodDef) -> Self {
+        let names = model::names(&m.name, m.generic.as_ref());
         Callable {
-            name: &m.name,
+            native: names.native,
+            token: names.token,
+            jvm_name: names.generic.map(|_| naming::camel(&names.id)),
             params: &m.params,
             returns: &m.returns,
             is_async: m.is_async,
@@ -2338,8 +2365,11 @@ impl<'a> Callable<'a> {
     }
 
     fn from_function(f: &'a FunctionDef) -> Self {
+        let names = model::names(&f.name, f.generic.as_ref());
         Callable {
-            name: &f.name,
+            native: names.native,
+            token: names.token,
+            jvm_name: names.generic.map(|_| naming::camel(&names.id)),
             params: &f.params,
             returns: &f.returns,
             is_async: f.is_async,
