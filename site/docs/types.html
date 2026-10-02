@@ -91,7 +91,11 @@ const all: Map&lt;AccountId, Price&gt; = await balances();</code></pre></div>
 <p>Swift and Kotlin add <code>Comparable</code> when the wrapped type has an order that means something (numbers, strings, dates, durations, decimals). A <code>Uuid</code> gets none: Foundation's <code>UUID</code> is comparable only from iOS 17. No literal conformances are generated, because a literal that becomes an <code>AccountId</code> is what the type is there to prevent.</p>
 <p>Wrapping a field you already persist in a newtype needs no migration code: the bytes are the same, so an old snapshot or cached query result reads back as it was.</p>
 
-<h2 id="generic-data-types">Generic data types<a class="anchor" href="#generic-data-types" aria-label="Link to this section">#</a></h2>
+<h2 id="generics">Generics<a class="anchor" href="#generics" aria-label="Link to this section">#</a></h2>
+
+<p>Generic code crosses as named instantiations: you list the types, the platforms get an ordinary function, record, class or store for each. Data types first; <a href="generics.html">generic functions, objects and stores</a> follow, with the limits.</p>
+
+<h3 id="generic-data-types">Generic data types</h3>
 
 <p>The schema describes concrete types, so a generic struct or enum is a <em>template</em> that registers nothing, and each use is a named instantiation. The name is yours and stays stable, which is what the generated Swift, Kotlin and TypeScript need.</p>
 <details class="reveal-code"><summary>Show the Rust code</summary>
@@ -115,7 +119,24 @@ pub enum Loadable&lt;T&gt; {
 pub fn statement(ctx: &amp;Ctx, account: AccountId, offset: u32, limit: u32) -&gt; EntrySlice { .. }</code></pre></div>
 </details>
 <p>On every platform <code>EntrySlice</code> is an ordinary record and <code>LoadableEntries</code> an ordinary enum, byte for byte what you would get by writing them out. Signatures spell the alias; writing <code>Slice&lt;Entry&gt;</code> in one is <a href="errors.html#E0002">E0002</a> and the message says which alias to declare. An alias lives in the crate of its template (a second one for the same instantiation is <a href="errors.html#E0070">E0070</a>), and its arguments are concrete types, other aliases and newtypes included.</p>
-<p>Generic objects, stores, functions, methods, ports, callbacks and queries stay out: each would need a dispatcher per instantiation. Type parameters are all a template takes; lifetimes are <a href="errors.html#E0003">E0003</a>, const generics and <code>where</code> clauses <a href="errors.html#E0002">E0002</a>.</p>
+<h3 id="generic-code">Generic functions, methods, objects and stores</h3>
+
+<p>The same shape, one level up (ADR-058). A function lists its types, <code>#[undra::api(generic(T = [Todo, Note]))]</code>, and each is one function: Swift and Kotlin overload it, TypeScript takes the type's name first (<code>newest("Todo", rows)</code>). An object or a store over a type parameter is a template, <code>#[undra::api(store, generic)] impl&lt;T: Row&gt; Selection&lt;T&gt;</code>, and each alias, <code>#[undra::api] pub type TodoSelection = Selection&lt;Todo&gt;;</code>, is an ordinary store of that name with its own type id, handles, signals and snapshot. <a href="generics.html">The guide</a> has the Rust and what Swift, Kotlin and TypeScript call, and where to put the alias.</p>
+
+<h3 id="generics-limits">What is not there</h3>
+
+<div class="table-wrap"><table><thead><tr><th>Refused</th><th>Code</th><th>Why, and what would lift it</th></tr></thead><tbody>
+<tr><td>A generic function with no list (an open-ended <code>T</code>)</td><td><a href="errors.html#E0002">E0002</a></td><td>Callers are on the platforms, so the core must contain what they can call. Nothing lifts it: this is the design.</td></tr>
+<tr><td>Two type parameters on a function or method</td><td><a href="errors.html#E0072">E0072</a></td><td>Each listed type is one function; two parameters need pairs, which need a syntax and names for pairs on the platforms.</td></tr>
+<tr><td>A scalar, a <code>String</code>, a container or an object in a function's list</td><td><a href="errors.html#E0072">E0072</a></td><td>An instantiation is presented under the type's name; unnamed types would need naming rules in three languages. Wrap it in a newtype.</td></tr>
+<tr><td>A generic method inside a generic object</td><td><a href="errors.html#E0074">E0074</a></td><td>An instantiation is one class; a second list multiplies it. Tests only: the expansion composes.</td></tr>
+<tr><td>A generic constructor</td><td><a href="errors.html#E0002">E0002</a></td><td>A constructor returns the object, whose type has no such parameter.</td></tr>
+<tr><td>Generic queries and mutations</td><td><a href="errors.html#E0002">E0002</a></td><td>A query is cached, persisted and invalidated under one name and key; instantiations need keys and handle names of their own.</td></tr>
+<tr><td>Generic ports, callback traits and error enums</td><td><a href="errors.html#E0002">E0002</a></td><td>The platform implements a port once, by the trait's name, and an error is thrown by name; named instantiations of traits would lift it.</td></tr>
+<tr><td>An alias in another crate than its template</td><td><a href="errors.html#E0070">E0070</a></td><td>The instantiation implements the boundary traits for the template's type, which only its crate may do.</td></tr>
+<tr><td>Native generics: <code>func newest&lt;T&gt;</code>, <code>Selection&lt;Todo&gt;</code> as a generic class</td><td>none</td><td>The schema would need type parameters and described type sets. The overloads stay source-compatible with that.</td></tr>
+</tbody></table></div>
+<p>Lifetimes are <a href="errors.html#E0003">E0003</a> and const generics <a href="errors.html#E0002">E0002</a>, as before; bounds and <code>where</code> clauses are yours and are checked at the alias, by <code>rustc</code>.</p>
 
 <h2 id="decimal">Decimal, for money<a class="anchor" href="#decimal" aria-label="Link to this section">#</a></h2>
 
@@ -138,7 +159,7 @@ pub fn statement(ctx: &amp;Ctx, account: AccountId, offset: u32, limit: u32) -&g
     <a class="next" href="paging.html"><span>Next</span><b>Paging and lazy lists</b></a>
   </nav>
   </main>
-  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#newtypes">Newtypes</a></li><li><a href="#generic-data-types">Generic data types</a></li><li><a href="#decimal">Decimal, for money</a></li><li><a href="#types-from-other-crates">Types from other crates</a></li></ul></aside>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#newtypes">Newtypes</a></li><li><a href="#generics">Generics</a></li><li><a href="#decimal">Decimal, for money</a></li><li><a href="#types-from-other-crates">Types from other crates</a></li></ul></aside>
 </div>
 <footer class="site-footer">
   <div class="wrap">

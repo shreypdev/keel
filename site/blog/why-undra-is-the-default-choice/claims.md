@@ -56,7 +56,7 @@ fetched and searched. Verdicts:
 | MI03 | Since then every code piece of the v1.x program has merged, each feature after an adversarial review recorded in the repository. *Was: "Since then the pieces below have merged, each after an adversarial review"* | stat:512 ("Every code piece of the v1.1/v1.2 program is merged"); stat:305-512, one review per feature row | REPO | A | **corrected**: two small fix pieces merged without a review (swift-fs, stat:400; dev-reload-flake, stat:462), so "each" is scoped to features |
 | MI07 | At the last merge the contract grid passed 95 of 95 cells over 33 scenarios | stat:511 ("contracts 95/95 (S01–S33)"); sc:561, :578 (S21 and S22 are TypeScript only: 31 × 3 + 2 = 95) | REPO | fact-check | **added**; verified stat:511 |
 | MI08 | the test suites ran 3,536 Rust, 1,856 TypeScript, 881 Kotlin, 870 Swift and 110 React Native tests | stat:511 ("Rust 3,536 · TS 1,856 + 37 · Kotlin 881 + 32 · Swift 870 · RN 110"; the +37 and +32 are separate suites the post does not count) | REPO | fact-check | **added**; verified stat:511 |
-| MI04 | Counting again today: 27 solved, 6 partial, 2 open and 1 left out by decision. *Was: 22 solved, 7 partial, 6 open* | section 11, re-derived row by row against `main` `da4fbbe` | DER | A-judge | **corrected**: six rows moved with what merged after the draft (T10, T13, T17, T22, T23, T33) |
+| MI04 | Counting again today: 28 solved, 5 partial, 2 open and 1 left out by decision. *Was: 27 solved, 6 partial, 2 open (22 solved, 7 partial, 6 open in the draft)* | section 11, re-derived row by row against `main` `da4fbbe` | DER | A-judge | **corrected**: six rows moved with what merged after the draft (T10, T13, T17, T22, T23, T33); T22 moved again with ADR-058 (generic functions, objects and stores), partial to solved |
 | MI05 | The table groups the 36 rows into 12 classes | the row labels cover 1-36 once each: 3-6, 1-2, 21-23, 7-10, 11/12/14, 15-16, 18-19, 20/24/30, 25-29 + 36, 31-32, 13/17/33/34, 35 | REPO | A | verified (counted: 4+2+3+4+3+2+2+3+6+2+4+1 = 36) |
 | MI06 | It leaves out Crux, which its own post covers | `site/blog/undra-vs-uniffi-and-crux/index.html` | REPO | A | verified |
 
@@ -103,7 +103,7 @@ fetched and searched. Verdicts:
 | M03-F2 | React Native native modules need a spec and code per platform | R5 turbo-native-modules-introduction | DOC | A-cat | verified R5: "define a typed JavaScript specification"; "write your native platform code using the generated interfaces" |
 | M03-N1 | Undra: records, enums and errors become native sum types | SPEC §10.1-10.3 (:753-886); docs/ERRORS.md:11-19 | REPO | A | verified |
 | M03-N2 | no Objective-C | SPEC §10.1 (:753); cat:123 (E1) | REPO | A | verified |
-| M03-N3 | Solved: objects cross as parameters and returns; the core calls host callbacks; newtypes stay typed. Partly: generics, one named type per instantiation, and no generic functions or objects. *Was: "Not yet: objects, callbacks, generics, newtypes"* | adr-040, adr-041, adr-042 (Status: Accepted, line 3); stat:482 (objects-callbacks), :500 (types-paging), :509 (follow-ups); SPEC:887 (§10.3a), :942 (§10.3b), :1051 (E0002 now names the instantiation route), :1079 (E0064: an object crosses as `Arc<T>` or `&T`); types.html:96-118; sc:705 (S27), :748 (S28), :861 (S31) | REPO | fact-check | **corrected**: all three ADRs shipped after the draft; generics are partial (types.html:118: "Generic objects, stores, functions, methods, ports, callbacks and queries stay out") |
+| M03-N3 | Solved: objects cross as parameters and returns; the core calls host callbacks; newtypes stay typed; generics cross as declared instantiations, functions as overloads and objects and stores as one class per alias. *Was: "Partly: generics, one named type per instantiation, and no generic functions or objects"* | adr-040, adr-041, adr-042, adr-058 (Status: Accepted, line 3); stat:482 (objects-callbacks), :500 (types-paging), :509 (follow-ups); SPEC:887 (§10.3a), :942 (§10.3b), :966 (§10.3d), :1075 (E0002), :1079 (E0064: an object crosses as `Arc<T>` or `&T`), :1108 (E0072), :1110 (E0074); types.html:94-140 (Generics), generics.html; sc:705 (S27), :748 (S28), :861 (S31), :935 (S34) | REPO | A | **corrected** (stale after ADR-058): the generics of the row are the declared ones; native generic types, an open-ended type parameter and generic queries, ports and callbacks are what types.html:126 ("What is not there") lists |
 
 ### Class 4: Data layer (rows 7 to 10)
 
@@ -339,7 +339,7 @@ fetched and searched. Verdicts:
 | O01 | Objects cannot cross as parameters or return values, and host callbacks cannot be arguments | was: SPEC E0064, E0004 | REPO | A | **removed**: false since ADR-040 and ADR-041 merged (stat:482; SPEC:1079 now says an object crosses as `Arc<T>` or `&T`) |
 | O02 | a UniFFI crate meets both on day one | was: from-uniffi.html | REPO | A | **removed**: no longer applies; the guide's own sentence was corrected in this pass |
 | O03 | ADR-040 to 042 propose the changes and none has shipped | was: Status Proposed | REPO | A | **removed**: all three Accepted and merged (stat:482, :500) |
-| O34 | Generic functions and objects: a generic record or enum crosses as one named type per instantiation; generic objects, stores, functions and methods do not cross | types.html:96-118; SPEC:1051 (E0002) | REPO | fact-check | **added**; verified types.html:118 |
+| O34 | Generics are declared, not open-ended: generic records, enums, functions, methods, objects and stores cross as the instantiations you list; a type parameter with no list, native generic types, and generic queries, ports and callbacks do not | types.html:126-140 ("What is not there"); generics.html; SPEC:1075 (E0002), :1108 (E0072), :1110 (E0074); adr-058 §6 | REPO | A | **corrected** (stale after ADR-058; was: "generic objects, stores, functions and methods do not cross"); verified types.html:126 |
 | O04 | the pagination recipe builds an infinite list on a keyed list | pagination.html | REPO | A | **removed** with its bullet: true, but no longer an open item (pagination.html:186 now points at `infinite` queries and `Lazy<T>`) |
 | O05 | there is no paged query type and no interval refetch | was: pagination.html; q:33-36 | REPO | A | **removed**: false since ADR-043 (stat:500; q:37-56) |
 | O06 | ADR-043 proposes both | was: Status Proposed | REPO | A | **removed**: Accepted and merged |
@@ -378,7 +378,7 @@ fetched and searched. Verdicts:
 | ID | Claim as written | Source | Basis | Checked by | Fact-check |
 |---|---|---|---|---|---|
 | C01 | Default is a claim about which question comes first, not about every team | editorial | DER | A-judge | verified (editorial) |
-| C02 | the open rows above are few enough to check against your own requirements in an afternoon | today's tally: 2 open rows, 6 partial (section 11) | DER | A-judge | verified (judgement; the tally it rests on is re-derived) |
+| C02 | the open rows above are few enough to check against your own requirements in an afternoon | today's tally: 2 open rows, 5 partial (section 11) | DER | A-judge | verified (judgement; the tally it rests on is re-derived) |
 | C03 | start with L1: move one function, call it from Swift, Kotlin and TypeScript | from-kmp.html ("Move one function, call it from Kotlin and Swift, ship") | REPO | A | verified (advice; the guide names Kotlin and Swift, the post adds TypeScript) |
 
 ## 8. Links the post makes (not factual claims)
@@ -424,7 +424,7 @@ site-relative link.
 ## 11. The 36-row tally behind MI02 and MI04
 
 "1 Oct" is the catalogue's "Undra today" column (cat:382-417; row 2 "yes native, part. web" counted as yes). "Today" is the fact-check's reading
-of `main` `da4fbbe`. Counts: 1 Oct = 10 yes, 9 part., 16 no, 1 n/a. **Today = 27 solved, 6 partial, 2 open, 1 n/a** (the draft's 22 / 7 / 6 / 1
+of `main` `da4fbbe`. Counts: 1 Oct = 10 yes, 9 part., 16 no, 1 n/a. **Today = 28 solved, 5 partial, 2 open, 1 n/a** (T22 moved with ADR-058, after `da4fbbe`; the draft's 22 / 7 / 6 / 1
 was right for `d1b35b5`; six rows moved with the pieces merged after it).
 
 | ID | Row (cat) | 1 Oct | Today | Evidence for "today" | Basis | Checked by | Fact-check |
@@ -450,7 +450,7 @@ was right for `d1b35b5`; six rows moved with the pieces merged after it).
 | T19 | 19 Deterministic tests (virtual time, fake I/O) | yes | solved | cat:141 (E19); adr-055 | REPO | A | verified |
 | T20 | 20 Compatibility check between bindings and library | yes | solved | SPEC:151; sc:396 (S16) | REPO | A | verified |
 | T21 | 21 Generated Swift passes native review | yes | solved (judgement) | CLAUDE.md:14 (R3); `crates/undra-bindgen/tests/golden/`; adr-032, adr-045 | DER | A-judge | verified (judgement) |
-| T22 | 22 Generics across the boundary | no | **partial** (was open) | adr-042 (Accepted); types.html:96-118 (named instantiations; generic objects, functions and methods stay out); sc:861 (S31) | REPO | fact-check | **corrected** |
+| T22 | 22 Generics across the boundary | no | **solved** (declared instantiations; was partial) | adr-042, adr-058 (Accepted); types.html:94-140; generics.html; sc:861 (S31), :935 (S34); SPEC:966 (§10.3d). Caveat: instantiations are listed, not open-ended; no native generic types | REPO | A | **corrected** (stale after ADR-058: partial to solved) |
 | T23 | 23 Objects, callbacks and listeners as arguments and returns | part. | **solved** (was partial) | adr-040, adr-041 (Accepted); sc:705 (S27), :748 (S28); objects.html, callbacks.html; stat:482, :509 | REPO | fact-check | **corrected** |
 | T24 | 24 Supports iOS 15 and 16 | no | solved (caveat) | adr-045; rev:ios-floor; stat:463. Caveat: no iOS 15/16 runtime has run it | REPO | A | verified |
 | T25 | 25 First-party web target with a DOM UI | yes | solved | cat:131 (E9); web.html | REPO | A | verified |

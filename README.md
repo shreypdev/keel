@@ -218,7 +218,10 @@ Added since, each with its page:
   that replay in tests on Swift, Kotlin, TypeScript and Rust: [docs/TESTING.md](docs/TESTING.md).
 * **iOS 15 and 16** — a lower deployment target generates `ObservableObject` stores; proven by compilation and a
   runtime probe on iOS 26.5, not yet on an iOS 15 or 16 runtime: [docs/IOS_15_16.md](docs/IOS_15_16.md).
-* Also: objects and host callbacks across the boundary, newtypes, generics and `Decimal`, paged and lazy lists,
+* **Generics** — a generic record, enum, function, method, object or store crosses as the instantiations you list:
+  overloads for functions, one ordinary class per alias for objects and stores. Declared, not open-ended; no native
+  generic types: [Generic functions, objects and stores](https://shreypdev.github.io/undra/docs/generics.html).
+* Also: objects and host callbacks across the boundary, newtypes and `Decimal`, paged and lazy lists,
   polling, panic reports with symbolication, background runs, several cores in one app, and a
   [cookbook](https://shreypdev.github.io/undra/docs/cookbook/) with a sample app.
 
@@ -228,8 +231,6 @@ Open, with the work done around it (the same list as the [roadmap](https://shrey
 
 * Benchmark rows from physical phones; today's device rows are a simulator, an emulator and headless Chromium.
 * The JavaScript runtime at 16 KB (it sits at its 22.1 KB gate).
-* Generic functions and objects across the boundary (a generic record or enum crosses as one named type per
-  instantiation).
 * Query handles across an `undra dev` reload (stores survive; query handles need a decision record).
 * The `undra-compose` and `android-adapters` tests in CI (they pass locally and on the emulator).
 
