@@ -303,10 +303,8 @@ final class RealtimeReviewTests: XCTestCase {
         let binding = WebSocketBinding(adapter: URLSessionWebSocketAdapter())
         defer { binding.detach() }
         let conn = try await binding.connect(url: "\(server.ws)/ws/echo", protocols: [], headers: []).conn
-        let first = await running { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 16) } }
-        await expectThrows(WsError.protocol("a receive is already pending on connection \(conn)")) { () async throws(WsError) -> [WsMessage] in
-            try await binding.receive(conn: conn, max: 16)
-        }
+        let (refused, first) = await firstOfTwo { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 16) } }
+        XCTAssertEqual(refused, .failure(.protocol("a receive is already pending on connection \(conn)")), "the second receive is refused at once")
         try await binding.send(conn: conn, message: .text("one"))
         let answered = try await first.value.get()
         XCTAssertEqual(answered, [.text("one")])

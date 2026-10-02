@@ -202,6 +202,27 @@ func running<Success: Sendable>(_ body: @escaping @Sendable () async -> Success)
     return task
 }
 
+/// Makes the same call twice at once and returns the outcome of the one that finished first, with the other still
+/// running. A binding allows one pending `receive` or `next` per connection, so of two made together the one that
+/// registers second is refused at once and the first waits; which is which depends on scheduling (`running` sees a
+/// task begin, not the binding register its pull, and a preemption between the two made the "second" call the
+/// pending one, waiting for a message that never came). A test asserts on the two outcomes, never on the order.
+func firstOfTwo<Value: Sendable, Failure: Error & Sendable>(
+    _ body: @escaping @Sendable () async -> Result<Value, Failure>
+) async -> (first: Result<Value, Failure>, other: Task<Result<Value, Failure>, Never>) {
+    let done = Locked<[Int: Result<Value, Failure>]>([:])
+    let tasks = [0, 1].map { index in
+        Task { () async -> Result<Value, Failure> in
+            let outcome = await body()
+            done.withLock { $0[index] = outcome }
+            return outcome
+        }
+    }
+    await eventually("one of the two calls to finish") { done.withLock { !$0.isEmpty } }
+    let (index, first) = done.withLock { $0.min { $0.key < $1.key }! }
+    return (first, tasks[1 - index])
+}
+
 /// `running` for a body that throws.
 func runningThrowing<Success: Sendable>(_ body: @escaping @Sendable () async throws -> Success) async -> Task<Success, any Error> {
     let begun = Locked(false)
@@ -326,12 +347,10 @@ final class WebSocketBindingTests: XCTestCase {
         let binding = WebSocketBinding(adapter: adapter)
         let conn = try await binding.connect(url: "ws://x.test", protocols: [], headers: []).conn
         let socket = try XCTUnwrap(adapter.sockets.first)
-        let waiting = await runningThrowing { try await binding.receive(conn: conn, max: 16) }
-        await expectThrows(WsError.protocol("a receive is already pending on connection \(conn)")) { () async throws(WsError) -> [WsMessage] in
-            try await binding.receive(conn: conn, max: 16)
-        }
+        let (refused, waiting) = await firstOfTwo { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 16) } }
+        XCTAssertEqual(refused, .failure(.protocol("a receive is already pending on connection \(conn)")), "the second receive is refused at once")
         socket.push(.text("a"))
-        let first = try await waiting.value
+        let first = try await waiting.value.get()
         XCTAssertEqual(first, [.text("a")], "a pending receive answers as soon as one message is there")
     }
 
