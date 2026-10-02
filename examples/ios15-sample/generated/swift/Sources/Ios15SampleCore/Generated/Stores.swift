@@ -14,7 +14,7 @@ public final class Todos: UndraStore, ObservableObject, @unchecked Sendable {
     /// Computed by the core; read-only.
     @Published public private(set) var remaining: UInt32 = 0
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
