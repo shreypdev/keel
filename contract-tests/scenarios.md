@@ -1,12 +1,13 @@
 # Contract scenarios
 
-This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): thirty-four
-scenarios (S01 to S33 and S35; S34 is not assigned) against the **real playground core** (`examples/playground/core`, the same Rust crate the
-apps run), through the real boundary. S01 to S20, S23 to S33 and S35 run on every platform; S21 and S22 are about
+This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): thirty-five
+scenarios (S01 to S35) against the **real playground core** (`examples/playground/core`, the same Rust crate the
+apps run), through the real boundary. S01 to S20 and S23 to S35 run on every platform; S21 and S22 are about
 the web host (worker mode and crash recovery, ADR-049) and run on TypeScript only. S23 to S25 are the opt-in
 ports of ADR-047 and ADR-048; S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's; S29 and S30 are ADR-046's
 (panic reports and background runs); S31 is ADR-042's (newtypes, generic instantiations, leaf types), S32 and
-S33 are ADR-043's (paged queries and lazy lists, polling) and S35 is ADR-059's (query handles across a restore):
+S33 are ADR-043's (paged queries and lazy lists, polling), S34 is ADR-058's (generic functions, objects and stores)
+and S35 is ADR-059's (query handles across a restore):
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
@@ -15,10 +16,10 @@ S33 are ADR-043's (paged queries and lazy lists, polling) and S35 is ADR-059's (
 | Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI table of the real core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20, S23 to S33 and S35, plus
-S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 98
-cells: 32 on Swift, 32 on Kotlin, 34 on TypeScript. The React Native column (`runtimes/rn`, the TypeScript scenarios
-over its model of the native module) runs S35 too.
+`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S23 to S35, plus
+S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 101
+cells: 33 on Swift, 33 on Kotlin, 35 on TypeScript. The React Native column (`runtimes/rn`, the TypeScript scenarios
+over its model of the native module) runs S34 and S35 too.
 
 ## The harness (the same on every platform)
 
@@ -935,6 +936,33 @@ transport the runner loads, TypeScript counts `Kind.Call` payloads whose first b
 5. **An observer's override.** `setPollInterval(3 s)` on the only observer: once the next fetch has ended, the following gap is at least 2.9 s; `setPollInterval(nil)`
    returns to the query's own second.
 6. **The last observer stops it.** After the handle is closed `ticker_fetches()` does not move for 2.5 s.
+
+### S34 generic functions, objects and stores (ADR-058)
+
+`selection` (`examples/playground/core/src/selection.rs`): the generic functions `newest` and `draft`, each listed for `Todo` and `Note`, the
+generic store `Selection<T>` (the aliases `TodoSelection` and `NoteSelection`: two stores, two type ids) and the generic object `Recent<T>` (the
+alias `RecentTodos`, returned by `recent_todos`). Every step goes through the **generated** API (the raw API where a step says so). The
+platforms spell a generic function as overloads (Swift `newest(rows:)`, `draft(Todo.self, title:)`; Kotlin `newest(rows)`, `draft(Todo::class, title)`;
+TypeScript `newest("Todo", rows)`, `draft("Todo", title)`); the rows of the steps have the identities named by their counter (a to-do's `Uuid` holds it in
+its first eight bytes, big-endian; a note's `id` is it).
+
+1. **A generic function is one function per type.** `newest` of the to-dos with counters 5, 9 and 7 is the one with counter 9; of the notes with
+   counters 2 and 1 it is the one with counter 2 (a `Note`, not a `Todo`); of an empty list of either type it is nothing.
+2. **A type that no argument names is named by the caller.** `draft(Todo.self, "first")` and a second `draft` of the same type return rows
+   titled as asked, not done, with different ids; `draft(Note.self, "a note")` returns a `Note`; `newest` of the two drafts is the second.
+3. **Two instantiations are two stores.** `TodoSelection` and `NoteSelection` have different handles and different type ids
+   (`UndraIds.Objects.<Name>.typeId`). Toggling a to-do on the to-do selection delivers one change-set whose `rows` entry is a keyed patch of one
+   `Insert` (and whose `count` entry follows), and **nothing** to the note selection; toggling it again delivers one `Remove`; toggling a note
+   delivers one `Insert` to the note selection and nothing to the to-do one.
+4. **Snapshot and restore keep both.** With two to-dos ticked on a `TodoSelection` and one note on a `NoteSelection`, `snapshot`, then clear the
+   first and tick another note, then `restore`: both stores keep their handles and show the snapshot's rows and counts (2 and 1), and keep
+   working, each on its own rows.
+5. **An id that names no instantiation is refused.** A raw free-function call with `fnv1a32("fn.newest<Draft>")` fails as a bad request (status 5;
+   Swift `UndraCallError.refused`, Kotlin `UndraCallError.Refused`; TypeScript `UndraReplyError`), the core is unharmed, and the ids of the
+   instantiations that exist are `fnv1a32("fn.newest<Todo>")` and `fnv1a32("fn.newest<Note>")`.
+6. **A generic object returned from a function is the alias's class.** `recent_todos([1, 2, 3], 2)` is a `RecentTodos` whose `rows()` are the
+   to-dos with counters 3 and 2 and whose `latest()` is the one with 3; `open` of the one with 2 puts it first; a second `recent_todos([], 5)` is another
+   wrapper with no rows, and closing it leaves the first working.
 
 ### S35 query handles across a restore (ADR-059)
 

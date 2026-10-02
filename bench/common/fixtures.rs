@@ -175,6 +175,24 @@ pub fn add_one(n: u32) -> u32 {
     n.wrapping_add(1)
 }
 
+/// What the generic fixture is generic over: plain Rust, invisible to the schema.
+pub trait Step {
+    /// How much `add_one_for` adds.
+    const BY: u32;
+}
+
+impl Step for Record5 {
+    const BY: u32 = 1;
+}
+
+/// `add_one` as an instantiation of a generic function (ADR-058): the same body, called as
+/// `add_one_for<Record5>`. The claim "an instantiation dispatches like a hand-written function" is
+/// the ratio of its row to `add_one`'s (`generic_fn_vs_function`).
+#[undra::api(generic(T = [Record5]))]
+pub fn add_one_for<T: Step>(n: u32) -> u32 {
+    n.wrapping_add(T::BY)
+}
+
 // ---------------------------------------------------------------------------------------------
 // Store fixtures
 // ---------------------------------------------------------------------------------------------

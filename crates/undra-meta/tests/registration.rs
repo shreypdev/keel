@@ -74,6 +74,7 @@ static CALCULATOR: ObjectMeta = ObjectMeta {
         takes_ctx: false,
         coalesce: false,
         docs: "",
+        generic: None,
     }],
     methods: &[MethodMeta {
         name: "add",
@@ -93,6 +94,7 @@ static CALCULATOR: ObjectMeta = ObjectMeta {
         takes_ctx: false,
         coalesce: false,
         docs: "",
+        generic: None,
     }],
     store: None,
     docs: "",
@@ -111,6 +113,7 @@ static COUNTER: ObjectMeta = ObjectMeta {
         takes_ctx: true,
         coalesce: false,
         docs: "",
+        generic: None,
     }],
     methods: &[],
     store: Some(StoreMeta {
@@ -140,6 +143,7 @@ static GREET: FunctionMeta = FunctionMeta {
     takes_ctx: false,
     docs: "Greets.",
     dispatch: dispatch_greet,
+    generic: None,
 };
 
 static CLOCK: PortMeta = PortMeta {
@@ -156,6 +160,7 @@ static CLOCK: PortMeta = PortMeta {
         takes_ctx: false,
         coalesce: false,
         docs: "",
+        generic: None,
     }],
     docs: "",
 };
@@ -363,6 +368,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
         is_async: false,
         takes_ctx,
         docs: String::new(),
+        generic: None,
     };
     by_hand.objects.push(ObjectDef {
         name: "Calculator".into(),
@@ -386,6 +392,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
             takes_ctx: false,
             coalesce: false,
             docs: String::new(),
+            generic: None,
         }],
         store: None,
         docs: String::new(),
@@ -419,6 +426,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
         is_async: false,
         takes_ctx: false,
         docs: "Greets.".into(),
+        generic: None,
     });
     by_hand.ports.push(PortDef {
         name: "Clock".into(),
@@ -434,6 +442,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
             takes_ctx: false,
             coalesce: false,
             docs: String::new(),
+            generic: None,
         }],
         docs: String::new(),
     });

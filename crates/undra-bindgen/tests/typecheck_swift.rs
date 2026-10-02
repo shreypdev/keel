@@ -91,6 +91,7 @@ const CHECKS: &[(&str, &str)] = &[
     ("recursive", "recursive.swift"),
     ("callbacks", "callbacks.swift"),
     ("newtypes", "newtypes.swift"),
+    ("generic_functions", "generic_functions.swift"),
 ];
 
 /// The executable target of a check.

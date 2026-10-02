@@ -1,0 +1,659 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-generic-objects",
+  "records": [
+    {
+      "name": "Todo",
+      "type_id": 2995082141,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ],
+      "docs": "A todo."
+    },
+    {
+      "name": "Note",
+      "type_id": 339788125,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        },
+        {
+          "name": "body",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ],
+      "docs": "A note."
+    },
+    {
+      "name": "TodoPage",
+      "type_id": 3418294094,
+      "fields": [
+        {
+          "name": "items",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Todo"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "next",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false
+        }
+      ],
+      "docs": "A page of todos: `Page<Todo>`."
+    },
+    {
+      "name": "NotePage",
+      "type_id": 1039687950,
+      "fields": [
+        {
+          "name": "items",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Note"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "next",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false
+        }
+      ],
+      "docs": "A page of notes: `Page<Note>`."
+    }
+  ],
+  "enums": [],
+  "objects": [
+    {
+      "name": "TodoCache",
+      "type_id": 2305159965,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 281367381,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "TodoCache"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "put",
+          "method_id": 3408298394,
+          "params": [
+            {
+              "name": "row",
+              "ty": {
+                "kind": "named",
+                "of": "Todo"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Stores a row, replacing the one with its id."
+        },
+        {
+          "name": "get",
+          "method_id": 439140043,
+          "params": [
+            {
+              "name": "id",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "Todo"
+            }
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "all",
+          "method_id": 2460818352,
+          "params": [],
+          "returns": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Todo"
+            }
+          },
+          "is_async": true,
+          "takes_ctx": false
+        }
+      ],
+      "store": null,
+      "docs": "Keeps rows by id."
+    },
+    {
+      "name": "NoteCache",
+      "type_id": 3745172445,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 1523910805,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "NoteCache"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "put",
+          "method_id": 314400986,
+          "params": [
+            {
+              "name": "row",
+              "ty": {
+                "kind": "named",
+                "of": "Note"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Stores a row, replacing the one with its id."
+        },
+        {
+          "name": "get",
+          "method_id": 1681683467,
+          "params": [
+            {
+              "name": "id",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "Note"
+            }
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "all",
+          "method_id": 3703464944,
+          "params": [],
+          "returns": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Note"
+            }
+          },
+          "is_async": true,
+          "takes_ctx": false
+        }
+      ],
+      "store": null,
+      "docs": "Keeps rows by id."
+    },
+    {
+      "name": "TodoSelection",
+      "type_id": 3633018333,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 4211495573,
+          "params": [
+            {
+              "name": "limit",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "named",
+            "of": "TodoSelection"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "toggle",
+          "method_id": 1516553193,
+          "params": [
+            {
+              "name": "row",
+              "ty": {
+                "kind": "named",
+                "of": "Todo"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Ticks a row, or unticks it."
+        },
+        {
+          "name": "contains",
+          "method_id": 4215727804,
+          "params": [
+            {
+              "name": "id",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "bool"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "clear",
+          "method_id": 374891038,
+          "params": [],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "store": {
+        "signals": [
+          {
+            "name": "rows",
+            "signal_id": 0,
+            "ty": {
+              "kind": "vec",
+              "of": {
+                "kind": "named",
+                "of": "Todo"
+              }
+            },
+            "computed": false,
+            "key": "id"
+          },
+          {
+            "name": "count",
+            "signal_id": 1,
+            "ty": {
+              "kind": "u32"
+            },
+            "computed": true,
+            "key": null
+          }
+        ]
+      },
+      "docs": "The rows the user has ticked."
+    },
+    {
+      "name": "NoteSelection",
+      "type_id": 1600009373,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 2690657493,
+          "params": [
+            {
+              "name": "limit",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "named",
+            "of": "NoteSelection"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "toggle",
+          "method_id": 3459740201,
+          "params": [
+            {
+              "name": "row",
+              "ty": {
+                "kind": "named",
+                "of": "Note"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Ticks a row, or unticks it."
+        },
+        {
+          "name": "contains",
+          "method_id": 1886822140,
+          "params": [
+            {
+              "name": "id",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "bool"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "clear",
+          "method_id": 3003433310,
+          "params": [],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "store": {
+        "signals": [
+          {
+            "name": "rows",
+            "signal_id": 0,
+            "ty": {
+              "kind": "vec",
+              "of": {
+                "kind": "named",
+                "of": "Note"
+              }
+            },
+            "computed": false,
+            "key": "id"
+          },
+          {
+            "name": "count",
+            "signal_id": 1,
+            "ty": {
+              "kind": "u32"
+            },
+            "computed": true,
+            "key": null
+          }
+        ]
+      },
+      "docs": "The rows the user has ticked."
+    }
+  ],
+  "functions": [
+    {
+      "name": "open_selection<Todo>",
+      "method_id": 2357620950,
+      "params": [
+        {
+          "name": "limit",
+          "ty": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "object",
+        "of": "TodoSelection"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "open_selection",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Todo"
+            },
+            "inferred": false
+          }
+        ]
+      },
+      "docs": "A fresh selection of rows."
+    },
+    {
+      "name": "open_selection<Note>",
+      "method_id": 2305423466,
+      "params": [
+        {
+          "name": "limit",
+          "ty": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "object",
+        "of": "NoteSelection"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "open_selection",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Note"
+            },
+            "inferred": false
+          }
+        ]
+      },
+      "docs": "A fresh selection of rows."
+    },
+    {
+      "name": "ticked<Todo>",
+      "method_id": 3552809059,
+      "params": [
+        {
+          "name": "selection",
+          "ty": {
+            "kind": "object",
+            "of": "TodoSelection"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "u32"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "ticked",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Todo"
+            },
+            "inferred": true
+          }
+        ]
+      },
+      "docs": "How many rows the selection holds."
+    },
+    {
+      "name": "ticked<Note>",
+      "method_id": 543757859,
+      "params": [
+        {
+          "name": "selection",
+          "ty": {
+            "kind": "object",
+            "of": "NoteSelection"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "u32"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "ticked",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Note"
+            },
+            "inferred": true
+          }
+        ]
+      },
+      "docs": "How many rows the selection holds."
+    },
+    {
+      "name": "page_of<Todo>",
+      "method_id": 2886503668,
+      "params": [
+        {
+          "name": "rows",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Todo"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "kind": "named",
+        "of": "TodoPage"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "page_of",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Todo"
+            },
+            "inferred": true
+          }
+        ]
+      },
+      "docs": "Wraps rows in a page."
+    },
+    {
+      "name": "page_of<Note>",
+      "method_id": 350596800,
+      "params": [
+        {
+          "name": "rows",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Note"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "kind": "named",
+        "of": "NotePage"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "page_of",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Note"
+            },
+            "inferred": true
+          }
+        ]
+      },
+      "docs": "Wraps rows in a page."
+    }
+  ],
+  "ports": [],
+  "queries": []
+}

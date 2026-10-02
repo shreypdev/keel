@@ -1,12 +1,12 @@
 # Contract tests
 
-The definition of "the platforms agree" (SPEC section 14): thirty-four scenarios (S34 is not assigned), run
-against the **real playground core** (`examples/playground/core`) through the real boundary: S01 to S20, S23 to
-S33 (the opt-in ports of ADR-047 and ADR-048, two cores, objects as parameters and returns, host callbacks, the
-panic report and the background run of ADR-046, newtypes, generic instantiations and leaf types, paged queries, lazy
-lists and polling) and S35 (query handles across a restore, ADR-059) by each platform runtime, S21 and S22 (web
-worker mode and crash recovery, ADR-049) by TypeScript only, 98 cells in all (34 on TypeScript, 32 each on Kotlin and
-Swift).
+The definition of "the platforms agree" (SPEC section 14): thirty-five scenarios, run against the **real
+playground core** (`examples/playground/core`) through the real boundary: S01 to S20 and S23 to S35 (the opt-in
+ports of ADR-047 and ADR-048, two cores, objects as parameters and returns, host callbacks, the panic report and
+the background run of ADR-046, newtypes, generic instantiations and leaf types, paged queries, lazy lists and
+polling, generic functions, objects and stores (ADR-058), query handles across a restore (ADR-059)) by each platform
+runtime, S21 and S22 (web worker mode and crash recovery, ADR-049) by TypeScript only, 101 cells in all (35 on
+TypeScript, 33 each on Kotlin and Swift).
 
 | Directory | Platform | Boundary | Run |
 |---|---|---|---|

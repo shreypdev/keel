@@ -42,12 +42,17 @@ use syn::{FnArg, ImplItem, ItemFn, ItemImpl, Pat, ReturnType, Signature, Type, V
 use super::attrs::{Site, docs, is_undra_macro_path, take};
 use super::check::{Checks, panic_text, primary_trait};
 use super::common::{
-    check_generics, derived, item_root, mentions_self, param_meta, send_assertion, submit,
+    GenericOn, check_generics, derived, item_root, mentions_self, param_meta, send_assertion,
+    submit,
 };
-use super::diag::{Diag, Errors, code};
+use super::diag::{Diag, Errors, code, in_instance};
+use super::generic_fn::{self, Label, Plan};
 use super::naming::{fnv1a32, unraw};
 use super::paths::Root;
-use super::types::{Allow, KType, Pos, map_error_type, map_method_return, map_type, ty_string};
+use super::types::{
+    Allow, Applications, KType, Pos, applications, map_error_type, map_method_return, map_type,
+    ty_string,
+};
 
 /// A leading `ctx: Ctx` / `ctx: &Ctx` parameter.
 #[derive(Clone, Copy, Debug)]
@@ -131,7 +136,7 @@ fn object_of(ty: &Type) -> Option<(Type, bool)> {
 /// Reads how a parameter the mapper accepted is spelled.
 fn plan_of(ty: &Type, kty: &KType) -> ParamPlan {
     match kty {
-        KType::Object(_) => match object_of(ty) {
+        KType::Object(_) | KType::ObjectOf(_) => match object_of(ty) {
             Some((elem, true)) => ParamPlan::Object {
                 elem,
                 shape: ObjShape::Ref,
@@ -150,7 +155,7 @@ fn plan_of(ty: &Type, kty: &KType) -> ParamPlan {
             None => ParamPlan::Plain,
         },
         KType::Option(inner) => match (&**inner, sole_arg(ty)) {
-            (KType::Object(_), Some(arg)) => match object_of(arg) {
+            (KType::Object(_) | KType::ObjectOf(_), Some(arg)) => match object_of(arg) {
                 Some((elem, true)) => ParamPlan::Object {
                     elem,
                     shape: ObjShape::OptionRef,
@@ -170,16 +175,18 @@ fn plan_of(ty: &Type, kty: &KType) -> ParamPlan {
             },
             _ => ParamPlan::Plain,
         },
-        KType::Vec(inner) if matches!(**inner, KType::Object(_)) => match sole_arg(ty) {
-            Some(arg) => match object_of(arg) {
-                Some((elem, false)) => ParamPlan::Object {
-                    elem,
-                    shape: ObjShape::VecArc,
+        KType::Vec(inner) if matches!(**inner, KType::Object(_) | KType::ObjectOf(_)) => {
+            match sole_arg(ty) {
+                Some(arg) => match object_of(arg) {
+                    Some((elem, false)) => ParamPlan::Object {
+                        elem,
+                        shape: ObjShape::VecArc,
+                    },
+                    _ => ParamPlan::Plain,
                 },
-                _ => ParamPlan::Plain,
-            },
-            None => ParamPlan::Plain,
-        },
+                None => ParamPlan::Plain,
+            }
+        }
         _ => ParamPlan::Plain,
     }
 }
@@ -222,6 +229,14 @@ pub(crate) struct FnModel {
     /// opening can fail. Only meaningful when `stream_item` is set.
     pub(crate) stream_in_result: bool,
     pub(crate) docs: String,
+    /// What the items generated for this function are named after: its name, or for one
+    /// instantiation of a generic function `newest_of_Todo` (ADR-058).
+    pub(crate) suffix: String,
+    /// The generic arguments of the call the dispatcher makes (`::<Todo>`), for an instantiation of
+    /// a generic function or method.
+    pub(crate) turbofish: Option<TokenStream>,
+    /// The generic function this is an instantiation of.
+    pub(crate) generic: Option<Label>,
 }
 
 /// Whether a returned stream sits on the `Ok` side of a `Result` (its opening can fail).
@@ -320,6 +335,11 @@ fn ctx_kind(ty: &Type) -> Option<(CtxParam, bool)> {
     }
 }
 
+/// Whether `ty` is the `Ctx` parameter of a function (`Ctx` or a reference to it).
+pub(crate) fn is_ctx(ty: &Type) -> bool {
+    ctx_kind(ty).is_some()
+}
+
 fn shape_error(what: String, node: &impl quote::ToTokens, why: &str, help: &str) -> syn::Error {
     Diag::new(code::E0007, what, why, help).on(node)
 }
@@ -365,10 +385,19 @@ fn typed_receiver(fn_name: &str, node: &impl quote::ToTokens, ty: &Type) -> syn:
     .on(node)
 }
 
-/// Checks the generics, receiver and parameters of `sig` and collects the parameters.
-pub(crate) fn analyze(sig: &mut Signature, errors: &mut Errors, site: Kindred) -> Analysis {
+/// Checks the generics, receiver and parameters of `sig` and collects the parameters. `generics`
+/// says what the signature is, for the text of E0002 for its type parameters; `None` when the
+/// caller has dealt with the generics itself (a generic function with a list, ADR-058).
+pub(crate) fn analyze(
+    sig: &mut Signature,
+    errors: &mut Errors,
+    site: Kindred,
+    generics: Option<GenericOn>,
+) -> Analysis {
     let fn_name = sig.ident.to_string();
-    check_generics(&sig.generics, &fn_name, errors);
+    if let Some(on) = generics {
+        check_generics(&sig.generics, &fn_name, on, errors);
+    }
     if sig.unsafety.is_some() || sig.abi.is_some() {
         errors.push(shape_error(
             format!("`{fn_name}` is `unsafe` or `extern`"),
@@ -535,38 +564,41 @@ impl CtorReturn {
 }
 
 /// `Arc<Self>` / `Arc<Type>`.
-fn is_arc_self(ty: &Type, type_name: &str) -> bool {
+fn is_arc_self(ty: &Type, type_name: &str, applied: bool) -> bool {
     match peel(ty) {
         Type::Path(path) if path.qself.is_none() => {
             let Some(seg) = path.path.segments.last() else {
                 return false;
             };
-            seg.ident == "Arc" && sole_arg(ty).is_some_and(|inner| is_self_type(inner, type_name))
+            seg.ident == "Arc"
+                && sole_arg(ty).is_some_and(|inner| is_self_type(inner, type_name, applied))
         }
         _ => false,
     }
 }
 
-fn is_self_type(ty: &Type, type_name: &str) -> bool {
+/// Whether `ty` is `Self` or the type's name. `applied` (the template of a generic object, whose
+/// type is written with its own parameters, `Selection<T>`) accepts arguments.
+fn is_self_type(ty: &Type, type_name: &str, applied: bool) -> bool {
     match ty {
         Type::Path(path) if path.qself.is_none() && path.path.segments.len() == 1 => {
             let seg = &path.path.segments[0];
-            (seg.ident == "Self" || seg.ident == type_name) && seg.arguments.is_none()
+            (seg.ident == "Self" || seg.ident == type_name) && (applied || seg.arguments.is_none())
         }
-        Type::Paren(inner) => is_self_type(&inner.elem, type_name),
-        Type::Group(inner) => is_self_type(&inner.elem, type_name),
+        Type::Paren(inner) => is_self_type(&inner.elem, type_name, applied),
+        Type::Group(inner) => is_self_type(&inner.elem, type_name, applied),
         _ => false,
     }
 }
 
-fn ctor_return(output: &ReturnType, type_name: &str) -> Option<CtorReturn> {
+fn ctor_return(output: &ReturnType, type_name: &str, applied: bool) -> Option<CtorReturn> {
     let ReturnType::Type(_, ty) = output else {
         return None;
     };
-    if is_self_type(ty, type_name) {
+    if is_self_type(ty, type_name, applied) {
         return Some(CtorReturn::Plain);
     }
-    if is_arc_self(ty, type_name) {
+    if is_arc_self(ty, type_name, applied) {
         return Some(CtorReturn::Shared);
     }
     let Type::Path(path) = &**ty else {
@@ -585,9 +617,9 @@ fn ctor_return(output: &ReturnType, type_name: &str) -> Option<CtorReturn> {
     });
     let ok = types.next()?;
     let err = types.next()?;
-    if is_self_type(ok, type_name) {
+    if is_self_type(ok, type_name, applied) {
         Some(CtorReturn::Fallible(Box::new(err.clone())))
-    } else if is_arc_self(ok, type_name) {
+    } else if is_arc_self(ok, type_name, applied) {
         Some(CtorReturn::FallibleShared(Box::new(err.clone())))
     } else {
         None
@@ -874,11 +906,13 @@ enum ObjReturn {
 fn object_return(ret: &KType) -> Option<(ObjReturn, bool)> {
     fn plain(ret: &KType) -> Option<ObjReturn> {
         match ret {
-            KType::Object(_) => Some(ObjReturn::One),
-            KType::Option(inner) if matches!(**inner, KType::Object(_)) => {
+            KType::Object(_) | KType::ObjectOf(_) => Some(ObjReturn::One),
+            KType::Option(inner) if matches!(**inner, KType::Object(_) | KType::ObjectOf(_)) => {
                 Some(ObjReturn::Optional)
             }
-            KType::Vec(inner) if matches!(**inner, KType::Object(_)) => Some(ObjReturn::Many),
+            KType::Vec(inner) if matches!(**inner, KType::Object(_) | KType::ObjectOf(_)) => {
+                Some(ObjReturn::Many)
+            }
             _ => None,
         }
     }
@@ -1311,11 +1345,12 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
         }
     }));
     let ident = &m.ident;
+    let turbofish = &m.turbofish;
     let call = match target.self_ty {
         Some(self_ty) if m.kind != Kind::Function => {
-            quote_spanned!(ident.span()=> #self_ty::#ident( #(#call_args),* ))
+            quote_spanned!(ident.span()=> #self_ty::#ident #turbofish ( #(#call_args),* ))
         }
-        _ => quote_spanned!(ident.span()=> #ident( #(#call_args),* )),
+        _ => quote_spanned!(ident.span()=> #ident #turbofish ( #(#call_args),* )),
     };
 
     let result = match m.kind {
@@ -1691,6 +1726,7 @@ fn method_meta(root: &Root, m: &FnModel, method_id: &TokenStream) -> TokenStream
     let returns = m.ret.meta(&meta);
     let is_async = m.is_async;
     let takes_ctx = m.ctx.is_some();
+    let generic = Label::meta(m.generic.as_ref(), &meta);
     quote! {
         #meta::MethodMeta {
             name: #name,
@@ -1700,6 +1736,7 @@ fn method_meta(root: &Root, m: &FnModel, method_id: &TokenStream) -> TokenStream
             is_async: #is_async,
             takes_ctx: #takes_ctx,
             coalesce: false,
+            generic: #generic,
             docs: #docs,
         }
     }
@@ -1745,16 +1782,20 @@ impl VisitMut for PatchStoreLiterals<'_> {
 // impl blocks
 // ---------------------------------------------------------------------------------------------
 
-fn self_type_name(ty: &Type) -> syn::Result<String> {
+/// The name of the type an impl block is for. `report_arguments` says whether a type written with
+/// arguments (`impl Cache<Todo>`) is E0002: not when the block's own type parameters have been
+/// reported already (`impl<T> Cache<T>` is one error, not two).
+fn self_type_name(ty: &Type, report_arguments: bool) -> syn::Result<String> {
     match ty {
         Type::Path(path) if path.qself.is_none() => {
             let seg = path.path.segments.last().expect("a path has a segment");
-            if !seg.arguments.is_none() {
+            if report_arguments && !seg.arguments.is_none() {
+                let name = unraw(&seg.ident);
                 return Err(Diag::new(
                     code::E0002,
                     format!("generic type `{}` in `#[undra::api] impl`", ty_string(ty)),
-                    "the schema describes concrete types; every target language would need one instantiation per use",
-                    "implement the object for a concrete, non-generic type",
+                    "the schema describes concrete objects: a generic object crosses once per instantiation, each under a name of its own, which the platforms generate a class for",
+                    format!("write the block once for the type with its own parameters, `#[undra::api(generic)] impl<T> {name}<T> {{ .. }}`, and declare the instantiation: `#[undra::api] pub type Todo{name} = {};`", ty_string(ty)),
                 )
                 .on(ty));
             }
@@ -1769,12 +1810,164 @@ fn self_type_name(ty: &Type) -> syn::Result<String> {
     }
 }
 
+/// A public method of an object, analysed: its parameters and return type are checked and its
+/// model is made. `analysis` is what [`analyze`] said of `sig`.
+fn method_model(
+    sig: &mut Signature,
+    analysis: Analysis,
+    name: String,
+    docs: String,
+    errors: &mut Errors,
+    checks: &mut Checks,
+) -> FnModel {
+    for p in &analysis.params {
+        checks.ty(&p.ty, &p.kty);
+    }
+    let ret = match map_method_return(&sig.output) {
+        Ok(ret) => ret,
+        Err(err) => {
+            errors.push(err.into_error());
+            KType::Unit
+        }
+    };
+    checks.ret(&sig.output, &ret);
+    let stream_item = stream_item_type(&sig.output);
+    let stream_in_result = stream_in_result(&sig.output);
+    ensure_static_streams_in(&mut sig.output);
+    FnModel {
+        ident: sig.ident.clone(),
+        suffix: name.clone(),
+        name,
+        kind: Kind::Method,
+        is_async: analysis.is_async,
+        ctx: None,
+        params: analysis.params,
+        ret,
+        ctor_shared: false,
+        stream_item,
+        stream_in_result,
+        docs,
+        turbofish: None,
+        generic: None,
+    }
+}
+
+/// Expands `#[undra::api(generic)]` (`#[undra::api(store, generic)]` for a store) on
+/// `impl<T> Type<T> { .. }` (ADR-058): the block as written, the analysis of its signatures with
+/// the type parameters left as they are, and the template that carries them. A plain object
+/// exports the template itself; a store hands the signatures to the local macro of its struct,
+/// which must stand above the block in the same module and exports it.
+pub(crate) fn expand_impl_template(
+    args_root: Option<Root>,
+    store: bool,
+    item: ItemImpl,
+) -> syn::Result<TokenStream> {
+    let mut errors = Errors::new();
+    let mut probe = item.attrs.clone();
+    let root = item_root(&mut probe, args_root.clone(), &mut errors);
+    if let Some((_, path, _)) = &item.trait_ {
+        errors.push(shape_error(
+            format!("`#[undra::api]` on a trait impl (`impl {} for ..`)", ty_string(path)),
+            path,
+            "the attribute exposes the inherent methods of an object; trait methods have no schema representation",
+            "move the methods you want to expose into an inherent `impl Type { .. }` block",
+        ));
+    }
+    let header = super::generic_object::check_header(&item, &mut errors);
+    let Some(header) = header else {
+        errors.finish()?;
+        // A block that is not for a named type: the ordinary expansion says so.
+        return expand_impl(args_root, store, item);
+    };
+    errors.finish()?;
+    let type_docs = docs(&item.attrs);
+    let definition = super::generic_object::impl_definition(&item, &header);
+    let emitted = expand_impl_as(args_root, store, item, ImplMode::Template(&header))?;
+    if store {
+        let compose = super::generic_object::compose_macro_name(&header.name);
+        return Ok(quote! {
+            #emitted
+
+            #compose! { #type_docs { #definition } }
+        });
+    }
+    let root_path = root.path_string();
+    let template = super::generic_object::object_template(
+        &super::generic_object::TemplateInfo {
+            kind: "object",
+            name: &header.name,
+            params: &header.params,
+            docs: &type_docs,
+            impl_docs: "",
+            restore: "",
+            root: &root_path,
+        },
+        definition,
+    );
+    Ok(quote! {
+        #emitted
+
+        #template
+    })
+}
+
+/// What the expansion of one instantiation of a generic object knows about it (ADR-058).
+#[derive(Clone, Debug)]
+pub(crate) struct ObjectInstance {
+    /// The template's name (`Selection`), for the E0070 constant.
+    pub(crate) template: String,
+    /// Whether this is a plain object's instantiation: its impl block carries the E0070 constant
+    /// and the check that the template is not a generic store. A store's instantiation carries
+    /// them in the store's own expansion, which comes first.
+    pub(crate) plain: bool,
+}
+
+/// What an impl block is expanded as.
+#[derive(Clone, Copy)]
+pub(crate) enum ImplMode<'a> {
+    /// An ordinary object: the block, its dispatcher, its registration and its checks.
+    Plain,
+    /// The template of a generic object (`#[undra::api(generic)]`, ADR-058): the block as
+    /// written, and the analysis of its signatures with the type parameters left as they are, so
+    /// a mistake that does not depend on the type is reported once, at the template. Nothing is
+    /// registered.
+    Template(&'a super::generic_object::Header),
+    /// One instantiation of a generic object: the block holds signatures only, is for the alias
+    /// and is not emitted.
+    Instance(&'a ObjectInstance),
+}
+
 /// Expands `#[undra::api]` on an inherent `impl` block.
 pub(crate) fn expand_impl(
     args_root: Option<Root>,
     store: bool,
-    mut item: ItemImpl,
+    item: ItemImpl,
 ) -> syn::Result<TokenStream> {
+    expand_impl_as(args_root, store, item, ImplMode::Plain)
+}
+
+/// Expands an impl block as an object, the template of a generic object or one instantiation of
+/// it (see [`ImplMode`]).
+pub(crate) fn expand_impl_as(
+    args_root: Option<Root>,
+    store: bool,
+    mut item: ItemImpl,
+    mode: ImplMode<'_>,
+) -> syn::Result<TokenStream> {
+    let instance = match mode {
+        ImplMode::Instance(instance) => Some(instance),
+        _ => None,
+    };
+    let template = match mode {
+        ImplMode::Template(header) => Some(header),
+        _ => None,
+    };
+    // What a generic type applied to a type parameter means in these signatures (ADR-058).
+    let _apps = match mode {
+        ImplMode::Plain => applications(Applications::Refuse),
+        ImplMode::Template(header) => applications(Applications::Template(header.params.clone())),
+        ImplMode::Instance(_) => applications(Applications::Instance),
+    };
     let mut errors = Errors::new();
     let root = item_root(&mut item.attrs, args_root, &mut errors);
     if let Some((_, path, _)) = &item.trait_ {
@@ -1785,20 +1978,50 @@ pub(crate) fn expand_impl(
             "move the methods you want to expose into an inherent `impl Type { .. }` block",
         ));
     }
-    check_generics(&item.generics, "impl", &mut errors);
     let self_ty = (*item.self_ty).clone();
-    let type_name = match self_type_name(&self_ty) {
+    let own_params = item
+        .generics
+        .params
+        .iter()
+        .any(|p| matches!(p, syn::GenericParam::Type(_)));
+    let ordinary = matches!(mode, ImplMode::Plain);
+    let type_name = match self_type_name(&self_ty, !own_params && ordinary) {
         Ok(name) => name,
         Err(error) => {
             errors.push(error);
             String::new()
         }
     };
+    if ordinary {
+        check_generics(
+            &item.generics,
+            &type_name,
+            GenericOn::ImplBlock,
+            &mut errors,
+        );
+    }
     let type_docs = docs(&item.attrs);
 
     let mut constructors: Vec<FnModel> = Vec::new();
     let mut methods: Vec<FnModel> = Vec::new();
-    let mut checks = Checks::new();
+    // A type that has no name (the impl is not for a named type) has been reported already.
+    let type_ident = format_ident!(
+        "{}",
+        if type_name.is_empty() {
+            "__undra_object"
+        } else {
+            &type_name
+        }
+    );
+    let mut checks = match mode {
+        ImplMode::Instance(_) => Checks::for_instance(&type_ident),
+        ImplMode::Template(header) => Checks::for_template(&type_ident, header.params.clone()),
+        ImplMode::Plain => Checks::new(),
+    };
+    // The checks of the generic methods: one pass over each generic signature, and one set for
+    // all the instantiations (ADR-058).
+    let mut template_checks: Vec<TokenStream> = Vec::new();
+    let mut instance_checks = Checks::for_listed_instance(&type_ident);
     for impl_item in &mut item.items {
         let ImplItem::Fn(func) = impl_item else {
             continue;
@@ -1809,10 +2032,10 @@ pub(crate) fn expand_impl(
             continue;
         }
         let is_public = matches!(func.vis, Visibility::Public(_));
-        take(
+        let attr = take(
             &mut func.attrs,
             if is_public {
-                Site::NOTHING
+                Site::METHOD
             } else {
                 Site::PRIVATE
             },
@@ -1822,38 +2045,109 @@ pub(crate) fn expand_impl(
             continue; // private helpers are not part of the API
         }
         let fn_docs = docs(&func.attrs);
-        let analysis = analyze(&mut func.sig, &mut errors, Kindred::Callable);
-        let name = unraw(&func.sig.ident);
+        let receiver = func.sig.receiver().is_some();
+        let type_params = func.sig.generics.type_params().next().is_some();
 
-        for p in &analysis.params {
-            checks.ty(&p.ty, &p.kty);
+        // One level of generics per item: the methods of a generic object take no type parameters
+        // of their own (ADR-058).
+        if let Some(header) = template {
+            if type_params || !attr.generic.is_empty() {
+                super::generic_object::method_generics_refused(
+                    &func.sig,
+                    &header.name,
+                    &mut errors,
+                    attr.generic.first().map(|list| &list.param),
+                );
+                continue;
+            }
         }
-        if analysis.has_receiver {
+
+        // A method with a list: one method per listed type (ADR-058).
+        if !attr.generic.is_empty() && (receiver || !type_params) {
+            let on = GenericOn::Method;
+            let Some(plan) = generic_fn::plan(&func.sig, on, &attr.generic, &mut errors) else {
+                continue;
+            };
+            let apps = applications(Applications::Template(vec![plan.param.to_string()]));
+            let mut template = Errors::new();
+            let analysis = analyze(&mut func.sig, &mut template, Kindred::Callable, None);
+            generic_fn::check_parameter_use(&func.sig, &plan.param, &mut template);
+            let mut tchecks = Checks::for_template(&func.sig.ident, vec![plan.param.to_string()]);
+            for p in &analysis.params {
+                tchecks.ty(&p.ty, &p.kty);
+            }
             let ret = match map_method_return(&func.sig.output) {
                 Ok(ret) => ret,
                 Err(err) => {
-                    errors.push(err.into_error());
+                    template.push(err.into_error());
                     KType::Unit
                 }
             };
-            checks.ret(&func.sig.output, &ret);
-            let stream_item = stream_item_type(&func.sig.output);
-            let stream_in_result = stream_in_result(&func.sig.output);
+            tchecks.ret(&func.sig.output, &ret);
             ensure_static_streams_in(&mut func.sig.output);
-            methods.push(FnModel {
-                ident: func.sig.ident.clone(),
+            drop(apps);
+            let clean = template.is_empty();
+            errors.absorb(template);
+            if !clean {
+                continue;
+            }
+            template_checks.push(tchecks.emit(&root));
+            let inferred = generic_fn::inferred(&func.sig, &plan.param);
+            let _instance_apps = applications(Applications::Instance);
+            for listed in &plan.instances {
+                let _guard = in_instance(&listed.name);
+                let mut sig = generic_fn::concrete_signature(&func.sig, &plan.param, &listed.ty);
+                let analysis = analyze(&mut sig, &mut errors, Kindred::Callable, None);
+                instance_checks.listed(
+                    &listed.ty,
+                    &listed.arg_name,
+                    &plan.param.to_string(),
+                    &plan.fn_name,
+                );
+                let mut model = method_model(
+                    &mut sig,
+                    analysis,
+                    listed.name.clone(),
+                    fn_docs.clone(),
+                    &mut errors,
+                    &mut instance_checks,
+                );
+                model.suffix = listed.suffix.clone();
+                model.turbofish = Some(listed.turbofish.clone());
+                model.generic = Some(Label {
+                    of: plan.fn_name.clone(),
+                    param: plan.param.to_string(),
+                    arg: listed.arg_name.clone(),
+                    inferred,
+                });
+                methods.push(model);
+            }
+            continue;
+        }
+
+        let on = if receiver {
+            GenericOn::Method
+        } else {
+            GenericOn::Constructor
+        };
+        let analysis = analyze(&mut func.sig, &mut errors, Kindred::Callable, Some(on));
+        let name = unraw(&func.sig.ident);
+
+        if analysis.has_receiver {
+            let model = method_model(
+                &mut func.sig,
+                analysis,
                 name,
-                kind: Kind::Method,
-                is_async: analysis.is_async,
-                ctx: None,
-                params: analysis.params,
-                ret,
-                ctor_shared: false,
-                stream_item,
-                stream_in_result,
-                docs: fn_docs,
-            });
-        } else if let Some(returns) = ctor_return(&func.sig.output, &type_name) {
+                fn_docs,
+                &mut errors,
+                &mut checks,
+            );
+            methods.push(model);
+        } else if let Some(returns) = ctor_return(&func.sig.output, &type_name, template.is_some())
+        {
+            for p in &analysis.params {
+                checks.ty(&p.ty, &p.kty);
+            }
             if analysis.is_async {
                 errors.push(shape_error(
                     format!("constructor `{name}` is `async`"),
@@ -1879,6 +2173,7 @@ pub(crate) fn expand_impl(
                     }
                 }
             };
+            let name_suffix = name.clone();
             constructors.push(FnModel {
                 ident: func.sig.ident.clone(),
                 name,
@@ -1891,6 +2186,9 @@ pub(crate) fn expand_impl(
                 stream_item: None,
                 stream_in_result: false,
                 docs: fn_docs,
+                suffix: name_suffix,
+                turbofish: None,
+                generic: None,
             });
         } else {
             errors.push(shape_error(
@@ -1932,13 +2230,34 @@ pub(crate) fn expand_impl(
     }
     errors.finish()?;
 
-    if store {
+    if store && instance.is_none() {
         let mut patch = PatchStoreLiterals { name: &type_name };
         for impl_item in &mut item.items {
             if let ImplItem::Fn(func) = impl_item {
                 patch.visit_impl_item_fn_mut(func);
             }
         }
+    }
+
+    // The template of a generic object: the block as written and the checks of its signatures,
+    // generic over the type parameters. What an instantiation registers is the alias's.
+    if template.is_some() {
+        let checks = checks.emit(&root);
+        // A type takes one block: a second one defines this constant again (see below).
+        let one_block = format_ident!(
+            "_undra_error_{}_{}_has_two_undra_api_impl_blocks_merge_them_into_one",
+            code::E0007,
+            type_name
+        );
+        return Ok(quote! {
+            #item
+
+            #[doc(hidden)]
+            #[allow(non_upper_case_globals, dead_code)]
+            const #one_block: () = ();
+
+            #checks
+        });
     }
 
     let meta = root.meta();
@@ -1954,7 +2273,7 @@ pub(crate) fn expand_impl(
     let all: Vec<&FnModel> = constructors.iter().chain(&methods).collect();
     let id_consts: Vec<syn::Ident> = all
         .iter()
-        .map(|m| format_ident!("__UNDRA_ID_{}", m.name))
+        .map(|m| format_ident!("__UNDRA_ID_{}", m.suffix))
         .collect();
     let id_values = all.iter().map(|m| {
         let name = &m.name;
@@ -2016,6 +2335,58 @@ pub(crate) fn expand_impl(
     let derived = derived();
     let registration = submit(&root, "Object", &meta_static);
     let checks = checks.emit(&root);
+    let instance_checks = instance_checks.emit(&root);
+    // The instantiation of a generic object (ADR-058): the block is the template's, so it is not
+    // emitted here; the type is the alias, which carries its name next to its id (the name of a
+    // generic application that mentions it is read from there), and a plain object's alias carries
+    // the E0070 rule and the check that its template is not a generic store.
+    let emitted = if instance.is_some() {
+        None
+    } else {
+        Some(&item)
+    };
+    let alias_span = self_ty.span();
+    let alias_rule = match instance {
+        Some(instance) if instance.plain => {
+            super::generic::duplicate_alias_constant(&instance.template, alias_span)
+        }
+        _ => TokenStream::new(),
+    };
+    let object_name = if instance.is_some() {
+        quote! {
+            /// The declared name of the instantiation, for a signature that names it through a
+            /// generic application (`Arc<Selection<T>>`).
+            #[doc(hidden)]
+            pub const __UNDRA_OBJECT_NAME: &'static str = #type_name;
+        }
+    } else {
+        TokenStream::new()
+    };
+    let generic_store_probe = match instance {
+        Some(instance) if instance.plain => {
+            let message = panic_text(&Diag::new(
+                code::E0011,
+                format!(
+                    "`{0}` is a `#[undra::store(generic)]` but its impl block is not marked as a store",
+                    instance.template
+                ),
+                "the impl block of a store must say so, so its constructors can attach the store's signals and its struct literals get the hidden cell field",
+                "write `#[undra::api(store, generic)]` on the impl block",
+            ));
+            quote_spanned! {alias_span=>
+                #[doc(hidden)]
+                #[allow(non_camel_case_types, dead_code)]
+                const _: () = {
+                    trait __UndraGenericStoreProbe {
+                        const __UNDRA_IS_GENERIC_STORE: bool = false;
+                    }
+                    impl<__UndraT: ?::core::marker::Sized> __UndraGenericStoreProbe for __UndraT {}
+                    ::core::assert!(!<#self_ty>::__UNDRA_IS_GENERIC_STORE, #message);
+                };
+            }
+        }
+        _ => TokenStream::new(),
+    };
     // What the runtime calls on a store, forwarding to the members `#[undra::store]` defines.
     let store_object = if store {
         quote! {
@@ -2104,13 +2475,14 @@ pub(crate) fn expand_impl(
     let probe_trait = format_ident!("__UndraStoreProbe_{}", type_name);
 
     Ok(quote! {
-        #item
+        #emitted
 
         #[doc(hidden)]
         #[allow(non_upper_case_globals, dead_code)]
         const #one_block: () = ();
 
         impl #self_ty {
+            #alias_rule
             /// Marks the type as an object, so a signature that uses it as a value can say so.
             #[doc(hidden)]
             pub const __UNDRA_IS_OBJECT: bool = true;
@@ -2118,7 +2490,10 @@ pub(crate) fn expand_impl(
             /// object as `Arc<T>` or `&T` is checked against (E0061).
             #[doc(hidden)]
             pub const __UNDRA_OBJECT_ID: u32 = #meta::ids::type_id(#type_name);
+            #object_name
         }
+
+        #generic_store_probe
 
         // Private to this block: a second block for the type does not define any of this twice.
         #[doc(hidden)]
@@ -2193,6 +2568,8 @@ pub(crate) fn expand_impl(
         };
 
         #checks
+        #(#template_checks)*
+        #instance_checks
     })
 }
 
@@ -2248,8 +2625,124 @@ pub(crate) fn undra_macro_name(attr: &syn::Attribute) -> Option<String> {
 // Free functions
 // ---------------------------------------------------------------------------------------------
 
+/// One instantiation of a generic function (ADR-058): the schema name and ids it is registered
+/// under, and the call it makes.
+pub(crate) struct FnInstance {
+    pub(crate) name: String,
+    pub(crate) suffix: String,
+    pub(crate) turbofish: TokenStream,
+    pub(crate) label: Label,
+}
+
 /// Expands `#[undra::api]` on a free function.
-pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Result<TokenStream> {
+pub(crate) fn expand_fn(args_root: Option<Root>, item: ItemFn) -> syn::Result<TokenStream> {
+    expand_fn_as(args_root, item, None)
+}
+
+/// Expands `#[undra::api(generic(T = [Todo, Note]))]` on a free function with a type parameter
+/// (ADR-058): the function as written, one analysis of its signature with the type parameter left
+/// as it is (so a mistake that does not depend on the type is reported once), and the ordinary
+/// function expansion once per listed type, on the signature with the type substituted.
+pub(crate) fn expand_generic_fn(
+    args_root: Option<Root>,
+    mut item: ItemFn,
+    lists: &[super::attrs::GenericList],
+) -> syn::Result<TokenStream> {
+    let mut errors = Errors::new();
+    let root = item_root(&mut item.attrs, args_root, &mut errors);
+    errors.finish()?;
+    let mut errors = Errors::new();
+    let fn_name = unraw(&item.sig.ident);
+    if mentions_self(item.sig.to_token_stream()) && item.sig.receiver().is_none() {
+        // The same finding as an ordinary function (see `expand_fn_as`).
+        return expand_fn_as(Some(root), item, None);
+    }
+    let Some(plan) = generic_fn::plan(&item.sig, GenericOn::Function, lists, &mut errors) else {
+        errors.finish()?;
+        unreachable!("a plan that is not made has said why");
+    };
+
+    // The template pass: the signature as written.
+    let apps = applications(Applications::Template(vec![plan.param.to_string()]));
+    let mut template = Errors::new();
+    let analysis = analyze(&mut item.sig, &mut template, Kindred::Callable, None);
+    if analysis.has_receiver {
+        template.push(has_receiver_error(&item.sig));
+    }
+    generic_fn::check_parameter_use(&item.sig, &plan.param, &mut template);
+    let ret = match map_method_return(&item.sig.output) {
+        Ok(ret) => ret,
+        Err(err) => {
+            template.push(err.into_error());
+            KType::Unit
+        }
+    };
+    let mut checks = Checks::for_template(&item.sig.ident, vec![plan.param.to_string()]);
+    for p in &analysis.params {
+        checks.ty(&p.ty, &p.kty);
+    }
+    checks.ret(&item.sig.output, &ret);
+    ensure_static_streams_in(&mut item.sig.output);
+    drop(apps);
+    errors.absorb(template);
+    errors.finish()?;
+    let template_checks = checks.emit(&root);
+
+    let _apps = applications(Applications::Instance);
+    let mut out = TokenStream::new();
+    let mut errors = Errors::new();
+    for instance in &plan.instances {
+        let _guard = in_instance(&instance.name);
+        let concrete = ItemFn {
+            sig: generic_fn::concrete_signature(&item.sig, &plan.param, &instance.ty),
+            ..item.clone()
+        };
+        let label = Label {
+            of: fn_name.clone(),
+            param: plan.param.to_string(),
+            arg: instance.arg_name.clone(),
+            inferred: generic_fn::inferred(&item.sig, &plan.param),
+        };
+        let fn_instance = FnInstance {
+            name: instance.name.clone(),
+            suffix: instance.suffix.clone(),
+            turbofish: instance.turbofish.clone(),
+            label,
+        };
+        match expand_fn_as(
+            Some(root.clone()),
+            concrete,
+            Some((fn_instance, &plan, instance)),
+        ) {
+            Ok(tokens) => out.extend(tokens),
+            Err(error) => errors.push(error),
+        }
+    }
+    errors.finish()?;
+    Ok(quote! {
+        #item
+        #template_checks
+        #out
+    })
+}
+
+fn has_receiver_error(sig: &Signature) -> syn::Error {
+    Diag::new(
+        code::E0007,
+        format!("`#[undra::api]` on the method `{}`", sig.ident),
+        "`#[undra::api]` on a function exposes a free function; the methods of an object are exposed by putting the attribute on the `impl` block they are in",
+        "remove `#[undra::api]` from the method and write `#[undra::api]` above `impl Type { .. }`",
+    )
+    .on(&sig.ident)
+}
+
+/// `instance` is `Some` for one instantiation of a generic function: the function itself is
+/// emitted once by [`expand_generic_fn`], so only what is particular to the instantiation is.
+fn expand_fn_as(
+    args_root: Option<Root>,
+    mut item: ItemFn,
+    instance: Option<(FnInstance, &Plan, &generic_fn::Instance)>,
+) -> syn::Result<TokenStream> {
     let mut errors = Errors::new();
     let root = item_root(&mut item.attrs, args_root, &mut errors);
     if mentions_self(item.sig.to_token_stream()) && item.sig.receiver().is_none() {
@@ -2272,17 +2765,10 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
             .on(&item.sig.ident),
         );
     }
-    let analysis = analyze(&mut item.sig, &mut errors, Kindred::Callable);
+    let generics = instance.is_none().then_some(GenericOn::Function);
+    let analysis = analyze(&mut item.sig, &mut errors, Kindred::Callable, generics);
     if analysis.has_receiver {
-        errors.push(
-            Diag::new(
-                code::E0007,
-                format!("`#[undra::api]` on the method `{}`", item.sig.ident),
-                "`#[undra::api]` on a function exposes a free function; the methods of an object are exposed by putting the attribute on the `impl` block they are in",
-                "remove `#[undra::api]` from the method and write `#[undra::api]` above `impl Type { .. }`",
-            )
-            .on(&item.sig.ident),
-        );
+        errors.push(has_receiver_error(&item.sig));
     }
     let ret = match map_method_return(&item.sig.output) {
         Ok(ret) => ret,
@@ -2291,7 +2777,18 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
             KType::Unit
         }
     };
-    let mut checks = Checks::new();
+    let mut checks = match &instance {
+        Some(_) => Checks::for_listed_instance(&item.sig.ident),
+        None => Checks::new(),
+    };
+    if let Some((_, plan, listed)) = &instance {
+        checks.listed(
+            &listed.ty,
+            &listed.arg_name,
+            &plan.param.to_string(),
+            &plan.fn_name,
+        );
+    }
     for p in &analysis.params {
         checks.ty(&p.ty, &p.kty);
     }
@@ -2301,7 +2798,18 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
     ensure_static_streams_in(&mut item.sig.output);
     errors.finish()?;
     let checks = checks.emit(&root);
-    let name = unraw(&item.sig.ident);
+    let (name, suffix, turbofish, label) = match instance {
+        Some((instance, ..)) => (
+            instance.name,
+            instance.suffix,
+            Some(instance.turbofish),
+            Some(instance.label),
+        ),
+        None => {
+            let name = unraw(&item.sig.ident);
+            (name.clone(), name, None, None)
+        }
+    };
 
     let model = FnModel {
         ident: item.sig.ident.clone(),
@@ -2315,6 +2823,9 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
         stream_item,
         stream_in_result,
         docs: docs(&item.attrs),
+        suffix: suffix.clone(),
+        turbofish,
+        generic: label,
     };
 
     let meta = root.meta();
@@ -2326,8 +2837,8 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
     let body = arm_body(&root, &model, &target, &mut needs);
     let helper_items = helpers(&root, &needs);
     let runtime = root.runtime();
-    let dispatch_fn = format_ident!("__undra_dispatch_fn_{}", name);
-    let meta_static = format_ident!("__UNDRA_META_fn_{}", name);
+    let dispatch_fn = format_ident!("__undra_dispatch_fn_{}", suffix);
+    let meta_static = format_ident!("__UNDRA_META_fn_{}", suffix);
     let function_id = quote!(#meta::ids::function_id(#name));
     let params = model
         .params
@@ -2337,10 +2848,17 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
     let is_async = model.is_async;
     let takes_ctx = model.ctx.is_some();
     let docs_text = &model.docs;
+    let generic = Label::meta(model.generic.as_ref(), &meta);
     let registration = submit(&root, "Function", &meta_static);
+    // The function itself is emitted once, by `expand_generic_fn`.
+    let emitted = if model.generic.is_some() {
+        None
+    } else {
+        Some(&item)
+    };
 
     Ok(quote! {
-        #item
+        #emitted
 
         #[doc(hidden)]
         #[allow(non_snake_case, unused_variables, unused_mut, deprecated, clippy::all)]
@@ -2366,6 +2884,7 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
             returns: #returns,
             is_async: #is_async,
             takes_ctx: #takes_ctx,
+            generic: #generic,
             docs: #docs_text,
             dispatch: #dispatch_fn,
         };

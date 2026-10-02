@@ -1,0 +1,8 @@
+error[E0080]: evaluation panicked: error[undra::E0002]: `Page<Note>` has no name (in `first_page<Note>`)
+                = note: the schema names every type, and an instantiated generic type is named by the alias that declares it; `Page<Note>` is reached here by putting a listed type in place of a type parameter, and no alias declares it
+                = help: declare `#[undra::api] pub type NotePage = Page<Note>;` next to `Page`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_application_without_an_alias.rs:30:1
+   |
+30 | #[k::api(generic(T = [Todo, Note]))]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_::_` failed here

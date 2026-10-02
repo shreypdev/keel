@@ -134,3 +134,8 @@ fn infinite_handles_page_and_poll_through_commands() {
 fn a_lazy_signal_hands_its_entries_to_the_runtimes_list() {
     run("lazy", "lazy", &[], |_| {});
 }
+
+#[test]
+fn generic_functions_are_overload_sets_that_call_the_id_of_their_own_instantiation() {
+    run("generic_functions", "generic_functions", &[], |_| {});
+}

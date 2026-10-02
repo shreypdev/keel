@@ -10,7 +10,8 @@
       { "file": "ports.html", "title": "Ports & adapters" },
       { "file": "objects.html", "title": "Objects and identity" },
       { "file": "callbacks.html", "title": "Host callbacks" },
-      { "file": "types.html", "title": "Newtypes, generics and decimals" }
+      { "file": "types.html", "title": "Newtypes, generics and decimals" },
+      { "file": "generics.html", "title": "Generic functions, objects and stores" }
     ] },
     { "title": "Data and live data", "pages": [
       { "file": "paging.html", "title": "Paging and lazy lists" },

@@ -122,6 +122,7 @@ static WAIT_META: FunctionMeta = FunctionMeta {
     takes_ctx: false,
     docs: "",
     dispatch: functions,
+    generic: None,
 };
 static ENDLESS_META: FunctionMeta = FunctionMeta {
     name: "weak_endless",
@@ -132,6 +133,7 @@ static ENDLESS_META: FunctionMeta = FunctionMeta {
     takes_ctx: false,
     docs: "",
     dispatch: functions,
+    generic: None,
 };
 static FINITE_META: FunctionMeta = FunctionMeta {
     name: "weak_finite",
@@ -142,6 +144,7 @@ static FINITE_META: FunctionMeta = FunctionMeta {
     takes_ctx: false,
     docs: "",
     dispatch: functions,
+    generic: None,
 };
 static WAIT_HOLDING_CTX_META: FunctionMeta = FunctionMeta {
     name: "weak_wait_holding_ctx",
@@ -152,6 +155,7 @@ static WAIT_HOLDING_CTX_META: FunctionMeta = FunctionMeta {
     takes_ctx: true,
     docs: "",
     dispatch: functions,
+    generic: None,
 };
 undra_meta::inventory::submit! { Registration::Function(&WAIT_HOLDING_CTX_META) }
 undra_meta::inventory::submit! { Registration::Function(&WAIT_META) }

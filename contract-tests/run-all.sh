@@ -31,7 +31,7 @@ done
 
 echo
 printf '%-5s' ""; for p in "${platforms[@]}"; do printf '%-9s' "$p"; done; echo
-for id in $(seq -f 'S%02g' 1 25) S26 S27 S28 S29 S30 S31 S32 S33 S35; do
+for id in $(seq -f 'S%02g' 1 25) S26 S27 S28 S29 S30 S31 S32 S33 S34 S35; do
   printf '%-5s' "$id"
   for p in "${platforms[@]}"; do
     cell="$(grep -E " $id " "$LOGS/$p.grade" | awk '{print $3}')"

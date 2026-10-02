@@ -57,6 +57,7 @@ val SCENARIOS: List<Scenario> = listOf(
     scenario("S31", "newtypes, generic instantiations and leaf types", ::s31Ledger),
     scenario("S32", "paged queries and lazy lists", ::s32Paging),
     scenario("S33", "polling", ::s33Polling),
+    scenario("S34", "generic functions, objects and stores", ::s34Generic),
     // S35 (ADR-059) restores into this core and closes everything it opens; its step 10 runs in the second JVM ([migrationBuildB]).
     scenario("S35", "query handles across a restore", ::s35QueryHandles),
     scenario("S17", "panic containment", ::s17Panic),

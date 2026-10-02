@@ -207,6 +207,11 @@ impl Runtime {
 
     /// Calls the registered free function `name`.
     pub fn call_function(&self, name: &str, args: &[u8]) -> Dispatched {
+        self.call_function_raw(name, ids::function_id(name), args)
+    }
+
+    /// Calls the dispatcher of the registered free function `name` with an arbitrary method id.
+    pub fn call_function_raw(&self, name: &str, method_id: u32, args: &[u8]) -> Dispatched {
         let meta = undra::meta::registrations()
             .find_map(|r| match r {
                 Registration::Function(f) if f.name == name => Some(*f),
@@ -214,7 +219,7 @@ impl Runtime {
             })
             .unwrap_or_else(|| panic!("no registered function `{name}`"));
         let call = DispatchCall {
-            method_id: ids::function_id(name),
+            method_id,
             call_id: 1,
             handle: 0,
             args,

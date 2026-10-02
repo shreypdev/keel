@@ -1,0 +1,9 @@
+error[undra::E0072]: the generic function `newest<Todo>` is not `newest` with `T = Tag`
+  = note: the generators put the instantiations of one generic function under one name, so they must be the same function with one type replaced
+  = help: regenerate the schema from the core (`undra build`); a schema is not edited by hand
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072
+
+error[undra::E0072]: the instantiations of `newest` disagree: `newest<Note>` has 1 parameter and `newest<Todo>` has 2 parameters
+  = note: the generators put the instantiations of one generic function under one name, so they must be the same function with one type replaced
+  = help: regenerate the schema from the core (`undra build`); a schema is not edited by hand
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0072

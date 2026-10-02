@@ -218,6 +218,13 @@ measured_ns = 31.8
 budget_ns = 250
 measured_ns = 36.0
 
+# ADR-058: `add_one_for<Record5>`, an instantiation of a generic function, is `add_one`'s body through
+# the same path. Its absolute budget is the floor; `generic_fn_vs_function` below is the gate: an
+# instantiation dispatches like a hand-written function, as a test.
+[bench."dispatch/call_sync/generic_fn"]
+budget_ns = 250
+measured_ns = 36.0
+
 [bench."dispatch/call_sync/echo_record1k"]
 budget_ns = 720
 measured_ns = 142.1
@@ -711,6 +718,17 @@ num = "stress/firehose/event"
 den = "stress/firehose/call_set"
 max = 1.1
 measured = 0.85
+
+# An instantiation of a generic function dispatches like the function written by hand (ADR-058): the
+# same body, the same path, so the ratio is 1 up to noise: 0.89-1.04 over six runs on the reference host
+# (the ADR asked for 1.1; the rule above, 1.15x the largest healthy sample rounded up to 0.1, gives 1.2,
+# and a tighter bound would fail on the noise of two ~40 ns rows). A second dispatch hop, a table lookup
+# per call or a copy of the arguments for generic code would each be 1.3x or more.
+[ratio."generic_fn_vs_function"]
+num = "dispatch/call_sync/generic_fn"
+den = "dispatch/call_sync/function"
+max = 1.2
+measured = 1.0
 
 # An object parameter costs a table lookup on top of a bare call: `Calculator.dock_slots(&Dock)` through
 # `call_sync` against `Calculator.add`. Healthy 0.99-1.14 on the reference host (quiet and loaded). No

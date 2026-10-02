@@ -64,7 +64,7 @@
       "items": [
         {
           "title": "The contract grid, grown to every feature",
-          "text": "Thirty-three scenarios run against the real core, 95 of 95 cells passing at the last merge (the web-only two on TypeScript alone)."
+          "text": "Thirty-five scenarios run against the real core, 101 of 101 cells passing at the last merge (the web-only two on TypeScript alone)."
         },
         {
           "title": "Frame-coalesced delivery (ADR-031)",
@@ -175,12 +175,16 @@
           "text": "A lower deployment target generates ObservableObject stores and the iOS 17 output is unchanged; the mode is proven by compilation and a runtime probe on iOS 26.5, not yet on an iOS 15 or 16 runtime."
         },
         {
+          "title": "Generic functions, objects and stores (ADR-058)",
+          "text": "A function lists the types it crosses for and arrives as overloads; a generic object or store is a template, and each alias is an ordinary class with its own type id. Instantiations are declared, not open-ended; native generics, and generic queries, ports and callbacks, are not there."
+        },
+        {
           "title": "The web call path (ADR-056)",
           "text": "A generated TypeScript call went from 3.2–3.5 µs to 0.47–0.68 µs in headless Chromium, and React Native's mirror work at 100,000 updates a second from about 22 ms to about 5 ms a frame on the iPhone simulator."
         },
         {
           "title": "Query handles across a reload (ADR-059)",
-          "text": "A query handle survives an undra dev reload, a devtools time travel, a web crash restart and an app's own restore, on the same handle and with no app code for the handle: the snapshot keeps what it is made of and the core builds it again when the app first uses it. A query without persist shows loading once after a reload."
+          "text": "A query handle keeps working on the same handle across an undra dev reload, a devtools time travel, a web crash restart and an app's own restore, with no app code for the handle."
         }
       ]
     },
@@ -198,10 +202,6 @@
         {
           "title": "The JavaScript runtime at 16 KB",
           "text": "What a hello-world page loads up front sits exactly at its gate, and the design's 16 KB target is not reachable without removing behaviour, so the next growth makes room or restates the budget."
-        },
-        {
-          "title": "Generic functions and objects",
-          "text": "A generic record or enum crosses as one named type per instantiation; generic objects, stores, functions and methods do not cross yet."
         },
         {
           "title": "Android module tests in CI",

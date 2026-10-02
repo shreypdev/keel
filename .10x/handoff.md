@@ -49,15 +49,16 @@ difficulty is in deciding, a cheaper model implements, then an adversarial revie
 - `reload-handles` — ADR-059 (Fable design, prototyped): query handles survive every restore path through an
   in-band snapshot record and build-on-first-use; implemented, opus review verdict merge (5 review tests added);
   the reviewer merges main, pushes once and watches CI; removes the TS replay; S35.
-- `generics-fn-obj` — ADR-058 (Fable design, prototyped): generic functions monomorphised from a declared list,
-  generic objects/stores through an alias; implemented, opus review verdict merge (2 Medium, 4 Low fixed);
-  the reviewer merges main, pushes once and watches CI; S34; E0072/E0074. The second of the two to land
-  re-merges main and regenerates the scenario grid (S34 and S35 together: 101 cells) and `site/data/tests.json`.
+- `generics-fn-obj` — landed at `aa04821` (status checkpoint 30). `generics-followups` closes the review's L6,
+  L7 and L8.
 - `ts-runtime-16k` — ADR-057 (Fable design, 15 measured levers: 22,100 → 15,958 B, 15,384 with Vite's preload
   helper apart); sonnet implementing, the 16,000 gate is met on the branch; adversarial review next; gates:
   runtime 16,000, with the helper 16,600, all-features 42,400.
 - `test-pacing` — the tests that still fail on time alone under a throttled local pass (status checkpoint 29
   lists them) and `ci-local`'s gaps (`--no-fail-fast`, a `--slow` pass that does not starve).
+- **Founder, 2026-10-02 (afternoon):** start nothing new; finish what is in flight with every review finding
+  addressed and tell him. He then protects `main`, and from then on every change lands through a pull request
+  (`scripts/wt.sh merge` pushes `main` directly and will need a PR flow: propose it, do not start it unasked).
 - **On hold by the founder (2026-10-02):** the Android emulator CI job for `android-adapters`, `android-work`
   and `undra-compose`. Do not start it. Finish everything else in flight first, then tell him all is done and
   ask whether to start it. Priority order: CI green on main, then the other work in progress. Each implemented piece still gets its adversarial review before the merge.

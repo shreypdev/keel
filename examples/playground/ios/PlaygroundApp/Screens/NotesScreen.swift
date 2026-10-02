@@ -5,10 +5,16 @@ import SwiftUI
 /// store; the database file is the platform's (`SQLiteDbAdapter`, in Application Support), so the
 /// notes are still there after a relaunch. Every change is written to the database first and then
 /// shows in `notes.notes`, which the view only reads.
+///
+/// The strip under the field is the generic code of the core (ADR-058): the ticks live in a
+/// `NoteSelection` (the `Selection<T>` the to-do screen instantiates for to-dos), the "Latest" line is
+/// `newest(rows:)` and "New draft" is `draft(Note.self, title:)`.
 struct NotesScreen: View {
     let notes: Notes
+    let selection: NoteSelection
     @State private var draft = ""
     @State private var problem: String?
+    @State private var latest: Note?
 
     /// The database the screen opens.
     static let database = "playground"
@@ -33,13 +39,33 @@ struct NotesScreen: View {
                             .accessibilityIdentifier("note-problem")
                     }
                 }
+                SelectionStrip(
+                    kind: "note",
+                    count: selection.count,
+                    latest: latest?.title,
+                    picked: selection.rows.map(\.title),
+                    selectAll: { selection.selectAll(rows: notes.notes) },
+                    clear: { selection.clear() },
+                    newDraft: newDraft
+                )
                 Section {
                     ForEach(notes.notes, id: \.id) { note in
-                        Button {
-                            run { try await notes.toggle(id: note.id) }
-                        } label: {
-                            Label(note.title, systemImage: note.done ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(note.done ? .secondary : .primary)
+                        HStack {
+                            Button {
+                                run { try await notes.toggle(id: note.id) }
+                            } label: {
+                                Label(note.title, systemImage: note.done ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(note.done ? .secondary : .primary)
+                            }
+                            Spacer()
+                            Button {
+                                selection.toggle(note)
+                            } label: {
+                                Image(systemName: isSelected(note) ? "checkmark.square.fill" : "square")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Select \(note.title)")
+                            .accessibilityIdentifier("note-select")
                         }
                         .swipeActions {
                             Button(role: .destructive) {
@@ -54,6 +80,9 @@ struct NotesScreen: View {
                     Text(notes.version == 0 ? "Opening the database…" : "SQLite database \"\(NotesScreen.database)\", schema version \(notes.version)")
                         .accessibilityIdentifier("notes-version")
                 }
+            }
+            .onChange(of: notes.notes, initial: true) {
+                latest = try? newest(rows: notes.notes)
             }
             .navigationTitle("Notes")
             .navigationBarTitleDisplayMode(.inline)
@@ -70,6 +99,18 @@ struct NotesScreen: View {
                     run { _ = try await notes.open(name: NotesScreen.database) }
                 }
             }
+        }
+    }
+
+    private func isSelected(_ note: Note) -> Bool {
+        selection.rows.contains { $0.id == note.id }
+    }
+
+    /// A draft is a note the core made but did not store: it is ticked, not saved to the database.
+    private func newDraft() {
+        let title = self.title
+        if let row = try? PlaygroundCore.draft(Note.self, title: title.isEmpty ? "Untitled" : title) {
+            selection.toggle(row)
         }
     }
 

@@ -225,6 +225,116 @@ fn instantiation_of_a_struct_template() {
 }
 
 #[test]
+fn generic_function() {
+    check(
+        "generic_function",
+        api(
+            quote!(generic(T = [Todo, Note])),
+            quote! {
+                /// The row that changed last, if there is one.
+                pub fn newest<T: Row>(rows: Vec<T>) -> Option<T> {
+                    rows.into_iter().max_by_key(Row::changed)
+                }
+            },
+        ),
+    );
+}
+
+#[test]
+fn generic_method() {
+    check(
+        "generic_method",
+        api(
+            quote!(),
+            quote! {
+                impl Library {
+                    pub fn new() -> Self { Library }
+                    /// The rows pinned to the top.
+                    #[undra(generic(T = [Todo, Note]))]
+                    pub fn pinned<T: Row>(&self) -> Vec<T> { Vec::new() }
+                }
+            },
+        ),
+    );
+}
+
+#[test]
+fn generic_object_template() {
+    check(
+        "generic_object_template",
+        api(
+            quote!(generic),
+            quote! {
+                /// Keeps rows by id.
+                impl<T: Row> Cache<T> {
+                    pub fn new() -> Self { Cache(Vec::new()) }
+                    /// Stores a row.
+                    pub fn put(&self, row: T) {}
+                    pub fn get(&self, id: Uuid) -> Option<T> { None }
+                }
+            },
+        ),
+    );
+}
+
+#[test]
+fn instantiation_of_an_object_template() {
+    check(
+        "generic_object_instance",
+        impl_::expand_instantiate(quote! {
+            #[undra_instance(kind = "object", template = "Cache", crate_name = "", root = "::undra", docs = "Keeps rows by id.", impl_docs = "", restore = "", alias_docs = "The todos the app has seen.")]
+            impl TodoCache {
+                pub fn new() -> Self { }
+                /// Stores a row.
+                pub fn put(&self, row: Todo) { }
+                pub fn get(&self, id: Uuid) -> Option<Todo> { }
+            }
+            type __UndraInstanceArgs = (Todo,);
+        }),
+    );
+}
+
+#[test]
+fn generic_store_template() {
+    check(
+        "generic_store_template",
+        impl_::expand_store(
+            quote!(generic, restore = "Self::assemble"),
+            quote! {
+                /// The rows the user has ticked.
+                pub struct Selection<T> {
+                    /// The ticked rows.
+                    #[undra(key = "id")]
+                    rows: Signal<Vec<T>>,
+                    count: Computed<u32>,
+                }
+            },
+        ),
+    );
+}
+
+#[test]
+fn instantiation_of_a_store_template() {
+    check(
+        "generic_store_instance",
+        impl_::expand_instantiate(quote! {
+            #[undra_instance(kind = "store", template = "Selection", crate_name = "", root = "::undra", docs = "The rows the user has ticked.", impl_docs = "Ticking rows.", restore = "Self::assemble", alias_docs = "")]
+            pub struct TodoSelection {
+                #[undra(key = "id")]
+                rows: Signal<Vec<Todo>>,
+                count: Computed<u32>,
+            }
+            impl TodoSelection {
+                pub fn new(ctx: Ctx) -> Self { }
+                /// Ticks a row.
+                pub fn toggle(&self, row: Todo) { }
+            }
+            type __UndraInstanceArgs = (Todo,);
+        }),
+    );
+}
+
+#[test]
 fn error_enum() {
     check(
         "error",
@@ -493,6 +603,12 @@ fn every_snapshot_file_has_a_test() {
         "generic_enum",
         "generic_alias",
         "generic_instance",
+        "generic_function",
+        "generic_method",
+        "generic_object_template",
+        "generic_object_instance",
+        "generic_store_template",
+        "generic_store_instance",
         "store",
         "store_default_restore",
         "store_impl",

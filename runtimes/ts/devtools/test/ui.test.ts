@@ -8,7 +8,7 @@ import { SCHEMA, bytes, changeSet, full, i32Bytes, listBytes, patch } from "./he
 const COUNTER = 5n;
 const TODOS = 6n;
 
-function page(): { state: DevtoolsState; root: HTMLElement; restored: number[] } {
+function page(schema: unknown = SCHEMA): { state: DevtoolsState; root: HTMLElement; restored: number[] } {
   document.body.innerHTML = '<div id="app"></div>';
   const root = document.getElementById("app") as HTMLElement;
   const state = new DevtoolsState();
@@ -17,7 +17,7 @@ function page(): { state: DevtoolsState; root: HTMLElement; restored: number[] }
   state.setConn("open");
   state.onMessage({
     t: "welcome",
-    welcome: { protocol: 1, undraVersion: "1.2.0", schemaHash: 0xabcdef0123456789n, platform: "rust", mode: "dev", coreEpoch: 1n, startedUnixMs: 1_790_000_000_000, ringSteps: 200, ringBytes: 1 << 20, ringStepBytes: 1 << 20, schemaJson: JSON.stringify(SCHEMA) },
+    welcome: { protocol: 1, undraVersion: "1.2.0", schemaHash: 0xabcdef0123456789n, platform: "rust", mode: "dev", coreEpoch: 1n, startedUnixMs: 1_790_000_000_000, ringSteps: 200, ringBytes: 1 << 20, ringStepBytes: 1 << 20, schemaJson: JSON.stringify(schema) },
   });
   state.onMessage({ t: "stores", stores: [{ handle: COUNTER, typeId: 10 }, { handle: TODOS, typeId: 11 }] });
   return { state, root, restored };
@@ -71,6 +71,26 @@ describe("the page", () => {
     expect(heads[0]?.textContent).toContain("count 2");
     (heads[0] as HTMLElement).click();
     expect(root.querySelector(".entry.open pre")?.textContent).toBe("1  →  2");
+  });
+
+  it("shows the call of a generic function, `newest<Todo>`, and of a generic method as text, not markup (ADR-058)", () => {
+    // A generic function is one function per listed type, named with its type argument and labelled (SPEC 2.2); the page names a
+    // call by the schema's name, and builds text nodes, so the angle brackets are characters.
+    const label = { of: "newest", args: [{ param: "T", ty: { kind: "named", of: "Todo" }, inferred: true }] };
+    const generic = {
+      ...SCHEMA,
+      functions: [...SCHEMA.functions, { name: "newest<Todo>", method_id: 210, params: [], returns: { kind: "i32" }, is_async: false, generic: label }],
+      objects: SCHEMA.objects.map((o) =>
+        o.name === "Counter" ? { ...o, methods: [...o.methods, { name: "pinned<Todo>", method_id: 111, params: [], returns: { kind: "i32" }, is_async: false, generic: label }] } : o,
+      ),
+    };
+    const { state, root } = page(generic);
+    send(state, commit(1, changeSet(1n, [full(COUNTER, 0, i32Bytes(1))]), 210));
+    send(state, commit(2, changeSet(2n, [full(COUNTER, 0, i32Bytes(2))]), 111));
+    const heads = [...root.querySelectorAll(".timeline .row-head .cause")].map((e) => e.textContent);
+    expect(heads).toEqual(["Counter.pinned<Todo>", "newest<Todo>"]);
+    expect(root.querySelector(".timeline todo"), "the brackets are characters, never a tag").toBeNull();
+    expect(root.querySelector(".timeline .cause")?.innerHTML).toBe("Counter.pinned&lt;Todo&gt;");
   });
 
   it("restores through the scrubber and through an entry, and Live goes back to the head", () => {

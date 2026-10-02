@@ -190,13 +190,23 @@ pub const CASES: &[&str] = &[
     "polling",
     "infinite",
     "lazy",
+    "generic_functions",
+    "generic_objects",
 ];
 
 /// The cases whose Swift output is also locked in the iOS 15 / 16 mode (`ObservableObject` stores,
 /// `UndraDuration`; ADR-045), as `tests/golden/<case>/swift-observable-object/`. They are the cases that
 /// have stores or query handles, and the ones with a `Duration` field.
 pub const FLOOR_CASES: &[&str] = &[
-    "stores", "queries", "full", "newtypes", "polling", "infinite", "lazy",
+    "stores",
+    "queries",
+    "full",
+    "newtypes",
+    "polling",
+    "infinite",
+    "lazy",
+    "generic_functions",
+    "generic_objects",
 ];
 
 /// `generator_for` in the iOS 15 mode: `ObservableObject` stores and a floor of iOS 15 (the strictest one).
@@ -236,6 +246,8 @@ pub fn case(name: &str) -> Schema {
         "polling" => polling(),
         "infinite" => infinite(),
         "lazy" => lazy(),
+        "generic_functions" => generic_functions(),
+        "generic_objects" => generic_objects(),
         other => panic!("unknown golden case {other}"),
     }
 }
@@ -376,6 +388,7 @@ pub fn method(
         takes_ctx: false,
         coalesce: false,
         docs: docs.into(),
+        generic: None,
     }
 }
 
@@ -450,6 +463,55 @@ pub fn function(
         is_async,
         takes_ctx: false,
         docs: docs.into(),
+        generic: None,
+    }
+}
+
+/// The label of the instantiation `of<arg>` of a generic function (ADR-058).
+pub fn label(of: &str, arg: &str, inferred: bool) -> undra_meta::GenericOf {
+    undra_meta::GenericOf {
+        of: of.into(),
+        args: vec![undra_meta::GenericArg {
+            param: "T".into(),
+            ty: named(arg),
+            inferred,
+        }],
+    }
+}
+
+/// `of<arg>` as a free function: the definition the macro makes for one listed type.
+pub fn instance_fn(
+    of: &str,
+    arg: &str,
+    inferred: bool,
+    docs: &str,
+    params: Vec<ParamDef>,
+    returns: TypeRef,
+    is_async: bool,
+) -> FunctionDef {
+    let name = format!("{of}<{arg}>");
+    FunctionDef {
+        generic: Some(label(of, arg, inferred)),
+        ..function(&name, docs, params, returns, is_async)
+    }
+}
+
+/// `owner.of<arg>`: the method the macro makes for one listed type.
+#[allow(clippy::too_many_arguments)] // a test builder that spells out every field of a definition
+pub fn instance_method(
+    owner: &str,
+    of: &str,
+    arg: &str,
+    inferred: bool,
+    docs: &str,
+    params: Vec<ParamDef>,
+    returns: TypeRef,
+    is_async: bool,
+) -> MethodDef {
+    let name = format!("{of}<{arg}>");
+    MethodDef {
+        generic: Some(label(of, arg, inferred)),
+        ..method(owner, &name, docs, params, returns, is_async)
     }
 }
 
@@ -2800,5 +2862,340 @@ fn lazy() -> Schema {
         ),
         vec![("chapters", TypeRef::lazy(named("Chapter")), false, None)],
     ));
+    s
+}
+
+/// Generic functions and methods (ADR-058): one definition per listed type, labelled. A free family
+/// whose type parameter the arguments fix (`newest`), one they do not (`draft`), an `async` one that
+/// takes the context and has an error type (`load`), a stream (`rows`), a command (`forget`), an
+/// `async` one that returns nothing (`save`), a parameter called `type` (`make`), a family of methods
+/// on an object (`pinned`, `remember`) and on a store (`open`, `tidy`).
+fn generic_functions() -> Schema {
+    let mut s = Schema::new("golden-generic-functions");
+    s.records.push(record(
+        "Todo",
+        "A todo.",
+        vec![field("id", TypeRef::U32), field("title", TypeRef::String)],
+    ));
+    s.records.push(record(
+        "Note",
+        "A note.",
+        vec![field("id", TypeRef::U32), field("body", TypeRef::String)],
+    ));
+    s.enums.push(error_def(
+        "LoadError",
+        "",
+        vec![
+            with_message(
+                tuple_variant("Missing", 0, vec![TypeRef::U32]),
+                "no row {0}",
+            ),
+            with_message(unit_variant("Offline", 1), "offline"),
+        ],
+    ));
+    let rows = ["Todo", "Note"];
+    for arg in rows {
+        s.functions.push(instance_fn(
+            "newest",
+            arg,
+            true,
+            "The row that changed last, if there is one.",
+            vec![param("rows", vec_of(named(arg)))],
+            opt(named(arg)),
+            false,
+        ));
+    }
+    for arg in rows {
+        s.functions.push(instance_fn(
+            "draft",
+            arg,
+            false,
+            "An empty row with a fresh id, ready to edit.",
+            vec![],
+            named(arg),
+            false,
+        ));
+    }
+    for arg in rows {
+        let mut load = instance_fn(
+            "load",
+            arg,
+            false,
+            "Loads a row from the server.",
+            vec![param("id", TypeRef::U32)],
+            err_result(named(arg), "LoadError"),
+            true,
+        );
+        load.takes_ctx = true;
+        s.functions.push(load);
+    }
+    for arg in rows {
+        s.functions.push(instance_fn(
+            "rows",
+            arg,
+            false,
+            "A stream of the first rows.",
+            vec![param("count", TypeRef::U32)],
+            TypeRef::stream(named(arg)),
+            false,
+        ));
+    }
+    for arg in rows {
+        s.functions.push(instance_fn(
+            "forget",
+            arg,
+            true,
+            "Drops a row from the cache.",
+            vec![param("row", named(arg))],
+            TypeRef::Unit,
+            false,
+        ));
+    }
+    for arg in rows {
+        s.functions.push(instance_fn(
+            "save",
+            arg,
+            true,
+            "Writes a row back.",
+            vec![param("row", named(arg))],
+            err_result(TypeRef::Unit, "LoadError"),
+            true,
+        ));
+    }
+    for arg in rows {
+        s.functions.push(instance_fn(
+            "make",
+            arg,
+            false,
+            "Makes a row of the given kind: a parameter called `type` does not collide with the type token.",
+            vec![param("type", TypeRef::String)],
+            named(arg),
+            false,
+        ));
+    }
+    // A function that is not generic, between the families.
+    s.functions.push(function(
+        "count_rows",
+        "How many rows there are.",
+        vec![],
+        TypeRef::U32,
+        false,
+    ));
+    s.objects.push(object(
+        "Library",
+        "A shelf of rows.",
+        vec![ctor("Library", "new", vec![], false)],
+        vec![
+            instance_method(
+                "Library",
+                "pinned",
+                "Todo",
+                false,
+                "The pinned rows of a type.",
+                vec![],
+                vec_of(named("Todo")),
+                false,
+            ),
+            instance_method(
+                "Library",
+                "pinned",
+                "Note",
+                false,
+                "The pinned rows of a type.",
+                vec![],
+                vec_of(named("Note")),
+                false,
+            ),
+            instance_method(
+                "Library",
+                "remember",
+                "Todo",
+                true,
+                "Remembers a row and answers how many there are.",
+                vec![param("row", named("Todo"))],
+                TypeRef::U32,
+                true,
+            ),
+            instance_method(
+                "Library",
+                "remember",
+                "Note",
+                true,
+                "Remembers a row and answers how many there are.",
+                vec![param("row", named("Note"))],
+                TypeRef::U32,
+                true,
+            ),
+            method(
+                "Library",
+                "count",
+                "How many rows are pinned.",
+                vec![],
+                TypeRef::U32,
+                false,
+            ),
+        ],
+    ));
+    s.objects.push(store(
+        object(
+            "Shelf",
+            "A store with generic methods.",
+            vec![ctor("Shelf", "new", vec![], false)],
+            vec![
+                instance_method(
+                    "Shelf",
+                    "tidy",
+                    "Todo",
+                    true,
+                    "Sorts rows.",
+                    vec![param("rows", vec_of(named("Todo")))],
+                    TypeRef::Unit,
+                    false,
+                ),
+                instance_method(
+                    "Shelf",
+                    "tidy",
+                    "Note",
+                    true,
+                    "Sorts rows.",
+                    vec![param("rows", vec_of(named("Note")))],
+                    TypeRef::Unit,
+                    false,
+                ),
+            ],
+        ),
+        vec![("size", TypeRef::U32, false, None)],
+    ));
+    s
+}
+
+/// What generic objects and stores produce (ADR-058): the `ObjectDef`s of two aliases of an object
+/// (`Cache<T>`) and of a store (`Selection<T>`), which are byte for byte what hand-written objects
+/// of those names produce (locking that no generator changes), and the functions that name them
+/// through their alias (`open_selection<T>`, `ticked<T>`, `page_of<T>`).
+fn generic_objects() -> Schema {
+    let mut s = Schema::new("golden-generic-objects");
+    s.records.push(record(
+        "Todo",
+        "A todo.",
+        vec![field("id", TypeRef::U32), field("title", TypeRef::String)],
+    ));
+    s.records.push(record(
+        "Note",
+        "A note.",
+        vec![field("id", TypeRef::U32), field("body", TypeRef::String)],
+    ));
+    s.records.push(record(
+        "TodoPage",
+        "A page of todos: `Page<Todo>`.",
+        vec![
+            field("items", vec_of(named("Todo"))),
+            field("next", opt(TypeRef::String)),
+        ],
+    ));
+    s.records.push(record(
+        "NotePage",
+        "A page of notes: `Page<Note>`.",
+        vec![
+            field("items", vec_of(named("Note"))),
+            field("next", opt(TypeRef::String)),
+        ],
+    ));
+    for (alias, row) in [("TodoCache", "Todo"), ("NoteCache", "Note")] {
+        s.objects.push(object(
+            alias,
+            "Keeps rows by id.",
+            vec![ctor(alias, "new", vec![], false)],
+            vec![
+                method(
+                    alias,
+                    "put",
+                    "Stores a row, replacing the one with its id.",
+                    vec![param("row", named(row))],
+                    TypeRef::Unit,
+                    false,
+                ),
+                method(
+                    alias,
+                    "get",
+                    "",
+                    vec![param("id", TypeRef::U32)],
+                    opt(named(row)),
+                    false,
+                ),
+                method(alias, "all", "", vec![], vec_of(named(row)), true),
+            ],
+        ));
+    }
+    for (alias, row) in [("TodoSelection", "Todo"), ("NoteSelection", "Note")] {
+        s.objects.push(store(
+            object(
+                alias,
+                "The rows the user has ticked.",
+                vec![ctor(
+                    alias,
+                    "new",
+                    vec![param("limit", TypeRef::U32)],
+                    false,
+                )],
+                vec![
+                    method(
+                        alias,
+                        "toggle",
+                        "Ticks a row, or unticks it.",
+                        vec![param("row", named(row))],
+                        TypeRef::Unit,
+                        false,
+                    ),
+                    method(
+                        alias,
+                        "contains",
+                        "",
+                        vec![param("id", TypeRef::U32)],
+                        TypeRef::Bool,
+                        false,
+                    ),
+                    method(alias, "clear", "", vec![], TypeRef::Unit, false),
+                ],
+            ),
+            vec![
+                ("rows", vec_of(named(row)), false, Some("id")),
+                ("count", TypeRef::U32, true, None),
+            ],
+        ));
+    }
+    for arg in ["Todo", "Note"] {
+        s.functions.push(instance_fn(
+            "open_selection",
+            arg,
+            false,
+            "A fresh selection of rows.",
+            vec![param("limit", TypeRef::U32)],
+            obj(&format!("{arg}Selection")),
+            false,
+        ));
+    }
+    for arg in ["Todo", "Note"] {
+        s.functions.push(instance_fn(
+            "ticked",
+            arg,
+            true,
+            "How many rows the selection holds.",
+            vec![param("selection", obj(&format!("{arg}Selection")))],
+            TypeRef::U32,
+            false,
+        ));
+    }
+    for arg in ["Todo", "Note"] {
+        s.functions.push(instance_fn(
+            "page_of",
+            arg,
+            true,
+            "Wraps rows in a page.",
+            vec![param("rows", vec_of(named(arg)))],
+            named(&format!("{arg}Page")),
+            false,
+        ));
+    }
     s
 }

@@ -581,10 +581,15 @@ pub(crate) fn expand_struct_as(
         }
         Expand::Instance(instance) => {
             let rule = super::generic::duplicate_alias_constant(&instance.template, name.span());
+            let type_name = unraw(name);
             Ok(quote_spanned! {name.span()=>
                 impl #name {
                     #rule
                     #constants
+                    /// The declared name of the instantiation, for a signature that names it
+                    /// through a generic application (`Page<T>` in a generic function).
+                    #[doc(hidden)]
+                    pub const UNDRA_TYPE_NAME: &'static str = #type_name;
                 }
 
                 #registered
@@ -1081,10 +1086,15 @@ pub(crate) fn expand_enum_as(
         }
         Expand::Instance(instance) => {
             let rule = super::generic::duplicate_alias_constant(&instance.template, name.span());
+            let type_name = unraw(&name);
             Ok(quote_spanned! {name.span()=>
                 impl #name {
                     #rule
                     #constants
+                    /// The declared name of the instantiation, for a signature that names it
+                    /// through a generic application (`Page<T>` in a generic function).
+                    #[doc(hidden)]
+                    pub const UNDRA_TYPE_NAME: &'static str = #type_name;
                 }
 
                 #registered
