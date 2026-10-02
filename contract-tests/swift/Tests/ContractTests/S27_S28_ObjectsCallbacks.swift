@@ -123,12 +123,14 @@ extension ContractScenarios {
             b.stock(count: 3)
             let refs3 = refs()
             let changeSets3 = core.mirror.stats().changeSetsReceived
-            let transactions3 = core.stat("transactions")
+            let drains = Locked<[DrainStats]>([])
+            let listening = core.mirror.addDrainListener { stats in drains.withLock { $0.append(stats) } }
             workshop.merge(from: a, onto: b)
+            listening.remove()
             try checkEqual(a.items, 0, "a after the merge")
             try checkEqual(b.items, 5, "b after the merge")
             try checkEqual(core.mirror.stats().changeSetsReceived - changeSets3, 2, "one change-set for each shelf")
-            try checkEqual(core.stat("transactions") - transactions3, 1, "delivered in one transaction")
+            try checkEqual(drains.snapshot.map(\.changeSets), [2], "both applied by one drain, before merge returned")
             try checkEqual(try workshop.total(shelves: [a, b]), 5, "total([a, b])")
             try checkEqual(try workshop.describe(shelf: a), "a", "describe(a)")
             try checkEqual(try workshop.describe(shelf: nil), "none", "describe(nil)")

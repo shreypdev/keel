@@ -67,11 +67,18 @@ final class PlaygroundModel {
     let counter: Counter
     let bigList: BigList
     let inbox: RemoteTodosQueryHandle
+    let workshop: Workshop
+    /// Two shelves the workshop hands out: child stores, one wrapper each however often asked for.
+    let leftShelf: Shelf
+    let rightShelf: Shelf
 
     init() throws {
         todos = try Todos()
         counter = try Counter()
         bigList = try BigList()
         inbox = try RemoteTodosQueryHandle(list: UndraBootstrap.inboxList)
+        workshop = try Workshop()
+        leftShelf = try workshop.shelf(name: "left")
+        rightShelf = try workshop.shelf(name: "right")
     }
 }

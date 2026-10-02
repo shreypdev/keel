@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the playground for the iOS simulator and proves it runs: the four screens launched one by
+# Builds the playground for the iOS simulator and proves it runs: the five screens launched one by
 # one (`-tab`), a screenshot of each in ../.proof/ios-<view>.png, the process checked alive with no
 # crash in the log, and the XCUITest tour run on top.
 #
@@ -60,7 +60,7 @@ run xcrun simctl install "$UDID" "$APP"
 
 # 4. Each screen: launch, wait, screenshot, alive, no crash in the log.
 failed=0
-for view in todos counter biglist remote; do
+for view in todos counter biglist remote workshop; do
   step "xcrun simctl launch $UDID $BUNDLE -tab $view"
   xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
   xcrun simctl launch "$UDID" "$BUNDLE" -tab "$view"
