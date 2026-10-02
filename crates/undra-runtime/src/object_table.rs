@@ -822,6 +822,16 @@ impl ObjectTable {
         self.inner.read().live
     }
 
+    /// How many entries `matches` accepts (it runs under the table's lock: it must not call out).
+    pub(crate) fn count_where(&self, matches: &dyn Fn(&Arc<dyn AnyObject>) -> bool) -> usize {
+        let inner = self.inner.read();
+        inner
+            .slots
+            .iter()
+            .filter(|slot| slot.entry.as_ref().is_some_and(|e| matches(&e.object)))
+            .count()
+    }
+
     /// Number of live stores.
     pub fn store_count(&self) -> usize {
         self.inner.read().stores.len()
@@ -891,13 +901,35 @@ impl ObjectTable {
     /// (a slot's next occupant gets a generation no earlier handle carries, or, in a restore,
     /// exactly the generation the snapshot recorded). Returns what was in it.
     pub(crate) fn clear(&self) -> Vec<Cleared> {
+        self.clear_keeping(&|_| false)
+    }
+
+    /// [`clear`](Self::clear), except the entries whose handle `keep` accepts stay **exactly as
+    /// they are**: their slot and generation, their host references, what was observed, their
+    /// address (ADR-059: a restore leaves a re-creatable object alone). A page server a store
+    /// registered is never kept: it goes with its store, which a restore replaces.
+    ///
+    /// `keep` runs under the table's lock, so it must not call out (look a handle up in a set the
+    /// caller built before). A kept slot is not on the free list.
+    pub(crate) fn clear_keeping(&self, keep: &dyn Fn(Handle) -> bool) -> Vec<Cleared> {
         let mut inner = self.inner.write();
+        let inner = &mut *inner;
         let mut out = Vec::with_capacity(inner.live);
         let mut free = Vec::with_capacity(inner.slots.len());
+        let mut kept: Vec<u32> = Vec::new();
         for (index, slot) in inner.slots.iter_mut().enumerate() {
+            let handle = Handle::new(index as u32, slot.generation);
+            if slot
+                .entry
+                .as_ref()
+                .is_some_and(|entry| !entry.table_owned && keep(handle))
+            {
+                kept.push(index as u32);
+                continue;
+            }
             if let Some(entry) = slot.entry.take() {
                 out.push(Cleared {
-                    handle: Handle::new(index as u32, slot.generation),
+                    handle,
                     object: entry.object,
                     observed: entry.observed,
                     host_refs: entry.host_refs,
@@ -907,11 +939,92 @@ impl ObjectTable {
         }
         free.reverse(); // pop() hands out the lowest index first
         inner.free = free;
-        inner.live = 0;
+        // What is indexed is rebuilt from the entries that stayed (none, for a plain `clear`).
+        inner.live = kept.len();
         inner.host_refs = 0;
         inner.stores.clear();
         inner.by_address.clear();
+        for index in kept {
+            if let Some(entry) = inner.slots[index as usize].entry.as_ref() {
+                inner.host_refs += u64::from(entry.host_refs);
+                if entry.object.as_store().is_some() {
+                    inner.stores.insert(index);
+                }
+                inner.by_address.insert(entry.object.address(), index);
+            }
+        }
         out
+    }
+
+    /// Every entry the host holds a reference to, with its handle, in slot order: what a snapshot
+    /// looks at to find the objects it can write a recreation record for, and what a restore looks
+    /// at to find the ones it leaves alone. The objects are cloned out so the caller asks them
+    /// things (their [`recreation`](crate::UndraObjectDyn::recreation) takes a lock of its own)
+    /// without the table's lock held. Entries the table registered itself (page servers) are left
+    /// out.
+    pub(crate) fn held(&self) -> Vec<(Handle, Arc<dyn AnyObject>)> {
+        let inner = self.inner.read();
+        inner
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(index, slot)| {
+                let entry = slot.entry.as_ref()?;
+                (!entry.table_owned).then(|| {
+                    (
+                        Handle::new(index as u32, slot.generation),
+                        entry.object.clone(),
+                    )
+                })
+            })
+            .collect()
+    }
+
+    /// Puts `object` behind the live `handle` in place of what is there (a dormant entry being
+    /// built, ADR-059): the handle, its host references and its slot stay, the address index and
+    /// the store index follow the new object, and a store's cell is told its owner and its handle
+    /// (and its page servers register) as it is when it enters any other way.
+    ///
+    /// # Errors
+    ///
+    /// `BadHandle` when `handle` is not live.
+    pub(crate) fn replace_object(
+        &self,
+        handle: Handle,
+        object: Arc<dyn AnyObject>,
+    ) -> Result<(), BadHandle> {
+        let cell = object.as_store().cloned();
+        let address = object.address();
+        {
+            let mut inner = self.inner.write();
+            Self::check(&inner, handle)?;
+            let index = handle.index();
+            let old = match inner.slots[index as usize].entry.as_mut() {
+                Some(entry) => std::mem::replace(&mut entry.object, object),
+                None => {
+                    return Err(BadHandle {
+                        handle,
+                        reason: BadHandleReason::Stale,
+                    });
+                }
+            };
+            let old_address = old.address();
+            if inner.by_address.get(&old_address) == Some(&index) {
+                inner.by_address.remove(&old_address);
+            }
+            inner.by_address.insert(address, index);
+            if cell.is_some() {
+                inner.stores.insert(index);
+            } else {
+                inner.stores.remove(&index);
+            }
+        }
+        if let Some(cell) = cell {
+            cell.set_owner(self.owner.load(Ordering::Relaxed));
+            cell.set_handle(handle.0);
+            self.lazy_enter(&cell, handle);
+        }
+        Ok(())
     }
 }
 
@@ -1351,5 +1464,182 @@ mod tests {
         t.insert(store(shelf.clone()));
         assert_eq!(t.live(), 1);
         assert_eq!(shelf.cell.lazy_handle(0), 0);
+    }
+
+    // ----- entries a restore leaves alone, and objects built in place (ADR-059) ----------------
+
+    /// An entry a restore keeps: it has been observed, and the host holds two references.
+    fn kept_entry(t: &ObjectTable) -> (Handle, Arc<dyn AnyObject>) {
+        let object = a(7);
+        let address = object.address();
+        let h = t.insert(object.clone());
+        t.with_observed(h, |o| o.record(1, true, 3)).unwrap();
+        assert_eq!(t.issue_with(address, || unreachable!(), false), (h, false));
+        assert_eq!(t.host_refs_of(h), Some(2));
+        (h, object)
+    }
+
+    #[test]
+    fn clear_keeping_leaves_the_accepted_entries_exactly_as_they_are() {
+        let t = ObjectTable::isolated();
+        let first = t.insert(a(1));
+        let (kept, object) = kept_entry(&t);
+        let last = t.insert(a(3));
+        assert_eq!((t.live(), t.host_refs()), (3, 4));
+
+        let cleared = t.clear_keeping(&|h| h == kept);
+        assert_eq!(
+            cleared.iter().map(|c| c.handle).collect::<Vec<_>>(),
+            [first, last]
+        );
+        // The kept entry is the same object under the same handle: its references, its address
+        // (so the same `Arc` still maps to its handle) and what the host observed.
+        assert_eq!(t.get::<A>(kept).unwrap().0, 7);
+        assert_eq!(t.host_refs_of(kept), Some(2));
+        assert_eq!((t.live(), t.host_refs()), (1, 2));
+        assert_eq!(
+            t.issue_with(object.address(), || unreachable!(), false),
+            (kept, false)
+        );
+        assert_eq!(
+            t.with_observed(kept, |o| o.to_reobserve()).unwrap(),
+            [1],
+            "what was observed stays in the entry"
+        );
+        // The others are stale.
+        assert!(t.get::<A>(first).is_err() && t.get::<A>(last).is_err());
+    }
+
+    #[test]
+    fn a_kept_slot_is_not_on_the_free_list() {
+        let t = ObjectTable::isolated();
+        let first = t.insert(a(1));
+        let (kept, _) = kept_entry(&t);
+        let third = t.insert(a(3));
+        t.clear_keeping(&|h| h == kept);
+        // Every new object takes another slot, lowest first, and the kept one is occupied.
+        let fresh: Vec<u32> = (0..4).map(|n| t.insert(a(n)).index()).collect();
+        assert!(!fresh.contains(&kept.index()), "{fresh:?}");
+        assert_eq!(
+            fresh[..2],
+            [first.index(), third.index()],
+            "the cleared slots are reused, in order"
+        );
+        assert_eq!(t.insert_at(kept, a(9)), Err(InsertAtError::Occupied));
+        assert_eq!(t.get::<A>(kept).unwrap().0, 7);
+    }
+
+    #[test]
+    fn clear_keeping_nothing_is_clear() {
+        let t = ObjectTable::isolated();
+        t.insert(a(1));
+        t.insert(a(2));
+        let cleared = t.clear_keeping(&|_| false);
+        assert_eq!(cleared.len(), 2);
+        assert_eq!((t.live(), t.host_refs(), t.store_count()), (0, 0, 0));
+    }
+
+    #[test]
+    fn clear_keeping_never_keeps_a_page_server_and_keeps_the_store_index_of_what_stays() {
+        let t = ObjectTable::isolated();
+        let shelf = shelf(true);
+        let store_handle = t.insert(store(shelf.clone()));
+        let server = Handle(shelf.cell.lazy_handle(0));
+        // A kept store (not what a restore does, but the table must keep its index right) and
+        // an `accept everything` predicate: the servers still go, they belong to a store.
+        let cleared = t.clear_keeping(&|_| true);
+        assert_eq!(cleared.len(), 2, "the two page servers went");
+        assert_eq!((t.live(), t.store_count()), (1, 1));
+        assert!(t.get::<Shelf>(store_handle).is_ok());
+        assert!(t.get::<PageServer>(server).is_err());
+    }
+
+    #[test]
+    fn held_lists_what_the_host_holds_in_slot_order_and_not_a_page_server() {
+        let t = ObjectTable::isolated();
+        let first = t.insert(a(1));
+        let shelf = shelf(true);
+        let store_handle = t.insert(store(shelf));
+        let last = t.insert(a(3));
+        t.release(first).unwrap();
+        let held: Vec<Handle> = t.held().into_iter().map(|(h, _)| h).collect();
+        // The two page servers are in the table but are not the host's.
+        assert_eq!(t.live(), 4);
+        assert_eq!(held, [store_handle, last]);
+        assert!(held.windows(2).all(|w| w[0].index() < w[1].index()));
+    }
+
+    #[test]
+    fn count_where_counts_matching_entries() {
+        let t = ObjectTable::isolated();
+        t.insert(a(1));
+        t.insert(plain(Arc::new(B)));
+        t.insert(a(2));
+        assert_eq!(t.count_where(&|o| o.undra_type_id() == 1), 2);
+        assert_eq!(t.count_where(&|o| o.undra_type_id() == 2), 1);
+        assert_eq!(t.count_where(&|_| false), 0);
+    }
+
+    #[test]
+    fn replace_object_keeps_the_handle_and_its_references_and_moves_the_indexes() {
+        let t = ObjectTable::isolated();
+        // (Kept alive by the test: a freed object's address may be reused by the next allocation,
+        // a page server's for instance, and the address index is keyed by address.)
+        let old = a(1);
+        let old_address = old.address();
+        let h = t.insert(old.clone());
+        t.issue_with(old_address, || unreachable!(), false);
+        assert_eq!((t.host_refs_of(h), t.store_count()), (Some(2), 0));
+
+        // A store takes the entry (what a dormant handle becomes when it is built).
+        let shelf = shelf(true);
+        let new = store(shelf.clone());
+        let new_address = new.address();
+        t.replace_object(h, new).unwrap();
+        assert_eq!(t.host_refs_of(h), Some(2), "the host's references stay");
+        assert_eq!(t.get::<Shelf>(h).unwrap().cell.lazy_handle(1), 0);
+        assert_eq!(t.type_of(h).unwrap(), (31, "Shelf"));
+        assert_eq!(t.store_count(), 1, "the store index follows the new object");
+        assert_eq!(t.stores().len(), 1);
+        // The cell learned its handle, and its page servers entered the table.
+        assert_eq!(shelf.cell.handle(), h.0);
+        assert_eq!(t.live(), 3);
+        assert_eq!(page_len(&t, Handle(shelf.cell.lazy_handle(0))), Some(3));
+        // The address index follows: the new object maps to the handle, the old one to nothing.
+        assert_eq!(
+            t.issue_with(new_address, || unreachable!(), false),
+            (h, false)
+        );
+        let (other, fresh) = t.issue_with(old_address, || a(1), false);
+        assert!(
+            fresh && other != h,
+            "the replaced object no longer maps to the handle"
+        );
+    }
+
+    #[test]
+    fn replace_object_with_a_plain_object_takes_the_entry_out_of_the_store_index() {
+        let t = ObjectTable::isolated();
+        let h = t.insert(store(shelf(false)));
+        assert_eq!(t.store_count(), 1);
+        t.replace_object(h, a(5)).unwrap();
+        assert_eq!(t.store_count(), 0);
+        assert_eq!(t.get::<A>(h).unwrap().0, 5);
+    }
+
+    #[test]
+    fn replace_object_refuses_a_handle_that_is_not_live() {
+        let t = ObjectTable::isolated();
+        let h = t.insert(a(1));
+        t.release(h).unwrap();
+        assert_eq!(
+            t.replace_object(h, a(2)).unwrap_err().reason,
+            BadHandleReason::Stale
+        );
+        assert_eq!(
+            t.replace_object(Handle::NULL, a(2)).unwrap_err().reason,
+            BadHandleReason::Null
+        );
+        assert_eq!(t.live(), 0);
     }
 }

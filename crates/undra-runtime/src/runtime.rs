@@ -46,7 +46,7 @@ use crate::log::{DEBUG, ERROR, FATAL, WARN};
 /// The `port_call_id` of a fire-and-forget port call: no answer is expected (SPEC 6, host contract 6).
 const FIRE_AND_FORGET: u32 = 0;
 use crate::object::{AnyObject, StoreObject, StoreRestorer, UndraObject, erased, store};
-use crate::object_table::{BadHandle, GENERATION_CEILING, ObjectTable, Released};
+use crate::object_table::{BadHandle, BadHandleReason, GENERATION_CEILING, ObjectTable, Released};
 use crate::persist::{self, RegisteredHooks};
 use crate::ports::{
     Completion, Events, PortBinding, PortDispatch, PortDispatcher, PortError, PortFuture,
@@ -500,6 +500,10 @@ pub struct Runtime {
     blocking: Blocking,
     table: DispatchTable,
     restorers: HashMap<u32, &'static StoreRestorer>,
+    /// What builds re-creatable objects again and the code that does it (ADR-059), created by the
+    /// first [`add_reviver`](Runtime::add_reviver): a core that adds none never links it, and
+    /// handles a recreation record as a store type it does not have.
+    pub(crate) recreation: std::sync::OnceLock<crate::recreation::Recreation>,
     /// The fingerprint of a store type's signals (ADR-037), computed when a snapshot or a restore
     /// first needs it (only for the types it holds; a few, so a list, not a map).
     store_fingerprints: Mutex<Vec<(u32, u64)>>,
@@ -551,7 +555,7 @@ fn failed_report(reason: String) -> PanicReport {
 }
 
 /// Where an object lives: equal addresses are the same object.
-fn object_address(object: &Arc<dyn AnyObject>) -> usize {
+pub(crate) fn object_address(object: &Arc<dyn AnyObject>) -> usize {
     Arc::as_ptr(object).cast::<()>() as usize
 }
 
@@ -904,6 +908,7 @@ impl Runtime {
             events: Events::default(),
             table,
             restorers,
+            recreation: std::sync::OnceLock::new(),
             store_fingerprints: Mutex::new(Vec::new()),
             description: Mutex::new(None),
             stats_sections: Mutex::new(Vec::new()),
@@ -1342,7 +1347,7 @@ impl Runtime {
     }
 
     /// `verb` and the type of the store at `handle`, for a panic report: `observe Todos`.
-    fn store_operation(&self, verb: &str, handle: Handle) -> String {
+    pub(crate) fn store_operation(&self, verb: &str, handle: Handle) -> String {
         match self.objects.type_of(handle) {
             Ok((_, type_name)) => format!("{verb} {type_name}"),
             Err(_) => verb.to_owned(),
@@ -2019,7 +2024,13 @@ impl Runtime {
     }
 
     /// Accounts for a caught panic: log level 5, counters, store poisoning.
-    fn note_panic(&self, what: &str, operation: &str, handle: Handle, report: &PanicReport) {
+    pub(crate) fn note_panic(
+        &self,
+        what: &str,
+        operation: &str,
+        handle: Handle,
+        report: &PanicReport,
+    ) {
         self.log_panic(&format!("{what} panicked"), operation, report);
         if !handle.is_null() {
             self.objects.mark_poisoned(handle);
@@ -2251,13 +2262,28 @@ impl Runtime {
             return;
         };
         let handle = Handle(handle);
-        let object = match self.objects.get_dyn(handle) {
+        let mut object = match self.objects.get_dyn(handle) {
             Ok(object) => object,
             Err(e) => {
                 self.log(WARN, "undra::runtime", &format!("observe: {e}"));
                 return;
             }
         };
+        if let Some(recreation) = self.recreation.get() {
+            // A handle a restore re-issued is built when the host first uses it (ADR-059); the
+            // host stopping to observe one it never observed builds nothing.
+            if on {
+                match (recreation.hooks.revive_object)(self, handle, object) {
+                    Ok(live) => object = live,
+                    Err(reason) => {
+                        self.log(WARN, "undra::runtime", &format!("observe: {reason}"));
+                        return;
+                    }
+                }
+            } else if (recreation.hooks.is_dormant)(&object) {
+                return;
+            }
+        }
         let Some(cell) = object.as_store() else {
             self.log(
                 WARN,
@@ -2463,8 +2489,27 @@ impl Runtime {
     }
 
     /// Resolves a raw handle to a `T`: what a generated dispatcher does for its receiver.
+    ///
+    /// A handle a restore re-issued whose object has not been built yet (ADR-059) is built here, on
+    /// the first use: the lookup misses (the dormant entry is not a `T`), the object is built in the
+    /// same entry, and the lookup is made again. A live object pays nothing for that. When the
+    /// object cannot be built the handle is stale from then on, like any released one.
     pub fn object<T: Send + Sync + 'static>(&self, handle: u64) -> Result<Arc<T>, BadHandle> {
-        self.objects.get::<T>(Handle(handle))
+        let handle = Handle(handle);
+        let found = self.objects.get::<T>(handle);
+        let Some(recreation) = self.recreation.get() else {
+            return found;
+        };
+        // Only a miss pays for the check: a dormant entry is live but not a `T`.
+        if let Err(BadHandle {
+            reason: BadHandleReason::WrongType { .. },
+            ..
+        }) = found
+        {
+            (recreation.hooks.revive_handle)(self, handle)?;
+            return self.objects.get::<T>(handle);
+        }
+        found
     }
 
     /// [`object`](Runtime::object) for an object **parameter** of a call that outlives its
@@ -2477,7 +2522,7 @@ impl Runtime {
         call_id: u32,
         handle: u64,
     ) -> Result<Arc<T>, BadHandle> {
-        let resolved = self.objects.get::<T>(Handle(handle));
+        let resolved = self.object::<T>(handle);
         if resolved.is_ok() {
             note_param(call_id, Handle(handle));
         }
@@ -3021,7 +3066,16 @@ impl Runtime {
     /// still hold. The runtime re-encodes each record with the table's own
     /// handle and the object's own type id, so a snapshot is consistent whatever the cell
     /// knows. Objects that are not stores, and stores that are [`transient`](crate::UndraObjectDyn::transient)
-    /// (query handles), are not included.
+    /// (query handles), are not written as stores.
+    ///
+    /// **Recreation records (ADR-059).** For each object the host holds a reference to whose
+    /// [`recreation`](crate::UndraObjectDyn::recreation) is `Some` and whose type a
+    /// [`Reviver`](crate::Reviver) claims (a query handle: its parameters), and for each handle a
+    /// restore re-issued that nothing has used yet, one more record follows the stores': the
+    /// record shape of a store with one field under
+    /// [`RECREATION_FIELD`](undra_wire::payload::RECREATION_FIELD). `count` counts both kinds, the
+    /// type table lists each record type once with its reviver's fingerprint, and the description
+    /// does not mention them. A runtime without a reviver writes none.
     pub fn snapshot(&self) -> Vec<u8> {
         // Read-only, so it is fine even if this thread already holds the lock.
         let _guard = self.enter_core().ok();
@@ -3070,8 +3124,13 @@ impl Runtime {
             }
         }
         let description = self.snapshot_description(&type_ids);
+        // The recreation records (ADR-059) and the types they add to the table.
+        let mut recreated_types: Vec<(u32, u64)> = Vec::new();
+        if let Some(recreation) = self.recreation.get() {
+            (recreation.hooks.snapshot)(self, &mut chunks, &mut recreated_types, &type_ids);
+        }
         let mut out = Writer::with_capacity(
-            32 + type_ids.len() * 12
+            32 + (type_ids.len() + recreated_types.len()) * 12
                 + description.len()
                 + chunks.iter().map(Vec::len).sum::<usize>(),
         );
@@ -3081,10 +3140,14 @@ impl Runtime {
         out.write_u64(self.objects.generation_floor());
         out.write_u64(self.schema_hash);
         // The type table (`SnapshotType`s): each store type once, with its fingerprint.
-        out.write_len(u32::try_from(type_ids.len()).unwrap_or(u32::MAX));
+        out.write_len(u32::try_from(type_ids.len() + recreated_types.len()).unwrap_or(u32::MAX));
         for &type_id in &type_ids {
             out.write_u32(type_id);
             out.write_u64(self.store_fingerprint(type_id));
+        }
+        for &(type_id, fingerprint) in &recreated_types {
+            out.write_u32(type_id);
+            out.write_u64(fingerprint);
         }
         out.write_str(&description);
         for chunk in &chunks {
@@ -3129,6 +3192,21 @@ impl Runtime {
     /// (its handles answer `stale_handle`) and reported, in the [`RestoreReport`] of
     /// [`Runtime::restore_with_report`] and a WARN log. The re-observe phase re-observes a handle
     /// only when the restored store there has the type it had when it was observed.
+    ///
+    /// **Objects that are built again (ADR-059).** A query handle is not state, so a restore does
+    /// not rebuild it; it keeps it alive instead, in two ways. A **live** re-creatable object (one
+    /// whose [`recreation`](crate::UndraObjectDyn::recreation) is `Some`) stays exactly as it is,
+    /// whatever the snapshot says: its entry, host references, observation, observer in the cache,
+    /// polling timer, fetch in flight and pages (a time travel, or an app's own `restore` on a live
+    /// core, changes nothing for it). Each **recreation record** of the snapshot whose handle is not
+    /// live and whose type a [`Reviver`](crate::Reviver) claims, with the fingerprint the snapshot
+    /// was written with and a record that decodes, is re-issued at the **same handle** as a
+    /// dormant entry: nothing is built, no port is called, no timer started. The object is built
+    /// in the same entry when the host first uses the handle (`observe`, a call on it, an object
+    /// parameter), and the host's wrapper never notices. A record that cannot be honoured is
+    /// *refused*: its handle stays stale, a WARN says why, and the restore goes on
+    /// ([`RestoreReport::refused`]). The one case in which a live re-creatable object goes stale is
+    /// a store of the snapshot that needs its slot ([`RestoreReport::displaced`]).
     pub fn restore(&self, payload: &[u8]) -> Result<(), RestoreError> {
         self.restore_with_report(payload).map(|_| ())
     }
@@ -3183,9 +3261,17 @@ impl Runtime {
             ..RestoreReport::default()
         };
         let mut migration = Migration::new(&snapshot);
+        // The recreation records this build can honour, as dormant objects (ADR-059). A runtime
+        // with no reviver treats a record as a store type it does not have, below.
+        let hooks = self.recreation.get().map(|recreation| recreation.hooks);
+        let mut reissue: crate::recreation::Reissue = Vec::new();
 
         for s in &snapshot.stores {
             let type_id = s.type_id;
+            if let (Some(hooks), Some(record)) = (hooks, s.recreation()) {
+                (hooks.plan)(self, &snapshot, s, record, &mut report, &mut reissue);
+                continue;
+            }
             let Some(restorer) = self.restorers.get(&type_id) else {
                 // A store type this build no longer has (the app removed that screen): left out,
                 // its handle answers `stale_handle`, reported (ADR-037 decision 7).
@@ -3280,7 +3366,12 @@ impl Runtime {
         // Phase 2: replace the table.
         // Nothing issued before the snapshot (or since) may be issued again: the counter resumes
         // above the snapshot's floor and above every generation it places (ADR-022).
-        let max_generation = built.iter().map(|(h, _)| h.generation()).max().unwrap_or(0);
+        let max_generation = built
+            .iter()
+            .chain(&reissue)
+            .map(|(h, _)| h.generation())
+            .max()
+            .unwrap_or(0);
         self.objects
             .raise_generation_floor(snapshot.generation_floor.max(max_generation));
         // What each store handle observed before the restore, and the store type it was observed
@@ -3295,7 +3386,13 @@ impl Runtime {
         // remove the store the others still use.
         // (A list, not a map: a handful of entries, and no second map type in the wasm.)
         let mut refs_before: Vec<(u64, u32)> = Vec::new();
-        for cleared in self.objects.clear() {
+        // A live re-creatable object (or a dormant handle) is not state: the restore leaves it
+        // exactly as it is, unless a store of the snapshot needs its slot (ADR-059).
+        let cleared = match hooks {
+            Some(hooks) => (hooks.clear)(self, &built, &mut before, &mut report),
+            None => self.objects.clear(),
+        };
+        for cleared in cleared {
             before.insert(cleared.handle.0, object_address(&cleared.object));
             if cleared.host_refs > 1 {
                 refs_before.push((cleared.handle.0, cleared.host_refs));
@@ -3324,6 +3421,12 @@ impl Runtime {
                     &format!("restore: could not place {handle:?}: {e}"),
                 );
             }
+        }
+
+        // The handles of the recreation records become valid again, dormant: the object is built
+        // when the host first uses the handle (ADR-059).
+        if let Some(hooks) = hooks {
+            (hooks.place)(self, reissue, &mut report);
         }
 
         // Calls and streams that were running on an object this restore replaced or invalidated
@@ -3457,8 +3560,16 @@ impl Runtime {
         ));
         // ADR-046: the reports delivered to `Diagnostics`. (The background tasks have a section of
         // their own, added when the first is registered: `background::stats_section`.)
+        // ADR-059: handles a restore re-issued that nothing has used yet, and the ones whose object
+        // could not be built when it was.
+        let (dormant, revive_failed) = self.recreation.get().map_or((0, 0), |recreation| {
+            (
+                (recreation.hooks.dormant_count)(self),
+                recreation.revive_failed.load(Ordering::Relaxed),
+            )
+        });
         out.push_str(&format!(
-            ",\"panic_reports\":{}}}",
+            ",\"panic_reports\":{},\"dormant_handles\":{dormant},\"revive_failed\":{revive_failed}}}",
             Stats::get(&s.panic_reports)
         ));
         // Sections of layered crates (`undra-query`'s persistence counters), before the closing
