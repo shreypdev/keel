@@ -3821,6 +3821,7 @@ Landed in the day after v1.0, each behind an ADR and an adversarial review.
 - A testing kit for apps (ADR-055)Previews run the real core in process with scripted ports and a manual clock; a session recorded once with undra dev --record replays deterministically in tests on every platform.
 - WebSocket, SSE and Db ports (ADR-047, ADR-048)Real-time streams with the core's credit as backpressure, and SQL over SQLite on every platform with the same deterministic fake; opt-in, so nothing grows for apps that do not use them.
 - Objects as parameters, host callbacks (ADR-040, ADR-041)Generated classes cross the boundary as themselves, one wrapper per handle; the core calls back into app code through typed callback interfaces that never unwind into it.
+- Production operations (ADR-046)Every contained panic becomes a structured report the app receives with symbolicable frames; background runs drain the queue under a deadline; release builds keep symbols beside the binary and undra symbolicate reads them.
 
 Now
 
