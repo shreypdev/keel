@@ -153,3 +153,8 @@ doc of `builds/web.rs` still says 0.1%.
    with the baseline, `scripts/wasm-size.sh` (the wasm half; the JavaScript half needs `npm ci`). Not run: the
    TypeScript, Kotlin and Swift runtimes' suites and the contract tests. Nothing they read changed (both JSON forms
    are the same bytes), so the integrator's matrix is the check.
+3. **Branches open in parallel that add a field to a `*Def`** (`wt/generics-fn-obj` and `wt/reload-handles` were cut
+   from the same main): after the merge `crates/undra-meta/src/schema_json.rs` does not compile until the field is
+   written there (it destructures every definition on purpose). The line to add is the one `serde` would write: the
+   key in declaration order, left out when the field's `skip_serializing_if` says so. The differential tests then
+   say whether it matches.
