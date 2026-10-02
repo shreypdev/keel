@@ -43,8 +43,9 @@ export function App({
   const [tab, setTab] = useState<TabId>(() => resolveTab(params, location.hash));
   // `?autostart=1` is for the view the page opened on: coming back to the stress screen later does not start it again.
   const [autostart, setAutostart] = useState(params.autostart);
-  // A crash restart (ADR-049) keeps the stores but not the other objects: the Live view's `Live` goes stale, so the view
-  // is mounted afresh after each restart and makes a new one.
+  // A crash restart (ADR-049) keeps the stores but not what they held outside their signals: the Live view's `Live`
+  // goes stale and the Notes store's open database is gone, so both views are mounted afresh after each restart (a new
+  // `Live`, the database opened again).
   const lastRestart = useSignal(playground.restarts.entries)?.[0]?.at ?? 0;
 
   const choose = (next: TabId): void => {
@@ -61,7 +62,7 @@ export function App({
       {tab === "remote" && <RemoteView playground={playground} />}
       {tab === "stress" && <StressView channel={channel} initialRate={params.rate} initialMode={params.mode} autostart={autostart} />}
       {tab === "live" && <LiveView key={lastRestart} initialUrl={params.ws} />}
-      {tab === "notes" && <NotesView />}
+      {tab === "notes" && <NotesView key={lastRestart} />}
     </>
   );
 
