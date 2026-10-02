@@ -470,6 +470,14 @@ class DiagnosticsTests : Suite() {
             assertEq(0, t.calls.size)
         }
 
+        case("runInBackground on a core that was never loaded fails as Unavailable (closed), like every call on the placeholder") {
+            val entry = CoreEntry("diagnostics_unloaded", HASH) { FakeNative("diagnostics_unloaded") }
+            LogCapture("dev.undra.runtime").use {
+                val e = assertThrows<UndraCallError.Unavailable> { runBlocking { entry.core.runInBackground(1_000L) } }
+                assertEq(UndraTransportException.Reason.CLOSED, e.transport.reason)
+            }
+        }
+
         case("runInBackground maps a cancelled, refused or unreadable reply onto UndraCallError") {
             val t = FakeTransport()
             attach(t).use { core ->
