@@ -140,6 +140,20 @@ impl<'a> Streamer<'a> {
                     }
                 }
             }
+            // A newtype is its inner value on the wire (ADR-042): wrapping a value in one, or
+            // unwrapping it, copies the bytes through the inner type's conversion.
+            (TypeRef::Named(old_name), new) if !matches!(new, TypeRef::Named(_)) => {
+                match transparent_inner(self.old, old_name) {
+                    Some(inner) => self.convert(r, w, inner, new, depth + 1, hook_here)?,
+                    None => return Err(refuse()),
+                }
+            }
+            (old, TypeRef::Named(new_name)) if !matches!(old, TypeRef::Named(_)) => {
+                match transparent_inner(self.new, new_name) {
+                    Some(inner) => self.convert(r, w, old, inner, depth + 1, hook_here)?,
+                    None => return Err(refuse()),
+                }
+            }
             (a, b) if a == b => {
                 let start = r.position();
                 skip(r, a, self.old, depth)?;
@@ -259,6 +273,15 @@ impl<'a> Streamer<'a> {
     }
 }
 
+/// The type a newtype named `name` wraps in `closure`, if it is one (ADR-042).
+pub(super) fn transparent_inner<'c>(closure: &'c TypeClosure, name: &str) -> Option<&'c TypeRef> {
+    closure
+        .record(name)
+        .filter(|record| record.transparent)
+        .and_then(|record| record.fields.first())
+        .map(|field| &field.ty)
+}
+
 /// Writes `i`, read as a narrower integer type, as `ty`: `widens` holds, so it always fits (the
 /// checked `put_int` of the tree form is for values a hook built).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // lossless: `widens` holds
@@ -325,6 +348,9 @@ pub(super) fn skip(
         }
         TypeRef::Uuid => {
             r.read_array::<16>()?;
+        }
+        TypeRef::Decimal => {
+            r.read_array::<17>()?;
         }
         TypeRef::Option(inner) => {
             let at = r.position();

@@ -273,6 +273,7 @@ pub fn record(name: &str, docs: &str, fields: Vec<FieldDef>) -> RecordDef {
         name: name.into(),
         type_id: ids::type_id(name),
         fields,
+        transparent: false,
         docs: docs.into(),
     }
 }
@@ -476,6 +477,9 @@ pub fn query(
         stale_ms,
         persist: false,
         idempotent: false,
+        interval_ms: None,
+        poll_in_background: false,
+        infinite: None,
     }
 }
 

@@ -1,5 +1,8 @@
 package dev.undra.runtime.wire
 
+import java.math.BigDecimal
+import java.math.BigInteger
+import java.math.RoundingMode
 import java.util.UUID
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.nanoseconds
@@ -149,6 +152,45 @@ public object Codecs {
             val msb = r.readI64BigEndian()
             val lsb = r.readI64BigEndian()
             return UUID(msb, lsb)
+        }
+    }
+
+    /**
+     * `Decimal` (ADR-042): a 128-bit two's-complement mantissa in 16 little-endian bytes, then a
+     * scale byte of at most 38; value = mantissa x 10^-scale, as a [BigDecimal] of
+     * `BigDecimal(BigInteger, scale)` (exact, and `equals` is scale-sensitive, as the wire
+     * encoding is: `1.0` and `1.00` are different values to `equals`, the same to `compareTo`).
+     *
+     * Decoding is exact. Encoding is exact for every value the wire can hold; the rest is
+     * documented, not hidden: a negative scale (`1E+3`) becomes whole digits (scale 0), digits past
+     * the 38th after the point are rounded half up, and a value whose mantissa needs more than 128
+     * bits saturates at the largest or smallest mantissa.
+     */
+    public val decimal: UndraCodec<BigDecimal> = object : UndraCodec<BigDecimal> {
+        override fun encode(w: UndraWriter, v: BigDecimal) {
+            var value = v
+            if (value.scale() < 0) value = value.setScale(0)
+            if (value.scale() > MAX_DECIMAL_SCALE) value = value.setScale(MAX_DECIMAL_SCALE, RoundingMode.HALF_UP)
+            var mantissa = value.unscaledValue()
+            var scale = value.scale()
+            if (mantissa.bitLength() > 127) {
+                mantissa = if (mantissa.signum() < 0) I128_MIN else I128_MAX
+                scale = 0
+            }
+            w.writeI64(mantissa.toLong())
+            w.writeI64(mantissa.shiftRight(64).toLong())
+            w.writeU8(scale.toUByte())
+        }
+
+        override fun decode(r: UndraReader): BigDecimal {
+            val low = r.readI64()
+            val high = r.readI64()
+            val at = r.position
+            val scale = r.readU8()
+            if (scale > MAX_DECIMAL_SCALE.toUByte()) throw WireException.InvalidTag(scale.toUInt(), at, "decimal scale")
+            val unsignedLow = if (low >= 0) BigInteger.valueOf(low) else BigInteger.valueOf(low).add(TWO_POW_64)
+            val mantissa = BigInteger.valueOf(high).shiftLeft(64).add(unsignedLow)
+            return BigDecimal(mantissa, scale.toInt())
         }
     }
 
@@ -337,3 +379,8 @@ private class ResultCodec<T, E>(
         }
     }
 }
+
+private const val MAX_DECIMAL_SCALE = 38
+private val TWO_POW_64: BigInteger = BigInteger.ONE.shiftLeft(64)
+private val I128_MAX: BigInteger = BigInteger.ONE.shiftLeft(127).subtract(BigInteger.ONE)
+private val I128_MIN: BigInteger = BigInteger.ONE.shiftLeft(127).negate()

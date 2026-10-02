@@ -6,7 +6,7 @@ use std::hash::{BuildHasher, Hash};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::types::{Bytes, Handle, Timestamp, Uuid};
+use crate::types::{Bytes, Decimal, Handle, Timestamp, Uuid};
 use crate::writer::len_u32;
 use crate::{Reader, WireError, Writer};
 
@@ -32,7 +32,7 @@ use crate::{Reader, WireError, Writer};
 /// assert_eq!(Point { x: 1, y: -1 }.encode_to_vec(), [1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff]);
 /// ```
 #[diagnostic::on_unimplemented(
-    message = "error[undra::E0001]: `{Self}` cannot cross the boundary by value\n  = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value\n  = help: declare `{Self}` with `#[undra::api]`, or return a record with the data the platform needs\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001",
+    message = "error[undra::E0001]: `{Self}` cannot cross the boundary by value\n  = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value\n  = help: declare `{Self}` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001",
     label = "not a type that can cross the boundary"
 )]
 pub trait Encode {
@@ -72,7 +72,7 @@ pub trait Encode {
 /// assert!(Point::decode_exact(&[1, 0, 0, 0]).is_err());
 /// ```
 #[diagnostic::on_unimplemented(
-    message = "error[undra::E0001]: `{Self}` cannot cross the boundary by value\n  = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value\n  = help: declare `{Self}` with `#[undra::api]`, or return a record with the data the platform needs\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001",
+    message = "error[undra::E0001]: `{Self}` cannot cross the boundary by value\n  = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value\n  = help: declare `{Self}` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001",
     label = "not a type that can cross the boundary"
 )]
 pub trait Decode: Sized {
@@ -514,6 +514,33 @@ impl Decode for Uuid {
     #[inline]
     fn decode(r: &mut Reader<'_>) -> Result<Self, WireError> {
         r.read_array::<16>().map(Uuid)
+    }
+}
+
+impl Encode for Decimal {
+    #[inline]
+    fn encode(&self, w: &mut Writer) {
+        w.write_raw(&self.mantissa.to_le_bytes());
+        w.write_u8(self.scale);
+    }
+}
+
+impl Decode for Decimal {
+    const MIN_ENCODED_LEN: usize = 17;
+
+    #[inline]
+    fn decode(r: &mut Reader<'_>) -> Result<Self, WireError> {
+        let mantissa = i128::from_le_bytes(r.read_array::<16>()?);
+        let at = r.position();
+        let scale = r.read_u8()?;
+        if scale > Decimal::MAX_SCALE {
+            return Err(WireError::InvalidTag {
+                tag: u32::from(scale),
+                at,
+                ty: "decimal scale",
+            });
+        }
+        Ok(Decimal { mantissa, scale })
     }
 }
 

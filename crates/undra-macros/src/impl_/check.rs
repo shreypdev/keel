@@ -679,6 +679,7 @@ fn canonical_leaf(kty: &KType, wire: &TokenStream) -> TokenStream {
         KType::String => quote!(::std::string::String),
         KType::Bytes => quote!(#wire::Bytes),
         KType::Uuid => quote!(#wire::Uuid),
+        KType::Decimal => quote!(#wire::Decimal),
         KType::Timestamp => quote!(#wire::Timestamp),
         KType::Duration => quote!(::core::time::Duration),
         // Not leaves: the walker never asks.

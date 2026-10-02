@@ -122,6 +122,16 @@ pub const fn port_method_id(trait_name: &str, method: &str) -> u32 {
     method_id(trait_name, method)
 }
 
+/// The method id of `set_poll_interval(Option<Duration>)` on every query handle:
+/// `fnv1a32("QueryHandle.set_poll_interval")` (ADR-043). The argument is the wire
+/// `Option<Duration>` (`None` clears the observer's override and returns it to the query's own
+/// interval).
+pub const SET_POLL_INTERVAL_METHOD_ID: u32 = fnv1a32("QueryHandle.set_poll_interval");
+
+/// The method id of `fetch_next_page()` on every handle of an infinite query:
+/// `fnv1a32("QueryHandle.fetch_next_page")` (ADR-043). No arguments.
+pub const FETCH_NEXT_PAGE_METHOD_ID: u32 = fnv1a32("QueryHandle.fetch_next_page");
+
 /// The reserved method every callback port answers to release one instance:
 /// `fnv1a32("<Trait>.__release")` (ADR-041). Fire-and-forget, arguments `instance u64`.
 pub const CALLBACK_RELEASE: &str = "__release";

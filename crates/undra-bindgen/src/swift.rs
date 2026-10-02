@@ -297,6 +297,7 @@ impl Types<'_> {
             TypeRef::Duration => self.duration.to_owned(),
             TypeRef::Timestamp => "Date".to_owned(),
             TypeRef::Uuid => "UUID".to_owned(),
+            TypeRef::Decimal => "Decimal".to_owned(),
             // `any Listener?` would be an existential of an optional: the optional goes outside.
             TypeRef::Option(_) if CallbackUse::of(t).is_some() => CallbackUse::of(t)
                 .map(|callback| format!("(any {})?", callback.name()))
@@ -406,6 +407,7 @@ impl Types<'_> {
             TypeRef::Uuid => {
                 "UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))".to_owned()
             }
+            TypeRef::Decimal => "Decimal.zero".to_owned(),
             TypeRef::Named(name) => return self.zero_named(name, state),
             TypeRef::Object(_) | TypeRef::Callback(_) => return None,
             TypeRef::Unit | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {

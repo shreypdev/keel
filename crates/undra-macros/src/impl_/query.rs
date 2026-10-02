@@ -514,6 +514,9 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
             stale_ms: #stale,
             persist: #persist,
             idempotent: #idempotent,
+            interval_ms: ::core::option::Option::None,
+            poll_in_background: false,
+            infinite: ::core::option::Option::None,
         };
         #registration
         #erased_registration

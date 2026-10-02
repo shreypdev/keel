@@ -423,6 +423,7 @@ mod tests {
                     docs: String::new(),
                 },
             ],
+            transparent: false,
             docs: "An item.".into(),
         });
         schema

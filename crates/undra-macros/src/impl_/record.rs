@@ -395,6 +395,7 @@ pub(crate) fn expand_struct(
             name: #name_str,
             type_id: #meta::ids::type_id(#name_str),
             fields: &[ #(#field_metas),* ],
+            transparent: false,
             docs: #docs,
         };
         #registration

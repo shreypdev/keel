@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { fnv1a32, fnv1a64 } from "../src/fnv.js";
 import { type Codec, codecs, decodeValue, encodeValue } from "../src/wire/codec.js";
+import { Decimal, decimalCodec } from "../src/wire/decimal.js";
+import { WireError } from "../src/wire/errors.js";
 import { type Kind, decodeEnvelope, encodeEnvelope } from "../src/wire/envelope.js";
 import {
   type CallPayload,
@@ -392,7 +394,37 @@ function handleCase(v: Vector): Case {
   };
 }
 
+/** A decimal vector: the number as text, or a rejection every decoder must make (ADR-042). */
+function decimalCase(v: Vector & { error?: string }): Case {
+  if (v.error !== undefined) {
+    return {
+      encode: () => fromHex(v.hex),
+      check(bytes) {
+        try {
+          decodeValue(decimalCodec, bytes);
+        } catch (e) {
+          expect(e).toBeInstanceOf(WireError);
+          expect((e as WireError).detail).toMatchObject({ code: "invalid_tag", ty: v.error });
+          return;
+        }
+        throw new Error("expected the decimal to be rejected");
+      },
+      reencode: (bytes) => bytes,
+    };
+  }
+  const json = v.value as { mantissa: number | string; scale: number; text: string };
+  const value = new Decimal(BigInt(json.mantissa), json.scale);
+  expect(value.toString()).toBe(json.text);
+  expect(Decimal.parse(json.text).equals(value)).toBe(true);
+  return codecCase(decimalCodec as Codec<unknown>, value);
+}
+
 function caseFor(v: Vector): Case | undefined {
+  if (v.type === "decimal") return decimalCase(v);
+  // The lazy-list payloads are checked by the lazy-list suite.
+  if (v.type === "lazy value" || v.type === "lazy invalidated" || v.type === "lazy page (item i32)") {
+    return { encode: () => fromHex(v.hex), check: () => {}, reencode: (b) => b };
+  }
   for (const [pattern, codec] of SCHEMA_CODECS) {
     if (pattern.test(v.type)) return codecCase(codec, v.value);
   }

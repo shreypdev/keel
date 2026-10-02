@@ -11,6 +11,8 @@ import dev.undra.runtime.testing.directBuffer
 import dev.undra.runtime.testing.fail
 import dev.undra.runtime.testing.unhex
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
+import java.math.BigInteger
 import java.util.UUID
 import kotlin.time.Duration.Companion.nanoseconds
 
@@ -65,6 +67,8 @@ class WireVectorsTest : Suite() {
             "duration" -> codec(v, Codecs.duration, value.asLong().nanoseconds)
             "timestamp" -> codec(v, Codecs.timestamp, Timestamp(value.asLong()))
             "uuid" -> codec(v, Codecs.uuid, UUID.fromString(value.asString()))
+            "decimal" -> decimal(v)
+            "lazy value", "lazy invalidated", "lazy page (item i32)" -> {} // checked by the lazy-list suite
             "handle" -> handle(v)
             "record Todo{id:uuid,title:string,done:bool}" -> {
                 val o = value.asObj()
@@ -143,6 +147,21 @@ class WireVectorsTest : Suite() {
 
     private fun <T> codec(v: WireVector, c: UndraCodec<T>, expected: T) =
         verify(v, expected, { c.encode(it, expected) }, { c.decodeAll(it) }, { c.decode(it) })
+
+    /** A decimal vector: the number and its scale, or a rejection every decoder must make. */
+    private fun decimal(v: WireVector) {
+        val expected = v.hex
+        if (v.error != null) {
+            val e = assertWire<WireException.InvalidTag> { Codecs.decimal.decodeAll(unhex(expected)) }
+            assertEq(v.error, e.type, "${v.name} error type")
+            return
+        }
+        val o = v.value.asObj()
+        val mantissa = o["mantissa"].let { (it as? JV.Num)?.text ?: it.asString() }
+        val number = BigDecimal(BigInteger(mantissa), o["scale"].asInt())
+        assertEq(o["text"].asString(), number.toPlainString(), "${v.name} text")
+        codec(v, Codecs.decimal, number)
+    }
 
     private fun handle(v: WireVector) {
         val raw = v.value.asLong()

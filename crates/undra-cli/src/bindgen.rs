@@ -396,6 +396,7 @@ mod tests {
                 default: false,
                 docs: String::new(),
             }],
+            transparent: false,
             docs: String::new(),
         });
         schema

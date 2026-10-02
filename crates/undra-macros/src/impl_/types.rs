@@ -54,6 +54,7 @@ pub(crate) enum KType {
     Duration,
     Timestamp,
     Uuid,
+    Decimal,
     Option(Box<KType>),
     Vec(Box<KType>),
     Map(Box<KType>, Box<KType>),
@@ -91,6 +92,7 @@ impl KType {
             KType::Duration => leaf("Duration"),
             KType::Timestamp => leaf("Timestamp"),
             KType::Uuid => leaf("Uuid"),
+            KType::Decimal => leaf("Decimal"),
             KType::Option(inner) => {
                 let inner = inner.meta(meta);
                 quote!(#meta::TypeRefMeta::Option(&#inner))
@@ -999,6 +1001,7 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
             "Duration" => Some(KType::Duration),
             "Timestamp" => Some(KType::Timestamp),
             "Uuid" => Some(KType::Uuid),
+            "Decimal" => Some(KType::Decimal),
             _ => None,
         };
         if let Some(leaf) = leaf {

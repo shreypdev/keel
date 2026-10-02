@@ -152,6 +152,7 @@ const QUALIFIED: &[(&str, &str)] = &[
     ("Unit", "kotlin.Unit"),
     ("Duration", "kotlin.time.Duration"),
     ("UUID", "java.util.UUID"),
+    ("BigDecimal", "java.math.BigDecimal"),
     ("Timestamp", "dev.undra.runtime.wire.Timestamp"),
 ];
 
@@ -341,6 +342,7 @@ impl<'a> Ctx<'a> {
             TypeRef::Duration => self.builtin("Duration", sh),
             TypeRef::Timestamp => self.builtin("Timestamp", sh),
             TypeRef::Uuid => self.builtin("UUID", sh),
+            TypeRef::Decimal => self.builtin("BigDecimal", sh),
             TypeRef::Option(inner) => format!("{}?", self.ty(inner, sh)),
             TypeRef::Vec(inner) => {
                 let list = self.builtin("List", sh);
@@ -385,6 +387,7 @@ impl<'a> Ctx<'a> {
             TypeRef::Duration => self.prim("duration"),
             TypeRef::Timestamp => self.prim("timestamp"),
             TypeRef::Uuid => self.prim("uuid"),
+            TypeRef::Decimal => self.prim("decimal"),
             TypeRef::Object(_) | TypeRef::Callback(_) => {
                 unreachable!("an object or callback has no value codec")
             }
@@ -550,6 +553,10 @@ impl<'a> Ctx<'a> {
             TypeRef::Uuid => {
                 self.import("java.util.UUID");
                 "UUID(0L, 0L)".to_owned()
+            }
+            TypeRef::Decimal => {
+                self.import("java.math.BigDecimal");
+                "BigDecimal.ZERO".to_owned()
             }
             TypeRef::Option(_) => "null".to_owned(),
             TypeRef::Vec(_) => "emptyList()".to_owned(),
@@ -1044,6 +1051,7 @@ impl<'a> Ctx<'a> {
             | TypeRef::Duration
             | TypeRef::Timestamp
             | TypeRef::Uuid
+            | TypeRef::Decimal
             | TypeRef::Option(_)
             | TypeRef::Vec(_)
             | TypeRef::Map(..) => Some(self.zero(t)),

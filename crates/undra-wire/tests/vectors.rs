@@ -12,12 +12,13 @@ use std::time::Duration;
 use common::{hex, unhex};
 use serde_json::Value;
 use undra_wire::payload::{
-    Call, CallOwned, CallTarget, ChangeEntry, ChangeOp, ChangeSet, ChangeSetRef, Reply,
-    ReplyStatus, Snapshot, SnapshotType, StoreSnapshot, StreamFailure, StreamFlag, StreamItem,
+    Call, CallOwned, CallTarget, ChangeEntry, ChangeOp, ChangeSet, ChangeSetRef, LazyInvalidated,
+    LazyPage, LazyValue, Reply, ReplyStatus, Snapshot, SnapshotType, StoreSnapshot, StreamFailure,
+    StreamFlag, StreamItem,
 };
 use undra_wire::{
-    Bytes, Decode, Encode, Envelope, Handle, KeyedPatch, Kind, PatchOp, Reader, Timestamp, Uuid,
-    Writer,
+    Bytes, Decimal, Decode, Encode, Envelope, Handle, KeyedPatch, Kind, PatchOp, Reader, Timestamp,
+    Uuid, WireError, Writer,
 };
 
 /// Vectors this crate does not cover, with the reason. Everything else must be covered, so a
@@ -77,6 +78,26 @@ fn both<T: Encode + Decode + PartialEq + Debug>(name: &str, value: T, expected: 
         Ok(&value),
         "{name}: decoding differs"
     );
+}
+
+/// A payload with inherent `encode` / `decode`: both directions, nothing left over.
+fn both_payload<T: PartialEq + Debug>(
+    name: &str,
+    value: T,
+    expected: &[u8],
+    encode: impl Fn(&T, &mut Writer),
+    decode: impl Fn(&mut Reader<'_>) -> Result<T, WireError>,
+) {
+    let mut w = Writer::new();
+    encode(&value, &mut w);
+    assert_eq!(hex(w.as_slice()), hex(expected), "{name}: encoding differs");
+    let mut r = Reader::new(expected);
+    assert_eq!(
+        decode(&mut r).as_ref(),
+        Ok(&value),
+        "{name}: decoding differs"
+    );
+    r.finish().unwrap();
 }
 
 /// The vectors describe `args` and `body` as logical `i32` lists; on the wire they are
@@ -459,6 +480,77 @@ fn check(v: &Value) {
             let id: Uuid = value.as_str().unwrap().parse().unwrap();
             assert_eq!(id.to_string(), value.as_str().unwrap(), "canonical Display");
             both(name, id, &expected);
+        }
+        "decimal" => {
+            if let Some(error) = v.get("error") {
+                // A vector every decoder must reject (the scale above 38).
+                match Decimal::decode_exact(&expected) {
+                    Err(WireError::InvalidTag { ty, .. }) => {
+                        assert_eq!(ty, error.as_str().unwrap(), "{name}");
+                    }
+                    other => panic!("{name}: expected a rejection, got {other:?}"),
+                }
+                return;
+            }
+            let d = Decimal::new(
+                int(&value["mantissa"]),
+                u8::try_from(int(&value["scale"])).unwrap(),
+            );
+            let text = value["text"].as_str().unwrap();
+            assert_eq!(d.to_string(), text, "{name}: canonical Display");
+            assert_eq!(text.parse::<Decimal>().unwrap(), d, "{name}: FromStr");
+            both(name, d, &expected);
+        }
+        "lazy value" => both_payload(
+            name,
+            LazyValue {
+                handle: Handle(u64::try_from(int(&value["handle"])).unwrap()),
+                len: u32_of(&value["len"]),
+                version: u64::try_from(int(&value["version"])).unwrap(),
+            },
+            &expected,
+            |x, w| x.encode(w),
+            LazyValue::decode,
+        ),
+        "lazy invalidated" => both_payload(
+            name,
+            LazyInvalidated {
+                len: u32_of(&value["len"]),
+                version: u64::try_from(int(&value["version"])).unwrap(),
+            },
+            &expected,
+            |x, w| x.encode(w),
+            LazyInvalidated::decode,
+        ),
+        "lazy page (item i32)" => {
+            let items: Vec<i32> = value["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|i| i32::try_from(int(i)).unwrap())
+                .collect();
+            let header = LazyPage {
+                version: u64::try_from(int(&value["version"])).unwrap(),
+                total: u32_of(&value["total"]),
+                count: u32::try_from(items.len()).unwrap(),
+            };
+            let mut w = Writer::new();
+            header.encode(&mut w);
+            for item in &items {
+                item.encode(&mut w);
+            }
+            assert_eq!(
+                hex(w.as_slice()),
+                hex(&expected),
+                "{name}: encoding differs"
+            );
+            let mut r = Reader::new(&expected);
+            assert_eq!(LazyPage::decode(&mut r), Ok(header), "{name}");
+            let back: Vec<i32> = (0..header.count)
+                .map(|_| i32::decode(&mut r).unwrap())
+                .collect();
+            r.finish().unwrap();
+            assert_eq!(back, items, "{name}");
         }
         "result<i32,string>" => {
             let result: Result<i32, String> = if let Some(ok) = value.get("ok") {

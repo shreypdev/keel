@@ -142,6 +142,24 @@ final class WireVectorTests: XCTestCase {
             assertCodec(v, hex: hex, name)
             XCTAssertEqual(v.uuidString, text, "\(name) hyphenated lowercase form")
             assertCodec(v.uuid, hex: hex, name)
+        case "decimal":
+            let hexBytes = hexToBytes(hex)
+            if let expectedError = vector["error"] as? String {
+                XCTAssertThrowsError(try Decimal.undraDecoded(from: hexBytes), name) { error in
+                    guard case WireError.invalidTag(_, _, let type) = error else { return XCTFail("\(name): \(error)") }
+                    XCTAssertEqual(type, expectedError, name)
+                }
+                return true
+            }
+            guard let fields = value as? [String: Any], let text = fields["text"] as? String,
+                  let decimal = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")) else { return bad(name, "value") }
+            // Foundation's parser compacts trailing zeros (`1.00` parses as `1`), so the text is
+            // compared as a number, and the bytes through a decode.
+            let decoded = try! Decimal.undraDecoded(from: hexBytes)
+            XCTAssertEqual(decoded, decimal, "\(name) decoding")
+            XCTAssertEqual(decoded.undraEncoded(), hexBytes, "\(name) the scale survives a round trip")
+        case "lazy value", "lazy invalidated", "lazy page (item i32)":
+            return true // the lazy-list codecs are checked by LazyListTests
         case "handle":
             guard let raw = jsonUInt64(value) else { return bad(name, "value") }
             let handle = UndraHandle(rawValue: raw)

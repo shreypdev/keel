@@ -15,7 +15,7 @@
 //! Both are total: a value that does not match its schema is an `Err`, never a panic.
 
 use undra_meta::{EnumDef, ParamDef, RecordDef, Schema, TypeRef};
-use undra_wire::{Reader, Uuid, WireError};
+use undra_wire::{Decode, Reader, Uuid, WireError};
 
 /// How deeply values may nest before the walk gives up (recursive schema types).
 const MAX_DEPTH: u32 = 24;
@@ -88,6 +88,7 @@ fn walk(
         TypeRef::Bytes => hex(r.read_bytes()?, text),
         TypeRef::Unit => {}
         TypeRef::Uuid => text.push_str(&Uuid(r.read_array::<16>()?).to_string()),
+        TypeRef::Decimal => text.push_str(&undra_wire::Decimal::decode(r)?.to_string()),
         TypeRef::Option(inner) => match r.read_u8()? {
             0 => text.push_str("none"),
             1 => walk(schema, inner, r, depth + 1, out)?,
@@ -134,7 +135,14 @@ fn walk(
                 out.text.push_str(&variant.name);
                 walk_fields(schema, &variant.fields, r, depth, out, '(', ')')?;
             } else if let Some(record) = find_record(schema, name) {
-                walk_fields(schema, &record.fields, r, depth, out, '(', ')')?;
+                if record.transparent {
+                    // A newtype is its inner value (ADR-042): a key shows `7`, not `UserId(7)`.
+                    for field in &record.fields {
+                        walk(schema, &field.ty, r, depth + 1, out)?;
+                    }
+                } else {
+                    walk_fields(schema, &record.fields, r, depth, out, '(', ')')?;
+                }
             } else {
                 // An object handle or a name the schema does not define: not a value.
                 return Err(bad("named type", r));
@@ -348,6 +356,7 @@ mod tests {
             name: "Point".to_owned(),
             type_id: 0,
             fields: vec![field("x", TypeRef::I32), field("y", TypeRef::I32)],
+            transparent: false,
             docs: String::new(),
         });
         schema

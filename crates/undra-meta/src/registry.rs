@@ -14,7 +14,7 @@
 //!         FieldMeta { name: "x", ty: TypeRefMeta::F64, default: false, docs: "" },
 //!         FieldMeta { name: "y", ty: TypeRefMeta::F64, default: false, docs: "" },
 //!     ],
-//!     docs: "",
+//!     transparent: false, docs: "",
 //! };
 //! undra_meta::inventory::submit! { Registration::Record(&POINT) }
 //!
@@ -118,6 +118,7 @@ mod tests {
         name: "Alpha",
         type_id: ids::type_id("Alpha"),
         fields: &[],
+        transparent: false,
         docs: "",
     };
     static Z: RecordMeta = RecordMeta {
@@ -129,6 +130,7 @@ mod tests {
             default: false,
             docs: "",
         }],
+        transparent: false,
         docs: "",
     };
 

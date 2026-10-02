@@ -92,6 +92,9 @@ fn records_and_enums(out: &mut String, records: &[ClosureRecord], enums: &[Closu
         string(out, &r.name);
         out.push_str(",\"fields\":");
         list(out, &r.fields, field);
+        if r.transparent {
+            out.push_str(",\"transparent\":true");
+        }
         out.push('}');
     });
     out.push_str(",\"enums\":");
@@ -180,7 +183,7 @@ fn type_ref(out: &mut String, ty: &TypeRef) {
 }
 
 /// The types without parameters, in the order of [`KINDS`].
-const LEAVES: [TypeRef; 17] = [
+const LEAVES: [TypeRef; 18] = [
     TypeRef::Bool,
     TypeRef::I8,
     TypeRef::I16,
@@ -198,10 +201,11 @@ const LEAVES: [TypeRef; 17] = [
     TypeRef::Duration,
     TypeRef::Timestamp,
     TypeRef::Uuid,
+    TypeRef::Decimal,
 ];
 
 /// The `kind` tag of every `TypeRef` variant, in declaration order (`serde`'s `snake_case`).
-const KINDS: [&str; 26] = [
+const KINDS: [&str; 27] = [
     "bool",
     "i8",
     "i16",
@@ -219,6 +223,7 @@ const KINDS: [&str; 26] = [
     "duration",
     "timestamp",
     "uuid",
+    "decimal",
     "option",
     "vec",
     "map",
@@ -249,15 +254,16 @@ pub(crate) fn kind_name(ty: &TypeRef) -> &'static str {
         TypeRef::Duration => 14,
         TypeRef::Timestamp => 15,
         TypeRef::Uuid => 16,
-        TypeRef::Option(_) => 17,
-        TypeRef::Vec(_) => 18,
-        TypeRef::Map(..) => 19,
-        TypeRef::Lazy(_) => 20,
-        TypeRef::Named(_) => 21,
-        TypeRef::Result(..) => 22,
-        TypeRef::Stream(_) => 23,
-        TypeRef::Object(_) => 24,
-        TypeRef::Callback(_) => 25,
+        TypeRef::Decimal => 17,
+        TypeRef::Option(_) => 18,
+        TypeRef::Vec(_) => 19,
+        TypeRef::Map(..) => 20,
+        TypeRef::Lazy(_) => 21,
+        TypeRef::Named(_) => 22,
+        TypeRef::Result(..) => 23,
+        TypeRef::Stream(_) => 24,
+        TypeRef::Object(_) => 25,
+        TypeRef::Callback(_) => 26,
     };
     KINDS[at]
 }
@@ -430,11 +436,13 @@ impl Cursor<'_> {
             let mut record = ClosureRecord {
                 name: String::new(),
                 fields: Vec::new(),
+                transparent: false,
             };
             c.lit("{\"name\":")?;
             record.name = c.string()?;
             c.lit(",\"fields\":")?;
             c.list(&mut record.fields, Cursor::field)?;
+            record.transparent = c.eat(",\"transparent\":true");
             c.lit("}")?;
             Ok(record)
         })?;
@@ -520,23 +528,23 @@ impl Cursor<'_> {
             .position(|k| *k == kind)
             .ok_or(self.err("an unknown type kind"))?;
         let ty = match index {
-            0..=16 => LEAVES[index].clone(),
-            21 | 24 | 25 => {
+            0..=17 => LEAVES[index].clone(),
+            22 | 25 | 26 => {
                 self.lit(",\"of\":")?;
                 let name = self.string()?;
                 match index {
-                    21 => TypeRef::Named(name),
-                    24 => TypeRef::Object(name),
+                    22 => TypeRef::Named(name),
+                    25 => TypeRef::Object(name),
                     _ => TypeRef::Callback(name),
                 }
             }
-            19 | 22 => {
+            20 | 23 => {
                 self.lit(",\"of\":[")?;
                 let a = Box::new(self.ty(depth + 1)?);
                 self.lit(",")?;
                 let b = Box::new(self.ty(depth + 1)?);
                 self.lit("]")?;
-                if index == 19 {
+                if index == 20 {
                     TypeRef::Map(a, b)
                 } else {
                     TypeRef::Result(a, b)
@@ -546,9 +554,9 @@ impl Cursor<'_> {
                 self.lit(",\"of\":")?;
                 let inner = Box::new(self.ty(depth + 1)?);
                 match index {
-                    17 => TypeRef::Option(inner),
-                    18 => TypeRef::Vec(inner),
-                    20 => TypeRef::Lazy(inner),
+                    18 => TypeRef::Option(inner),
+                    19 => TypeRef::Vec(inner),
+                    21 => TypeRef::Lazy(inner),
                     _ => TypeRef::Stream(inner),
                 }
             }
@@ -675,6 +683,7 @@ mod tests {
             TypeRef::Duration,
             TypeRef::Timestamp,
             TypeRef::Uuid,
+            TypeRef::Decimal,
             TypeRef::named("Todo"),
         ];
         types.push(TypeRef::option(TypeRef::named(
@@ -702,10 +711,22 @@ mod tests {
             root: ClosureRoot::Params {
                 params: fields.clone(),
             },
-            records: vec![ClosureRecord {
-                name: "Todo".into(),
-                fields: fields.clone(),
-            }],
+            records: vec![
+                ClosureRecord {
+                    name: "Todo".into(),
+                    fields: fields.clone(),
+                    transparent: false,
+                },
+                ClosureRecord {
+                    name: "UserId".into(),
+                    fields: vec![ClosureField {
+                        name: "value".into(),
+                        ty: TypeRef::Uuid,
+                        default: false,
+                    }],
+                    transparent: true,
+                },
+            ],
             enums: vec![ClosureEnum {
                 name: "E".into(),
                 variants: vec![
@@ -884,8 +905,13 @@ mod tests {
     }
 
     fn arb_records_and_enums() -> BoxedStrategy<(Vec<ClosureRecord>, Vec<ClosureEnum>)> {
-        let record = (arb_name(), proptest::collection::vec(arb_field(), 0..3))
-            .prop_map(|(name, fields)| ClosureRecord { name, fields });
+        let record = (arb_name(), proptest::collection::vec(arb_field(), 0..3)).prop_map(
+            |(name, fields)| ClosureRecord {
+                name,
+                fields,
+                transparent: false,
+            },
+        );
         let variant = (
             arb_name(),
             prop_oneof![Just(0_u16), Just(u16::MAX), any::<u16>()],

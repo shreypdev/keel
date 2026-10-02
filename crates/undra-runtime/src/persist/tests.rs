@@ -32,6 +32,7 @@ fn record(name: &str, fields: Vec<FieldDef>) -> RecordDef {
         name: name.into(),
         type_id: ids::type_id(name),
         fields,
+        transparent: false,
         docs: String::new(),
     }
 }
@@ -1213,4 +1214,86 @@ proptest! {
         let wrapped = TypeRef::option(ty.clone());
         let _ = migrate(&bytes, &ty, &old, &wrapped, &new_schema.closure(&wrapped), &NoHooks);
     }
+}
+
+// ----- newtypes and decimals (ADR-042) ------------------------------------------------------
+
+/// `Todo { owner: <owner> }`, with `UserId(Uuid)` declared as a newtype when `wrapped`.
+fn owner_schema(wrapped: bool) -> Schema {
+    let mut s = Schema::new("t");
+    let owner = if wrapped {
+        named("UserId")
+    } else {
+        TypeRef::Uuid
+    };
+    s.records.push(record("Todo", vec![field("owner", owner)]));
+    if wrapped {
+        let mut id = record("UserId", vec![field("value", TypeRef::Uuid)]);
+        id.transparent = true;
+        s.records.push(id);
+    }
+    s
+}
+
+#[test]
+fn wrapping_a_field_in_a_newtype_and_unwrapping_it_migrates_without_a_hook() {
+    let (flat, wrapped) = (owner_schema(false), owner_schema(true));
+    let bytes = Uuid([7; 16]).encode_to_vec();
+    let todo = TypeRef::named("Todo");
+    // The bytes are the same either way: a newtype is its inner value.
+    assert_eq!(
+        structural(&bytes, &flat, &todo, &wrapped, &todo).unwrap(),
+        bytes
+    );
+    assert_eq!(
+        structural(&bytes, &wrapped, &todo, &flat, &todo).unwrap(),
+        bytes
+    );
+    // At the root, inside an option and inside a list too.
+    let owner = TypeRef::named("UserId");
+    assert_eq!(
+        structural(&bytes, &flat, &TypeRef::Uuid, &wrapped, &owner).unwrap(),
+        bytes
+    );
+    let list = Some(Uuid([1; 16])).encode_to_vec();
+    assert_eq!(
+        structural(
+            &list,
+            &flat,
+            &TypeRef::option(TypeRef::Uuid),
+            &wrapped,
+            &TypeRef::option(owner.clone())
+        )
+        .unwrap(),
+        list
+    );
+    // A newtype does not become an unrelated type.
+    assert!(structural(&bytes, &wrapped, &owner, &flat, &TypeRef::String).is_err());
+    // The dynamic path sees the newtype as a record with one field called `value`.
+    let closure = wrapped.closure(&owner);
+    let decoded = decode_dyn(&bytes, &owner, &closure).unwrap();
+    assert_eq!(decoded.field("value"), Some(&DynValue::Uuid([7; 16])));
+    assert_eq!(encode_dyn(&decoded, &owner, &closure).unwrap(), bytes);
+}
+
+proptest! {
+    #[test]
+    fn decimals_round_trip_through_the_dynamic_form(mantissa in any::<i128>(), scale in 0u8..=38) {
+        let d = undra_wire::Decimal::new(mantissa, scale);
+        round_trips(&d, &TypeRef::Decimal)?;
+    }
+}
+
+#[test]
+fn a_decimal_with_a_scale_above_38_is_refused_in_both_directions() {
+    let schema = base_schema();
+    let closure = schema.closure(&TypeRef::Decimal);
+    let mut bytes = 5_i128.to_le_bytes().to_vec();
+    bytes.push(39);
+    assert!(decode_dyn(&bytes, &TypeRef::Decimal, &closure).is_err());
+    let bad = DynValue::Decimal {
+        mantissa: 5,
+        scale: 39,
+    };
+    assert!(encode_dyn(&bad, &TypeRef::Decimal, &closure).is_err());
 }

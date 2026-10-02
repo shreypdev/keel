@@ -499,6 +499,10 @@ impl<'a> Ctx<'a> {
                 self.rt_type("Timestamp");
                 "Timestamp".to_owned()
             }
+            TypeRef::Decimal => {
+                self.rt_type("Decimal");
+                "Decimal".to_owned()
+            }
             TypeRef::Option(inner) => format!("{} | null", self.ty(inner)),
             TypeRef::Vec(inner) => {
                 let item = self.ty(inner);
@@ -559,6 +563,10 @@ impl<'a> Ctx<'a> {
             TypeRef::Duration => self.prim("duration"),
             TypeRef::Timestamp => self.prim("timestamp"),
             TypeRef::Uuid => self.prim("uuid"),
+            TypeRef::Decimal => {
+                self.rt_value("decimalCodec");
+                "decimalCodec".to_owned()
+            }
             TypeRef::Named(name) => {
                 let symbol = format!("{name}Codec");
                 self.use_value(name, &symbol);
@@ -780,6 +788,10 @@ impl<'a> Ctx<'a> {
             | TypeRef::Timestamp => "0".to_owned(),
             TypeRef::String => "\"\"".to_owned(),
             TypeRef::Uuid => "\"00000000-0000-0000-0000-000000000000\"".to_owned(),
+            TypeRef::Decimal => {
+                self.rt_value("Decimal");
+                "Decimal.ZERO".to_owned()
+            }
             TypeRef::Bytes => "new Uint8Array(0)".to_owned(),
             TypeRef::Option(_) => "null".to_owned(),
             TypeRef::Vec(_) => "[]".to_owned(),

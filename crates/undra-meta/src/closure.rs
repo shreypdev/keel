@@ -82,6 +82,10 @@ pub struct ClosureRecord {
     pub name: String,
     /// Its fields, in wire order.
     pub fields: Vec<ClosureField>,
+    /// A newtype (ADR-042): it crosses as its one field, byte for byte, so a migration may
+    /// wrap a value of the field's type in it or unwrap one. Written only when `true`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub transparent: bool,
 }
 
 /// An enum (or error) reached by a closure.
@@ -117,13 +121,13 @@ pub struct ClosureVariant {
 ///     name: "Todo".into(),
 ///     type_id: undra_meta::ids::type_id("Todo"),
 ///     fields: vec![FieldDef { name: "title".into(), ty: TypeRef::String, default: false, docs: "".into() }],
-///     docs: "A thing to do.".into(),
+///     transparent: false, docs: "A thing to do.".into(),
 /// });
 /// let before = schema.closure(&TypeRef::vec(TypeRef::named("Todo"))).fingerprint();
 ///
 /// // Docs and unrelated items do not move it ...
 /// schema.records[0].docs.clear();
-/// schema.records.push(RecordDef { name: "Other".into(), type_id: 1, fields: vec![], docs: "".into() });
+/// schema.records.push(RecordDef { name: "Other".into(), type_id: 1, fields: vec![], transparent: false, docs: "".into() });
 /// assert_eq!(schema.closure(&TypeRef::vec(TypeRef::named("Todo"))).fingerprint(), before);
 ///
 /// // ... a structural change does.
@@ -404,6 +408,7 @@ impl Schema {
             return Some(Reached::Record(ClosureRecord {
                 name: record.name.clone(),
                 fields: fields(&record.fields),
+                transparent: record.transparent,
             }));
         }
         let en = self.enums.iter().find(|e| e.name == name)?;
@@ -532,6 +537,7 @@ mod tests {
             name: name.into(),
             type_id: ids::type_id(name),
             fields,
+            transparent: false,
             docs: String::new(),
         }
     }
@@ -642,6 +648,9 @@ mod tests {
             stale_ms: None,
             persist: false,
             idempotent: false,
+            interval_ms: None,
+            poll_in_background: false,
+            infinite: None,
         });
         assert_eq!(profile(&s), base);
     }
@@ -762,6 +771,9 @@ mod tests {
             stale_ms: None,
             persist: true,
             idempotent: false,
+            interval_ms: None,
+            poll_in_background: false,
+            infinite: None,
         };
         s.queries.push(q(
             QueryKind::Query,
@@ -808,5 +820,26 @@ mod tests {
         ));
         let c = s.closure(&TypeRef::named("Node"));
         assert_eq!(c.records.len(), 1);
+    }
+
+    #[test]
+    fn a_newtype_is_described_as_transparent_and_moves_the_fingerprint() {
+        let mut s = Schema::new("t");
+        s.records.push(record(
+            "Todo",
+            vec![field("owner", TypeRef::named("UserId"))],
+        ));
+        s.records
+            .push(record("UserId", vec![field("value", TypeRef::Uuid)]));
+        let flat = s.closure(&TypeRef::named("Todo"));
+        assert!(flat.records.iter().all(|r| !r.transparent));
+        s.records[1].transparent = true;
+        let wrapped = s.closure(&TypeRef::named("Todo"));
+        assert!(wrapped.record("UserId").unwrap().transparent);
+        assert_ne!(flat.fingerprint(), wrapped.fingerprint());
+        let text = wrapped.canonical_json();
+        assert!(text.contains("\"transparent\":true"), "{text}");
+        assert_eq!(TypeClosure::from_json(&text).unwrap(), wrapped);
+        assert!(!flat.canonical_json().contains("transparent"));
     }
 }
