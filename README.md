@@ -51,7 +51,7 @@ phone, so no device target is claimed as met:
 | Filtered view of a 10,000-row list, one row changed (158 bytes on the wire, was 353 KB) | **392 ns** | ≤ 1 µs |
 | Change-set for 100 dirty signals | **2.3 µs** | ≤ 100 µs |
 | Cold start restoring 100 KB of state | **85 µs** | ≤ 3 ms |
-| Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->117.7 KB<!--/measured-->** gzipped | ≤ 120 KB |
+| Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->118.4 KB<!--/measured-->** gzipped | ≤ 120 KB |
 | Android core (`.so`, arm64-v8a, release, hello world) | **<!--measured:android-size-->978.6 KB<!--/measured-->** | ≤ 1.2 MB |
 
 The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.sh) builds the
