@@ -64,3 +64,24 @@ rows the catalogue marks "not assessed"; a Crux column; any Capacitor claim; a c
 `node site/scripts/build-all.mjs` (blog index, feed, sitemap, search, llms regenerate; the post gets 14 min read from the computed word count); `check-links.mjs`: 41 pages OK;
 `check-links.mjs --words`: 342 words (budget 350, unchanged); `sync-chrome.mjs --check`: in sync; the page at 375 px in the browser pane, light and dark, `scrollWidth` 375
 (screenshot kept in the session scratchpad as `default-choice-post-375px.jpg`); at 1100 px by headless Chrome. Merged `main` at the end (`merge-base --is-ancestor main HEAD`).
+
+## Fact-check pass (2026-10-02, adversarial; appended)
+
+Record: `.10x/reviews/2026-10-02-default-choice-post-fact-check.md`. `main` `da4fbbe` (checkpoint 26) merged first; the `_index.md` conflict
+resolved by keeping both sides.
+
+* **Verdict: publish.** Of the draft's 221 claim rows: 182 verified, 29 corrected (8 about other tools, 21 about Undra), 10 removed; 11 claims
+  added and verified. The 36-row tally re-derived: 27 solved, 6 partial, 2 open, 1 n/a (was 22 / 7 / 6 / 1 on `d1b35b5`).
+* **Competitor pages re-read verbatim** (curl, 45 linked pages plus five the ledger leans on; UniFFI's whole 68-page manual for the silence
+  claims). The decisions above about "A-cat" rows no longer apply: every K/U/F row now carries a quote from the 2 October copy.
+* **What I decided**: generics are "partly" (named instantiations, no generic functions or objects), not solved; step-debugging is solved with
+  its scope stated (LLDB tested on the iOS simulator; Android Studio and Chrome documented); the +0.6 ns stays only beside the review's −5.1 ns
+  inside ±40 ns; the dev-loop restore leads with the debug core's 1.6 ms; both derived-list numbers (333 ns direct, 392 ns through the runtime)
+  are given so the post agrees with the landing card; `undra doctor`'s count is dropped (it moved from 34 to 37); `claims.md` stays public and
+  the post's footer links it.
+* **Stale statements fixed** (section 10 of the ledger): the reads post (derived lists, the playground snippet), the KMP post (Android remote
+  transport, SQL), both migration guides (what maps now), `roadmap.json`, `pending.json`. `site/index.html` untouched.
+* **Checks**: `build-all` (the post reads 15 min), `check-links --words` pass with the landing at 342 words, `sync-chrome --check` in sync; the post
+  at 375 px and 1100 px with no horizontal overflow (screenshots `post-375-top.jpg`, `post-375-matrix.jpg`, `post-1100-matrix.jpg` in the session
+  scratchpad). The local preview server could not be declared in `.claude/launch.json` (a hook keeps the base repository's `.claude/` read-only from
+  this worktree), so a `python3 -m http.server` on 127.0.0.1:8765 served `site/` for the browser pane.
