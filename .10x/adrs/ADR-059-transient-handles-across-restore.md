@@ -531,6 +531,14 @@ removed, the reviver reachable only through `add_reviver`, the wording, S35 in t
    replay's removal measured on `crashRecovery()` as 82,006 raw / 25,838 gzipped bytes against 83,389 / 26,209 (-1,383 /
    -371; the Consequences' 1,979 / 530 were the unminified source). `snapshot/encode_100_handles` 15.6 us,
    `snapshot/restore_100_handles` 19.6 us (fresh runtime), `snapshot/restore_100_handles_live` 38.3 us (the same runtime).
+   **Review correction (2026-10-02):** the record (116,690) is not `main` on this toolchain. `scripts/wasm-size.sh` on `main`
+   (`12dafe2`, no code change since the branch point) and on the branch, same machine, rustc 1.99.0, wasm-opt 133: 116,208
+   against 117,749 gzipped, **+1,541** (raw module +3,284): over the +1.3 KB the architect's decision 7 accepted, under the
+   120,000 gate (2,251 to spare). The recreation code itself is not linked into the hello-world core (none of
+   `recreation.rs`'s strings is in the module); the growth is the always-linked part (raw, before wasm-opt: `undra_restore`
+   +795, `Runtime::object::<T>` +272 for each object type, `undra_observe` +248, `undra_snapshot` +204, `undra_stats_json`
+   +118, `RestoreReport`'s drop +98). Accepted by the review as within the gate; the per-type cost of `object::<T>` is a
+   follow-up (`.10x/reviews/2026-10-02-reload-handles-review.md`).
 9. **A wrongly typed use builds.** `Runtime::object::<T>` of a dormant handle builds the object before it can tell the type
    is wrong for `T` (a `LazyPage` call aimed at a query handle, say): the handle is the host's own, the cost is one build,
    and the answer is the ordinary wrong-type refusal.
