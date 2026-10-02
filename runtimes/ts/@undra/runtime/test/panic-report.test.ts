@@ -301,6 +301,30 @@ describe("UndraCore and the panic report of a trap (over the stub core, a real w
     expect(closed).toHaveLength(1);
   });
 
+  it("is known for a trap the moment load resolves: load waits for the hash (a crash at startup is the one most worth symbolicating)", async () => {
+    // A digest as slow as a real module's on a busy device (the contract grid's playground core lost this race).
+    const subtle = crypto.subtle;
+    const digest = subtle.digest.bind(subtle);
+    const slow = vi.spyOn(subtle, "digest").mockImplementation(async (algorithm, data) => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return digest(algorithm, data);
+    });
+    let loaded: Awaited<ReturnType<typeof load>>;
+    try {
+      loaded = await load({ onPanic: () => {} });
+    } finally {
+      slow.mockRestore();
+    }
+    const { core, bytes, reports } = loaded;
+    // No wait between `load` and the trap: the hash must not be racing it (prod-ops review).
+    const failed = core.call(FREE, STUB.PANIC, NO_ARGS).catch((e: unknown) => e);
+    const wanted = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
+    expect(await failed).toMatchObject({ reason: "trap" });
+    await macrotask();
+    expect(reports).toHaveLength(1);
+    expect((reports[0] as UndraPanicReport).imageId).toBe(wanted);
+  });
+
   it("with onPanic: one report, before onClose; the core's namespace and version, the thread, the schema hash, image id and the wasm frames", async () => {
     const { core, bytes, events, reports, closed } = await load({ onPanic: () => {}, namespace: "stub_core", coreVersion: "3.1.4" });
     const wanted = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");

@@ -186,8 +186,8 @@ export interface AttachOptions {
    * the runtime builds the same report from the core's FATAL `undra::panic` record and the trap's stack, once per trap,
    * before any restart (ADR-049) and with or without `recovery`. A handler that throws is reported to `onError` and changes
    * nothing. Without a handler a native core's report is logged at error level (one line: operation, message, location).
-   * Setting it makes the runtime load the code that builds the report of a wasm trap, and hash the module (SHA-256, in the
-   * background) for `imageId`.
+   * Setting it makes the runtime load the code that builds the report of a wasm trap, and hash the module (SHA-256) for
+   * `imageId` while the module compiles: `load` resolves once both are there, so a trap right after it is reported in full.
    */
   readonly onPanic?: (report: UndraPanicReport) => void;
   /**
@@ -1108,19 +1108,15 @@ export class UndraCore {
 
   /**
    * Gets ready to report a trap of a wasm core (ADR-046 decision 4.4) when the app wants reports: loads the code that builds
-   * them (a page without `onPanic` or `recovery` never fetches it; with `recovery` it came with it), which `_start` waits for
-   * while the module is fetched, so that it is there when a trap needs it.
+   * them (a page without `onPanic` or `recovery` never fetches it; with `recovery` it came with it) and, with `onPanic`, hashes
+   * the module for `imageId`; `_start` waits for both while the module is fetched, so that they are there when a trap needs them.
    */
   private _loadPanics(): Promise<void> | undefined {
     const options = this._options;
     if (!this._transport.mode.startsWith("wasm") || (options.onPanic === undefined && options.recovery === undefined)) return undefined;
-    const start = (support: PanicSupport): void => {
-      this._panics = support.start(this, options);
-    };
-    if (options.recovery !== undefined) {
-      start(options.recovery.panics);
-      return undefined;
-    }
+    // Ready when the builder is there and the module is hashed (`imageId`): `_start` waits for both.
+    const start = (support: PanicSupport): Promise<void> => (this._panics = support.start(this, options)).ready;
+    if (options.recovery !== undefined) return start(options.recovery.panics);
     return import("./panic-report.js").then((module) => start(module.panicSupport), (error: unknown) => this._reportError("onPanic", error));
   }
 

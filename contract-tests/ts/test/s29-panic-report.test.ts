@@ -54,7 +54,7 @@ test("S29 panic report", async () => {
       wasmBytes: true,
       load: { ...load, onPanic: (report) => reports.push(report) },
     });
-    // The module is hashed in the background once the core is up: ready at the first trap.
+    // `load` resolved once the module was hashed: the id is there for any trap after it.
     await waitFor("one call to answer", async () => (await add(1, 2, core)) === 3);
     const failure = await explode("kaboom", core).then(
       () => undefined,

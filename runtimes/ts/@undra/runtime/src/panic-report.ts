@@ -143,6 +143,12 @@ export interface PanicHost {
 /** What reports the traps of one core. */
 export interface PanicReporter {
   /**
+   * Settles once the report's `imageId` is known (the module hashed, when the app set `onPanic`; at once otherwise). Never
+   * rejects. `UndraCore.load` waits for it, so that a trap right after load, the startup crash most worth symbolicating,
+   * carries the id too.
+   */
+  readonly ready: Promise<void>;
+  /**
    * Builds the report of `trap` (see {@link trapReport}; `record` is the core's last FATAL `undra::panic` message, if any) and hands
    * it to `onPanic` once, if the app set one. A handler that throws goes to {@link PanicHost.report} and changes nothing. Returns the
    * report, which `crashRecovery`'s `UndraCoreRestarted` carries.
@@ -150,19 +156,21 @@ export interface PanicReporter {
   trapped(record: string | null, trap: Error): UndraPanicReport;
 }
 
-/** Starts reporting the traps of `host` with `options`: hashes the module for `imageId` in the background when the app set `onPanic`. */
+/** Starts reporting the traps of `host` with `options`: hashes the module for `imageId` when the app set `onPanic` (see {@link PanicReporter.ready}). */
 function start(host: PanicHost, options: PanicOptions): PanicReporter {
   let imageId = "";
   // Only for an app that asked for reports: the SHA-256 is the `imageId` of what it receives.
-  if (options.onPanic !== undefined && options.wasm !== undefined) {
-    wasmImageId(options.wasm).then(
-      (id) => {
-        imageId = id;
-      },
-      () => {},
-    );
-  }
+  const ready =
+    options.onPanic !== undefined && options.wasm !== undefined
+      ? wasmImageId(options.wasm).then(
+          (id) => {
+            imageId = id;
+          },
+          () => {},
+        )
+      : Promise.resolve();
   return {
+    ready,
     trapped(record, trap) {
       const report = trapReport(record, trap, {
         thread: host.mode === "wasm-worker" ? "worker" : "main",
