@@ -2,15 +2,16 @@ import Foundation
 import UndraFFI
 @testable import UndraRuntime
 import PlaygroundCore
+import PlaygroundCoreFFI
 import XCTest
 
 /// The build-B process of the two-build steps (scenarios.md, "Two builds"; S14 steps 8 and 9, S15 steps
 /// 12 to 14).
 ///
 /// `run.sh` runs it after the main run, in a second `swift test` process (`--skip-build --filter
-/// MigrationBuildB`, with `UNDRA_CONTRACT_PHASE=B`) whose `.build/core/libundra_core.dylib` is build B's
+/// MigrationBuildB`, with `UNDRA_CONTRACT_PHASE=B`) whose `.build/core/libplayground_core.dylib` is build B's
 /// library. Build B has no generated bindings: the test loads the core with the hash it reports
-/// (`undra_schema_hash()`) and drives it through `UndraCore`'s raw API with ids made by `fnv1a32`
+/// (its table's `schema_hash`) and drives it through `UndraCore`'s raw API with ids made by `fnv1a32`
 /// (the generated `StorageStatus` is used only as a codec: its layout is the same in both builds). It
 /// reads what build A handed over (`Handover`) and prints only `SCENARIO S14 FAIL ...` /
 /// `SCENARIO S15 FAIL ...` lines (and an informational `MIGRATION ... ok`), so `check.sh`, which reads
@@ -30,7 +31,8 @@ final class MigrationBuildB: XCTestCase {
         guard ProcessInfo.processInfo.environment["UNDRA_CONTRACT_PHASE"] == "B" else {
             throw XCTSkip("the build-B phase runs in its own process (run.sh sets UNDRA_CONTRACT_PHASE=B)")
         }
-        let reported = undra_schema_hash()
+        // Build B has build A's namespace, so its table is the same export (ADR-044).
+        let reported = playgroundTable().schema_hash
         guard reported != UndraIds.schemaHash else {
             fail("S14", "the core in .build/core is build A (schema hash 0x\(Persisted.hex(reported, digits: 16))), not build B")
             fail("S15", "the core in .build/core is build A, not build B")
@@ -59,6 +61,7 @@ final class MigrationBuildB: XCTestCase {
         let core: UndraCore
         do {
             core = try UndraCore.load(.inproc(
+                api: playground_core_undra_api(),
                 adapters: Adapters([ManualClock(), server, kv, log, RngAdapter(), TimerAdapter()]),
                 expectedSchemaHash: reported
             ))

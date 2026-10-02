@@ -8,7 +8,7 @@ extension ContractScenarios {
 
     /// S20, the native variant (scenarios.md, platform notes): steps 1, 2, 4 (what the harness's failed
     /// first read of the queue did) and 5. Step 3 needs a fresh core and is not run on native.
-    func testS19_storageFailuresAreTyped() async {
+    func testS20_storageFailuresAreTyped() async {
         await scenario("S20", "storage failures are typed") {
             let core = try self.core
             let server = Fixture.shared.server
