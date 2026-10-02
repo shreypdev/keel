@@ -8,7 +8,7 @@
 use undra_meta::ids::{fnv1a32, port_id, port_method_id};
 use undra_meta::{PortKind, collect_schema};
 use undra_ports::{
-    Clock, Connectivity, Fs, Http, Kv, Lifecycle, Log, Rng, SecureStore, Timer, fakes,
+    Clock, Connectivity, Diagnostics, Fs, Http, Kv, Lifecycle, Log, Rng, SecureStore, Timer, fakes,
 };
 use undra_runtime::Port;
 
@@ -81,6 +81,12 @@ const TABLE: &[PortRow] = &[
         PortKind::Event,
         &[("changed", 0x0bc8_2569)],
     ),
+    (
+        "Diagnostics",
+        0xab68_cd7c,
+        PortKind::Sync,
+        &[("panicked", 0xbd14_7e2e)],
+    ),
 ];
 
 #[test]
@@ -95,6 +101,7 @@ fn port_ids_are_the_hard_coded_values() {
     assert_eq!(<dyn Timer as Port>::PORT_ID, 0x00c2_cdd9);
     assert_eq!(<dyn Connectivity as Port>::PORT_ID, 0x1fef_f6ff);
     assert_eq!(<dyn Lifecycle as Port>::PORT_ID, 0x81c0_afd4);
+    assert_eq!(<dyn Diagnostics as Port>::PORT_ID, 0xab68_cd7c);
 }
 
 #[test]
@@ -111,6 +118,7 @@ fn port_names_and_kinds_are_the_traits() {
     assert_eq!(<dyn Fs as Port>::KIND, PortKind::Async);
     assert_eq!(<dyn Connectivity as Port>::KIND, PortKind::Event);
     assert_eq!(<dyn Lifecycle as Port>::KIND, PortKind::Event);
+    assert_eq!(<dyn Diagnostics as Port>::KIND, PortKind::Sync);
 }
 
 #[test]

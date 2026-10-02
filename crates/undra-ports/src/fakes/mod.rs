@@ -12,6 +12,7 @@
 //! | [`CaptureLog`] | [`Log`] | keeps every record |
 //! | [`ScriptedConnectivity`] | [`Connectivity`] | pushes scripted events into a runtime |
 //! | [`ScriptedLifecycle`] | [`Lifecycle`] | pushes scripted events into a runtime |
+//! | [`CaptureDiagnostics`] | [`Diagnostics`] | keeps every panic report |
 //!
 //! Every fake is `Send + Sync`, keeps its state behind a lock and never reads the system clock,
 //! a random source or a thread (CLAUDE.md R12).
@@ -29,6 +30,7 @@
 //! `TestRuntime::advance`, to move time on such a runtime.
 
 mod clock;
+mod diagnostics;
 mod events;
 mod fs;
 mod http;
@@ -43,6 +45,7 @@ use undra_runtime::testing::TestRuntime;
 use undra_runtime::{Port, Runtime};
 
 pub use clock::{FakeClock, MAX_TIMERS_PER_ADVANCE};
+pub use diagnostics::CaptureDiagnostics;
 pub use events::{ScriptedConnectivity, ScriptedLifecycle};
 pub use fs::MemFs;
 pub use http::{FakeHttp, Matcher};
@@ -50,7 +53,10 @@ pub use log::{CaptureLog, LogEntry};
 pub use rng::SeededRng;
 pub use store::{FailOn, FailingKv, MemKv, MemSecureStore, MemStore, StoreOp};
 
-use crate::{Clock, Connectivity, Fs, Http, Kv, Lifecycle, Log, Rng, SecureStore, Timer};
+use crate::{
+    BackgroundReport, Clock, Connectivity, Diagnostics, Fs, Http, Kv, Lifecycle, Log, Rng,
+    SecureStore, Timer,
+};
 
 /// One of each fake, ready to be [installed](Fakes::install) into a runtime.
 ///
@@ -64,6 +70,8 @@ pub struct Fakes {
     pub rng: Arc<SeededRng>,
     /// The `Log`.
     pub log: Arc<CaptureLog>,
+    /// The `Diagnostics`: the panic reports of the runtime it is installed in.
+    pub diagnostics: Arc<CaptureDiagnostics>,
     /// The `Http`.
     pub http: Arc<FakeHttp>,
     /// The `Kv`.
@@ -92,6 +100,7 @@ impl Fakes {
             clock: Arc::new(FakeClock::new()),
             rng: Arc::new(SeededRng::new(seed)),
             log: Arc::new(CaptureLog::new()),
+            diagnostics: Arc::new(CaptureDiagnostics::new()),
             http: Arc::new(FakeHttp::new()),
             kv: Arc::new(MemKv::new()),
             secure_store: Arc::new(MemSecureStore::new()),
@@ -135,6 +144,11 @@ impl Fakes {
             <dyn Log as Port>::PORT_ID,
             self.log.clone(),
             &crate::LOG_DISPATCHER,
+        );
+        rt.bind_dyn_port_with::<dyn Diagnostics>(
+            <dyn Diagnostics as Port>::PORT_ID,
+            self.diagnostics.clone(),
+            &crate::DIAGNOSTICS_DISPATCHER,
         );
         rt.bind_dyn_port_with::<dyn Http>(
             <dyn Http as Port>::PORT_ID,
@@ -188,6 +202,51 @@ impl Fakes {
     pub fn sync_timers(&self, t: &TestRuntime) {
         for (timer_id, delay_ms) in t.host().take_timer_sets() {
             Timer::set(&*self.clock, timer_id, delay_ms);
+        }
+    }
+
+    /// Runs the standard function `run_background(deadline)` on `t` and lets the window pass on
+    /// the fake clock, the way an OS window does, until the run reports; returns the report.
+    ///
+    /// The run ends early when its tasks are done and at `deadline` less the half second it keeps
+    /// for the host otherwise, so a task waiting for the network (see
+    /// [`ScriptedConnectivity`]) shows as `finished: false` with its work still pending.
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use undra_ports::fakes;
+    /// use undra_runtime::testing::TestRuntime;
+    ///
+    /// let t = TestRuntime::new();
+    /// let fakes = fakes::install(&t);
+    /// // No background task is registered: nothing to do, so the run finishes at once.
+    /// let report = fakes.run_background(&t, Duration::from_secs(30));
+    /// assert!(report.finished && report.still_pending == 0);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If the run has not reported a second after its deadline (a bug in the run).
+    pub fn run_background(&self, t: &TestRuntime, deadline: Duration) -> BackgroundReport {
+        let slot = Arc::new(parking_lot::Mutex::new(None));
+        let (ctx, out) = (t.ctx(), slot.clone());
+        t.ctx().spawn(async move {
+            let ms = u64::try_from(deadline.as_millis()).unwrap_or(u64::MAX);
+            *out.lock() = Some(crate::run_background(&ctx, ms).await);
+        });
+        let step = Duration::from_millis(50);
+        let mut waited = Duration::ZERO;
+        loop {
+            self.advance(t, Duration::ZERO);
+            if let Some(report) = slot.lock().take() {
+                return report;
+            }
+            assert!(
+                waited <= deadline + Duration::from_secs(1),
+                "run_background did not report within its deadline"
+            );
+            self.advance(t, step);
+            waited += step;
         }
     }
 

@@ -11,9 +11,10 @@ use undra_meta::{PortKind, Schema, TypeRef, collect_schema, ids};
 use undra_ports::HttpMethod;
 
 /// `Schema::hash()` of the standard ports.
-/// The standard surface's hash since ADR-049 (`StorageError`, the storage ports' signatures, two
-/// `FsError` variants); it was `0x35fa_e635_f800_25f2`.
-const SCHEMA_HASH: u64 = 0xbbf6_f70d_0c56_7f47;
+/// The standard surface's hash since ADR-046 (the `Diagnostics` port, `PanicReport`, `PanicFrame`,
+/// `BackgroundReport` and the function `run_background`); it was `0xbbf6_f70d_0c56_7f47` since
+/// ADR-049 (`StorageError`, the storage ports' signatures, two `FsError` variants).
+const SCHEMA_HASH: u64 = 0x543d_0961_0867_e387;
 
 const GOLDEN: &str = "tests/golden/schema.json";
 
@@ -36,7 +37,7 @@ fn the_schema_has_exactly_the_standard_surface() {
     };
     assert_eq!(
         names(schema.records.iter().map(|r| r.name.as_str()).collect()),
-        "Header,HttpRequest,HttpResponse"
+        "BackgroundReport,Header,HttpRequest,HttpResponse,PanicFrame,PanicReport"
     );
     assert_eq!(
         names(schema.enums.iter().map(|e| e.name.as_str()).collect()),
@@ -44,10 +45,14 @@ fn the_schema_has_exactly_the_standard_surface() {
     );
     assert_eq!(
         names(schema.ports.iter().map(|p| p.name.as_str()).collect()),
-        "Clock,Connectivity,Fs,Http,Kv,Lifecycle,Log,Rng,SecureStore,Timer"
+        "Clock,Connectivity,Diagnostics,Fs,Http,Kv,Lifecycle,Log,Rng,SecureStore,Timer"
     );
     assert!(schema.objects.is_empty(), "a ports crate has no objects");
-    assert!(schema.functions.is_empty());
+    // The one standard function (ADR-046): the platform's way of granting a background window.
+    assert_eq!(
+        names(schema.functions.iter().map(|f| f.name.as_str()).collect()),
+        "run_background"
+    );
     assert!(schema.queries.is_empty());
 }
 
@@ -64,6 +69,9 @@ fn type_ids_are_hard_coded() {
         ("StorageError", 0x3d40_b010),
         ("NetKind", 0x0371_71aa),
         ("AppState", 0xcfb6_6091),
+        ("PanicFrame", 0x19a4_97d1),
+        ("PanicReport", 0xd08d_5436),
+        ("BackgroundReport", 0x5dbe_a5f3),
     ];
     for (name, id) in expected {
         assert_eq!(ids::type_id(name), id, "{name}");
@@ -118,6 +126,57 @@ fn record_fields_are_in_wire_order() {
             field("body", TypeRef::Bytes),
         ]
     );
+    // ADR-046.
+    assert_eq!(
+        fields("PanicFrame"),
+        [
+            field("address", TypeRef::U64),
+            field("symbol", TypeRef::option(TypeRef::String)),
+            field("file", TypeRef::option(TypeRef::String)),
+            field("line", TypeRef::option(TypeRef::U32)),
+        ]
+    );
+    assert_eq!(
+        fields("PanicReport"),
+        [
+            field("message", TypeRef::String),
+            field("location", TypeRef::String),
+            field("operation", TypeRef::String),
+            field("thread", TypeRef::String),
+            field("frames", TypeRef::vec(t("PanicFrame"))),
+            field("namespace", TypeRef::String),
+            field("core_version", TypeRef::String),
+            field("schema_hash", TypeRef::U64),
+            field("image_id", TypeRef::String),
+        ]
+    );
+    assert_eq!(
+        fields("BackgroundReport"),
+        [
+            field("finished", TypeRef::Bool),
+            field("replayed", TypeRef::U32),
+            field("refetched", TypeRef::U32),
+            field("still_pending", TypeRef::U32),
+        ]
+    );
+}
+
+#[test]
+fn the_standard_function_is_run_background() {
+    let schema = schema();
+    let f = &schema.functions[0];
+    assert_eq!(f.name, "run_background");
+    assert_eq!(f.method_id, ids::function_id("run_background"));
+    assert_eq!(f.method_id, 0x0e5b_14ff);
+    assert!(f.is_async && f.takes_ctx);
+    assert_eq!(
+        f.params
+            .iter()
+            .map(|p| (p.name.as_str(), p.ty.clone()))
+            .collect::<Vec<_>>(),
+        [("deadline_ms", TypeRef::U64)]
+    );
+    assert_eq!(f.returns, t("BackgroundReport"));
 }
 
 #[test]
@@ -329,6 +388,15 @@ fn method_signatures_are_the_ones_of_spec_8() {
             "Lifecycle",
             PortKind::Event,
             vec![("changed", vec![("state", t("AppState"))], TypeRef::Unit)],
+        ),
+        (
+            "Diagnostics",
+            PortKind::Sync,
+            vec![(
+                "panicked",
+                vec![("report", t("PanicReport"))],
+                TypeRef::Unit,
+            )],
         ),
     ];
     for (port, kind, methods) in expected {

@@ -234,7 +234,13 @@ impl Timers {
                         if let Some(slot) = slot {
                             // Waking runs a waker, which is arbitrary code; the timer thread
                             // must not die because one misbehaves.
-                            let _ = crate::guard::guarded(|| slot.fire());
+                            if let Err(report) = crate::guard::guarded(|| slot.fire()) {
+                                crate::runtime::report_current(
+                                    "a timer's waker panicked",
+                                    "timer",
+                                    &report,
+                                );
+                            }
                         }
                     });
                 }

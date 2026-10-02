@@ -59,9 +59,11 @@ pub use undra_signals;
 pub use undra_wire;
 
 mod atomic_update;
+pub mod background;
 mod blocking;
 mod config;
 mod ctx;
+mod diagnostics;
 mod dispatch;
 pub mod executor;
 mod ext;
@@ -83,6 +85,9 @@ pub use config::{
     DroppedStore, InitError, MODE_DEV, MODE_INPROC, RestoreError, RestoreReport, RuntimeConfig,
 };
 pub use ctx::{Closed, Ctx, CtxScope, Gone, WeakCtx, WeakSleep};
+pub use diagnostics::{
+    CoreIdentity, DIAGNOSTICS_PORT, FrameSource, PANICKED_METHOD, install_frame_source,
+};
 pub use dispatch::{DispatchBytes, DispatchLayer, DispatchResult};
 pub use ext::{InitHook, InspectFn, StatsSection};
 pub use host::{Host, PortCallOutcome};

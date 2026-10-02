@@ -4,8 +4,8 @@
 //!
 //! # Where things are
 //!
-//! * The ten port traits ([`Clock`], [`Rng`], [`Log`], [`Http`], [`Kv`], [`SecureStore`],
-//!   [`Fs`], [`Timer`], [`Connectivity`], [`Lifecycle`]) and their records are re-exported at the
+//! * The eleven port traits ([`Clock`], [`Rng`], [`Log`], [`Http`], [`Kv`], [`SecureStore`],
+//!   [`Fs`], [`Timer`], [`Connectivity`], [`Lifecycle`], [`Diagnostics`]) and their records are re-exported at the
 //!   crate root, together with what `#[undra::port]` generates for them: proxies
 //!   (`HttpProxy`, ...), accessors ([`http`], [`kv`], [`clock`], ...), Rust-side dispatchers
 //!   ([`KV_DISPATCHER`], ...: not registered, so a core links them only where a Rust
@@ -13,6 +13,8 @@
 //!   for the event ports, [`on_connectivity_changed`] / [`encode_connectivity_changed_event`] and
 //!   [`on_lifecycle_changed`] / [`encode_lifecycle_changed_event`].
 //! * [`CtxPorts`] adds `ctx.http()`, `ctx.kv()`, ... to [`Ctx`](undra_runtime::Ctx).
+//! * [`run_background`] is the standard function every core has: a platform calls it with the
+//!   window the OS granted (ADR-046), and it runs the background tasks of the runtime.
 //! * [`fakes`] holds the deterministic fakes and [`fakes::install`].
 //!
 //! # Calling a port from core code
@@ -48,11 +50,13 @@ mod root {
     pub use undra_wire as wire;
 }
 
+mod background;
 mod ctx_ext;
 pub mod fakes;
 mod ports;
 mod records;
 
+pub use background::run_background;
 pub use ctx_ext::CtxPorts;
 pub use ports::*;
 pub use records::*;
