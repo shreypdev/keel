@@ -12,8 +12,9 @@
 set -euo pipefail
 platform="${1:-runner}"
 # S20 to S22 are ADR-049's (S21 and S22 web-only); S23 to S25 are held by other ADRs (the boundary-surface plan);
-# S26 is ADR-044's two cores.
-IDS=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10 S11 S12 S13 S14 S15 S16 S17 S18 S19 S20 S26)
+# S26 is ADR-044's two cores; S29 and S30 are ADR-046's panic report and background run (S27 and S28 are the
+# objects and callbacks of ADR-040 and ADR-041).
+IDS=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10 S11 S12 S13 S14 S15 S16 S17 S18 S19 S20 S26 S29 S30)
 # Web-only scenarios (ADR-049): the TypeScript runner runs them.
 case "$platform" in
   ts) IDS+=(S21 S22) ;;

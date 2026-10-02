@@ -631,6 +631,72 @@ harness adapters.
    of kind `state`; native: the runtime's in-process claim), and A, closed, loads again and answers
    `add(2, 3) == 5`. Both are closed at the end.
 
+### S29 panic report (ADR-046)
+
+The playground core's panics, seen by the app's crash reporter. Every platform sets `LoadOptions.onPanic`
+(Swift `onPanic`, Kotlin `onPanic`, TypeScript `onPanic`) and records each `UndraPanicReport` (message, location,
+operation, thread, frames, namespace, coreVersion, schemaHash, imageId), with a note of the thread it was
+delivered on.
+
+**Native (Kotlin over JNI, Swift over the C ABI)**
+
+1. `explode("kaboom")` fails as in S17.1 (status 2). `onPanic` received **exactly one** report: `message`
+   contains `kaboom`; `location` contains `lab.rs:` and ends in `:<line>:<column>`; `operation == "explode"`;
+   `thread` is not empty; `namespace == "playground_core"`; `coreVersion` is not empty; `schemaHash` is the
+   bindings' hash; `imageId` is empty or lowercase hex; `frames` is not empty (the runners load debug builds, which
+   name their frames: some frame has a `symbol`), and every frame's `address` is a `UInt64`/`Long`/`bigint`.
+2. `explode_later(10, "later")` reports once, `operation == "explode_later"`; a **detached task** that panics
+   (`explode_detached("task")`, which returns at once) reports once, `operation == "task"`.
+3. `onPanic` is called on the platform's main thread (the Swift main actor's thread, the Kotlin runner's `main`
+   executor, the JavaScript thread), once per report and in the order the panics happened; the call that
+   panicked still fails as in S17.
+4. `stats().panics` and `stats().panicReports` both grew by 3 (the stats report `panic_reports`), and the core keeps
+   working: `add(1, 2) == 3`. A reporter that throws changes nothing: the next panic is reported all the same
+   (the runner's `onPanic` throws once, on the first report, in a second `load` of the S17 kind: Swift cannot
+   throw there, so its `onPanic` is `@Sendable (UndraPanicReport) -> Void` and the step is Kotlin and TypeScript).
+
+**wasm (TypeScript)** — the core traps, so the report is built from the core's FATAL record and the trap:
+
+1. `explode("kaboom")` makes the call fail as in S17 (wasm); `onPanic` received **exactly one** report **before**
+   the restart of S22 begins (`onCoreRestarted` fires after it): `message` contains `kaboom`, `location` contains
+   `lab.rs:`, `operation == "explode"` (the call the core was running, from the FATAL record), `thread == "main"`,
+   `namespace == "playground_core"`, `coreVersion` not empty, `schemaHash` the bindings', `frames` not empty (each
+   `address` the module offset of a `wasm-function[i]:0x..` line, a `symbol` when the build has names) and
+   `imageId` is the SHA-256 of the module's bytes as 64 lowercase hex digits.
+2. The same report arrives with recovery on (S22) and with it off, and `onPanic` throwing is reported to `onError`
+   and changes nothing.
+
+### S30 background run (ADR-046)
+
+`runInBackground(deadline)` (Swift `core.runInBackground(deadline:)`, Kotlin `core.runInBackground(deadlineMs)`,
+TypeScript `core.runInBackground(deadlineMs)`) over the standard function `run_background`. List `s30`; the
+server serves `[]`; a handle observes it.
+
+1. **Offline work is pending.** `Connectivity.changed(online=false, kind=None)`; POST `/lists/s30/todos` fails with
+   `HttpError.Network("offline")`; `create_remote_todo("s30", "Queued")` is started and stays pending
+   (`storage_status().pending == 1`). `stats().background.tasks >= 3` and `stats().background.pending >= 1`: the
+   platform can tell that a window is worth asking for. Emitting `Lifecycle.changed(Background)` writes the
+   persisted cache entry of the list at once (the Kv holds a key starting `undra.query.cache2.` within 100 ms, not
+   250 ms later).
+2. **Still offline, the run says so and does not wait.** `runInBackground(5 s)` returns in under 1 s with
+   `finished == false`, `replayed == 0`, `stillPending >= 1`; the item is still queued.
+3. **Online, the run drains the queue.** POST answers `201 {"id":9,"title":"Queued","done":false}` after a delay of
+   400 ms. `Connectivity.changed(online=true, kind=Wifi)` starts the replay; `runInBackground(10 s)` started
+   right after it returns once the replay finished: `finished == true`, `replayed == 1`, `stillPending == 0`; the
+   pending `create_remote_todo` resolved; the server saw 2 POSTs with the same `Idempotency-Key`.
+4. **A run cut at its deadline leaves the work intact.** Offline again; `create_remote_todo("s30", "Slow")` queued
+   (`pending == 1`); POST answers `201 {...}` after 5 s; online. `runInBackground(1 s)` returns in about
+   500 ms (the deadline less the half second kept for the host), **not later than 900 ms**, with
+   `finished == false`, `replayed == 0`, `stillPending == 1`: the replay in flight is the client's, not the run's, so
+   the item is still queued (`pending == 1`, the Kv queue key still holds it) and **nothing is sent twice**; within
+   10 s the POST answers, `pending == 0`, and the server saw exactly one POST for it after the failed one, with the
+   same `Idempotency-Key`.
+5. **A host that cancels the call.** `runInBackground(30 s)` while a replay is held (offline, then online with a
+   POST that answers after 3 s) is cancelled after 100 ms (Swift: the `Task` is cancelled, Kotlin: the coroutine,
+   TypeScript: the `AbortSignal`): the call fails with the platform's cancellation, the core keeps working
+   (`add(1, 2) == 3`) and the queue is intact (`pending == 1` until the POST answers, then 0).
+6. **Counters.** `stats().background.runs == 4`, `.finished == 1`, `.replayed == 1`.
+
 ## Platform notes
 
 * TypeScript: S03 runs only in `wasm-main` mode (the only one with `callSync`); S17 step 6 is the only
@@ -659,5 +725,10 @@ harness adapters.
 * S20 step 4 differs by platform: a fresh TypeScript core can be loaded with a `Kv` whose queue reads fail, so
   the TypeScript column walks the whole "unreadable, then readable on `Active`" path; Swift and Kotlin load one
   core per process, so their harness fails the first read of the queue at load and S20 checks what that did.
+* S29 steps 1 to 4 and S30 run on every platform with the playground's debug core; S29's wasm column is the
+  trap path (the core cannot call `Diagnostics` before it traps, so the host builds the report from the FATAL
+  `undra::panic` record, `message`, `at <file>:<line>:<col>` and `in <operation>` on lines of their own, and the
+  trap's stack). S27 and S28 are `objects-callbacks`'; ADR-046's provisional numbers (S27 panic report, S28
+  background run) became S29 and S30.
 * S21 and S22 are TypeScript-only: worker mode and crash recovery are web features (ADR-049; a native core
   contains a panic without trapping, SPEC 5.6). `check.sh` does not expect them from Swift or Kotlin.
