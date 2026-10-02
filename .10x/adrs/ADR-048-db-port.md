@@ -1,6 +1,8 @@
 # ADR-048: a `Db` standard port over SQLite: typed cells, bound parameters, adapter-run migrations, interactive transactions without blocking the core
 
-Status: **Proposed** (2026-10-01, piece G3 of the v1.x plan, `wt/ports-v2`; the founder approved the bet in
+Status: **Accepted** (2026-10-02, after the adversarial review of `wt/ports-v2`,
+`.10x/reviews/2026-10-02-ports-review.md`; see "Implementation notes" at the end for the deviations). Proposed
+2026-10-01 (piece G3 of the v1.x plan, `wt/ports-v2`; the founder approved the bet in
 Amendment A of `.10x/specs/2026-10-01-v1x-default-choice-design.md`). Touches SPEC 0 (the "Rust-owned SQLite" line
 stays out of scope: SQLite stays foreign), 8, 10.5, 11, 17; `undra-ports`, `undra` (feature), `undra-bindgen`
 (`stdlib`), the four runtimes. **No wire, C ABI or wasm ABI change; no existing schema hash moves.** Sits beside
@@ -113,3 +115,37 @@ uses the SQLite every platform already ships (iOS, Android) or a vetted build (J
 * Bench rows `db/insert_1k` (1,000 inserts in one transaction) and `db/query_10k` (10,000 rows of 3 cells decoded)
   through the port path with `MemDb`, budgets in `bench/budgets.toml`.
 * SPEC 8, 10.5, 11, 17 and `site/docs/db.html`. Hello-world wasm and JS: unchanged within tolerance.
+
+## Implementation notes (2026-10-02, accepted after the review)
+
+* **Android turns its own WAL pool off** (one connection per database, which `changes()` and `last_insert_rowid()`
+  need) and the binding sets `journal_mode = WAL` itself. Android exposes neither the parameter count nor the end of
+  a statement, so a tokenizer (`SqlText`) gives both; the review made it count every variable form SQLite's does
+  (`#name`, `::` and `(...)` suffixes: `UPDATE .. SET x = #v WHERE id = ?` had bound the value to `#v`). A single row
+  larger than Android's cursor window (about 2 MB) is a typed `Sql`/`Full` failure, never a crash (measured on the
+  `undra` AVD). Since the review BEGIN, COMMIT and ROLLBACK go to SQLite itself (a leading `;`), not Android's
+  transaction stack, which drops a transaction SQLite refused to commit (a deferred foreign key) and then refuses
+  the binding's ROLLBACK: every later `begin` failed. The React Native module had the same code.
+* **wa-sqlite 1.0.0 bugs are worked around** in `db/wa-sqlite-engine.ts`: its `bind_text` binds a NUL-terminated copy
+  and `column_text` reads up to the first U+0000 (text is bound and read as bytes with their length), and its
+  `bind_blob` binds a NULL pointer for an empty array, which SQLite stores as NULL (blobs are bound through
+  `sqlite3_bind_blob` with their length); each workaround has a test that fails without it. The web has no WAL (`dbPort(waSqliteDb(), { wal: false })`).
+* **Open, decided by the review on every binding** (Swift found it; Kotlin, TypeScript, React Native and the Rust
+  check followed): `user_version` is read again under `BEGIN IMMEDIATE`'s write lock, so two opens of one new file at
+  once (two stores opening `"app"` at launch, two cores) migrate it once instead of the second failing
+  `Migration { 1, "table already exists" }`; the switch to WAL, which SQLite answers `BUSY` at once while another
+  connection makes it, is retried until the busy timeout; a migration version must be at most 2,147,483,647
+  (`user_version` is a signed 32-bit integer and would store a larger one as 0, re-running migration 1 on every
+  open; `undra_ports::db::validate_migrations` refuses it before the call).
+* **A transaction whose `begin` was still crossing when its task was cancelled** is rolled back when the platform's
+  late answer names it (decision 5's "dropped mid-way" now covers the `begin` itself; the same for `open`).
+* **Two cores (ADR-044) that open the same name share its file by design**, each through its own binding; SQLite's
+  locks keep them apart (a contended write is `Busy` after the busy timeout; on Node `DatabaseSync` waits on the
+  calling thread). **On the web one tab holds the database**: `AccessHandlePoolVFS` takes every file of the origin's
+  pool exclusively, so a second tab's (or a second `waSqliteDb()`'s) `open` is `Unavailable` with the browser's
+  reason. A shared worker or Web Locks hand-off is future work.
+* **Not decided here (open):** a migration whose SQL holds its own `COMMIT` (or `BEGIN`/`ROLLBACK`) ends the
+  binding's transaction early, so a later failing migration leaves a partial schema with `user_version` unchanged;
+  refusing transaction control inside migrations (an authorizer on `SQLITE_TRANSACTION`/`SAVEPOINT`, or the
+  tokenizer) is the candidate rule for every binding.
+

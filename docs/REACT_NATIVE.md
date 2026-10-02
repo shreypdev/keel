@@ -179,7 +179,7 @@ answers the core directly, off the JS thread:
 | `Clock`, `Rng`, `Log` | native, in the module (`Log` records also reach your `log` adapter, default the console) | | |
 | `Timer` | the core's own timer thread | | |
 | `Db` (opt-in, ADR-048) | native (C++ binding: migrations, one worker per database, transactions, busy timeout) | the system SQLite, `<Application Support>/<bundle id>/Undra/db/<name>.sqlite`, the Swift runtime's file | `android.database.sqlite` through JNI, `getDatabasePath("undra-<name>.sqlite")`, `android-adapters`' file |
-| `WebSocket` (opt-in, ADR-047) | `reactNativeWebSocket()`: React Native's `WebSocket`, headers as its third argument | a dropped connection ends `Closed(1001, "Stream end encountered")` (React Native forwards no `wasClean`) | a dropped connection ends `Network` |
+| `WebSocket` (opt-in, ADR-047) | `reactNativeWebSocket()`: React Native's `WebSocket`, headers as its third argument | a dropped connection ends `Network`, or `Closed(1001, "Stream end encountered")` when iOS reports it as the end of its stream (React Native forwards no `wasClean`) | a dropped connection ends `Network` |
 | `Sse` (opt-in, ADR-047) | `reactNativeSse()`: `fetch` body streams where present, else `XMLHttpRequest` progress events | | |
 
 Because the directories, file layouts, Keychain items and Keystore key are the ones the Swift and Kotlin runtimes

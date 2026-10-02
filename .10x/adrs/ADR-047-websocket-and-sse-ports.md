@@ -1,6 +1,8 @@
 # ADR-047: `WebSocket` and `Sse` standard ports: pull-based inbound streams with the core's credit, reconnection in the core
 
-Status: **Proposed** (2026-10-01, piece G2 of the v1.x plan, `wt/ports-v2`; the founder approved the bet in
+Status: **Accepted** (2026-10-02, after the adversarial review of `wt/ports-v2`,
+`.10x/reviews/2026-10-02-ports-review.md`; see "Implementation notes" at the end for the deviations). Proposed
+2026-10-01 (piece G2 of the v1.x plan, `wt/ports-v2`; the founder approved the bet in
 Amendment A of `.10x/specs/2026-10-01-v1x-default-choice-design.md`). Touches SPEC 8 (two opt-in ports and five
 types), 10.5 (the `stdlib` table), 11 (default adapters), 17 (the runtimes' adapter interfaces); `undra-ports`,
 `undra` (features), `undra-bindgen` (`stdlib`), the Swift, Kotlin, TypeScript and React Native runtimes.
@@ -121,3 +123,43 @@ a per-connection inbound stream with backpressure: events have no credit and fan
   peer close, abrupt drop, flood under a stalled reader, non-UTF-8 text, wrong content type).
 * Bench row `ports/ws_roundtrip` (one message out and back through the port path, `bench/budgets.toml`).
 * SPEC 8, 10.5, 11, 17 and `site/docs/realtime.html`. Hello-world wasm and JS: unchanged within tolerance.
+
+## Implementation notes (2026-10-02, accepted after the review)
+
+What the implementation and the review decided where this text left room, and where they depart from it:
+
+* **A pull answers a burst as one reply** (decision 3, added during the work): at once with `max`, else once one is
+  there and 2 ms passed without another, or 8 ms after its first. The Swift runner measured 6 pulls in S23.3
+  without it. React Native's timers fire on frame boundaries, so there the quiet period is one frame: a lone
+  message reaches the core about 16.7 ms after it arrived (measured on both OSes; documented in
+  `docs/REACT_NATIVE.md`).
+* **SSE on the JVM is `java.net.http`** (decision 9's table said `HttpURLConnection` for both): on JDK 17
+  `HttpURLConnection.disconnect()` does not abort a read blocked on a chunked body, so S24.3 could not pass. Android
+  keeps `HttpURLConnection`, where it does.
+* **TypeScript registers the ports through `LoadOptions.ports`**, not adapter keys (adapter keys would pull binding
+  code into the main entry). The review moved the ids out of the main entry too: `OptInPortIds` (`WebSocket`, `Sse`,
+  `Db`) is exported by `@undra/runtime/realtime` and `@undra/runtime/db`, because ADR-052's 26,000-byte gate had 16
+  bytes of headroom and `PortIds` carrying them put the hello world 132 bytes over. What the main entry still
+  carries is the `PortImpl.dispose` call when the core closes (25,996 B gz after the review); a crash restart
+  (ADR-049) disposes from `recovery.ts`, and `registerPort` no longer disposes the port it replaces.
+* **S23's TypeScript column runs `nodeWebSocket()`** (Node's `http` upgrade with the runtime's RFC 6455 framing):
+  Node's global `WebSocket` hides a refusal's status, refuses to send 1001 and reports bad UTF-8 as a drop.
+  `nodeWebSocket` pauses the socket, but only after parsing one socket read (at most 64 KiB on the wire, measured
+  up to ~13,000 tiny frames queued against a read-ahead of 16): bounded, TCP pushes back, not "at most `max`"
+  (open item).
+* **Kotlin's error fields are `reason`** (`WsError.Closed(code, reason)`, `Refused(status, reason)`, like
+  `HttpError.Network(reason)`): `message` stays the exception's Display text, which is what Kotlin readers expect
+  of `message`.
+* **Platform ends that differ** (typed everywhere, documented): a browser or React Native `WebSocket` reports every
+  failure before `open` as `Refused { status: null }` (DNS included); script cannot send 1001 or 1008, so a server
+  sees 1005 when the binding closes going away; React Native on iOS may report a dropped connection as
+  `Closed(1001, "Stream end encountered")` (it forwards no `wasClean`; seen once in the review, `Network` in the final
+  device run), Android as `Network`.
+* **Review fixes:** a `connect`/`open` whose caller was cancelled while it crossed left the connection or stream
+  open (Rust runs those calls in a task of its own that closes what the late answer names; the Kotlin and
+  TypeScript bindings close what opens after a detach); a crash-restarted web core now releases what the trapped
+  instance held (the bindings count disposals instead of dying); `URLSession`'s default of 6 connections per host
+  left a 7th SSE stream to one host waiting in `open` (the default session allows 1,024); `browserWebSocket`
+  refused one message larger than its byte limit with nothing queued; `fetchSse` sent a non-Latin-1
+  `Last-Event-ID` (now UTF-8 bytes); a raw `WsError`/`SseError` from its own port answered status 2 on Kotlin.
+
