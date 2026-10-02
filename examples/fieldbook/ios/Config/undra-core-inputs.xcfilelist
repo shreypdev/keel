@@ -1,0 +1,8 @@
+$(SRCROOT)/../core/Cargo.toml
+$(SRCROOT)/../core/src
+$(SRCROOT)/../core/src/auth.rs
+$(SRCROOT)/../core/src/lib.rs
+$(SRCROOT)/../core/src/net.rs
+$(SRCROOT)/../core/src/notes.rs
+$(SRCROOT)/../core/src/presence.rs
+$(SRCROOT)/../undra.toml

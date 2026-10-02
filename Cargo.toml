@@ -15,6 +15,7 @@ members = [
   "crates/undra",
   "examples/playground/core",
   "examples/cookbook/core",
+  "examples/fieldbook/core",
   "bench",
 ]
 

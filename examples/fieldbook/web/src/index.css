@@ -1,0 +1,146 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+main {
+  max-width: 32rem;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+form,
+nav {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+form input {
+  flex: 1;
+}
+
+nav button[aria-pressed="true"] {
+  font-weight: 600;
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+}
+
+li label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.35rem 0;
+}
+
+.done {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.error {
+  color: #c0392b;
+}
+
+.muted {
+  opacity: 0.65;
+  font-size: 0.9rem;
+}
+
+.bar,
+.row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.grow {
+  flex: 1;
+}
+
+.bar h1 {
+  flex: 1;
+  margin: 0;
+}
+
+.status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+}
+
+.switch {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+form.new {
+  flex-wrap: wrap;
+}
+
+form.new input:first-child {
+  flex: 1 1 10rem;
+}
+
+form.new textarea {
+  flex: 1 1 100%;
+  font: inherit;
+}
+
+.search {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+nav {
+  flex-wrap: wrap;
+}
+
+.notes li {
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  margin: 0.6rem 0;
+}
+
+.notes li.pinned {
+  border-color: #ef6c00;
+}
+
+.notes p {
+  margin: 0.3rem 0;
+}
+
+.badge {
+  font-size: 0.75rem;
+  padding: 0 0.4rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  opacity: 0.7;
+}
+
+.photos {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.thumb {
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: cover;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.attach {
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-decoration: underline;
+}

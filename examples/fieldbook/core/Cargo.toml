@@ -1,0 +1,18 @@
+[package]
+name = "fieldbook-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The Undra core of Fieldbook, the sample app: field notes with photos. Auth, an offline queue, a derived notebook, an update with a migration hook, and (feature `presence`) real-time presence over WebSocket."
+
+[features]
+# Who else is in the notebook right now, over the opt-in `WebSocket` port (ADR-047: `undra = { features = ["websocket"] }`).
+# This feature turns `src/presence.rs` on and is what asks `undra` for the port.
+presence = []
+
+[dependencies]
+undra = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

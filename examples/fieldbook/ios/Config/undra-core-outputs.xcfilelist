@@ -1,0 +1,4 @@
+$(SRCROOT)/../build/ios/FieldbookCore.xcframework/Info.plist
+$(SRCROOT)/../build/ios/FieldbookCore.xcframework/ios-arm64/libfieldbook_core.a
+$(SRCROOT)/../build/ios/FieldbookCore.xcframework/ios-arm64-simulator/libfieldbook_core.a
+$(SRCROOT)/../build/ios/.undra-configuration-$(CONFIGURATION)
