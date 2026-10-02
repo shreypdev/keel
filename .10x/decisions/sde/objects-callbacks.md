@@ -175,14 +175,19 @@ code gives its references back itself".
   (and releases the extra reference); Kotlin 15.5 to 22.5 ns/op (live wrapper), 190 to 204 ns/op (a new wrapper and its
   close); TypeScript 671 to 891 ns/op (a new wrapper), about 220 ns/op for the identity lookup alone and 1.0 to 1.3 us/op with its
   `Release` through the in-process fake transport.
-* **Size** (`scripts/wasm-size.sh`): `web/hello-wasm` 118,929 gzipped on the merged branch (gate 120,000: ok; the committed
-  record is 116,575; the TypeScript implementer measured 118,793 before and after the TypeScript work, which does not touch the module). `web/hello-runtime-js` **26,313 gzipped against a gate of
-  26,000 (record 25,996): 317 bytes of growth, 313 over**. About 97 bytes are the mirror's callback entries (the `Mirror`
-  class always ships) and about 220 are `adopt` in every constructor, the late-finalizer handling, `_giveBack` / `_held` /
-  `hostRefs` and the dispatch change; hello does not include `callbacks.ts`, `adoptObject` or `requireOwn`. Two trims gave
-  nothing measurable. **Proposal**: raise `budget_gzip_bytes` of `web/hello-runtime-js` to 26,500 and re-record at 26,313 in
-  the integrator's commit (`scripts/wasm-size.sh --record`), or let ts-size-e4 land first and re-measure; the budget is not
-  changed on this branch.
+* **Size** (`scripts/wasm-size.sh`, on the tree after merging `main` with ts-size-e4 and ns-storage, whose gate counts what a
+  page loads up front): `web/hello-wasm` 118,929 gzipped (gate 120,000: ok; the committed record is 116,706, so the core
+  grew 2,223 bytes: the object table's references and origins, the issue scope, the callback proxies, the
+  `Arc`/`dyn` dispatch). `web/hello-runtime-js` **21,677 gzipped against a gate of 21,500 (record 21,173): 504 bytes of growth,
+  177 over**. Before the merge with ts-size-e4 the same code measured 317 bytes over the old record (26,313 of 26,000 against
+  25,996); the merge adds what the new up-front chunk keeps of the new code. What is in the chunk (unminified, `UNDRA_SIZE_MODULES=exports`):
+  `identity.ts` 963 bytes (`adopt` and `collected`: every generated constructor adopts, hello's `Todos.create` included),
+  the mirror's callback entries (the `Mirror` class always ships), `_giveBack` / `_held` / `hostRefs` in `core.ts`; hello does
+  not include `callbacks.ts`, `adoptObject`, `adoptOptional`, `adoptList` or `requireOwn`. **Proposal**: raise
+  `budget_gzip_bytes` of `web/hello-runtime-js` from 21,500 to 21,800 and re-record at 21,677 in the integrator's commit
+  (`scripts/wasm-size.sh --record`; ADR-052's amendment names 21.5 KB), or take the identity map out of the up-front chunk by
+  making a store's constructor load it lazily (a second `await` in every `create()`, which ADR-056 spent a release removing). The
+  budget is not changed on this branch.
 
 **Counts.**
 
@@ -203,7 +208,7 @@ Run once at the end on the merged tree (after merging `main` at `8000d39`), macO
 | bindgen goldens | the new `object_graph` and `callbacks` cases on Swift, Kotlin and TypeScript (compiled and run by `typecheck_*`/`run_ts`), every older tree re-blessed once (the wrapper initialiser and the constructor's `adopt`) |
 | Interop (`crates/undra-transport/interop/run.sh`), `schema_retention` + `schema_docs` | ok |
 | Budgets (`cargo test -p undra-bench --test budgets --release`), `sync_alloc`, `commit_alloc`, `derived_alloc` | pass |
-| `scripts/wasm-size.sh` | `web/hello-wasm` ok (118,929 of 120,000); `web/hello-runtime-js` **over by 313 bytes** (see Numbers) |
+| `scripts/wasm-size.sh` | `web/hello-wasm` ok (118,929 of 120,000); `web/hello-runtime-js` **over by 177 bytes** (21,677 of 21,500; see Numbers) |
 | Playground web: `npm test` (121 pass), `npm run build` | pass; the Playwright smoke of the Stress tab fails as before (see the limits) |
 | Playground Android `./gradlew assembleDebug` | pass (the Kotlin implementer also drove the Workshop tab on emulator-5554) |
 | Site: `node site/scripts/build-all.mjs`, `check-links.mjs --words` | clean; two new docs pages, the callbacks section of the reference pages, E0064/E0071/E0004 on the errors page |
