@@ -1080,6 +1080,219 @@ fn a_restore_asks_for_the_records_with_no_lock_of_the_table_held() {
     assert_eq!(report.reissued, 1);
 }
 
+// ----- review (ADR-059): first uses at once, references, damaged records ----------------------------
+
+/// Several first uses of one dormant handle at the same time (two clients observing it, a call in the
+/// same tick): the object is built exactly once, in the one entry, and every use is answered by it.
+/// The threads race each other, not the test: every interleaving must give the same counts.
+#[test]
+fn first_uses_at_the_same_time_build_a_dormant_handle_exactly_once() {
+    let old = runtime();
+    let handle = widget(&old, 5);
+    let snapshot = old.runtime().snapshot();
+    for round in 0..16_u32 {
+        let new = runtime();
+        restore(&new, &snapshot);
+        new.host().take_decoded_change_sets();
+        let rt = new.runtime().clone();
+        let start = std::sync::Barrier::new(8);
+        let reads: Vec<u32> = std::thread::scope(|s| {
+            let users: Vec<_> = (0..8_u32)
+                .map(|i| {
+                    let (rt, start) = (&rt, &start);
+                    s.spawn(move || {
+                        start.wait();
+                        if i % 2 == 0 {
+                            rt.observe(handle.0, ALL, true);
+                            return None;
+                        }
+                        let reply = undra_runtime::testing::decode_reply(&rt.call_sync(
+                            &undra_runtime::testing::call_payload(
+                                CallTarget::Method {
+                                    handle,
+                                    method_id: READ,
+                                },
+                                100 + i,
+                                &[],
+                            ),
+                        ));
+                        assert_eq!(reply.status, ReplyStatus::Ok, "{reply:?}");
+                        Some(u32::decode_exact(&reply.body).unwrap())
+                    })
+                })
+                .collect();
+            users
+                .into_iter()
+                .filter_map(|user| user.join().unwrap())
+                .collect()
+        });
+        assert_eq!(reads, [5, 5, 5, 5], "round {round}");
+        assert_eq!(builds(&new), 1, "round {round}: built exactly once");
+        assert_eq!(
+            [
+                stat(&new, "dormant_handles"),
+                stat(&new, "live_handles"),
+                stat(&new, "host_refs"),
+                stat(&new, "panics"),
+            ],
+            [0, 1, 1, 0],
+            "round {round}"
+        );
+        let sets = new.host().take_decoded_change_sets();
+        assert!(
+            !sets.is_empty(),
+            "round {round}: the observes were answered"
+        );
+        assert!(
+            sets.iter()
+                .flat_map(|cs| cs.entries.iter())
+                .all(|e| e.handle == handle && e.value == 5_u32.encode_to_vec()),
+            "round {round}: every answer is the one built object's: {sets:?}"
+        );
+    }
+}
+
+/// ADR-040's references stay exact through restore, first use, a restore of the same runtime, release
+/// and a restore again: the statistics come back to where they started.
+#[test]
+fn host_references_are_exact_across_restore_use_release_and_restore_again() {
+    let old = runtime();
+    let handle = widget(&old, 5);
+    let snapshot = old.runtime().snapshot();
+    let t = runtime();
+    let counts = |t: &TestRuntime| {
+        [
+            stat(t, "live_handles"),
+            stat(t, "host_refs"),
+            stat(t, "dormant_handles"),
+        ]
+    };
+    let baseline = counts(&t);
+    assert_eq!(baseline, [0, 0, 0]);
+
+    // A fresh runtime: re-issued with the one reference the host's wrapper owns.
+    restore(&t, &snapshot);
+    assert_eq!(counts(&t), [1, 1, 1]);
+    observe(&t, handle);
+    assert_eq!(counts(&t), [1, 1, 0], "built in the same entry");
+    // The same runtime again (a time travel): left alone, its reference too.
+    restore(&t, &snapshot);
+    assert_eq!(counts(&t), [1, 1, 0]);
+    assert_eq!(t.runtime().objects().host_refs_of(handle), Some(1));
+    // The wrapper's one release removes it.
+    t.runtime().release(handle.0);
+    assert_eq!(counts(&t), baseline);
+    assert_eq!(call(&t, handle, READ).status, ReplyStatus::BadRequest);
+
+    // Released since the snapshot: the record makes it dormant again (a restore cannot tell), with
+    // one reference, which one release gives back without building anything.
+    restore(&t, &snapshot);
+    assert_eq!(counts(&t), [1, 1, 1]);
+    t.runtime().release(handle.0);
+    assert_eq!(counts(&t), baseline);
+    assert_eq!(builds(&t), 1, "one build in all of it");
+
+    // A second reference the host took on the live object (a second wrapper) is kept by a restore
+    // of the same runtime, and both releases are needed.
+    restore(&t, &snapshot);
+    assert_eq!(read(&t, handle), 5);
+    assert_eq!(builds(&t), 2);
+    let object = t.runtime().objects().get_dyn(handle).unwrap();
+    let (again, fresh) =
+        t.runtime()
+            .objects()
+            .issue_with(object.address(), || unreachable!(), false);
+    assert_eq!((again, fresh), (handle, false));
+    drop(object);
+    assert_eq!(t.runtime().objects().host_refs_of(handle), Some(2));
+    restore(&t, &snapshot);
+    assert_eq!(t.runtime().objects().host_refs_of(handle), Some(2));
+    t.runtime().release(handle.0);
+    assert_eq!(counts(&t), [1, 1, 0]);
+    t.runtime().release(handle.0);
+    assert_eq!(counts(&t), baseline);
+}
+
+/// R6 and ADR-023 on the record's own header: every byte of a recreation record in an encoded
+/// snapshot (its handle, type, field count, field id, length and bytes), damaged three ways, gives a
+/// restore that either succeeds (the record refused, dropped or re-issued, the store restored) or is
+/// refused whole with a typed error that leaves the runtime exactly as it was. Nothing panics.
+#[test]
+fn a_damaged_record_header_is_refused_typed_or_left_out_and_nothing_panics() {
+    let old = runtime();
+    let counter = new_counter(&old, 4, "kept");
+    let handle = widget(&old, 5);
+    let snapshot = old.runtime().snapshot();
+    // The recreation record is the last chunk: handle u64, type u32, count u32, id u32, len u32, record.
+    let chunk = 8 + 4 + 4 + 4 + 4 + record_of(5).len();
+    let start = snapshot.len() - chunk;
+    assert_eq!(
+        u32::from_le_bytes(snapshot[start + 16..start + 20].try_into().unwrap()),
+        undra_wire::payload::RECREATION_FIELD
+    );
+    let mut outcomes = [0_usize; 2];
+    for at in start..snapshot.len() {
+        for damage in [0x00_u8, 0xff, snapshot[at] ^ 0x01] {
+            if damage == snapshot[at] {
+                continue;
+            }
+            let mut bytes = snapshot.clone();
+            bytes[at] = damage;
+            // A runtime with a live handle of its own, which a refused restore must not touch (above
+            // the slots the snapshot's store and record name, so no store displaces it).
+            let t = runtime();
+            for _ in 0..4 {
+                t.runtime()
+                    .objects()
+                    .insert(undra_runtime::plain(Arc::new(Marker)));
+            }
+            let mine = widget(&t, 9);
+            observe(&t, mine);
+            let before = (
+                table_of(&t, &[mine, handle, counter]),
+                t.runtime().snapshot(),
+            );
+            match t.runtime().restore_with_report(&bytes) {
+                Ok(report) => {
+                    outcomes[0] += 1;
+                    assert_eq!(
+                        report.restored, 1,
+                        "byte {at} = {damage:#x}: the store ({report:?})"
+                    );
+                    assert_eq!(read(&t, mine), 9, "byte {at} = {damage:#x}: left alone");
+                }
+                Err(e) => {
+                    outcomes[1] += 1;
+                    assert!(
+                        matches!(
+                            e,
+                            RestoreError::Decode(_)
+                                | RestoreError::BadHandle { .. }
+                                | RestoreError::GenerationFloor { .. }
+                        ),
+                        "byte {at} = {damage:#x}: {e:?}"
+                    );
+                    assert_eq!(
+                        (
+                            table_of(&t, &[mine, handle, counter]),
+                            t.runtime().snapshot()
+                        ),
+                        before,
+                        "byte {at} = {damage:#x}: a refused restore changes nothing"
+                    );
+                }
+            }
+            assert_eq!(stat(&t, "panics"), 0, "byte {at} = {damage:#x}");
+            assert_eq!(
+                builds(&t),
+                0,
+                "byte {at} = {damage:#x}: a restore builds nothing"
+            );
+        }
+    }
+    assert!(outcomes[0] > 0 && outcomes[1] > 0, "{outcomes:?}");
+}
+
 // ----- properties ------------------------------------------------------------------------------------
 
 mod properties {

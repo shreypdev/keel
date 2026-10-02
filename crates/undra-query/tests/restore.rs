@@ -997,3 +997,222 @@ fn a_snapshot_taken_inside_a_change_set_callback_of_a_commit_does_not_deadlock()
         "the snapshot taken inside the callback carries the handle's record"
     );
 }
+
+// ----- review (ADR-059): determinism and damaged records -----------------------------------------------
+
+/// The `Clock` and the `Timer` of the fakes, counted: what a restore must not touch (R12).
+struct CountedTime {
+    inner: Arc<undra_ports::fakes::FakeClock>,
+    reads: std::sync::atomic::AtomicUsize,
+    timers_set: std::sync::atomic::AtomicUsize,
+}
+
+impl undra_ports::Clock for CountedTime {
+    fn now_ms(&self) -> i64 {
+        self.reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        undra_ports::Clock::now_ms(&*self.inner)
+    }
+
+    fn monotonic_ns(&self) -> u64 {
+        self.reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        undra_ports::Clock::monotonic_ns(&*self.inner)
+    }
+}
+
+impl undra_ports::Timer for CountedTime {
+    fn set(&self, timer_id: u32, delay_ms: u64) {
+        self.timers_set
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        undra_ports::Timer::set(&*self.inner, timer_id, delay_ms);
+    }
+}
+
+/// A platform whose `Clock` and `Timer` are counted, bound before the runtime starts.
+fn counted_platform() -> (Platform, Arc<CountedTime>) {
+    use undra::runtime::Port;
+    let t = TestRuntime::new();
+    let fakes = undra_ports::fakes::install(&t);
+    let counted = Arc::new(CountedTime {
+        inner: fakes.clock.clone(),
+        reads: std::sync::atomic::AtomicUsize::new(0),
+        timers_set: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let clock: Arc<dyn undra_ports::Clock> = counted.clone();
+    let timer: Arc<dyn undra_ports::Timer> = counted.clone();
+    t.runtime()
+        .bind_dyn_port::<dyn undra_ports::Clock>(<dyn undra_ports::Clock as Port>::PORT_ID, clock);
+    t.runtime()
+        .bind_dyn_port::<dyn undra_ports::Timer>(<dyn undra_ports::Timer as Port>::PORT_ID, timer);
+    t.run_init_hooks();
+    let p = Platform::on(Harness { t, fakes });
+    p.h.settle();
+    (p, counted)
+}
+
+impl CountedTime {
+    fn reads(&self) -> usize {
+        self.reads.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// What a restore must leave as it was besides the clock (read around the restore alone: the
+/// statistics read it): timers armed through the `Timer` port and on the fake clock, the timers the
+/// runtime holds (`stats_json`'s `pending_timers`: the polls), requests made.
+fn port_use(p: &Platform, counted: &CountedTime) -> [u64; 4] {
+    [
+        counted
+            .timers_set
+            .load(std::sync::atomic::Ordering::Relaxed) as u64,
+        p.h.fakes.clock.pending_timers() as u64,
+        p.stat("pending_timers"),
+        p.h.http_calls() as u64,
+    ]
+}
+
+/// R12: a restore reads no clock, arms no timer and fetches nothing, whether it leaves live handles
+/// alone (the same runtime: their polling timers are the ones armed before, not a second set) or
+/// re-issues them (a fresh runtime: nothing until the host uses a handle).
+#[test]
+fn a_restore_calls_no_port_and_arms_no_timer() {
+    let (p, counted) = counted_platform();
+    p.h.fakes.http.respond(format!("{API}/tick"), ok(&1_u32));
+    p.h.serve_page(1, vec![todo(1, "milk")]);
+    p.h.serve_page(2, vec![todo(2, "eggs")]);
+    // A query that polls, one whose observer set its own interval, and one released after the
+    // snapshot (dormant after the restore).
+    let tick = p.construct::<TickQuery>(&());
+    p.observe(tick);
+    let todos = p.construct::<TodosQuery>(&1_u32);
+    p.observe(todos);
+    let five_seconds = Some(Duration::from_secs(5)).encode_to_vec();
+    assert_eq!(
+        p.method(todos, SET_POLL_INTERVAL_METHOD_ID, &five_seconds)
+            .status,
+        ReplyStatus::Ok
+    );
+    let released = p.construct::<TodosQuery>(&2_u32);
+    p.observe(released);
+    p.h.settle();
+    p.take();
+    let snapshot = p.snapshot();
+    p.rt().release(released.0);
+    p.h.settle();
+
+    let before = port_use(&p, &counted);
+    assert!(
+        before[2] >= 2,
+        "the runtime holds the two polling timers (at least): {before:?}"
+    );
+    for _ in 0..3 {
+        let reads = counted.reads();
+        let report = p.rt().restore_with_report(&snapshot).unwrap();
+        assert_eq!(counted.reads(), reads, "the same runtime: no clock read");
+        assert_eq!(report.reissued, 3, "{report:?}");
+        assert_eq!(
+            port_use(&p, &counted),
+            before,
+            "the same runtime: no port touched, no timer armed twice"
+        );
+        assert!(p.take().is_empty(), "and nothing delivered");
+    }
+    // Time goes on: each poll still fires once per interval (the one timer armed before the
+    // restores), the dormant one never.
+    p.h.advance_ms(1_100);
+    assert_eq!(p.h.http_calls() as u64, before[3] + 1, "the ticker, once");
+
+    // A fresh runtime: the restore re-issues all three and touches no port.
+    let (fresh, counted) = counted_platform();
+    fresh
+        .h
+        .fakes
+        .http
+        .respond(format!("{API}/tick"), ok(&2_u32));
+    fresh.h.serve_page(1, vec![todo(1, "milk")]);
+    let idle = port_use(&fresh, &counted);
+    let reads = counted.reads();
+    let report = fresh.rt().restore_with_report(&snapshot).unwrap();
+    assert_eq!(counted.reads(), reads, "a fresh runtime: no clock read");
+    assert_eq!((report.reissued, report.refused.len()), (3, 0));
+    assert_eq!(fresh.stat("dormant_handles"), 3);
+    fresh.h.settle();
+    assert_eq!(port_use(&fresh, &counted), idle, "a fresh runtime: nothing");
+    // The counters count: the first use reads the clock and fetches.
+    let reads = counted.reads();
+    fresh.observe(tick);
+    fresh.h.settle();
+    let used = port_use(&fresh, &counted);
+    assert!(
+        counted.reads() > reads && used[3] == idle[3] + 1,
+        "{idle:?} -> {used:?}"
+    );
+}
+
+/// R6 on a query handle's record: every byte of it changed (zeroed, all ones, one bit flipped), the
+/// record cut at every length and one with a byte too many. A fresh runtime always restores the
+/// snapshot; the record is refused (the handle stale, as a refused record's is) or re-issued and then
+/// built by the host's use. Nothing panics anywhere.
+#[test]
+fn every_damage_to_a_query_handles_record_is_refused_or_built_and_nothing_panics() {
+    let old = Platform::new();
+    old.h.serve_page(7, vec![todo(1, "milk")]);
+    let handle = old.construct::<TodosQuery>(&7_u32);
+    old.observe(handle);
+    let five_seconds = Some(Duration::from_secs(5)).encode_to_vec();
+    assert_eq!(
+        old.method(handle, SET_POLL_INTERVAL_METHOD_ID, &five_seconds)
+            .status,
+        ReplyStatus::Ok
+    );
+    old.h.settle();
+    let snapshot = old.snapshot();
+    let record = Snapshot::decode(&mut Reader::new(&snapshot))
+        .unwrap()
+        .stores[0]
+        .recreation()
+        .expect("the handle's record")
+        .to_vec();
+    assert_eq!(record.len(), 2 + 4 + 4 + 9, "format, params, Some(poll_ms)");
+    let mut damaged: Vec<Vec<u8>> = Vec::new();
+    for at in 0..record.len() {
+        for byte in [0x00_u8, 0xff, record[at] ^ 0x01] {
+            if byte != record[at] {
+                let mut bytes = record.clone();
+                bytes[at] = byte;
+                damaged.push(bytes);
+            }
+        }
+        damaged.push(record[..at].to_vec());
+    }
+    damaged.push([record.as_slice(), &[0]].concat());
+
+    let (mut refused, mut built) = (0, 0);
+    for bytes in damaged {
+        let forged = edit_snapshot(&snapshot, |s| s.stores[0].signals[0].1 = bytes.clone());
+        let new = Platform::new();
+        new.h.serve_page(7, vec![todo(1, "milk")]);
+        let report = new
+            .rt()
+            .restore_with_report(&forged)
+            .unwrap_or_else(|e| panic!("{bytes:?}: a damaged record never fails the restore: {e}"));
+        assert_eq!(report.reissued + report.refused.len(), 1, "{bytes:?}");
+        new.observe(handle);
+        let refetch = new.method(handle, REFETCH_METHOD_ID, &[]).status;
+        new.h.advance_ms(12_000);
+        if report.refused.is_empty() {
+            built += 1;
+            assert_eq!(refetch, ReplyStatus::Ok, "{bytes:?}");
+        } else {
+            refused += 1;
+            assert_eq!(refetch, ReplyStatus::BadRequest, "{bytes:?}");
+        }
+        assert_eq!(new.stat("panics"), 0, "{bytes:?}");
+        assert_eq!(
+            new.stat("revive_failed"),
+            0,
+            "{bytes:?}: what passed the check builds"
+        );
+    }
+    assert!(refused > 0 && built > 0, "{refused} refused, {built} built");
+}
