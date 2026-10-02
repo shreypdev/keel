@@ -610,6 +610,8 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 | `dispatch/call_sync/echo_record1k` | 139.5 ns | 139.2 ns .. 139.8 ns |
 | `dispatch/call_async/ready_add` | 220.6 ns | 217.6 ns .. 224.8 ns |
 
+An instantiation of a generic function (ADR-058, `add_one_for<Record5>`: the body of `add_one`, listed for one type) is a function like any other: `dispatch/call_sync/generic_fn` measured 0.89x to 1.04x of `dispatch/call_sync/function` over six gate runs on the reference host (36 to 48 ns each, the machine shared), and `generic_fn_vs_function` gates the ratio at 1.2.
+
 ### Signals and stores
 
 `cell` is the signals crate alone (100 `Signal<u32>` attached to a `StoreCell`, one transaction, a counting sink). `runtime` is the same 100 writes as one method call on a macro-generated store through the runtime. `decode` is a host validating and walking that change-set (borrowed). Keyed rows are one call through the runtime on an observed `Signal<Vec<Item>>` with `#[undra(key = "id")]`, written with the recorded list operations (`insert`, `update_at`, `move_item`); `raw_update_diff` is the same one-row edit through the raw `update`, which takes the diff path. Insert runs against a list that is restored outside the timed region. The wide interval on `raw_update_diff` is machine load (the gate harness measured 528.7 µs p50).
