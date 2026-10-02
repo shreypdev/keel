@@ -26,7 +26,7 @@ export interface LoadOptions {
   readonly url?: string;
   readonly adapters?: Readonly<Record<string, PortImpl>>;
   readonly expectedSchemaHash: bigint;
-  /** Addition (ADR-046): the core's namespace, for the panic report of a wasm trap. */
+  /** ADR-044 amendment A: the core's namespace, which the generated entry fills in (`UndraIds.namespace`). */
   readonly namespace?: string;
 }
 
@@ -35,6 +35,8 @@ export interface AttachOptions {
   readonly adapters?: Readonly<Record<string, PortImpl>>;
   readonly expectedSchemaHash: bigint;
   readonly shared?: boolean;
+  /** ADR-044 amendment A: the core's namespace, which the generated entry fills in (`UndraIds.namespace`). */
+  readonly namespace?: string;
 }
 
 /** Addition (ADR-044): a transport a host provides (React Native's `NativeTransport`, a test double). */

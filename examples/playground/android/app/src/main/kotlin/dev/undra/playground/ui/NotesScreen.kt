@@ -44,7 +44,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Owns the `Notes` store: a list the core keeps in SQLite through the opt-in `Db` port (ADR-048). On Android that is the
- * platform's own SQLite (`AndroidDbAdapter`, file `undra-playground.sqlite` under the app's database directory), so the notes
+ * platform's own SQLite (`AndroidDbAdapter`, file `undra-playground_core-playground.sqlite` under the app's database directory: `undra-<namespace>-<name>.sqlite`), so the notes
  * survive the process. The store's list changes only after the database did.
  */
 class NotesViewModel : ViewModel() {
@@ -106,7 +106,7 @@ class NotesViewModel : ViewModel() {
     }
 
     private companion object {
-        /** The database's name: the file is `undra-playground.sqlite`. */
+        /** The database's name: the file is `undra-playground_core-playground.sqlite` (the core's namespace, then this). */
         const val DATABASE = "playground"
     }
 }

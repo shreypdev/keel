@@ -20,7 +20,9 @@
 #      run time by its namespace, nothing linked;
 #   3. the JSI layer compiled against React Native's headers, skipped when the playground app's
 #      dependencies are not installed; UNDRA_RN_REQUIRE_JSI=1 (CI) makes that a failure instead;
-#   4. the Apple platform of the default ports compiled against the iOS SDK (macOS with Xcode).
+#   4. the Apple platform of the default ports compiled against the iOS SDK (macOS with Xcode);
+#   5. the same platform built for this Mac and asked where each core's stores are: per namespace
+#      (ADR-044 amendment A; cpp/test/apple_platform_test.mm, macOS only).
 #
 # The Db port's checks (step 0b and the Db part of steps 1 and 2) run against the system SQLite
 # (`sqlite3.h` and `-lsqlite3`: macOS has both; Linux needs `libsqlite3-dev`) and are skipped without it;
@@ -187,4 +189,16 @@ if [ "$(uname -s)" = Darwin ] && xcrun --sdk iphonesimulator --show-sdk-path >/d
   echo "ok - UndraDbSqlite.cpp and UndraDb.cpp compile against the iOS SDK"
 else
   echo "# skipped the Apple platform compile check: no iOS SDK on this machine"
+fi
+
+# 5. The Apple platform on this Mac: where the default stores of two cores are (it touches no file).
+if [ "$(uname -s)" = Darwin ]; then
+  echo "# the Apple platform's store locations (per core namespace)"
+  "${CXX:-clang++}" -std=c++20 -fobjc-arc -x objective-c++ -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -fno-sanitize-recover=undefined -I "$pkg/cpp" "$here/apple_platform_test.mm" "$pkg/ios/UndraPlatformApple.mm" \
+    -x c++ "$pkg/cpp/UndraDbSqlite.cpp" "$pkg/cpp/UndraDb.cpp" "$pkg/cpp/UndraStores.cpp" \
+    -framework Foundation -framework Security -framework Network -lsqlite3 -o "$out/apple_platform_test"
+  "$out/apple_platform_test"
+else
+  echo "# skipped the Apple platform's store locations: macOS only"
 fi

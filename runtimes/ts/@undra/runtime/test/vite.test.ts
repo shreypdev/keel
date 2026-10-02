@@ -212,6 +212,20 @@ describe("the project", () => {
   });
 });
 
+describe("the build target", () => {
+  it("is es2022 when the app sets none (Vite 6's default, es2020, rewrites the runtime's class fields into helpers)", () => {
+    const plugin = undra();
+    expect(plugin.config({})).toEqual({ build: { target: "es2022" } });
+    expect(plugin.config({ build: {} })).toEqual({ build: { target: "es2022" } });
+  });
+
+  it("leaves a target the app chose alone", () => {
+    const plugin = undra();
+    expect(plugin.config({ build: { target: "es2020" } })).toBeUndefined();
+    expect(plugin.config({ build: { target: ["chrome100", "safari16"] } })).toBeUndefined();
+  });
+});
+
 describe("the plugin", () => {
   it("is a plugin that runs first and has the hooks Vite calls", () => {
     const plugin = undra();

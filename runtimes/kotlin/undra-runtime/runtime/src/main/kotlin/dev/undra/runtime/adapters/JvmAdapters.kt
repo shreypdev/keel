@@ -1,5 +1,6 @@
 package dev.undra.runtime.adapters
 
+import dev.undra.runtime.CoreNamespace
 import dev.undra.runtime.PortImpl
 import dev.undra.runtime.Platform
 import java.nio.file.Path
@@ -12,21 +13,26 @@ import java.nio.file.Paths
  * | Port | Implementation |
  * |---|---|
  * | `Http` | [HttpAdapter] over `java.net.http.HttpClient` |
- * | `Kv`, `SecureStore` | [FileKv] over files in `<dataDir>/kv` and `<dataDir>/secure`; failures are [StorageError]s |
- * | `Fs` | [FsAdapter] over `<dataDir>/fs`; failures are [FsError]s |
+ * | `Kv`, `SecureStore` | [FileKv] over files in `<dataDir>/<namespace>/kv` and `<dataDir>/<namespace>/secure`; failures are [StorageError]s |
+ * | `Fs` | [FsAdapter] over `<dataDir>/<namespace>/fs`; failures are [FsError]s |
  * | `Clock`, `Rng`, `Log` | [ClockAdapter], [RngAdapter] (`SecureRandom`), [LogAdapter] (`java.util.logging`) |
  * | `Timer` | [TimerAdapter] over a scheduled executor |
  * | `Connectivity`, `Lifecycle` | none: they are event ports; see [ConnectivityEvents] and [LifecycleEvents] |
  * | `Diagnostics` | none here: the loaded core registers its own [DiagnosticsAdapter] (whatever `defaultAdapters` says), which calls `LoadOptions.onPanic` |
  * | `WebSocket` (opt-in, ADR-047) | [WebSocketPortAdapter] over [ClientWebSocketAdapter], the runtime's own RFC 6455 client |
  * | `Sse` (opt-in, ADR-047) | [SsePortAdapter] over [JdkHttpSseAdapter] (`java.net.http`) |
- * | `Db` (opt-in, ADR-048) | [DbPortAdapter] over [JdbcDbAdapter] in `<dataDir>/db` (needs `org.xerial:sqlite-jdbc` on the class path) |
+ * | `Db` (opt-in, ADR-048) | [DbPortAdapter] over [JdbcDbAdapter] in `<dataDir>/<namespace>/db` (needs `org.xerial:sqlite-jdbc` on the class path) |
  *
  * The three opt-in ports are registered whether or not the core enables them (cargo features `websocket`, `sse`, `db`); a
  * core that does not declare a port never calls it.
  *
  * `UndraCore.load` installs these itself unless `LoadOptions.defaultAdapters` is `false`; use this object to
  * pick another data directory or to mix them with your own.
+ *
+ * **The default data directory is per core namespace** (ADR-044, amendment A): `UndraCore.load` keeps a core's files in
+ * [defaultDataDir]`(namespace)`, `<dataDir>/<namespace>` (`~/.undra/data/playground_a/kv`, ...), so two cores of one app
+ * never see each other's keys, secrets, files or databases. [standard] with a directory of your own uses exactly that
+ * directory for every core it serves, as an adapter you pass yourself does.
  *
  * On Android `UndraCore.load` installs only [portable] (SPEC section 11): the other six come from the
  * `android-adapters` module (`AndroidPlatformDefaults.install(core, context)`, right after the load). Until then a
@@ -47,7 +53,15 @@ public object JvmAdapters {
     }
 
     /**
-     * Every adapter of the table above, with file-backed ones under [dataDir].
+     * The data directory of the core [namespace]: `<dataDir>/<namespace>`, [defaultDataDir] being `<dataDir>`. What
+     * `UndraCore.load` keeps that core's `kv`, `secure`, `fs` and `db` under, so that two cores never share them.
+     */
+    public fun defaultDataDir(namespace: String): Path = defaultDataDir().resolve(CoreNamespace.requireForStores(namespace))
+
+    /**
+     * Every adapter of the table above, with file-backed ones under [dataDir] (`<dataDir>/kv`, `<dataDir>/secure`,
+     * `<dataDir>/fs`, `<dataDir>/db`). Pass `defaultDataDir(core.namespace)` for the directory `UndraCore.load` uses for a
+     * core; the default, the directory of the process, is shared by everything that uses it.
      *
      * @param timerFired what the timer adapter calls when a timer is due; pass `core::timerFired`.
      */
@@ -75,7 +89,7 @@ public object JvmAdapters {
             StandardPorts.Timer.PORT_ID to TimerAdapter(timerFired).portImpl(),
         )
 
-    /** What `UndraCore.load` installs by default: [standard] on a JVM, [portable] on Android. */
-    internal fun defaults(timerFired: (UInt) -> Unit): Map<UInt, PortImpl> =
-        if (Platform.isAndroid) portable(timerFired) else standard(timerFired = timerFired)
+    /** What `UndraCore.load` installs by default for the core [namespace]: [standard] under its directory on a JVM, [portable] on Android. */
+    internal fun defaults(namespace: String, timerFired: (UInt) -> Unit): Map<UInt, PortImpl> =
+        if (Platform.isAndroid) portable(timerFired) else standard(defaultDataDir(namespace), timerFired)
 }

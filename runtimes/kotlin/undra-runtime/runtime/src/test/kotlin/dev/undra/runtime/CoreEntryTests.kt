@@ -1,5 +1,6 @@
 package dev.undra.runtime
 
+import dev.undra.runtime.adapters.JvmAdapters
 import dev.undra.runtime.support.FakeNative
 import dev.undra.runtime.support.HASH
 import dev.undra.runtime.support.NO_BYTES
@@ -58,6 +59,7 @@ class CoreEntryTests : Suite() {
             val sharedBefore = UndraCore.current
             val core = entry.load(bare())
             try {
+                assertEq("entry_lifecycle", core.namespace, "the entry's namespace is the core's: the default stores are kept under it (ADR-044 amendment A)")
                 assertEq(1, made.get())
                 assertEq(1, native.inits.get())
                 assertTrue(entry.core === core, "the loaded core is the entry's core")
@@ -80,6 +82,49 @@ class CoreEntryTests : Suite() {
                 again.close()
             }
             assertTrue(entry.core === placeholder)
+        }
+
+        case("a core's namespace is the entry's, else its natives', else the unnamed one") {
+            val viaEntry = CoreEntry("entry_ns_a", HASH) { fake("entry_ns_a") }.load(bare())
+            val direct = UndraCore.load(bare().let { LoadOptions(defaultAdapters = false, expectedSchemaHash = HASH) }, fake("entry_ns_b"))
+            try {
+                assertEq("entry_ns_a", viaEntry.namespace)
+                assertEq("entry_ns_b", direct.namespace, "a direct load takes the natives' namespace")
+            } finally {
+                viaEntry.close()
+                direct.close()
+            }
+            assertEq(UndraCore.UNNAMED_NAMESPACE, UnloadedCore(null).namespace)
+            assertEq("_", UndraCore.UNNAMED_NAMESPACE, "no real namespace is `_`: it starts with a lowercase letter")
+            assertEq("entry_ns_c", UnloadedCore("entry_ns_c").namespace)
+            // The options the entry fills in keep everything else, `onDevNotice` included.
+            val notice: (String) -> Unit = { }
+            val filled = LoadOptions(defaultAdapters = false, onDevNotice = notice).withSchemaHashDefault(HASH).withNamespaceDefault("x")
+            assertTrue(filled.onDevNotice === notice, "the copy keeps onDevNotice")
+            assertEq("x", filled.namespace)
+            assertEq("y", LoadOptions(namespace = "y").withNamespaceDefault("x").namespace, "a namespace in the options wins")
+        }
+
+        case("a namespace that is not a core namespace is refused typed before the core starts or any store is named (review of ns-storage)") {
+            val bad = listOf(
+                "..", ".", "a/b", "a\\b", "../escape", "", "a".repeat(33), "Upper", "1abc", "_", "caf\u00e9", "a\u0000b", "with space", "with-dash", "a.b",
+            )
+            for (namespace in bad) {
+                val entry = CoreEntry("entry_bad_ns", HASH) { fake("entry_bad_ns") }
+                val viaOptions = assertThrows<UndraModeException> { entry.load(LoadOptions(defaultAdapters = false, namespace = namespace)) }
+                assertTrue(viaOptions.message!!.contains("namespace"), "the message names the namespace: ${viaOptions.message}")
+                assertTrue(viaOptions.message!!.length < 400, "a long one is shown shortened")
+                assertTrue(UndraCore.current == null || UndraCore.current?.namespace != namespace, "nothing was started")
+                // A core whose natives name it so is refused as well (a hand-made one, or an older tool's).
+                if (namespace != "_" && namespace.isNotEmpty() && !namespace.contains('\u0000')) {
+                    assertThrows<UndraModeException> { UndraCore.load(LoadOptions(defaultAdapters = false, expectedSchemaHash = HASH), fake(namespace)) }
+                }
+                // The data directory of a namespace never leaves the data directory (`_`, the fallback, is the one name that is no namespace).
+                if (namespace != "_") assertThrows<IllegalArgumentException> { JvmAdapters.defaultDataDir(namespace) }
+            }
+            // The fallback is the one name a store may carry without being a namespace.
+            JvmAdapters.defaultDataDir(UndraCore.UNNAMED_NAMESPACE)
+            for (good in listOf("a", "playground_core", "a".repeat(32), "a1_b2")) assertEq(null, CoreNamespace.problem(good), good)
         }
 
         case("an entry refuses a second load while its core is loaded; another entry for the namespace is refused by the in-process claim") {

@@ -96,18 +96,18 @@ export function trackReads<R>(fn: () => R): { readonly value: R; readonly signal
  * from change-sets with `_set`; application code only reads and subscribes.
  */
 export class Signal<T> {
-  #value: T;
+  private _value: T;
   /**
-   * Typed `Subscriber<never>`, not `Subscriber<T>`: a `#private` field takes
+   * Typed `Subscriber<never>`, not `Subscriber<T>`: a private field takes
    * part in assignability, and a `Signal<number>` must stay assignable to
    * `Signal<unknown>` (generated stores list their signals that way).
    */
-  #subscribers: Set<{ readonly fn: Subscriber<never> }> | null = null;
-  #queued = false;
+  private _subscribers: Set<{ readonly fn: Subscriber<never> }> | null = null;
+  private _queued = false;
 
   /** @param initial The placeholder value shown until the first change-set arrives. */
   constructor(initial: T) {
-    this.#value = initial;
+    this._value = initial;
   }
 
   /**
@@ -116,12 +116,12 @@ export class Signal<T> {
    */
   get(): T {
     collector?.add(this as Signal<unknown>);
-    return this.#value;
+    return this._value;
   }
 
   /** The current value, without dependency tracking. The reference is stable until the signal changes. */
   peek(): T {
-    return this.#value;
+    return this._value;
   }
 
   /**
@@ -131,15 +131,15 @@ export class Signal<T> {
    */
   subscribe(fn: Subscriber<T>): () => void {
     const entry: { readonly fn: Subscriber<never> } = { fn };
-    (this.#subscribers ??= new Set()).add(entry);
+    (this._subscribers ??= new Set()).add(entry);
     return () => {
-      this.#subscribers?.delete(entry);
+      this._subscribers?.delete(entry);
     };
   }
 
   /** Number of active subscriptions. */
   get subscriberCount(): number {
-    return this.#subscribers?.size ?? 0;
+    return this._subscribers?.size ?? 0;
   }
 
   /**
@@ -149,12 +149,12 @@ export class Signal<T> {
    * immediately when there is none.
    */
   _set(value: T): void {
-    if (Object.is(value, this.#value)) return;
-    this.#value = value;
-    if (this.#subscribers === null || this.#subscribers.size === 0) return;
+    if (Object.is(value, this._value)) return;
+    this._value = value;
+    if (this._subscribers === null || this._subscribers.size === 0) return;
     if (batchDepth > 0) {
-      if (!this.#queued) {
-        this.#queued = true;
+      if (!this._queued) {
+        this._queued = true;
         dirty.push(this);
       }
     } else {
@@ -164,10 +164,10 @@ export class Signal<T> {
 
   /** Internal: announces the current value to the subscribers present now. */
   _notify(): void {
-    this.#queued = false;
-    const subscribers = this.#subscribers;
+    this._queued = false;
+    const subscribers = this._subscribers;
     if (subscribers === null || subscribers.size === 0) return;
-    const value = this.#value;
+    const value = this._value;
     // A copy, so that a subscriber may unsubscribe (or subscribe) while we iterate.
     for (const entry of [...subscribers]) {
       if (!subscribers.has(entry)) continue;

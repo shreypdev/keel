@@ -116,8 +116,6 @@ export async function startUndra(): Promise<Playground> {
       ports,
       onError,
       onPanic: (report) => onPanic(report, panics),
-      // The core's name for the panic report (a wasm module does not carry it).
-      namespace: UndraPlaygroundCore.namespace,
       // A panic traps a wasm core: restart it from its last snapshot instead of leaving the page dead (ADR-049).
       recovery: crashRecovery(RECOVERY),
       onCoreRestarted: (event) => {

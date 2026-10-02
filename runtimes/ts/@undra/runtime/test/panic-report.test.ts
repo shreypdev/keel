@@ -3,7 +3,7 @@ import type { UndraPanicReport } from "../src/adapters/types.js";
 import type { UndraCallError } from "../src/call-error.js";
 import { UndraCore } from "../src/core.js";
 import { UndraTransportError } from "../src/errors.js";
-import { type PanicContext, parsePanicRecord, trapFrames, trapReport, wasmImageId } from "../src/panic-report.js";
+import { type PanicContext, panicSupport, parsePanicRecord, trapFrames, trapReport, wasmImageId } from "../src/panic-report.js";
 import { type UndraCoreRestarted, crashRecovery } from "../src/recovery.js";
 import type { WasmSource } from "../src/transport/wasm-main.js";
 import { CallTarget } from "../src/wire/index.js";
@@ -131,6 +131,53 @@ describe("the report of a trap", () => {
     expect(report.operation).toBe("");
     expect(report.thread).toBe("worker");
     expect(report.frames).toEqual([{ address: 0x10n, symbol: "wasm-function[5]", file: null, line: null }]);
+  });
+});
+
+describe("the reporter of a core (what UndraCore starts when the app wants reports)", () => {
+  const options = { expectedSchemaHash: 0xabcdn, namespace: "playground_core", coreVersion: "1.2.3" };
+  const RECORD = "kaboom\n    at core/src/lab.rs:42:9\n    in explode";
+
+  it("builds the report from the options (the namespace and version the app gave, the schema hash, the thread of the mode) and hands it to onPanic once", () => {
+    const seen: UndraPanicReport[] = [];
+    const reporter = panicSupport.start({ mode: "wasm-worker", report: () => {} }, { ...options, onPanic: (r) => seen.push(r) });
+    const report = reporter.trapped(RECORD, trapError(V8_STACK));
+    expect(seen).toEqual([report]);
+    expect(report).toMatchObject({ message: "kaboom", thread: "worker", namespace: "playground_core", coreVersion: "1.2.3", schemaHash: 0xabcdn, imageId: "" });
+  });
+
+  it("still builds the report with no onPanic (crashRecovery's UndraCoreRestarted carries it), and says \"\" for what the app did not give", () => {
+    const reporter = panicSupport.start({ mode: "wasm-main", report: () => {} }, { expectedSchemaHash: 1n });
+    expect(reporter.trapped(null, trapError(V8_STACK))).toMatchObject({ thread: "main", namespace: "", coreVersion: "", imageId: "" });
+  });
+
+  it("passes a handler's failure to the host and carries on: the report is returned and the next one is delivered", () => {
+    const failures: Array<[string, unknown]> = [];
+    let calls = 0;
+    const reporter = panicSupport.start(
+      { mode: "wasm-main", report: (error, operation) => failures.push([operation, error]) },
+      {
+        ...options,
+        onPanic: () => {
+          if (++calls === 1) throw new Error("the reporter is down");
+        },
+      },
+    );
+    expect(reporter.trapped(RECORD, trapError(V8_STACK)).message).toBe("kaboom");
+    expect(reporter.trapped(RECORD, trapError(V8_STACK)).message).toBe("kaboom");
+    expect(calls).toBe(2);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.[0]).toBe("onPanic");
+    expect(String(failures[0]?.[1])).toContain("the reporter is down");
+  });
+
+  it("hashes the module in the background only when the app set onPanic: the image id of a later report", async () => {
+    const bytes = new TextEncoder().encode("abc");
+    const quiet = panicSupport.start({ mode: "wasm-main", report: () => {} }, { ...options, wasm: bytes });
+    const loud = panicSupport.start({ mode: "wasm-main", report: () => {} }, { ...options, wasm: bytes, onPanic: () => {} });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(quiet.trapped(null, trapError(V8_STACK)).imageId).toBe("");
+    expect(loud.trapped(null, trapError(V8_STACK)).imageId).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   });
 });
 

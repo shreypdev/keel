@@ -23,15 +23,15 @@ class ProcessDeathService : Service() {
             when (mode) {
                 MODE_WRITE -> {
                     runBlocking {
-                        AndroidSecureStoreAdapter(applicationContext).set(SECRET_KEY, SECRET_VALUE)
-                        AndroidKvAdapter(applicationContext).set(KV_KEY, KV_VALUE)
-                        AndroidFsAdapter(applicationContext).write(FS_PATH, FS_VALUE)
+                        AndroidSecureStoreAdapter(applicationContext, TEST_NAMESPACE).set(SECRET_KEY, SECRET_VALUE)
+                        AndroidKvAdapter(applicationContext, TEST_NAMESPACE).set(KV_KEY, KV_VALUE)
+                        AndroidFsAdapter(applicationContext, TEST_NAMESPACE).write(FS_PATH, FS_VALUE)
                     }
                     File(cacheDir, DONE_FILE).writeText("written")
                     Process.killProcess(Process.myPid())
                 }
                 MODE_LOOP -> {
-                    val kv = AndroidKvAdapter(applicationContext)
+                    val kv = AndroidKvAdapter(applicationContext, TEST_NAMESPACE)
                     var n = 0
                     while (true) {
                         runBlocking { kv.set(LOOP_KEY, loopValue(n)) }

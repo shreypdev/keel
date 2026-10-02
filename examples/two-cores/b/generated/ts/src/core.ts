@@ -40,23 +40,22 @@ export const UndraPlaygroundB = {
   schemaHash: UndraIds.schemaHash,
 
   /**
-   * Loads the core (`UndraCore.load` with this package's schema hash and namespace, which a panic report names)
-   * and makes it `core`. Rejects with
-   * `UndraSchemaMismatchError` when the core was built from another schema, and with `UndraError` while
-   * this core is already loaded.
+   * Loads the core (`UndraCore.load` with this package's schema hash and namespace) and makes it `core`. Rejects
+   * with `UndraSchemaMismatchError` when the core was built from another schema, and with `UndraError` while
+   * this core is already loaded. The default stores are kept under the namespace (`undra.<namespace>.kv`, ...).
    */
-  async load(options: Omit<LoadOptions, "expectedSchemaHash">): Promise<UndraCore> {
+  async load(options: Omit<LoadOptions, "expectedSchemaHash" | "namespace">): Promise<UndraCore> {
     claim();
-    return started(UndraCore.load({ namespace: UndraIds.namespace, ...options, expectedSchemaHash: UndraIds.schemaHash }));
+    return started(UndraCore.load({ ...options, expectedSchemaHash: UndraIds.schemaHash, namespace: UndraIds.namespace }));
   },
 
   /**
    * Attaches the core over a transport you provide (React Native's `NativeTransport`, a test double),
-   * with this package's schema hash, and makes it `core`.
+   * with this package's schema hash and namespace, and makes it `core`.
    */
-  async attach(transport: Transport, options: Omit<AttachOptions, "expectedSchemaHash"> = {}): Promise<UndraCore> {
+  async attach(transport: Transport, options: Omit<AttachOptions, "expectedSchemaHash" | "namespace"> = {}): Promise<UndraCore> {
     claim();
-    return started(UndraCore.attach(transport, { ...options, expectedSchemaHash: UndraIds.schemaHash }));
+    return started(UndraCore.attach(transport, { ...options, expectedSchemaHash: UndraIds.schemaHash, namespace: UndraIds.namespace }));
   },
 
   /**

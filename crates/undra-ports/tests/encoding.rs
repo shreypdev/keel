@@ -493,6 +493,8 @@ const KOTLIN_RECORDS: &str =
     "kotlin/undra-runtime/runtime/src/main/kotlin/dev/undra/runtime/adapters/StandardRecords.kt";
 const SWIFT_RECORDS: &str = "swift/UndraRuntime/Sources/UndraRuntime/Core/StandardRecords.swift";
 const TS_TYPES: &str = "ts/@undra/runtime/src/adapters/types.ts";
+/// `NetKind` and `AppState` are defined with the host events (ADR-052's amendment of 2026-10-02): types.ts re-exports them.
+const TS_EVENTS: &str = "ts/@undra/runtime/src/adapters/events.ts";
 const TS_CODECS: &str = "ts/@undra/runtime/src/adapters/codecs.ts";
 
 /// `(variant name, index)` of a type as `undra-meta` registered it.
@@ -770,7 +772,11 @@ fn swift_numbering_matches() {
 
 #[test]
 fn typescript_numbering_matches() {
-    let (Some(types), Some(codecs)) = (runtime_source(TS_TYPES), runtime_source(TS_CODECS)) else {
+    let (Some(types), Some(events), Some(codecs)) = (
+        runtime_source(TS_TYPES),
+        runtime_source(TS_EVENTS),
+        runtime_source(TS_CODECS),
+    ) else {
         eprintln!("runtimes/ not found; skipping the TypeScript numbering check");
         return;
     };
@@ -780,10 +786,15 @@ fn typescript_numbering_matches() {
         "HttpMethod",
         &[],
     );
-    assert_same("TS NET_KINDS", ts_list(&types, "NET_KINDS"), "NetKind", &[]);
+    assert_same(
+        "TS NET_KINDS",
+        ts_list(&events, "NET_KINDS"),
+        "NetKind",
+        &[],
+    );
     assert_same(
         "TS APP_STATES",
-        ts_list(&types, "APP_STATES"),
+        ts_list(&events, "APP_STATES"),
         "AppState",
         &[],
     );

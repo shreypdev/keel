@@ -33,6 +33,11 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
     /// The core's entry points, read from its table once.
     private let table: CoreTable
 
+    /// The namespace of the core this transport reaches (its table's).
+    var namespace: String {
+        return table.namespace
+    }
+
     /// A transport over the core whose checked table is `table`.
     init(table: CoreTable) {
         self.table = table

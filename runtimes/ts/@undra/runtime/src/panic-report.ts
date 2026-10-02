@@ -17,7 +17,7 @@ import type { WasmSource } from "./transport/wasm-main.js";
 export interface PanicContext {
   /** Where the core ran: `"main"` (the page's thread) or `"worker"`. */
   readonly thread: string;
-  /** `LoadOptions.namespace`, or `""`. */
+  /** `AttachOptions.namespace`, or `""`. */
   readonly namespace: string;
   /** `LoadOptions.coreVersion`, or `""`. */
   readonly coreVersion: string;
@@ -118,13 +118,74 @@ export async function wasmImageId(wasm: WasmSource): Promise<string> {
   return Array.from(new Uint8Array(await subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** What the report of a trap is made of, besides the trap itself: the options the core was loaded with that it reads. */
+export interface PanicOptions {
+  /** The schema hash of the bindings (the core's, once it has said hello: a different one is refused). */
+  readonly expectedSchemaHash: bigint;
+  /** `AttachOptions.namespace`: the report's `namespace`, `""` without one. */
+  readonly namespace?: string | undefined;
+  /** `AttachOptions.onPanic`: who is handed the report. */
+  readonly onPanic?: ((report: UndraPanicReport) => void) | undefined;
+  /** `LoadOptions.wasm`: hashed for the report's `imageId` when `onPanic` is set. */
+  readonly wasm?: WasmSource | undefined;
+  /** `LoadOptions.coreVersion`: the report's `coreVersion`, `""` without one. */
+  readonly coreVersion?: string | undefined;
+}
+
+/** What {@link PanicSupport.start} needs of the core it reports for: `UndraCore` has both. */
+export interface PanicHost {
+  /** The transport's mode: `"wasm-worker"` or `"wasm-main"`, the report's `thread`. */
+  readonly mode: string;
+  /** Reports a failure of `onPanic` (it threw) to `onError` and the log, and carries on: `UndraCore.report`. */
+  report(error: unknown, operation: string): void;
+}
+
+/** What reports the traps of one core. */
+export interface PanicReporter {
+  /**
+   * Builds the report of `trap` (see {@link trapReport}; `record` is the core's last FATAL `undra::panic` message, if any) and hands
+   * it to `onPanic` once, if the app set one. A handler that throws goes to {@link PanicHost.report} and changes nothing. Returns the
+   * report, which `crashRecovery`'s `UndraCoreRestarted` carries.
+   */
+  trapped(record: string | null, trap: Error): UndraPanicReport;
+}
+
+/** Starts reporting the traps of `host` with `options`: hashes the module for `imageId` in the background when the app set `onPanic`. */
+function start(host: PanicHost, options: PanicOptions): PanicReporter {
+  let imageId = "";
+  // Only for an app that asked for reports: the SHA-256 is the `imageId` of what it receives.
+  if (options.onPanic !== undefined && options.wasm !== undefined) {
+    wasmImageId(options.wasm).then(
+      (id) => {
+        imageId = id;
+      },
+      () => {},
+    );
+  }
+  return {
+    trapped(record, trap) {
+      const report = trapReport(record, trap, {
+        thread: host.mode === "wasm-worker" ? "worker" : "main",
+        namespace: options.namespace ?? "",
+        coreVersion: options.coreVersion ?? "",
+        schemaHash: options.expectedSchemaHash,
+        imageId,
+      });
+      try {
+        options.onPanic?.(report);
+      } catch (thrown) {
+        host.report(thrown, "onPanic");
+      }
+      return report;
+    },
+  };
+}
+
 /** What `UndraCore` takes from this module, as one value: how `crashRecovery` carries it to the core without a dynamic import. */
 export interface PanicSupport {
-  /** {@link trapReport}. */
-  readonly trapReport: typeof trapReport;
-  /** {@link wasmImageId}. */
-  readonly wasmImageId: typeof wasmImageId;
+  /** Starts reporting the traps of a core. */
+  readonly start: (host: PanicHost, options: PanicOptions) => PanicReporter;
 }
 
 /** {@link PanicSupport} of this module. */
-export const panicSupport: PanicSupport = { trapReport, wasmImageId };
+export const panicSupport: PanicSupport = { start };

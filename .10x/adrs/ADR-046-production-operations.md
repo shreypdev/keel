@@ -323,10 +323,9 @@ records, the fakes, scenarios, SPEC sections, docs. The decisions below are the 
     the hello-world web core +2,146 bytes gzipped from the ADR's *schema and dispatch*, not the symbols
     (117,081 to 119,227, measured on the merged tree: the standard surface is in every schema, `run_background` is dispatched by every core, and the
     wasm FATAL record carries location and operation; `--no-symbols` reproduces the old build's size exactly).
-    The hello-world JavaScript runtime grew by 1,401 bytes gzipped (25,984 to 27,385 on the merged tree: 704 up front, 855 for the lazily
-    imported report builder, which the committed size script folds into its one chunk), over the 26,000 gate: the budget
-    `web/hello-runtime-js` is raised to 27,500 in `bench/budgets.toml` and recorded at 27,385 (ADR-052 restates it;
-    ts-size-e4's script, which leaves dynamically imported modules out, would measure about 25,000).
+    The hello-world JavaScript runtime, as the up-front chunk `main`'s ts-size-e4 gates, grew by 420 bytes gzipped (21,336 to
+    21,756), over the 21,500 gate: `web/hello-runtime-js` is raised to 22,000 in `bench/budgets.toml` and recorded at 21,756
+    (ADR-052's amendment of 2026-10-01 has the ablation); the report builder (853 bytes) and the `Diagnostics` port are lazy.
 15. **The Android release build ignored ADR-052's home remap** (17 `/Users/<name>` strings in the baseline `.so`); fixed
     (`cargo ndk` gets the remap through `--config build.rustflags`).
 16. **`.lldbinit`**: Rust 1.98's sysroot has `lldb_lookup.py` and no `lldb_commands`, so the generated file is one `script` line
@@ -334,6 +333,14 @@ records, the fakes, scenarios, SPEC sections, docs. The decisions below are the 
     (a launch hung); both the host and the iOS-simulator-process variants exist.
 17. **Release workflows**: the generated CI uploads `build/symbols/` per namespace and platform on a push (the repository's own
     `release.yml` ships no core artefacts and is unchanged).
+18. **The TypeScript runtime follows ts-size-e4's structure** (`private _field`, the lazy default ports, the events in `events.ts`
+    and `browser-events.ts`): the `Diagnostics` port is registered in `_start` from a dynamic import of the `ports` chunk for
+    every non-wasm mode, so a page that loads a native core over `remote` now fetches that chunk (about 2.3 KB gzipped) at
+    load; `LoadOptions.namespace` is main's `AttachOptions.namespace` (a wasm report's `namespace` is `""` when none is
+    given); `startEventSources` takes an optional `onBackground` callback for the page's background window.
+19. **S29 on React Native is a SKIP, with the reason**: the RN column runs a wasm stand-in over `NativeTransport`, which traps
+    instead of reporting through `Diagnostics`, as S17 already is there; the native path is `diagnostics.test.ts`, the C++
+    host test and RN04 on a device. S30 passes through `NativeTransport`.
 
 Dated 2026-10-01 for ADR-049's "the panic report precedes a restart" and "background runs retry an unreadable queue": both
 hold (`onPanic` before the restart sequence; the replay task reads an unreadable queue again).

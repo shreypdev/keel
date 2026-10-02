@@ -9,7 +9,7 @@ bindings `undra bindgen` generated (`../generated/kotlin`, package `dev.undra.pl
 | Counter | `Counter` | one tap is one transaction: `count`, `changes` and the computed `parity` arrive in one change-set |
 | 10k list | `BigList` | 10,000 keyed rows in a `LazyColumn`; insert, update, move and remove cross as one-operation patches; "Stream updates" sends ten a second |
 | Remote | `RemoteTodosQueryHandle` | a cached server list (`inbox`) with status, fetching, updated-at and error; optimistic add and toggle; an Offline switch that queues your additions and replays them |
-| Notes | `Notes` | notes kept in SQLite through the opt-in `Db` port (ADR-048): the platform's `android.database.sqlite` (`AndroidDbAdapter`, file `undra-playground.sqlite`), migrated on open; add, toggle and remove change the database first, then the keyed list; they survive a restart |
+| Notes | `Notes` | notes kept in SQLite through the opt-in `Db` port (ADR-048): the platform's `android.database.sqlite` (`AndroidDbAdapter`, file `undra-playground_core-playground.sqlite`, per core namespace), migrated on open; add, toggle and remove change the database first, then the keyed list; they survive a restart |
 
 Every screen reads its store with `collectAsState()` on the store's `StateFlow`s. A `ViewModel` owns each
 store, so the state (which lives in the core) survives switching tabs and rotating the device.
@@ -89,7 +89,7 @@ ANDROID_SERIAL=emulator-5554 ./smoke.sh      # SKIP_CORE=1 reuses build/android/
 ```
 
 Builds the core and the app, installs it, launches every tab and screenshots it, then drives the Remote tab's offline story
-with `uiautomator`: fetch (persisted to `files/undra/kv`), Offline switch on, add an item (queued), kill the process, real
+with `uiautomator`: fetch (persisted to `files/undra/playground_core/kv`), Offline switch on, add an item (queued), kill the process, real
 airplane mode on, relaunch (the cached list comes from `Kv` while offline, the core holds the queue because the Connectivity
 adapter says there is no network), airplane mode off (the core replays the queue; the server receives the
 `Idempotency-Key` generated before the kill). Output: `.proof/android-adapters-smoke.log` and `.proof/android-adapters-*.png`.

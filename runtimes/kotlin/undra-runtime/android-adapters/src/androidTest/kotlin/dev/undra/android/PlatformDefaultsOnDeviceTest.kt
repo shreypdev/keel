@@ -141,9 +141,9 @@ class PlatformDefaultsOnDeviceTest {
             platform.fs.write("f", byteArrayOf(2))
             platform.secureStore.set("s", byteArrayOf(3))
         }
-        assertTrue(File(context.filesDir, "undra/kv").isDirectory)
-        assertTrue(File(context.filesDir, "undra/fs/f").isFile)
-        assertTrue(File(context.noBackupFilesDir, "undra/secure").isDirectory)
+        assertTrue(File(context.filesDir, "undra/$TEST_NAMESPACE/kv").isDirectory)
+        assertTrue(File(context.filesDir, "undra/$TEST_NAMESPACE/fs/f").isFile)
+        assertTrue(File(context.noBackupFilesDir, "undra/$TEST_NAMESPACE/secure").isDirectory)
         assertNotNull(platform.connectivity.current())
         assertNotNull(platform.lifecycle.state)
     }

@@ -29,6 +29,7 @@ import {
   type WsMessage,
   type WsOpened,
 } from "./types.js";
+import { writeIndex } from "./events.js";
 
 /*
  * Hand-written codecs of the SPEC section 8 records, enums and errors. The
@@ -54,13 +55,6 @@ const headers = codecs.vec(HeaderCodec);
 const optionBytes = codecs.option(codecs.bytes);
 const optionU32 = codecs.option(codecs.u32);
 const optionName = codecs.option(codecs.string);
-
-/** Writes `v` as its `u16` index in `variants` (the encoding half of a unit enum's codec). */
-function writeIndex<T extends string>(w: UndraWriter, name: string, variants: readonly T[], v: T): void {
-  const index = variants.indexOf(v);
-  if (index < 0) throw new RangeError(`unknown ${name} variant: ${String(v)}`);
-  w.writeU16(index);
-}
 
 /** Reads a `u16` index into `variants` (the decoding half of a unit enum's codec). */
 function readIndex<T extends string>(r: UndraReader, name: string, variants: readonly T[]): T {
@@ -93,15 +87,7 @@ export const AppStateCodec: Codec<AppState> = unitEnum("AppState", APP_STATES);
  * what it answers (a response, a typed error, an event), so an app ships only those, not the whole codecs below.
  */
 
-/** Writes a `NetKind` (`NetKindCodec.encode`): the payload of `Connectivity.changed`. */
-export function writeNetKind(w: UndraWriter, v: NetKind): void {
-  writeIndex(w, "NetKind", NET_KINDS, v);
-}
-
-/** Writes an `AppState` (`AppStateCodec.encode`): the payload of `Lifecycle.changed`. */
-export function writeAppState(w: UndraWriter, v: AppState): void {
-  writeIndex(w, "AppState", APP_STATES, v);
-}
+export { writeAppState, writeNetKind } from "./events.js";
 
 /** Reads an `HttpRequest` (`HttpRequestCodec.decode`). */
 export function readHttpRequest(r: UndraReader): HttpRequest {

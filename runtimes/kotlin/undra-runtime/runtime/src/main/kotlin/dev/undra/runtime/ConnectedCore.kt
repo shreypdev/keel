@@ -60,6 +60,7 @@ internal class ConnectedCore(
     private val onConnectionChange: ((ConnectionState) -> Unit)? = null,
     private val onError: ((UndraUnhandledError) -> Unit)? = null,
     private val onDevNotice: ((String) -> Unit)? = null,
+    override val namespace: String = UNNAMED_NAMESPACE,
     private val onPanic: ((UndraPanicReport) -> Unit)? = null,
 ) : UndraCore(), TransportEvents {
 
@@ -134,7 +135,7 @@ internal class ConnectedCore(
     fun installPorts(options: LoadOptions) {
         ports.register(StandardPorts.Diagnostics.PORT_ID, DiagnosticsAdapter(::panicReported).portImpl())
         if (options.defaultAdapters) {
-            for ((id, impl) in JvmAdapters.defaults(this::timerFired)) ports.register(id, impl)
+            for ((id, impl) in JvmAdapters.defaults(namespace, this::timerFired)) ports.register(id, impl)
         }
         for ((id, impl) in options.adapters) ports.register(id, impl)
     }

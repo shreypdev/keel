@@ -204,6 +204,31 @@ describe("the Diagnostics port of a native core", () => {
     }
   });
 
+  it("diagnosticsPort's host decides what a missing handler and a failing one do: a log line, and a failure that is reported instead of thrown", () => {
+    const lines: string[] = [];
+    const failures: unknown[] = [];
+    const log = { log: (level: number, target: string, message: string) => lines.push(`${level} ${target} ${message}`) };
+    const unhandled = diagnosticsPort(undefined, { log });
+    expect(unhandled.methods[PortIds.Diagnostics.panicked]?.(panicked({ ...REPORT, operation: "", message: "boom", location: "a.rs:1:2" }))).toEqual(new Uint8Array(0));
+    expect(lines).toEqual(["4 undra::panic panic: boom (a.rs:1:2)"]);
+    const failing = diagnosticsPort(
+      () => {
+        throw new Error("the reporter is down");
+      },
+      { fail: (error) => failures.push(error) },
+    );
+    expect(failing.methods[PortIds.Diagnostics.panicked]?.(panicked(REPORT))).toEqual(new Uint8Array(0));
+    expect(failures).toHaveLength(1);
+  });
+
+  it("without a host, diagnosticsPort ignores a report nobody asked for, and lets a failing handler's error out of the method (the embedder's to contain)", () => {
+    expect(diagnosticsPort(undefined).methods[PortIds.Diagnostics.panicked]?.(panicked(REPORT))).toEqual(new Uint8Array(0));
+    const failing = diagnosticsPort(() => {
+      throw new Error("the reporter is down");
+    });
+    expect(() => failing.methods[PortIds.Diagnostics.panicked]?.(panicked(REPORT))).toThrow("the reporter is down");
+  });
+
   it("diagnosticsPort is the port of an embedder's own transport, too: a sync PortImpl over the same decoder", () => {
     const seen: UndraPanicReport[] = [];
     const port = diagnosticsPort((r) => seen.push(r));

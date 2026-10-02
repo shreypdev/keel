@@ -71,6 +71,7 @@ path = "core"
 namespace = "acme_pay"</code></pre></div>
 <div class="table-wrap"><table><thead><tr><th>What</th><th>Named</th></tr></thead><tbody><tr><td>The C symbol, which returns the core's table</td><td><code>acme_pay_undra_api</code></td></tr><tr><td>iOS</td><td><code>AcmePayCore.xcframework</code>, one prelinked <code>libacme_pay.a</code> per slice</td></tr><tr><td>Android</td><td><code>libacme_pay.so</code></td></tr><tr><td>Web</td><td><code>acme_pay.wasm</code></td></tr><tr><td>The bindings' entry, in Swift, Kotlin and TypeScript</td><td><code>UndraAcmePay</code></td></tr></tbody></table></div>
 <p><code>undra build</code> refuses a namespace that a sibling project already uses, and every runtime refuses to load two cores with one.</p>
+<p>The namespace also keeps the default storage apart: each core's <code>Kv</code>, <code>SecureStore</code>, <code>Fs</code> and <code>Db</code> live under <code>undra/&lt;namespace&gt;/</code> on every platform, so two cores that use the defaults never see each other's data unless you hand them one adapter of your own.</p>
 <h2 id="loading-two-cores">Loading two cores<a class="anchor" href="#loading-two-cores" aria-label="Link to this section">#</a></h2>
 <p>Load each core once, through its own entry. Every generated type defaults to the core of its own package, so a call never reaches the wrong one.</p>
 <details class="reveal-code"><summary>Show the code for Swift, Kotlin and TypeScript</summary>

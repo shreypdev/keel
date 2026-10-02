@@ -697,22 +697,76 @@ budget_gzip_bytes = 120000
 measured_gzip_bytes = 119227
 tolerance = 0.05
 
-# What a hello-world app ships of the JavaScript runtime: `@undra/runtime` as the template's
+# What a hello-world app loads up front of the JavaScript runtime: `@undra/runtime` as the template's
 # web/src/undra.ts imports it, tree-shaken and minified by the Vite of the runtime's lockfile
-# (scripts/web-size-runtime.mjs); the generated bindings, the app's loader and the lazily loaded
-# worker script are not in it. The blueprint's 8 KB predates the transports, reconnect, coalescing
-# and worker mode: ADR-052's decision 2 (2026-10-01) restated it at 24 KB, and after the merge with
-# the parity failure model (its error channel added the bytes) at 26 KB; the follow-up piece
-# `ts-runtime-size` targets 16 KB. Gated like the wasm. Re-recorded by persistence-v2 (ADR-049: typed storage
-# errors, worker protocol 3, the snapshot layout-2 codec; crash recovery is `crashRecovery()`, which only an app
-# that imports it ships): 24,841 -> 25,906; after main's ABI table and the review's worker refusal, 25,984
-# (16 bytes under the budget: the next change to the hello runtime pays for itself, or `ts-runtime-size` lands).
-# prod-ops (ADR-046) raises the budget to 27,500 (measured 27,385): every runtime now has the `Diagnostics`
-# adapter and `onPanic` (the report codecs, the wasm trap path that builds the report from the FATAL record and
-# the stack, an image id), about 700 bytes up front, and `runInBackground` with the page's background window, about
-# 850 bytes in a lazily loaded chunk that the measuring script folds in. `ts-size-e4` (ADR-056) takes the budget
-# back down: measured with its script this change is about 25,000.
+# (scripts/web-size-runtime.mjs): the one chunk of the runtime modules the entry reaches by static imports. The
+# generated bindings, the app's loader, the Worker script and the modules only a dynamic import() reaches (the
+# wasm-worker and remote transports, the Http/Kv/SecureStore/Fs ports, the framed transports' wire code) are not in
+# it; the record reports the latter as `lazy_gzipped`. The blueprint's 8 KB predates the transports, reconnect,
+# coalescing and worker mode: ADR-052's decision 2 (2026-10-01) restated it at 24 KB, then 26 KB, for the chunk that
+# had every runtime module in it; the amendment of 2026-10-02 (`ts-size-e4`) counts what is loaded up front (25,996
+# -> 24,335 by that change of what is measured alone) and cuts it to 21,159: the remote transport, the default
+# ports and the framed transports' wire code load on demand (-4,686), the call path's levers (ADR-056) cost 1,510.
+# The 16 KB the first restatement aimed at is not reached: what is left is the runtime itself (the amendment says
+# what). Gated like the wasm. prod-ops (ADR-046) raises the budget to 22,000: the hello world carries, up front, the
+# report loader of the wasm trap path, `runInBackground`, the page's background window with its `pagehide` and
+# `freeze` listeners, the stats fields and the Diagnostics registration, 420 bytes over main's 21,336 (the report
+# builder, the Diagnostics port and its codecs are lazy chunks). The ablation is in the ADR-046 amendment.
 [size."web/hello-runtime-js"]
-budget_gzip_bytes = 27500
-measured_gzip_bytes = 27385
+budget_gzip_bytes = 22000
+measured_gzip_bytes = 21756
 tolerance = 0.05
+
+# ---------------------------------------------------------------------------------------------
+# The web call path (E4; R9: budgets are tests). Per operation, p50, in nanoseconds. Not measured by
+# the budgets test of this crate: the rows named `node/...` by `call-path.test.ts` of the TypeScript
+# runtime (the runtime's own cost: the core is a WebAssembly stub that echoes its arguments, so the
+# path from the writer to the decoded reply is all that is timed), the others by the playground's
+# device bench in Chromium (`npm run bench` in examples/playground/web, scripts/bench-device.sh
+# --device web), which fails a run whose p50 is over its row. The 5x rule of the header: the budget is
+# five times what the reference host measured (Apple M5 Pro, Chromium 153 / Node 24, load up to 30
+# from other builds), rounded up to two significant figures; UNDRA_BENCH_SCALE multiplies it.
+# Where the web rows stood before the call-path pieces (the default Vite target, bench/RESULTS.md,
+# 2026-10-01): sync_call 3.2 to 5.5 us, sync_call_runtime 3.5 to 5.9 us, record_1kb 4.6 to 8.2 us,
+# keyed_insert_10k 20.6 to 28.5 us, changeset_100 88 to 110 us.
+# ---------------------------------------------------------------------------------------------
+
+[web."node/call_async"]
+budget_ns = 1600
+measured_ns = 312
+what = "await core.call(..) on the stub core, with the generated code's writer and decode: the runtime's own cost"
+
+[web."node/call_sync"]
+budget_ns = 800
+measured_ns = 159
+what = "UndraCore.callSync on the stub core: the runtime's own cost"
+
+[web."sync_call"]
+budget_ns = 2200
+measured_ns = 440
+what = "await bench.benchAdd(1, 2): the generated binding, in Chromium (the device bench's `sync_call` row)"
+
+[web."sync_call_runtime"]
+budget_ns = 1500
+measured_ns = 290
+what = "UndraCore.callSync of the same method, in Chromium"
+
+[web."record_1kb"]
+budget_ns = 6100
+measured_ns = 1210
+what = "await bench.benchEchoBytes(1,024 bytes): the payload crosses the boundary twice, in Chromium"
+
+[web."keyed_insert_10k"]
+budget_ns = 67000
+measured_ns = 13350
+what = "await bench.benchListInsert(5000) on 10,000 rows: the call, the core's insert, the patch applied to the mirror, in Chromium"
+
+[web."changeset_100"]
+budget_ns = 84000
+measured_ns = 16700
+what = "await bench.benchTouchSignals(100): one change-set of 100 entries applied to 100 signals, in Chromium"
+
+[web."drain_frame"]
+budget_ns = 6300000
+measured_ns = 1260000
+what = "the ADR-031 experiment: 1,667 one-update keyed patches on 10,000 rows in one frame (100,000 a second at 60 Hz), merged, the page's own thread, in Chromium"

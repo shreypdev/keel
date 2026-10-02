@@ -14,7 +14,7 @@ import type { DbAdapter, DbConnection } from "./binding.js";
 
 /** What the main thread asks. `conn` is the worker's id of an open connection. */
 export type DbWorkerRequest =
-  | { readonly t: "open"; readonly id: number; readonly name: string }
+  | { readonly t: "open"; readonly id: number; readonly name: string; readonly namespace?: string }
   | { readonly t: "execute" | "query"; readonly id: number; readonly conn: number; readonly sql: string; readonly params: readonly DbValue[] }
   | { readonly t: "script"; readonly id: number; readonly conn: number; readonly sql: string }
   | { readonly t: "close"; readonly id: number; readonly conn: number };
@@ -60,7 +60,7 @@ export function serveDb(scope: DbWorkerScope, adapter: DbAdapter): () => void {
   const answer = async (request: DbWorkerRequest): Promise<number | DbExecuted | DbRows | null> => {
     switch (request.t) {
       case "open": {
-        const opened = await adapter.open(request.name);
+        const opened = await adapter.open(request.name, request.namespace === undefined ? undefined : { namespace: request.namespace });
         const id = next++;
         connections.set(id, opened);
         return id;
@@ -165,8 +165,8 @@ export function workerDbAdapter(create: () => DbWorkerLike): DbAdapter {
   };
 
   return {
-    async open(name) {
-      const conn = await ask<number>((id) => ({ t: "open", id, name }));
+    async open(name, scope) {
+      const conn = await ask<number>((id) => ({ t: "open", id, name, ...(scope !== undefined && { namespace: scope.namespace }) }));
       let closed = false;
       return {
         execute: (sql, params) => ask<DbExecuted>((id) => ({ t: "execute", id, conn, sql, params })),

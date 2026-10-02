@@ -37,7 +37,8 @@ public class CoreEntry(
 
     /**
      * Loads the core as [options] say (in this process unless they say [Mode.REMOTE]) and makes it [core]. An
-     * unset [LoadOptions.expectedSchemaHash] is filled in with [schemaHash]. The first core loaded in the process
+     * unset [LoadOptions.expectedSchemaHash] is filled in with [schemaHash], and an unset [LoadOptions.namespace] with
+     * [namespace] (the default stores are kept under it). The first core loaded in the process
      * also becomes [UndraCore.shared].
      *
      * @throws UndraSchemaMismatchException if the core was built from another schema.
@@ -55,7 +56,7 @@ public class CoreEntry(
                     "the Undra core `$namespace` is already loaded; use it (Undra<Namespace>.core), or close it before loading it again",
                 )
             }
-            val core = UndraCore.start(options.withSchemaHashDefault(schemaHash), native)
+            val core = UndraCore.start(options.withSchemaHashDefault(schemaHash).withNamespaceDefault(namespace), native)
             loaded.set(core)
             return core
         } finally {

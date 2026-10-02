@@ -41,6 +41,19 @@ export interface PortImpl {
    * Optional; it must not throw (the main entry carries no handler for it, ADR-052).
    */
   readonly dispose?: () => void;
+  /**
+   * Called by the core that registers this port (`LoadOptions.ports`, `registerPort`), before any call reaches it, with
+   * what the port may need to know about its core: its namespace (ADR-044 amendment A), which the default location of
+   * a store is made from (`dbPort` passes it to its adapter, so `waSqliteDb()` keeps its files in
+   * `undra/<namespace>/db`). Optional; a port that is registered with two cores is told by the last. It must not throw.
+   */
+  readonly bind?: (host: PortHost) => void;
+}
+
+/** What a core tells a port implementation that registers with it ({@link PortImpl.bind}). */
+export interface PortHost {
+  /** The namespace of the core (`UndraCore.namespace`). */
+  readonly namespace: string;
 }
 
 /**

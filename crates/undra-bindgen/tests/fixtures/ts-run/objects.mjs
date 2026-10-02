@@ -90,7 +90,8 @@ rt.UndraCore.attach = async (transport, options) => {
 };
 const transport = { mode: "test" };
 assert.equal(await UndraGoldenObjects.attach(transport, { shared: false }), attached);
-assert.deepEqual(seen, { transport, options: { shared: false, expectedSchemaHash: UndraIds.schemaHash } });
+// The entry fills in the schema hash and the core's namespace (ADR-044 amendment A: the default stores are per namespace).
+assert.deepEqual(seen, { transport, options: { shared: false, expectedSchemaHash: UndraIds.schemaHash, namespace: "golden_objects" } });
 assert.equal(UndraGoldenObjects.core, attached);
 await assert.rejects(UndraGoldenObjects.attach(transport), (e) => e instanceof rt.UndraError && e.kind === "state");
 await objects.Calculator.create();
