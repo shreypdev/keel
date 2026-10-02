@@ -17,3 +17,18 @@ error[undra::E0051]: at object Counter, `object_will_change` becomes `objectWill
   = note: with the iOS 15 / 16 store shape (`swift_observation = "observable-object"`, the default for a deployment target below iOS 17) a store is a Combine `ObservableObject`, which declares that member itself
   = help: rename it so that it does not meet that name
   = docs: https://shreypdev.github.io/undra/docs/errors.html#E0051
+
+error[undra::E0051]: at the schema, `newest<Todo>`, `newest_todo` all become `newestTodo`
+  = note: id constants are named in camelCase in Swift and TypeScript, and the id of an instantiation of a generic function names the function and the type, so names that differ only in case or underscores end up equal
+  = help: rename one of them so that they stay distinct after conversion
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0051
+
+error[undra::E0051]: at the schema, `newest<Todo>`, `newest_todo` all become `NEWEST_TODO`
+  = note: id constants are named UPPER_SNAKE_CASE in Kotlin, and the id of an instantiation of a generic function names the function and the type, so names that differ only in case or underscores end up equal
+  = help: rename one of them so that they stay distinct after conversion
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0051
+
+error[undra::E0051]: at the schema, `newest<Todo>`, `newest` all become `newest`
+  = note: functions, mutations and port adapters are top-level functions named in camelCase, so names that differ only in case or underscores end up equal
+  = help: rename one of them so that they stay distinct after conversion
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0051
