@@ -7,6 +7,11 @@ const here = (path: string): string => fileURLToPath(new URL(path, import.meta.u
 export default defineConfig({
   plugins: [react()],
   resolve: {
+    // The runtime's React adapter and its Db worker are used from the checkout's sources (below), where `react` and `wa-sqlite`
+    // (the optional peer dependencies the app installs, see package.json) would otherwise be looked up in the runtime's own
+    // node_modules: absent on a machine that only ran `npm ci` here, and on one that also installed the runtime's dev
+    // dependencies a second copy of React, whose hooks the app's renderer does not serve. The app's copy is the only one.
+    dedupe: ["react", "react-dom", "wa-sqlite"],
     alias: {
       // The bindings `undra bindgen` generates, used from their TypeScript sources so there is no
       // build step between a core change and the browser.
