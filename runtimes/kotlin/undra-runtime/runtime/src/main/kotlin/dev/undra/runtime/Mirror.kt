@@ -25,11 +25,13 @@ import kotlin.time.Duration.Companion.nanoseconds
  *    `observe` apply what is queued without waiting for it, so `store.increment()` followed by a read of
  *    the store on the main thread sees the change.
  *  - **Merged.** One application (a *drain*) folds the queued entries per signal, in arrival order, without
- *    decoding them: a full value or a lazy invalidation supersedes everything before it, and keyed patches
- *    that follow each other become one patch (their counts add up, their operations keep their order,
- *    SPEC 3.8). Each signal is applied at most twice per drain (its last full value, then its merged patch),
- *    signals in the order their first entry arrived. Signals a store declared `no_coalesce` are applied
- *    entry by entry instead.
+ *    decoding them: a full value supersedes everything before it; a lazy invalidation supersedes only the earlier
+ *    lazy invalidations of its signal, never the full value (that one carries the page server's handle, an
+ *    invalidation only a length and a version: a drain that folded `[Full, Inv, Inv]` applies `[Full, Inv]`, and one
+ *    that folded `[Inv, Full]` applies `[Full]`); and keyed patches that follow each other become one patch (their
+ *    counts add up, their operations keep their order, SPEC 3.8). Each signal is applied at most three times per
+ *    drain (its last full value, its last invalidation after it, then its merged patch), signals in the order their
+ *    first entry arrived. Signals a store declared `no_coalesce` are applied entry by entry instead.
  *  - **Bounded.** Past [MirrorOptions.maxPendingEntries] or [MirrorOptions.maxPendingBytes] the queue is
  *    folded in place on the thread that passed the bound. A signal whose merged patch grows past 4,096
  *    operations or 1 MiB is dropped and re-observed at the next drain, so a main thread that falls far
@@ -367,6 +369,12 @@ public open class Mirror internal constructor(
                 bytes += ENTRY_OVERHEAD + source.lengths[f]
                 weight = 0
             }
+            val v = slot.invalidation
+            if (v >= 0) {
+                out.addOwned(slot.handle, slot.signal, source.ops[v], source.values[v]!!, source.starts[v], source.lengths[v], weight)
+                bytes += ENTRY_OVERHEAD + source.lengths[v]
+                weight = 0
+            }
             if (slot.patchCount == 1) {
                 val p = slot.patchAt(0)
                 out.addOwned(slot.handle, slot.signal, PATCH_CODE, source.values[p]!!, source.starts[p], source.lengths[p], weight)
@@ -416,8 +424,9 @@ public open class Mirror internal constructor(
             if (awaiting.isNotEmpty()) {
                 val key = SignalKey(handle, signal)
                 if (awaiting.containsKey(key)) {
-                    // Its patches are relative to a list this host never saw: wait for a full value.
-                    if (op == PATCH_CODE) continue
+                    // Its patches are relative to a list this host never saw, and a lazy invalidation to a page server
+                    // it never saw: wait for a full value.
+                    if (op == PATCH_CODE || op == INVALIDATED_CODE) continue
                     awaiting.remove(key)
                 }
             }
@@ -439,14 +448,18 @@ public open class Mirror internal constructor(
                 units.add(slot)
             }
             slot.entries += batch.weights[i]
-            if (op != PATCH_CODE) {
+            if (op == PATCH_CODE) {
+                if (!slot.addPatch(batch, i)) {
+                    UndraLog.warn(
+                        "a keyed patch for signal ${signal.toUInt()} of ${Handle(handle)} cannot be merged (${batch.lengths[i]} bytes); " +
+                            "the signal is re-observed",
+                    )
+                    markDropped(slot)
+                }
+            } else if (op == INVALIDATED_CODE) {
+                slot.setInvalidation(i)
+            } else {
                 slot.setFull(i)
-            } else if (!slot.addPatch(batch, i)) {
-                UndraLog.warn(
-                    "a keyed patch for signal ${signal.toUInt()} of ${Handle(handle)} cannot be merged (${batch.lengths[i]} bytes); " +
-                        "the signal is re-observed",
-                )
-                markDropped(slot)
             }
         }
         return units
@@ -585,6 +598,8 @@ public open class Mirror internal constructor(
         }
         val f = slot.full
         if (f >= 0) call(registration, slot.handle, slot.signal, batch.ops[f], batch.values[f]!!, batch.starts[f], batch.lengths[f])
+        val v = slot.invalidation
+        if (v >= 0) call(registration, slot.handle, slot.signal, batch.ops[v], batch.values[v]!!, batch.starts[v], batch.lengths[v])
         if (slot.patchCount == 1) {
             val p = slot.patchAt(0)
             call(registration, slot.handle, slot.signal, PATCH_CODE, batch.values[p]!!, batch.starts[p], batch.lengths[p])
@@ -755,8 +770,15 @@ public open class Mirror internal constructor(
 
     /** One signal of one store as a drain or a compaction folds it (indices into the folded [EntryBuffer]). */
     private class Slot(val handle: Long, val signal: Int) {
-        /** The last full value or lazy invalidation, or -1; everything before it is superseded. */
+        /** The last full value, or -1; everything before it is superseded. */
         var full = -1
+            private set
+
+        /**
+         * The last lazy invalidation after [full], or -1. It supersedes only the earlier invalidations of its signal,
+         * never [full]: the full value carries the page server's handle, an invalidation only a length and a version.
+         */
+        var invalidation = -1
             private set
         private var patches = IntArray(0)
 
@@ -775,9 +797,14 @@ public open class Mirror internal constructor(
 
         fun setFull(index: Int) {
             full = index
+            invalidation = -1
             patchCount = 0
             ops = 0L
             opBytes = 0L
+        }
+
+        fun setInvalidation(index: Int) {
+            invalidation = index
         }
 
         fun clear() = setFull(-1)
@@ -887,6 +914,7 @@ public open class Mirror internal constructor(
         /** What a superseded `coalesce` invocation's unit becomes in a fold. */
         private val SUPERSEDED = Any()
         private val PATCH_CODE: Byte = ChangeOp.PATCH.code.toByte()
+        private val INVALIDATED_CODE: Byte = ChangeOp.INVALIDATED.code.toByte()
     }
 }
 
