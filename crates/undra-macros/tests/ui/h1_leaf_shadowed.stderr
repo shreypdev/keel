@@ -76,7 +76,7 @@ help: the trait `undra::undra_wire::Decode` is not implemented for `Timestamp`
              (A,)
              AppState
              BTreeMap<K, V>
-             Box<T>
+             BackgroundReport
            and $N others
 
 error[E0277]: error[undra::E0001]: `Decimal` cannot cross the boundary by value
@@ -101,7 +101,7 @@ help: the trait `undra::undra_wire::Decode` is not implemented for `Decimal`
              (A,)
              AppState
              BTreeMap<K, V>
-             Box<T>
+             BackgroundReport
            and $N others
 
 error[E0277]: error[undra::E0060]: `Timestamp` is spelled like a built-in Undra type, but it is not one
