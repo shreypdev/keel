@@ -617,6 +617,59 @@ fn rehome(tokens: TokenStream) -> TokenStream {
         .collect()
 }
 
+/// The part of the E0070 rule constant's name that says which instantiation it is: the type
+/// arguments as written, in an identifier, so that two aliases of one instantiation in one module
+/// define the same constant and two different instantiations never do.
+///
+/// The spelling is encoded one character at a time, without loss: ASCII letters and digits stand
+/// for themselves and every other character is `_` and a code (`_` is `__`, `:` is `_C`, `<` is
+/// `_L`, `>` is `_G`, `,` is `_M`, a space is `_W`, anything else `_U<hex>_`), and the arguments
+/// are joined by `_A`. An identifier cannot hold the punctuation itself, and dropping it made
+/// `Cache<A_B, C>` and `Cache<A, B_C>` (or `Vec<Todo>` and `VecTodo`) one constant, a false
+/// "declared twice". A plain name such as `Todo` reads as itself.
+pub(crate) fn rule_key<'a>(arguments: impl Iterator<Item = &'a syn::Type>) -> String {
+    let mut key = String::new();
+    for (index, ty) in arguments.enumerate() {
+        if index > 0 {
+            key.push_str("_A");
+        }
+        for c in ty_string(ty).chars() {
+            let code = match c {
+                c if c.is_ascii_alphanumeric() => {
+                    key.push(c);
+                    continue;
+                }
+                '_' => "_",
+                ':' => "C",
+                '<' => "L",
+                '>' => "G",
+                ',' => "M",
+                ' ' => "W",
+                '&' => "R",
+                '(' => "O",
+                ')' => "P",
+                '[' => "B",
+                ']' => "E",
+                ';' => "S",
+                '\'' => "Q",
+                '+' => "T",
+                '=' => "Y",
+                '*' => "K",
+                '!' => "N",
+                '-' => "D",
+                '.' => "F",
+                other => {
+                    key.push_str(&format!("_U{:x}_", u32::from(other)));
+                    continue;
+                }
+            };
+            key.push('_');
+            key.push_str(code);
+        }
+    }
+    key
+}
+
 /// The instantiation of a generic object (`impl Alias { signatures }`) or of a generic store
 /// (`struct Alias { fields }`, then the block): the ordinary object and store expansions on
 /// concrete tokens, under the alias's name, without the items themselves.
@@ -645,17 +698,7 @@ fn instantiate_object_in(items: Vec<syn::Item>, here: &str) -> syn::Result<Token
     let mut items = items;
     let arguments = match items.pop() {
         Some(syn::Item::Type(item)) if item.ident == "__UndraInstanceArgs" => match *item.ty {
-            syn::Type::Tuple(tuple) => tuple
-                .elems
-                .iter()
-                .map(|ty| {
-                    ty_string(ty)
-                        .chars()
-                        .filter(|c| c.is_alphanumeric() || *c == '_')
-                        .collect::<String>()
-                })
-                .collect::<Vec<_>>()
-                .join("_"),
+            syn::Type::Tuple(tuple) => rule_key(tuple.elems.iter()),
             _ => String::new(),
         },
         Some(other) => {
