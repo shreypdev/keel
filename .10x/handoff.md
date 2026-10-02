@@ -35,6 +35,25 @@ ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5)
 with their context when told to):
 Landed: devtools, persistence, testkit, docs-v1x, ports (all reviewed) (ADR-037/049 Accepted; opus review `.10x/reviews/2026-10-02-persistence-review.md`: 3 High fixed — a wrong-typed migration hook spliced bytes, RN storage not on ADR-049, a dead web core after a trap during restart; hello wasm 116.8 KB, JS 25,984/26,000; Rust 2,891 · Swift 553 · Kotlin 652 · TS 1,264 · contracts 65/65; hash `0xfa536b9ac6f06149`). Still to land: testkit (review) then ports (review; it must cross persistence: `check.sh`, `run-all.sh`, `scenarios.md`, SPEC §8).
 
+**Launch wave (2026-10-02, evening).** Founder's rules now binding: (1) no piece lands on `main` unless CI is
+green on its pushed head (`scripts/wt.sh merge` enforces it once `ci-green` lands; agents push their own
+`wt/<name>` branch and iterate until CI, Bench, Two cores and Site are green); (2) Fable designs where the
+difficulty is in deciding, a cheaper model implements, then an adversarial review. In flight:
+- `ci-green` — every red CI job at its root cause, Rust 1.99.0 pins, Node 24, the merge gate. Pushed at
+  `b5ded91`: Bench and Two cores green; CI had three red jobs left (Rust on Linux, the macOS Swift tests, React
+  Native); the agent pushes and watches its own fixes. Merge it first; `main` is red until then.
+- `diagram-rn` — React Native as the fourth frame of the landing diagram (`fbf8d7a`, fable-reviewed from
+  screenshots); merge main into it once `ci-green` lands, push, Site green, fast-forward.
+- `reload-handles` — ADR-059 (Fable design, prototyped): query handles survive every restore path through an
+  in-band snapshot record and build-on-first-use; sonnet implementing; removes the TS replay; S35.
+- `generics-fn-obj` — ADR-058 (Fable design, prototyped): generic functions monomorphised from a declared list,
+  generic objects/stores through an alias; sonnet implementing; S34; E0072/E0074.
+- `ts-runtime-16k` — ADR-057 (Fable design, 15 measured levers: 22,100 → 15,958 B, 15,384 with Vite's preload
+  helper apart); sonnet implementing; gates: runtime 16,000, first-load 16,600, all-features 42,400.
+- Owed, starts when `ci-green` lands: an Android emulator CI job for `android-adapters`, `android-work` and
+  `undra-compose`. Each implemented piece still gets its adversarial review before the merge.
+- A separate session is bisecting a cold-start restore slowdown (two rows 1.7–1.8x the machine baseline).
+
 **Also owed:** the Rust 1.99.0 bump (ci.yml header says how; do it when no worktree is mid-build);
   a custom port in the playground for the reference's Ports section; `undra bindgen --declarations`.
 
