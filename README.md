@@ -74,8 +74,8 @@ Sustained-load results (a firehose, keyed churn, fan-out, a 60-second soak) are 
   Kotlin <!--trust:tests-kotlin-->881<!--/trust--> · Swift <!--trust:tests-swift-->870<!--/trust--> ·
   React Native <!--trust:tests-react-native-->110<!--/trust--> — the counts at the last merge, after the full matrix
   ran (the ledger is [`.10x/status.md`](.10x/status.md)).
-* **<!--trust:scenarios-->33<!--/trust--> wire-level contract scenarios, run on every platform**
-  (<!--trust:cells-->95<!--/trust-->/<!--trust:cells-->95<!--/trust--> cells pass; two scenarios are about the web
+* **<!--trust:scenarios-->34<!--/trust--> wire-level contract scenarios, run on every platform**
+  (<!--trust:cells-->98<!--/trust-->/<!--trust:cells-->98<!--/trust--> cells pass; two scenarios are about the web
   host and run on TypeScript only): sync/async calls, typed errors, cancellation, stream backpressure, keyed patches,
   optimistic rollback, offline queue replay, snapshot/restore, schema-mismatch rejection, panic containment, a
   coalesced 1,000-transaction burst applied in one drain, a derived keyed list whose 60,000 recorded operations replay
@@ -249,7 +249,7 @@ package (see [`docs/blueprint.html`](docs/blueprint.html)).
 | `crates/` | the 13 Rust crates: schema (`undra-meta`), wire codec, macros, signals, runtime, ports, query, testkit, ffi (the only `unsafe`), transport, bindgen, cli, facade |
 | `runtimes/` | the Swift, Kotlin, TypeScript and React Native runtime packages the generated code sits on |
 | `examples/` | `playground` (the reference app: one core, three platforms and React Native, proof screenshots), `cookbook`, `fieldbook` (a sample app), `two-cores`, `ios15-sample` |
-| `contract-tests/` | the <!--trust:scenarios-->33<!--/trust--> scenarios + a runner per platform |
+| `contract-tests/` | the <!--trust:scenarios-->34<!--/trust--> scenarios + a runner per platform |
 | `bench/` | criterion benches + the budget gate; `RESULTS.md` has the numbers |
 | `docs/SPEC.md` | the binding specification (wire, ABI, runtime model, generated shapes) |
 | `.10x/` | the project's decision record: ADRs, reviews, status ledger |
