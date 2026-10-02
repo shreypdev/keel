@@ -381,6 +381,19 @@ pub type TaggedSku = Tagged<Sku>;
 #[k::api]
 pub type TaggedPrice = Tagged<Price>;
 
+/// A recursive template: `Self` inside it is the template's own type, and in an instantiation the
+/// alias.
+#[k::api(generic)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tree<T> {
+    pub value: T,
+    pub children: Vec<Self>,
+    pub parent: Option<Box<Self>>,
+}
+
+#[k::api]
+pub type TodoTree = Tree<Todo>;
+
 /// What a hand-written record with the same fields looks like on the wire.
 #[k::api]
 pub struct HandPage {
@@ -553,6 +566,27 @@ fn an_instantiation_registers_under_the_alias_and_the_template_registers_nothing
     schema
         .validate()
         .expect("the schema with the instantiations is valid");
+}
+
+#[test]
+fn a_recursive_template_refers_to_the_alias_in_its_instantiation() {
+    let tree = TodoTree {
+        value: todo(1),
+        children: vec![TodoTree {
+            value: todo(2),
+            children: Vec::new(),
+            parent: None,
+        }],
+        parent: None,
+    };
+    assert_eq!(TodoTree::decode_exact(&tree.encode_to_vec()).unwrap(), tree);
+    let def = record("TodoTree");
+    assert_eq!(def.fields[0].ty, named("Todo"));
+    assert_eq!(def.fields[1].ty, TypeRef::Vec(Box::new(named("TodoTree"))));
+    assert_eq!(
+        def.fields[2].ty,
+        TypeRef::Option(Box::new(named("TodoTree")))
+    );
 }
 
 #[test]

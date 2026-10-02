@@ -1274,13 +1274,33 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
             "this type is not one of the types the schema describes, or is spelled with the wrong number of arguments",
             &format!("write one of the supported types here: {ALLOWED_SET}"),
         )),
-        _ => Err(generic_spelled(ty, last, &args)),
+        _ => Err(generic_spelled(ty, last, &args, cx.self_name)),
     }
 }
 
 /// E0002 for a generic type written with its arguments: a data type is instantiated once, under a
 /// name of its own, and the name is what a signature spells (ADR-042 decision 2.3).
-fn generic_spelled(ty: &Type, last: &syn::PathSegment, args: &[&Type]) -> TyErr {
+fn generic_spelled(
+    ty: &Type,
+    last: &syn::PathSegment,
+    args: &[&Type],
+    self_name: Option<&str>,
+) -> TyErr {
+    // A template that names itself with its own parameters: `Self` is what it means.
+    if self_name == Some(strip_raw(&last.ident.to_string()).as_str()) {
+        return TyErr::new(
+            ty,
+            Diag::new(
+                code::E0002,
+                format!(
+                    "generic type `{}` names the type being defined",
+                    ty_string(ty)
+                ),
+                "inside its own definition a type is `Self`: the schema names an instantiation by the alias that declares it, and the definition of the template has none",
+                format!("write `Self` instead of `{}`", ty_string(ty)),
+            ),
+        );
+    }
     let alias: String = args
         .iter()
         .map(|arg| alias_hint(arg))

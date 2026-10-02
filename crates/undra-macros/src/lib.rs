@@ -44,6 +44,12 @@
 //!   `__undra_cell` field and struct literals of the type inside that impl block get it added.
 //!   Stores with `Computed` fields name a rebuild function with
 //!   `#[undra::store(restore = "Self::rebuild")]`. See [`store`].
+//! * **Newtypes** (ADR-042): a tuple struct of exactly one field is a transparent record: it crosses as
+//!   its inner type and may be a map key when that is one. A unit struct or a tuple struct of two or
+//!   more fields stays E0007.
+//! * **Generic data types** (ADR-042): `#[undra::api(generic)]` on a struct or enum with type parameters
+//!   is a template that registers nothing; `#[undra::api] pub type TodoPage = Page<Todo>;` registers the
+//!   instantiation `TodoPage`. Signatures spell the alias; `Page<Todo>` is E0002.
 //! * `Lazy<T>` (a lazily paged list) is rejected with E0001 in v1, like in `undra-bindgen`.
 //! * `#[undra::error]` derives `Debug` unless the enum already does.
 //! * `async fn`s of a port trait become methods returning boxed futures (`async fn` in traits
@@ -154,6 +160,10 @@ pub fn mutation(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// `from = "0x.."` restricts a hook to old data with that fingerprint. The function is kept as
 /// written; the runtime calls it under the panic guard. A wrong target or shape is E0066.
+///
+/// Many changes need no hook. Fields and variants are matched by name, integers widen, `T` becomes
+/// `Option<T>`, and (ADR-042) wrapping a value in a newtype or unwrapping it is lossless, because a
+/// newtype has the bytes of its inner type: `id: Uuid` becoming `id: UserId` migrates by itself.
 #[proc_macro_attribute]
 pub fn migrate(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_::expand_migrate(attr.into(), item.into()).into()

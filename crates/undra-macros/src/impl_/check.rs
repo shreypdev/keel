@@ -215,7 +215,12 @@ impl Checks {
     fn resolved(&self, ty: &Type) -> Type {
         let mut ty = ty.clone();
         if let Some(name) = &self.self_name {
-            VisitMut::visit_type_mut(&mut ReplaceSelf { name }, &mut ty);
+            // In a template `Self` is `Page<T>`: the type with its own parameters.
+            let args: &[String] = match &self.scope {
+                Scope::Template(params) => params,
+                _ => &[],
+            };
+            VisitMut::visit_type_mut(&mut ReplaceSelf { name, args }, &mut ty);
         }
         ty
     }
@@ -582,9 +587,10 @@ impl Checks {
     }
 }
 
-/// Rewrites `Self` to the type's name.
+/// Rewrites `Self` to the type's name, applied to `args` (a template's type parameters).
 struct ReplaceSelf<'a> {
     name: &'a syn::Ident,
+    args: &'a [String],
 }
 
 impl VisitMut for ReplaceSelf<'_> {
@@ -596,6 +602,14 @@ impl VisitMut for ReplaceSelf<'_> {
                 let mut name = self.name.clone();
                 name.set_span(seg.ident.span());
                 seg.ident = name;
+                if !self.args.is_empty() {
+                    let args = self
+                        .args
+                        .iter()
+                        .map(|a| syn::Ident::new(a, seg.ident.span()));
+                    seg.arguments =
+                        syn::PathArguments::AngleBracketed(syn::parse_quote!(<#(#args),*>));
+                }
             }
         }
     }

@@ -55,3 +55,10 @@ db-fake = ["undra-ports/db-fake"]
 
 [dev-dependencies]
 undra-bindgen = { workspace = true }
+# `tests/leaf_types.rs` (run with `--features uuid,chrono,time,rust_decimal,bytes`) spells these
+# types in a core; without a feature the file is empty. No clock or randomness feature of any.
+uuid = { version = "1", default-features = false }
+chrono = { version = "0.4", default-features = false }
+time = { version = "0.3", default-features = false }
+rust_decimal = { version = "1", default-features = false }
+bytes = { version = "1", default-features = false }

@@ -2001,7 +2001,7 @@ error[undra::E0004]: callback `Arc<dyn Listener>` cannot be a field of a record 
 | [`C0013`](https://shreypdev.github.io/undra/docs/errors.html#C0013) | the dev server failed to start or crashed |
 | [`C0014`](https://shreypdev.github.io/undra/docs/errors.html#C0014) | the project's Undra does not match: the core's comes from elsewhere, or it is newer |
 | [`E0001`](https://shreypdev.github.io/undra/docs/errors.html#E0001) | unsupported type in a public position |
-| [`E0002`](https://shreypdev.github.io/undra/docs/errors.html#E0002) | generic parameter |
+| [`E0002`](https://shreypdev.github.io/undra/docs/errors.html#E0002) | generic parameter, or a generic type spelled with its arguments |
 | [`E0003`](https://shreypdev.github.io/undra/docs/errors.html#E0003) | lifetime in a public signature |
 | [`E0004`](https://shreypdev.github.io/undra/docs/errors.html#E0004) | a trait object, `dyn` or `impl Trait` that is not a callback parameter, or a callback where one may not stand (ADR-041) |
 | [`E0005`](https://shreypdev.github.io/undra/docs/errors.html#E0005) | `Result` / `Stream` outside return position |
@@ -2032,6 +2032,7 @@ error[undra::E0004]: callback `Arc<dyn Listener>` cannot be a field of a record 
 | [`E0064`](https://shreypdev.github.io/undra/docs/errors.html#E0064) | an object (`#[undra::api] impl`) used where a value is expected, or a value used as an object, or an object where objects may not stand (ADR-040) |
 | [`E0065`](https://shreypdev.github.io/undra/docs/errors.html#E0065) | a signal of a store written off its owning runtime's core (ADR-035): a runtime message |
 | [`E0066`](https://shreypdev.github.io/undra/docs/errors.html#E0066) | a `#[undra::migrate]` hook with a wrong target or shape (ADR-037; addition) |
+| [`E0070`](https://shreypdev.github.io/undra/docs/errors.html#E0070) | a named instantiation of a generic data type that is declared twice or outside the crate of its template |
 | [`E0071`](https://shreypdev.github.io/undra/docs/errors.html#E0071) | a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041) |
 
 ## Types and shapes
@@ -2040,27 +2041,31 @@ error[undra::E0004]: callback `Arc<dyn Listener>` cannot be a field of a record 
 
 Raised by macros, schema validation, the `Encode`/`Decode` bounds.
 
-unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), a `DerivedList` field without its row type (ADR-039), `Handle` (no schema type; an object crosses as `Arc<T>` or `&T`, ADR-040), `Arc<T>` of a built-in or an `Rc`, a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`)
+unsupported type in a public position (lists the type and the allowed set); includes `i128`/`u128` (the help points at `Decimal`, `Uuid` or a `String` newtype), `DateTime<Local>` and `DateTime<FixedOffset>` ("convert to `Utc`; offsets do not cross"), a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate that only that crate has (`DateTime<Utc>`, `OffsetDateTime`, `TimeDelta`, ..) spelled without the matching feature of `undra` (one error naming the feature), `Lazy<T>` (lazy lists are not available in v1), a `DerivedList` field without its row type (ADR-039), `Handle` (no schema type; an object crosses as `Arc<T>` or `&T`, ADR-040), `Arc<T>` of a built-in or an `Rc`, a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `Plain` cannot cross the boundary by value | a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value | declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs |
+| `Plain` cannot cross the boundary by value | a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value | declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra` |
+| `DateTime<Local>` cannot cross the boundary | a `Timestamp` is an instant in milliseconds since the Unix epoch, in UTC; a date-time with a local time zone or a fixed offset has no one value every platform reads alike, and the offset itself would be lost | convert to `Utc` (`value.with_timezone(&Utc)`) and spell `DateTime<Utc>`; offsets do not cross |
+| `DateTime<FixedOffset>` cannot cross the boundary | a `Timestamp` is an instant in milliseconds since the Unix epoch, in UTC; a date-time with a local time zone or a fixed offset has no one value every platform reads alike, and the offset itself would be lost | convert to `Utc` (`value.with_timezone(&Utc)`) and spell `DateTime<Utc>`; offsets do not cross |
 | `DerivedList` needs the type of its rows | a derived list is a `Vec` of rows the platforms mirror, so the schema needs the row type, written as the one type argument | write `DerivedList<Row>` for `visible`, with the type the pipeline's `build()` produces |
 | `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet | a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it | expose the items as a `Signal<Vec<T>>` (keyed with `#[undra(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit |
 | `&str` cannot cross the boundary | references have no wire representation; every value crosses by copy | use an owned `String` |
-| `usize` cannot cross the boundary | its width differs between platforms (32-bit wasm, 64-bit iOS and Android), so the wire layout would too | use a fixed-width integer such as `u32` or `u64` |
-| `Ctx` parameter on method `touch` | methods reach the runtime through the object: `Ctx` is only injected into constructors, free functions, queries and mutations | keep a `WeakCtx` (`ctx.downgrade()`) in the object when it is constructed and upgrade it in the method, or use `Ctx::current()` |
 
-### `E0002` generic parameter
+### `E0002` generic parameter, or a generic type spelled with its arguments
 
 Raised by macros.
 
-generic parameter on a `#[undra::api]` item
+generic parameter on a `#[undra::api]` item that is not a template, on an error enum, object, store, function, method, port, callback, query or mutation (their text points at `#[undra::api(generic)]` and a named instantiation for data types); a const parameter, a `where` clause or a default type parameter ("only type parameters are supported"); a generic type spelled with its arguments (`Page<Todo>`: declare `#[undra::api] pub type TodoPage = Page<Todo>;` and write `TodoPage`); the wrong number of type arguments for a template (ADR-042)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| generic parameter `T` on `Page` | the schema describes concrete types; every target language would need one instantiation per use | remove the parameter, and declare one concrete `#[undra::api]` type per instantiation |
-| generic parameter `T` on `first` | the schema describes concrete types; every target language would need one instantiation per use | remove the parameter, and declare one concrete `#[undra::api]` type per instantiation |
+| generic parameter `T` on `Page` | the schema describes concrete types; every target language would need one instantiation per use | mark the struct or enum `#[undra::api(generic)]` and declare each instantiation under a name: `#[undra::api] pub type TodoPage = Page<Todo>;`; or remove the parameter and declare one concrete `#[undra::api]` type per instantiation |
+| generic parameter `E` on `Failure` | the schema describes concrete types, and the platforms throw an error by name | remove the parameter and declare one concrete `#[undra::error]` enum per use |
+| generic parameter `T` on `get` | the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed | remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`) |
+| generic parameter `T` on `first` | the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed | remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`) |
+| generic parameter `T` on `Counter` | the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed | remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`) |
+| generic parameter `T` on `Sink` | the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed | remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`) |
 
 ### `E0003` lifetime in a public signature
 
@@ -2070,8 +2075,9 @@ lifetime in a public signature
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| lifetime `'a` on `Label` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | remove the lifetime parameter and use owned types |
+| lifetime `'a` on `WithLifetime` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | remove the lifetime parameter and use owned types |
 | lifetime `'a` in `&'a str` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | use an owned type such as `String` or `Vec<T>` |
+| lifetime `'a` on `Label` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | remove the lifetime parameter and use owned types |
 | lifetime `'static` in `&'static str` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | use an owned type such as `String` or `Vec<T>` |
 
 ### `E0004` a trait object, `dyn` or `impl Trait` that is not a callback parameter, or a callback where one may not stand (ADR-041)
@@ -2105,20 +2111,23 @@ Raised by macros, schema validation.
 
 ### `E0006` map key type not allowed
 
-Raised by macros, schema validation.
+Raised by macros, schema validation, a bound the compiler checks.
 
-map key type not allowed
+map key type not allowed: `String`, integers, `bool`, `Uuid` and newtypes of those are keys; a float, a `Decimal`, a record, a collection, and a newtype of one of those are not (the macros assert `K: MapKey` at every `HashMap`/`BTreeMap` key position, ADR-042)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `f64` cannot be a map key | map keys must be `String`, an integer, `bool` or `Uuid`: those compare and hash identically on every platform (floats and composite keys do not) | use one of those key types, or a `Vec` of records with an explicit key field |
+| `f64` cannot be a map key | map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not) | use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field |
+| `Decimal` cannot be a map key | map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not) | use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field |
+| `undra::prelude::Decimal` cannot be a map key | map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not) | use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field |
+| `Loose` cannot be a map key | map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not) | use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field |
 | `f32` at record Scores, field by_weight is not a valid map key | map keys must compare and hash the same on every platform: `String`, an integer type, `bool` and `Uuid` do, floats and composite keys do not | use one of those key types, or a `Vec` of records with an explicit key field |
 
 ### `E0007` unsupported item shape or placement of an Undra attribute
 
 Raised by macros.
 
-unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__undra_cell`, `#[undra::port]` on an inherent impl, an Undra attribute on the wrong kind of item, `#[undra::api]` on a method, `#[undra::query]` or `#[undra::mutation]` inside an `impl` block or a port trait, a function whose signature uses `Self`, a second `#[undra::api]` impl block for one type). A second impl block is reported by `rustc` as "the name `_undra_error_E0007_<Type>_has_two_undra_api_impl_blocks_merge_them_into_one` is defined multiple times": merge the blocks. A query or mutation inside an impl block that is not `#[undra::api]` cannot be seen by its macro; `rustc` then reports "macro definition is not supported in `trait`s or `impl`s" and "cannot find macro `_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block`", which is this code: move the function out of the block
+unsupported item shape (a unit struct, a tuple struct of two or more fields or none (one field is a newtype), a record without fields, a type alias that does not name an instantiation of a `#[undra::api(generic)]` type, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__undra_cell`, `#[undra::port]` on an inherent impl, an Undra attribute on the wrong kind of item, `#[undra::api]` on a method, `#[undra::query]` or `#[undra::mutation]` inside an `impl` block or a port trait, a function whose signature uses `Self`, a second `#[undra::api]` impl block for one type). A second impl block is reported by `rustc` as "the name `_undra_error_E0007_<Type>_has_two_undra_api_impl_blocks_merge_them_into_one` is defined multiple times": merge the blocks. A query or mutation inside an impl block that is not `#[undra::api]` cannot be seen by its macro; `rustc` then reports "macro definition is not supported in `trait`s or `impl`s" and "cannot find macro `_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block`", which is this code: move the function out of the block
 
 | What you see | Why | Fix |
 | --- | --- | --- |
@@ -2127,7 +2136,7 @@ unsupported item shape (a tuple or unit struct, a record without fields, an empt
 | `#[undra::api]` on the method `now` of a port trait | a port is a list of methods the platform implements; the attribute applies to a whole item (a type or a free function), never to a trait method | remove the attribute from `now`; a function the core exposes that calls the port is a free `#[undra::api] fn(ctx: &Ctx, ..)` outside the trait, calling `weather(ctx).now(..)` |
 | `#[undra::query]` on `admins`, which is inside an `impl` block: its signature uses `Self` | a query is a free function, and the macro generates a struct next to it, which an impl block cannot hold | move `admins` out of the impl block, to module level, and spell out the type instead of `Self` |
 | `#[undra::store]` cannot be applied to an `enum` | `#[undra::store]` applies to a struct | move `#[undra::store]` onto a struct, or remove it |
-| `#[undra::api]` cannot be applied to a type alias | `#[undra::api]` applies to a struct, an enum, an `impl` block or a free `fn` | move `#[undra::api]` onto a struct, an enum, an `impl` block or a free `fn`, or remove it |
+| `#[undra::api]` on the type alias `Alias`, which does not name an instantiation | a type alias is not a schema type of its own; the only alias that is names an instantiation of a generic data type declared with `#[undra::api(generic)]`, so it can be given a name the platforms generate a type for | write `#[undra::api] pub type Alias = Page<Todo>;` for a template `Page`, or remove `#[undra::api]` and write the aliased type where it is used |
 
 ### `E0008` unknown or misplaced `#[undra(..)]` attribute or macro argument
 
@@ -2385,12 +2394,14 @@ a record, enum, error, object or port named like a standard library item (sectio
 
 Raised by macros (a check the compiler runs).
 
-a spelling that looks like a built-in Undra type (`Bytes`, `Uuid`, `String`, `Vec`, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit
+a spelling that looks like a built-in Undra type (`Bytes`, `Uuid`, `String`, `Vec`, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit; for a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes`, `Decimal`) by the membership assertion `Spelled: WireLeaf<kind>`, whose message names the leaves and the features (`uuid`, `chrono`, `time`, `rust_decimal`, `bytes`) that add the types of other crates (ADR-042)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `Bytes` is spelled like the built-in Undra type `undra::prelude::Bytes`, but it is a different type | the schema records this position as the built-in type, so the platforms would read the bytes of `undra::prelude::Bytes` where the generated code writes `Bytes` | rename your type, or import the built-in one (`undra::prelude::Bytes`) where it is used |
-| `Uuid` is spelled like the built-in Undra type `undra::prelude::Uuid`, but it is a different type | the schema records this position as the built-in type, so the platforms would read the bytes of `undra::prelude::Uuid` where the generated code writes `Uuid` | rename your type, or import the built-in one (`undra::prelude::Uuid`) where it is used |
+| `Bytes` is spelled like a built-in Undra type, but it is not one | the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Bytes` | rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra` |
+| `Uuid` is spelled like a built-in Undra type, but it is not one | the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Uuid` | rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra` |
+| `Timestamp` is spelled like a built-in Undra type, but it is not one | the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Timestamp` | rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra` |
+| `Decimal` is spelled like a built-in Undra type, but it is not one | the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Decimal` | rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra` |
 
 ### `E0061` the name written is not the declared name of the type, or the type is not declared with `#[undra::api]`
 
@@ -2466,6 +2477,16 @@ a `#[undra::migrate]` hook with a wrong target or shape (ADR-037): no target or 
 | the migration hook `wrong_parameter` must take one parameter, `old: Option<&DynValue>` | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | write `fn wrong_parameter(old: Option<&DynValue>) -> Result<T, MigrateError>`, where `T` is the signal's value type (`old` is `None` when the snapshot lacks the signal): a plain, non-generic, non-async function |
 | the migration hook `wrong_return` must return `Result<DynRecord, MigrateError>` | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | write `fn wrong_return(old: &DynRecord) -> Result<DynRecord, MigrateError>`: a plain, non-generic, non-async function |
 | `from = "not-hex"` is not a fingerprint | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | write the 64-bit fingerprint of the old type in hex, as the runtime's log or `undra.types.<fingerprint>` key shows it: `from = "0x0123456789abcdef"`, or leave `from` out to take every old version |
+
+### `E0070` a named instantiation of a generic data type that is declared twice or outside the crate of its template
+
+Raised by macros (a check the compiler runs).
+
+a named instantiation of a generic data type (`type TodoPage = Page<Todo>`) declared twice, or outside the crate of its template (ADR-042): the inherent impl of the instantiation carries a constant named after the rule (`_undra_error_E0070_this_instantiation_of_Page_is_declared_twice_keep_one_alias_per_instantiation`), so a second alias of one instantiation is reported by `rustc` as that constant defined twice; an alias in another crate than its template's is reported by the macro itself, naming both crates
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `TodoPage` instantiates `Page`, which is declared in the crate `model`, not in `app` | an instantiation adds an inherent impl to the template's type, which only the crate that declares the template may do, and a second crate naming the same instantiation would register it twice | declare the alias next to the template, in `model`, and use it from here; or declare a concrete `#[undra::api]` struct or enum in this crate |
 
 ### `E0071` a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041)
 

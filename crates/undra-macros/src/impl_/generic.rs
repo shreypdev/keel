@@ -703,6 +703,11 @@ mod tests {
             ),
             ("struct S<T> { a: &str, b: T }", "E0001", "`&str`"),
             ("enum E<T> {}", "E0007", "no variants"),
+            (
+                "struct Tree<T> { a: Option<Box<Tree<T>>> }",
+                "E0002",
+                "names the type being defined",
+            ),
         ] {
             let out = expand_template(src);
             assert!(out.contains(code), "{src}: {out}");
