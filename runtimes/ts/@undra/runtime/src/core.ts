@@ -1,5 +1,6 @@
-import { browserAdapters } from "./adapters/browser.js";
-import { standardPorts, startEventSources, timerPort } from "./adapters/ports.js";
+import { lightAdapters } from "./adapters/browser-events.js";
+import { defaultPorts } from "./adapters/default-ports.js";
+import { startEventSources } from "./adapters/events.js";
 import { PortIds } from "./adapters/ids.js";
 import { WEB_CRYPTO_REQUIRED, consoleLog, hasCryptoRandom } from "./adapters/system.js";
 import type { Adapters, AdapterOverrides } from "./adapters/types.js";
@@ -107,7 +108,7 @@ export interface AttachOptions {
   /** The schema hash of the generated bindings (`UndraIds.schemaHash`); a core built from another schema is refused. */
   readonly expectedSchemaHash: bigint;
   /**
-   * Adapters to use instead of the browser defaults (`browserAdapters()`):
+   * Adapters to use instead of the browser defaults (`browserAdapters()`, which the runtime builds piece by piece: the four port adapters on the first call to their port):
    * a value replaces the default of that port, `null` removes it. `timer`,
    * `clock` and `rng` back the wasm imports (main-thread wasm only); `log`
    * receives the core's log records; `http`, `kv`, `secureStore` and `fs`
@@ -362,7 +363,7 @@ export class UndraCore {
    * random source (`wasm-main` only).
    */
   static async load(options: LoadOptions): Promise<UndraCore> {
-    const adapters = mergeAdapters(browserAdapters(), options.adapters);
+    const adapters = mergeAdapters(lightAdapters(), options.adapters);
     // The worker keeps the snapshots of a core in `wasm-worker` mode: it is told the policy (data, not code).
     const recovery = options.recovery?.options;
     let transport: Transport;
@@ -436,7 +437,7 @@ export class UndraCore {
    * `Hello`.
    */
   static attach(transport: Transport, options: AttachOptions): Promise<UndraCore> {
-    return UndraCore.#attach(transport, options, mergeAdapters(browserAdapters(), options.adapters));
+    return UndraCore.#attach(transport, options, mergeAdapters(lightAdapters(), options.adapters));
   }
 
   static async #attach(transport: Transport, options: AttachOptions, adapters: Partial<Adapters>): Promise<UndraCore> {
@@ -513,7 +514,7 @@ export class UndraCore {
         this.#resync(handle, signalId);
       },
     });
-    for (const [portId, impl] of standardPorts(adapters)) this.#ports.set(portId, impl);
+    for (const [portId, impl] of defaultPorts(options.adapters)) this.#ports.set(portId, impl);
     if (options.ports !== undefined) {
       for (const [portId, impl] of Object.entries(options.ports)) this.#ports.set(Number(portId), impl);
     }
@@ -842,6 +843,7 @@ export class UndraCore {
     this.#setConnection({ kind: "connected" });
     if (this.#options.adapters?.timer && this.#transport.mode === "remote") {
       // A native core normally times itself; an explicit Timer adapter is a request to serve its Timer port.
+      const { timerPort } = await import("./adapters/ports.js");
       this.#ports.set(
         PortIds.Timer.portId,
         timerPort(this.#options.adapters.timer, (timerId) => {
