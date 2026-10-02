@@ -165,7 +165,14 @@ describe("adopt", () => {
     started = performance.now();
     for (let i = 1; i <= rounds; i++) adopt(core, BigInt(i), Thing);
     const hit = ((performance.now() - started) * 1e6) / rounds;
-    console.log(`BENCH host adopt: new wrapper ${fresh.toFixed(0)} ns/op, live wrapper (identity hit + give back) ${hit.toFixed(0)} ns/op`);
+    // The lookup alone: the give-back's Release is the transport's cost, not the identity map's.
+    (core as unknown as { _giveBack(handle: bigint): void })._giveBack = () => {};
+    started = performance.now();
+    for (let i = 1; i <= rounds; i++) adopt(core, BigInt(i), Thing);
+    const lookup = ((performance.now() - started) * 1e6) / rounds;
+    console.log(
+      `BENCH host adopt: new wrapper ${fresh.toFixed(0)} ns/op; live wrapper ${hit.toFixed(0)} ns/op with its Release through the in-process fake, ${lookup.toFixed(0)} ns/op for the lookup alone`,
+    );
     expect(fresh).toBeGreaterThan(0);
   });
 });

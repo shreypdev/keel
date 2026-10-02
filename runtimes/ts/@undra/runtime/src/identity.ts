@@ -23,14 +23,8 @@ export interface UndraObjectClass<T extends UndraObject> {
   readonly prototype: T;
 }
 
-/** The wrappers of one core, by handle. */
-interface Table {
-  readonly live: Map<Handle, WeakRef<UndraObject>>;
-  /** The size at which the next sweep runs (it doubles after each, so sweeping stays O(1) per adoption). */
-  sweepAt: number;
-}
-
-const tables = new WeakMap<UndraCore, Table>();
+/** The wrappers of each core, by handle. */
+const tables = new WeakMap<UndraCore, Map<Handle, WeakRef<UndraObject>>>();
 
 /** A store's `_observeAll` (protected; reached by name, as the generated `create()` reaches it inside the class). */
 interface Observing {
@@ -40,33 +34,9 @@ interface Observing {
 /** The first observation of each store a reply made, so that the same store adopted again waits for its values too. */
 const observed = new WeakMap<UndraObject, Promise<void>>();
 
-/** Drops the entries whose wrapper was closed or collected. */
-function sweep(table: Table): void {
-  for (const [handle, ref] of table.live) {
-    if (ref.deref()?.closed !== false) table.live.delete(handle);
-  }
-  table.sweepAt = Math.max(64, 2 * table.live.size);
-}
-
-/** `adopt`, telling whether the wrapper is new. */
-function take<T extends UndraObject>(core: UndraCore, handle: Handle, type: UndraObjectClass<T>): [T, boolean] {
-  let table = tables.get(core);
-  if (table === undefined) tables.set(core, (table = { live: new Map(), sweepAt: 64 }));
-  const ref = table.live.get(handle);
-  const found = ref?.deref();
-  if (found !== undefined && !found.closed) {
-    // The reply's reference: the live wrapper keeps the one it owns.
-    core._giveBack(handle);
-    return [found as T, false];
-  }
-  // A wrapper that was collected before its finalizer ran still has its mirror registration; the finalizer only gives
-  // its reference back once a newer wrapper holds the handle (`collected`).
-  if (ref !== undefined && found === undefined) core.mirror.unregister(handle);
-  const made = new (type as unknown as new (core: UndraCore, handle: Handle) => T)(core, handle);
-  core._held(handle);
-  table.live.set(handle, new WeakRef(made));
-  if (table.live.size >= table.sweepAt) sweep(table);
-  return [made, true];
+/** The live wrapper of `handle` in `core`, if there is one (closed or not). */
+function wrapperOf(core: UndraCore, handle: Handle): UndraObject | undefined {
+  return tables.get(core)?.get(handle)?.deref();
 }
 
 /**
@@ -75,7 +45,27 @@ function take<T extends UndraObject>(core: UndraCore, handle: Handle, type: Undr
  * calls it; an app never holds a raw handle.
  */
 export function adopt<T extends UndraObject>(core: UndraCore, handle: Handle, type: UndraObjectClass<T>): T {
-  return take(core, handle, type)[0];
+  let live = tables.get(core);
+  if (live === undefined) tables.set(core, (live = new Map()));
+  const ref = live.get(handle);
+  const found = ref?.deref();
+  if (found !== undefined && !found.closed) {
+    // The reply's reference: the live wrapper keeps the one it owns.
+    core._giveBack(handle);
+    return found as T;
+  }
+  // A wrapper that was collected before its finalizer ran still has its mirror registration; the finalizer only gives
+  // its reference back once a newer wrapper holds the handle (`collected`).
+  if (ref !== undefined && found === undefined) core.mirror.unregister(handle);
+  const made = new (type as unknown as new (core: UndraCore, handle: Handle) => T)(core, handle);
+  core._held(handle);
+  live.set(handle, new WeakRef(made));
+  // As the map doubles past 64, the entries of wrappers that were closed or collected go: O(1) per adoption.
+  const size = live.size;
+  if (size >= 64 && (size & (size - 1)) === 0) {
+    for (const [key, entry] of live) if (entry.deref()?.closed !== false) live.delete(key);
+  }
+  return made;
 }
 
 /** Reads a handle that must not be null (ADR-040 decision 3: absence is an `Option`). */
@@ -87,8 +77,9 @@ function readHandle(r: UndraReader): Handle {
 
 /** Adopts `handle` and, for a store that is new, observes it (once), so its signals hold the core's values. */
 async function ready<T extends UndraObject>(core: UndraCore, handle: Handle, type: UndraObjectClass<T>): Promise<T> {
-  const [object, made] = take(core, handle, type);
-  if (made && typeof (object as Partial<Observing>)._observeAll === "function") {
+  const before = wrapperOf(core, handle);
+  const object = adopt(core, handle, type);
+  if (object !== before && typeof (object as Partial<Observing>)._observeAll === "function") {
     observed.set(object, (object as unknown as Observing)._observeAll());
   }
   await observed.get(object);
@@ -151,6 +142,6 @@ export function requireOwn(core: UndraCore, object: UndraObject): Handle {
  * @internal The finalizer of `UndraObject`.
  */
 export function collected(core: UndraCore, handle: Handle): void {
-  if (tables.get(core)?.live.get(handle)?.deref() === undefined) core.release(handle);
+  if (wrapperOf(core, handle) === undefined) core.release(handle);
   else core._giveBack(handle);
 }
