@@ -191,6 +191,19 @@ impl Link {
             key: self.key.clone(),
         }
     }
+
+    /// What a snapshot keeps of the handle (ADR-059): the parameters it observes with and the
+    /// polling interval it set for itself, if any. See [`crate::revive`].
+    pub(crate) fn recreation(&self) -> Vec<u8> {
+        let poll_ms = self
+            .shared
+            .state
+            .lock()
+            .entries
+            .get(&self.key)
+            .and_then(|entry| entry.polling.override_of(self.sink_id));
+        crate::revive::encode_record(&self.key.params, poll_ms)
+    }
 }
 
 impl Drop for Link {
@@ -357,6 +370,8 @@ pub(crate) trait HandleOps: Send + Sync {
         false
     }
     fn make_cell(&self) -> Result<Arc<StoreCell>, SignalsError>;
+    /// What a snapshot keeps of the handle (ADR-059): [`Link::recreation`].
+    fn recreation(&self) -> Vec<u8>;
 }
 
 impl<Q: QueryDef> HandleOps for QueryHandle<Q> {
@@ -374,6 +389,10 @@ impl<Q: QueryDef> HandleOps for QueryHandle<Q> {
 
     fn make_cell(&self) -> Result<Arc<StoreCell>, SignalsError> {
         QueryHandle::make_cell(self)
+    }
+
+    fn recreation(&self) -> Vec<u8> {
+        self.link.recreation()
     }
 }
 
@@ -407,9 +426,16 @@ impl UndraObjectDyn for HandleObject {
         Some(&self.0.cell)
     }
 
-    /// A handle is a view of the cache; snapshots leave it out and the platform re-creates it.
+    /// A handle is a view of the cache, not state: a snapshot does not carry it as a store.
     fn transient(&self) -> bool {
         true
+    }
+
+    /// What a snapshot keeps instead (ADR-059): the handle's parameters and its observer's own
+    /// polling interval, from which a restore re-issues the handle and the runtime builds the
+    /// object again when the host first uses it ([`crate::revive`]).
+    fn recreation(&self) -> Option<Vec<u8>> {
+        Some(self.0.ops.recreation())
     }
 }
 
