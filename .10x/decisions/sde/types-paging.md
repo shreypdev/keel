@@ -138,3 +138,41 @@ Each sub-piece commits small (`type(scope): summary`, trailer `Co-Authored-By: C
 worktree `/Users/shrey/Desktop/src/.work/tp-<name>`, never pushes, runs only its own checks, and reports its HEAD. The integrator
 (`wt/types-paging`) merges the branches in the order `tp-macros`, `tp-lazy`, `tp-query`, `tp-bindgen`, `tp-swift`, `tp-kotlin`,
 `tp-ts`, fixes the seams and runs the matrix once.
+
+## Results (integrator, 2026-10-02)
+
+What landed: everything in both ADRs' implementation briefs, whole (R4). The per-ADR lists and the dated deviations are in the ADRs'
+"Implementation (2026-10-02) and deviations" sections (ADR-042: nine items, ADR-043: eight items), both flipped to Accepted; ADR-031 carries the
+fold-rule amendment (a full value supersedes everything before it; a lazy invalidation supersedes only earlier invalidations of its signal).
+
+Contract scenarios: **S31** newtypes, generic instantiations and leaf types; **S32** paged queries and lazy lists; **S33** polling. The grid is
+33 scenarios and 95 cells (31 Swift, 31 Kotlin, 33 TypeScript), all 95 pass; the React Native column runs S31 to S33 as well (S17 and S29 stay
+app-tested there, as before).
+
+Sizes (`scripts/wasm-size.sh`, both gates, on this worktree's path, which embeds about 240 bytes more than the canonical one): the hello-world
+web core is **116,480 gzipped** (gate 120,000; main's record 119,654), so it did not grow: the foundation cost it about 1.9 KB (schema fields,
+persisted-state arms), which the lazy page server linked by use (`serve_lazy_lists` hooks only a store with a `Lazy` sets) and one shell sort
+(`undra_signals::sort_ids`, replacing three `slice::sort` instantiations) paid back with room to spare. The JavaScript up-front chunk is **22,061**
+(gate 22,100, record 22,005): `LazyList`, the paging hooks and the polling controls load with the generated bindings that use them. The
+recorded numbers in `bench/budgets.toml`'s sizes were not re-recorded here (a longer path would pin the record 240 bytes high); re-record on the
+canonical path after the merge to `main`.
+
+Bench rows (`bench/budgets.toml`, `bench/RESULTS.md` section 7): `wire/decimal/roundtrip` 45 ns (budget 250), `lazy/page_50_of_100k` 290 ns,
+`lazy/page_50_of_10k` 288 ns, `lazy/view_page_50_of_100k` 3.2 us, `lazy/invalidate` 178 ns (12 bytes asserted), `lazy/invalidate_10k` 171 ns,
+`query/infinite_append_page_50` 7.3 us against `query/keyed_push_50` 5.4 us (ratio 1.34, gate 2.0); `lazy_alloc` pins one buffer more than a plain
+observed write.
+
+Counts on the merged tree: `cargo test --workspace` 3,515 passed, 0 failed, 21 ignored; Swift 861 (observation mode and the ObservableObject
+mode), Kotlin 876 (+32 testkit; both compilers), TypeScript 1,844, React Native 109 + 30 C++ checks, the wasm harness 22 + 36, interop (Swift 6 + 22,
+JNI 16, C), the playground web 135; `undra bindgen --check --docs` is current on playground, cookbook, fieldbook and two-cores a and b (the iOS 15
+sample is generated without `--docs`, as its floor script checks it); the Android `assembleDebug` of the playground builds; site `build-all` is up
+to date and `check-links --words` passes (landing prose 342 of 350).
+
+Process notes:
+* **An environment incident**: the shared `scratchpad/env.sh` was overwritten by the `objects-followups` agent (it `cd`s into that worktree), so two
+  of this piece's commit/merge commands ran in that worktree (commits `dbabbad`, `5ae4aa8`, `458fafa`). Nothing was pushed. That worktree's owner
+  has since repaired its branch (`backup/of-foreign-458fafa` keeps the accidental line; none of the three commits is in its history). This piece
+  moved to a private `env-tp.sh` with a branch guard (`INCIDENT-types-paging-env.md` in the scratchpad has the reflog).
+* The `Decimal` bench row was first recorded with a placeholder (16 ns) and re-measured at 45 ns; ADR-042's deviation 9 says 45.
+* Merging `main` (prod-ops, objects-callbacks) moved every schema hash once more, as announced: regenerated, not hand-merged; one golden
+  (`h1_leaf_shadowed`: `BackgroundReport` joins the `Encode` candidates) and the session/remote-todos testkit fixtures were re-recorded.

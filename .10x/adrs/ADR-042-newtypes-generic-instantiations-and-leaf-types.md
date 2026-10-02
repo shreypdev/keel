@@ -270,6 +270,6 @@ All eight items of the brief landed (the records: `.10x/decisions/sde/types-pagi
    reason); `Decimal`, `BigDecimal`, `UndraLazyList`, `UndraLazyListObject`, `LazyList` and `InfiniteQuery` are reserved type names.
 8. **Persisted state (decision 1.7)**: the structural migration wraps and unwraps a newtype in both the streamed and the tree conversion
    (`ClosureRecord.transparent`), and wrapping a persisted field in a newtype needs no hook (tested).
-9. **Numbers.** `wire/decimal/roundtrip` is in the `wire` group with a budget of 250 ns (measured 16 ns). The foundation costs the hello-world
+9. **Numbers.** `wire/decimal/roundtrip` is in the `wire` group with a budget of 250 ns (measured 45 ns: 16 bytes of mantissa, a scale checked on decode). The foundation costs the hello-world
    web core bytes (schema serialisation of the new fields, the persisted-state arms); see ADR-043's size note, where they were paid back.
 
