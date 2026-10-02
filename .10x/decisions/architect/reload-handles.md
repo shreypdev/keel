@@ -29,7 +29,7 @@
 
 ## Decisions needed from the integrator
 
-Each with my recommendation. 1 to 3 are the design; 4 to 8 can be answered independently.
+Each with my recommendation. 1 to 3 are the design; 4 to 9 can be answered independently.
 
 1. **The record in-band (reserved field id) or a "layout 3" trailer behind a tag?** The brief expected a layout
    change. *Recommend in-band.* P1 ran both against `main` unmodified: an old runtime restores the in-band snapshot
