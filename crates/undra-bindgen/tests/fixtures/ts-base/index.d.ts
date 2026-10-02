@@ -26,6 +26,8 @@ export interface LoadOptions {
   readonly url?: string;
   readonly adapters?: Readonly<Record<string, PortImpl>>;
   readonly expectedSchemaHash: bigint;
+  /** Addition (ADR-046): the core's namespace, for the panic report of a wasm trap. */
+  readonly namespace?: string;
 }
 
 /** Addition (ADR-044): what `UndraCore.attach` and a generated entry's `attach` take. */

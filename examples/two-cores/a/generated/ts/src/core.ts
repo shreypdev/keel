@@ -40,13 +40,14 @@ export const UndraPlaygroundA = {
   schemaHash: UndraIds.schemaHash,
 
   /**
-   * Loads the core (`UndraCore.load` with this package's schema hash) and makes it `core`. Rejects with
+   * Loads the core (`UndraCore.load` with this package's schema hash and namespace, which a panic report names)
+   * and makes it `core`. Rejects with
    * `UndraSchemaMismatchError` when the core was built from another schema, and with `UndraError` while
    * this core is already loaded.
    */
   async load(options: Omit<LoadOptions, "expectedSchemaHash">): Promise<UndraCore> {
     claim();
-    return started(UndraCore.load({ ...options, expectedSchemaHash: UndraIds.schemaHash }));
+    return started(UndraCore.load({ namespace: UndraIds.namespace, ...options, expectedSchemaHash: UndraIds.schemaHash }));
   },
 
   /**

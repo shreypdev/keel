@@ -1187,7 +1187,8 @@ impl TsGen<'_> {
             w.line("schemaHash: UndraIds.schemaHash,");
             w.blank();
             w.line("/**");
-            w.line(" * Loads the core (`UndraCore.load` with this package's schema hash) and makes it `core`. Rejects with");
+            w.line(" * Loads the core (`UndraCore.load` with this package's schema hash and namespace, which a panic report names)");
+            w.line(" * and makes it `core`. Rejects with");
             w.line(" * `UndraSchemaMismatchError` when the core was built from another schema, and with `UndraError` while");
             w.line(" * this core is already loaded.");
             w.line(" */");
@@ -1197,7 +1198,7 @@ impl TsGen<'_> {
                 |w| {
                     w.line("claim();");
                     w.line(
-                        "return started(UndraCore.load({ ...options, expectedSchemaHash: UndraIds.schemaHash }));",
+                        "return started(UndraCore.load({ namespace: UndraIds.namespace, ...options, expectedSchemaHash: UndraIds.schemaHash }));",
                     );
                 },
             );
