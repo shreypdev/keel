@@ -960,7 +960,7 @@ do not change) through the raw API with the ids it knows. The server serves `GET
    `Probe`, the one object the restore makes stale, step 7): no query handle was dropped and the restore made no
    handle of its own.
 4. **`refetch` is accepted** on the same remote wrapper: the GET count grows by 1 and `data` is the two items.
-5. **Polling continues.** The ticker advances within 2.5 s with no call from the runner (the core's timer was
+5. **Polling continues.** The ticker advances (it polls every second; each runner waits up to 20 s, so a loaded machine does not fail the step) with no call from the runner (the core's timer was
    not touched).
 6. **Pages still load.** `fetchNextPage()` on the same feed wrapper gives 150 rows; `Library.books[0]` is readable
    again (the restore rebuilt the store and its page servers, and a page call through the new server succeeds).
