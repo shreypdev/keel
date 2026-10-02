@@ -970,7 +970,9 @@ do not change) through the raw API with the ids it knows. The server serves `GET
    remote and feed wrappers).
 9. **Closing** the wrappers returns `live_handles` to its value before step 1.
 10. **A fresh runtime** (TypeScript: a second core of build B in the process; Swift and Kotlin: the build-B
-    process, the snapshot and the handles of step 1 handed over in a file). The runner reads `live_handles`,
+    process, the snapshot and the handles of step 1 handed over in a file, on a **new core of build B**: S14's
+    and S15's build-B steps leave stores in the core they used, which a restore replaces, so the core is shut
+    down and loaded again over an empty `Kv` and a new server first). The runner reads `live_handles`,
     then `restore(snapshot)` succeeds. `live_handles` has grown by the stores of the snapshot (`Counter`,
     `Library` and its two page servers) and the three query handles build B honours: 7 (the handle of `roster` is
     not counted). No GET was made yet. After `configure_remote` (core state outside stores, as S22 says),
