@@ -203,6 +203,34 @@ jobs:
           xcodebuild -quiet -project examples/playground/ios/PlaygroundApp.xcodeproj -scheme PlaygroundApp \
             -configuration Debug -destination 'generic/platform=iOS Simulator' build
 
+  ios-floor:
+    # ADR-045, docs/IOS_15_16.md: an app that supports iOS 15 and 16 gets ObservableObject stores and the runtime's UndraDuration.
+    # Everything here is scripts/ios-floor.sh, so a machine runs the same steps: the runtime for the iOS 15.0 simulator, every golden
+    # case of the generator in this mode for iOS 15.0 and 16.0, examples/ios15-sample (deployment target 15.0) with xcodebuild, the
+    # playground's and Fieldbook's bindings generated for iOS 15 and compiled for it (their apps stay on 17, which is the default
+    # job above), and the Swift contract grid against the iOS 15 bindings. Running the sample needs an iOS 15 or 16 simulator
+    # runtime, which the hosted image may not have (the last step says which); the build is the guarantee.
+    name: iOS 15 / 16 floor
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - name: iOS targets of the core, and the undra CLI
+        run: |
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+          cargo build -p undra-cli
+      - name: The runtime, the golden cases and the sample build at the floor
+        run: scripts/ios-floor.sh runtime golden sample
+      - name: The playground's and Fieldbook's bindings generated for iOS 15 compile for it
+        run: scripts/ios-floor.sh apps
+      - name: Swift contract scenarios against bindings generated for iOS 15
+        run: scripts/ios-floor.sh contract
+      - name: The sample on an iOS 15 or 16 simulator runtime, when the image has one
+        run: |
+          xcrun simctl list runtimes
+          scripts/ios-floor.sh simulator
+
   android:
     name: Android cross-build
     runs-on: ubuntu-latest

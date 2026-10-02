@@ -1,0 +1,12 @@
+swift/Package.swift
+swift/Sources/Ios15SampleCore/Generated/Core.swift
+swift/Sources/Ios15SampleCore/Generated/Errors.swift
+swift/Sources/Ios15SampleCore/Generated/Ids.swift
+swift/Sources/Ios15SampleCore/Generated/Objects.swift
+swift/Sources/Ios15SampleCore/Generated/Ports.swift
+swift/Sources/Ios15SampleCore/Generated/Queries.swift
+swift/Sources/Ios15SampleCore/Generated/Stores.swift
+swift/Sources/Ios15SampleCore/Generated/Types.swift
+swift/Sources/Ios15SampleCoreFFI/include/ios15_sample_core_undra.h
+swift/Sources/Ios15SampleCoreFFI/include/module.modulemap
+swift/Sources/Ios15SampleCoreFFI/ios15_sample_core_undra.c

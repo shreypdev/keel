@@ -10,13 +10,19 @@ extension ContractScenarios {
         await scenario("S01", "primitives round-trip") {
             let core = try self.core
 
-            // 1. The typical value.
+            // 1. The typical value. The wire `Duration` is `Swift.Duration`, or the runtime's `UndraDuration` when the bindings
+            // are generated for an iOS 15 floor (`run.sh --floor`, ADR-045); the same 1.500000123 seconds either way.
+            #if UNDRA_FLOOR
+            let span = UndraDuration(nanoseconds: 1_500_000_123)
+            #else
+            let span: Duration = .seconds(1) + .nanoseconds(500_000_123)
+            #endif
             let typical = Primitives(
                 flag: true, tiny: -8, small: -16_000, int: -2_000_000_000,
                 long: -9_000_000_000_000_000_000, byte: 255, word: 65_535, dword: 4_000_000_000,
                 qword: 18_000_000_000_000_000_000, single: 1.5, double: -2.25e100,
                 text: "héllo, wörld ✓", blob: [0, 1, 2, 254, 255],
-                span: .seconds(1) + .nanoseconds(500_000_123),
+                span: span,
                 at: Date(timeIntervalSince1970: 1_700_000_000.123),
                 id: UUID(uuidString: "12345678-9abc-def0-0102-030405060708")!
             )

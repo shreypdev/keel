@@ -110,6 +110,10 @@ pub const MIGRATIONS: &[Migration] = &[Migration {
             kind: Kind::New,
             text: "A project made by `undra init` builds its core from the app's own build system (a Gradle `undraBuild` task, an Xcode \"Build the Undra core\" phase, the `undra()` Vite plugin) and has a CI workflow (`.github/workflows/undra.yml`). `undra upgrade` does not edit your app's project files: to get these in an older project copy the pieces from a fresh `undra init` (the Xcode project's build phase and `ios/Config/*.xcfilelist`, `android/app/build.gradle.kts`, `web/vite.config.ts`). `undra doctor --fix` prints the commands that close every gap of this machine as one block.",
         },
+        Note {
+            kind: Kind::New,
+            text: "An app can support iOS 15 and 16 (ADR-045, docs/IOS_15_16.md): set `[ios] deployment_target = \"15.0\"` in undra.toml (it must be 15.0 or later) and run `undra bindgen`, and the generated Swift stores and query handles are `ObservableObject`s with `@Published` properties instead of `@Observable` classes (the default from 17.0 on, unchanged), and the wire `Duration` is the runtime's `UndraDuration` below iOS 16. Views observe a store with `@ObservedObject` (`@StateObject` to own it) and the dev status bar reads `core.connectionObject`; `undra init --ios-deployment-target 15.0` writes an app that does. `[bindings] swift_observation` (and `undra bindgen --swift-observation`) overrides the choice, and `observation` below iOS 17.0 is refused. Nothing changes for a project that stays on 17.0.",
+        },
     ],
 }];
 
