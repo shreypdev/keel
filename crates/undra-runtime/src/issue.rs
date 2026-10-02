@@ -167,10 +167,20 @@ impl<'a> IssueScope<'a> {
     /// against the call's origin when it has one.
     pub fn commit(mut self) {
         let issued = core::mem::take(&mut self.issued);
-        let origin = current_ledger_origin();
+        let origin = current_origin();
         if origin != 0 && !issued.is_empty() {
             self.rt.origins().record(origin, &issued);
         }
+    }
+}
+
+impl IssueScope<'_> {
+    /// [`commit`](IssueScope::commit) for a constructor's reply (an `Arc<Self>` singleton): the
+    /// references are the caller's own, which the one that made the constructor call counts (the
+    /// transport's session, per reference), so they are not recorded against the call's origin as
+    /// well: a reference lives in exactly one ledger.
+    pub fn commit_constructed(mut self) {
+        self.issued.clear();
     }
 }
 
@@ -186,42 +196,24 @@ impl Drop for IssueScope<'_> {
 
 // ----- origins ---------------------------------------------------------------------------
 
-/// Which client a call is served for, and whether the references it issues are recorded for that
-/// client: a constructor's reply is the transport's to account for (it is one reference the client
-/// made, counted by the session that knows which constructor call it answered), so the origin's
-/// ledger skips what a constructor issues (an `Arc<Self>` singleton would otherwise be counted twice).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct CallOrigin {
-    /// The client (`0`: the process's own embedder).
-    pub(crate) origin: u64,
-    /// Whether the references the call issues are recorded against `origin`.
-    pub(crate) ledger: bool,
-}
-
 thread_local! {
-    /// The origin of the call being served on this thread.
-    static ORIGIN: Cell<CallOrigin> = const { Cell::new(CallOrigin { origin: 0, ledger: false }) };
+    /// The origin of the call being served on this thread (`0`: the process's own embedder).
+    static ORIGIN: Cell<u64> = const { Cell::new(0) };
 }
 
-/// The origin of the call running on this thread: whose proxies a callback parameter makes.
+/// The origin of the call running on this thread.
 pub(crate) fn current_origin() -> u64 {
-    ORIGIN.try_with(Cell::get).unwrap_or_default().origin
-}
-
-/// The origin the references issued now are recorded against, or `0` for none.
-fn current_ledger_origin() -> u64 {
-    let current = ORIGIN.try_with(Cell::get).unwrap_or_default();
-    if current.ledger { current.origin } else { 0 }
+    ORIGIN.try_with(Cell::get).unwrap_or(0)
 }
 
 /// Sets the thread's origin for as long as it lives.
 pub(crate) struct OriginScope {
-    previous: CallOrigin,
+    previous: u64,
 }
 
 impl OriginScope {
-    pub(crate) fn enter(origin: CallOrigin) -> OriginScope {
-        let previous = ORIGIN.try_with(|o| o.replace(origin)).unwrap_or_default();
+    pub(crate) fn enter(origin: u64) -> OriginScope {
+        let previous = ORIGIN.try_with(|o| o.replace(origin)).unwrap_or(0);
         OriginScope { previous }
     }
 }
@@ -236,12 +228,12 @@ impl Drop for OriginScope {
 /// A call's future, polled with its origin set: an asynchronous method issues its handles in its
 /// last poll, which the executor runs on whichever thread it is on.
 pub(crate) struct WithOrigin<F> {
-    origin: CallOrigin,
+    origin: u64,
     inner: Pin<Box<F>>,
 }
 
 impl<F> WithOrigin<F> {
-    pub(crate) fn new(origin: CallOrigin, inner: F) -> WithOrigin<F> {
+    pub(crate) fn new(origin: u64, inner: F) -> WithOrigin<F> {
         WithOrigin {
             origin,
             inner: Box::pin(inner),

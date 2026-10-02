@@ -39,7 +39,7 @@ use crate::executor::{
 use crate::ext::{Extensions, InitHook, InspectFn, Inspectors};
 use crate::guard::{self, PanicReport, drop_guarded, encode_panic_body};
 use crate::host::{Host, PortCallOutcome};
-use crate::issue::{CallOrigin, IssueScope, OriginScope, Origins, WithOrigin};
+use crate::issue::{IssueScope, OriginScope, Origins, WithOrigin};
 use crate::lazy::LazyList;
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
 
@@ -88,10 +88,11 @@ thread_local! {
     /// Ids of the runtimes whose `Host` callback this thread is currently inside, innermost
     /// last (ADR-023, finding M2).
     static IN_HOST: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
-    /// The handles a dispatcher resolved to objects while it ran on this thread (`Runtime::object`),
-    /// collected only while `dispatch` has armed it: the objects a call holds (its receiver and its
-    /// object parameters), which a restore must check before the call may go on (ADR-023, O3).
-    static RESOLVED: RefCell<Option<Vec<Handle>>> = const { RefCell::new(None) };
+    /// The object parameters `Runtime::param` resolved for the call being dispatched on this
+    /// thread: what an asynchronous call or a stream holds, which a restore must check
+    /// (ADR-023). They belong to the call `RESOLVED_FOR` names (`0`: none).
+    static RESOLVED: Cell<Held> = const { Cell::new(NO_PARAMS) };
+    static RESOLVED_FOR: Cell<u32> = const { Cell::new(0) };
     /// Nesting depth of `testing::unchecked_writes` scopes on this thread.
     static UNCHECKED_WRITES: Cell<u32> = const { Cell::new(0) };
     /// This thread created a `TestRuntime`, so it is that test's driver.
@@ -381,45 +382,45 @@ struct CallEntry {
     receiver: Handle,
     /// What the call is, to name it in a panic report (ADR-046).
     target: CallTarget,
-    /// The handles of the objects the call took as parameters (resolved before its body ran): a
-    /// restore that replaced or invalidated one of them cancels the call as it does for the
-    /// receiver, since the call would finish on an object the handle no longer names.
-    params: Vec<Handle>,
+    /// The objects the call took as parameters (resolved before its body ran): a restore that
+    /// replaced or invalidated one of them cancels the call as it does for the receiver, since
+    /// the call would finish on an object the handle no longer names.
+    params: Held,
     stream: Option<Arc<StreamState>>,
 }
 
-/// Arms the thread's collector of resolved object handles for the span of a dispatch, and hands
-/// back what the dispatcher resolved.
-struct ResolvedScope(());
+/// The object parameters of one call, inline, unused slots null: a call is checked against its
+/// first four (an object parameter beyond them is not: a restore leaves such a call to finish).
+/// Plain data (`Copy`), so a call table entry has nothing to free.
+type Held = [Handle; 4];
 
-impl ResolvedScope {
-    fn arm() -> ResolvedScope {
-        let _ = RESOLVED.try_with(|slot| *slot.borrow_mut() = Some(Vec::new()));
-        ResolvedScope(())
-    }
+/// A call with no object parameter.
+const NO_PARAMS: Held = [Handle::NULL; 4];
 
-    /// The handles resolved so far, in order; the collector stays armed until the scope drops.
-    fn take(&self) -> Vec<Handle> {
-        RESOLVED
-            .try_with(|slot| slot.borrow_mut().as_mut().map(std::mem::take))
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+/// Remembers that call `call_id` took the object `handle` as a parameter. A call's parameters
+/// are resolved one after the other, straight before its dispatch returns the future or stream
+/// that holds them, so one slot per thread is enough.
+#[inline(never)]
+fn note_param(call_id: u32, handle: Handle) {
+    let mut held = if RESOLVED_FOR.replace(call_id) == call_id {
+        RESOLVED.get()
+    } else {
+        NO_PARAMS
+    };
+    if let Some(free) = held.iter_mut().find(|held| held.is_null()) {
+        *free = handle;
     }
+    RESOLVED.set(held);
 }
 
-impl Drop for ResolvedScope {
-    fn drop(&mut self) {
-        let _ = RESOLVED.try_with(|slot| *slot.borrow_mut() = None);
+/// The object parameters call `call_id` took (and forgets them).
+#[inline(never)]
+fn take_params(call_id: u32) -> Held {
+    if RESOLVED_FOR.replace(0) == call_id {
+        RESOLVED.get()
+    } else {
+        NO_PARAMS
     }
-}
-
-fn note_resolved(handle: Handle) {
-    let _ = RESOLVED.try_with(|slot| {
-        if let Some(list) = slot.borrow_mut().as_mut() {
-            list.push(handle);
-        }
-    });
 }
 
 /// Credit accounting for one open stream (SPEC 3.7).
@@ -463,8 +464,6 @@ enum Dispatched {
     Written,
     Panicked(PanicReport, Handle),
     Bad(String),
-    /// Failed after taking what the host handed over, without unwinding: status 2 (`DispatchResult::Failed`).
-    Failed(String),
 }
 
 /// The reply of a synchronous call: the armed slot holding it, or an owned payload.
@@ -531,11 +530,11 @@ pub struct Runtime {
     client_origin: AtomicU64,
 }
 
-/// The report of a call that failed in the core without a panic: its reason, no backtrace.
-fn failed_report(reason: &str) -> PanicReport {
+/// The report of a call that failed in the core without a panic: its reason, nothing else.
+fn failed_report(reason: String) -> PanicReport {
     PanicReport {
-        message: reason.to_owned(),
-        backtrace: "not a panic: the call failed after it took its arguments".to_owned(),
+        message: reason,
+        backtrace: String::new(),
         location: String::new(),
         thread: String::new(),
         frames: Vec::new(),
@@ -1541,8 +1540,8 @@ impl Runtime {
     /// (ADR-040) are recorded against it and [`release_origin`](Runtime::release_origin) can
     /// give them back when the client disconnects, and the callback instances it lends are its
     /// own ([`set_client_origin`](Runtime::set_client_origin)). What a *constructor* returns is
-    /// not recorded: it is the one reference its client made, which the caller counts (the
-    /// transport's session). `origin` 0 is the process's own embedder.
+    /// not recorded ([`IssueScope::commit_constructed`]): it is the one reference its client made,
+    /// which the caller counts (the transport's session). `origin` 0 is the process's own embedder.
     pub fn call_from(&self, origin: u64, payload: &[u8]) -> u32 {
         // Set for the dispatch of a synchronous method and, through the spawned future, for every
         // poll of an asynchronous one.
@@ -1559,14 +1558,7 @@ impl Runtime {
                 return 5;
             }
         };
-        // A constructor's reply is the one reference its client made, counted by the session that
-        // knows which constructor call it answers; the origin's ledger records what other calls
-        // return, so that a reference is in exactly one of them.
-        let origin = CallOrigin {
-            origin,
-            ledger: !matches!(call.target, CallTarget::Constructor { .. }),
-        };
-        let _origin = (origin.origin != 0).then(|| OriginScope::enter(origin));
+        let _origin = (origin != 0).then(|| OriginScope::enter(origin));
         let call_id = call.call_id;
         if call_id == 0 {
             Stats::inc(&self.stats.bad_requests);
@@ -1595,43 +1587,35 @@ impl Runtime {
             );
             return 5;
         }
-        // The objects the dispatcher resolves (the receiver, the object parameters) are what an
-        // asynchronous call or a stream holds while it runs: a restore checks them (ADR-023).
-        let resolved = ResolvedScope::arm();
-        let dispatched = self.dispatch(&call, false);
-        let params = resolved.take();
-        drop(resolved);
-        match dispatched {
+        match self.dispatch(&call, false) {
             Dispatched::Bad(reason) => self.reply_bad(call_id, &reason),
             Dispatched::Panicked(report, handle) => {
                 self.reply_panic(call_id, handle, &call.target, &report);
             }
-            Dispatched::Failed(reason) => self.reply_failed(call_id, &reason),
             Dispatched::Done(result, handle) => match result {
                 DispatchResult::Sync(Ok(body)) => self.send_reply(call_id, ReplyStatus::Ok, &body),
                 DispatchResult::Sync(Err(body)) => {
                     self.send_reply(call_id, ReplyStatus::Error, &body);
                 }
                 DispatchResult::Async(future) => {
-                    if origin.origin == 0 {
-                        self.spawn_call(call_id, handle, call.target, params, future);
+                    if origin == 0 {
+                        self.spawn_call(call_id, handle, call.target, future);
                     } else {
                         self.spawn_call(
                             call_id,
                             handle,
                             call.target,
-                            params,
                             Box::pin(WithOrigin::new(origin, future)),
                         );
                     }
                 }
                 DispatchResult::Stream(stream) => {
-                    self.open_stream(call_id, handle, call.target, params, stream);
+                    self.open_stream(call_id, handle, call.target, stream);
                 }
                 DispatchResult::Unknown
                 | DispatchResult::BadRequest(_)
                 | DispatchResult::Failed(_) => {
-                    // `dispatch` maps these to `Dispatched::Bad` and `Dispatched::Failed`.
+                    // `dispatch` maps these to `Dispatched::Bad` and `Dispatched::Panicked`.
                     self.reply_bad(call_id, "internal: unmapped dispatch result");
                 }
             },
@@ -1724,19 +1708,6 @@ impl Runtime {
                 None => bad("internal: a dispatcher wrote a reply nobody asked for"),
             },
             Dispatched::Bad(reason) => bad(&reason),
-            Dispatched::Failed(reason) => {
-                let report = failed_report(&reason);
-                self.log(
-                    ERROR,
-                    "undra::runtime",
-                    &format!("call_sync failed: {reason}"),
-                );
-                SyncReply::Owned(reply_payload(
-                    call_id,
-                    ReplyStatus::Panic,
-                    &encode_panic_body(&report),
-                ))
-            }
             Dispatched::Panicked(report, handle) => {
                 self.note_panic(
                     "call_sync",
@@ -1952,7 +1923,11 @@ impl Runtime {
     ) -> Option<Dispatched> {
         match outcome.downcast::<DispatchResult>() {
             Ok(DispatchResult::BadRequest(reason)) => Some(Dispatched::Bad(reason)),
-            Ok(DispatchResult::Failed(reason)) => Some(Dispatched::Failed(reason)),
+            // The call took its arguments and failed without unwinding: contained and reported like a
+            // panic (status 2, the reason as the message), without a backtrace.
+            Ok(DispatchResult::Failed(reason)) => {
+                Some(Dispatched::Panicked(failed_report(reason), Handle::NULL))
+            }
             Ok(DispatchResult::Unknown) if layered => None,
             Ok(DispatchResult::Unknown) => Some(Dispatched::Bad(format!(
                 "unknown method {:#010x}, or its arguments or receiver were not valid",
@@ -2024,13 +1999,6 @@ impl Runtime {
         }
     }
 
-    /// A call that took what it was handed and then failed without unwinding (status 2).
-    fn reply_failed(&self, call_id: u32, reason: &str) {
-        let report = failed_report(reason);
-        self.log(ERROR, "undra::runtime", &format!("call failed: {reason}"));
-        self.send_reply(call_id, ReplyStatus::Panic, &encode_panic_body(&report));
-    }
-
     fn reply_panic(&self, call_id: u32, handle: Handle, target: &CallTarget, report: &PanicReport) {
         self.note_panic("call", &self.operation_of(target), handle, report);
         self.send_reply(call_id, ReplyStatus::Panic, &encode_panic_body(report));
@@ -2041,7 +2009,6 @@ impl Runtime {
         call_id: u32,
         handle: Handle,
         target: CallTarget,
-        params: Vec<Handle>,
         future: Pin<Box<dyn Future<Output = DispatchBytes> + Send>>,
     ) {
         // The task holds the runtime weakly (ADR-034): the executor owns the task, so a strong
@@ -2074,7 +2041,7 @@ impl Runtime {
                 task,
                 receiver: handle,
                 target,
-                params,
+                params: take_params(call_id),
                 stream: None,
             },
         );
@@ -2103,7 +2070,6 @@ impl Runtime {
         call_id: u32,
         handle: Handle,
         target: CallTarget,
-        params: Vec<Handle>,
         stream: Pin<Box<dyn futures_core::Stream<Item = DispatchBytes> + Send>>,
     ) {
         let state = Arc::new(StreamState::default());
@@ -2134,7 +2100,7 @@ impl Runtime {
                 task,
                 receiver: handle,
                 target,
-                params,
+                params: take_params(call_id),
                 stream: Some(state),
             },
         );
@@ -2173,35 +2139,34 @@ impl Runtime {
     /// rebuilt); a call on an object that had already been released, whose handle the restore did
     /// not touch, is not.
     fn cancel_calls_replaced_by_restore(&self, before: &HashMap<u64, usize>) {
-        // Whether the object `handle` names is not the one it named before the restore.
-        let replaced = |handle: Handle| {
-            let was = before.get(&handle.0).copied();
-            let now = self
-                .objects
-                .get_dyn(handle)
-                .ok()
-                .map(|object| object_address(&object));
-            (was.is_some() || now.is_some()) && was != now
-        };
-        let affected: Vec<u32> = {
-            let calls = self.calls.lock();
-            calls
-                .iter()
-                .filter(|(_, entry)| {
-                    std::iter::once(entry.receiver)
-                        .chain(entry.params.iter().copied())
-                        .filter(|handle| !handle.is_null())
-                        .any(replaced)
-                })
-                .map(|(&call_id, _)| call_id)
-                .collect()
-        };
+        let mut affected: Vec<u32> = Vec::new();
+        for (&call_id, entry) in self.calls.lock().iter() {
+            // The receiver, then the objects it took as parameters.
+            for &handle in std::iter::once(&entry.receiver).chain(&entry.params) {
+                if !handle.is_null() && self.replaced_by_restore(before, handle) {
+                    affected.push(call_id);
+                    break;
+                }
+            }
+        }
         for call_id in affected {
             self.abort_call(
                 call_id,
                 "the object it was running on was replaced by a restore",
             );
         }
+    }
+
+    /// Whether the object `handle` names is not the one it named before the restore (`before`
+    /// maps every handle that was live to its object's address).
+    fn replaced_by_restore(&self, before: &HashMap<u64, usize>, handle: Handle) -> bool {
+        let was = before.get(&handle.0).copied();
+        let now = self
+            .objects
+            .get_dyn(handle)
+            .ok()
+            .map(|object| object_address(&object));
+        (was.is_some() || now.is_some()) && was != now
     }
 
     /// Ends every in-flight call and stream from the runtime's side ([`abort_call`](Runtime::abort_call)
@@ -2460,10 +2425,22 @@ impl Runtime {
 
     /// Resolves a raw handle to a `T`: what a generated dispatcher does for its receiver.
     pub fn object<T: Send + Sync + 'static>(&self, handle: u64) -> Result<Arc<T>, BadHandle> {
+        self.objects.get::<T>(Handle(handle))
+    }
+
+    /// [`object`](Runtime::object) for an object **parameter** of a call that outlives its
+    /// dispatch (an `async` method, a stream): also remembers the handle for call `call_id`, which
+    /// holds the object while it runs, so that a restore that replaces or invalidates it cancels
+    /// the call, as it does for one running on a replaced receiver (ADR-023). What a generated
+    /// dispatcher calls for each `&T`, `Arc<T>`, `Option` and `Vec` parameter of such a method.
+    pub fn param<T: Send + Sync + 'static>(
+        &self,
+        call_id: u32,
+        handle: u64,
+    ) -> Result<Arc<T>, BadHandle> {
         let resolved = self.objects.get::<T>(Handle(handle));
         if resolved.is_ok() {
-            // A call that outlives its dispatch holds this object (see `cancel_calls_replaced_by_restore`).
-            note_resolved(Handle(handle));
+            note_param(call_id, Handle(handle));
         }
         resolved
     }

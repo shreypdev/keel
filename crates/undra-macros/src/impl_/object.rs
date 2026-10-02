@@ -1052,7 +1052,7 @@ fn constructor_result(
             match __scope.issue_constructed(__value) {
                 ::core::result::Result::Ok(__handle) => {
                     let __outcome = #ok;
-                    __scope.commit();
+                    __scope.commit_constructed();
                     __outcome
                 }
                 ::core::result::Result::Err(__why) => #refused,
@@ -1190,9 +1190,17 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
         let local = arg_local(index);
         let handle = handle_local(index);
         let param = &p.name;
+        // A call that outlives its dispatch (an `async` method, a stream) holds its object
+        // parameters while it runs: the runtime remembers them for a restore (`Runtime::param`).
+        let outlives = m.is_async || m.stream_item.is_some();
         let one = |h: TokenStream| {
+            let resolve = if outlives {
+                quote!(__rt.param::<#elem>(__call.call_id, #h))
+            } else {
+                quote!(__rt.object::<#elem>(#h))
+            };
             quote! {
-                match __rt.object::<#elem>(#h) {
+                match #resolve {
                     ::core::result::Result::Ok(__o) => __o,
                     ::core::result::Result::Err(__e) => {
                         return __undra_bad_request(::std::format!(
