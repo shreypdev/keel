@@ -619,7 +619,7 @@ mod tests {
         let b = bytes(|w| observe.encode(w));
         assert_eq!(
             b,
-            [1, 0, 0, 0, 1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 1],
+            [1, 0, 0, 1, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 1],
             "handle u64, signal_id u32, on u8"
         );
         assert_eq!(Observe::decode(&mut Reader::new(&b)), Ok(observe));
@@ -630,7 +630,7 @@ mod tests {
             }
             .encode(w)
         });
-        assert_eq!(b, [2, 0, 0, 0, 3, 0, 0, 0]);
+        assert_eq!(b, [2, 0, 0, 3, 0, 0, 0, 0]);
 
         let b = bytes(|w| TimerFired { timer_id: 77 }.encode(w));
         assert_eq!(b, [77, 0, 0, 0]);

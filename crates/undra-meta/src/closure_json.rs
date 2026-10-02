@@ -170,7 +170,7 @@ fn type_ref(out: &mut String, ty: &TypeRef) {
             type_ref(out, b);
             out.push(']');
         }
-        TypeRef::Named(name) => {
+        TypeRef::Named(name) | TypeRef::Object(name) | TypeRef::Callback(name) => {
             out.push_str(",\"of\":");
             string(out, name);
         }
@@ -201,7 +201,7 @@ const LEAVES: [TypeRef; 17] = [
 ];
 
 /// The `kind` tag of every `TypeRef` variant, in declaration order (`serde`'s `snake_case`).
-const KINDS: [&str; 24] = [
+const KINDS: [&str; 26] = [
     "bool",
     "i8",
     "i16",
@@ -226,6 +226,8 @@ const KINDS: [&str; 24] = [
     "named",
     "result",
     "stream",
+    "object",
+    "callback",
 ];
 
 pub(crate) fn kind_name(ty: &TypeRef) -> &'static str {
@@ -254,6 +256,8 @@ pub(crate) fn kind_name(ty: &TypeRef) -> &'static str {
         TypeRef::Named(_) => 21,
         TypeRef::Result(..) => 22,
         TypeRef::Stream(_) => 23,
+        TypeRef::Object(_) => 24,
+        TypeRef::Callback(_) => 25,
     };
     KINDS[at]
 }
@@ -517,9 +521,14 @@ impl Cursor<'_> {
             .ok_or(self.err("an unknown type kind"))?;
         let ty = match index {
             0..=16 => LEAVES[index].clone(),
-            21 => {
+            21 | 24 | 25 => {
                 self.lit(",\"of\":")?;
-                TypeRef::Named(self.string()?)
+                let name = self.string()?;
+                match index {
+                    21 => TypeRef::Named(name),
+                    24 => TypeRef::Object(name),
+                    _ => TypeRef::Callback(name),
+                }
             }
             19 | 22 => {
                 self.lit(",\"of\":[")?;
@@ -835,6 +844,8 @@ mod tests {
         let leaf = prop_oneof![
             (0_usize..LEAVES.len()).prop_map(|i| LEAVES[i].clone()),
             arb_name().prop_map(TypeRef::Named),
+            arb_name().prop_map(TypeRef::Object),
+            arb_name().prop_map(TypeRef::Callback),
         ];
         leaf.prop_recursive(6, 32, 2, |inner| {
             prop_oneof![

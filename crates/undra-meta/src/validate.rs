@@ -105,6 +105,59 @@ pub enum SchemaError {
         /// The object's name.
         object: String,
     },
+    /// A `Named` reference that resolves to an object (E0064): objects are named by
+    /// [`TypeRef::Object`], and only a constructor's return type names its own object with
+    /// `Named` (ADR-040).
+    ObjectNamedAsValue {
+        /// The object's name.
+        name: String,
+        /// Where the reference appears.
+        at: String,
+    },
+    /// An `Object` reference that does not resolve to an object (E0064).
+    NotAnObject {
+        /// The name that is a record, an enum or an error.
+        name: String,
+        /// What it is.
+        found: TypeKind,
+        /// Where the reference appears.
+        at: String,
+    },
+    /// An `Object` anywhere but a method, constructor-argument or function parameter or a method
+    /// or function return, as `T`, `Option<T>` or `Vec<T>` (and the `Ok` side of a returned
+    /// `Result`) (E0064, ADR-040).
+    MisplacedObject {
+        /// The offending type.
+        ty: TypeRef,
+        /// Where it appears.
+        at: String,
+    },
+    /// A `Callback` anywhere but a parameter of a method, constructor or function, as `T` or
+    /// `Option<T>` (E0004, ADR-041).
+    MisplacedCallback {
+        /// The offending type.
+        ty: TypeRef,
+        /// Where it appears.
+        at: String,
+    },
+    /// A `Callback` that does not name a port of kind `Callback` (E0004).
+    NotACallback {
+        /// The name.
+        name: String,
+        /// Where the reference appears.
+        at: String,
+    },
+    /// A method of a callback port that is neither fire-and-forget (`()`, not `async`) nor
+    /// `async` with a `Result`, or whose name starts with `__` (reserved for `__release` and
+    /// `__cancel`) (E0071, ADR-041).
+    BadCallbackMethod {
+        /// The callback port.
+        port: String,
+        /// The method.
+        method: String,
+        /// What is wrong, in a few words.
+        problem: &'static str,
+    },
 }
 
 impl SchemaError {
@@ -119,6 +172,11 @@ impl SchemaError {
             SchemaError::MisplacedResult { .. } | SchemaError::MisplacedStream { .. } => "E0005",
             SchemaError::InvalidMapKey { .. } => "E0006",
             SchemaError::StoreWithoutConstructor { .. } => "E0011",
+            SchemaError::ObjectNamedAsValue { .. }
+            | SchemaError::NotAnObject { .. }
+            | SchemaError::MisplacedObject { .. } => "E0064",
+            SchemaError::MisplacedCallback { .. } | SchemaError::NotACallback { .. } => "E0004",
+            SchemaError::BadCallbackMethod { .. } => "E0071",
         }
     }
 }
@@ -173,6 +231,36 @@ impl fmt::Display for SchemaError {
                 "the platforms create a store by calling one of its constructors; without one it can never be instantiated".to_owned(),
                 "add `pub fn new(ctx: Ctx) -> Self` to its `#[undra::api(store)]` impl block".to_owned(),
             ),
+            SchemaError::ObjectNamedAsValue { name, at } => (
+                format!("`{name}` at {at} is an object, named as a value"),
+                "an object crosses the boundary as a handle and is named `object` in the schema; `named` is for records, enums and errors, and the one place it names an object is the return type of the object's own constructors".to_owned(),
+                format!("take or return `Arc<{name}>` (or `&{name}` as a parameter), which the schema records as an `object` reference"),
+            ),
+            SchemaError::NotAnObject { name, found, at } => (
+                format!("`{name}` at {at} is referenced as an object, but it is a {found}"),
+                "an `object` reference names a type with an `#[undra::api] impl` block; records, enums and errors cross by value".to_owned(),
+                format!("write `{name}` without `Arc` or `&`, or give it an `#[undra::api] impl` block if it is meant to be an object"),
+            ),
+            SchemaError::MisplacedObject { ty, at } => (
+                format!("`{ty}` at {at}: an object is only allowed as a method or function parameter or return, alone or as `Option` or `Vec` of one"),
+                "a record field, a signal, a map, a stream item, a port, a query or a mutation holds values: they are copied, compared, hashed and persisted, and none of that can carry a reference to an object".to_owned(),
+                "return a record with the data you need, or put the child behind a method of the parent".to_owned(),
+            ),
+            SchemaError::MisplacedCallback { ty, at } => (
+                format!("`{ty}` at {at}: a callback interface is only allowed as a parameter of a method, constructor or function, alone or as `Option`"),
+                "a callback is an instance the host passes in for the core to call back; it has no value to copy, compare or store, and the core never hands one out".to_owned(),
+                "take the callback as a parameter, or pass a record or an id where a value is needed".to_owned(),
+            ),
+            SchemaError::NotACallback { name, at } => (
+                format!("`{name}` at {at} is referenced as a callback interface, but it is not one"),
+                "a `callback` reference names a trait declared with `#[undra::callback]`".to_owned(),
+                format!("declare `{name}` with `#[undra::callback]`, or fix the name"),
+            ),
+            SchemaError::BadCallbackMethod { port, method, problem } => (
+                format!("method `{method}` of the callback interface `{port}` {problem}"),
+                "the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone: a method either reports (fire-and-forget, returning nothing) or is `async` and returns a `Result`".to_owned(),
+                "make a reporting method return `()`, or make a method that answers `async` and return `Result<T, E>`; do not start a name with `__`".to_owned(),
+            ),
         };
         f.write_str(&crate::diag::message(code, what, why, fix))
     }
@@ -187,6 +275,21 @@ struct Allow {
     stream: bool,
     lazy: bool,
     unit: bool,
+    /// An `Object`: `NO`, `HERE_OR_WRAPPED` (the node, or `Option`/`Vec` of it) or `HERE`.
+    object: Slot,
+    /// A `Callback`: `NO`, `HERE_OR_WRAPPED` (the node, or `Option` of it) or `HERE`.
+    callback: Slot,
+}
+
+/// Where an object or a callback reference may stand.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Slot {
+    /// Nowhere here.
+    No,
+    /// At this node, or directly inside an `Option` (or, for an object, a `Vec`) at this node.
+    Wrapped,
+    /// At this node only.
+    Here,
 }
 
 /// Fields and parameters: no wrapper and no `Unit`.
@@ -195,6 +298,15 @@ const PLAIN: Allow = Allow {
     stream: false,
     lazy: false,
     unit: false,
+    object: Slot::No,
+    callback: Slot::No,
+};
+/// A parameter of a method, constructor or function: values, plus an object (alone, `Option` or
+/// `Vec` of one) or a callback (alone or `Option`).
+const PARAM: Allow = Allow {
+    object: Slot::Wrapped,
+    callback: Slot::Wrapped,
+    ..PLAIN
 };
 /// Return types: `T`, `Result<T,E>`, `Stream<T>`, `Result<Stream<T>,E>`, where
 /// `Unit` may stand for the whole return type.
@@ -203,6 +315,14 @@ const RETURN: Allow = Allow {
     stream: true,
     lazy: false,
     unit: true,
+    object: Slot::No,
+    callback: Slot::No,
+};
+/// The return of a method or function: as [`RETURN`], and an object (alone, `Option` or `Vec` of
+/// one, on the `Ok` side of a `Result` too).
+const RETURN_OBJECTS: Allow = Allow {
+    object: Slot::Wrapped,
+    ..RETURN
 };
 /// A store signal's type: `Lazy<T>` is legal at the top.
 const SIGNAL: Allow = Allow {
@@ -210,6 +330,8 @@ const SIGNAL: Allow = Allow {
     stream: false,
     lazy: true,
     unit: false,
+    object: Slot::No,
+    callback: Slot::No,
 };
 /// The components of a `Result` or `Stream`: `Unit` is fine there (`Result<(),
 /// E>`, a stream of ticks). Also used for a map key so that a `Unit` key is
@@ -219,14 +341,23 @@ const COMPONENT: Allow = Allow {
     stream: false,
     lazy: false,
     unit: true,
+    object: Slot::No,
+    callback: Slot::No,
 };
 
 struct Checker<'a> {
     known: HashSet<&'a str>,
+    /// What each declared type name is.
+    kinds: HashMap<&'a str, TypeKind>,
+    /// The ports of kind `Callback`.
+    callbacks: HashSet<&'a str>,
+    /// While a constructor's return type is checked: the object it constructs, which `Named` may
+    /// still spell there.
+    constructs: Option<&'a str>,
     errors: Vec<SchemaError>,
 }
 
-impl Checker<'_> {
+impl<'a> Checker<'a> {
     fn check(&mut self, ty: &TypeRef, allow: Allow, at: &dyn Fn() -> String) {
         match ty {
             TypeRef::Named(name) => {
@@ -235,9 +366,64 @@ impl Checker<'_> {
                         name: name.clone(),
                         at: at(),
                     });
+                } else if self.kinds.get(name.as_str()) == Some(&TypeKind::Object)
+                    && self.constructs != Some(name.as_str())
+                {
+                    self.errors.push(SchemaError::ObjectNamedAsValue {
+                        name: name.clone(),
+                        at: at(),
+                    });
                 }
             }
-            TypeRef::Option(inner) | TypeRef::Vec(inner) => self.check(inner, PLAIN, at),
+            TypeRef::Object(name) => {
+                if allow.object == Slot::No {
+                    self.errors.push(SchemaError::MisplacedObject {
+                        ty: ty.clone(),
+                        at: at(),
+                    });
+                }
+                match self.kinds.get(name.as_str()) {
+                    None => self.errors.push(SchemaError::UnresolvedType {
+                        name: name.clone(),
+                        at: at(),
+                    }),
+                    Some(TypeKind::Object) => {}
+                    Some(&found) => self.errors.push(SchemaError::NotAnObject {
+                        name: name.clone(),
+                        found,
+                        at: at(),
+                    }),
+                }
+            }
+            TypeRef::Callback(name) => {
+                if allow.callback == Slot::No {
+                    self.errors.push(SchemaError::MisplacedCallback {
+                        ty: ty.clone(),
+                        at: at(),
+                    });
+                }
+                if !self.callbacks.contains(name.as_str()) {
+                    self.errors.push(SchemaError::NotACallback {
+                        name: name.clone(),
+                        at: at(),
+                    });
+                }
+            }
+            TypeRef::Option(inner) => {
+                let inner_allow = Allow {
+                    object: if allow.object == Slot::Wrapped { Slot::Here } else { Slot::No },
+                    callback: if allow.callback == Slot::Wrapped { Slot::Here } else { Slot::No },
+                    ..PLAIN
+                };
+                self.check(inner, inner_allow, at);
+            }
+            TypeRef::Vec(inner) => {
+                let inner_allow = Allow {
+                    object: if allow.object == Slot::Wrapped { Slot::Here } else { Slot::No },
+                    ..PLAIN
+                };
+                self.check(inner, inner_allow, at);
+            }
             TypeRef::Map(key, value) => {
                 if !key.is_valid_map_key() {
                     self.errors.push(SchemaError::InvalidMapKey {
@@ -271,6 +457,7 @@ impl Checker<'_> {
                 let ok_allow = if allow.result {
                     Allow {
                         stream: allow.stream,
+                        object: allow.object,
                         ..COMPONENT
                     }
                 } else {
@@ -312,22 +499,39 @@ impl Checker<'_> {
         }
     }
 
-    fn check_params(&mut self, params: &[crate::ParamDef], owner: &str) {
+    fn check_params(&mut self, params: &[crate::ParamDef], owner: &str, allow: Allow) {
         for param in params {
-            self.check(&param.ty, PLAIN, &|| {
+            self.check(&param.ty, allow, &|| {
                 format!("{owner}, param {}", param.name)
             });
         }
     }
 
-    fn check_return(&mut self, returns: &TypeRef, owner: &str) {
-        self.check(returns, RETURN, &|| format!("{owner}, return type"));
+    fn check_return(&mut self, returns: &TypeRef, owner: &str, allow: Allow) {
+        self.check(returns, allow, &|| format!("{owner}, return type"));
     }
 
+    /// A method of an object: parameters may be objects or callbacks, a return may be an object.
     fn check_method(&mut self, method: &crate::MethodDef, owner: &str, what: &str) {
         let owner = format!("{owner}, {what} {}", method.name);
-        self.check_params(&method.params, &owner);
-        self.check_return(&method.returns, &owner);
+        self.check_params(&method.params, &owner, PARAM);
+        self.check_return(&method.returns, &owner, RETURN_OBJECTS);
+    }
+
+    /// A constructor: as a method, except that it returns its own object as `Named`.
+    fn check_constructor(&mut self, method: &crate::MethodDef, object: &'a str, owner: &str) {
+        let owner = format!("{owner}, constructor {}", method.name);
+        self.check_params(&method.params, &owner, PARAM);
+        self.constructs = Some(object);
+        self.check_return(&method.returns, &owner, RETURN);
+        self.constructs = None;
+    }
+
+    /// A method of a port: values only. A callback interface's methods are held to its shape.
+    fn check_port_method(&mut self, method: &crate::MethodDef, owner: &str) {
+        let owner = format!("{owner}, method {}", method.name);
+        self.check_params(&method.params, &owner, PLAIN);
+        self.check_return(&method.returns, &owner, RETURN);
     }
 }
 
@@ -346,7 +550,13 @@ impl Schema {
     ///   returned `Result` or `Stream`), never as a record, variant or
     ///   parameter type, a signal type, or inside `Option`, `Vec`, map values
     ///   or `Lazy` (E0001);
-    /// * every store has at least one constructor (E0011).
+    /// * every store has at least one constructor (E0011);
+    /// * an `Object` names an object and a `Named` does not, except in the return type of its own
+    ///   constructors; objects stand only as method and function parameters and returns, alone or
+    ///   as `Option` or `Vec` (E0064, ADR-040);
+    /// * a `Callback` names a port of kind `Callback`, stands only as a parameter of a method,
+    ///   constructor or function, alone or as `Option`, and a callback port's methods are
+    ///   fire-and-forget or `async` with a `Result` (E0004, E0071, ADR-041).
     ///
     /// It does not check that ids match their names or that they are free of
     /// hash collisions; `undra-bindgen` owns collision detection.
@@ -395,6 +605,14 @@ impl Schema {
 
         let mut checker = Checker {
             known: seen.keys().copied().collect(),
+            callbacks: self
+                .ports
+                .iter()
+                .filter(|port| port.kind == crate::PortKind::Callback)
+                .map(|port| port.name.as_str())
+                .collect(),
+            kinds: seen,
+            constructs: None,
             errors,
         };
 
@@ -422,7 +640,7 @@ impl Schema {
         for object in &self.objects {
             let owner = format!("object {}", object.name);
             for ctor in &object.constructors {
-                checker.check_method(ctor, &owner, "constructor");
+                checker.check_constructor(ctor, &object.name, &owner);
             }
             for method in &object.methods {
                 checker.check_method(method, &owner, "method");
@@ -443,14 +661,23 @@ impl Schema {
 
         for function in &self.functions {
             let owner = format!("function {}", function.name);
-            checker.check_params(&function.params, &owner);
-            checker.check_return(&function.returns, &owner);
+            checker.check_params(&function.params, &owner, PARAM);
+            checker.check_return(&function.returns, &owner, RETURN_OBJECTS);
         }
 
         for port in &self.ports {
             let owner = format!("port {}", port.name);
             for method in &port.methods {
-                checker.check_method(method, &owner, "method");
+                checker.check_port_method(method, &owner);
+                if port.kind == crate::PortKind::Callback {
+                    if let Some(problem) = callback_method_problem(method) {
+                        checker.errors.push(SchemaError::BadCallbackMethod {
+                            port: port.name.clone(),
+                            method: method.name.clone(),
+                            problem,
+                        });
+                    }
+                }
             }
         }
 
@@ -459,8 +686,8 @@ impl Schema {
                 crate::QueryKind::Query => format!("query {}", query.name),
                 crate::QueryKind::Mutation => format!("mutation {}", query.name),
             };
-            checker.check_params(&query.params, &owner);
-            checker.check_return(&query.returns, &owner);
+            checker.check_params(&query.params, &owner, PLAIN);
+            checker.check_return(&query.returns, &owner, RETURN);
         }
 
         if checker.errors.is_empty() {
@@ -468,6 +695,21 @@ impl Schema {
         } else {
             Err(checker.errors)
         }
+    }
+}
+
+/// What is wrong with a method of a callback port (ADR-041), if anything: a callback method
+/// reports (returns `()` and is not `async`) or is `async` and returns a `Result`.
+fn callback_method_problem(method: &crate::MethodDef) -> Option<&'static str> {
+    if method.name.starts_with("__") {
+        return Some("has a name that starts with `__`, which is reserved for `__release` and `__cancel`");
+    }
+    match (&method.returns, method.is_async) {
+        (TypeRef::Unit, false) => None,
+        (TypeRef::Result(..), true) => None,
+        (TypeRef::Unit, true) => Some("is `async` and returns nothing: an async method must return a `Result`"),
+        (_, true) => Some("is `async` but does not return a `Result<T, E>`"),
+        (_, false) => Some("returns a value synchronously: make it `async` and return a `Result<T, E>`"),
     }
 }
 
@@ -657,13 +899,21 @@ mod tests {
     }
 
     #[test]
-    fn named_references_resolve_to_records_enums_errors_and_objects() {
-        for name in ["Todo", "Priority", "TodoError", "Calculator"] {
+    fn named_references_resolve_to_records_enums_and_errors_but_not_objects() {
+        for name in ["Todo", "Priority", "TodoError"] {
             let mut s = representative_schema();
             s.records
                 .push(record("Holder", vec![field("f", TypeRef::named(name))]));
             assert_eq!(s.validate(), Ok(()), "{name}");
         }
+        // An object is `Object`, not `Named` (ADR-040), and not a field either way.
+        let mut s = representative_schema();
+        s.records
+            .push(record("Holder", vec![field("f", TypeRef::named("Calculator"))]));
+        assert!(matches!(
+            &s.validate().unwrap_err()[..],
+            [SchemaError::ObjectNamedAsValue { name, .. }] if name == "Calculator"
+        ));
     }
 
     #[test]
@@ -955,6 +1205,299 @@ mod tests {
         // A plain object without constructors is fine.
         let ok = base(|s| s.objects.push(object("Plain", vec![], vec![])));
         assert_eq!(ok.validate(), Ok(()));
+    }
+
+    // ----- objects and callbacks as parameters and returns (ADR-040, ADR-041) ---------------
+
+    fn with_child(f: impl FnOnce(&mut Schema)) -> Schema {
+        base(|s| {
+            s.objects.push(object("Child", vec![], vec![]));
+            f(s);
+        })
+    }
+
+    fn parent(methods: Vec<crate::MethodDef>) -> crate::ObjectDef {
+        object("Parent", vec![], methods)
+    }
+
+    #[test]
+    fn objects_stand_as_method_parameters_and_returns_alone_or_in_option_and_vec() {
+        let child = || TypeRef::object("Child");
+        let schema = with_child(|s| {
+            s.objects.push(parent(vec![
+                method("Parent", "get", vec![], child(), false),
+                method("Parent", "maybe", vec![], TypeRef::option(child()), false),
+                method("Parent", "all", vec![], TypeRef::vec(child()), false),
+                method(
+                    "Parent",
+                    "open",
+                    vec![param("id", TypeRef::U32)],
+                    TypeRef::result(child(), TypeRef::named("Known")),
+                    true,
+                ),
+                method(
+                    "Parent",
+                    "open_all",
+                    vec![],
+                    TypeRef::result(TypeRef::vec(child()), TypeRef::named("Known")),
+                    true,
+                ),
+                method(
+                    "Parent",
+                    "take",
+                    vec![
+                        param("a", child()),
+                        param("b", TypeRef::option(child())),
+                        param("c", TypeRef::vec(child())),
+                    ],
+                    TypeRef::Unit,
+                    false,
+                ),
+            ]));
+            s.functions.push(crate::FunctionDef {
+                name: "child_of".into(),
+                method_id: 1,
+                params: vec![param("c", child())],
+                returns: child(),
+                is_async: false,
+                takes_ctx: false,
+                docs: String::new(),
+            });
+        });
+        assert_eq!(schema.validate(), Ok(()));
+    }
+
+    #[test]
+    fn objects_are_refused_where_a_value_is_copied() {
+        let child = || TypeRef::object("Child");
+        for ty in [
+            TypeRef::option(TypeRef::option(child())),
+            TypeRef::vec(TypeRef::vec(child())),
+            TypeRef::vec(TypeRef::option(child())),
+            TypeRef::map(TypeRef::String, child()),
+            TypeRef::lazy(child()),
+        ] {
+            let errs = errors(&with_child(|s| {
+                s.objects.push(parent(vec![method(
+                    "Parent",
+                    "m",
+                    vec![param("p", ty.clone())],
+                    TypeRef::Unit,
+                    false,
+                )]));
+            }));
+            assert!(
+                errs.iter().any(|e| matches!(e, SchemaError::MisplacedObject { .. })),
+                "{ty}: {errs:?}"
+            );
+        }
+        // A record field, a variant field, a signal, a stream item, an error, a port and a query.
+        let in_record = errors(&with_child(|s| {
+            s.records.push(record("Holder", vec![field("c", child())]));
+        }));
+        assert!(matches!(&in_record[..], [SchemaError::MisplacedObject { at, .. }] if at == "record Holder, field c"));
+        let in_signal = errors(&with_child(|s| {
+            let mut store = object("Store", vec![method("Store", "new", vec![], TypeRef::named("Store"), false)], vec![]);
+            store.store = Some(StoreDef {
+                signals: vec![SignalDef {
+                    name: "s".into(),
+                    signal_id: 0,
+                    ty: TypeRef::vec(child()),
+                    computed: false,
+                    key: None,
+                    no_coalesce: false,
+                    default: false,
+                }],
+            });
+            s.objects.push(store);
+        }));
+        assert!(matches!(&in_signal[..], [SchemaError::MisplacedObject { .. }]), "{in_signal:?}");
+        let in_stream = errors(&with_child(|s| {
+            s.objects.push(parent(vec![method(
+                "Parent",
+                "m",
+                vec![],
+                TypeRef::stream(child()),
+                false,
+            )]));
+        }));
+        assert!(matches!(&in_stream[..], [SchemaError::MisplacedObject { .. }]), "{in_stream:?}");
+        let in_error_side = errors(&with_child(|s| {
+            s.objects.push(parent(vec![method(
+                "Parent",
+                "m",
+                vec![],
+                TypeRef::result(TypeRef::Unit, child()),
+                false,
+            )]));
+        }));
+        assert!(matches!(&in_error_side[..], [SchemaError::MisplacedObject { .. }]), "{in_error_side:?}");
+        let in_query = errors(&with_child(|s| {
+            s.queries.push(QueryDef {
+                name: "q".into(),
+                query_id: 1,
+                kind: QueryKind::Query,
+                key: "q".into(),
+                params: vec![param("c", child())],
+                returns: child(),
+                stale_ms: None,
+                persist: false,
+                idempotent: false,
+            });
+        }));
+        assert_eq!(in_query.len(), 2, "{in_query:?}");
+        assert!(in_query.iter().all(|e| matches!(e, SchemaError::MisplacedObject { .. })));
+        let in_port = errors(&with_child(|s| {
+            s.ports.push(PortDef {
+                name: "P".into(),
+                port_id: 1,
+                kind: PortKind::Async,
+                methods: vec![method("P", "m", vec![param("c", child())], TypeRef::Unit, false)],
+                docs: String::new(),
+            });
+        }));
+        assert!(matches!(&in_port[..], [SchemaError::MisplacedObject { .. }]), "{in_port:?}");
+        assert_eq!(in_port[0].code(), "E0064");
+    }
+
+    #[test]
+    fn object_references_must_name_objects_and_named_must_not() {
+        let unknown = errors(&base(|s| {
+            s.objects.push(parent(vec![method("Parent", "m", vec![], TypeRef::object("Ghost"), false)]));
+        }));
+        assert!(matches!(&unknown[..], [SchemaError::UnresolvedType { name, .. }] if name == "Ghost"));
+        let record = errors(&base(|s| {
+            s.objects.push(parent(vec![method("Parent", "m", vec![], TypeRef::object("Known"), false)]));
+        }));
+        assert!(
+            matches!(&record[..], [SchemaError::NotAnObject { name, found: TypeKind::Record, .. }] if name == "Known"),
+            "{record:?}"
+        );
+        assert!(record[0].to_string().contains("E0064"));
+        // `Named` of an object is refused as a value, but a constructor returns its own object so.
+        let named = errors(&with_child(|s| {
+            s.objects.push(parent(vec![method("Parent", "m", vec![], TypeRef::named("Child"), false)]));
+        }));
+        assert!(matches!(&named[..], [SchemaError::ObjectNamedAsValue { name, .. }] if name == "Child"));
+        let ctor_ok = with_child(|s| {
+            s.objects.push(object(
+                "Parent",
+                vec![method("Parent", "new", vec![], TypeRef::named("Parent"), false)],
+                vec![],
+            ));
+        });
+        assert_eq!(ctor_ok.validate(), Ok(()));
+        // ... but not another object's.
+        let ctor_other = errors(&with_child(|s| {
+            s.objects.push(object(
+                "Parent",
+                vec![method("Parent", "new", vec![], TypeRef::named("Child"), false)],
+                vec![],
+            ));
+        }));
+        assert!(matches!(&ctor_other[..], [SchemaError::ObjectNamedAsValue { .. }]));
+    }
+
+    fn callback_port(methods: Vec<crate::MethodDef>) -> PortDef {
+        PortDef {
+            name: "Listener".into(),
+            port_id: ids::port_id("Listener"),
+            kind: PortKind::Callback,
+            methods,
+            docs: String::new(),
+        }
+    }
+
+    #[test]
+    fn callbacks_stand_as_parameters_alone_or_optional() {
+        let cb = || TypeRef::callback("Listener");
+        let schema = base(|s| {
+            s.ports.push(callback_port(vec![
+                method("Listener", "progress", vec![param("n", TypeRef::U64)], TypeRef::Unit, false),
+                method(
+                    "Listener",
+                    "confirm",
+                    vec![param("name", TypeRef::String)],
+                    TypeRef::result(TypeRef::Bool, TypeRef::named("Known")),
+                    true,
+                ),
+            ]));
+            s.objects.push(parent(vec![method(
+                "Parent",
+                "watch",
+                vec![param("a", cb()), param("b", TypeRef::option(cb()))],
+                TypeRef::Unit,
+                false,
+            )]));
+            s.objects.push(object(
+                "Other",
+                vec![method("Other", "new", vec![param("l", cb())], TypeRef::named("Other"), false)],
+                vec![],
+            ));
+        });
+        assert_eq!(schema.validate(), Ok(()));
+    }
+
+    #[test]
+    fn callbacks_are_refused_elsewhere_and_must_name_a_callback_port() {
+        let cb = || TypeRef::callback("Listener");
+        for ty in [TypeRef::vec(cb()), TypeRef::map(TypeRef::String, cb()), TypeRef::option(TypeRef::option(cb()))] {
+            let errs = errors(&base(|s| {
+                s.ports.push(callback_port(vec![]));
+                s.objects.push(parent(vec![method("Parent", "m", vec![param("p", ty.clone())], TypeRef::Unit, false)]));
+            }));
+            assert!(errs.iter().any(|e| matches!(e, SchemaError::MisplacedCallback { .. })), "{ty}: {errs:?}");
+        }
+        let as_return = errors(&base(|s| {
+            s.ports.push(callback_port(vec![]));
+            s.objects.push(parent(vec![method("Parent", "m", vec![], cb(), false)]));
+        }));
+        assert!(matches!(&as_return[..], [SchemaError::MisplacedCallback { .. }]), "{as_return:?}");
+        assert_eq!(as_return[0].code(), "E0004");
+        let as_field = errors(&base(|s| {
+            s.ports.push(callback_port(vec![]));
+            s.records.push(record("Holder", vec![field("l", cb())]));
+        }));
+        assert!(matches!(&as_field[..], [SchemaError::MisplacedCallback { .. }]));
+        // A plain port is not a callback.
+        let not_callback = errors(&base(|s| {
+            s.ports.push(PortDef { kind: PortKind::Async, ..callback_port(vec![]) });
+            s.objects.push(parent(vec![method("Parent", "m", vec![param("p", cb())], TypeRef::Unit, false)]));
+        }));
+        assert!(matches!(&not_callback[..], [SchemaError::NotACallback { name, .. }] if name == "Listener"));
+        // A callback method cannot take a callback or an object.
+        let nested = errors(&with_child(|s| {
+            s.ports.push(callback_port(vec![method(
+                "Listener",
+                "m",
+                vec![param("c", TypeRef::object("Child"))],
+                TypeRef::Unit,
+                false,
+            )]));
+        }));
+        assert!(matches!(&nested[..], [SchemaError::MisplacedObject { .. }]), "{nested:?}");
+    }
+
+    #[test]
+    fn callback_methods_report_or_are_async_with_a_result() {
+        let bad = |m: crate::MethodDef| {
+            errors(&base(|s| s.ports.push(callback_port(vec![m]))))
+        };
+        for (m, needle) in [
+            (method("Listener", "get", vec![], TypeRef::U32, false), "returns a value synchronously"),
+            (method("Listener", "get", vec![], TypeRef::Result(Box::new(TypeRef::U32), Box::new(TypeRef::named("Known"))), false), "returns a value synchronously"),
+            (method("Listener", "go", vec![], TypeRef::Unit, true), "returns nothing"),
+            (method("Listener", "go", vec![], TypeRef::U32, true), "does not return a `Result"),
+            (method("Listener", "__release", vec![], TypeRef::Unit, false), "reserved"),
+        ] {
+            let errs = bad(m);
+            assert!(
+                matches!(&errs[..], [SchemaError::BadCallbackMethod { .. }]),
+                "{needle}: {errs:?}"
+            );
+            assert_eq!(errs[0].code(), "E0071");
+            assert!(errs[0].to_string().contains(needle), "{needle}: {}", errs[0]);
+        }
     }
 
     fn is_misplaced_unit(errs: &[SchemaError]) -> bool {

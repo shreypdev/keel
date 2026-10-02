@@ -275,7 +275,7 @@ proptest! {
     }
 
     #[test]
-    fn round_trip_handle(raw in any::<u64>(), index in any::<u32>(), generation in any::<u32>()) {
+    fn round_trip_handle(raw in any::<u64>(), index in 0..=Handle::MAX_INDEX, generation in 0..=Handle::MAX_GENERATION) {
         check(&Handle(raw))?;
         prop_assert_eq!(Handle(raw).encode_to_vec(), raw.to_le_bytes().to_vec());
         let h = Handle::new(index, generation);

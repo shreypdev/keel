@@ -99,6 +99,10 @@ pub enum TypeRefMeta {
     Result(&'static TypeRefMeta, &'static TypeRefMeta),
     /// See [`TypeRef::Stream`].
     Stream(&'static TypeRefMeta),
+    /// See [`TypeRef::Object`].
+    Object(&'static str),
+    /// See [`TypeRef::Callback`].
+    Callback(&'static str),
 }
 
 impl From<&TypeRefMeta> for TypeRef {
@@ -128,6 +132,8 @@ impl From<&TypeRefMeta> for TypeRef {
             TypeRefMeta::Named(n) => TypeRef::named(n),
             TypeRefMeta::Result(t, e) => TypeRef::result(t.into(), e.into()),
             TypeRefMeta::Stream(t) => TypeRef::stream(t.into()),
+            TypeRefMeta::Object(n) => TypeRef::object(n),
+            TypeRefMeta::Callback(n) => TypeRef::callback(n),
         }
     }
 }

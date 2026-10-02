@@ -243,6 +243,11 @@ pub enum PortKind {
     Async,
     /// Fire-and-forget host to core events; methods return `()`.
     Event,
+    /// A host-implemented callback interface (`#[undra::callback]`, ADR-041): a port with many
+    /// instances, which the host passes in as parameters. Every method is fire-and-forget
+    /// (returns `()`) or `async` with a `Result<T, E>`. A call on an instance is a port call
+    /// whose arguments begin with the instance handle.
+    Callback,
 }
 
 /// A port: a trait implemented by the platform (foreign) or a Rust fake.
@@ -252,7 +257,7 @@ pub struct PortDef {
     pub name: String,
     /// `fnv1a32("port.<name>")`, see [`crate::ids::port_id`].
     pub port_id: u32,
-    /// Sync, async or event.
+    /// Sync, async, event or callback.
     pub kind: PortKind,
     /// Port methods; `method_id` is `fnv1a32("<Trait>.<method>")`. Sorted by
     /// name in the canonical form.

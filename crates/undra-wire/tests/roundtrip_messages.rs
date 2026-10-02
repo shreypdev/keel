@@ -235,7 +235,7 @@ proptest! {
 
     #[test]
     fn snapshot(
-        generation_floor in any::<u32>(),
+        generation_floor in any::<u64>(),
         schema_hash in any::<u64>(),
         description in ".{0,40}",
         stores in vec(

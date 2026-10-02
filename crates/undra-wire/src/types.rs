@@ -223,8 +223,13 @@ impl FromStr for Uuid {
     }
 }
 
-/// A reference to a runtime object: `u64` with the slot index in the low 32 bits and the
-/// generation (starting at 1) in the high 32 bits. `0` is the null handle.
+/// A reference to a runtime object: `u64` with the slot index in the low 24 bits and the
+/// generation (starting at 1) in the high 40 bits. `0` is the null handle.
+///
+/// The split is 24 bits of slot (16.7 million live objects) and 40 bits of generation (1.1 x 10^12
+/// issues: 3.5 years at 10,000 a second, ADR-040 decision 8). Hosts never interpret a handle (wasm
+/// passes it as two `i32`s, JNI as a `long`), so only the runtime and the snapshot's floor word
+/// know the layout.
 ///
 /// Handles are only meaningful inside the runtime instance that issued them (SPEC 1.2).
 ///
@@ -234,7 +239,7 @@ impl FromStr for Uuid {
 /// use undra_wire::Handle;
 ///
 /// let h = Handle::new(1, 1);
-/// assert_eq!(h.0, 4_294_967_297);
+/// assert_eq!(h.0, 16_777_217);
 /// assert_eq!((h.index(), h.generation()), (1, 1));
 /// assert!(!h.is_null());
 /// assert!(Handle::NULL.is_null());
@@ -246,22 +251,32 @@ impl Handle {
     /// The null handle (`0`), which never refers to an object.
     pub const NULL: Handle = Handle(0);
 
-    /// Builds a handle from a slot index and a generation.
+    /// How many low bits of a handle are the slot index.
+    pub const INDEX_BITS: u32 = 24;
+    /// The largest slot index a handle can hold (2^24 - 1).
+    pub const MAX_INDEX: u32 = (1 << Self::INDEX_BITS) - 1;
+    /// The largest generation a handle can hold (2^40 - 1).
+    pub const MAX_GENERATION: u64 = (1 << (64 - Self::INDEX_BITS)) - 1;
+
+    /// Builds a handle from a slot index and a generation. Both are masked to their field, so an
+    /// out-of-range value cannot alias a neighbouring field: the table refuses to issue one
+    /// (`index > MAX_INDEX` is "object table is full", a generation past `MAX_GENERATION` is
+    /// exhaustion) before it ever calls this.
     #[inline]
-    pub const fn new(index: u32, generation: u32) -> Self {
-        Handle(((generation as u64) << 32) | (index as u64))
+    pub const fn new(index: u32, generation: u64) -> Self {
+        Handle(((generation & Self::MAX_GENERATION) << Self::INDEX_BITS) | (index & Self::MAX_INDEX) as u64)
     }
 
-    /// The slot index (low 32 bits).
+    /// The slot index (low 24 bits).
     #[inline]
     pub const fn index(self) -> u32 {
-        self.0 as u32
+        (self.0 & Self::MAX_INDEX as u64) as u32
     }
 
-    /// The generation (high 32 bits).
+    /// The generation (high 40 bits).
     #[inline]
-    pub const fn generation(self) -> u32 {
-        (self.0 >> 32) as u32
+    pub const fn generation(self) -> u64 {
+        self.0 >> Self::INDEX_BITS
     }
 
     /// Returns `true` for the null handle.
@@ -288,10 +303,13 @@ mod tests {
 
     #[test]
     fn handle_packs_index_and_generation() {
-        let h = Handle::new(0xdead_beef, 0x1234_5678);
-        assert_eq!(h.0, 0x1234_5678_dead_beef);
-        assert_eq!(h.index(), 0xdead_beef);
-        assert_eq!(h.generation(), 0x1234_5678);
+        let h = Handle::new(0xde_adbe, 0x12_3456_789a);
+        assert_eq!(h.0, 0x12_3456_789a_deadbe);
+        assert_eq!(h.index(), 0xde_adbe);
+        assert_eq!(h.generation(), 0x12_3456_789a);
+        // A field never spills into its neighbour.
+        assert_eq!(Handle::new(u32::MAX, 0).generation(), 0);
+        assert_eq!(Handle::new(0, u64::MAX).index(), 0);
         assert_eq!(Handle::new(0, 0), Handle::NULL);
         assert!(!Handle::new(0, 1).is_null());
         assert!(!Handle::new(1, 0).is_null());
