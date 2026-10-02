@@ -50,7 +50,10 @@ export interface BrowserWebSocketOptions {
   readonly headers?: "refuse" | "pass";
   /** How many received messages wait for the core before the connection is given up (1008). Default 4,096. */
   readonly maxBufferedMessages?: number;
-  /** How many bytes of received messages wait before the connection is given up (1008); text counts its UTF-16 length. Default 16 MiB. */
+  /**
+   * How many bytes of received messages wait before the connection is given up (1008); text counts its UTF-16 length.
+   * Default 16 MiB. It bounds a backlog: one message with nothing queued before it is taken whatever its size.
+   */
   readonly maxBufferedBytes?: number;
 }
 
@@ -142,7 +145,9 @@ class BrowserConnection implements WebSocketConnection {
       closeSocket(this.#socket, 1003, "");
       return;
     }
-    if (this.#inbox.length + 1 > this.#maxMessages || this.#inbox.bytes + size > this.#maxBytes) {
+    // The limits bound a backlog: a message with nothing queued before it is taken whatever its size.
+    const queued = this.#inbox.length;
+    if (queued > 0 && (queued + 1 > this.#maxMessages || this.#inbox.bytes + size > this.#maxBytes)) {
       this.#inbox.fail(new WsError.Closed(1008, DID_NOT_KEEP_UP));
       closeSocket(this.#socket, 1008, DID_NOT_KEEP_UP);
       return;

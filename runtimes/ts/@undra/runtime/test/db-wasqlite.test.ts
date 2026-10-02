@@ -30,13 +30,15 @@ interface MemoryFile {
   data: ArrayBuffer;
 }
 
-/** An engine over a fresh wa-sqlite module and MemoryVFS, with the VFS's files at hand. */
-async function memoryEngine(): Promise<{ readonly engine: DbAdapter; readonly files: Map<string, MemoryFile> }> {
+/** An engine over a fresh wa-sqlite module and MemoryVFS (holding `files`, when given), with the VFS's files at hand. */
+async function memoryEngine(files?: ReadonlyMap<string, MemoryFile>): Promise<{ readonly engine: DbAdapter; readonly files: Map<string, MemoryFile> }> {
   const module = await SQLiteESMFactory({ wasmBinary: WASM });
   const api = Factory(module);
   const vfs = new MemoryVFS();
+  const held = (vfs as unknown as { mapNameToFile: Map<string, MemoryFile> }).mapNameToFile;
+  for (const [name, file] of files ?? []) held.set(name, file);
   api.vfs_register(vfs, false);
-  return { engine: waSqliteEngine(api, module, vfs.name, (name) => `/${name}`), files: (vfs as unknown as { mapNameToFile: Map<string, MemoryFile> }).mapNameToFile };
+  return { engine: waSqliteEngine(api, module, vfs.name, (name) => `/${name}`), files: held };
 }
 
 function target(engine: DbAdapter, files: Map<string, MemoryFile>): DbSuiteTarget {
@@ -88,6 +90,58 @@ afterAll(() => {
 
 dbSuite("the wa-sqlite engine (MemoryVFS) through dbPort", () => direct);
 dbSuite("waSqliteDb: the engine in a worker, every call over postMessage", () => proxied);
+
+describe("the wa-sqlite engine binds what wa-sqlite 1.0.0's own binders lose", () => {
+  it("text holding U+0000 is bound with its length, so it is stored whole (wa-sqlite's bind_text stops at the first U+0000)", async () => {
+    const api = dbCalls(dbPort(direct.adapter(), { wal: false }));
+    const { db } = ok(await api.open(":memory:"));
+    ok(await api.execute(db, "CREATE TABLE t (s TEXT)"));
+    ok(await api.execute(db, "INSERT INTO t VALUES (?)", cells("a\u0000b\u0000")));
+    expect(ok(await api.query(db, "SELECT length(CAST(s AS BLOB)), hex(s), typeof(s) FROM t")).rows).toEqual([cells(4n, "61006200", "text")]);
+    expect(ok(await api.query(db, "SELECT COUNT(*) FROM t WHERE s = ?", cells("a"))).rows, "not cut to \"a\"").toEqual([cells(0n)]);
+  });
+
+  it("an empty blob is bound with a pointer, so it stays a zero-length blob (wa-sqlite's bind_blob binds NULL for it)", async () => {
+    const api = dbCalls(dbPort(direct.adapter(), { wal: false }));
+    const { db } = ok(await api.open(":memory:"));
+    ok(await api.execute(db, "CREATE TABLE t (b BLOB NOT NULL)"));
+    ok(await api.execute(db, "INSERT INTO t VALUES (?)", cells(new Uint8Array(0))));
+    expect(ok(await api.query(db, "SELECT b, typeof(b), length(b), b IS NULL FROM t")).rows).toEqual([cells(new Uint8Array(0), "blob", 0n, 0n)]);
+    ok(await api.execute(db, "INSERT INTO t VALUES (?)", cells("")));
+    expect(ok(await api.query(db, "SELECT typeof(b) FROM t")).rows, "an empty text is not NULL either").toEqual([cells("blob"), cells("text")]);
+  });
+});
+
+describe("the wa-sqlite engine when its worker dies mid-transaction (a page reload)", () => {
+  it("the files it leaves (database and hot journal) reopen consistent: the transaction is rolled back, the commits stay", async () => {
+    // OPFS is not reachable from Node: MemoryVFS stands in for AccessHandlePoolVFS, whose writes also land as they happen.
+    const first = await memoryEngine();
+    const api = dbCalls(dbPort(first.engine, { wal: false }));
+    const { db } = ok(await api.open("crash", [{ version: 1, sql: "CREATE TABLE t (n INTEGER, pad BLOB)" }]));
+    ok(await api.execute(db, "INSERT INTO t VALUES (?, ?)", cells(1n, new Uint8Array(100))));
+    // A tiny page cache, so the transaction's pages spill into the database file before it commits.
+    ok(await api.query(db, "PRAGMA cache_size = 2"));
+    const committed = new Uint8Array((first.files.get("/crash") as MemoryFile).data.slice(0, (first.files.get("/crash") as MemoryFile).size));
+    const tx = ok(await api.begin(db));
+    for (let n = 2n; n < 200n; n++) ok(await api.execute(tx, "INSERT INTO t VALUES (?, ?)", cells(n, new Uint8Array(1000))));
+    // The worker is terminated here: what the VFS holds at this instant is what a reload finds.
+    const left = new Map([...first.files].map(([name, file]) => [name, { ...file, data: file.data.slice(0) }]));
+    expect([...left.keys()].sort(), "a hot journal is left beside the database").toEqual(["/crash", "/crash-journal"]);
+    const spilled = new Uint8Array((left.get("/crash") as MemoryFile).data.slice(0, (left.get("/crash") as MemoryFile).size));
+    expect(spilled.length > committed.length || spilled.some((byte, i) => byte !== committed[i]), "uncommitted pages reached the file").toBe(true);
+
+    const second = await memoryEngine(left);
+    const reopened = dbCalls(dbPort(second.engine, { wal: false }));
+    const again = ok(await reopened.open("crash", [{ version: 1, sql: "CREATE TABLE t (n INTEGER, pad BLOB)" }]));
+    expect(again.version).toBe(1);
+    expect(ok(await reopened.query(again.db, "PRAGMA integrity_check")).rows).toEqual([cells("ok")]);
+    expect(ok(await reopened.query(again.db, "SELECT n FROM t")).rows, "only the committed row").toEqual([cells(1n)]);
+    const next = ok(await reopened.begin(again.db));
+    ok(await reopened.execute(next, "INSERT INTO t VALUES (?, ?)", cells(2n, null)));
+    ok(await reopened.commit(next));
+    expect(ok(await reopened.query(again.db, "SELECT COUNT(*) FROM t")).rows).toEqual([cells(2n)]);
+  });
+});
 
 /** A worker the test scripts: it records requests, and the test answers them or fails it. */
 class ScriptedWorker implements DbWorkerLike {

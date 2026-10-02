@@ -100,7 +100,8 @@ async function closeQuietly(connection: WebSocketConnection, code: number, reaso
  *   connection ended, its end.
  * * `close` answers a waiting `receive` with `[]`, drops the buffer and closes the adapter's
  *   connection; closing again is not an error.
- * * When the core closes (or the port is replaced), every open connection is closed with 1001.
+ * * When the core closes, the port is replaced, or a wasm core restarts after a trap (`dispose`),
+ *   every open connection is closed with 1001; after a restart the port serves the new instance.
  */
 export function webSocketPort(adapter: WebSocketAdapter): PortImpl {
   const lines = new Lines<WsMessage, Held, WsError>({
@@ -109,19 +110,22 @@ export function webSocketPort(adapter: WebSocketAdapter): PortImpl {
     coerce: asWsError,
     finished: () => new WsError.Network("the connection ended"),
   });
-  let disposed = false;
+  /** Bumped by `dispose`: a connect that was under way then is closed when it opens. */
+  let epoch = 0;
   const ids = PortIds.WebSocket;
   return {
+    name: "WebSocket",
     sync: false,
     methods: {
       [ids.connect]: (args) => {
         const [url, protocols, extra] = readArgs(args, (r) => [r.readStr(), strings.decode(r), headers.decode(r)] as const);
         return typed(async () => {
           if (!url.startsWith("ws://") && !url.startsWith("wss://")) throw new WsError.Refused(null, `invalid URL: ${url}`);
+          const asked = epoch;
           const connection = await adapter.connect(url, protocols, extra);
-          if (disposed) {
+          if (epoch !== asked) {
             await closeQuietly(connection, GOING_AWAY, "");
-            throw new WsError.Network("the core closed while the connection opened");
+            throw new WsError.Network("the core went away while the connection opened");
           }
           const conn = lines.open({ connection, closedWith: null }, () => connection.messages());
           return encodeValue(WsOpenedCodec, { conn, protocol: connection.protocol });
@@ -155,8 +159,7 @@ export function webSocketPort(adapter: WebSocketAdapter): PortImpl {
       },
     },
     dispose() {
-      if (disposed) return;
-      disposed = true;
+      epoch++;
       for (const [conn, line] of lines.live()) {
         line.handle.closedWith = { code: GOING_AWAY, reason: "" };
         lines.close(conn, line);

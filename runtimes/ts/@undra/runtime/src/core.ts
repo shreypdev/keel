@@ -496,6 +496,9 @@ export class UndraCore {
             this.#hand(error);
           },
           panicked: (trap) => this.#panicReport(trap),
+          releasePorts: () => {
+            this.#disposePorts(this.#ports.values(), true);
+          },
         },
         options.onCoreRestarted,
       ) ?? transport;
@@ -875,9 +878,12 @@ export class UndraCore {
     this.#disposePorts(this.#ports.values());
   }
 
-  /** Lets each port in `ports` that is no longer registered release what it holds (`PortImpl.dispose`), once each. */
-  #disposePorts(ports: Iterable<PortImpl>): void {
-    const live = this.#closed ? null : new Set(this.#ports.values());
+  /**
+   * Lets each port in `ports` that is no longer registered release what it holds (`PortImpl.dispose`), once each;
+   * with `registered`, the registered ones too (a restarted core: what the instance that trapped held is released).
+   */
+  #disposePorts(ports: Iterable<PortImpl>, registered = false): void {
+    const live = this.#closed || registered ? null : new Set(this.#ports.values());
     for (const impl of new Set(ports)) {
       if (impl.dispose === undefined || live?.has(impl)) continue;
       try {

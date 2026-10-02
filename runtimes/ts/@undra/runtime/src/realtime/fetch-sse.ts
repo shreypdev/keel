@@ -15,6 +15,16 @@ export interface FetchSseOptions {
   readonly fetch?: FetchLike;
 }
 
+/**
+ * `value` as the header value `fetch` sends as its UTF-8 bytes: one character per byte (a header value is bytes, and
+ * `fetch` refuses a character above U+00FF). `Last-Event-ID` carries the id as UTF-8, as `EventSource` sends it.
+ */
+function utf8HeaderValue(value: string): string {
+  let out = "";
+  for (const byte of new TextEncoder().encode(value)) out += String.fromCharCode(byte);
+  return out;
+}
+
 /** The media type of `contentType` (`text/event-stream; charset=utf-8` → `text/event-stream`). */
 function essence(contentType: string): string {
   return (contentType.split(";")[0] ?? "").trim().toLowerCase();
@@ -25,7 +35,8 @@ class FetchStream implements SseStream {
   readonly #reader: ReadableStreamDefaultReader<Uint8Array>;
   readonly #controller: AbortController;
   readonly #parser: SseParser;
-  readonly #decoder = new TextDecoder("utf-8", { fatal: true });
+  /** Keeps a byte order mark: the parser skips one at the start, and only one (the standard's UTF-8 decode strips one). */
+  readonly #decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   readonly #ready: SseEvent[] = [];
   #end: SseError | null = null;
   #endReported = false;
@@ -103,11 +114,12 @@ class FetchStream implements SseStream {
  * `EventSource`, which sends no headers, hides a refusal's status and reconnects on its own.
  *
  * The request sends `Accept: text/event-stream`, `Cache-Control: no-cache`, the headers and
- * `Last-Event-ID` when resuming. `open` resolves on a 2xx answer (204 excepted: it means "stop")
- * whose type is `text/event-stream`; any other status is `Refused { status }`, another type
- * `Protocol`, a request that got no answer `Network`. The body is read only when the core pulls
- * (`body.getReader()`), so a core that stops reading lets TCP push back on the server. The body's
- * end is `Ended`, a failure while reading `Network`, bytes that are not UTF-8 `Protocol`.
+ * `Last-Event-ID` when resuming (the id's UTF-8 bytes, as `EventSource` sends it). `open` resolves
+ * on a 2xx answer (204 excepted: it means "stop") whose type is `text/event-stream`; any other
+ * status is `Refused { status }`, another type `Protocol`, a request that got no answer `Network`.
+ * The body is read only when the core pulls (`body.getReader()`), so a core that stops reading lets
+ * TCP push back on the server. The body's end is `Ended`, a failure while reading `Network`, bytes
+ * that are not UTF-8 `Protocol`.
  */
 export function fetchSse(options: FetchSseOptions = {}): SseAdapter {
   return {
@@ -119,7 +131,7 @@ export function fetchSse(options: FetchSseOptions = {}): SseAdapter {
         ["Cache-Control", "no-cache"],
         ...headers.map(({ name, value }): [string, string] => [name, value]),
       ];
-      if (lastEventId !== null) sent.push(["Last-Event-ID", lastEventId]);
+      if (lastEventId !== null) sent.push(["Last-Event-ID", utf8HeaderValue(lastEventId)]);
       const controller = new AbortController();
       let response: Response;
       try {

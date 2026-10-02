@@ -445,6 +445,25 @@ describe("over a real channel, with UndraCore on the main thread", () => {
     }
   });
 
+  it("LoadOptions.ports with the realtime and db bindings in worker mode: the core's call crosses to the binding and its typed answer comes back", async () => {
+    // The stub core calls (portId, STUB.PORT_METHOD); each binding answers it with its own `close` of an id that was never
+    // opened, so the reply is the binding's typed error (status 1), produced on the main thread.
+    const cases: Array<[string, PortImpl, number, Uint8Array, number]> = [
+      ["WebSocket", webSocketPort({ connect: () => Promise.reject(new Error("unused")) }), PortIds.WebSocket.close, Uint8Array.of(9, 0, 0, 0, 0xe8, 0x03, 0, 0, 0, 0), PortIds.WebSocket.portId],
+      ["Sse", ssePort({ open: () => Promise.reject(new Error("unused")) }), PortIds.Sse.close, u32(9), PortIds.Sse.portId],
+      ["Db", dbPort({ open: () => Promise.reject(new Error("unused")) }), PortIds.Db.close, u32(9), PortIds.Db.portId],
+    ];
+    for (const [name, binding, method, args, portId] of cases) {
+      const close = binding.methods[method] as (args: Uint8Array) => Uint8Array | Promise<Uint8Array>;
+      const impl: PortImpl = { ...binding, methods: { ...binding.methods, [STUB.PORT_METHOD]: () => close(args) } };
+      const w = await overChannel({ portId }, { [portId]: impl });
+      const reply = await call(w.core);
+      expect(reply[4], `${name}: the binding's typed error`).toBe(PortStatus.Error);
+      expect(w.log.records.filter((r) => r.level >= 4), name).toEqual([]);
+      w.close();
+    }
+  });
+
   it.each([
     ["an app's sync port without a name", STUB.PORT_ID, "port 0xc0dec0de", undefined],
     ["a Clock (clockPort names it)", PortIds.Clock.portId, "Clock port 0xcd99c48e", "Clock"],

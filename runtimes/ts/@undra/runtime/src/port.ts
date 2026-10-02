@@ -32,9 +32,11 @@ export interface PortImpl {
   /** Implementations by method id. */
   readonly methods: Readonly<Record<number, (args: Uint8Array) => Uint8Array | Promise<Uint8Array>>>;
   /**
-   * Called once when the core that registered this port closes, or when `registerPort` replaces
-   * it: a port that holds platform resources for the core (the WebSocket connections of
-   * `webSocketPort`, the databases of `dbPort`) releases them here. Register one instance per
+   * Called when the core that registered this port closes, when `registerPort` replaces it, and
+   * when a wasm core restarts after a trap (`crashRecovery`, ADR-049): a port that holds platform
+   * resources for the core (the WebSocket connections of `webSocketPort`, the databases and open
+   * transactions of `dbPort`) releases them here. After a restart the same instance serves the new
+   * core instance, so a call that arrives after `dispose` starts afresh. Register one instance per
    * core. Optional; a failure it throws is reported, not propagated.
    */
   readonly dispose?: () => void;

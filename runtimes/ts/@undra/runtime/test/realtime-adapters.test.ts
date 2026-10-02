@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SseError, type SseEvent, WsError, type WsMessage } from "../src/adapters/types.js";
 import type { PortImpl } from "../src/port.js";
 import {
@@ -13,6 +13,7 @@ import {
   ssePort,
   webSocketPort,
 } from "../src/realtime.js";
+import { Inbox } from "../src/realtime/inbox.js";
 import { err, ok, sseCalls, text, wsCalls } from "./support/port-calls.js";
 import { type RealtimeServer, lastOn, startRealtimeServer, stopRealtimeServer, until } from "./support/realtime-server.js";
 
@@ -68,14 +69,16 @@ interface Case {
   readonly badUtf8: "protocol" | "network";
   /** The close code the server sees when the core goes away (1001), or `1005` (none) where a script cannot send 1001. */
   readonly goingAway: number;
+  /** How a host that does not resolve fails: `Network`, or `Refused(null)` where every failure before `open` looks alike (a browser). */
+  readonly unresolved: "network" | "refused";
 }
 
 const CASES: readonly Case[] = [
-  { name: "nodeWebSocket", adapter: () => nodeWebSocket(), refusedStatus: 401, badUtf8: "protocol", goingAway: 1001 },
-  { name: "browserWebSocket (Node's global WebSocket)", adapter: () => browserWebSocket(), refusedStatus: null, badUtf8: "network", goingAway: 1005 },
+  { name: "nodeWebSocket", adapter: () => nodeWebSocket(), refusedStatus: 401, badUtf8: "protocol", goingAway: 1001, unresolved: "network" },
+  { name: "browserWebSocket (Node's global WebSocket)", adapter: () => browserWebSocket(), refusedStatus: null, badUtf8: "network", goingAway: 1005, unresolved: "refused" },
 ];
 
-describe.each(CASES)("$name against the realtime server", ({ adapter, refusedStatus, badUtf8, goingAway }) => {
+describe.each(CASES)("$name against the realtime server", ({ adapter, refusedStatus, badUtf8, goingAway, unresolved }) => {
   let port: PortImpl;
   let api: ReturnType<typeof wsCalls>;
 
@@ -124,6 +127,33 @@ describe.each(CASES)("$name against the realtime server", ({ adapter, refusedSta
     const { conn } = ok(await api.connect(`${server.wsUrl}/ws/close?code=4001&reason=kicked`));
     expect(await readToEnd(api, conn)).toEqual({ messages: [text("hello")], end: new WsError.Closed(4001, "kicked") });
     expect(err(await api.send(conn, text("late")))).toEqual(new WsError.Closed(4001, "kicked"));
+  });
+
+  it("the peer's normal close (1000) is Closed(1000, reason) too, not a clean end", async () => {
+    const { conn } = ok(await api.connect(`${server.wsUrl}/ws/close?code=1000&reason=bye`));
+    expect(await readToEnd(api, conn)).toEqual({ messages: [text("hello")], end: new WsError.Closed(1000, "bye") });
+  });
+
+  it(`a host that does not resolve is ${unresolved === "network" ? "Network" : "Refused(null) (a browser cannot tell it from a refusal)"}`, async () => {
+    const failed = err(await api.connect("ws://nonexistent.invalid/"));
+    if (unresolved === "network") expect(failed).toBeInstanceOf(WsError.Network);
+    else expect(failed).toEqual(new WsError.Refused(null, "the WebSocket could not connect"));
+  });
+
+  it("a lone message waiting in a receive is answered at once (2 ms of quiet), not after a long linger", async () => {
+    const { conn } = ok(await api.connect(`${server.wsUrl}/ws/echo`));
+    const times: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      const waiting = api.receive(conn, 16);
+      const sent = performance.now();
+      ok(await api.send(conn, text(String(i))));
+      expect(await waiting).toEqual({ ok: [text(String(i))] });
+      times.push(performance.now() - sent);
+    }
+    times.sort((a, b) => a - b);
+    expect(times[5], "the median round trip, loopback (about 3 ms)").toBeLessThan(25);
+    expect(times[9], "the slowest").toBeLessThan(100);
+    ok(await api.close(conn, 1000, ""));
   });
 
   it("a drop without a close frame ends the stream with Network", async () => {
@@ -182,6 +212,58 @@ describe("a flood under a stalled reader", () => {
   }, 30_000);
 });
 
+/** Records the largest queue any connection's inbox held (messages, and their bytes as counted) while `run` runs. */
+async function inboxHighWater<T>(run: (high: () => { readonly messages: number; readonly bytes: number }) => Promise<T>): Promise<T> {
+  const push = Inbox.prototype.push;
+  let messages = 0;
+  let bytes = 0;
+  const spy = vi.spyOn(Inbox.prototype, "push").mockImplementation(function (this: Inbox<unknown>, item: unknown, size: number) {
+    push.call(this, item, size);
+    messages = Math.max(messages, this.length);
+    bytes = Math.max(bytes, this.bytes);
+  });
+  try {
+    return await run(() => ({ messages, bytes }));
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+describe("a flood of 100,000 small messages while the core does not pull: what a connection holds is bounded", () => {
+  it("browserWebSocket holds at most 4,096 messages, then closes and ends Closed(1008) after them, in order", async () => {
+    await inboxHighWater(async (high) => {
+      const api = wsCalls(webSocketPort(browserWebSocket()));
+      const { conn } = ok(await api.connect(`${server.wsUrl}/ws/flood?n=100000`));
+      await until("the client to give up", () => lastOn(server, "/ws/flood")?.clientClosed, 10_000);
+      expect(high().messages, "the connection's queue").toBe(4096);
+      const { messages, end } = await readToEnd(api, conn);
+      expect(end).toEqual(new WsError.Closed(1008, DID_NOT_KEEP_UP));
+      expect(messages.length, "the queue and the binding's read-ahead of 16 at most").toBeLessThanOrEqual(4096 + 16);
+      expect(messages.length).toBeGreaterThanOrEqual(4096);
+      messages.forEach((m, i) => {
+        expect(m).toEqual(text(String(i)));
+      });
+    });
+  }, 30_000);
+
+  it("nodeWebSocket stops reading the socket: what it holds stops growing within one socket read, then all 100,000 arrive in order", async () => {
+    await inboxHighWater(async (high) => {
+      const api = wsCalls(webSocketPort(nodeWebSocket()));
+      const { conn } = ok(await api.connect(`${server.wsUrl}/ws/flood?n=100000`));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const early = high();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(high(), "nothing more was read while the core did not pull").toEqual(early);
+      // It parses a whole socket read (at most 64 KiB) before it pauses: tiny frames make that thousands of messages.
+      expect(early.bytes, "at most one socket read of payload").toBeLessThanOrEqual(64 * 1024);
+      const { messages, end } = await readToEnd(api, conn);
+      expect(messages).toHaveLength(100_000);
+      expect(messages.every((m, i) => m.kind === "text" && m.value === String(i))).toBe(true);
+      expect(end).toEqual(new WsError.Closed(1000, "end"));
+    });
+  }, 30_000);
+});
+
 /** A scripted WHATWG WebSocket: the test fires its events. */
 class FakeSocket implements PlatformWebSocket {
   static last: FakeSocket | null = null;
@@ -230,6 +312,30 @@ describe("browserWebSocket, scripted", () => {
     await opening;
   });
 
+  it("in a browser (a document, no Node) a connect with headers is refused by default, never made without them", async () => {
+    const adapter = browserWebSocket({ WebSocket: Socket });
+    const g = globalThis as { document?: unknown };
+    const node = Object.getOwnPropertyDescriptor(process.versions, "node") as PropertyDescriptor;
+    FakeSocket.last = null;
+    let refused: Promise<unknown>;
+    let plain: Promise<unknown>;
+    g.document = {};
+    delete (process.versions as Record<string, unknown>).node;
+    try {
+      refused = adapter.connect("ws://x.test/", [], [{ name: "Authorization", value: "Bearer t" }]);
+      expect(FakeSocket.last, "no socket was made for the connect with headers").toBeNull();
+      plain = adapter.connect("ws://x.test/", ["v1"], []);
+    } finally {
+      Object.defineProperty(process.versions, "node", node);
+      delete g.document;
+    }
+    await expect(refused).rejects.toEqual(new WsError.Refused(null, HEADERS_REFUSED));
+    const socket = FakeSocket.last as FakeSocket | null;
+    expect(socket?.init, "without headers it connects, protocols only").toEqual(["v1"]);
+    socket?.fire("open");
+    await plain;
+  });
+
   it("an error before open is Refused with no status", async () => {
     const opening = browserWebSocket({ WebSocket: Socket }).connect("ws://x.test/", [], []);
     const socket = FakeSocket.last as FakeSocket;
@@ -250,6 +356,23 @@ describe("browserWebSocket, scripted", () => {
     expect((await iterator.next()).value).toEqual(text("a"));
     expect((await iterator.next()).value).toEqual(text("b"));
     expect((await iterator.next()).value).toEqual({ kind: "binary", value: Uint8Array.of(7) });
+    await expect(iterator.next()).rejects.toEqual(new WsError.Closed(1008, DID_NOT_KEEP_UP));
+  });
+
+  it("one message larger than maxBufferedBytes is delivered when nothing waits before it: the limit is on a backlog, not on a message", async () => {
+    const opening = browserWebSocket({ WebSocket: Socket, maxBufferedBytes: 10 }).connect("ws://x.test/", [], []);
+    const socket = FakeSocket.last as FakeSocket;
+    socket.fire("open");
+    const iterator = (await opening).messages()[Symbol.asyncIterator]();
+    const big = "x".repeat(100);
+    const first = iterator.next();
+    socket.fire("message", { data: big });
+    expect((await first).value, "taken by the waiting consumer").toEqual(text(big));
+    socket.fire("message", { data: big });
+    expect(socket.closes, "queued with nothing before it").toEqual([]);
+    socket.fire("message", { data: "y" });
+    expect(socket.closes, "a backlog past the limit gives up").toEqual([[undefined, undefined]]);
+    expect((await iterator.next()).value).toEqual(text(big));
     await expect(iterator.next()).rejects.toEqual(new WsError.Closed(1008, DID_NOT_KEEP_UP));
   });
 
@@ -344,6 +467,13 @@ describe("fetchSse against the realtime server", () => {
     expect(end).toEqual(new SseError.Ended());
   }, 30_000);
 
+  it("401 is Refused(401); a host that does not resolve is Network", async () => {
+    const refused = err(await api.open(`${server.url}/sse/status?code=401`));
+    expect(refused).toBeInstanceOf(SseError.Refused);
+    expect((refused as SseError.Refused).status).toBe(401);
+    expect(err(await api.open("http://nonexistent.invalid/feed"))).toBeInstanceOf(SseError.Network);
+  });
+
   it("a request that gets no answer is Network", async () => {
     const closed = await startRealtimeServer();
     const url = closed.url;
@@ -376,6 +506,12 @@ describe("fetchSse, scripted", () => {
     expect(await readEvents(api, stream)).toEqual({ events: [{ id: null, event: "message", data: "é😀", retryMs: null }], end: new SseError.Ended() });
   });
 
+  it("skips exactly one byte order mark (UTF-8 decode's): a second one starts a field name", async () => {
+    const api = sseCalls(ssePort(answer([Uint8Array.of(0xef, 0xbb), Uint8Array.of(0xbf, 0xef, 0xbb, 0xbf), utf8("data: a\n\ndata: b\n\n")])));
+    const stream = ok(await api.open("https://x.test/"));
+    expect(await readEvents(api, stream)).toEqual({ events: [{ id: null, event: "message", data: "b", retryMs: null }], end: new SseError.Ended() });
+  });
+
   it("bytes that are not UTF-8 end the stream with Protocol, a failing body with Network", async () => {
     const bad = sseCalls(ssePort(answer([utf8("data: a\n\n"), Uint8Array.of(0x64, 0xff, 0x0a, 0x0a)])));
     const s1 = ok(await bad.open("https://x.test/"));
@@ -384,6 +520,25 @@ describe("fetchSse, scripted", () => {
     const s2 = ok(await broken.open("https://x.test/"));
     const { end } = await readEvents(broken, s2);
     expect(end).toEqual(new SseError.Network("connection reset"));
+  });
+
+  it("resumes after any id: Last-Event-ID goes out as the id's UTF-8 bytes, as EventSource sends it (fetch takes only bytes)", async () => {
+    let sent: Array<[string, string]> = [];
+    const api = sseCalls(
+      ssePort(
+        fetchSse({
+          fetch: async (_url, init) => {
+            sent = init.headers;
+            return new Response("data: a\n\n", { headers: { "content-type": "text/event-stream" } });
+          },
+        }),
+      ),
+    );
+    ok(await api.open("https://x.test/", [], "é😀"));
+    const header = sent.find(([name]) => name === "Last-Event-ID")?.[1] ?? "";
+    expect(new TextDecoder().decode(Uint8Array.from(header, (c) => c.charCodeAt(0)))).toBe("é😀");
+    ok(await api.open("https://x.test/", [], "42"));
+    expect(sent.find(([name]) => name === "Last-Event-ID")?.[1], "an ASCII id as it is").toBe("42");
   });
 
   it("an answer without a content type is Protocol", async () => {

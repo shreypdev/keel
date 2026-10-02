@@ -73,7 +73,7 @@ async function closeQuietly(stream: SseStream): Promise<void> {
  * `next` answers up to `max` of them (a burst as one reply: 2 ms of quiet or 8 ms after its first
  * event), `[]` after the core's `close`, the stream's end (sticky; an `events()` that finishes by
  * itself is `Ended`), else waits; one `next` at a time; `close` answers
- * a waiting `next` with `[]`; the core's shutdown closes every stream.
+ * a waiting `next` with `[]`; the core's shutdown (and a wasm core's restart after a trap) closes every stream.
  */
 export function ssePort(adapter: SseAdapter): PortImpl {
   const lines = new Lines<SseEvent, Held, SseError>({
@@ -82,19 +82,22 @@ export function ssePort(adapter: SseAdapter): PortImpl {
     coerce: asSseError,
     finished: () => new SseError.Ended(),
   });
-  let disposed = false;
+  /** Bumped by `dispose`: an open that was under way then is closed when it answers. */
+  let epoch = 0;
   const ids = PortIds.Sse;
   return {
+    name: "Sse",
     sync: false,
     methods: {
       [ids.open]: (args) => {
         const [url, extra, lastEventId] = readArgs(args, (r) => [r.readStr(), headers.decode(r), optionString.decode(r)] as const);
         return typed(async () => {
           if (!url.startsWith("http://") && !url.startsWith("https://")) throw new SseError.Refused(null, `invalid URL: ${url}`);
+          const asked = epoch;
           const stream = await adapter.open(url, extra, lastEventId);
-          if (disposed) {
+          if (epoch !== asked) {
             await closeQuietly(stream);
-            throw new SseError.Network("the core closed while the stream opened");
+            throw new SseError.Network("the core went away while the stream opened");
           }
           return encodeValue(codecs.u32, lines.open({ stream }, () => stream.events()));
         });
@@ -113,8 +116,7 @@ export function ssePort(adapter: SseAdapter): PortImpl {
       },
     },
     dispose() {
-      if (disposed) return;
-      disposed = true;
+      epoch++;
       for (const [id, line] of lines.live()) {
         lines.close(id, line);
         void closeQuietly(line.handle.stream);

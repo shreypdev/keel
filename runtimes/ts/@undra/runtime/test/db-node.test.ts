@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DbError } from "../src/adapters/types.js";
-import { nodeSqliteDb, sqliteError } from "../src/db.js";
+import { dbPort, nodeSqliteDb, sqliteError } from "../src/db.js";
 import { dbSuite } from "./support/db-suite.js";
+import { cells, dbCalls, err, ok } from "./support/port-calls.js";
 
 /*
  * The Db suite of the brief (section 5) against the real Node adapter, `nodeSqliteDb` over
@@ -32,6 +33,36 @@ dbSuite("nodeSqliteDb through dbPort", () => ({
   },
   exists: (name) => existsSync(join(directory, `${name}.sqlite`)),
 }));
+
+describe("nodeSqliteDb: what dispose leaves on disk", () => {
+  const migration = [{ version: 1, sql: "CREATE TABLE t (v INTEGER)" }];
+
+  it("a transaction open when the core goes away is rolled back: a new connection gets the write lock at once and no row", async () => {
+    const port = dbPort(nodeSqliteDb({ directory }));
+    const api = dbCalls(port);
+    const { db } = ok(await api.open("dangling", migration));
+    ok(await api.execute(db, "INSERT INTO t VALUES (?)", cells(1n)));
+    const tx = ok(await api.begin(db));
+    ok(await api.execute(tx, "INSERT INTO t VALUES (?)", cells(2n)));
+    port.dispose?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(err(await api.query(tx, "SELECT 1")), "the transaction is over").toBeInstanceOf(DbError.Unavailable);
+    // A raw connection to the file: BEGIN IMMEDIATE takes the write lock without waiting.
+    const sqlite = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
+    const raw = new sqlite.DatabaseSync(join(directory, "dangling.sqlite"));
+    try {
+      raw.exec("PRAGMA busy_timeout = 0");
+      raw.exec("BEGIN IMMEDIATE");
+      expect(raw.prepare("SELECT v FROM t ORDER BY v").all(), "the committed row stays, the uncommitted one is gone").toEqual([{ v: 1 }]);
+      raw.exec("ROLLBACK");
+    } finally {
+      raw.close();
+    }
+    const again = ok(await api.open("dangling", migration));
+    expect(ok(await api.query(again.db, "SELECT COUNT(*) FROM t")).rows, "the port serves a new open after dispose").toEqual([cells(1n)]);
+    ok(await api.close(again.db));
+  });
+});
 
 describe("the error mapping", () => {
   it("maps result codes, never text", () => {

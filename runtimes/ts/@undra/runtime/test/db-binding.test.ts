@@ -266,6 +266,10 @@ describe("dbPort: statements, transactions, ids", () => {
     expect(err(await api.close(42))).toEqual(new DbError.Unavailable("no open database or transaction 42"));
   });
 
+  it("carries its port's name (what the runtime says about a failure names the Db port)", () => {
+    expect(dbPort(new ScriptedDb()).name).toBe("Db");
+  });
+
   it("dispose (the core closed) closes every open database, rolling back what runs", async () => {
     const db = new ScriptedDb();
     const port = dbPort(db);

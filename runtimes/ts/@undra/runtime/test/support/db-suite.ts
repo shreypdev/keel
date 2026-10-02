@@ -133,6 +133,50 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       expect(ok(await outside).rows, "the waiting statement ran after the commit").toEqual([cells(1n)]);
     });
 
+    it("an outer statement waits at most the busy timeout, while the transaction's own statements go on", async () => {
+      const api = open({ busyTimeoutMs: 200 });
+      const { db } = ok(await api.open(":memory:"));
+      ok(await api.execute(db, "CREATE TABLE x (v INTEGER)"));
+      const tx = ok(await api.begin(db));
+      const started = Date.now();
+      const outside = api.execute(db, "INSERT INTO x VALUES (0)");
+      for (let i = 1n; i <= 5n; i++) ok(await api.execute(tx, "INSERT INTO x VALUES (?)", cells(i)));
+      expect(Date.now() - started, "the transaction's statements did not wait behind the outer one").toBeLessThan(200);
+      expect(err(await outside)).toEqual(new DbError.Busy());
+      const waited = Date.now() - started;
+      expect(waited, "not before the timeout").toBeGreaterThanOrEqual(190);
+      expect(waited, "not long after it").toBeLessThan(1200);
+      ok(await api.commit(tx));
+      expect(ok(await api.query(db, "SELECT v FROM x ORDER BY v")).rows, "the outer insert never ran").toEqual([1n, 2n, 3n, 4n, 5n].map((v) => cells(v)));
+    });
+
+    it("binds values, never splices them: SQL in a text parameter is data", async () => {
+      const api = open();
+      const { db } = ok(await api.open(":memory:"));
+      ok(await api.execute(db, "CREATE TABLE t (name TEXT)"));
+      const evil = "'; DROP TABLE t; --";
+      ok(await api.execute(db, "INSERT INTO t (name) VALUES (?)", cells(evil)));
+      expect(ok(await api.query(db, "SELECT name FROM t WHERE name = ?", cells(evil))).rows).toEqual([cells(evil)]);
+      expect(ok(await api.query(db, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", cells("t"))).rows, "t is still there").toEqual([cells(1n)]);
+    });
+
+    it("carries a 2 MB row whole, and integers past 2^53 exactly", async () => {
+      const api = open();
+      const { db } = ok(await api.open(":memory:"));
+      ok(await api.execute(db, "CREATE TABLE big (t TEXT, b BLOB, i INTEGER, j INTEGER)"));
+      const text = `${"é😀".repeat(170_000)}\u0000end`;
+      const blob = Uint8Array.from({ length: 1 << 20 }, (_, i) => (i * 31) & 0xff);
+      const row = cells(text, blob, 2n ** 53n + 1n, -(2n ** 53n) - 3n);
+      ok(await api.execute(db, "INSERT INTO big VALUES (?, ?, ?, ?)", row));
+      expect(ok(await api.query(db, "SELECT length(CAST(t AS BLOB)) + length(b) FROM big")).rows[0]?.[0]).toEqual({ kind: "integer", value: BigInt(new TextEncoder().encode(text).length + blob.length) });
+      const rows = ok(await api.query(db, "SELECT t, b, i, j FROM big")).rows;
+      expect(rows).toHaveLength(1);
+      const [t, b, i, j] = rows[0] as DbValue[];
+      expect(t?.kind === "text" && t.value === text, "the text, U+0000 and all").toBe(true);
+      expect(b).toEqual({ kind: "blob", value: blob });
+      expect([i, j]).toEqual(cells(2n ** 53n + 1n, -(2n ** 53n) - 3n));
+    });
+
     it("a garbage file is Corrupt", async () => {
       target().corrupt("garbage");
       expect(err(await open().open("garbage"))).toBeInstanceOf(DbError.Corrupt);
@@ -172,6 +216,22 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       expect(again.version).toBe(2);
       expect(ok(await reopened.query(again.db, "SELECT x FROM a")).rows, "a new port over the same storage reads the rows").toEqual([cells(1n)]);
       ok(await reopened.close(again.db));
+    });
+
+    it("a failed migration of a database that holds data leaves it as it was: version, schema and rows", async () => {
+      const api = open();
+      const v1 = [{ version: 1, sql: "CREATE TABLE a (x INTEGER); INSERT INTO a VALUES (7)" }];
+      ok(await api.close(ok(await api.open("upgrade", v1)).db));
+      const v2 = [...v1, { version: 2, sql: "ALTER TABLE a ADD COLUMN y INTEGER; CREATE TABLE b (z); UPDATE a SET x = 8; INSERT INTO nowhere VALUES (1)" }];
+      const failed = err(await api.open("upgrade", v2));
+      expect(failed).toBeInstanceOf(DbError.Migration);
+      expect((failed as DbError.Migration).version).toBe(2);
+      const again = ok(await api.open("upgrade", v1));
+      expect(again.version).toBe(1);
+      expect(ok(await api.query(again.db, "PRAGMA user_version")).rows).toEqual([cells(1n)]);
+      expect(ok(await api.query(again.db, "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).rows, "no table b").toEqual([cells("a")]);
+      expect(ok(await api.query(again.db, "SELECT * FROM a")), "no column y, the row unchanged").toEqual({ columns: ["x"], rows: [cells(7n)] });
+      ok(await api.close(again.db));
     });
 
     it('":memory:" databases are private to their connection', async () => {

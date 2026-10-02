@@ -179,6 +179,27 @@ describe("webSocketPort: how a connection ends", () => {
     expect(connection.closes, "the adapter is closed once").toEqual([[4000, "bye"]]);
   });
 
+  it("the core's close racing the peer's end: a waiting receive gets exactly one answer, and afterwards the line is closed", async () => {
+    // The close in the same tick as the end, before the pump sees it: the close wins.
+    const a = await opened();
+    const first = a.api.receive(a.conn, 16);
+    await settle();
+    a.connection.source.fail(new WsError.Closed(4000, "bye"));
+    const closing = a.api.close(a.conn, 1000, "");
+    expect(await first).toEqual({ ok: [] });
+    expect(await closing).toEqual({ ok: undefined });
+    expect(await a.api.receive(a.conn, 16)).toEqual({ ok: [] });
+    // The end seen first: the waiting receive gets it; the close after it is still a clean close.
+    const b = await opened();
+    const second = b.api.receive(b.conn, 16);
+    await settle();
+    b.connection.source.fail(new WsError.Closed(4000, "bye"));
+    expect(await second).toEqual({ err: new WsError.Closed(4000, "bye") });
+    expect(await b.api.close(b.conn, 1000, "")).toEqual({ ok: undefined });
+    expect(await b.api.receive(b.conn, 16)).toEqual({ ok: [] });
+    expect(b.connection.closes).toEqual([[1000, ""]]);
+  });
+
   it("send waits for the adapter and reports its typed failure", async () => {
     const { api, conn, connection } = await opened();
     expect(await api.send(conn, { kind: "binary", value: Uint8Array.of(1, 2) })).toEqual({ ok: undefined });
@@ -210,6 +231,49 @@ describe("webSocketPort: the core goes away", () => {
     expect(await waiting).toEqual({ ok: [] });
     expect(adapter.connections.map((c) => c.closes)).toEqual([[[1001, ""]], [[1000, "done"]]]);
     expect(await api.send(1, text("x"))).toEqual({ err: new WsError.Closed(1001, "") });
+  });
+
+  it("a connect under way at dispose is closed going away when it opens; the port serves calls after dispose (a restarted core)", async () => {
+    let open: (connection: WebSocketConnection) => void = () => {};
+    const connection = new ScriptedConnection("");
+    const adapter: WebSocketAdapter = {
+      connect: () =>
+        new Promise((resolve) => {
+          open = resolve;
+        }),
+    };
+    const port = webSocketPort(adapter);
+    const api = ws(port);
+    const opening = api.connect("ws://slow.test/");
+    await settle();
+    port.dispose?.();
+    open(connection);
+    expect(await opening).toEqual({ err: new WsError.Network("the core went away while the connection opened") });
+    expect(connection.closes).toEqual([[1001, ""]]);
+    const later = new ScriptedConnection("");
+    adapter.connect = async () => later;
+    expect(await api.connect("ws://new.test/")).toEqual({ ok: { conn: 1, protocol: "" } });
+    later.source.push(text("hi"));
+    expect(await api.receive(1, 16)).toEqual({ ok: [text("hi")] });
+  });
+
+  it("the bindings carry their port's name, so a failure the runtime reports names the port", async () => {
+    expect(webSocketPort(new ScriptedWebSocket()).name).toBe("WebSocket");
+    expect(ssePort(new ScriptedSse()).name).toBe("Sse");
+    const fake = new FakeCoreTransport({ mode: "remote" });
+    const log = captureLog();
+    track(
+      await UndraCore.attach(fake, {
+        expectedSchemaHash: SCHEMA,
+        shared: false,
+        adapters: { log, http: null, timer: null, kv: null, secureStore: null, fs: null, connectivity: null, lifecycle: null },
+        ports: { [PortIds.WebSocket.portId]: webSocketPort(new ScriptedWebSocket()) },
+      }),
+    );
+    // Arguments that do not decode: a bug on the core's side, answered "unavailable" and reported under the port's name.
+    const reply = await fake.callPort(PortIds.WebSocket.portId, PortIds.WebSocket.receive, Uint8Array.of(1));
+    expect(reply.status).toBe(PortStatus.Unavailable);
+    expect(log.records.some((r) => r.level >= 4 && r.message.includes("WebSocket port 0x7388b95f"))).toBe(true);
   });
 
   it("UndraCore.close disposes its ports, and registerPort disposes the port it replaces", async () => {

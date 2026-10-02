@@ -144,7 +144,9 @@ function firstInteger(rows: DbRows): number {
  *   `Unavailable("no open database or transaction <id>")`, an ended transaction
  *   `Unavailable("transaction <id> is over")`.
  * * `close` rolls back a running transaction and closes the connection; closing again is not an
- *   error. When the core closes (or the port is replaced), every database is closed.
+ *   error. When the core closes, the port is replaced, or a wasm core restarts after a trap
+ *   (`dispose`), every database is closed and its running transaction rolled back; after a restart
+ *   the port serves the new instance.
  */
 export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImpl {
   const busyTimeoutMs = Math.max(0, options.busyTimeoutMs ?? 5000);
@@ -152,7 +154,8 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
   const databases = new Map<number, Database>();
   const transactions = new Map<number, Transaction>();
   let next = 1;
-  let disposed = false;
+  /** Bumped by `dispose`: an open that was under way then closes its connection instead of registering it. */
+  let epoch = 0;
 
   /** Runs `op` on `db`'s queue, after everything queued before it. */
   const enqueue = <T>(db: Database, op: () => Promise<T>): Promise<T> => {
@@ -234,6 +237,7 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
   const open = async (name: string, wanted: readonly DbMigration[]): Promise<{ db: number; version: number }> => {
     validateDbName(name);
     validateMigrations(wanted);
+    const asked = epoch;
     const conn = await adapter.open(name);
     try {
       await conn.query("PRAGMA foreign_keys = ON", []);
@@ -264,7 +268,7 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
         }
         version = last.version;
       }
-      if (disposed) throw new DbError.Unavailable("the core closed while the database opened");
+      if (epoch !== asked) throw new DbError.Unavailable("the core went away while the database opened");
       const id = next++;
       databases.set(id, { id, conn, closed: false, tx: null, waiters: new Set(), tail: Promise.resolve() });
       return { db: id, version };
@@ -276,6 +280,7 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
 
   const ids = PortIds.Db;
   return {
+    name: "Db",
     sync: false,
     methods: {
       [ids.open]: (args) => {
@@ -352,8 +357,7 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
       },
     },
     dispose() {
-      if (disposed) return;
-      disposed = true;
+      epoch++;
       for (const db of databases.values()) if (!db.closed) void closeDatabase(db);
     },
   };
