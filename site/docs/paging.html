@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paging and lazy lists · Undra docs</title>
+<meta name="description" content="Infinite queries that grow a keyed list a page at a time, and Lazy lists the platform pages through on demand: the Rust spelling, the shape on each platform, and what a change costs.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/paging.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Paging and lazy lists · Undra docs">
+<meta property="og:description" content="Infinite queries that grow a keyed list a page at a time, and Lazy lists the platform pages through on demand: the Rust spelling, the shape on each platform, and what a change costs.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/paging.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Paging and lazy lists · Undra docs">
+<meta name="twitter:description" content="Infinite queries that grow a keyed list a page at a time, and Lazy lists the platform pages through on demand: the Rust spelling, the shape on each platform, and what a change costs.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/paging.html#article","headline":"Paging and lazy lists · Undra docs","description":"Infinite queries that grow a keyed list a page at a time, and Lazy lists the platform pages through on demand: the Rust spelling, the shape on each platform, and what a change costs.","url":"https://shreypdev.github.io/undra/docs/paging.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Paging and lazy lists","item":"https://shreypdev.github.io/undra/docs/paging.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="paging.html" aria-current="page">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="paging.html" aria-current="page">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1>Paging and lazy lists</h1>
+    <p class="lede">A feed from a server grows by the page. A big collection in the core is read a window at a time. Neither ships a whole list across the boundary.</p>
+<h2 id="two-needs">Two kinds of long list<a class="anchor" href="#two-needs" aria-label="Link to this section">#</a></h2>
+
+<p>"Paging" hides two different problems, and they get different tools.</p>
+<div class="table-wrap"><table><thead><tr><th></th><th>A feed from a server</th><th>A big collection in the core</th></tr></thead><tbody><tr><td>Where the rows are</td><td>on a server; the core fetches a page at a time</td><td>already in the core (a database, a derived view over 50,000 rows)</td></tr><tr><td>What the screen shows</td><td>every row loaded so far</td><td>a window of it</td></tr><tr><td>Use</td><td>an <code>infinite</code> query: a keyed list that grows by the page</td><td><code>Lazy&lt;T&gt;</code>: the platform pages the core's list on demand</td></tr></tbody></table></div>
+
+<h2 id="infinite-queries">Infinite queries<a class="anchor" href="#infinite-queries" aria-label="Link to this section">#</a></h2>
+
+<p>An infinite query is a query with a cursor. The function takes the cursor and returns one page; the handle on each platform shows all the pages loaded so far as one list, keyed by the field you name.</p>
+<details class="reveal-code"><summary>Show the Rust code</summary>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">#[undra::query(key = "feed/{filter}", infinite, item_key = "id", stale = "1m")]
+async fn feed(
+    ctx: &amp;Ctx,
+    filter: Filter,
+    #[undra(cursor)] cursor: Option&lt;String&gt;,
+) -&gt; Result&lt;undra::query::Page&lt;Post, String&gt;, ApiError&gt; {
+    // `None` is the first page; `Page { items, next }` says where the next one starts.
+    let body = fetch(ctx, filter, cursor).await?;
+    Ok(Page { items: body.posts, next: body.next })
+}</code></pre></div>
+</details>
+<p>The cursor is not part of the cache key and not a parameter on the platform. The handle has the five signals of every query and two more, <code>hasNextPage</code> and <code>fetchingNextPage</code>, and <code>data</code> is the list itself, empty before the first page rather than optional.</p>
+<details class="reveal-code"><summary>Show the code for Swift, Kotlin and TypeScript</summary>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">let feed = try FeedQueryHandle(filter: .all)
+List(feed.data) { post in                       // Post is Identifiable when its key is `id`
+    PostRow(post)
+        .onAppear { feed.loadMore(ifNeededFor: post) }   // fetches when within 5 rows of the end
+}
+if feed.fetchingNextPage { ProgressView() }</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">val feed = FeedQueryHandle.create(Filter.All)
+val rows by feed.data.collectAsState()
+val state = rememberLazyListState()
+LazyColumn(state = state) { items(rows, key = { it.id }) { PostRow(it) } }
+state.LoadMoreWhenNearEnd(feed)                   // undra-compose</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">const feed = await FeedQueryHandle.create(Filter.All);
+const posts = useSignal(feed.data);              // keyed: a page arrives as a patch of pushes
+const sentinel = useLoadMore(feed);              // ref callback for the last element
+return &lt;&gt;{posts.map((p) =&gt; &lt;PostRow key={p.id} post={p} /&gt;)}&lt;div ref={sentinel} /&gt;&lt;/&gt;;</code></pre></div>
+</details>
+<p>Loading the next page appends with the same recorded <code>push</code> a store uses, so the change-set is the new rows and nothing else, however long the list already is. A refetch (a stale entry, <code>invalidate</code>, the app coming to the front, the network returning, a poll) fetches the loaded pages again in order from the first, each with the cursor the previous response returned, and sends only what changed. <code>refetch_pages = N</code> bounds that: a feed scrolled through fifty pages need not cost fifty requests on every refresh.</p>
+<p>A mutation edits the whole list with <code>CacheView::update_items</code>, inside the optimistic transaction. <code>persist</code> keeps the first <code>persist_pages</code> pages (one by default) in the same format as any persisted query, so a cold start shows the first page at once. Not in this version: previous pages (paging backwards) and an upper bound on pages kept in memory; for a list that outgrows memory, feed a store's <code>Lazy&lt;T&gt;</code> from the query.</p>
+
+<h2 id="lazy-lists">Lazy lists<a class="anchor" href="#lazy-lists" aria-label="Link to this section">#</a></h2>
+
+<p>A store field of type <code>Lazy&lt;T&gt;</code> is a list the core owns and the platform reads a window of. The platform is told how many rows there are and which version of the list that is; it asks the core for the pages it needs.</p>
+<details class="reveal-code"><summary>Show the code for Rust, Swift, Kotlin and TypeScript</summary>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">#[undra::store]
+pub struct Library {
+    #[undra(key = "id")]
+    books: Lazy&lt;Book&gt;,          // 100,000 rows; the platform never receives them whole
+}
+
+#[undra::api(store)]
+impl Library {
+    pub fn add(&amp;self, title: String) { self.books.push(Book { .. }); }   // the recorded API of Signal&lt;Vec&lt;T&gt;&gt;
+}</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">let library = try Library()
+List(0..&lt;library.books.count, id: \.self) { i in
+    if let book = library.books[i] { BookRow(book) } else { BookRow.placeholder }   // reading requests the page
+}</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">val library = Library.create()
+LazyColumn { items(library.books) { index, book -&gt; if (book != null) BookRow(book) else Placeholder() } }   // undra-compose</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">const library = await Library.create();
+const { length, getItem } = useLazyList(library.books);
+// for TanStack Virtual or react-window: useVirtualizer({ count: length, ... }) and getItem(index)</code></pre></div>
+</details>
+<p>Reading a row that is not loaded gives <code>nil</code>, <code>null</code> or <code>undefined</code> and asks for its page of 50 rows and one page of prefetch on each side, once. Requests made in one frame go out together. At most 24 pages are kept, least recently touched first out. A change to the list, whatever it is, is one 12-byte entry (the new length and the new version): the platform keeps showing the rows it has and asks again for the pages on screen, so a change costs the window, never the list. A reply carries the version it was read at, so a page that arrives after a newer change is thrown away and asked for again.</p>
+<div class="table-wrap"><table><thead><tr><th></th><th>Cost</th></tr></thead><tbody><tr><td>Observing a list of 100,000 rows</td><td>20 bytes</td></tr><tr><td>A change of any size</td><td>12 bytes, then the window</td></tr><tr><td>A page of 50 rows in the core</td><td>microseconds (a few hundred nanoseconds on the reference machine)</td></tr><tr><td>Rows kept on the platform</td><td>at most 24 pages</td></tr></tbody></table></div>
+<p><code>Lazy::over(&amp;derived)</code> is a read-only lazy view of a derived list (<a href="concepts.html">core concepts</a>): its pages come from the derived index in O(log n + page), so a filtered and sorted view over 50,000 rows pages as cheaply as the list itself. A store with a view needs a <code>restore</code> hook, because the view is rebuilt from its source rather than saved. A <code>Lazy</code> is store state: a snapshot carries its rows, and after a restore the platform gets a new page server and reads its window again.</p>
+<p>Rows not yet loaded have no identity, so animations across a re-page follow the index; the loaded rows have their keys. A <code>PagingSource</code> adapter over <code>UndraLazyList</code> for Jetpack Paging can follow if teams ask. On iOS 15 and 16 the Swift class is <code>UndraLazyListObject</code>, an <code>ObservableObject</code> you hold with <code>@ObservedObject</code>.</p>
+<p>The playground's <a href="https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/paging.rs" rel="noopener">Library and feed</a> use both, and the contract scenario S32 checks them on Swift, Kotlin and TypeScript. The <a href="cookbook/pagination.html">pagination recipe</a> shows the older shape, one query per page number.</p>
+
+
+
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/paging.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="types.html"><span>Previous</span><b>Newtypes, generics and decimals</b></a>
+    <a class="next" href="polling.html"><span>Next</span><b>Polling</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#two-needs">Two kinds of long list</a></li><li><a href="#infinite-queries">Infinite queries</a></li><li><a href="#lazy-lists">Lazy lists</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

@@ -501,6 +501,8 @@ An observed entry refetches when it is stale and something happens:
 
 **One fetch per key at a time.** If five screens observe the same list, they share one in-flight request.
 
+**Polling and paging.** `interval = "30s"` refetches an observed query on a schedule ([Polling](https://shreypdev.github.io/undra/docs/polling.html)), and `infinite` turns a cursor query into a keyed list that grows by the page ([Paging and lazy lists](https://shreypdev.github.io/undra/docs/paging.html)).
+
 ## Retry with jitter
 
 A failed fetch is retried `retry` times (three by default) with exponential backoff, `min(1000 × 2ⁿ, 30000)` milliseconds, with plus or minus 20% jitter. The jitter comes from the `Rng` port and the delay from the `Timer` port, so a test with fakes sees exactly the schedule it scripts.
@@ -833,6 +835,141 @@ The core holds the callback until it lets go, so a listener you create inline li
 In a Rust test pass an implementation written in Rust: `#[undra::port] impl Reporter for Recorder` records the calls, and an `async` method answers as you set it. See [Testing your app](https://shreypdev.github.io/undra/docs/testing.html).
 
 The playground's [Reporter](https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/workshop.rs) is this page's example, and the contract scenario S28 checks ordering, errors, cancelling and release on Swift, Kotlin and TypeScript.
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/types.html
+
+# Newtypes, generics and decimals
+
+A newtype crosses as the value it wraps and arrives as a distinct type. A generic type gets a name per use. Money is a `Decimal`, never a float.
+
+## Newtypes
+
+A tuple struct with one field is a newtype. It crosses as the value it wraps, with no length and no tag, so it costs nothing on the wire, and each platform gets a distinct type, so an `AccountId` can never be passed where a `UserId` is wanted.
+
+| In Rust | Swift | Kotlin | TypeScript |
+| --- | --- | --- | --- |
+| `struct AccountId(pub Uuid)` | `struct AccountId: RawRepresentable, Hashable, Codable` | `@JvmInline value class AccountId(val value: UUID)` | `type AccountId = string & {{ __brand }}` and a function `AccountId(value)` |
+
+The inner type is any value type: another newtype, a record, a `Vec`, an `Option`, a `Decimal`. A newtype can stand anywhere a record can, and as a map key when the type it wraps is a valid key (`String`, an integer, `bool`, `Uuid`); the compiler checks it, so `HashMap<Price, _>` with `struct Price(Decimal)` is an error at the map, not a surprise on a phone. A keyed list may use a newtype as its key field.
+
+Swift and Kotlin add `Comparable` when the wrapped type has an order that means something (numbers, strings, dates, durations, decimals). A `Uuid` gets none: Foundation's `UUID` is comparable only from iOS 17. No literal conformances are generated, because a literal that becomes an `AccountId` is what the type is there to prevent.
+
+Wrapping a field you already persist in a newtype needs no migration code: the bytes are the same, so an old snapshot or cached query result reads back as it was.
+
+## Generic data types
+
+The schema describes concrete types, so a generic struct or enum is a *template* that registers nothing, and each use is a named instantiation. The name is yours and stays stable, which is what the generated Swift, Kotlin and TypeScript need.
+
+On every platform `EntrySlice` is an ordinary record and `LoadableEntries` an ordinary enum, byte for byte what you would get by writing them out. Signatures spell the alias; writing `Slice<Entry>` in one is [E0002](https://shreypdev.github.io/undra/docs/errors.html#E0002) and the message says which alias to declare. An alias lives in the crate of its template (a second one for the same instantiation is [E0070](https://shreypdev.github.io/undra/docs/errors.html#E0070)), and its arguments are concrete types, other aliases and newtypes included.
+
+Generic objects, stores, functions, methods, ports, callbacks and queries stay out: each would need a dispatcher per instantiation. Type parameters are all a template takes; lifetimes are [E0003](https://shreypdev.github.io/undra/docs/errors.html#E0003), const generics and `where` clauses [E0002](https://shreypdev.github.io/undra/docs/errors.html#E0002).
+
+## Decimal, for money
+
+`Decimal` is an exact decimal number: a 128-bit mantissa and a scale of at most 38, so `19.99` is `1999` with scale `2`. It never goes through a float. The scale is part of the value, so `1.10` and `1.1` are different values to `==` (and to a map) and the same number to a numeric comparison; `Decimal` is therefore not a map key.
+
+| Platform | Type | Notes |
+| --- | --- | --- |
+| Rust | `undra::Decimal { mantissa: i128, scale: u8 }` | exact `FromStr` and `Display`, `cmp_numeric`; no arithmetic. With the `rust_decimal` feature, `rust_decimal::Decimal` crosses too |
+| Swift | `Foundation.Decimal` | decoding is exact; a NaN encodes as zero, 2127 or more saturates, digits past the 38th after the point are cut off |
+| Kotlin | `java.math.BigDecimal` | `equals` is scale-sensitive, `compareTo` is numeric, as Kotlin engineers expect |
+| TypeScript | `Decimal` of `@undra/runtime` | `mantissa: bigint`, `scale`, `parse`, `toString`, `equals`, `compare`; no arithmetic, convert through `toString()` to your decimal library |
+
+A scale above 38 is refused by every decoder, in the core as much as on the platforms. `i128` and `u128` stay out; the error points here, or at a `String` newtype for identifiers.
+
+## Types from other crates
+
+The types most Rust teams already use cross as the wire type they stand for, behind features of the `undra` crate. Each dependency is built without a clock or a randomness feature, so a core that uses them still builds for wasm32, iOS and Android, and still reads no clock of its own.
+
+| Feature | Crosses as |
+| --- | --- |
+| `uuid` | `uuid::Uuid` as `Uuid` |
+| `chrono` | `DateTime<Utc>` as `Timestamp` (milliseconds), `TimeDelta` as `Duration` |
+| `time` | `OffsetDateTime` and `UtcDateTime` as `Timestamp` (normalised to UTC), `time::Duration` as `Duration` |
+| `rust_decimal` | `rust_decimal::Decimal` as `Decimal` |
+| `bytes` | `bytes::Bytes` as `Bytes` |
+
+Precision is documented, not hidden. A `Timestamp` is milliseconds, and a finer value rounds toward negative infinity on its way out. A `Duration` is never negative, so a negative `TimeDelta` encodes as zero. `DateTime<Local>` and `DateTime<FixedOffset>` are [E0001](https://shreypdev.github.io/undra/docs/errors.html#E0001): convert to `Utc`, offsets do not cross. Spell a type without its feature and the error names the feature to turn on.
+
+The playground's [ledger](https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/ledger.rs) uses every shape on this page, and the contract scenario S31 checks them on Swift, Kotlin and TypeScript.
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/paging.html
+
+# Paging and lazy lists
+
+A feed from a server grows by the page. A big collection in the core is read a window at a time. Neither ships a whole list across the boundary.
+
+## Two kinds of long list
+
+"Paging" hides two different problems, and they get different tools.
+
+|  | A feed from a server | A big collection in the core |
+| --- | --- | --- |
+| Where the rows are | on a server; the core fetches a page at a time | already in the core (a database, a derived view over 50,000 rows) |
+| What the screen shows | every row loaded so far | a window of it |
+| Use | an `infinite` query: a keyed list that grows by the page | `Lazy<T>`: the platform pages the core's list on demand |
+
+## Infinite queries
+
+An infinite query is a query with a cursor. The function takes the cursor and returns one page; the handle on each platform shows all the pages loaded so far as one list, keyed by the field you name.
+
+The cursor is not part of the cache key and not a parameter on the platform. The handle has the five signals of every query and two more, `hasNextPage` and `fetchingNextPage`, and `data` is the list itself, empty before the first page rather than optional.
+
+Loading the next page appends with the same recorded `push` a store uses, so the change-set is the new rows and nothing else, however long the list already is. A refetch (a stale entry, `invalidate`, the app coming to the front, the network returning, a poll) fetches the loaded pages again in order from the first, each with the cursor the previous response returned, and sends only what changed. `refetch_pages = N` bounds that: a feed scrolled through fifty pages need not cost fifty requests on every refresh.
+
+A mutation edits the whole list with `CacheView::update_items`, inside the optimistic transaction. `persist` keeps the first `persist_pages` pages (one by default) in the same format as any persisted query, so a cold start shows the first page at once. Not in this version: previous pages (paging backwards) and an upper bound on pages kept in memory; for a list that outgrows memory, feed a store's `Lazy<T>` from the query.
+
+## Lazy lists
+
+A store field of type `Lazy<T>` is a list the core owns and the platform reads a window of. The platform is told how many rows there are and which version of the list that is; it asks the core for the pages it needs.
+
+Reading a row that is not loaded gives `nil`, `null` or `undefined` and asks for its page of 50 rows and one page of prefetch on each side, once. Requests made in one frame go out together. At most 24 pages are kept, least recently touched first out. A change to the list, whatever it is, is one 12-byte entry (the new length and the new version): the platform keeps showing the rows it has and asks again for the pages on screen, so a change costs the window, never the list. A reply carries the version it was read at, so a page that arrives after a newer change is thrown away and asked for again.
+
+|  | Cost |
+| --- | --- |
+| Observing a list of 100,000 rows | 20 bytes |
+| A change of any size | 12 bytes, then the window |
+| A page of 50 rows in the core | microseconds (a few hundred nanoseconds on the reference machine) |
+| Rows kept on the platform | at most 24 pages |
+
+`Lazy::over(&derived)` is a read-only lazy view of a derived list ([core concepts](https://shreypdev.github.io/undra/docs/concepts.html)): its pages come from the derived index in O(log n + page), so a filtered and sorted view over 50,000 rows pages as cheaply as the list itself. A store with a view needs a `restore` hook, because the view is rebuilt from its source rather than saved. A `Lazy` is store state: a snapshot carries its rows, and after a restore the platform gets a new page server and reads its window again.
+
+Rows not yet loaded have no identity, so animations across a re-page follow the index; the loaded rows have their keys. A `PagingSource` adapter over `UndraLazyList` for Jetpack Paging can follow if teams ask. On iOS 15 and 16 the Swift class is `UndraLazyListObject`, an `ObservableObject` you hold with `@ObservedObject`.
+
+The playground's [Library and feed](https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/paging.rs) use both, and the contract scenario S32 checks them on Swift, Kotlin and TypeScript. The [pagination recipe](https://shreypdev.github.io/undra/docs/cookbook/pagination.html) shows the older shape, one query per page number.
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/polling.html
+
+# Polling
+
+An `interval` on a query refetches it while it is observed. It runs from the end of the last fetch, pauses when the app is away and resumes when it returns.
+
+## An interval on a query
+
+Add `interval` to a query and the core refetches it while somebody is looking.
+
+The shortest interval is one second; below that the compiler says to use a stream, which is the tool for real-time data ([the opt-in ports](https://shreypdev.github.io/undra/docs/db.html) have WebSocket and Server-Sent Events).
+
+## How it polls
+
+The next fetch is scheduled one interval after the *end* of the previous one, whether it succeeded or failed once its retries ran out. A fetch slower than the interval never overlaps the next, and a struggling server is asked less often rather than hammered.
+
+| Situation | What happens |
+| --- | --- |
+| Nobody observes the entry | no timer; the last observer going away cancels it |
+| The app is in the background or inactive | paused, unless the query says `poll_in_background` |
+| The device is offline | paused |
+| The app comes to the front, the network returns | the usual triggers fire (a stale entry refetches, going online refetches everything observed) and polling continues from the end of that fetch |
+| Several observers | the entry polls at the shortest interval any of them asked for, each new observer starting from the attribute's |
+| A fetch fails | retried with backoff as any query is, then the interval runs from the end; the error shows and the next success clears it |
+
+Time comes from the Clock and delays from the Timer port, so a test under `undra::ports::fakes` advances the clock and sees each poll, background pause included. The contract scenario S33 checks it on every platform with real timers.
 
 ---
 
@@ -1192,7 +1329,7 @@ The view is a plain array on the platform. Asking for the next page is a call th
 
 ## Limits
 
-- There is no paged query type yet (`Lazy<T>` is rejected in v1): every page you load stays in memory on each platform that observes the list.
+- This recipe is the shape that needs nothing new: one query handle per page, stitched together in the core. For a feed that grows by the page, an `infinite` query keeps the pages, the cursor and the refetch order in the core, and `Lazy<T>` lets a platform read a window of a list that is too big to send; both are in [Paging and lazy lists](https://shreypdev.github.io/undra/docs/paging.html). Here, every page you load stays in memory on each platform that observes the list.
 - Prepending (a chat's older messages) is a `insert` at index 0 of the same list; the recipe appends only.
 
 Source: [`examples/cookbook/core/src/paging.rs`](https://github.com/shreypdev/undra/blob/main/examples/cookbook/core/src/paging.rs).
@@ -2034,6 +2171,7 @@ error[undra::E0004]: callback `Arc<dyn Listener>` cannot be a field of a record 
 | [`E0066`](https://shreypdev.github.io/undra/docs/errors.html#E0066) | a `#[undra::migrate]` hook with a wrong target or shape (ADR-037; addition) |
 | [`E0070`](https://shreypdev.github.io/undra/docs/errors.html#E0070) | a named instantiation of a generic data type that is declared twice or outside the crate of its template |
 | [`E0071`](https://shreypdev.github.io/undra/docs/errors.html#E0071) | a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041) |
+| [`E0073`](https://shreypdev.github.io/undra/docs/errors.html#E0073) | an `infinite` query that does not meet ADR-043's shape: no `item_key` or one that names no field of the rows, no or more than one `#[undra(cursor)]` parameter, a cursor that is not `Option<C>` or is in the key, a success type that is not `Page<T, C>`, rows that are not a record |
 
 ## Types and shapes
 
@@ -2041,7 +2179,7 @@ error[undra::E0004]: callback `Arc<dyn Listener>` cannot be a field of a record 
 
 Raised by macros, schema validation, the `Encode`/`Decode` bounds.
 
-unsupported type in a public position (lists the type and the allowed set); includes `i128`/`u128` (the help points at `Decimal`, `Uuid` or a `String` newtype), `DateTime<Local>` and `DateTime<FixedOffset>` ("convert to `Utc`; offsets do not cross"), a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate that only that crate has (`DateTime<Utc>`, `OffsetDateTime`, `TimeDelta`, ..) spelled without the matching feature of `undra` (one error naming the feature), `Lazy<T>` (lazy lists are not available in v1), a `DerivedList` field without its row type (ADR-039), `Handle` (no schema type; an object crosses as `Arc<T>` or `&T`, ADR-040), `Arc<T>` of a built-in or an `Rc`, a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`)
+unsupported type in a public position (lists the type and the allowed set); includes `i128`/`u128` (the help points at `Decimal`, `Uuid` or a `String` newtype), `DateTime<Local>` and `DateTime<FixedOffset>` ("convert to `Utc`; offsets do not cross"), a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate that only that crate has (`DateTime<Utc>`, `OffsetDateTime`, `TimeDelta`, ..) spelled without the matching feature of `undra` (one error naming the feature), a `Lazy<T>` that is not a store field, or is inside a `Signal`, `Computed` or `DerivedList` (ADR-043), a `DerivedList` field without its row type (ADR-039), `Handle` (no schema type; an object crosses as `Arc<T>` or `&T`, ADR-040), `Arc<T>` of a built-in or an `Rc`, a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
@@ -2050,7 +2188,7 @@ unsupported type in a public position (lists the type and the allowed set); incl
 | `DateTime<Local>` cannot cross the boundary | a `Timestamp` is an instant in milliseconds since the Unix epoch, in UTC; a date-time with a local time zone or a fixed offset has no one value every platform reads alike, and the offset itself would be lost | convert to `Utc` (`value.with_timezone(&Utc)`) and spell `DateTime<Utc>`; offsets do not cross |
 | `DateTime<FixedOffset>` cannot cross the boundary | a `Timestamp` is an instant in milliseconds since the Unix epoch, in UTC; a date-time with a local time zone or a fixed offset has no one value every platform reads alike, and the offset itself would be lost | convert to `Utc` (`value.with_timezone(&Utc)`) and spell `DateTime<Utc>`; offsets do not cross |
 | `DerivedList` needs the type of its rows | a derived list is a `Vec` of rows the platforms mirror, so the schema needs the row type, written as the one type argument | write `DerivedList<Row>` for `visible`, with the type the pipeline's `build()` produces |
-| `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet | a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it | expose the items as a `Signal<Vec<T>>` (keyed with `#[undra(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit |
+| `Lazy<Row>` can only be the type of a store field, not of a record or enum field | a `Lazy<T>` is a list the core owns and the platforms page through by handle: it is not a value, so it cannot be a parameter, a return type, a record or enum field, or the value of a signal | write it as a field of a `#[undra::store]` struct (`books: Lazy<Book>`); to give a caller a list, return a `Vec<T>`, or take an offset and a limit and return one page |
 
 ### `E0002` generic parameter, or a generic type spelled with its arguments
 
@@ -2121,7 +2259,8 @@ map key type not allowed: `String`, integers, `bool`, `Uuid` and newtypes of tho
 | `Decimal` cannot be a map key | map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not) | use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field |
 | `undra::prelude::Decimal` cannot be a map key | map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not) | use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field |
 | `Loose` cannot be a map key | map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not) | use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field |
-| `f32` at record Scores, field by_weight is not a valid map key | map keys must compare and hash the same on every platform: `String`, an integer type, `bool` and `Uuid` do, floats and composite keys do not | use one of those key types, or a `Vec` of records with an explicit key field |
+| `f32` at record Scores, field by_weight is not a valid map key | map keys must compare and hash the same on every platform: `String`, an integer type, `bool`, `Uuid` and a newtype of one of those do, floats, decimals and composite keys do not | use one of those key types, or a `Vec` of records with an explicit key field |
+| `decimal` at record Prices, field by_amount is not a valid map key | map keys must compare and hash the same on every platform: `String`, an integer type, `bool`, `Uuid` and a newtype of one of those do, floats, decimals and composite keys do not | use one of those key types, or a `Vec` of records with an explicit key field |
 
 ### `E0007` unsupported item shape or placement of an Undra attribute
 
@@ -2314,16 +2453,16 @@ the error type of a `Result` port method has no `From<PortError>` (an unavailabl
 
 Raised by macros.
 
-query without `key` / mutation with `stale` / a query argument of the wrong kind
+query without `key` / mutation with `stale` / a query argument of the wrong kind, an `interval` below one second (use a stream for real-time data), `refetch_pages` or `persist_pages` that is not a whole number of at least 1, polling or paging options on a mutation
 
 | What you see | Why | Fix |
 | --- | --- | --- |
+| `interval = "500ms"` is below one second | a poll fetches the whole result again each time, so a query polled more than once a second is really a stream: use a stream for real-time data | write `interval = "1s"` or more, or deliver the changes with a `#[undra::port]` event or a stream |
+| `interval = "0s"` is below one second | a poll fetches the whole result again each time, so a query polled more than once a second is really a stream: use a stream for real-time data | write `interval = "1s"` or more, or deliver the changes with a `#[undra::port]` event or a stream |
+| invalid `interval` duration: `soon` does not start with a whole number | `interval` is how long after a fetch ends the next one starts | write a whole number and a unit, for example `interval = "30s"` |
+| mutation `add` has `interval` | polling and paging apply to cached reads; a mutation writes and caches nothing | remove `interval`; put it on the query the mutation invalidates |
 | query `todos` has no `key` | the cache is addressed by key: two calls share a cached result only if their keys are equal | add `key = "todos"`, with `{param}` placeholders for the parameters that distinguish results |
 | mutation `add_todo` has `stale` | `stale` is how long a cached *read* stays fresh; a mutation writes and caches nothing | remove `stale`; put it on the query the mutation invalidates |
-| `{pgae}` in `key` is not a parameter of the function | each placeholder is replaced by the encoded parameter of that name | the parameters are: page |
-| `key` must be a string literal | `key` takes a string literal; anything else cannot be read at compile time | write `key = "todos:{page}"` |
-| `retry` must be a whole number | `retry` takes a whole number; anything else cannot be read at compile time | write `retry = 3` |
-| `stale` must be a string literal with a unit | `stale` takes a string literal with a unit; anything else cannot be read at compile time | write `stale = "30s"` |
 
 ### `E0041` query or mutation function with an invalid signature
 
@@ -2504,6 +2643,21 @@ a method of a `#[undra::callback]` trait that returns a value synchronously, is 
 | `#[undra(coalesce)]` on the `async` callback method `confirm` | `coalesce` drops the older of two pending calls, and an `async` method's caller is waiting for each answer | remove `#[undra(coalesce)]`, or make the method a plain `fn` that reports progress |
 | callback method `__release` has a reserved name | names that start with `__` belong to the protocol (`__release` gives an instance back, `__cancel` cancels a call): a method of that name would be mistaken for one | rename the method |
 | method `token` of the callback interface `Provider` returns a value synchronously: make it `async` and return a `Result<T, E>` | the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone: a method either reports (fire-and-forget, returning nothing) or is `async` and returns a `Result` | make a reporting method return `()`, or make a method that answers `async` and return `Result<T, E>`; do not start a name with `__` |
+
+### `E0073` an `infinite` query that does not meet ADR-043's shape: no `item_key` or one that names no field of the rows, no or more than one `#[undra(cursor)]` parameter, a cursor that is not `Option<C>` or is in the key, a success type that is not `Page<T, C>`, rows that are not a record
+
+Raised by macros, schema validation.
+
+an `infinite` query (ADR-043) that is not a list of records with a cursor: no `item_key`, or one that names no field of the rows; no or more than one `#[undra(cursor)]` parameter, a cursor that is not `Option<C>` or is part of the `key`; a success type that is not `Page<T, C>` (with `C` the cursor's type) or rows that are not a record; `item_key`, `refetch_pages` or `persist_pages` without `infinite`, `persist_pages` without `persist`, `#[undra(cursor)]` on a query that is not `infinite`; in the schema an `infinite` mutation or a `returns` that is not `Vec<T>` of a record with the `item_key` field: the handle shows the pages as one list keyed by a field of its rows, and each page is asked for with the cursor the previous one returned
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| the infinite query `no_cursor` has no `#[undra(cursor)]` parameter | the core asks for each page with the cursor the previous one returned: exactly one parameter carries it, `None` for the first page | mark one parameter `#[undra(cursor)] cursor: Option<String>` (or the cursor type your server uses) |
+| the infinite query `two_cursors` has 2 `#[undra(cursor)]` parameters | the core asks for each page with the cursor the previous one returned: exactly one parameter carries it, `None` for the first page | mark one parameter `#[undra(cursor)] cursor: Option<String>` (or the cursor type your server uses) |
+| the cursor `cursor` of `not_an_option` is `String`, not an `Option<C>` | the cursor is `None` for the first page and the previous page's `next` after it | write `#[undra(cursor)] cursor: Option<String>`, or another value type for the cursor your server uses |
+| the cursor `cursor` is in the `key` of the infinite query `in_the_key` | every page of one list shares one cache entry, so the cursor, which differs per page, cannot be part of its key | remove the placeholder from `key`; the key holds the parameters that distinguish lists |
+| `#[undra(cursor)]` on `cursor`, which is not a parameter of an `infinite` query | the cursor is how an infinite query asks for its next page; an ordinary query has no pages | remove the attribute, or add `infinite` and `item_key = ".."` to the query |
+| `item_key = "idd"` of the infinite query `typo` names no field of `Post` | `item_key` names the field of the rows that identifies them, and `Post` has the fields `id`, `title` | write the name of one of those fields as `item_key` |
 
 ## The command line
 
@@ -3517,7 +3671,7 @@ Source: https://shreypdev.github.io/undra/reference/swift.html
 
 # Swift reference
 
-Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xe4c001b130237f02`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xe153ece252788d5b`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3531,25 +3685,25 @@ The core's entry, named after its namespace: `load` starts the core and checks i
 
 A struct for each record, an enum for each enum, with the wire codec beside it.
 
-`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Account` `AccountId` `Cents` `Composite` `DbCells` `Entry` `EntrySlice` `Item` `Note` `Price` `Primitives` `ProbeCounters` `Receipt` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `LoadableEntries` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
 An enum for each `#[undra::error]`, conforming to `Error`.
 
-`LabError` `ListError` `RemoteError` `ReportError` `StressError` `TodoError` `WorkshopError`
+`LabError` `LedgerError` `ListError` `RemoteError` `ReportError` `StressError` `TickError` `TodoError` `WorkshopError`
 
 ## Objects
 
 A class for each object, and a function for each free Rust function.
 
-`Live` `Probe` `Watch` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
+`Live` `Probe` `Watch` `add` `addLater` `area` `balances` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `deposit` `echoAccount` `echoCents` `echoComposite` `echoDecimal` `echoFigure` `echoPrice` `echoPrimitives` `echoReceipt` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `loadableStatement` `localizedGreeting` `openAccount` `ownerOf` `parseCount` `ping` `sampleReceipt` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `setTickerFailing` `sseFollow` `statement` `storageStatus` `tickerFetches` `touchFeed` `version` `wsEcho`
 
 ## Stores
 
 An `@Observable` class for each `#[undra::store]`: its signals, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
+`Bench` `BigList` `Counter` `Device` `Ledger` `Legacy` `Library` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
 
 ## Ports
 
@@ -3567,7 +3721,7 @@ A protocol for each `#[undra::callback]` trait, which your app implements so the
 
 A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
-`RemoteTodosQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
+`FeedQueryHandle` `RemoteTodosQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
 
 ## Wire ids
 
@@ -3583,7 +3737,7 @@ Source: https://shreypdev.github.io/undra/reference/kotlin.html
 
 # Kotlin reference
 
-Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xe4c001b130237f02`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xe153ece252788d5b`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3597,25 +3751,25 @@ The core's entry, named after its namespace: `load` starts the core and checks i
 
 A data class for each record, an enum or sealed interface for each enum, each with its codec.
 
-`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Account` `AccountId` `Cents` `Composite` `DbCells` `Entry` `EntrySlice` `Item` `Note` `Price` `Primitives` `ProbeCounters` `Receipt` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `LoadableEntries` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
 A sealed class for each `#[undra::error]`, one subclass per variant.
 
-`LabError` `ListError` `RemoteError` `ReportError` `StressError` `TodoError` `WorkshopError`
+`LabError` `LedgerError` `ListError` `RemoteError` `ReportError` `StressError` `TickError` `TodoError` `WorkshopError`
 
 ## Objects
 
 A class for each object, and a function for each free Rust function.
 
-`Live` `Probe` `Watch` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
+`Live` `Probe` `Watch` `add` `addLater` `area` `balances` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `deposit` `echoAccount` `echoCents` `echoComposite` `echoDecimal` `echoFigure` `echoPrice` `echoPrimitives` `echoReceipt` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `loadableStatement` `localizedGreeting` `openAccount` `ownerOf` `parseCount` `ping` `sampleReceipt` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `setTickerFailing` `sseFollow` `statement` `storageStatus` `tickerFetches` `touchFeed` `version` `wsEcho`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `StateFlow`, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
+`Bench` `BigList` `Counter` `Device` `Ledger` `Legacy` `Library` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
 
 ## Ports
 
@@ -3633,7 +3787,7 @@ An interface for each `#[undra::callback]` trait, which your app implements so t
 
 A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
-`RemoteTodosQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
+`FeedQueryHandle` `RemoteTodosQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
 
 ## Wire ids
 
@@ -3649,7 +3803,7 @@ Source: https://shreypdev.github.io/undra/reference/typescript.html
 
 # TypeScript reference
 
-Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xe4c001b130237f02`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xe153ece252788d5b`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3667,25 +3821,25 @@ The core's entry, named after its namespace: `load` starts the core and checks i
 
 An interface for each record, a union for each enum, each with a codec.
 
-`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Account` `AccountId` `Cents` `Composite` `DbCells` `Entry` `EntrySlice` `Item` `Note` `Price` `Primitives` `ProbeCounters` `Receipt` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `LoadableEntries` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
 An abstract class for each `#[undra::error]`, one subclass per variant.
 
-`LabErrorKind` `LabError` `ListErrorKind` `ListError` `RemoteErrorKind` `RemoteError` `ReportErrorKind` `ReportError` `StressErrorKind` `StressError` `TodoErrorKind` `TodoError` `WorkshopErrorKind` `WorkshopError`
+`LabErrorKind` `LabError` `LedgerErrorKind` `LedgerError` `ListErrorKind` `ListError` `RemoteErrorKind` `RemoteError` `ReportErrorKind` `ReportError` `StressErrorKind` `StressError` `TickErrorKind` `TickError` `TodoErrorKind` `TodoError` `WorkshopErrorKind` `WorkshopError`
 
 ## Objects
 
 A class for each object, and an async function for each free Rust function.
 
-`Live` `Probe` `Watch` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
+`Live` `Probe` `Watch` `add` `addLater` `area` `balances` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `deposit` `echoAccount` `echoCents` `echoComposite` `echoDecimal` `echoFigure` `echoPrice` `echoPrimitives` `echoReceipt` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `loadableStatement` `localizedGreeting` `openAccount` `ownerOf` `parseCount` `ping` `sampleReceipt` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `setTickerFailing` `sseFollow` `statement` `storageStatus` `tickerFetches` `touchFeed` `version` `wsEcho`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `Signal`, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
+`Bench` `BigList` `Counter` `Device` `Ledger` `Legacy` `Library` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
 
 ## Ports
 
@@ -3703,7 +3857,7 @@ An interface for each `#[undra::callback]` trait, which your app implements so t
 
 A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
-`RemoteTodosQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
+`FeedQueryHandle` `RemoteTodosQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
 
 ## Wire ids
 
