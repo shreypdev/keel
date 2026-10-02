@@ -18,10 +18,10 @@ help: the trait `Encode` is not implemented for `Timestamp`
    = help: the following other types implement trait `Encode`:
              &T
              ()
+             (A,)
              (A, B)
              (A, B, C)
              (A, B, C, D)
-             (A,)
              AppState
              Arc<T>
            and $N others
@@ -46,10 +46,10 @@ help: the trait `Encode` is not implemented for `Decimal`
    = help: the following other types implement trait `Encode`:
              &T
              ()
+             (A,)
              (A, B)
              (A, B, C)
              (A, B, C, D)
-             (A,)
              AppState
              Arc<T>
            and $N others
@@ -70,10 +70,10 @@ help: the trait `undra::undra_wire::Decode` is not implemented for `Timestamp`
    | ^^^^^^^^^^^^^^^^^^^^
    = help: the following other types implement trait `undra::undra_wire::Decode`:
              ()
+             (A,)
              (A, B)
              (A, B, C)
              (A, B, C, D)
-             (A,)
              AppState
              BTreeMap<K, V>
              BackgroundReport
@@ -95,10 +95,10 @@ help: the trait `undra::undra_wire::Decode` is not implemented for `Decimal`
    | ^^^^^^^^^^^^^^^^^^
    = help: the following other types implement trait `undra::undra_wire::Decode`:
              ()
+             (A,)
              (A, B)
              (A, B, C)
              (A, B, C, D)
-             (A,)
              AppState
              BTreeMap<K, V>
              BackgroundReport

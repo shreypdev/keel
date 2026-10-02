@@ -41,7 +41,7 @@ Native macOS is the reference environment. `source scripts/env.sh` puts everythi
 PATH (rustup, brew JDK 17 + Kotlin, the kotlinx-coroutines jar, a `DEVELOPER_DIR`
 fallback when xcode-select still points at CommandLineTools). Machine setup, every
 suite's run command, and the known gotchas are in `docs/ONBOARDING.md`; `undra doctor`
-diagnoses a machine. Rust stable (1.98+) with the wasm32/iOS/Android targets installed —
+diagnoses a machine. Rust stable (1.99+; CI pins 1.99.0) with the wasm32/iOS/Android targets installed —
 no build-std, no nightly, except Miri/ASan jobs in CI. Full Xcode is required for Swift
 tests and simulators; Android work needs the SDK + NDK r27 + the `undra` AVD.
 

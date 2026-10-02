@@ -140,7 +140,7 @@ jobs:
       # alone, never from artifacts a cache might hold.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-03
         with:
-          toolchain: 1.98.1 # the version CI pins (ci.yml header); bump them together
+          toolchain: 1.99.0 # the version CI pins (ci.yml header); bump them together
           targets: ${{ matrix.target }}
       - name: Build (release profile, LTO, stripped)
         run: cargo build --release --locked -p undra-cli --target "$TARGET"

@@ -8,9 +8,10 @@ on:
 # The Rust version is pinned, not "stable": the compile-fail goldens (trybuild) quote rustc's
 # wording and the bench budgets are baselined on one compiler, so a new stable release must land
 # as a deliberate commit that bumps every `rust-toolchain@` line here, in bench.yml, release.yml,
-# rn-devices.yml and site.yml together, regenerates the goldens (TRYBUILD=overwrite) and re-baselines the
-# budgets. 1.99.0 (2026-10-01) is the first one waiting: it renames `fetch_update`
-# (already replaced by `cas_update`) and rewords const-eval panics.
+# rn-devices.yml, site.yml and two-cores.yml together, regenerates the goldens (TRYBUILD=overwrite)
+# and re-baselines the budgets and the web size. 1.99.0 (2026-10-01) is what is pinned: the commit that
+# bumped to it replaced `fetch_update` (by `cas_update`) and regenerated the goldens, whose const-eval
+# panics it rewords. The next stable waits for its own such commit.
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
@@ -21,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
@@ -93,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown, aarch64-apple-ios, aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
@@ -176,7 +177,7 @@ jobs:
           curl -sSfLo "$HOME/lib/sqlite-jdbc-3.53.4.0.jar" \
             https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.53.4.0/sqlite-jdbc-3.53.4.0.jar
           echo "47e21dd53efe1524fe0df6965cb65003ffe17172  $HOME/lib/sqlite-jdbc-3.53.4.0.jar" | sha1sum -c -
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
       - uses: Swatinem/rust-cache@v2
       - name: Build the JNI library (the fixture core, namespace undra_fixture)
         run: cargo build --manifest-path crates/undra-ffi/tests/fixture/Cargo.toml
@@ -192,7 +193,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
@@ -212,7 +213,7 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
@@ -262,7 +263,7 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
@@ -287,7 +288,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: aarch64-linux-android, x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
@@ -365,7 +366,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
@@ -409,7 +410,7 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
@@ -424,7 +425,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
@@ -453,7 +454,7 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2

@@ -23,8 +23,10 @@ the `shellenv` line as its fix. The paths below are Apple silicon's; on an Intel
 
 #### Rust
 
-`rustup` with the stable channel, 1.85 or newer (the MSRV of the workspace, edition 2024). Doctor checks
-`rustup`, the active channel, `rustc` and `cargo`.
+`rustup` with the stable channel, 1.85 or newer (the MSRV of the workspace, edition 2024); **1.99.0** is the
+compiler CI pins (every `rust-toolchain` line of `.github/workflows`), and the one the compile-fail goldens, the
+bench budgets and the web size are recorded on: a machine on another stable gets goldens that differ in rustc's
+wording and numbers that differ in the last digits. Doctor checks `rustup`, the active channel, `rustc` and `cargo`.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
