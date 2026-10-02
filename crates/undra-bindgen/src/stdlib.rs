@@ -915,7 +915,12 @@ mod tests {
                 } else {
                     t.name.to_owned()
                 };
-                assert_eq!(runtime_spelling(lang, t.name), expected, "{lang:?} {}", t.name);
+                assert_eq!(
+                    runtime_spelling(lang, t.name),
+                    expected,
+                    "{lang:?} {}",
+                    t.name
+                );
             }
         }
     }

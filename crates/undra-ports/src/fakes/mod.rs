@@ -34,9 +34,9 @@
 //! `TestRuntime::advance`, to move time on such a runtime.
 
 mod clock;
-mod diagnostics;
 #[cfg(feature = "db")]
 mod db;
+mod diagnostics;
 mod events;
 mod fs;
 mod http;
@@ -57,9 +57,9 @@ use undra_runtime::testing::TestRuntime;
 use undra_runtime::{Port, Runtime};
 
 pub use clock::{FakeClock, MAX_TIMERS_PER_ADVANCE};
-pub use diagnostics::CaptureDiagnostics;
 #[cfg(feature = "db")]
 pub use db::{DbCall, DbCallKind, FakeDb};
+pub use diagnostics::CaptureDiagnostics;
 pub use events::{ScriptedConnectivity, ScriptedLifecycle};
 pub use fs::MemFs;
 pub use http::{FakeHttp, Matcher};
