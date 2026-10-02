@@ -82,6 +82,13 @@ enum StandardPorts {
         static let changed: UInt32 = fnv1a32("Lifecycle.changed")
     }
 
+    /// `Diagnostics`, sync, one method (ADR-046): the core hands every contained panic to it as one
+    /// `PanicReport`, fire and forget (port call id 0, like a `Log` record).
+    enum Diagnostics {
+        static let portId: UInt32 = fnv1a32("port.Diagnostics")
+        static let panicked: UInt32 = fnv1a32("Diagnostics.panicked")
+    }
+
     // MARK: Names, for diagnostics
 
     /// Every standard port and method, by name: `"Kv"`, `"Kv.get"`, ...
@@ -96,6 +103,7 @@ enum StandardPorts {
         "Timer": ["set"],
         "Connectivity": ["changed"],
         "Lifecycle": ["changed"],
+        "Diagnostics": ["panicked"],
     ]
 
     private static let namesById: (ports: [UInt32: String], methods: [UInt32: String]) = {
@@ -125,6 +133,15 @@ enum StandardPorts {
         let digits = String(value, radix: 16)
         return String(repeating: "0", count: Swift.max(0, 8 - digits.count)) + digits
     }
+}
+
+// MARK: - Standard functions
+
+/// `fnv1a32("fn.<name>")` for the standard functions: free functions every schema has and no binding
+/// generates (ADR-024 and its amendment), which the runtime calls by itself.
+enum StandardFunctions {
+    /// `run_background(deadline_ms: u64) -> BackgroundReport` (ADR-046), an async call.
+    static let runBackground: UInt32 = fnv1a32("fn.run_background")
 }
 
 // MARK: - RuntimeConfig

@@ -1,6 +1,7 @@
 // The records the standard ports exchange (docs/SPEC.md section 8), with their hand-written wire
 // codecs: `HttpMethod`, `Header`, `HttpRequest`, `HttpResponse`, `HttpError`, `FsError`,
-// `StorageError`, `NetKind` and `UndraAppState`.
+// `StorageError`, `NetKind`, `UndraAppState` and, since ADR-046, `UndraPanicFrame`,
+// `UndraPanicReport` and `UndraBackgroundReport`.
 //
 // They are public API. Generated bindings refer to them where an app's own port, method or record
 // mentions a standard type (`func upload(_ request: HttpRequest) async throws(HttpError) ->
@@ -8,10 +9,13 @@
 // implements `Http`, `Fs`, `Kv`, `SecureStore` or `Connectivity` itself builds and reads them. The names are the Rust
 // ones, as in the Kotlin and TypeScript runtimes, and the shapes are what generated code for
 // `undra-ports` would contain (a struct per record, `Codable` where it can be, an enum per error
-// with the messages of the Rust `#[error]` attributes). Two spellings differ from the Rust:
+// with the messages of the Rust `#[error]` attributes). Some spellings differ from the Rust:
 // `NetKind.disconnected` is `NetKind::None` (a case called `none` would be ambiguous with
 // `Optional.none` wherever the value is optional), and `AppState` is `UndraAppState`, the name it
-// has had since v1 (an app's own `AppState` is the commonest type name there is).
+// has had since v1 (an app's own `AppState` is the commonest type name there is). `PanicFrame`,
+// `PanicReport` and `BackgroundReport` carry the `Undra` prefix too (`UndraPanicFrame`,
+// `UndraPanicReport`, `UndraBackgroundReport`): they are what an app hands to its crash reporter and
+// to the OS, where a bare `PanicReport` would collide with the app's own types.
 //
 // A module that declares a type with one of these names (an app record called `HttpRequest` with
 // another shape) shadows the runtime's inside that module; code that imports both modules writes
@@ -457,5 +461,178 @@ public enum UndraAppState: UInt16, UndraEnum, CaseIterable, Sendable, Codable {
 
     public func undraEncode(_ w: inout UndraWriter) {
         w.writeU16(rawValue)
+    }
+}
+
+// MARK: - Diagnostics and background records (ADR-046)
+
+/// One frame of the Rust call stack at a panic, innermost first.
+///
+/// `PanicFrame { address: u64, symbol: Option<String>, file: Option<String>, line: Option<u32> }`
+/// (type id `0x19a497d1`). `address` is an offset into the core's image (the instruction address
+/// minus the image's load address, pointing into the call instruction), so a symbolicator holding
+/// the build's symbol files (``UndraPanicReport/imageId`` names them) resolves it. A debug build
+/// also names the frame (`symbol`, `file`, `line`); a release build has addresses only, and `0`
+/// means the address is not known.
+public struct UndraPanicFrame: UndraRecord, Sendable, Hashable, Codable {
+    /// The offset of the instruction in the core's image, or `0` when it is not known.
+    public var address: UInt64
+    /// The function name, when the image still has it (debug builds).
+    public var symbol: String?
+    /// The source file, when the image still has it (debug builds).
+    public var file: String?
+    /// The source line, when the image still has it (debug builds).
+    public var line: UInt32?
+
+    /// Creates a frame; without arguments for the rest it carries an address only.
+    public init(address: UInt64, symbol: String? = nil, file: String? = nil, line: UInt32? = nil) {
+        self.address = address
+        self.symbol = symbol
+        self.file = file
+        self.line = line
+    }
+
+    public static func undraDecode(_ r: inout UndraReader) throws -> UndraPanicFrame {
+        let address = try r.readU64()
+        let symbol = try Optional<String>.undraDecode(&r)
+        let file = try Optional<String>.undraDecode(&r)
+        let line = try Optional<UInt32>.undraDecode(&r)
+        return UndraPanicFrame(address: address, symbol: symbol, file: file, line: line)
+    }
+
+    public func undraEncode(_ w: inout UndraWriter) {
+        w.writeU64(address)
+        symbol.undraEncode(&w)
+        file.undraEncode(&w)
+        line.undraEncode(&w)
+    }
+}
+
+/// What the core knows about a panic it contained: the value ``LoadOptions/onPanic`` receives, once
+/// per panic, and what an app hands to its crash reporter (ADR-046).
+///
+/// `PanicReport { message, location, operation, thread, frames: Vec<PanicFrame>, namespace,
+/// core_version, schema_hash: u64, image_id }` (type id `0xd08d5436`). The call that panicked still
+/// fails as before (``UndraCallError/panicked(message:backtrace:)``); this is the structured twin of
+/// that error and the only report of a panic in a task nobody awaits.
+public struct UndraPanicReport: UndraRecord, Sendable, Hashable, Codable {
+    /// The panic message.
+    public var message: String
+    /// Where it panicked, `file:line:column` (the path is remapped in release builds).
+    public var location: String
+    /// What the core was running: `"Todos.add"`, `"explode"`, `"task"`, `"computed Todos.visible"`,
+    /// `"observe Todos"`, `"snapshot Todos"`, `"init hook x"`, and so on.
+    public var operation: String
+    /// The name of the Rust thread that panicked (`"undra-core"`, ...).
+    public var thread: String
+    /// The Rust stack, innermost frame first; empty when the core could not capture it.
+    public var frames: [UndraPanicFrame]
+    /// The core's namespace (`[core] namespace` in its undra.toml).
+    public var namespace: String
+    /// The version of the core crate (`export_core!`).
+    public var coreVersion: String
+    /// The schema hash of the core.
+    public var schemaHash: UInt64
+    /// The identity of the image that holds the core, lowercase hex: the Mach-O `LC_UUID` or the ELF
+    /// GNU build id. It is what a symbolicator uses to find the symbol file of this exact build; empty
+    /// when the core could not read it.
+    public var imageId: String
+
+    /// Creates a report.
+    public init(
+        message: String,
+        location: String,
+        operation: String,
+        thread: String,
+        frames: [UndraPanicFrame] = [],
+        namespace: String,
+        coreVersion: String,
+        schemaHash: UInt64,
+        imageId: String
+    ) {
+        self.message = message
+        self.location = location
+        self.operation = operation
+        self.thread = thread
+        self.frames = frames
+        self.namespace = namespace
+        self.coreVersion = coreVersion
+        self.schemaHash = schemaHash
+        self.imageId = imageId
+    }
+
+    public static func undraDecode(_ r: inout UndraReader) throws -> UndraPanicReport {
+        let message = try r.readString()
+        let location = try r.readString()
+        let operation = try r.readString()
+        let thread = try r.readString()
+        let frames = try [UndraPanicFrame].undraDecode(&r)
+        let namespace = try r.readString()
+        let coreVersion = try r.readString()
+        let schemaHash = try r.readU64()
+        let imageId = try r.readString()
+        return UndraPanicReport(
+            message: message,
+            location: location,
+            operation: operation,
+            thread: thread,
+            frames: frames,
+            namespace: namespace,
+            coreVersion: coreVersion,
+            schemaHash: schemaHash,
+            imageId: imageId
+        )
+    }
+
+    public func undraEncode(_ w: inout UndraWriter) {
+        w.writeString(message)
+        w.writeString(location)
+        w.writeString(operation)
+        w.writeString(thread)
+        frames.undraEncode(&w)
+        w.writeString(namespace)
+        w.writeString(coreVersion)
+        w.writeU64(schemaHash)
+        w.writeString(imageId)
+    }
+}
+
+/// What a background run (``UndraCore/runInBackground(deadline:)``) did (ADR-046).
+///
+/// `BackgroundReport { finished: bool, replayed: u32, refetched: u32, still_pending: u32 }` (type id
+/// `0x5dbea5f3`).
+public struct UndraBackgroundReport: UndraRecord, Sendable, Hashable, Codable {
+    /// Whether every background task finished and nothing is left to do. `false` when the deadline
+    /// came first or something is still pending: ask the OS for another window.
+    public var finished: Bool
+    /// Offline mutations the run replayed to the server.
+    public var replayed: UInt32
+    /// Stale persisted or observed queries the run refetched.
+    public var refetched: UInt32
+    /// Items still waiting for a window or for the network after the run: queued offline mutations,
+    /// stale persisted queries, unflushed persistence.
+    public var stillPending: UInt32
+
+    /// Creates a report.
+    public init(finished: Bool, replayed: UInt32 = 0, refetched: UInt32 = 0, stillPending: UInt32 = 0) {
+        self.finished = finished
+        self.replayed = replayed
+        self.refetched = refetched
+        self.stillPending = stillPending
+    }
+
+    public static func undraDecode(_ r: inout UndraReader) throws -> UndraBackgroundReport {
+        let finished = try r.readBool()
+        let replayed = try r.readU32()
+        let refetched = try r.readU32()
+        let stillPending = try r.readU32()
+        return UndraBackgroundReport(finished: finished, replayed: replayed, refetched: refetched, stillPending: stillPending)
+    }
+
+    public func undraEncode(_ w: inout UndraWriter) {
+        w.writeBool(finished)
+        w.writeU32(replayed)
+        w.writeU32(refetched)
+        w.writeU32(stillPending)
     }
 }

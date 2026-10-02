@@ -57,6 +57,8 @@ public final class UndraCore: @unchecked Sendable {
         var releasedWhileDown: Set<UndraHandle> = []
         /// Counts the times the connection was lost, so that a replay that a newer loss overtook does not announce a connection.
         var lossEpoch = 0
+        /// The last state an app reported through the `Lifecycle` port (`event(port:method:payload:)`), if any.
+        var lastLifecycle: UndraAppState?
     }
 
     private static let sharedSlot = Guarded<UndraCore?>(nil)
@@ -85,6 +87,8 @@ public final class UndraCore: @unchecked Sendable {
     private let onError: (@Sendable (UndraUnhandledError) -> Void)?
     private let onConnectionChange: (@Sendable (UndraConnectionState) -> Void)?
     private let onDevNotice: (@Sendable (String) -> Void)?
+    /// `LoadOptions.onPanic`, read by the default `Diagnostics` adapter (``DiagnosticsAdapter``).
+    let onPanic: (@Sendable (UndraPanicReport) -> Void)?
     private let deferredQueue = DispatchQueue(label: "dev.undra.runtime.deferred")
 
     /// True while `onError` runs on this task or thread, so a handler that makes a failing call
@@ -100,7 +104,8 @@ public final class UndraCore: @unchecked Sendable {
         maxPendingBytes: Int = Mirror.defaultMaxPendingBytes,
         frameScheduler: (any FrameScheduler)? = nil,
         onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil,
-        onDevNotice: (@Sendable (String) -> Void)? = nil
+        onDevNotice: (@Sendable (String) -> Void)? = nil,
+        onPanic: (@Sendable (UndraPanicReport) -> Void)? = nil
     ) {
         self.transport = transport
         self.mirror = Mirror(maxPendingEntries: maxPendingEntries, maxPendingBytes: maxPendingBytes, scheduler: frameScheduler)
@@ -108,6 +113,7 @@ public final class UndraCore: @unchecked Sendable {
         self.onError = onError
         self.onConnectionChange = onConnectionChange
         self.onDevNotice = onDevNotice
+        self.onPanic = onPanic
         var initial = State(isShutDown: isShutDown)
         if isShutDown {
             initial.connection = .closed(.requested)
@@ -231,7 +237,8 @@ public final class UndraCore: @unchecked Sendable {
             maxPendingBytes: options.maxPendingBytes,
             frameScheduler: frameScheduler,
             onConnectionChange: options.onConnectionChange,
-            onDevNotice: options.onDevNotice
+            onDevNotice: options.onDevNotice,
+            onPanic: options.onPanic
         )
         options.onConnectionChange?(.connecting)
         let startOptions = TransportStartOptions(
@@ -482,6 +489,61 @@ public final class UndraCore: @unchecked Sendable {
         )
     }
 
+    // MARK: Background runs
+
+    /// Runs the core's background work (ADR-046): replays the offline queue, refetches stale persisted
+    /// and observed queries, flushes pending persistence, and whatever tasks the app registered with
+    /// the core. It returns when all of them finished or when `deadline` less half a second (kept for
+    /// the host to tell the OS it is done) has passed, whichever comes first, with what it did.
+    ///
+    /// This is the call behind the OS's background windows (``UndraBackground`` on iOS): the OS grants
+    /// a window of a known length, the app asks the core to use it. Cancelling the calling `Task` (the
+    /// OS is about to take the window back) cancels the call in the core and throws
+    /// `CancellationError`; what the run already did is kept, and the offline queue persists item by
+    /// item, so a cancelled run loses nothing.
+    ///
+    /// ```swift
+    /// let report = try await core.runInBackground(deadline: 25)
+    /// if !report.finished { /* ask the OS for another window */ }
+    /// ```
+    ///
+    /// - Parameter deadline: the window in seconds. A deadline of half a second or less returns at once.
+    /// - Throws: `CancellationError` if the task is cancelled; ``UndraCallError`` otherwise (the core is
+    ///   shut down: ``UndraCallError/unavailable(_:)``). A run does not fail for what its tasks did
+    ///   (an offline server is a report with `finished == false`), and it never traps.
+    public func runInBackground(deadline: TimeInterval) async throws -> UndraBackgroundReport {
+        var writer = UndraWriter()
+        writer.writeU64(UndraCore.milliseconds(of: deadline))
+        do {
+            let body = try await call(
+                .freeFunction(methodId: StandardFunctions.runBackground),
+                method: StandardFunctions.runBackground,
+                args: writer.finish()
+            )
+            return try UndraBackgroundReport.undraDecoded(from: body)
+        } catch {
+            let mapped = UndraCallError.mapped(error)
+            if let failure = mapped as? UndraCallError, failure == .cancelledByCore, Task.isCancelled {
+                // The core's reply to the cancellation this task asked for.
+                throw CancellationError()
+            }
+            throw mapped
+        }
+    }
+
+    /// `seconds` as the whole milliseconds of the `u64` the core takes: rounded up, never negative, and
+    /// saturating (a non-finite or enormous deadline is "as long as you like").
+    static func milliseconds(of seconds: TimeInterval) -> UInt64 {
+        if seconds.isNaN || seconds <= 0 {
+            return 0
+        }
+        let milliseconds = (seconds * 1000).rounded(.up)
+        if milliseconds >= 18_446_744_073_709_551_615.0 {
+            return UInt64.max
+        }
+        return UInt64(milliseconds)
+    }
+
     /// Opens a stream and returns its items as encoded bodies.
     ///
     /// The core is granted 16 items of credit when the stream opens and 9 to 16 more each time the
@@ -708,6 +770,70 @@ public final class UndraCore: @unchecked Sendable {
             return
         }
         transport.event(portId: port, methodId: method, payload: payload)
+        if port == StandardPorts.Lifecycle.portId, method == StandardPorts.Lifecycle.changed {
+            lifecycleReported(payload)
+        }
+    }
+
+    /// Records a `Lifecycle.changed` the host just sent (whoever sent it: the default adapter,
+    /// ``UndraLifecycle`` or an adapter of the app's own) and tells the runtime's own listeners, such as
+    /// background scheduling, which run after the core has processed it.
+    private func lifecycleReported(_ payload: [UInt8]) {
+        guard let reported = try? UndraAppState.undraDecoded(from: payload) else {
+            return
+        }
+        state.withLock { (current: inout State) -> Void in
+            current.lastLifecycle = reported
+        }
+        UndraCore.notifyLifecycleObservers(self, reported)
+    }
+
+    /// Reports `reported` to the core unless it is the state last reported (the default lifecycle
+    /// adapter calls it, so an app that also reports by itself does not make the core see a state twice).
+    func reportLifecycleIfChanged(_ reported: UndraAppState) {
+        let same = state.withLock { (current: inout State) -> Bool in
+            return current.lastLifecycle == reported
+        }
+        if same {
+            return
+        }
+        event(
+            port: StandardPorts.Lifecycle.portId,
+            method: StandardPorts.Lifecycle.changed,
+            payload: UndraLifecycle.encodeChanged(reported)
+        )
+    }
+
+    /// What listens to every `Lifecycle.changed` any core sent: a core and the state it was told.
+    typealias LifecycleObserver = @Sendable (UndraCore, UndraAppState) -> Void
+
+    private static let lifecycleObservers = Guarded<(next: Int, all: [Int: LifecycleObserver])>((next: 0, all: [:]))
+
+    /// Adds `observer` (called after the core was told, on the thread that told it, with no lock held)
+    /// and returns the token that removes it.
+    static func addLifecycleObserver(_ observer: @escaping LifecycleObserver) -> Int {
+        return lifecycleObservers.withLock { (current: inout (next: Int, all: [Int: LifecycleObserver])) -> Int in
+            let token = current.next
+            current.next += 1
+            current.all[token] = observer
+            return token
+        }
+    }
+
+    /// Removes the observer ``addLifecycleObserver(_:)`` returned `token` for.
+    static func removeLifecycleObserver(_ token: Int) {
+        lifecycleObservers.withLock { (current: inout (next: Int, all: [Int: LifecycleObserver])) -> Void in
+            current.all[token] = nil
+        }
+    }
+
+    private static func notifyLifecycleObservers(_ core: UndraCore, _ reported: UndraAppState) {
+        let observers = lifecycleObservers.withLock { (current: inout (next: Int, all: [Int: LifecycleObserver])) -> [LifecycleObserver] in
+            return current.all.sorted { $0.key < $1.key }.map { $0.value }
+        }
+        for observer in observers {
+            observer(core, reported)
+        }
     }
 
     /// Tells the core that timer `timerId`, armed through the Timer port, has come due.

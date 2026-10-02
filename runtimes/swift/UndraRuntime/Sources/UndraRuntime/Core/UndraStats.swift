@@ -1,5 +1,40 @@
 // Runtime statistics: the core's `undra_stats_json` document plus the host's own counters.
 
+/// The core's background-run counters (`"background"` in its stats document, ADR-046): what
+/// ``UndraCore/runInBackground(deadline:)`` has to work with and what it did. All zero for a core that
+/// predates them.
+public struct UndraBackgroundStats: Sendable, Equatable {
+    /// Background tasks registered in the core (the query runtime registers three).
+    public var tasks: Int
+    /// Items of work a background window would drain: queued offline mutations, stale persisted queries,
+    /// unflushed persistence. The platform reads it after reporting `Lifecycle.Background` to decide
+    /// whether to ask the OS for a window.
+    public var pending: Int
+    /// Background runs started.
+    public var runs: Int
+    /// Runs that finished all their work.
+    public var finished: Int
+    /// Offline mutations replayed by background runs.
+    public var replayed: Int
+    /// Queries refetched by background runs.
+    public var refetched: Int
+
+    /// Counters that are all zero.
+    public init() {
+        self.init(tasks: 0, pending: 0, runs: 0, finished: 0, replayed: 0, refetched: 0)
+    }
+
+    /// Creates the counters.
+    public init(tasks: Int, pending: Int, runs: Int, finished: Int, replayed: Int, refetched: Int) {
+        self.tasks = tasks
+        self.pending = pending
+        self.runs = runs
+        self.finished = finished
+        self.replayed = replayed
+        self.refetched = refetched
+    }
+}
+
 /// A snapshot of the runtime's counters (`UndraCore.stats()`).
 ///
 /// The `core` fields come from the core's `undra_stats_json` document and are zero when the
@@ -27,6 +62,11 @@ public struct UndraStats: Sendable, Equatable {
     public var coreTransactions: Int
     /// Panics the core caught.
     public var corePanics: Int
+    /// Panic reports the core handed to the `Diagnostics` port (ADR-046): one per contained panic, the
+    /// ones ``LoadOptions/onPanic`` receives.
+    public var panicReports: Int
+    /// The core's background-run counters (ADR-046); all zero when the core has none.
+    public var background: UndraBackgroundStats
 
     /// `UndraObject`s (and stores) created and not yet closed.
     public var hostLiveHandles: Int
@@ -60,6 +100,15 @@ public struct UndraStats: Sendable, Equatable {
         self.coreOpenStreams = values["open_streams"] ?? 0
         self.coreTransactions = values["transactions"] ?? 0
         self.corePanics = values["panics"] ?? 0
+        self.panicReports = values["panic_reports"] ?? 0
+        self.background = UndraBackgroundStats(
+            tasks: values["background.tasks"] ?? 0,
+            pending: values["background.pending"] ?? 0,
+            runs: values["background.runs"] ?? 0,
+            finished: values["background.finished"] ?? 0,
+            replayed: values["background.replayed"] ?? 0,
+            refetched: values["background.refetched"] ?? 0
+        )
         self.hostLiveHandles = 0
         self.hostMirroredStores = 0
         self.hostPendingCalls = 0

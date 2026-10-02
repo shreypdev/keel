@@ -91,16 +91,16 @@ struct BrokenBackend: KeyValueBackend {
 
 @MainActor
 final class AdapterSetTests: XCTestCase {
-    func testThePlatformDefaultsCoverTheStandardPortsExceptLifecycle() {
+    func testThePlatformDefaultsCoverEveryStandardPort() {
         let ids = Adapters.platformDefault.all.map { $0.portId }
         XCTAssertEqual(Set(ids).count, ids.count, "one adapter per port")
         let expected: Set<UInt32> = [
             StandardPorts.Http.portId, StandardPorts.Kv.portId, StandardPorts.SecureStore.portId,
             StandardPorts.Fs.portId, StandardPorts.Clock.portId, StandardPorts.Rng.portId,
             StandardPorts.Log.portId, StandardPorts.Timer.portId, StandardPorts.Connectivity.portId,
+            StandardPorts.Lifecycle.portId, StandardPorts.Diagnostics.portId,
         ]
         XCTAssertEqual(Set(ids), expected)
-        XCTAssertFalse(ids.contains(StandardPorts.Lifecycle.portId))
     }
 
     func testReplacingAndRemovingAdaptersByPort() {
@@ -139,9 +139,9 @@ final class AdapterSetTests: XCTestCase {
         let expected: Set<UInt32> = [
             StandardPorts.Http.portId, StandardPorts.Kv.portId, StandardPorts.SecureStore.portId,
             StandardPorts.Fs.portId, StandardPorts.Clock.portId, StandardPorts.Rng.portId,
-            StandardPorts.Log.portId, StandardPorts.Timer.portId,
+            StandardPorts.Log.portId, StandardPorts.Timer.portId, StandardPorts.Diagnostics.portId,
         ]
-        XCTAssertEqual(registered, expected, "Connectivity has no methods the core calls")
+        XCTAssertEqual(registered, expected, "Connectivity and Lifecycle have no methods the core calls")
         core.shutdown()
     }
 }

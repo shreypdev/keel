@@ -155,4 +155,67 @@ final class PublicStandardTypesTests: XCTestCase {
         XCTAssertEqual(Header(text: "mine").text, "mine")
         XCTAssertEqual(UndraRuntime.Header(name: "a", value: "b").name, "a")
     }
+
+    // MARK: ADR-046: panic reports and background runs
+
+    func testThePanicAndBackgroundRecordsAreBuiltAndReadFromOutsideTheModule() throws {
+        let frame = UndraPanicFrame(address: 0x10)
+        XCTAssertNil(frame.symbol)
+        XCTAssertNil(frame.file)
+        XCTAssertNil(frame.line)
+        var named = UndraPanicFrame(address: 0x20, symbol: "f", file: "lab.rs", line: 3)
+        named.line = 4
+        XCTAssertEqual(named.line, 4)
+        var report = UndraPanicReport(
+            message: "boom", location: "lab.rs:3:9", operation: "explode", thread: "undra-core", frames: [frame, named],
+            namespace: "playground_core", coreVersion: "1.0.0", schemaHash: 0x5324_1303_b2d0_8c5e, imageId: "ab"
+        )
+        XCTAssertEqual(report.frames.count, 2)
+        let bare = UndraPanicReport(
+            message: "m", location: "l", operation: "o", thread: "t", namespace: "n", coreVersion: "v", schemaHash: 1, imageId: ""
+        )
+        XCTAssertEqual(bare.frames, [], "frames default to none")
+        report.message = "changed"
+        XCTAssertNotEqual(report, bare)
+        XCTAssertEqual(try UndraPanicReport.undraDecoded(from: report.undraEncoded()), report)
+
+        let background = UndraBackgroundReport(finished: true)
+        XCTAssertEqual([background.replayed, background.refetched, background.stillPending], [0, 0, 0])
+        XCTAssertEqual(try UndraBackgroundReport.undraDecoded(from: background.undraEncoded()), background)
+        XCTAssertEqual(Set([background, UndraBackgroundReport(finished: true)]).count, 1)
+    }
+
+    func testThePanicAndBackgroundTypesAreSendable() async {
+        let report = UndraPanicReport(
+            message: "m", location: "l", operation: "o", thread: "t", namespace: "n", coreVersion: "v", schemaHash: 1, imageId: ""
+        )
+        let background = UndraBackgroundReport(finished: false, stillPending: 2)
+        let (echoed, run) = await Task.detached { (report, background) }.value
+        XCTAssertEqual(echoed, report)
+        XCTAssertEqual(run, background)
+    }
+
+    func testTheOptionTheStatsAndTheEntriesAreReachableFromOutsideTheModule() {
+        // `LoadOptions.onPanic` is `@Sendable (UndraPanicReport) -> Void` and nil by default.
+        var options = LoadOptions.inproc()
+        XCTAssertNil(options.onPanic)
+        options.onPanic = { (report: UndraPanicReport) -> Void in _ = report.operation }
+        XCTAssertNotNil(options.onPanic)
+        XCTAssertNotNil(LoadOptions.inproc(onPanic: { _ in }).onPanic)
+        XCTAssertNotNil(LoadOptions.remote(url: "ws://127.0.0.1:1", onPanic: { _ in }).onPanic)
+        XCTAssertNotNil(LoadOptions(mode: .inproc, onPanic: { _ in }).onPanic)
+        // The stats types.
+        let stats = UndraStats()
+        XCTAssertEqual(stats.panicReports, 0)
+        XCTAssertEqual(stats.background, UndraBackgroundStats())
+        XCTAssertEqual(UndraBackgroundStats(tasks: 1, pending: 2, runs: 3, finished: 4, replayed: 5, refetched: 6).refetched, 6)
+        // The default adapters.
+        XCTAssertEqual(DiagnosticsAdapter().portId, fnv1a32("port.Diagnostics"))
+        XCTAssertEqual(LifecycleAdapter().portId, fnv1a32("port.Lifecycle"))
+        XCTAssertTrue(Adapters.platformDefault.all.contains { $0 is DiagnosticsAdapter })
+        XCTAssertTrue(Adapters.platformDefault.all.contains { $0 is LifecycleAdapter })
+        // `runInBackground(deadline:)` is public API with the documented signature.
+        let run: (UndraCore) -> (TimeInterval) async throws -> UndraBackgroundReport = { $0.runInBackground(deadline:) }
+        _ = run
+    }
 }
