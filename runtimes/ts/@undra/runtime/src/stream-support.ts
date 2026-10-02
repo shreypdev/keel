@@ -1,6 +1,6 @@
 // PROTOTYPE (ADR-057 lever d1/e): everything a stream needs of the core, out of the first chunk. The generated entry of a
 // core whose schema has a stream passes `features: [streams]`; a core loaded without it loads this module on its first stream.
-import type { CallTargetArg, PendingStream, UndraCore } from "./core.js";
+import { type CallTargetArg, type PendingStream, type UndraCore, encodeTarget } from "./core.js";
 import { UndraReplyError, UndraTransportError } from "./errors.js";
 import { errorMessage } from "./platform.js";
 import { StreamCall } from "./stream.js";
@@ -18,8 +18,10 @@ interface Entry extends PendingStream {
 
 export const streams: StreamSupport = {
   open(core, target, methodId, args) {
-    const { pending, transport, callId: alloc, encode, closedMessage } = core._internals;
-    const callId = core.closed ? 0 : alloc();
+    const pending = core._pending;
+    const transport = core._transport;
+    const closedMessage = core._closedMessage;
+    const callId = core.closed ? 0 : core._allocCallId();
     const stream = new StreamCall(callId, {
       sendCredit: (id, credit) => {
         if (core.closed) throw new UndraTransportError("closed", closedMessage);
@@ -56,7 +58,7 @@ export const streams: StreamSupport = {
     };
     pending.set(callId, entry);
     try {
-      transport.sendCall(encode(target, methodId, callId, args));
+      transport.sendCall(encodeTarget(target, methodId, callId, args));
     } catch (error) {
       pending.delete(callId);
       stream.fail(error);
@@ -65,7 +67,7 @@ export const streams: StreamSupport = {
   },
 
   item(core, payload) {
-    const { pending } = core._internals;
+    const pending = core._pending;
     if (payload.length < 5) {
       core.report(new UndraTransportError("protocol", "the core sent a truncated stream item"), "stream");
       return;

@@ -50,7 +50,7 @@ export const extension: CoreExtension = {
   async starting(core, options, adapters, ports) {
     const given = (["clock", "rng", "timer"] as const).filter((name) => options.adapters?.[name] != null);
     if (given.length > 0 && core.mode === "wasm-worker") {
-      core._internals.log(3, "undra::worker", `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`);
+      core._log(3, "undra::worker", `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`);
     }
     const built = core.mode.startsWith("wasm") ? undefined : await import("../adapters/ports.js");
     built?.serveDiagnostics(core, ports, options.onPanic, adapters.log);
@@ -91,21 +91,20 @@ export const extension: CoreExtension = {
   },
   reconnecting(core, attempt, error) {
     if (core.closed) return;
-    const { failInFlight, setConnection } = core._internals;
-    if (attempt === 1) failInFlight(new UndraTransportError("closed", `the connection to the core was lost (${error.message}); reconnecting`, { cause: error }));
-    setConnection({ kind: "reconnecting", attempt, error });
+    if (attempt === 1) core._failInFlight(new UndraTransportError("closed", `the connection to the core was lost (${error.message}); reconnecting`, { cause: error }));
+    core._setConnection({ kind: "reconnecting", attempt, error });
   },
   reconnected(core, hello) {
     if (core.closed) return;
-    const { transport, observed, setConnection } = core._internals;
+    const transport = core._transport;
     core.hello = hello;
     try {
       for (const handle of released.get(core)?.splice(0) ?? []) transport.release(handle);
-      for (const [handle, signals] of observed) for (const signalId of signals) transport.observe(handle, signalId, true);
+      for (const [handle, signals] of core._observed) for (const signalId of signals) transport.observe(handle, signalId, true);
     } catch (error) {
       core.report(error, "reconnect");
       return;
     }
-    setConnection({ kind: "connected" });
+    core._setConnection({ kind: "connected" });
   },
 };

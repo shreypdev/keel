@@ -794,9 +794,8 @@ export class Mirror {
    * core that answers later. The waiters are a module of their own, loaded with such a transport; a mirror used on its own
    * loads it here.
    */
-  async whenObserved(handle: Handle, signalId: number, timeoutMs = 0): Promise<void> {
-    this._w ??= (await import("./transport/framed.js")).mirrorWaiters(this);
-    return this._w.when(handle, signalId, timeoutMs);
+  whenObserved(handle: Handle, signalId: number, timeoutMs = 0): Promise<void> {
+    return (this._w as MirrorWaiters).when(handle, signalId, timeoutMs);
   }
 
   /** Rejects every pending {@link Mirror.whenObserved} promise with `error` (the transport went away). */

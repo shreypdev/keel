@@ -355,7 +355,7 @@ function writeHead(out: Uint8Array, target: CallTargetArg, methodId: number, cal
 }
 
 /** A `Call` payload (SPEC 3.3) in one allocation: a free function or a method with its arguments, or a page call (no arguments, 21 bytes). */
-function encodeTarget(target: CallTargetArg, methodId: number, callId: number, args: Uint8Array): Uint8Array {
+export function encodeTarget(target: CallTargetArg, methodId: number, callId: number, args: Uint8Array): Uint8Array {
   if ((target as CallTargetRef).target === CallTarget.LazyListPage) {
     const page = target as PageTarget;
     const out = new Uint8Array(21);
@@ -461,29 +461,7 @@ export class UndraCore {
   /** The placeholder `shared` returns while no core is loaded: a core that was closed from the start. */
   private static _placeholder(): UndraCore {
     if (UndraCore._unloaded === null) {
-      const gone = (): never => {
-        throw new UndraTransportError("closed", UNLOADED_MESSAGE);
-      };
-      const core = new UndraCore(
-        {
-          mode: "wasm-main",
-          synchronous: true,
-          start: () => Promise.reject(new UndraTransportError("closed", UNLOADED_MESSAGE)),
-          send: gone,
-          callSync: gone,
-          close: () => {},
-          sendCall: gone,
-          observe: gone,
-          release: gone,
-          cancel: gone,
-          streamCredit: gone,
-          event: gone,
-          timerFired: gone,
-          portReply: gone,
-        },
-        { expectedSchemaHash: 0n, shared: false },
-        {},
-      );
+      const core = new UndraCore({ mode: "wasm-main", synchronous: true, close() {} } as unknown as Transport & Channel, { expectedSchemaHash: 0n, shared: false }, {});
       core._closed = true;
       core._closedMessage = UNLOADED_MESSAGE;
       UndraCore._unloaded = core;
@@ -571,15 +549,18 @@ export class UndraCore {
   /** What the core said in its `Hello` (for wasm modes, synthesised from the module). Set once `load` resolves. */
   hello: HelloPayload = { undraVersion: "", schemaHash: 0n, platform: "", mode: "" };
 
-  private readonly _transport: Transport & Channel;
+  /** @internal */
+  readonly _transport: Transport & Channel;
   private readonly _options: CoreOptions;
   private readonly _adapters: Partial<Adapters>;
   private readonly _observeTimeoutMs: number;
   private readonly _ports = new Map<number, PortImpl>();
-  private readonly _pending = new Map<number, PendingCall | PendingStream>();
+  /** @internal */
+  readonly _pending = new Map<number, PendingCall | PendingStream>();
   private readonly _handles = new Set<Handle>();
   /** The signals the app observes, per handle: what a reconnect observes again. */
-  private readonly _observed = new Map<Handle, Set<number>>();
+  /** @internal */
+  readonly _observed = new Map<Handle, Set<number>>();
   /** @internal What a core that is not in this thread adds (`transport/framed.ts`): reconnects, its ports, the dev notice. */
   _ext: import("./transport/framed.js").CoreExtension | undefined;
   /** @internal How many times crash recovery restarted the core: a wrapper's finalizer compares it with the count at its birth. */
@@ -590,7 +571,8 @@ export class UndraCore {
   private _nextCallId = 0;
   private _closed = false;
   /** What a call on this closed core says; the default is "the core is closed". */
-  private _closedMessage = "the core is closed";
+  /** @internal */
+  _closedMessage = "the core is closed";
   private _reporting = false;
   /** The failures of calls the `onError` handler started (see `report`): reported, they are only logged. */
   private readonly _handlerFailures = new WeakSet<object>();
@@ -755,21 +737,6 @@ export class UndraCore {
 
   /** @internal The stream support, once a feature or the first stream installed it. */
   _streams: StreamSupport | undefined;
-  /** @internal For the stream support: the pending map, the transport, a fresh call id, the request encoder. */
-  get _internals() {
-    return {
-      pending: this._pending,
-      transport: this._transport,
-      callId: () => this._allocCallId(),
-      encode: encodeTarget,
-      closedMessage: this._closedMessage,
-      observed: this._observed,
-      failInFlight: (error: Error) => this._failInFlight(error),
-      setConnection: (state: ConnectionState) => this._setConnection(state),
-      log: (level: number, target: string, message: string) => this._log(level, target, message),
-    };
-  }
-
   /**
    * Runs a constructor (`typeId` names the object type, `methodId` the
    * constructor) and resolves with the new object's handle. Rejects like `call`,
@@ -1074,7 +1041,8 @@ export class UndraCore {
   }
 
   /** Fails every call, stream and `observe` that waits for the core with `failure`; returns how many calls and streams there were. */
-  private _failInFlight(failure: Error): number {
+  /** @internal */
+  _failInFlight(failure: Error): number {
     const pending = [...this._pending.values()];
     this._pending.clear();
     for (const p of pending) {
@@ -1124,7 +1092,8 @@ export class UndraCore {
     return report;
   }
 
-  private _setConnection(state: ConnectionState): void {
+  /** @internal */
+  _setConnection(state: ConnectionState): void {
     this._connection._set(state);
     this._notifyConnection(state);
   }
@@ -1147,7 +1116,8 @@ export class UndraCore {
     }
   }
 
-  private _allocCallId(): number {
+  /** @internal */
+  _allocCallId(): number {
     this._nextCallId = nextCallId(this._nextCallId, (id) => this._pending.has(id));
     return this._nextCallId;
   }
@@ -1350,7 +1320,8 @@ export class UndraCore {
     }
   }
 
-  private _log(level: number, target: string, message: string): void {
+  /** @internal */
+  _log(level: number, target: string, message: string): void {
     try {
       (this._adapters.log ?? consoleLog()).log(level, target, message);
     } catch {
