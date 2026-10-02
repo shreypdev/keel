@@ -77,8 +77,10 @@ jobs:
       # 1. The playground: one Rust core, compiled to wasm, under a React UI.
       - name: Build the playground core (wasm32)
         run: cargo run -p undra-cli -- build --platform web -C examples/playground
-      # The playground imports the runtime from the workspace, and the runtime's Db worker imports
-      # its optional peer wa-sqlite: without the runtime's own install, vite cannot resolve it.
+      # The playground imports the runtime from the workspace, and the runtime's Db worker imports its optional peer
+      # wa-sqlite. The app declares wa-sqlite and its Vite config resolves it (and react) to the app's own copies, so
+      # the build does not depend on this install; it is kept because it costs seconds and the runtime's sources are
+      # what the build reads.
       - name: Install the TypeScript runtime's dependencies
         working-directory: runtimes/ts/@undra/runtime
         run: npm ci
