@@ -318,6 +318,15 @@ function encodeTarget(target: CallTargetArg, methodId: number, callId: number, a
   return out;
 }
 
+/**
+ * The reply body: `reply` past its 5-byte header (`call_id u32, status u8`). A small reply (what the core copied out of
+ * its memory is a typed array V8 keeps on its heap up to 64 bytes) is copied: `subarray` would give it a backing store
+ * of its own, which costs more than the copy.
+ */
+function replyBody(reply: Uint8Array): Uint8Array {
+  return reply.length <= 64 ? reply.slice(5) : reply.subarray(5);
+}
+
 /** Overlays `overrides` on `base`: a value replaces, `null` removes. */
 function mergeAdapters(base: Partial<Adapters>, overrides: AdapterOverrides | undefined): Partial<Adapters> {
   const merged: Record<string, unknown> = { ...base };
@@ -626,7 +635,7 @@ export class UndraCore {
     this.mirror.flush();
     if (reply.length < 5) throw new UndraTransportError("protocol", "the core returned a truncated reply");
     const status = reply[4] as number;
-    const body = reply.subarray(5);
+    const body = replyBody(reply);
     if (status === ReplyStatus.Ok) return body;
     throw new UndraReplyError(status as ReplyStatus, body);
   }
@@ -1217,7 +1226,7 @@ export class UndraCore {
     }
     const callId = ((payload[0] as number) | ((payload[1] as number) << 8) | ((payload[2] as number) << 16) | ((payload[3] as number) << 24)) >>> 0;
     const status = payload[4] as number;
-    const body = payload.subarray(5);
+    const body = replyBody(payload);
     const entry = this.#pending.get(callId);
     if (entry === undefined) return; // aborted or cancelled meanwhile, or never ours
 
