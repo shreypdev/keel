@@ -633,6 +633,8 @@ Each runtime ships an adapter for every port, so a new app works without adapter
 | `Timer` | `DispatchQueue` | `ScheduledExecutor` | `setTimeout` |
 | `Connectivity`, `Lifecycle` | `NWPathMonitor`, `scenePhase` | `ConnectivityManager`, activity lifecycle callbacks | `navigator.onLine`, `visibilitychange` |
 
+Every default store is per core namespace (`<namespace>/kv` under the app's `undra` directory in Application Support or `filesDir`, a Keychain service or Keystore alias and an IndexedDB database named after it), so two cores of one app never read each other's keys, secrets or files; an adapter you pass yourself keeps the location you gave it.
+
 On Android one call installs all ten, `AndroidPlatformDefaults.install(core, context)`; the runtime alone installs only `Clock`, `Rng`, `Log` and `Timer`. On the JVM without Android, `Connectivity` and `Lifecycle` are stubs. On the web, `Clock`, `Rng` and `Log` are bound to imports of the wasm module, so a web app needs no adapter code for them.
 
 Under React Native, `loadNative` installs all ten too: `Kv`, `SecureStore`, `Fs` and `Connectivity` are native code in `@undra/react-native` (files in the app's private storage, the Keychain or the Android Keystore, `NWPathMonitor` or `ConnectivityManager`, with the Swift and Android adapters' file layouts), `Http` is React Native's `fetch` and `Lifecycle` its `AppState` ([docs/REACT_NATIVE.md](https://github.com/shreypdev/undra/blob/main/docs/REACT_NATIVE.md)).
@@ -944,6 +946,8 @@ namespace = "acme_pay"
 | The bindings' entry, in Swift, Kotlin and TypeScript | `UndraAcmePay` |
 
 `undra build` refuses a namespace that a sibling project already uses, and every runtime refuses to load two cores with one.
+
+The namespace also keeps the default storage apart: each core's `Kv`, `SecureStore`, `Fs` and `Db` live under `undra/<namespace>/` on every platform, so two cores that use the defaults never see each other's data unless you hand them one adapter of your own.
 
 ## Loading two cores
 
