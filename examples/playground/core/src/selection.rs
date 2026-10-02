@@ -29,7 +29,9 @@ use crate::todos::{Todo, counter_of, id_of};
 /// up from one, so a drafted row never has the identity of a stored one.
 const DRAFT_BASE: u64 = 1 << 40;
 
-/// How many drafts this core has made (a counter: the core reads no clock and no random source).
+/// The offset of the next draft above [`DRAFT_BASE`] (a counter: the core reads no clock and no
+/// random source). It counts the drafts of this run, and a restored selection raises it above the
+/// drafts it holds.
 static DRAFTS: AtomicU64 = AtomicU64::new(0);
 
 /// What the generic code of this module needs of a row. Plain Rust: the schema never sees it,
@@ -86,6 +88,13 @@ pub fn draft<T: Row>(title: String) -> T {
     T::drafted(DRAFT_BASE + DRAFTS.fetch_add(1, Ordering::Relaxed), title)
 }
 
+/// Makes the next draft's serial larger than `serial`, when `serial` is a draft's.
+fn draws_past(serial: u64) {
+    if let Some(drawn) = serial.checked_sub(DRAFT_BASE) {
+        DRAFTS.fetch_max(drawn.saturating_add(1), Ordering::Relaxed);
+    }
+}
+
 /// The rows the user has ticked, in the order they were ticked: a store over any [`Row`].
 ///
 /// The struct and the impl block below are the template; it registers nothing until an alias
@@ -108,6 +117,14 @@ impl<T: Row> Selection<T> {
 
     // Used by `new` and, through `restore = ".."`, to rebuild the store from a snapshot.
     fn assemble(_ctx: Ctx, rows: Signal<Vec<T>>) -> Self {
+        // A restored selection may hold drafts of an earlier run of the core, whose counter went
+        // further than this run's: drafts continue above every one of them, as `Todos` continues
+        // its identities above the snapshot's, so a new draft never unticks an old one.
+        rows.with(|rows| {
+            for row in rows {
+                draws_past(row.serial());
+            }
+        });
         let count = Computed::new(&rows, |rows: &Vec<T>| {
             u32::try_from(rows.len()).unwrap_or(u32::MAX)
         });
@@ -285,6 +302,55 @@ mod tests {
             schema.store_fingerprint(ids::type_id("NoteSelection"))
         );
         schema.validate().unwrap();
+    }
+
+    /// A draft after a restore never has the identity of a drafted row the restored selection
+    /// holds (review L7): the snapshot may come from an earlier run of the core, whose draft
+    /// counter went further than this run's, and `toggle` tells rows apart by identity.
+    #[test]
+    fn a_draft_after_a_restore_is_above_every_drafted_row_the_selection_holds() {
+        let t = TestRuntime::new();
+        let reply = t.call_sync(
+            CallTarget::Constructor {
+                type_id: ids::type_id("TodoSelection"),
+                method_id: ids::method_id("TodoSelection", "new"),
+            },
+            1,
+            &[],
+        );
+        assert_eq!(reply.status, ReplyStatus::Ok);
+        let selection = Handle::decode_exact(&reply.body).unwrap();
+        // A row drafted far ahead of this run's counter, as by an earlier run of the core.
+        let now: Todo = draft("probe".to_owned());
+        let ahead = Todo::drafted(now.serial() + 1_000_000, "from an earlier run".to_owned());
+        let reply = t.call_sync(
+            CallTarget::Method {
+                handle: selection,
+                method_id: ids::method_id("TodoSelection", "toggle"),
+            },
+            2,
+            &ahead.encode_to_vec(),
+        );
+        assert_eq!(reply.status, ReplyStatus::Ok);
+        let snapshot = t.runtime().snapshot();
+        t.runtime()
+            .restore(&snapshot)
+            .expect("the snapshot restores");
+        let reply = t.call_sync(
+            CallTarget::Function {
+                method_id: ids::function_id("draft<Todo>"),
+            },
+            3,
+            &"next".to_owned().encode_to_vec(),
+        );
+        assert_eq!(reply.status, ReplyStatus::Ok);
+        let next = Todo::decode_exact(&reply.body).unwrap();
+        assert!(
+            next.serial() > ahead.serial(),
+            "the draft {} is not above the restored {}",
+            next.serial(),
+            ahead.serial()
+        );
     }
 
     /// Ticking a row is one keyed `Insert` for the todo selection and nothing for the note one.
