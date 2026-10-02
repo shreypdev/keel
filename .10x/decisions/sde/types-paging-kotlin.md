@@ -109,3 +109,36 @@ Branch `wt/tp-kotlin`, worktree `/Users/shrey/Desktop/src/.work/tp-kotlin`. Cont
 * `maxCachedPages < 3` cannot keep a read's prefetch; documented, not forbidden.
 * The compose helper's `items` draws every row with `key = index`; a keyed variant (stable ids across invalidations) would need the item
   key, which the signal does not carry (a later refinement, like the index-shifting patches the ADR defers).
+
+## S31 (the Kotlin column of the ledger scenario) and the merge of `wt/types-paging`
+
+`wt/types-paging` was merged into this branch (clean). `contract-tests/kotlin/src/dev/undra/contract/S31Ledger.kt` runs S31 over the
+generated ledger API (`openAccount`, `deposit`, `balances`, `statement`, `loadableStatement`, `echo*`, `sampleReceipt`, the `Ledger` store)
+and is registered in `Scenarios.kt` after S28 (before S17, which closes the core). It checks, in the spec's steps: (1) the codecs of
+`AccountId`, `Cents` and `Price` write the bytes of `Uuid`, `i64` and `Decimal` (16, 8, 17), the `echo_*` calls return equal values, the
+three are distinct `@JvmInline value class`es (checked by the runtime class and the annotation) and `Cents` is `Comparable`; (2)
+`balances()` has exactly the two opened `AccountId` keys, and the `Ledger` store's `open` / `rename` / `close_account` each deliver one
+entry that is a keyed patch of one `Insert` (under 64 bytes) / `Update` / `Remove` with the patched list equal to a model (a raw store
+reads the patch bytes, the generated store's `accounts` flow is compared with the model); (3) `statement` windows, `next`, and the
+three `LoadableEntries` cases; (4) `0.1 + 0.2` is `0.3`, `echo_decimal` is equal and scale-exact for `0`, `1.10`, `-1.50`, a scale of 38,
+both 128-bit mantissa ends and the largest at scale 38, a wire decimal with scale 39 through `UndraCore.callSync` is a bad request that
+says why (and `bad_requests` grows by one), an amount of 101 bits is `LedgerError.OutOfRange` and changes nothing, an unknown account is
+`LedgerError.NoSuchAccount`; (5) `sample_receipt()` (id, `2026-10-01T12:00:00.123Z`, 90 s, `19.990` at scale 3, `[1,2,3,255]`) and an
+`echo_receipt` round trip of a platform-built receipt. For `check.sh` the new id is `S31` (all platforms); the runner prints
+`SCENARIO S31 PASS newtypes, generic instantiations and leaf types`. `Main.kt`, `run.sh` and `NOTES.md` say S31 now.
+
+Results (`contract-tests/kotlin/run.sh`, real core): with the brew compiler (2.4.20) and CI's 2.0.21, `SCENARIO S31 PASS`, and
+27 of 27 scenarios pass (S01-S20, S23-S28, S31) **once the two-cores bindings are regenerated** (below).
+
+Seams found (nothing of the generated ledger Kotlin is wrong; none fixed here):
+* `examples/two-cores/a/generated/**` and `examples/two-cores/b/generated/**` are stale: they carry the old playground schema hash
+  `0xe4c001b130237f02` (`.../twocores/a/Ids.kt:10`), the core now reports `0x5a8a8212ec2b22b2`, so S26 and S27 fail with "schema
+  mismatch" until `undra bindgen -C examples/two-cores/a` and `-C examples/two-cores/b` are run (60 files changed; I did that locally,
+  saw S26 and S27 pass on both compilers, and reverted it: not my paths).
+* `testkit/fixtures/session-todos.json` and `testkit/fixtures/ports-remote-todos.json` are recorded against the old hash: `TESTKIT FAIL
+  T4` (the testing kit's recorded session, not part of the grid) fails with the same schema mismatch and makes `run.sh` exit 1. They need
+  re-recording against the new core. `site/**` (generated reference pages, `llms-full.txt`, `search-index.json`) also still print the old
+  hash.
+* Observation, not a bug of the scenario: the generated `value class Price` implements `Comparable<Price>` through `BigDecimal.compareTo`
+  (`examples/playground/generated/kotlin/.../Types.kt:258`), which ignores the scale while its `equals` (BigDecimal's) does not, so
+  `Price("1.10") == Price("1.1")` is false but `compareTo` is 0 (the same wart `BigDecimal` has).
