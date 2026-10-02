@@ -41,6 +41,14 @@ now validated at `attach`/`load`; F1 unvalidated namespace path components fixed
 fixtures fixed). Decision: do not raise the gate; land `ts-size-e4` first (it targets 16 KB), then cross
 `ns-storage` over it, re-run `scripts/wasm-size.sh`, fast-forward. HEAD `0d3733f`.
 
+**Drafted, not published:** `default-choice-post` (H4) at `21979a4` on `wt/default-choice-post`: the post with a
+36-row matrix (22 solved / 7 partial / 6 open / 1 by decision today), five measured sections, the adoption
+cost, what is open; `claims.md` beside it has 221 claims, all "fact-check: pending". Publish only after the
+adversarial fact-check (fable/opus), run after `ts-size-e4`, `objects-callbacks` and `prod-ops` land so the
+numbers and the "not yet" cells are refreshed first. The pass must also fix the stale statements it found: the
+reads post ("Derived lists cross whole"), the KMP post ("Android has no remote transport"), `roadmap.json`
+(web core 102.7 KB; the inspector under "Later"), and decide whether `claims.md` stays public (it deploys).
+
 **Also owed:** the Rust 1.99.0 bump (ci.yml header says how; do it when no worktree is mid-build);
 `ts-runtime-size` (16 KB target);  a custom port in the playground for the reference's Ports section; `undra bindgen --declarations`.
 
