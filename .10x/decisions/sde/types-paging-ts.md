@@ -71,7 +71,8 @@ the contract left open and how it was settled, the size proof, and what the scen
 | tree | raw | gzip |
 |---|---|---|
 | foundation `6013803` | 69,584 | **21,570** |
-| `wt/tp-ts` (hello app, no `Lazy`) | 69,667 | **21,602** (+32) |
+| `wt/tp-ts` (hello app, no `Lazy`), with the `core.ts` seam | 69,667 | 21,602 (+32) |
+| `wt/tp-ts` with the mirror amendment (final) | 69,714 | **21,638** (+68 over the foundation) |
 | `wt/tp-ts`, an app that constructs a `LazyList` | 75,331 | 23,317 (the cost of using it, +1,715) |
 | main `b800994` (for reference; the foundation predates ts-size-e4) | 68,868 | 21,344 |
 
@@ -81,7 +82,7 @@ measure +0). The +32 gzip bytes (+83 raw) are the seam in `core.ts` that a page 
 with `encodeCall` and `callSync` must not take the head-parts fast path for it. The two checks are written as cheaply as they
 can be (a cast, no `typeof`); an alternative with no growth would reach into `UndraCore`'s private members from `lazy.ts` or
 patch its prototype, which I judged worse than 32 bytes. **The integrator should run `scripts/wasm-size.sh` on the merged tree:**
-on main's current numbers the seam leaves about 124 bytes of the 21,500 budget.
+on main's current numbers (21,344) the seam and the mirror amendment together leave about 88 bytes of the 21,500 budget.
 
 ## React Native
 
@@ -96,23 +97,28 @@ the React hooks are the web ones, so `docs/REACT_NATIVE.md` needs no change beyo
 
 ## Findings for the integrator
 
-1. **SPEC 11.1 / ADR-031 lose the page server's handle when an op 2 follows an op 0 in one drain.** "A full value (op 0) or a
-   lazy invalidation (op 2) supersedes everything queued earlier for the key": with the value now carrying the handle, a drain that
-   holds `[Full(handle H, len, v1), LazyInvalidated(len', v2)]` for one signal applies only the invalidation, and the host never
-   learns `H` (the same after a restore, which re-sends op 0 with a new handle). Over `wasm-main` and React Native `observe` flushes
-   inline so the value is applied before any later change; over `wasm-worker` and `remote` a commit right behind the first value
-   can land in the same drain. `LazyList` reports an invalidation that arrives before any value (`UndraTransportError("protocol")`,
-   through `onError`) rather than ignoring it silently, but cannot recover. The fix is in the folding rule of the three mirrors
-   (keep the last op 0 as the base when an op 2 follows it, apply both) or in a core that sends the handle again; it is a SPEC
-   11.1 change, so I left the TypeScript `Mirror` alone (its hot path is in the size gate). Swift and Kotlin have the same rule.
+1. **ADR-031 amendment (integrator's decision, implemented in the TypeScript `Mirror`): a full value supersedes everything before
+   it for its signal; a lazy invalidation supersedes only earlier invalidations, never the full value** (an op-2 value is only
+   length and version, the op 0 carries the page server's handle). The finding was that SPEC 11.1's old rule lost the handle when
+   `[Full(handle), LazyInvalidated]` reached one drain (over `wasm-worker`/`remote`, or after a restore that re-sends op 0).
+   `Slot.full` is now a list of what to deliver, in order (the value, the last invalidation, or both: `setFull` is one line);
+   `_applySlot`, `_compact`, `_requeue` and `_markDropped` iterate it. `[Full, Inv]` delivers both, `[Full, Inv, Inv]` the value and
+   the last invalidation, `[Inv, Full]` the value, `[Inv, Inv]` the last, `[Full, Inv, Full]` the last value; patches and
+   ordinary signals are untouched; a compaction keeps the pair. Tests: `coalesce.test.ts` (the old "an invalidation supersedes what
+   came before it" is replaced by six cases of the new rule, incl. a compaction), `coalesce-model.test.ts` (every store has a lazy
+   signal: invalidations and restarts with a new handle in the random histories; it fails with the old rule), `lazy.test.ts`
+   (a `LazyList` behind the real mirror: first value + invalidation in one drain, a restart's handle + invalidation in one drain).
+   `LazyList` still reports an invalidation that arrives before any value. React Native has no folding of its own (its inbox
+   keeps commit order, the TypeScript `Mirror` folds), so it follows. Size of the mirror change: +36 gzip bytes (21,602 -> 21,638);
+   the first versions (a `base` and an `inv` field: +86 and +75) were rewritten as the list to get here.
 2. The brief's README: `runtimes/ts/@undra/runtime` had none; a short one was added.
 3. `site/docs/api-typescript.html`, `site/docs/cookbook/pagination.html` and `docs/REACT_NATIVE.md` are outside this piece; they
    should list `LazyList`, `useLazyList`, `useLoadMore`.
 
 ## Checks and counts
 
-* `runtimes/ts/@undra/runtime`: `npx vitest run`: **1,763 passed** (61 files; 103 are new: `lazy.test.ts` 76, `lazy-react.test.ts` 18,
-  `lazy-adapters.test.ts` 3, `lazy-fuzz.test.ts` 6; the three `lazy *` wire vectors now check encode, decode and re-encode for real).
+* `runtimes/ts/@undra/runtime`: `npx vitest run`: **1,770 passed** (61 files; 110 are new or changed: `lazy.test.ts` 78, `lazy-react.test.ts` 18,
+  `lazy-adapters.test.ts` 3, `lazy-fuzz.test.ts` 6, six lazy cases in `coalesce.test.ts`, a lazy signal in `coalesce-model.test.ts`; the three `lazy *` wire vectors now check encode, decode and re-encode for real).
   `npm run typecheck` (tsconfig, build, vite) and `npm run build` pass. There is no lint script in the package.
 * `runtimes/rn/@undra/react-native`: `npm test` 97 passed (92 before, 5 new); `npm run typecheck` passes.
   `cpp/test/run.sh` (ASan and UBSan, the playground cores prebuilt in the main checkout through `UNDRA_CORE_DYLIB` and

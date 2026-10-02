@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { UndraCallError } from "../src/call-error.js";
 import { UndraTransportError } from "../src/errors.js";
 import { LazyList } from "../src/lazy.js";
-import { UndraReader, WireError, codecs, encodeLazyInvalidated, encodeLazyPage, encodeLazyValue } from "../src/wire/index.js";
+import { ChangeOp, UndraReader, WireError, codecs, encodeChangeSet, encodeLazyInvalidated, encodeLazyPage, encodeLazyValue } from "../src/wire/index.js";
 import { LazyServer, drain, lazyCore, numbersList, settle } from "./support/lazy-server.js";
 
 /*
@@ -696,5 +696,61 @@ describe("LazyList on its own transport", () => {
     expect(list.length.peek()).toBe(500);
     expect(list.get(0)).toBe(-1);
     expect(list.get(120)).toBe(row(120));
+  });
+});
+
+describe("a LazyList behind the mirror (ADR-031 amendment: an invalidation never supersedes the value that names the page server)", () => {
+  const STORE = 9n;
+  const SIGNAL = 3;
+  const register = (core: { mirror: import("../src/mirror.js").Mirror }, list: LazyList<number>): void => {
+    core.mirror.register(STORE, (signalId, op, value) => {
+      if (signalId !== SIGNAL) return;
+      if (op === ChangeOp.FullValue) list.applyFull(new UndraReader(value));
+      else if (op === ChangeOp.LazyInvalidated) list.applyInvalidated(new UndraReader(value));
+    });
+  };
+  const send = (core: { mirror: import("../src/mirror.js").Mirror }, txnId: bigint, op: ChangeOp, value: Uint8Array): void => {
+    core.mirror.enqueue(encodeChangeSet({ txnId, entries: [{ handle: STORE, signalId: SIGNAL, op, value }] }));
+  };
+
+  it("a first value and an invalidation that reach the host in one drain: the list has its page server and the newer length", async () => {
+    const { core, fake, errors } = await lazyCore({ synchronous: true });
+    const server = new LazyServer(codecs.i32, Array.from({ length: 120 }, (_, i) => i * 10)).install(fake);
+    const list = new LazyList<number>(core, codecs.i32);
+    register(core, list);
+    send(core, 1n, ChangeOp.FullValue, server.value());
+    server.change((rows) => {
+      rows.push(1200);
+    });
+    send(core, 2n, ChangeOp.LazyInvalidated, server.invalidated());
+    core.mirror.flush();
+    expect(list.length.peek()).toBe(121);
+    list.get(110);
+    await settle();
+    expect(list.get(120)).toBe(1200);
+    expect(errors).toEqual([]);
+  });
+
+  it("a restart's new handle followed by an invalidation in one drain: the list pages from the new server", async () => {
+    const { list, server, fake, core, errors } = await numbersList(500, { synchronous: true });
+    register(core, list);
+    list.get(0);
+    await settle();
+    expect(list.get(0)).toBe(0);
+    const second = new LazyServer(codecs.i32, Array.from({ length: 60 }, (_, i) => i + 1000), 0x0002_0000_0002n, 3n).install(fake);
+    send(core, 1n, ChangeOp.FullValue, second.value());
+    second.change((rows) => {
+      rows.push(7);
+    });
+    send(core, 2n, ChangeOp.LazyInvalidated, second.invalidated());
+    core.mirror.flush();
+    expect(list.length.peek()).toBe(61);
+    expect(list.get(0)).toBeUndefined(); // the old cache is gone
+    server.calls.length = 0;
+    await settle();
+    expect(list.get(0)).toBe(1000);
+    expect(list.get(60)).toBe(7); // page 1, the neighbour, came with page 0, and the invalidation's row is in it
+    expect(errors).toEqual([]);
+    expect(server.calls.every((c) => c.handle === second.handle)).toBe(true);
   });
 });
