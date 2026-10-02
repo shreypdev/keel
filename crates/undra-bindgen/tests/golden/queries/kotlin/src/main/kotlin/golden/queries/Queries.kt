@@ -22,7 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * Observes the `todo_by_id` query (cache key `todo:{id}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
  */
-class TodoByIdQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class TodoByIdQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _data: MutableStateFlow<Todo?> = signal(null)
     /** The latest successful result, if any. */
     val data: StateFlow<Todo?> = _data.asStateFlow()
@@ -38,10 +38,6 @@ class TodoByIdQueryHandle private constructor(core: UndraCore, handle: Long) : U
     private val _updatedAt: MutableStateFlow<Timestamp?> = signal(null)
     /** When `data` was last updated. */
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
-
-    init {
-        observeAll()
-    }
 
     /**
      * Fetches again now, even if the data is fresh.
@@ -131,7 +127,7 @@ class TodoByIdQueryHandle private constructor(core: UndraCore, handle: Long) : U
             Codecs.uuid.encode(w, id)
             w.writeBool(fresh)
             val handle = ctx.constructObject(UndraIds.Objects.TodoByIdQueryHandle.TYPE_ID, UndraIds.Objects.TodoByIdQueryHandle.NEW, w.toByteArray())
-            return TodoByIdQueryHandle(ctx, handle)
+            return ctx.adopt(handle, ::TodoByIdQueryHandle)
         }
     }
 }
@@ -140,7 +136,7 @@ class TodoByIdQueryHandle private constructor(core: UndraCore, handle: Long) : U
  * Observes the `todo_count` query (cache key `todo-count`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
  */
-class TodoCountQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class TodoCountQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _data: MutableStateFlow<UInt?> = signal(null)
     /** The latest successful result, if any. */
     val data: StateFlow<UInt?> = _data.asStateFlow()
@@ -156,16 +152,6 @@ class TodoCountQueryHandle private constructor(core: UndraCore, handle: Long) : 
     private val _updatedAt: MutableStateFlow<Timestamp?> = signal(null)
     /** When `data` was last updated. */
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
-
-    init {
-        observeAll()
-    }
-
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraGoldenQueries.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.TodoCountQueryHandle.TYPE_ID, UndraIds.Objects.TodoCountQueryHandle.NEW, ByteArray(0)),
-    )
 
     /**
      * Fetches again now, even if the data is fresh.
@@ -246,9 +232,12 @@ class TodoCountQueryHandle private constructor(core: UndraCore, handle: Long) : 
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(ctx: UndraCore = UndraGoldenQueries.core): TodoCountQueryHandle = create(ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraGoldenQueries.core): TodoCountQueryHandle {
             val handle = ctx.constructObject(UndraIds.Objects.TodoCountQueryHandle.TYPE_ID, UndraIds.Objects.TodoCountQueryHandle.NEW, ByteArray(0))
-            return TodoCountQueryHandle(ctx, handle)
+            return ctx.adopt(handle, ::TodoCountQueryHandle)
         }
     }
 }
@@ -257,7 +246,7 @@ class TodoCountQueryHandle private constructor(core: UndraCore, handle: Long) : 
  * Observes the `todos` query (cache key `todos:{page}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
  */
-class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class TodosQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _data: MutableStateFlow<Page?> = signal(null)
     /** The latest successful result, if any. */
     val data: StateFlow<Page?> = _data.asStateFlow()
@@ -273,10 +262,6 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
     private val _updatedAt: MutableStateFlow<Timestamp?> = signal(null)
     /** When `data` was last updated. */
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
-
-    init {
-        observeAll()
-    }
 
     /**
      * Fetches again now, even if the data is fresh.
@@ -361,7 +346,7 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
             val w = UndraWriter()
             w.writeU32(page)
             val handle = ctx.constructObject(UndraIds.Objects.TodosQueryHandle.TYPE_ID, UndraIds.Objects.TodosQueryHandle.NEW, w.toByteArray())
-            return TodosQueryHandle(ctx, handle)
+            return ctx.adopt(handle, ::TodosQueryHandle)
         }
     }
 }

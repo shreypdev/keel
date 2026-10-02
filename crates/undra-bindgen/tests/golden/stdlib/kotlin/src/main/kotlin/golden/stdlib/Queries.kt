@@ -24,7 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * Observes the `latest_response` query (cache key `latest`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
  */
-class LatestResponseQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class LatestResponseQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _data: MutableStateFlow<HttpResponse?> = signal(null)
     /** The latest successful result, if any. */
     val data: StateFlow<HttpResponse?> = _data.asStateFlow()
@@ -40,16 +40,6 @@ class LatestResponseQueryHandle private constructor(core: UndraCore, handle: Lon
     private val _updatedAt: MutableStateFlow<Timestamp?> = signal(null)
     /** When `data` was last updated. */
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
-
-    init {
-        observeAll()
-    }
-
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraGoldenStdlib.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.LatestResponseQueryHandle.TYPE_ID, UndraIds.Objects.LatestResponseQueryHandle.NEW, ByteArray(0)),
-    )
 
     /**
      * Fetches again now, even if the data is fresh.
@@ -130,9 +120,12 @@ class LatestResponseQueryHandle private constructor(core: UndraCore, handle: Lon
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(ctx: UndraCore = UndraGoldenStdlib.core): LatestResponseQueryHandle = create(ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraGoldenStdlib.core): LatestResponseQueryHandle {
             val handle = ctx.constructObject(UndraIds.Objects.LatestResponseQueryHandle.TYPE_ID, UndraIds.Objects.LatestResponseQueryHandle.NEW, ByteArray(0))
-            return LatestResponseQueryHandle(ctx, handle)
+            return ctx.adopt(handle, ::LatestResponseQueryHandle)
         }
     }
 }

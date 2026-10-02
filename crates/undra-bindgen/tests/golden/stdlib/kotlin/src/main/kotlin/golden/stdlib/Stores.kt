@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /** Mirrors what the platform reports about the connection. */
-class Link private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Link internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _state: MutableStateFlow<AppState> = signal(AppState.ACTIVE)
     val state: StateFlow<AppState> = _state.asStateFlow()
     private val _kind: MutableStateFlow<NetKind> = signal(NetKind.WIFI)
@@ -28,16 +28,6 @@ class Link private constructor(core: UndraCore, handle: Long) : UndraStore(core,
     val failure: StateFlow<HttpError?> = _failure.asStateFlow()
     private val _pending: MutableStateFlow<List<HttpRequest>> = signal(emptyList())
     val pending: StateFlow<List<HttpRequest>> = _pending.asStateFlow()
-
-    init {
-        observeAll()
-    }
-
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraGoldenStdlib.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.Link.TYPE_ID, UndraIds.Objects.Link.NEW, ByteArray(0)),
-    )
 
     override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader) {
         try {
@@ -86,9 +76,12 @@ class Link private constructor(core: UndraCore, handle: Long) : UndraStore(core,
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(ctx: UndraCore = UndraGoldenStdlib.core): Link = create(ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraGoldenStdlib.core): Link {
             val handle = ctx.constructObject(UndraIds.Objects.Link.TYPE_ID, UndraIds.Objects.Link.NEW, ByteArray(0))
-            return Link(ctx, handle)
+            return ctx.adopt(handle, ::Link)
         }
     }
 }

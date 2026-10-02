@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * Observes the `todos` query (cache key `todos:{page}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
  */
-class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class TodosQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _data: MutableStateFlow<Page?> = signal(null)
     /** The latest successful result, if any. */
     val data: StateFlow<Page?> = _data.asStateFlow()
@@ -37,10 +37,6 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
     private val _updatedAt: MutableStateFlow<Timestamp?> = signal(null)
     /** When `data` was last updated. */
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
-
-    init {
-        observeAll()
-    }
 
     /**
      * Fetches again now, even if the data is fresh.
@@ -125,7 +121,7 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
             val w = UndraWriter()
             w.writeU32(page)
             val handle = ctx.constructObject(UndraIds.Objects.TodosQueryHandle.TYPE_ID, UndraIds.Objects.TodosQueryHandle.NEW, w.toByteArray())
-            return TodosQueryHandle(ctx, handle)
+            return ctx.adopt(handle, ::TodosQueryHandle)
         }
     }
 }
