@@ -217,7 +217,9 @@ final class RealtimeReviewTests: XCTestCase {
     /// fire after about 10 ms), so two pushes more than `burstGap` apart are not a trickle, and a pull answered
     /// between them is answered correctly. The feeder therefore paces itself by spinning on the clock, records when
     /// each message was pushed, and a trial whose pushes were ever `burstGap` or more apart before the answer is not
-    /// a trickle and is repeated; the assertions about the behaviour are made on a trial that was one.
+    /// a trickle and is repeated, for up to 30 seconds; the assertions about the behaviour are made on a trial that
+    /// was one. (A machine that never lets the feeder keep a 2 ms cadence for 8 ms fails with that said, not with a
+    /// claim about the binding.)
     func testATrickleIsAnsweredByTheBurstCapNotHeldUntilItStops() async throws {
         let gapNanoseconds: UInt64 = 2_000_000 // burstGap
         var pauses: [Double] = []
