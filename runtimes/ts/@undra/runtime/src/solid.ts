@@ -19,6 +19,9 @@ export type { UndraClass } from "./lifetime.js";
  * const visible = useSignal(todos.visible);
  * return <For each={visible()}>{(todo) => <li>{todo.title}</li>}</For>;
  * ```
+ *
+ * A `LazyList` (ADR-043) needs nothing more: `useSignal(list.length)` is its row count and `useSignal(list.revision)`
+ * changes when rows arrive, so a memo that reads `list.get(i)` after `revision()` shows the rows as they come.
  */
 export function useSignal<T>(signal: Signal<T>): Accessor<T> {
   // `() => next`: Solid would call a value that is itself a function.

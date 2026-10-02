@@ -21,6 +21,9 @@ import type { Signal } from "./signal.js";
  * The store contract wants the current value as soon as there is a subscriber, which `Signal`
  * itself does not do, so `subscribe` calls `run` with `peek()` first. The store is cheap: one
  * object, and a subscription to the signal per subscriber for as long as it lasts.
+ *
+ * A `LazyList` (ADR-043) needs nothing more: `signalStore(list.length)` is its row count and `signalStore(list.revision)`
+ * changes when rows arrive, so a block that reads `list.get(i)` after `$revision` shows the rows as they come.
  */
 export function signalStore<T>(signal: Signal<T>): Readable<T> {
   return {

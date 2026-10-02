@@ -240,14 +240,19 @@ export class LazyList<T> {
 
   /**
    * Applies a `LazyInvalidated` entry (change-set op 2): the new length and version. A version the list has already
-   * seen (a page reply that carried it) changes nothing. Reads `reader` to its end.
+   * seen (a page reply that carried it) changes nothing. One that arrives before any value is reported and ignored: it
+   * has no page server to read from. Reads `reader` to its end.
    *
    * @throws {WireError} If the value is malformed; the list is unchanged.
    */
   applyInvalidated(reader: UndraReader): void {
     const value = readLazyInvalidated(reader);
     reader.finish();
-    if (this._handle === null) return;
+    if (this._handle === null) {
+      // An invalidation has no handle to page from; the value that carries it was lost or never sent.
+      this._report(new UndraTransportError("protocol", "a lazy list was invalidated before its value (and so its page server) reached the host"));
+      return;
+    }
     batch(() => {
       this._advance(value.len, value.version, -1);
     });
