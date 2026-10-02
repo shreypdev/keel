@@ -379,7 +379,12 @@ pub(super) fn skip(
                 )));
             }
         }
-        TypeRef::Unit | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
+        TypeRef::Unit
+        | TypeRef::Lazy(_)
+        | TypeRef::Result(..)
+        | TypeRef::Stream(_)
+        | TypeRef::Object(_)
+        | TypeRef::Callback(_) => {
             return Err(MigrateError::new("not a persisted value type"));
         }
     }

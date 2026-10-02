@@ -60,6 +60,7 @@ pub use undra_wire;
 
 mod atomic_update;
 mod blocking;
+mod callbacks;
 mod config;
 mod ctx;
 mod dispatch;
@@ -67,6 +68,7 @@ pub mod executor;
 mod ext;
 mod guard;
 mod host;
+mod issue;
 mod lazy;
 pub mod log;
 mod object;
@@ -79,6 +81,7 @@ mod sync_out;
 pub mod testing;
 mod timer;
 
+pub use callbacks::{CallbackCall, CallbackHandle, CallbackInterface};
 pub use config::{
     DroppedStore, InitError, MODE_DEV, MODE_INPROC, RestoreError, RestoreReport, RuntimeConfig,
 };
@@ -86,6 +89,7 @@ pub use ctx::{Closed, Ctx, CtxScope, Gone, WeakCtx, WeakSleep};
 pub use dispatch::{DispatchBytes, DispatchLayer, DispatchResult};
 pub use ext::{InitHook, InspectFn, StatsSection};
 pub use host::{Host, PortCallOutcome};
+pub use issue::{IssueError, IssueScope};
 pub use lazy::{LazyList, LazyListInner};
 pub use object::{
     AnyObject, CellFn, RestoreFn, StoreObject, StoreRestorer, UndraObject, UndraObjectDyn, plain,

@@ -31,6 +31,7 @@ static __UNDRA_META_port_Http: ::undra::meta::PortMeta = ::undra::meta::PortMeta
     name: "Http",
     port_id: ::undra::meta::ids::port_id("Http"),
     kind: ::undra::meta::PortKind::Async,
+    background: false,
     methods: &[
         ::undra::meta::MethodMeta {
             name: "request",
@@ -47,6 +48,7 @@ static __UNDRA_META_port_Http: ::undra::meta::PortMeta = ::undra::meta::PortMeta
             ),
             is_async: true,
             takes_ctx: false,
+            coalesce: false,
             docs: "Sends a request.",
         },
         ::undra::meta::MethodMeta {
@@ -61,6 +63,7 @@ static __UNDRA_META_port_Http: ::undra::meta::PortMeta = ::undra::meta::PortMeta
             returns: ::undra::meta::TypeRefMeta::Bool,
             is_async: true,
             takes_ctx: false,
+            coalesce: false,
             docs: "",
         },
     ],
@@ -398,12 +401,13 @@ const _: () = {
         const UNDRA_TYPE_ID: u32 = 0;
         const UNDRA_IS_ERROR: bool = false;
         const __UNDRA_IS_OBJECT: bool = false;
+        const __UNDRA_OBJECT_ID: u32 = 0;
     }
     impl<T: ?::core::marker::Sized> __UndraFallback for T {}
     const _: () = {
         if <HttpRequest>::__UNDRA_IS_OBJECT {
             ::core::panic!(
-                "error[undra::E0064]: `HttpRequest` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
+                "error[undra::E0064]: `HttpRequest` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value\n  = help: return it as `Arc<HttpRequest>`, take it as `&HttpRequest` or `Arc<HttpRequest>` (a method, constructor or function parameter or return), or use a record with the data the platform needs\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
         let __undra_id = <HttpRequest>::UNDRA_TYPE_ID;
@@ -421,7 +425,7 @@ const _: () = {
     const _: () = {
         if <HttpResponse>::__UNDRA_IS_OBJECT {
             ::core::panic!(
-                "error[undra::E0064]: `HttpResponse` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
+                "error[undra::E0064]: `HttpResponse` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value\n  = help: return it as `Arc<HttpResponse>`, take it as `&HttpResponse` or `Arc<HttpResponse>` (a method, constructor or function parameter or return), or use a record with the data the platform needs\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
         let __undra_id = <HttpResponse>::UNDRA_TYPE_ID;
@@ -439,7 +443,7 @@ const _: () = {
     const _: () = {
         if <HttpError>::__UNDRA_IS_OBJECT {
             ::core::panic!(
-                "error[undra::E0064]: `HttpError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
+                "error[undra::E0064]: `HttpError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value\n  = help: return it as `Arc<HttpError>`, take it as `&HttpError` or `Arc<HttpError>` (a method, constructor or function parameter or return), or use a record with the data the platform needs\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
         let __undra_id = <HttpError>::UNDRA_TYPE_ID;

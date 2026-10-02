@@ -1,0 +1,79 @@
+error[E0277]: `dyn Platform` is not a callback interface
+  --> tests/ui/e0004_not_a_callback.rs:25:39
+   |
+25 |     pub fn takes_a_port(&self, p: Arc<dyn Platform>) {}
+   |                                   --- ^^^^^^^^^^^^ this trait was not declared with `#[undra::callback]`
+   |                                   |
+   |                                   required by a bound introduced by this call
+   |
+   = help: the trait `CallbackInterface` is not implemented for `dyn Platform`
+   = note: error[undra::E0004]: `dyn Platform` cannot be taken as a callback
+             = note: only a trait declared with `#[undra::callback]` has a proxy the core can call and a generated protocol the host implements
+             = help: add `#[undra::callback]` to the trait, or pass a record or an id
+             = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
+note: required by a bound in `runtime::callbacks::<impl Runtime>::callback`
+  --> $WORKSPACE/crates/undra-runtime/src/callbacks.rs
+   |
+   |     pub fn callback<P: ?Sized + CallbackInterface>(&self, instance: u64) -> Arc<P> {
+   |                                 ^^^^^^^^^^^^^^^^^ required by this bound in `runtime::callbacks::<impl Runtime>::callback`
+
+error[E0277]: `dyn Plain` is not a callback interface
+  --> tests/ui/e0004_not_a_callback.rs:27:46
+   |
+27 |     pub fn takes_a_plain_trait(&self, p: Arc<dyn Plain>) {}
+   |                                          --- ^^^^^^^^^ this trait was not declared with `#[undra::callback]`
+   |                                          |
+   |                                          required by a bound introduced by this call
+   |
+   = help: the trait `CallbackInterface` is not implemented for `dyn Plain`
+   = note: error[undra::E0004]: `dyn Plain` cannot be taken as a callback
+             = note: only a trait declared with `#[undra::callback]` has a proxy the core can call and a generated protocol the host implements
+             = help: add `#[undra::callback]` to the trait, or pass a record or an id
+             = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
+note: required by a bound in `runtime::callbacks::<impl Runtime>::callback`
+  --> $WORKSPACE/crates/undra-runtime/src/callbacks.rs
+   |
+   |     pub fn callback<P: ?Sized + CallbackInterface>(&self, instance: u64) -> Arc<P> {
+   |                                 ^^^^^^^^^^^^^^^^^ required by this bound in `runtime::callbacks::<impl Runtime>::callback`
+
+error[E0277]: `dyn Platform` is not a callback interface
+  --> tests/ui/e0004_not_a_callback.rs:25:39
+   |
+25 |     pub fn takes_a_port(&self, p: Arc<dyn Platform>) {}
+   |                                       ^^^^^^^^^^^^ this trait was not declared with `#[undra::callback]`
+   |
+   = help: the trait `CallbackInterface` is not implemented for `dyn Platform`
+   = note: error[undra::E0004]: `dyn Platform` cannot be taken as a callback
+             = note: only a trait declared with `#[undra::callback]` has a proxy the core can call and a generated protocol the host implements
+             = help: add `#[undra::callback]` to the trait, or pass a record or an id
+             = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
+note: required by a bound in `_::_::__undra_callback`
+  --> tests/ui/e0004_not_a_callback.rs:19:1
+   |
+19 | #[k::api]
+   | ^^^^^^^^^ required by this bound in `__undra_callback`
+...
+25 |     pub fn takes_a_port(&self, p: Arc<dyn Platform>) {}
+   |                                       --- required by a bound in this function
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `dyn Plain` is not a callback interface
+  --> tests/ui/e0004_not_a_callback.rs:27:46
+   |
+27 |     pub fn takes_a_plain_trait(&self, p: Arc<dyn Plain>) {}
+   |                                              ^^^^^^^^^ this trait was not declared with `#[undra::callback]`
+   |
+   = help: the trait `CallbackInterface` is not implemented for `dyn Plain`
+   = note: error[undra::E0004]: `dyn Plain` cannot be taken as a callback
+             = note: only a trait declared with `#[undra::callback]` has a proxy the core can call and a generated protocol the host implements
+             = help: add `#[undra::callback]` to the trait, or pass a record or an id
+             = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
+note: required by a bound in `_::_::__undra_callback`
+  --> tests/ui/e0004_not_a_callback.rs:19:1
+   |
+19 | #[k::api]
+   | ^^^^^^^^^ required by this bound in `__undra_callback`
+...
+27 |     pub fn takes_a_plain_trait(&self, p: Arc<dyn Plain>) {}
+   |                                              --- required by a bound in this function
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

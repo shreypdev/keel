@@ -1,6 +1,6 @@
 //! Handle generations (ADR-022): one monotonically increasing counter, carried across snapshots.
 //! Regression tests for review finding H1 (a restore re-issued generations, so a stale handle
-//! aliased a new object) and its edges (T8: generation `u32::MAX`; counter exhaustion, L8).
+//! aliased a new object) and its edges (T8: the last generation; counter exhaustion, L8).
 
 mod common;
 
@@ -10,14 +10,14 @@ use undra_runtime::{Handle, RestoreError, Runtime, RuntimeConfig};
 use undra_wire::payload::{ReplyStatus, Snapshot};
 use undra_wire::{Reader, Writer};
 
-fn floor_of(snapshot: &[u8]) -> u32 {
+fn floor_of(snapshot: &[u8]) -> u64 {
     Snapshot::decode(&mut Reader::new(snapshot))
         .expect("a snapshot")
         .generation_floor
 }
 
 /// A snapshot of nothing, carrying only a generation floor.
-fn empty_snapshot_with_floor(generation_floor: u32) -> Vec<u8> {
+fn empty_snapshot_with_floor(generation_floor: u64) -> Vec<u8> {
     let mut w = Writer::new();
     Snapshot {
         generation_floor,
@@ -125,21 +125,21 @@ fn h1_a_floor_below_the_current_counter_is_ignored() {
     assert_eq!(status(&t, first, 5), ReplyStatus::Ok);
 }
 
-/// T8: a snapshot whose handle carries generation `u32::MAX` used to saturate the floor, so
-/// the first release wrapped the slot back to generation 1.
+/// T8: a snapshot whose handle carries the last generation used to saturate the floor, so the
+/// first release wrapped the slot back to generation 1.
 #[test]
 fn h1_a_snapshot_with_generation_max_is_refused_instead_of_wrapping() {
     let t = TestRuntime::new();
     let a = new_counter(&t, 1, "a"); // (0, 1)
     let mut decoded = Snapshot::decode(&mut Reader::new(&t.runtime().snapshot())).unwrap();
-    decoded.stores[0].handle = Handle::new(0, u32::MAX);
+    decoded.stores[0].handle = Handle::new(0, Handle::MAX_GENERATION);
     let mut w = Writer::new();
     decoded.encode(&mut w);
     let snapshot = w.into_vec();
     assert_eq!(
         t.runtime().restore(&snapshot),
         Err(RestoreError::BadHandle {
-            handle: Handle::new(0, u32::MAX).0
+            handle: Handle::new(0, Handle::MAX_GENERATION).0
         })
     );
     // Refused means untouched: the original store is still there under its handle.
@@ -149,26 +149,28 @@ fn h1_a_snapshot_with_generation_max_is_refused_instead_of_wrapping() {
 #[test]
 fn h1_a_floor_that_leaves_nothing_to_issue_is_refused() {
     let t = TestRuntime::new();
+    const MAX: u64 = Handle::MAX_GENERATION;
     assert_eq!(
-        t.runtime().restore(&empty_snapshot_with_floor(u32::MAX)),
-        Err(RestoreError::GenerationFloor { floor: u32::MAX })
+        t.runtime().restore(&empty_snapshot_with_floor(MAX)),
+        Err(RestoreError::GenerationFloor { floor: MAX })
     );
     // Anything at or above the ceiling is refused too (re-review NF1): the counter is shared
-    // by the whole process and crash recovery replays the same snapshot every launch.
-    const CEILING: u32 = u32::MAX - (1 << 24);
-    for floor in [u32::MAX - 1, CEILING + 1, CEILING] {
+    // by the whole process and crash recovery replays the same snapshot every launch. A floor
+    // the 40-bit field cannot even hold is refused as well.
+    const CEILING: u64 = MAX - (1 << 36);
+    for floor in [u64::MAX, MAX + 1, MAX - 1, CEILING + 1, CEILING] {
         assert_eq!(
             t.runtime().restore(&empty_snapshot_with_floor(floor)),
             Err(RestoreError::GenerationFloor { floor })
         );
     }
-    // Just under the ceiling is accepted, with 2^24 generations of headroom left.
+    // Just under the ceiling is accepted, with 2^36 generations of headroom left.
     t.runtime()
         .restore(&empty_snapshot_with_floor(CEILING - 1))
         .unwrap();
 }
 
-/// L8: the counter never wraps. When its 2^32 - 1 values are spent the runtime refuses to
+/// L8: the counter never wraps. When its 2^40 - 1 values are spent the runtime refuses to
 /// create objects (status 2, a FATAL record) and everything that exists keeps working.
 #[test]
 fn l8_an_exhausted_generation_counter_refuses_inserts_and_keeps_serving() {
@@ -176,10 +178,10 @@ fn l8_an_exhausted_generation_counter_refuses_inserts_and_keeps_serving() {
     let survivor = new_counter(&t, 7, "survivor");
     // Spend all but one generation. A restore refuses floors near the ceiling (NF1), so the
     // test raises this runtime's private counter directly.
-    t.raise_generation_floor(u32::MAX - 1);
+    t.raise_generation_floor(Handle::MAX_GENERATION - 1);
 
-    let last = new_counter(&t, 1, "last"); // takes generation u32::MAX
-    assert_eq!(last.generation(), u32::MAX);
+    let last = new_counter(&t, 1, "last"); // takes the last generation
+    assert_eq!(last.generation(), Handle::MAX_GENERATION);
     t.host().take_logs();
 
     let reply = t.call_sync(
@@ -272,7 +274,7 @@ fn nf1_a_store_generation_near_the_ceiling_is_a_bad_handle() {
     let snapshot = t.runtime().snapshot();
     let mut decoded = Snapshot::decode(&mut Reader::new(&snapshot)).unwrap();
     let index = decoded.stores[0].handle.index();
-    let bad = Handle((u64::from(u32::MAX - 1) << 32) | u64::from(index));
+    let bad = Handle::new(index, Handle::MAX_GENERATION - 1);
     decoded.stores[0].handle = bad;
     let mut w = Writer::new();
     decoded.encode(&mut w);

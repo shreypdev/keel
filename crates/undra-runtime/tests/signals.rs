@@ -558,9 +558,9 @@ fn restore_rejects_bad_snapshots_and_leaves_the_runtime_unchanged() {
     for bad in [
         Handle::NULL,
         Handle::new(1, 0),
-        Handle::new(u32::MAX, 1),
-        // A generation of u32::MAX would leave the counter nothing to issue (review T8).
-        Handle::new(1, u32::MAX),
+        Handle::new(Handle::MAX_INDEX, 1),
+        // The last generation would leave the counter nothing to issue (review T8).
+        Handle::new(1, Handle::MAX_GENERATION),
     ] {
         assert_eq!(
             t.runtime().restore(&encode(vec![store(bad, counter_type)])),
@@ -576,11 +576,13 @@ fn restore_rejects_bad_snapshots_and_leaves_the_runtime_unchanged() {
         ])),
         Err(RestoreError::BadHandle { handle: dup.0 })
     );
-    // A floor of u32::MAX could never issue another handle: refused, not obeyed.
+    // A floor of the last generation could never issue another handle: refused, not obeyed.
     assert_eq!(
         t.runtime()
-            .restore(&snapshot_v2(t.runtime(), u32::MAX, vec![])),
-        Err(RestoreError::GenerationFloor { floor: u32::MAX })
+            .restore(&snapshot_v2(t.runtime(), Handle::MAX_GENERATION, vec![])),
+        Err(RestoreError::GenerationFloor {
+            floor: Handle::MAX_GENERATION
+        })
     );
     // A store's own decoder rejecting its values, and one that panics.
     let mut broken = store(Handle::new(3, 1), counter_type);

@@ -13,6 +13,7 @@ static __UNDRA_META_port_Clock: ::undra::meta::PortMeta = ::undra::meta::PortMet
     name: "Clock",
     port_id: ::undra::meta::ids::port_id("Clock"),
     kind: ::undra::meta::PortKind::Sync,
+    background: false,
     methods: &[
         ::undra::meta::MethodMeta {
             name: "now_ms",
@@ -21,6 +22,7 @@ static __UNDRA_META_port_Clock: ::undra::meta::PortMeta = ::undra::meta::PortMet
             returns: ::undra::meta::TypeRefMeta::I64,
             is_async: false,
             takes_ctx: false,
+            coalesce: false,
             docs: "",
         },
         ::undra::meta::MethodMeta {
@@ -39,6 +41,7 @@ static __UNDRA_META_port_Clock: ::undra::meta::PortMeta = ::undra::meta::PortMet
             returns: ::undra::meta::TypeRefMeta::Unit,
             is_async: false,
             takes_ctx: false,
+            coalesce: false,
             docs: "",
         },
     ],

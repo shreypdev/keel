@@ -29,9 +29,9 @@ use super::check::Checks;
 use super::common::{item_root, mentions_self, param_meta, send_assertion, submit};
 use super::diag::{Diag, Errors, code};
 use super::naming::{pascal_case, unraw};
-use super::object::{analyze, arg_local};
+use super::object::{Kindred, analyze, arg_local};
 use super::paths::Root;
-use super::types::{KType, map_return};
+use super::types::{KType, Pos, map_return_at};
 
 /// Whether the attribute is `#[undra::query]` or `#[undra::mutation]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -265,7 +265,7 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
     }
 
     // The function itself.
-    let analysis = analyze(&mut item.sig, &mut errors);
+    let analysis = analyze(&mut item.sig, &mut errors, Kindred::Query);
     if item.sig.asyncness.is_none() {
         errors.push(signature_error(
             format!("`{fn_name}` must be `async`"),
@@ -302,7 +302,7 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
             "add `ctx: &Ctx` (or `ctx: Ctx`) before the other parameters",
         ));
     }
-    let ret = match map_return(&item.sig.output) {
+    let ret = match map_return_at(&item.sig.output, Pos::QueryReturn) {
         Ok(ret) => ret,
         Err(err) => {
             errors.push(err.into_error());

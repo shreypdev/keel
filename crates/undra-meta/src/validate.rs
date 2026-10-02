@@ -891,6 +891,7 @@ mod tests {
                 name: "Known".into(),
                 port_id: 1,
                 kind: PortKind::Sync,
+                background: false,
                 methods: vec![],
                 docs: String::new(),
             });
@@ -979,6 +980,7 @@ mod tests {
                 name: "P".into(),
                 port_id: 1,
                 kind: PortKind::Sync,
+                background: false,
                 methods: vec![method("P", "m", vec![param("p", ghost())], ghost(), false)],
                 docs: String::new(),
             });
@@ -1352,6 +1354,7 @@ mod tests {
                 name: "P".into(),
                 port_id: 1,
                 kind: PortKind::Async,
+                background: false,
                 methods: vec![method("P", "m", vec![param("c", child())], TypeRef::Unit, false)],
                 docs: String::new(),
             });
@@ -1403,6 +1406,7 @@ mod tests {
             name: "Listener".into(),
             port_id: ids::port_id("Listener"),
             kind: PortKind::Callback,
+            background: false,
             methods,
             docs: String::new(),
         }

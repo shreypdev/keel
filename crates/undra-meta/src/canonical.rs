@@ -595,6 +595,7 @@ mod tests {
             name: "Listener".into(),
             port_id: crate::ids::port_id("Listener"),
             kind: crate::PortKind::Callback,
+            background: false,
             methods: vec![],
             docs: String::new(),
         });
@@ -997,6 +998,7 @@ mod tests {
                 name: name(i).into(),
                 port_id: i as u32,
                 kind: PortKind::Async,
+                background: false,
                 methods: (0..(20 - i))
                     .map(|m| method(name(i), name(m), vec![], TypeRef::String, true))
                     .collect(),

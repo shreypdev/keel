@@ -135,17 +135,18 @@ pub enum RestoreError {
         /// The panic message.
         message: String,
     },
-    /// The snapshot contains the null handle, the same handle twice, a generation of `0` or
-    /// `u32::MAX`, or a slot index implausibly far beyond the table.
+    /// The snapshot contains the null handle, the same handle twice, a generation of `0` or the
+    /// last one, or a slot index implausibly far beyond the table.
     BadHandle {
         /// The offending raw handle.
         handle: u64,
     },
-    /// The snapshot's generation floor is `u32::MAX`: every generation had been issued when it
-    /// was taken, so a runtime restored from it could never create an object (ADR-022).
+    /// The snapshot's generation floor leaves (almost) no generation to issue: it is above the
+    /// ceiling a restore accepts, so a runtime restored from it could soon never create an object
+    /// (ADR-022).
     GenerationFloor {
         /// The floor from the snapshot.
-        floor: u32,
+        floor: u64,
     },
     /// A store's persisted values cannot become today's types (ADR-037): the store type's
     /// fingerprint differs, and a signal neither converts structurally nor has a migration hook
@@ -213,7 +214,7 @@ impl fmt::Display for RestoreError {
             }
             RestoreError::GenerationFloor { floor } => write!(
                 f,
-                "snapshot generation floor {floor:#010x} leaves no generation to issue"
+                "snapshot generation floor {floor:#x} leaves no generation to issue"
             ),
             RestoreError::Incompatible {
                 type_id,

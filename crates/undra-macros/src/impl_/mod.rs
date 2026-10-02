@@ -262,7 +262,7 @@ pub(crate) fn expand_port(attr: TokenStream, item: TokenStream) -> TokenStream {
     run(item, &[], |item| match item {
         syn::Item::Trait(item) => {
             let (root, requested, dispatcher_by_use) = port::parse_port_args(attr)?;
-            port::expand_trait(root, requested, dispatcher_by_use, item)
+            port::expand_trait(root, requested, dispatcher_by_use, false, item)
         }
         syn::Item::Impl(item) => {
             parse_args(
@@ -278,6 +278,17 @@ pub(crate) fn expand_port(attr: TokenStream, item: TokenStream) -> TokenStream {
             "a trait definition or an `impl Trait for Type` block",
             &other,
         )),
+    })
+}
+
+/// `#[undra::callback]` (ADR-041).
+pub(crate) fn expand_callback(attr: TokenStream, item: TokenStream) -> TokenStream {
+    run(item, &[], |item| match item {
+        syn::Item::Trait(item) => {
+            let (root, background) = port::parse_callback_args(attr)?;
+            port::expand_trait(root, port::Requested::Callback, false, background, item)
+        }
+        other => Err(wrong_item("callback", "a trait definition", &other)),
     })
 }
 

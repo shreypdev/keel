@@ -347,6 +347,7 @@ const fn method(
         returns,
         is_async,
         takes_ctx: false,
+        coalesce: false,
         docs: "",
     }
 }
@@ -794,7 +795,7 @@ pub fn wait_until(limit: std::time::Duration, mut cond: impl FnMut() -> bool) ->
 #[allow(dead_code)]
 pub fn snapshot_v2(
     rt: &undra_runtime::Runtime,
-    generation_floor: u32,
+    generation_floor: u64,
     stores: Vec<undra_wire::payload::StoreSnapshot>,
 ) -> Vec<u8> {
     let mut type_ids: Vec<u32> = Vec::new();

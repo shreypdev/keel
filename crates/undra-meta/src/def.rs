@@ -160,6 +160,12 @@ pub struct MethodDef {
     /// Whether the first Rust parameter is a `Ctx` (constructors and free
     /// functions only).
     pub takes_ctx: bool,
+    /// `#[undra(coalesce)]` on a fire-and-forget method of a callback interface (ADR-041): of the
+    /// invocations still waiting in one drain only the newest, per instance and method, is
+    /// delivered (progress reporting). Serialized only when `true`, like
+    /// [`SignalDef::no_coalesce`], so no schema without one hashes differently.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub coalesce: bool,
     /// Doc comment; excluded from the schema hash.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub docs: String,
@@ -259,6 +265,12 @@ pub struct PortDef {
     pub port_id: u32,
     /// Sync, async, event or callback.
     pub kind: PortKind,
+    /// `#[undra::callback(background)]` (ADR-041): the host runs this callback interface's
+    /// implementations on a serial executor per instance, in call order, without waiting for a
+    /// frame, instead of through the mirror's drain on the main thread. Serialized only when
+    /// `true`, so no schema without one hashes differently.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub background: bool,
     /// Port methods; `method_id` is `fnv1a32("<Trait>.<method>")`. Sorted by
     /// name in the canonical form.
     pub methods: Vec<MethodDef>,

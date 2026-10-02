@@ -46,6 +46,7 @@ pub(crate) fn method(
         returns,
         is_async,
         takes_ctx: false,
+        coalesce: false,
         docs: String::new(),
     }
 }
@@ -376,6 +377,7 @@ pub(crate) fn representative_schema() -> Schema {
         name: "Clock".into(),
         port_id: ids::port_id("Clock"),
         kind: PortKind::Sync,
+        background: false,
         methods: vec![
             MethodDef {
                 method_id: ids::port_method_id("Clock", "now_ms"),
@@ -392,6 +394,7 @@ pub(crate) fn representative_schema() -> Schema {
         name: "Http".into(),
         port_id: ids::port_id("Http"),
         kind: PortKind::Async,
+        background: false,
         methods: vec![method(
             "Http",
             "request",
@@ -405,6 +408,7 @@ pub(crate) fn representative_schema() -> Schema {
         name: "Connectivity".into(),
         port_id: ids::port_id("Connectivity"),
         kind: PortKind::Event,
+        background: false,
         methods: vec![method(
             "Connectivity",
             "changed",

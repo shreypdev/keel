@@ -603,7 +603,7 @@ impl TestRuntime {
     /// exhaustion path without issuing billions of handles. Test runtimes own a private
     /// counter, so nothing leaks into other tests.
     #[doc(hidden)]
-    pub fn raise_generation_floor(&self, floor: u32) {
+    pub fn raise_generation_floor(&self, floor: u64) {
         self.rt.objects().raise_generation_floor(floor);
     }
 

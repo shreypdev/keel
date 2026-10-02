@@ -15,6 +15,13 @@
 //!   assertion compares it with the hash of the name the schema recorded, so an alias or a
 //!   renamed import fails (E0061). Objects carry `__UNDRA_IS_OBJECT` and get their own message
 //!   (E0064), and the error position of a `Result` also requires `UNDRA_IS_ERROR`.
+//! * **Objects** (`Arc<T>`, `&T` as parameters and returns, ADR-040): the same assertion the
+//!   other way round. `T` must be an object (`__UNDRA_IS_OBJECT`, E0064 says a record or enum
+//!   crosses by value) whose declared name is the one the schema recorded (`__UNDRA_OBJECT_ID`,
+//!   E0061).
+//! * **Callbacks** (`Arc<dyn Trait>` parameters, ADR-041): `dyn Trait` must implement
+//!   `CallbackInterface`, which only `#[undra::callback]` does (its `on_unimplemented` message is
+//!   the E0004), and its port id must be the one of the name the schema recorded (E0061).
 //!
 //! A type that is not an Undra type at all has no `UNDRA_TYPE_ID`: it falls back to `0`, and the
 //! assertion says so instead of calling it an alias. That is the case of a type that merely
@@ -41,6 +48,7 @@ use super::types::{KType, ty_string};
 /// What a built-in constructor is compared with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Wrapper {
+    Arc,
     Box,
     Vec,
     Option,
@@ -52,6 +60,7 @@ enum Wrapper {
 impl Wrapper {
     fn of(name: &str) -> Option<Wrapper> {
         Some(match name {
+            "Arc" => Wrapper::Arc,
             "Box" => Wrapper::Box,
             "Vec" => Wrapper::Vec,
             "Option" => Wrapper::Option,
@@ -66,6 +75,7 @@ impl Wrapper {
     /// checked on its own).
     fn canonical(self, args: &[&Type]) -> TokenStream {
         match self {
+            Wrapper::Arc => quote!(::std::sync::Arc<#(#args),*>),
             Wrapper::Box => quote!(::std::boxed::Box<#(#args),*>),
             Wrapper::Vec => quote!(::std::vec::Vec<#(#args),*>),
             Wrapper::Option => quote!(::core::option::Option<#(#args),*>),
@@ -88,12 +98,24 @@ enum Same {
     },
 }
 
+/// What a named type is checked to be.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Is {
+    /// A record, enum or error: a value.
+    Value,
+    /// The error side of a `Result`: a `#[undra::error]` enum.
+    Error,
+    /// An object, taken or returned as `Arc<T>` / `&T` (ADR-040).
+    Object,
+    /// The trait of an `Arc<dyn Trait>` callback parameter (ADR-041).
+    Callback,
+}
+
 /// One named-type assertion.
 struct Named {
     ty: Type,
     name: String,
-    /// The type is the error side of a `Result`.
-    error: bool,
+    is: Is,
 }
 
 /// The identity checks of one expansion. Build it while the models are analysed, then append
@@ -176,6 +198,13 @@ impl Checks {
                 }
                 return;
             }
+            Type::Reference(reference) => {
+                // `&T`: an object taken by reference (ADR-040).
+                if let KType::Object(object) = kty {
+                    self.named(&reference.elem, object, Is::Object);
+                }
+                return;
+            }
             Type::Path(_) => {}
             _ => return,
         }
@@ -193,6 +222,15 @@ impl Checks {
             return self.walk(args[0], kty, error);
         }
         match kty {
+            KType::Object(object) if name == "Arc" && args.len() == 1 => {
+                self.wrapper(ty, Wrapper::Arc, &args);
+                self.named(args[0], object, Is::Object);
+            }
+            KType::Callback(callback) if name == "Arc" && args.len() == 1 => {
+                self.wrapper(ty, Wrapper::Arc, &args);
+                let primary = primary_trait(args[0]);
+                self.named(&primary, callback, Is::Callback);
+            }
             KType::Vec(inner) if args.len() == 1 => {
                 self.wrapper(ty, Wrapper::Vec, &args);
                 self.walk(args[0], inner, false);
@@ -234,10 +272,11 @@ impl Checks {
                 if name == "Self" && path.path.segments.len() == 1 {
                     return;
                 }
-                self.named(ty, record, error);
+                self.named(ty, record, if error { Is::Error } else { Is::Value });
             }
             KType::Unit | KType::Stream(_) => {}
             KType::Vec(_) | KType::Option(_) | KType::Map(..) | KType::Result(..) => {}
+            KType::Object(_) | KType::Callback(_) => {}
             leaf => self.leaf(ty, leaf),
         }
     }
@@ -261,12 +300,12 @@ impl Checks {
         }
     }
 
-    fn named(&mut self, ty: &Type, name: &str, error: bool) {
-        if self.fresh(format!("named:{}:{name}:{error}", ty_string(ty))) {
+    fn named(&mut self, ty: &Type, name: &str, is: Is) {
+        if self.fresh(format!("named:{}:{name}:{is:?}", ty_string(ty))) {
             self.named.push(Named {
                 ty: self.resolved(ty),
                 name: name.to_owned(),
-                error,
+                is,
             });
         }
     }
@@ -295,6 +334,7 @@ impl Checks {
         }
         let wire = root.wire();
         let meta = root.meta();
+        let runtime = root.runtime();
 
         let same_items = if self.same.is_empty() {
             TokenStream::new()
@@ -334,12 +374,13 @@ impl Checks {
         let named_items = if self.named.is_empty() {
             TokenStream::new()
         } else {
-            let asserts = self.named.iter().map(|named| named.assertion(&meta));
+            let asserts = self.named.iter().map(|named| named.assertion(&meta, &runtime));
             quote! {
                 trait __UndraFallback {
                     const UNDRA_TYPE_ID: u32 = 0;
                     const UNDRA_IS_ERROR: bool = false;
                     const __UNDRA_IS_OBJECT: bool = false;
+                    const __UNDRA_OBJECT_ID: u32 = 0;
                 }
                 impl<T: ?::core::marker::Sized> __UndraFallback for T {}
                 #(#asserts)*
@@ -400,7 +441,12 @@ impl VisitMut for ReplaceSelf<'_> {
 }
 
 impl Named {
-    fn assertion(&self, meta: &TokenStream) -> TokenStream {
+    fn assertion(&self, meta: &TokenStream, runtime: &TokenStream) -> TokenStream {
+        match self.is {
+            Is::Object => return self.object_assertion(meta),
+            Is::Callback => return self.callback_assertion(meta, runtime),
+            Is::Value | Is::Error => {}
+        }
         let span = self.ty.span();
         let ty = &self.ty;
         let name = &self.name;
@@ -409,8 +455,10 @@ impl Named {
         let object = panic_text(&Diag::new(
             code::E0064,
             format!("`{shown}` is an object and cannot be used as a value"),
-            "an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value",
-            "return a record with the data the platform needs, or construct the object from the platform with one of its constructors",
+            "an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value",
+            format!(
+                "return it as `Arc<{shown}>`, take it as `&{shown}` or `Arc<{shown}>` (a method, constructor or function parameter or return), or use a record with the data the platform needs"
+            ),
         ));
         let mismatch = panic_text(&Diag::new(
             code::E0061,
@@ -442,7 +490,7 @@ impl Named {
                 "declare it with `#[undra::error]`, for example `#[undra::error] enum {name} {{ #[error(\"failed\")] Failed }}`"
             ),
         ));
-        let error_check = if self.error {
+        let error_check = if self.is == Is::Error {
             quote_spanned! {span=>
                 if !<#ty>::UNDRA_IS_ERROR {
                     ::core::panic!(#not_error);
@@ -468,11 +516,110 @@ impl Named {
             };
         }
     }
+
+    /// `T` of `Arc<T>` / `&T` must be an object with the declared name the schema recorded.
+    fn object_assertion(&self, meta: &TokenStream) -> TokenStream {
+        let span = self.ty.span();
+        let ty = &self.ty;
+        let name = &self.name;
+        let shown = ty_string(ty);
+        let value = panic_text(&Diag::new(
+            code::E0064,
+            format!("`{shown}` is a record, enum or error, not an object"),
+            "only an object (a type with an `#[undra::api] impl` block) crosses as `Arc<T>` or `&T`, as a handle; records, enums and errors cross by value, copied",
+            format!("write `{shown}` without `Arc` or `&`, or give it an `#[undra::api] impl` block if it is meant to be an object"),
+        ));
+        let undeclared = panic_text(&Diag::new(
+            code::E0064,
+            format!("`{shown}` is not an object"),
+            "an object is a type with an `#[undra::api] impl` block: the macro generates what lets the core hand it to the platforms as a handle, and without one there is nothing to hand out",
+            format!("add `#[undra::api]` to an `impl {shown} {{ .. }}` block, or use a record (`#[undra::api] struct`) if it is plain data"),
+        ));
+        let mismatch = panic_text(&Diag::new(
+            code::E0061,
+            format!(
+                "`{name}` here is an alias or a renamed import of an object that is declared under another name"
+            ),
+            format!(
+                "Undra describes an object to the platforms by the name it is written with, while the handle the core issues is of the type that name resolves to; with `type {name} = Other` or `use path::Other as {name}` the platforms would wrap it as `{name}`"
+            ),
+            format!("write the object under the name it is declared with (`Other` in the examples above)"),
+        ));
+        quote_spanned! {span=>
+            const _: () = {
+                if !<#ty>::__UNDRA_IS_OBJECT {
+                    // Whatever has an Undra type id is a record, an enum or an error.
+                    if <#ty>::UNDRA_TYPE_ID != 0 {
+                        ::core::panic!(#value);
+                    }
+                    ::core::panic!(#undeclared);
+                }
+                if <#ty>::__UNDRA_OBJECT_ID != #meta::ids::type_id(#name) {
+                    ::core::panic!(#mismatch);
+                }
+            };
+        }
+    }
+
+    /// `dyn Trait` must be a callback interface with the declared name the schema recorded.
+    fn callback_assertion(&self, meta: &TokenStream, runtime: &TokenStream) -> TokenStream {
+        let span = self.ty.span();
+        let ty = &self.ty;
+        let name = &self.name;
+        let mismatch = panic_text(&Diag::new(
+            code::E0061,
+            format!(
+                "`{name}` here is an alias or a renamed import of a callback trait that is declared under another name"
+            ),
+            format!(
+                "Undra describes a callback interface to the platforms by the name it is written with, while the proxy the core calls is of the trait that name resolves to"
+            ),
+            "write the trait under the name it is declared with",
+        ));
+        quote_spanned! {span=>
+            const _: () = {
+                // The bound is the E0004 message of `CallbackInterface`: only a trait declared
+                // with `#[undra::callback]` implements it.
+                const fn __undra_callback<P: ?::core::marker::Sized + #runtime::CallbackInterface>() -> u32 {
+                    <P as #runtime::Port>::PORT_ID
+                }
+                if __undra_callback::<#ty>() != #meta::ids::port_id(#name) {
+                    ::core::panic!(#mismatch);
+                }
+            };
+        }
+    }
 }
 
 /// The message of a const `panic!` (a format string: braces escaped).
 pub(crate) fn panic_text(diag: &Diag) -> String {
     diag.message().replace('{', "{{").replace('}', "}}")
+}
+
+/// `dyn Trait` for the trait of `dyn Trait + Send + Sync + 'static`: the auto-trait bounds
+/// are dropped, since a callback trait has `Send + Sync` supertraits.
+pub(crate) fn primary_trait(ty: &Type) -> Type {
+    let mut ty = ty;
+    while let Type::Paren(p) = ty {
+        ty = &p.elem;
+    }
+    let Type::TraitObject(object) = ty else {
+        return ty.clone();
+    };
+    let mut object = object.clone();
+    object.bounds = object
+        .bounds
+        .iter()
+        .filter(|bound| match bound {
+            syn::TypeParamBound::Trait(bound) => !bound.path.segments.last().is_some_and(|seg| {
+                matches!(seg.ident.to_string().as_str(), "Send" | "Sync" | "Unpin")
+            }),
+            syn::TypeParamBound::Lifetime(_) => false,
+            _ => true,
+        })
+        .cloned()
+        .collect();
+    Type::TraitObject(object)
 }
 
 /// The `Item` type of `impl Stream<Item = T>`.

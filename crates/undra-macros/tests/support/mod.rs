@@ -29,6 +29,16 @@ type Foreign = Arc<dyn Fn(u32, &[u8]) -> Result<Vec<u8>, PortError> + Send + Syn
 struct Platform {
     foreign: Mutex<HashMap<u32, Foreign>>,
     change_sets: Mutex<Vec<Vec<u8>>>,
+    port_calls: Mutex<Vec<PortCallRecord>>,
+}
+
+/// A port call the core made to the "platform".
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortCallRecord {
+    pub port_id: u32,
+    pub method_id: u32,
+    pub port_call_id: u32,
+    pub args: Vec<u8>,
 }
 
 impl Host for Platform {
@@ -47,8 +57,16 @@ impl Host for Platform {
         port_call_id: u32,
         args: &[u8],
     ) -> PortCallOutcome {
+        self.port_calls.lock().unwrap().push(PortCallRecord {
+            port_id,
+            method_id,
+            port_call_id,
+            args: args.to_vec(),
+        });
         let handler = self.foreign.lock().unwrap().get(&port_id).cloned();
         match handler.map(|handler| handler(method_id, args)) {
+            // A handler that answers "cancelled" will reply later (through `port_reply`).
+            Some(Err(PortError::Cancelled)) => PortCallOutcome::Async,
             Some(Ok(body)) => {
                 PortCallOutcome::Sync(port_reply(port_call_id, PortStatus::Ok, &body))
             }
@@ -123,6 +141,11 @@ impl Runtime {
             .unwrap()
             .insert(port_id, Arc::new(handler));
         self.rt.bind_foreign_port(port_id);
+    }
+
+    /// The port calls the core made since the last call, in order.
+    pub fn port_calls(&self) -> Vec<PortCallRecord> {
+        std::mem::take(&mut *self.platform.port_calls.lock().unwrap())
     }
 
     /// Fans an event payload out to subscribers.

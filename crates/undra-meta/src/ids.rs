@@ -122,6 +122,32 @@ pub const fn port_method_id(trait_name: &str, method: &str) -> u32 {
     method_id(trait_name, method)
 }
 
+/// The reserved method every callback port answers to release one instance:
+/// `fnv1a32("<Trait>.__release")` (ADR-041). Fire-and-forget, arguments `instance u64`.
+pub const CALLBACK_RELEASE: &str = "__release";
+
+/// The reserved method every callback port answers to cancel an async call:
+/// `fnv1a32("<Trait>.__cancel")` (ADR-041). Fire-and-forget, arguments `instance u64,
+/// port_call_id u32`.
+pub const CALLBACK_CANCEL: &str = "__cancel";
+
+/// The id of a callback port's `__release` method.
+///
+/// ```
+/// use undra_meta::ids;
+/// assert_eq!(ids::callback_release_id("UploadListener"), ids::fnv1a32("UploadListener.__release"));
+/// ```
+#[must_use]
+pub const fn callback_release_id(trait_name: &str) -> u32 {
+    port_method_id(trait_name, CALLBACK_RELEASE)
+}
+
+/// The id of a callback port's `__cancel` method.
+#[must_use]
+pub const fn callback_cancel_id(trait_name: &str) -> u32 {
+    port_method_id(trait_name, CALLBACK_CANCEL)
+}
+
 /// The id of a query: `fnv1a32("query.<fn_name>")`.
 #[must_use]
 pub const fn query_id(name: &str) -> u32 {

@@ -1,0 +1,44 @@
+error: error[undra::E0004]: callback `Arc<dyn Listener>` cannot be a field of a record or enum (`Listener` is a callback interface)
+         = note: a callback is an instance with a lifetime, not a value: it cannot be copied, compared, stored in a record or mirrored from a signal
+         = help: keep an id or a record here, and take the callback as a parameter of the method that needs it
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
+  --> tests/ui/e0004_callbacks_where_none_may_stand.rs:21:19
+   |
+21 |     pub listener: Arc<dyn Listener>,
+   |                   ^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0004]: callback `Arc<dyn Listener>` cannot be used here (`Listener` is a callback interface)
+         = note: a callback is an object the host implements and passes in for the core to call; the core never hands one out
+         = help: return a plain value, or an object (`Arc<T>`) the host can call methods on
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
+  --> tests/ui/e0004_callbacks_where_none_may_stand.rs:32:34
+   |
+32 |     pub fn returns_one(&self) -> Arc<dyn Listener> {
+   |                                  ^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0004]: callback `Arc<dyn Listener>` cannot be used here (`Listener` is a callback interface)
+         = note: a callback may be a parameter of a method, constructor or function, alone or in an `Option`; it cannot be nested in another type
+         = help: take one `Arc<dyn Trait>` (or `Option<Arc<dyn Trait>>`) per parameter
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
+  --> tests/ui/e0004_callbacks_where_none_may_stand.rs:36:39
+   |
+36 |     pub fn many(&self, listeners: Vec<Arc<dyn Listener>>) {}
+   |                                       ^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0004]: closure type `Arc<dyn Fn(u32) + Send + Sync>` cannot cross the boundary
+         = note: callbacks have no wire representation
+         = help: declare a `#[undra::callback]` trait and take `Arc<dyn Trait>`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
+  --> tests/ui/e0004_callbacks_where_none_may_stand.rs:38:30
+   |
+38 |     pub fn closure(&self, f: Arc<dyn Fn(u32) + Send + Sync>) {}
+   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0030]: parameter `listener` of port method `call` is not a wire type
+         = note: callback `Arc<dyn Listener>` cannot be a parameter of a port (`Listener` is a callback interface) (a port is implemented once, by the platform, for the whole process; a callback instance in its arguments would need a wrapper type the port implementation does not have)
+         = help: pass a record or an id through the port
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0030
+  --> tests/ui/e0004_callbacks_where_none_may_stand.rs:45:30
+   |
+45 |     fn call(&self, listener: Arc<dyn Listener>);
+   |                              ^^^^^^^^^^^^^^^^^
