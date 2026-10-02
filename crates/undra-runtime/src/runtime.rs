@@ -2911,10 +2911,13 @@ impl Runtime {
         // a second `Arc<Self>` construction, a reply whose extra reference is still on its way
         // back) each give exactly one back later. Starting from one would let the first of them
         // remove the store the others still use.
-        let mut refs_before: HashMap<u64, u32> = HashMap::new();
+        // (A list, not a map: a handful of entries, and no second map type in the wasm.)
+        let mut refs_before: Vec<(u64, u32)> = Vec::new();
         for cleared in self.objects.clear() {
             before.insert(cleared.handle.0, object_address(&cleared.object));
-            refs_before.insert(cleared.handle.0, cleared.host_refs);
+            if cleared.host_refs > 1 {
+                refs_before.push((cleared.handle.0, cleared.host_refs));
+            }
             if let Some(cell) = cleared.object.as_store() {
                 cell.set_handle(0);
                 observed.insert(
@@ -2925,7 +2928,10 @@ impl Runtime {
             self.drop_guarded_logged("an object replaced by restore", cleared.object);
         }
         for (handle, object) in &built {
-            let refs = refs_before.get(&handle.0).copied().unwrap_or(1);
+            let refs = refs_before
+                .iter()
+                .find(|(h, _)| *h == handle.0)
+                .map_or(1, |(_, n)| *n);
             if let Err(e) = self
                 .objects
                 .insert_at_with_refs(*handle, object.clone(), refs)
