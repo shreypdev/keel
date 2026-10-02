@@ -153,9 +153,9 @@ impl Resume {
         self.grace
     }
 
-    /// Keeps `handles` for the client with `token`. Returns the handles of a session that was
-    /// retained before and is now replaced (the caller releases them).
-    pub(crate) fn retain(&self, token: &str, handles: Vec<u64>) -> Vec<u64> {
+    /// Keeps `handles` for the client with `token`. Returns the session that was retained before
+    /// and is now replaced (the caller releases it).
+    pub(crate) fn retain(&self, token: &str, handles: Vec<u64>) -> Option<Retained> {
         let mut state = self.state.lock();
         let now = Instant::now();
         let replaced = state.retained.replace(Retained {
@@ -165,7 +165,7 @@ impl Resume {
             since: now,
         });
         self.wake.notify_all();
-        replaced.map(|r| r.handles).unwrap_or_default()
+        replaced
     }
 
     /// Starts with `session` retained, as if its client had just dropped (a core that was
@@ -232,7 +232,7 @@ impl Resume {
             }
             let Some(gone) = state.retained.take() else { continue };
             drop(state);
-            release_all(rt, &gone.handles);
+            release_retained(rt, &gone);
             rt.log(
                 INFO,
                 TARGET,
@@ -261,6 +261,20 @@ pub(crate) fn release_all(rt: &Runtime, handles: &[u64]) {
     for handle in handles {
         rt.release(*handle);
     }
+}
+
+/// The runtime origin (ADR-040) of the session `token` announced: stable across the sockets of
+/// one session, so what its calls returned is still recorded for it when the client comes back,
+/// and different from the id of a connection that announced none (those are small).
+pub(crate) fn origin_of(token: &str) -> u64 {
+    (1 << 63) | (undra_runtime::undra_meta::ids::fnv1a64(token.as_bytes()) >> 1)
+}
+
+/// Gives back everything a retained session held: the objects its constructors made and the
+/// references its calls returned.
+pub(crate) fn release_retained(rt: &Runtime, retained: &Retained) {
+    release_all(rt, &retained.handles);
+    rt.release_origin(origin_of(&retained.token));
 }
 
 #[cfg(test)]
@@ -299,7 +313,7 @@ mod tests {
     #[test]
     fn a_session_is_taken_once_and_only_by_its_token() {
         let resume = Resume::new(Duration::from_secs(60));
-        assert!(resume.retain("t1", vec![1, 2]).is_empty());
+        assert!(resume.retain("t1", vec![1, 2]).is_none());
         assert!(resume.take("other").is_none());
         assert!(resume.holds(), "a wrong token does not consume the session");
         let got = resume.take("t1").expect("the owner takes it");
@@ -311,7 +325,7 @@ mod tests {
     fn retaining_again_hands_back_what_it_replaces() {
         let resume = Resume::new(Duration::from_secs(60));
         resume.retain("a", vec![1]);
-        assert_eq!(resume.retain("b", vec![2]), [1]);
+        assert_eq!(resume.retain("b", vec![2]).map(|r| r.handles), Some(vec![1]));
         assert_eq!(resume.supersede().map(|r| r.token), Some("b".to_owned()));
         assert!(!resume.holds());
     }

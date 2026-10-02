@@ -143,6 +143,9 @@ pub(crate) struct Session {
     release_on_disconnect: bool,
     busy_grace: Duration,
     hooks: Hooks,
+    /// The first teardown decides what becomes of the references this client's calls returned
+    /// (kept for its return, or given back); a second one finds nothing left to decide.
+    origin_settled: std::sync::atomic::AtomicBool,
 }
 
 impl Session {
@@ -160,6 +163,7 @@ impl Session {
             conn,
             resume,
             release_on_disconnect: config.release_on_disconnect,
+            origin_settled: std::sync::atomic::AtomicBool::new(false),
             busy_grace: config.busy_grace,
             hooks,
         }
@@ -310,7 +314,7 @@ impl Session {
         }
         // A new client: whatever the previous one left behind is not coming back.
         if let Some(gone) = self.resume.supersede() {
-            resume::release_all(&self.rt, &gone.handles);
+            resume::release_retained(&self.rt, &gone);
             self.note(
                 INFO,
                 &format!(
@@ -371,7 +375,7 @@ impl Session {
             Kind::Release => {
                 let release = decode(payload, "Release", Release::decode)?;
                 self.conn.release(release.handle.0);
-                self.rt.release(release.handle.0);
+                self.rt.release_from(self.origin(), release.handle.0);
             }
             Kind::PortReply => {
                 let reply = decode(payload, "PortReply", PortReply::decode)?;
@@ -461,7 +465,7 @@ impl Session {
         };
         let refused = {
             let _route = RouteGuard::set(Route::Commit(Cause::Call(method_id)));
-            self.rt.call(payload) != 0
+            self.rt.call_from(self.origin(), payload) != 0
         };
         if refused {
             // Refused without a reply (call id 0, a runtime shutting down): answer for it, or
@@ -473,6 +477,15 @@ impl Session {
             );
         }
         Ok(())
+    }
+
+    /// The runtime origin of this client's calls (ADR-040): stable across the reconnects of one
+    /// session, so the references its calls returned are recorded for it, not for the socket.
+    fn origin(&self) -> u64 {
+        match self.conn.session() {
+            Some(request) => resume::origin_of(&request.token),
+            None => self.conn.id,
+        }
     }
 
     /// Gives back what the client held: cancels its calls, stops its observations, releases
@@ -512,10 +525,18 @@ impl Session {
             }
         }
         if let Some(request) = keep_for {
-            let replaced = self.resume.retain(&request.token, left.constructed.clone());
-            resume::release_all(&self.rt, &replaced);
+            if let Some(replaced) = self.resume.retain(&request.token, left.constructed.clone()) {
+                resume::release_retained(&self.rt, &replaced);
+            }
         } else if self.release_on_disconnect {
             resume::release_all(&self.rt, &left.constructed);
+        }
+        // What its calls returned (ADR-040) was never in the tracker: the runtime kept it, for
+        // the origin. A session kept for its return keeps it too; the retained session gives it
+        // back (`release_retained`).
+        let settled = self.origin_settled.swap(true, Ordering::AcqRel);
+        if !settled && keep_for.is_none() && self.release_on_disconnect {
+            self.rt.release_origin(self.origin());
         }
         for id in &left.port_calls {
             let mut w = Writer::with_capacity(5);
