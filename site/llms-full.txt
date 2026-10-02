@@ -2741,7 +2741,7 @@ Structured local data with SQLite, written once in the core. The platform owns t
 
 ## Turn it on
 
-`Db` is an opt-in port over the SQLite each platform already has: the system library on iOS, `android.database.sqlite` on Android, a JDBC driver on the JVM, `node:sqlite` in Node and wa-sqlite in a worker on the web. The core stays small and never blocks: the platform owns the database and its thread.
+`Db` is an opt-in port over the SQLite each platform already has: the system library on iOS, `android.database.sqlite` on Android, a JDBC driver on the JVM, `node:sqlite` in Node and wa-sqlite in a worker on the web. The core stays small and never blocks: the platform owns the database and its thread. On the web the files live in the origin private file system, which one tab holds at a time: a second tab of the same app gets `Unavailable`.
 
 core/Cargo.toml
 

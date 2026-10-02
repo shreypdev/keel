@@ -62,7 +62,7 @@
     <h1>Local database</h1>
     <p class="lede">Structured local data with SQLite, written once in the core. The platform owns the file and the thread; the core sends bound statements and gets typed rows back.</p>
 <h2 id="turn-it-on">Turn it on<a class="anchor" href="#turn-it-on" aria-label="Link to this section">#</a></h2>
-<p><code>Db</code> is an opt-in port over the SQLite each platform already has: the system library on iOS, <code>android.database.sqlite</code> on Android, a JDBC driver on the JVM, <code>node:sqlite</code> in Node and wa-sqlite in a worker on the web. The core stays small and never blocks: the platform owns the database and its thread.</p>
+<p><code>Db</code> is an opt-in port over the SQLite each platform already has: the system library on iOS, <code>android.database.sqlite</code> on Android, a JDBC driver on the JVM, <code>node:sqlite</code> in Node and wa-sqlite in a worker on the web. The core stays small and never blocks: the platform owns the database and its thread. On the web the files live in the origin private file system, which one tab holds at a time: a second tab of the same app gets <code>Unavailable</code>.</p>
 <div class="code"><div class="code-bar"><span>core/Cargo.toml</span></div><pre><code data-lang="toml">[dependencies]
 undra = { version = &quot;0.1&quot;, features = [&quot;db&quot;] }</code></pre></div>
 <h2 id="open-and-migrate">Open and migrate<a class="anchor" href="#open-and-migrate" aria-label="Link to this section">#</a></h2>
