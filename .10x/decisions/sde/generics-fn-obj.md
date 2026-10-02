@@ -69,9 +69,20 @@ how it was verified and what the review should look at.
 * Stores: `TodoSelection` is generated exactly as a hand-written store (`@Observable` class, `StateFlow`s, `Signal`s): no generator
   change, which `generic_objects` locks.
 
-## Verification (once, at the end; commands in the brief)
+## Verification (once, at the end; local, Rust 1.99.0, macOS)
 
-TBD
+| Check | Result |
+|---|---|
+| `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p undra-ffi --target wasm32-unknown-unknown -- -D warnings`, `cargo doc --workspace --no-deps` with `-D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | 3,610 pass, 1 fails: `undra-cli --test symbols` `shipped_artefacts_do_not_grow_and_no_symbols_writes_none`, its Android half (the emulator is booted here; CI has no device and skips it): the with-symbols `libplayground_core.so` is 16 bytes larger than the `--no-symbols` one (`.text` 16 bytes longer, both 2.8 MB) and the test asserts `after <= before` with no margin (the wasm half has 0.25%). Layout noise of the playground's code, not a growth of what ships; left alone (outside the brief) |
+| `cargo test -p undra-bindgen` (goldens, validate, diagnostics, `typecheck_swift` 4, `typecheck_kotlin` under kotlinc 2.4.20 and 2.0.21, `typecheck_ts` 22, `run_ts` 14) | pass |
+| Budgets (`cargo test -p undra-bench --test budgets --release`) and the alloc gates (`sync_alloc`, `commit_alloc`, `derived_alloc`, `lazy_alloc`, release) | pass; `generic_fn_vs_function` 0.89 to 1.04 |
+| wasm ABI harness, TypeScript runtime (`npm test`, 1,856; `tsc`), Swift runtime (870), Kotlin runtime under 2.4.20 and 2.0.21 (881 cases, 0 failed, 2 skipped, plus 32 testkit), React Native (110, typecheck, `test:contract` 25 + 2 skipped with S34 passing, `cpp/test/run.sh`), interop | pass |
+| `undra bindgen --check --docs` on the playground, two-cores a and b, cookbook and Fieldbook; `--check` on ios15-sample; `schema_docs` and `schema_retention` | up to date, pass |
+| Sizes (`scripts/wasm-size.sh`) | web hello wasm 117,215 gzipped (+665 against 116,550; gate 120,000), up-front JS 22,100 (gate 22,100, no runtime changed) |
+| Playground web (`npm test` 135, `npm run build`, `npm run smoke` 9 in Chromium with the new steps), Android `assembleDebug`, the iOS app (`undra build --platform ios`, `xcodebuild` for the simulator) | pass |
+| Site: `build-all`, `check-links --words` | landing 347 words (budget 350), no broken link |
+| Contract grid (`bash contract-tests/run-all.sh`), 34 scenarios | 98 of 98 cells pass: TypeScript 34 (S01 to S34, with S21 and S22), Kotlin 32 and Swift 32 (S01 to S20, S23 to S34); Swift's S33 (polling, real time, "the gap between the first two ticks was 0.0 s") failed once in the full run on a loaded machine and passed alone and in a full Swift re-run: not touched by this piece |
 
 ## Deviations
 
