@@ -70,8 +70,11 @@ class SecureStoreOnDeviceTest {
     fun the_aes_key_lives_in_the_android_keystore_and_cannot_be_read_out() = runBlocking {
         AndroidSecureStoreAdapter(context, TEST_NAMESPACE).set("k", secret)
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        assertTrue(keyStore.containsAlias(AndroidSecureStoreAdapter.DEFAULT_KEY_ALIAS))
-        val key = keyStore.getKey(AndroidSecureStoreAdapter.DEFAULT_KEY_ALIAS, null) as SecretKey
+        // The default alias is the core's: `<namespace>.dev.undra.securestore` (ADR-044 amendment A).
+        val alias = AndroidSecureStoreAdapter.keyAliasOf(TEST_NAMESPACE)
+        assertEquals("ns_test.dev.undra.securestore", alias)
+        assertTrue(keyStore.containsAlias(alias))
+        val key = keyStore.getKey(alias, null) as SecretKey
         assertNull("the key material is not extractable", key.encoded)
         assertEquals("AES", key.algorithm)
         val info = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore").getKeySpec(key, KeyInfo::class.java) as KeyInfo
