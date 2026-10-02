@@ -1,14 +1,15 @@
 # ADR-057: The JavaScript runtime's first chunk at 16 KB: where 22.1 KB is, what leaves it, and the gate
 
-Status: **Proposed** (2026-10-02, piece `ts-runtime-16k`: design and measurement; the implementation is a later piece, from
-the brief in `.10x/decisions/architect/ts-runtime-16k.md`). It would touch `@undra/runtime`'s module layout, its package
-`exports` (a production and a development flavour), one optional field of `AttachOptions` (`features`), optional methods of
-`Transport` (the control messages as calls), the TypeScript generator's entry for a schema that has a stream
-(`features: [streams]`: a generated shape, R3 and R11), the JavaScript size gate (`scripts/web-size-runtime.mjs`,
-`scripts/wasm-size.sh`, `bench/budgets.toml`) and SPEC 10.3, 12, 13, 14 and 17.1. It does **not** touch the wire, the C or wasm
-ABI, the schema, the schema hash, the threading model, or any name SPEC 17.1 lists: every class, method and function there
-keeps its name, its signature and its behaviour. Constitution R9 (budgets are tests), R11 (decided before the code), R3
-(generated code), R6 (every error a typed value).
+Status: **Accepted** (2026-10-02). Proposed the same day by the architect (piece `ts-runtime-16k`, the brief in
+`.10x/decisions/architect/ts-runtime-16k.md`); implemented by `wt/ts-runtime-16k` (decision record
+`.10x/decisions/sde/ts-runtime-16k.md`, "Implementation note" below for what was built and where it differs from the design). It
+touches `@undra/runtime`'s module layout, its package `exports` (a production and a development flavour), one optional field of
+`AttachOptions` (`features`), the `Transport` interface (the control messages as calls; `CoreTransport`), the TypeScript
+generator's entry for a schema that has a stream (`features: [streams]`: a generated shape, R3 and R11), the JavaScript size gate
+(`scripts/web-size-runtime.mjs`, `scripts/wasm-size.sh`, `bench/budgets.toml`) and SPEC 10.3, 12, 13, 14 and 17.1. It does **not**
+touch the wire, the C or wasm ABI, the schema, the schema hash, the threading model, or any name SPEC 17.1 lists: every class,
+method and function there keeps its name, its signature and its behaviour. Constitution R9 (budgets are tests), R11 (decided
+before the code), R3 (generated code), R6 (every error a typed value).
 
 ## Context
 
@@ -206,8 +207,8 @@ The package publishes two builds of the same sources and the same declarations:
 **(b) Messages are codes.** Every sentence the runtime throws or logs is `msg(17, operation, mode)`: a literal code and the
 values. `messages.ts` (development) holds the table and formats today's sentence, character for character; the production
 build swaps in `messages.prod.ts`, whose `msg` returns
-`undra T0017: callSync, remote (https://shreypdev.github.io/undra/docs/errors.html#T0017)`. A wire error's production text
-is its code and fields (`wire: code=unexpected_eof at=12 needed=3`). What is **synchronous and unchanged in both flavours**
+`T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017`. A wire error's production text
+is its code and fields with a link (`wire: code=unexpected_eof at=12 needed=3 — https://…/errors.html#wire-unexpected_eof`). What is **synchronous and unchanged in both flavours**
 is everything R6 names: the class (`instanceof`), `name`, `kind`, `code`, `detail`, `status`, `reason`, `operation`,
 `cause`, and the core's own text (a panic message, a refusal reason travel as values). What a production page loses is the
 prose, one click away. The T-codes are a second catalogue of SPEC 12 (never reused, generated into the same errors page);
@@ -270,6 +271,63 @@ first stream. The call path's code is the same code: `call`, `callSync`, the dir
 touched, and on the last prototype the two Node rows measured 340 and 170 ns against `main`'s 333 and 162 (the best of three
 alternating runs each, on one host at load 52; budgets 1,600 and 800, `[web."node/.."]`). Each lever lands with the `[web."id"]` rows green.
 
+## Implementation note (as built, 2026-10-02)
+
+The levers landed one or two to a commit on `wt/ts-runtime-16k` (base `23ebf45`), each with its measured number in the message.
+The gate's own numbers, helper in the chunk until row 15:
+
+| # | Lever | Commit | gz after | Δ |
+|---|---|---|---|---|
+| | `main` `a309e9f` (and the module rule as a test, row 0) | `82dac17` | 22,100 | |
+| 1 | session payloads re-exported by the wire barrel | `d113766` | 21,971 | −129 |
+| 2 | nine port ids as literals | `146102b` | 21,766 | −205 |
+| 3, 11a | `codecs` a module namespace; the fourteen codecs a hello page does not name in a module of their own | `d391b3e` | 20,799 | −967 |
+| 4 | stream support a feature (`features: [streams]`) | `c0a5822` | 20,152 | −647 |
+| 5 | the typed channel (`CoreTransport`); the in-process host has no `send` and no payload decoder | `47f6116` | 19,458 | −694 |
+| 6, 7 | observe waiters, and what only a core outside this thread needs, load with its transport | `c931d36` | 18,942 | −516 |
+| 8 | `stats`, `snapshot`, `restore`, `runInBackground` on first call | `5ff3377` | 18,580 | −362 |
+| 9, 10a | each on-demand transport maps `load()`'s options; the sync-port refusal text | `3fd82d1` | 18,311 | −269 |
+| 11b | the two rarely thrown error classes | `f0757ce` | 18,158 | −153 |
+| 12 | trims | `d9bf9b3` | 18,079 | −79 |
+| 13 | the production flavour says codes (242 + 2 codes, `messages.ts`, `messages.prod.ts`, two-build package) | `a0870e0` | 16,763 | −1,316 |
+| 14 | the production build renames private properties; the suites run against it | `b124b97` | 16,193 | −570 |
+| 15 | the gate: helper beside the number, three rows, the module list | `aacae1c` | **15,679** | −514 |
+| 4b | `stream-feature.ts`: no bundler warning in an app with a stream | `a50bc9a` | 15,680 | +1 |
+
+**End state** (`scripts/wasm-size.sh`, zlib 9): `web/hello-runtime-js` **15,680** (budget 16,000; Vite's preload helper 691 beside
+it); `web/hello-runtime-js-with-helper` **16,191** (16,600); `web/all-features-runtime-js` **40,100** (27,355 up front + 12,745
+on demand; 42,400, which was 42,385). The prototypes measured 15,384 for the same tree; the 296 bytes between are real code
+the prototypes did not write (the typed `Transport`'s adapters, the loaders' failure paths, `msg` call sites, tests' demands:
+`UndraFeature.name`, the flavour check), so the margin under 16,000 is 320 and not 616. The development flavour's first chunk is
+21,151 bytes (ungated: the design's 17.8 KB had each sentence where it is used; the table is one module, so the whole of it is in a
+development page's first chunk, and a development page is served by Vite's dev server module by module).
+
+**Where the build differs from the design above.**
+
+* **The rename pass does not use `minifySync`.** Row 14 names oxc's `minifySync` with `mangleProps` and composed source maps.
+  oxc's printer drops every comment, `/* @__PURE__ */` annotations included, which are what a consumer's bundler tree-shakes by (the
+  runtime has fourteen). `scripts/mangle.mjs` parses `tsc`'s output with the same oxc parser and splices the new names into the text at the
+  parsed spans: comments, line structure and `tsc`'s maps stay, and a map's columns move by what an edit added or removed before them
+  (a test checks every segment still starts the token it started). It renames the properties the package *declares* (a class member, an
+  object literal's key, an assigned property) and leaves what it only reads (`exports._initialize` of a WebAssembly module, wa-sqlite's
+  `_sqlite3_*`): 169 names in 16 modules, not the 184 the prototype's regular expression counted. It fails the build on a name that is
+  also an export's name and on a string literal equal to a renamed name. `rolldown` and `@jridgewell/sourcemap-codec` are the
+  explicit devDependencies (both were in the lockfile through Vite); `@jridgewell/remapping` is not needed.
+* **`stripInternal`** is on in `tsconfig.build.json`; `UndraFeature`, whose only member was `@internal`, gained `readonly name` so that
+  the declaration is still a type and not `{}`.
+* **The suites run against the production build with the development messages**: `npm run test:dist` (the runtime's own suite),
+  `UNDRA_TS_DIST=<runtime>/dist/index.js` (the React Native unit and contract suites, the testkit, the devtools, the TypeScript
+  contract column, the wasm acceptance), each a second CI run. The tests word their expectations as sentences, so the one
+  module that is not production's is `messages.js`; what the production table says is held by `flavours.test.ts` (the same class, name,
+  kind and fields in both flavours for 25 errors; only `message` differs) and `dist-flavour.test.ts` (the built package). The three
+  tests that read `_era`, `_giveBack` or `_install` ask `test/support/internals.ts` for the name the build gives them, so they run in both
+  modes (the brief had them skip). The wasm acceptance's three message assertions are flavour-aware.
+* **A thin loader, `stream-feature.ts`.** A core without the feature imports it, not `stream-support.ts`: a module that is both an
+  `import()` target and a static import (an app whose generated entry passes `streams`) makes Rolldown warn at every build of the app.
+* **The all-features row** copies the playground's bindings next to its entry inside the scratch project (so `@undra/runtime` resolves
+  as an installed app's does) and counts the Worker script out and the bundler's own chunks out.
+* **`@undra/runtime/mangle-cache.json`** is a package export (the table of renamed names), as section 4 says.
+
 ## Levers measured and not taken
 
 | Lever | Worth | Why not |
@@ -307,8 +365,8 @@ alternating runs each, on one host at load 52; budgets 1,600 and 800, `[web."nod
 
 ## Consequences
 
-* The first chunk goes from 22,100 to about 15.4 KB as the gate will count it (16.0 KB counted as today). The development
-  flavour's first chunk is about 17.8 KB, ungated.
+* The first chunk goes from 22,100 to 15,680 bytes as the gate counts it (16,191 with Vite's helper counted in; the design said
+  about 15.4 and 16.0 KB). The development flavour's first chunk is 21,151 bytes, ungated (the implementation note says why).
 * Generated code changes in one place: the entry of a schema that has a stream gains `streams` in an import and
   `features: [streams]` in `load` and `attach` (and `"features"` in the options it omits); the goldens of such schemas move.
   Bindings generated before this ADR keep working on a runtime after it (the stream support loads on first use); bindings
@@ -318,7 +376,7 @@ alternating runs each, on one host at load 52; budgets 1,600 and 800, `[web."nod
 * The package's `dist` is no longer what `tsc` wrote: `npm run build` is a script (compile, swap one module, rename, compose
   maps), and the suite runs twice in CI, on the sources and on the production `dist` (the wasm harness and the contract
   column already take a `dist` path).
-* A production page's errors say `undra T0017: ..` and link to the errors page, which has a T section generated from the
+* A production page's errors say `T0017: ..` and link to the errors page, which has a T section generated from the
   development table. Logs, crash reports and `onError` carry the same codes with their typed fields.
 * More, smaller on-demand chunks: 13 files in a hello build (10 once the framed modules are one) instead of 8. An app that precaches (a service worker)
   lists them like the others.
@@ -336,19 +394,22 @@ alternating runs each, on one host at load 52; budgets 1,600 and 800, `[web."nod
 * **The prototype numbers are prototypes.** Tests will ask for code the prototypes did not write; 616 bytes of margin is for
   that. If the helper is counted (D6), there is none, and the first chunk needs the next lever to have room.
 
-## Decisions needed (the integrator)
+## Decisions (the integrator, 2026-10-02)
+
+All nine as recommended, with these conditions:
 
 * **D1.** Production messages are a code, the values and a link; the sentences live in the development flavour and on the
-  errors page (row 13: −1,178). Without it the plan ends at about 16.6 KB (helper apart) or 17.1 KB.
+  errors page (row 13: −1,316 as landed). The text is `T<code>: <values> — https://…/errors.html#T<code>` (no `undra` prefix).
 * **D2.** The published `dist` is the production flavour with private properties renamed; `development` and `react-native`
-  resolve the readable build (row 14: −542).
-* **D3.** `Transport` gains the typed control methods, and `WasmMainTransport` becomes a subclass of the host class the core
-  runs (rows 5 to 7: −1,167).
-* **D4.** `AttachOptions.features` and the generated `features: [streams]` (row 4: −747; a generated shape).
-* **D5.** `stats()`, `snapshot()`, `restore()` and `runInBackground()` load a chunk on their first call (row 8: −343).
-* **D6.** The gate reports Vite's preload helper beside the number (15,384, 616 bytes under 16,000) or keeps it inside
-  (15,958, 42 under). Recommended: beside, with both printed.
-* **D7.** The all-features row's budget: today's 42,400, or informational only.
-* **D8.** The code family (`T0001`..) and its page (`docs/errors.html`, a second table), or another scheme.
-* **D9.** `codecs` becomes a module namespace object instead of a frozen plain object (row 3: −874; generated code and its
-  call sites unchanged).
+  resolve the readable build (row 14: −570 as landed).
+* **D3.** `Transport` gains the typed control methods, `CoreTransport` is the typed channel `UndraCore` speaks, and
+  `WasmMainTransport` is a subclass of the host class the core runs (rows 5 to 7).
+* **D4.** `AttachOptions.features` and the generated `features: [streams]` (row 4; a generated shape: only a schema with a stream).
+* **D5.** Only a method that already returns a promise may load a chunk on its first call: `stats()`, `snapshot()`, `restore()`
+  and `runInBackground()` (row 8).
+* **D6.** The gate reports Vite's preload helper beside the number (`bundler_gzipped`) **and** gates the other reading: the row
+  `web/hello-runtime-js-with-helper` at 16,600.
+* **D7.** `web/all-features-runtime-js` at 42,400.
+* **D8.** The code family `T0001`.. and its page (`docs/errors.html`, "Runtime messages"); codes are append-only, a retired one
+  is `null`, and a wire failure's code is its own anchor.
+* **D9.** `codecs` is a module namespace object (`export * as codecs`); generated code and its call sites are unchanged.

@@ -622,3 +622,29 @@ recorded 116,628 at its own path without the remap): wasm **116,864** gzipped at
 JavaScript up front **22,105**, 5 over its 22,100 (`types-paging`'s 22,068 plus this piece's +39): trimmed to **22,100** by letting an
 aborted call settle its promise before the cancel goes out (no no-op `reject` on the abandoned entry) and by the shorter name of
 the restart counter (`_era`). That is no headroom: the next change to the chunk makes room or restates the budget here.
+
+## Amendment (2026-10-02, `ts-runtime-16k`, ADR-057): the JavaScript gate is 16,000, and what it measures
+
+ADR-057 measured the levers the `ts-size-e4` amendment declined ("16 KB would mean removing behaviour") and the founder accepted
+the plan: `web/hello-runtime-js` is **15,680** bytes gzipped against a budget of **16,000** (was 22,100), and no behaviour is removed.
+What this ADR said about the number changes in four places.
+
+* **What is measured.** The runtime as an app installs it: the gate builds the package (`npm run build`, the production flavour in
+  `dist`, the readable one in `dist/dev`), links it into the project's `node_modules` and lets Vite resolve `@undra/runtime`
+  through `exports`, which selects the production flavour (messages as `T<code>` with their values and a link, private properties
+  renamed). A chunk that holds a sentence of the development table fails the run.
+* **The preload helper is not the runtime.** Vite's preload helper, the virtual module the build adds to whichever chunk has an
+  `import()`, is a chunk of its own and is reported as `bundler_gzipped` (691) beside the number. The other reading is gated too:
+  `web/hello-runtime-js-with-helper` (the helper left in the chunk, 16,191) at 16,600.
+* **The modules are part of the record.** `web-size.jsonl` lists the runtime modules that hold code in the first chunk; a run whose
+  list differs from the committed one fails and names the module, because a re-export from a module with code of its own can bring a
+  module in without any import of it (ADR-057, the module rule; `up-front.test.ts` is the cheap guard of the same rule).
+* **A page that uses everything is gated.** `web/all-features-runtime-js` (the playground's bindings with recovery, a panic handler,
+  `stats`, `snapshot`, `restore` and a background run; the first chunk plus every chunk of the runtime it loads on demand, the Worker
+  script excepted) is 40,100 against 42,400 (was 42,385): the plan may move bytes out of the first chunk, it may not make that
+  page load more.
+
+The "Why it stops at 21 KB" section of the `ts-size-e4` amendment is superseded; its levers (the on-demand transports and default
+ports) stand, and ADR-057's rows 1 to 15 are what came after. `scripts/wasm-size.sh`, `scripts/web-size-runtime.mjs`,
+`scripts/web-size-all-features.ts`, `bench/budgets.toml` (three `[size]` tables for the JavaScript, comments with the history) and the
+size job of `bench.yml` follow. The wasm line is unchanged by this piece.
