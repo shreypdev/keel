@@ -216,7 +216,13 @@ impl Model {
         objects.sort_by(|a, b| a.name.cmp(&b.name));
         stores.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let mut functions = schema.functions.clone();
+        // The standard function (ADR-046) is the runtimes' own API, not generated.
+        let mut functions: Vec<_> = schema
+            .functions
+            .iter()
+            .filter(|f| !covered.functions.contains(f.name.as_str()))
+            .cloned()
+            .collect();
         functions.sort_by(|a, b| a.name.cmp(&b.name));
         let mut ports: Vec<PortDef> = schema
             .ports

@@ -113,8 +113,10 @@ fn the_table_is_what_undra_ports_registers() {
         assert_eq!(kind, p.kind, "{}", p.name);
     }
     let covered = stdlib::covered(&schema);
-    assert_eq!(covered.types.len(), 9, "{:?}", covered.types);
-    assert_eq!(covered.ports.len(), 10, "{:?}", covered.ports);
+    assert_eq!(covered.types.len(), 12, "{:?}", covered.types);
+    assert_eq!(covered.ports.len(), 11, "{:?}", covered.ports);
+    // ADR-046: the standard function is recognised too, so the generators leave it out.
+    assert_eq!(covered.functions.len(), 1, "{:?}", covered.functions);
 }
 
 #[test]
@@ -153,6 +155,9 @@ const STANDARD_DECLARATIONS: &[&str] = &[
     "FsError",
     "NetKind",
     "AppState",
+    "PanicFrame",
+    "PanicReport",
+    "BackgroundReport",
 ];
 
 #[test]

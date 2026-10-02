@@ -3,6 +3,45 @@
   "crate_name": "golden-stdlib",
   "records": [
     {
+      "name": "BackgroundReport",
+      "type_id": 1572775411,
+      "fields": [
+        {
+          "name": "finished",
+          "ty": {
+            "kind": "bool"
+          },
+          "default": false,
+          "docs": "Every background task ran to completion before the deadline."
+        },
+        {
+          "name": "replayed",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false,
+          "docs": "Queued mutations that were sent."
+        },
+        {
+          "name": "refetched",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false,
+          "docs": "Queries that were fetched again."
+        },
+        {
+          "name": "still_pending",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false,
+          "docs": "Work that is still waiting: queued mutations and unfinished fetches."
+        }
+      ],
+      "docs": "What a background run did."
+    },
+    {
       "name": "Header",
       "type_id": 290429312,
       "fields": [
@@ -117,6 +156,137 @@
         }
       ],
       "docs": "An HTTP response. Any status, including 4xx and 5xx, is a response; only failures before a\nresponse exists are an `HttpError`."
+    },
+    {
+      "name": "PanicFrame",
+      "type_id": 430217169,
+      "fields": [
+        {
+          "name": "address",
+          "ty": {
+            "kind": "u64"
+          },
+          "default": false,
+          "docs": "The instruction address minus the load address of the image (the offset a symbolicator takes), 0 if unknown."
+        },
+        {
+          "name": "symbol",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false,
+          "docs": "The function, when this build can name it (debug builds)."
+        },
+        {
+          "name": "file",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false,
+          "docs": "The source file, when this build knows it (debug builds)."
+        },
+        {
+          "name": "line",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "u32"
+            }
+          },
+          "default": false,
+          "docs": "The line in `file`."
+        }
+      ],
+      "docs": "One frame of a panic's backtrace."
+    },
+    {
+      "name": "PanicReport",
+      "type_id": 3498923062,
+      "fields": [
+        {
+          "name": "message",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The panic message."
+        },
+        {
+          "name": "location",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "`file:line:column` of the panic."
+        },
+        {
+          "name": "operation",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "What was running: `Todos.add`, `task`, `computed Todos.visible`."
+        },
+        {
+          "name": "thread",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The name of the thread that panicked."
+        },
+        {
+          "name": "frames",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "PanicFrame"
+            }
+          },
+          "default": false,
+          "docs": "The backtrace, innermost frame first."
+        },
+        {
+          "name": "namespace",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The core's namespace."
+        },
+        {
+          "name": "core_version",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The core's version."
+        },
+        {
+          "name": "schema_hash",
+          "ty": {
+            "kind": "u64"
+          },
+          "default": false,
+          "docs": "The core's schema hash."
+        },
+        {
+          "name": "image_id",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The identity of the image the addresses belong to: Mach-O UUID, ELF build id or wasm SHA-256, in hex."
+        }
+      ],
+      "docs": "A panic the core contained: what a crash reporter needs."
     },
     {
       "name": "Endpoint",
@@ -826,7 +996,27 @@
       "docs": "Mirrors what the platform reports about the connection."
     }
   ],
-  "functions": [],
+  "functions": [
+    {
+      "name": "run_background",
+      "method_id": 240850175,
+      "params": [
+        {
+          "name": "deadline_ms",
+          "ty": {
+            "kind": "u64"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "named",
+        "of": "BackgroundReport"
+      },
+      "is_async": true,
+      "takes_ctx": true,
+      "docs": "Runs the core's background work, for at most `deadline_ms` (the window the OS granted).\n\nEvery background task of the runtime (the offline queue's replay, the refetch of stale queries\nand the flush of what waits to be persisted, `undra-query`'s; the app's own) starts at once. The\ncall returns when they are all done, or half a second before the deadline so the host can still\ntell the OS it finished, with what got done and what is left. A host that is about to lose its\nwindow cancels the call; work already done is kept."
+    }
+  ],
   "ports": [
     {
       "name": "Clock",
@@ -890,6 +1080,33 @@
         }
       ],
       "docs": "Connectivity changes, pushed by the platform to the core."
+    },
+    {
+      "name": "Diagnostics",
+      "port_id": 2875772284,
+      "kind": "sync",
+      "methods": [
+        {
+          "name": "panicked",
+          "method_id": 3172236846,
+          "params": [
+            {
+              "name": "report",
+              "ty": {
+                "kind": "named",
+                "of": "PanicReport"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "The core contained a panic. Fire and forget: the core does not wait, so never throw."
+        }
+      ],
+      "docs": "Where the reports of contained panics go (ADR-046): forward them to the app's crash reporter."
     },
     {
       "name": "Fs",
