@@ -5,17 +5,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import dev.undra.runtime.InfiniteQuery
 
 /**
- * Fetches the next page of [query] when this list is scrolled to within [threshold] items of its end, and keeps doing
- * so while the list is still near its end after a page arrived (a list that is too short to scroll loads until it
- * fills). Nothing is fetched while there is no next page ([InfiniteQuery.hasNextPage]) or one is on its way
- * ([InfiniteQuery.fetchingNextPage]); a failed fetch is reported by the query's command and not retried by this helper
- * until the list is scrolled or the query's state changes.
+ * Fetches the next page of [query] when this list is scrolled to within [threshold] items of its end, and fetches again
+ * after a page arrived if the list is still near its end (a list that is too short to scroll loads until it fills).
+ * Nothing is fetched while there is no next page ([InfiniteQuery.hasNextPage]) or one is on its way
+ * ([InfiniteQuery.fetchingNextPage]). A fetch that fails leaves the list as it was, so it is not retried in a loop: scroll
+ * away from the end and back (or let the query's own retry policy run) to try again.
  *
  * ```kotlin
  * val state = rememberLazyListState()
@@ -34,16 +33,19 @@ public fun LazyListState.LoadMoreWhenNearEnd(query: InfiniteQuery, threshold: In
     require(threshold >= 0) { "threshold must not be negative, was $threshold" }
     val state = this
     val hasNextPage by query.hasNextPage.collectAsState()
+    // Read when the effect runs (the delegate reads the state's current value), not a key: see the effect below.
     val fetchingNextPage by query.fetchingNextPage.collectAsState()
-    val nearEnd: State<Boolean> = remember(state, threshold) {
+    val itemCount by remember(state) { derivedStateOf { state.layoutInfo.totalItemsCount } }
+    val nearEnd by remember(state, threshold) {
         derivedStateOf {
             val info = state.layoutInfo
             isNearEnd(info.visibleItemsInfo.lastOrNull()?.index, info.totalItemsCount, threshold)
         }
     }
-    val near = nearEnd.value
-    LaunchedEffect(near, hasNextPage, fetchingNextPage, query) {
-        if (shouldFetchNextPage(near, hasNextPage, fetchingNextPage)) query.fetchNextPage()
+    // Restarted when the list gets near its end or leaves it, when a next page appears or goes away, and when rows were
+    // added (a page arrived), but not when a fetch ends without adding any: that is how a failure is not retried at once.
+    LaunchedEffect(nearEnd, hasNextPage, itemCount, query) {
+        if (shouldFetchNextPage(nearEnd, hasNextPage, fetchingNextPage)) query.fetchNextPage()
     }
 }
 

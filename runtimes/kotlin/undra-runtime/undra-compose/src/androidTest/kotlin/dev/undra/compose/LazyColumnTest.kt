@@ -117,10 +117,20 @@ class LazyColumnTest {
         rule.waitForIdle()
         assertEquals(1, query.fetches.get())
 
+        // The fetch failed: nothing was added, so the helper does not try again by itself...
+        query.fetching.value = false
+        rule.waitForIdle()
+        assertEquals(1, query.fetches.get())
+        // ...until the list is scrolled away from the end and back.
+        rule.runOnIdle { runBlocking { state.scrollToItem(0) } }
+        rule.waitForIdle()
+        rule.runOnIdle { runBlocking { state.scrollToItem(97) } }
+        rule.waitUntil(10_000) { query.fetches.get() == 2 }
+
         // The page arrived and there is no next one.
         query.fetching.value = false
         query.next.value = false
         rule.waitForIdle()
-        assertEquals(1, query.fetches.get())
+        assertEquals(2, query.fetches.get())
     }
 }

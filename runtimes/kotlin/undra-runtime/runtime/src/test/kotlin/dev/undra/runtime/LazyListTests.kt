@@ -2,6 +2,7 @@ package dev.undra.runtime
 
 import dev.undra.runtime.support.FakeTransport
 import dev.undra.runtime.support.HASH
+import dev.undra.runtime.support.LogCapture
 import dev.undra.runtime.support.changeSet
 import dev.undra.runtime.support.eventually
 import dev.undra.runtime.support.full
@@ -81,6 +82,8 @@ private class LazyPageServer(var total: Int, var version: ULong = 1uL, var base:
 
 /** A core over a fake transport, a page server behind it and a list whose turns are [turns]. */
 private class LazyRig(val sync: Boolean = true, total: Int = 1000) : AutoCloseable {
+    /** The runtime's log, kept out of the test output (what a report logs is checked where it matters). */
+    val log = LogCapture("dev.undra.runtime")
     val server = LazyPageServer(total)
     val transport = FakeTransport(isSynchronous = sync)
     val errors = CopyOnWriteArrayList<UndraUnhandledError>()
@@ -145,6 +148,7 @@ private class LazyRig(val sync: Boolean = true, total: Int = 1000) : AutoCloseab
     override fun close() {
         list.close()
         core.close()
+        log.close()
     }
 }
 
@@ -719,6 +723,7 @@ class LazyListTests : Suite() {
                 r.turn()
                 assertEq(2, r.errors.size)
                 assertTrue(r.errors.all { it.operation.startsWith("UndraLazyList.page(") })
+                assertEq(2, r.log.messages().count { it.startsWith("UndraLazyList.page(") }) // and logged, as every report is
                 assertEq(null, r.list[0])
             }
             LazyRig(sync = false, total = 400).use { r ->
@@ -866,6 +871,7 @@ class LazyListTests : Suite() {
         // ---- threads --------------------------------------------------------------------------------
 
         case("reads from several threads while the core invalidates and the main thread pages: no failure, and the rows converge") {
+            val log = LogCapture("dev.undra.runtime")
             val server = LazyPageServer(5000)
             val t = FakeTransport()
             val lock = Any()
@@ -912,6 +918,7 @@ class LazyListTests : Suite() {
             list.close()
             core.close()
             main.shutdownNow()
+            log.close()
         }
     }
 
