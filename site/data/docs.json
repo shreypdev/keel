@@ -10,6 +10,7 @@
       { "file": "ports.html", "title": "Ports & adapters" },
       { "file": "web.html", "title": "Workers & crash recovery" },
       { "file": "updates.html", "title": "Shipping an update" },
+      { "file": "production.html", "title": "Operating in production" },
       { "file": "several-cores.html", "title": "One core or several" },
       { "file": "testing.html", "title": "Testing your app" }
     ] },
