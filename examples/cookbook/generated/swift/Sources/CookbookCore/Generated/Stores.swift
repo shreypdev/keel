@@ -10,7 +10,7 @@ public final class Auth: UndraStore, @unchecked Sendable {
     public private(set) var session: Session = Session.signedOut
     public private(set) var busy: Bool = false
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
@@ -130,7 +130,7 @@ public final class Feed: UndraStore, @unchecked Sendable {
     /// Derived by the core from another list; read-only. Changes arrive as keyed patches.
     public private(set) var visible: [Post] = []
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
@@ -298,7 +298,7 @@ public final class SignUp: UndraStore, @unchecked Sendable {
     /// Computed by the core; read-only.
     public private(set) var valid: Bool = false
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
@@ -497,7 +497,7 @@ public final class SignUp: UndraStore, @unchecked Sendable {
 public final class Uploads: UndraStore, @unchecked Sendable {
     public private(set) var uploads: [Upload] = []
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }

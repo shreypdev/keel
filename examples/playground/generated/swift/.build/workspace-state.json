@@ -1,0 +1,27 @@
+{
+  "object" : {
+    "artifacts" : [
+
+    ],
+    "dependencies" : [
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "undraruntime",
+          "kind" : "fileSystem",
+          "location" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime",
+          "name" : "UndraRuntime"
+        },
+        "state" : {
+          "name" : "fileSystem",
+          "path" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime"
+        },
+        "subpath" : "undraruntime"
+      }
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}
