@@ -18,7 +18,7 @@ import {
   decodePortReply,
   decodeValue,
 } from "@undra/runtime";
-import { OptInPortIds, type PlatformWebSocket } from "@undra/runtime/realtime";
+import { OptInPortIds, type PlatformWebSocket, type WebSocketAdapter } from "@undra/runtime/realtime";
 import {
   type NativeCoreEntry,
   type ReactNativeWebSocketConstructor,
@@ -203,7 +203,35 @@ describe.skipIf(!hasWebSocket)("reactNativeWebSocket against the realtime server
   });
 
   test("the binding: one receive at a time (a second is Protocol), a lone message answered within milliseconds, close during a receive answers []", async () => {
-    const ports = realtimePorts({ webSocket: adapter, sse: reactNativeSse({ transport: "xhr", XMLHttpRequest: NodeXhr }) });
+    // "Within milliseconds" is not a number of them that a machine can be held to (a loopback round trip and the 2 ms timer that ends a burst take as long as
+    // the machine lets them). So the adapter is wrapped to arm a timer of the binding's quiet period, 2 ms (`QUIET_MS` of the runtime's realtime lines, which
+    // the package does not export), as it hands each message to the binding, where the binding arms its own, and the answer is measured against that timer:
+    // a message held for a linger answers milliseconds after it on a machine whose timers can tell 2 ms from 8; a slow machine moves both and leaves the difference.
+    let reference: Promise<number> = Promise.resolve(0);
+    const tapped: WebSocketAdapter = {
+      async connect(url, protocols, headers) {
+        const connection = await adapter.connect(url, protocols, headers);
+        return {
+          protocol: connection.protocol,
+          send: (message) => connection.send(message),
+          close: (code, reason) => connection.close(code, reason),
+          messages: () => ({
+            [Symbol.asyncIterator]() {
+              const iterator = connection.messages()[Symbol.asyncIterator]();
+              return {
+                async next() {
+                  const step = await iterator.next();
+                  if (step.done !== true) reference = new Promise((resolve) => setTimeout(() => resolve(performance.now()), 2));
+                  return step;
+                },
+                return: (value) => iterator.return?.(value) ?? Promise.resolve({ done: true, value: undefined }),
+              };
+            },
+          }),
+        };
+      },
+    };
+    const ports = realtimePorts({ webSocket: tapped, sse: reactNativeSse({ transport: "xhr", XMLHttpRequest: NodeXhr }) });
     const port = ports[OptInPortIds.WebSocket.portId]!;
     const ids = OptInPortIds.WebSocket;
     const w = new UndraWriter(64);
@@ -232,15 +260,15 @@ describe.skipIf(!hasWebSocket)("reactNativeWebSocket against the realtime server
 
     // A lone message: the pull answers it once it has been quiet for 2 ms, not after waiting for 16.
     const lone: number[] = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 20; i++) {
       const pending = receive(16);
-      const sent = performance.now();
       await sendText(`lone ${i}`);
       expect(decodeValue(codecs.vec(WsMessageCodec), await pending)).toEqual([text(`lone ${i}`)]);
-      lone.push(performance.now() - sent);
+      lone.push(performance.now() - (await reference));
     }
     lone.sort((a, b) => a - b);
-    expect(lone[2]).toBeLessThan(25); // the median, a loopback echo included
+    expect(lone[10], `a lone message was answered ${lone[10]} ms (the median of 20) after a quiet-period timer armed as it arrived`).toBeLessThan(4);
+    expect(lone[17], "a lone message waited 100 ms or more past its quiet-period timer in three rounds of 20").toBeLessThan(100);
 
     // A second receive while one waits is the typed Protocol error; the first still answers.
     const first = receive(16);
