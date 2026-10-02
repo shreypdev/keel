@@ -313,6 +313,8 @@ pub(crate) struct Cleared {
     pub handle: Handle,
     pub object: Arc<dyn AnyObject>,
     pub observed: Observed,
+    /// The host references the entry held (ADR-040).
+    pub host_refs: u32,
 }
 
 /// The generation-tagged slab of live objects. See the [module documentation](self).
@@ -515,7 +517,7 @@ impl ObjectTable {
                 crate::runtime::log_error_current(
                     "undra::runtime",
                     &format!(
-                        "host references to {handle:?} reached u32::MAX and stay there; the host leaks"
+                        "host references to {handle:?} reached u32::MAX and stay there: the references past it are not counted, so the object can be removed while the host still holds some"
                     ),
                 );
             }
@@ -533,6 +535,19 @@ impl ObjectTable {
         handle: Handle,
         object: Arc<dyn AnyObject>,
     ) -> Result<(), InsertAtError> {
+        self.insert_at_with_refs(handle, object, 1)
+    }
+
+    /// [`insert_at`](Self::insert_at) with the number of host references the entry starts with:
+    /// what a restore uses for a store handle the host held before it (ADR-040: a restore keeps
+    /// the references the host owns; it replaces the object, not the host's wrappers). At least one.
+    pub(crate) fn insert_at_with_refs(
+        &self,
+        handle: Handle,
+        object: Arc<dyn AnyObject>,
+        host_refs: u32,
+    ) -> Result<(), InsertAtError> {
+        let host_refs = host_refs.max(1);
         if handle.is_null()
             || handle.generation() == 0
             || handle.generation() >= Handle::MAX_GENERATION
@@ -570,11 +585,11 @@ impl ObjectTable {
                 object,
                 poisoned: false,
                 observed: Observed::default(),
-                host_refs: 1,
+                host_refs,
                 transient: false,
             });
             inner.live += 1;
-            inner.host_refs += 1;
+            inner.host_refs += u64::from(host_refs);
             inner.by_address.insert(address, handle.index());
             if is_store {
                 inner.stores.insert(handle.index());
@@ -772,6 +787,7 @@ impl ObjectTable {
                     handle: Handle::new(index as u32, slot.generation),
                     object: entry.object,
                     observed: entry.observed,
+                    host_refs: entry.host_refs,
                 });
             }
             free.push(index as u32);

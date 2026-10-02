@@ -619,3 +619,141 @@ fn origins_hold_what_their_calls_returned_until_released() {
     assert_eq!(refs(&rt, inbox), Some(1));
     assert_eq!(rt.real().release_origin(8), 0, "once");
 }
+
+// ---------------------------------------------------------------------------------------------
+// Review fixes (2026-10-02, the objects-callbacks review).
+
+/// A store with one instance per thread, constructed through `Arc<Self>`: two constructions are
+/// one handle and two host references (Swift's second wrapper of such a store holds the second).
+#[k::store]
+pub struct Lobby {
+    pub visitors: Signal<u32>,
+}
+
+thread_local! {
+    static LOBBY: std::cell::RefCell<Option<Arc<Lobby>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[k::api(store)]
+impl Lobby {
+    pub fn shared() -> Arc<Self> {
+        LOBBY.with(|lobby| {
+            Arc::clone(lobby.borrow_mut().get_or_insert_with(|| {
+                Arc::new(Lobby {
+                    visitors: Signal::new(0),
+                })
+            }))
+        })
+    }
+
+    pub fn visit(&self) {
+        self.visitors.update(|n| *n += 1);
+    }
+}
+
+#[test]
+fn a_restore_keeps_every_reference_the_host_holds_to_a_store() {
+    let rt = Runtime::new();
+    let first = handle_of(&rt.call_object("Lobby", "shared", 0, &[]).sync_ok());
+    let second = handle_of(&rt.call_object("Lobby", "shared", 0, &[]).sync_ok());
+    assert_eq!(first, second);
+    assert_eq!(refs(&rt, first), Some(2));
+
+    let snapshot = rt.real().snapshot();
+    rt.real().restore(&snapshot).unwrap();
+    assert_eq!(
+        refs(&rt, first),
+        Some(2),
+        "the restored store keeps the host's two references (it used to start again at one)"
+    );
+    // The first wrapper lets go: the store stays for the second.
+    rt.real().release(first);
+    assert_eq!(refs(&rt, first), Some(1));
+    rt.call_object("Lobby", "visit", first, &[]).sync_ok();
+    rt.real().release(first);
+    assert_eq!(refs(&rt, first), None);
+    assert_eq!(rt.real().objects().host_refs(), 0);
+}
+
+/// A plain object an async method hands out.
+pub struct Note;
+
+#[k::api]
+impl Note {
+    pub fn id(&self) -> u32 {
+        7
+    }
+}
+
+/// The runtime the shutdown test shuts down from inside a call (set by that test only).
+static SHUTTING: std::sync::OnceLock<Arc<undra::runtime::Runtime>> = std::sync::OnceLock::new();
+
+/// An object whose async method returns an object while the runtime starts shutting down.
+pub struct Desk;
+
+#[k::api]
+impl Desk {
+    pub fn new() -> Self {
+        Desk
+    }
+
+    /// Starts a shutdown on another thread, waits until it has begun (the shutdown then waits for
+    /// the core lock this poll holds) and returns an object.
+    pub async fn note_during_shutdown(&self) -> Arc<Note> {
+        std::future::ready(()).await;
+        let rt = Arc::clone(SHUTTING.get().expect("set by the test"));
+        let stopper = Arc::clone(&rt);
+        std::thread::spawn(move || stopper.shutdown());
+        while !rt.is_shut_down() {
+            std::thread::yield_now();
+        }
+        Arc::new(Note)
+    }
+}
+
+#[test]
+fn an_async_object_return_that_finishes_as_the_runtime_shuts_down_is_answered_cancelled() {
+    use undra::runtime::testing::TestRuntime;
+    use undra::wire::payload::{CallTarget, ReplyStatus};
+
+    let t = TestRuntime::new();
+    SHUTTING
+        .set(Arc::clone(t.runtime()))
+        .ok()
+        .expect("one test sets it");
+    let desk = t.call_sync(
+        CallTarget::Constructor {
+            type_id: ids::type_id("Desk"),
+            method_id: ids::method_id("Desk", "new"),
+        },
+        1,
+        &[],
+    );
+    assert_eq!(desk.status, ReplyStatus::Ok);
+    let desk = handle_of(&desk.body);
+    t.call(
+        CallTarget::Method {
+            handle: Handle(desk),
+            method_id: ids::method_id("Desk", "note_during_shutdown"),
+        },
+        2,
+        &[],
+    );
+    t.run_pending();
+    // The shutdown thread finishes once the poll has let the core lock go.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while t.host().reply_count() == 0 && std::time::Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    let replies: Vec<_> = t
+        .take_replies()
+        .into_iter()
+        .filter(|r| r.call_id == 2)
+        .collect();
+    assert_eq!(replies.len(), 1, "one answer: {replies:?}");
+    assert_eq!(
+        replies[0].status,
+        ReplyStatus::Cancelled,
+        "not status 0 with an empty body, which no host can decode as a handle"
+    );
+}

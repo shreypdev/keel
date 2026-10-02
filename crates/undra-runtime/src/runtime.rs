@@ -1793,6 +1793,13 @@ impl Runtime {
         if self.calls.lock().remove(&call_id).is_none() {
             return;
         }
+        // Shutdown began while the call's last poll ran: answered as cancelled, as shutdown answers
+        // every call still in flight. Its result may not be whole: a method that returns objects
+        // lowers them through a `WeakCtx` that no longer upgrades, so it issued nothing (ADR-040).
+        if self.is_shut_down() {
+            self.send_reply(call_id, ReplyStatus::Cancelled, &[]);
+            return;
+        }
         match result {
             Ok(body) => self.send_reply(call_id, ReplyStatus::Ok, &body),
             Err(body) => self.send_reply(call_id, ReplyStatus::Error, &body),
@@ -2899,8 +2906,15 @@ impl Runtime {
         let mut observed = HashMap::new();
         // Which object each handle named before the restore (by address, for the check below).
         let mut before: HashMap<u64, usize> = HashMap::new();
+        // The references the host held to each handle (ADR-040): a store the snapshot puts back
+        // under its handle keeps them, because the host's wrappers (one per reference given out:
+        // a second `Arc<Self>` construction, a reply whose extra reference is still on its way
+        // back) each give exactly one back later. Starting from one would let the first of them
+        // remove the store the others still use.
+        let mut refs_before: HashMap<u64, u32> = HashMap::new();
         for cleared in self.objects.clear() {
             before.insert(cleared.handle.0, object_address(&cleared.object));
+            refs_before.insert(cleared.handle.0, cleared.host_refs);
             if let Some(cell) = cleared.object.as_store() {
                 cell.set_handle(0);
                 observed.insert(
@@ -2911,7 +2925,11 @@ impl Runtime {
             self.drop_guarded_logged("an object replaced by restore", cleared.object);
         }
         for (handle, object) in &built {
-            if let Err(e) = self.objects.insert_at(*handle, object.clone()) {
+            let refs = refs_before.get(&handle.0).copied().unwrap_or(1);
+            if let Err(e) = self
+                .objects
+                .insert_at_with_refs(*handle, object.clone(), refs)
+            {
                 self.log(
                     ERROR,
                     "undra::runtime",
