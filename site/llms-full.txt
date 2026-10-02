@@ -2046,11 +2046,11 @@ unsupported type in a public position (lists the type and the allowed set); incl
 | What you see | Why | Fix |
 | --- | --- | --- |
 | `Plain` cannot cross the boundary by value | a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value | declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra` |
+| `()` cannot be used as a field | `()` occupies zero bytes on the wire, so it is only legal as a return type or as a variant without fields; `Vec<()>`, `Option<()>` and maps of `()` defeat length validation | remove the value, or use `bool` if you need a marker |
 | `DateTime<Local>` cannot cross the boundary | a `Timestamp` is an instant in milliseconds since the Unix epoch, in UTC; a date-time with a local time zone or a fixed offset has no one value every platform reads alike, and the offset itself would be lost | convert to `Utc` (`value.with_timezone(&Utc)`) and spell `DateTime<Utc>`; offsets do not cross |
 | `DateTime<FixedOffset>` cannot cross the boundary | a `Timestamp` is an instant in milliseconds since the Unix epoch, in UTC; a date-time with a local time zone or a fixed offset has no one value every platform reads alike, and the offset itself would be lost | convert to `Utc` (`value.with_timezone(&Utc)`) and spell `DateTime<Utc>`; offsets do not cross |
 | `DerivedList` needs the type of its rows | a derived list is a `Vec` of rows the platforms mirror, so the schema needs the row type, written as the one type argument | write `DerivedList<Row>` for `visible`, with the type the pipeline's `build()` produces |
 | `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet | a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it | expose the items as a `Signal<Vec<T>>` (keyed with `#[undra(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit |
-| `&str` cannot cross the boundary | references have no wire representation; every value crosses by copy | use an owned `String` |
 
 ### `E0002` generic parameter, or a generic type spelled with its arguments
 
@@ -2075,10 +2075,10 @@ lifetime in a public signature
 
 | What you see | Why | Fix |
 | --- | --- | --- |
+| lifetime `'static` in `&'static str` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | use an owned type such as `String` or `Vec<T>` |
 | lifetime `'a` on `WithLifetime` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | remove the lifetime parameter and use owned types |
 | lifetime `'a` in `&'a str` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | use an owned type such as `String` or `Vec<T>` |
 | lifetime `'a` on `Label` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | remove the lifetime parameter and use owned types |
-| lifetime `'static` in `&'static str` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | use an owned type such as `String` or `Vec<T>` |
 
 ### `E0004` a trait object, `dyn` or `impl Trait` that is not a callback parameter, or a callback where one may not stand (ADR-041)
 
@@ -2414,6 +2414,7 @@ the schema records a name that the type written there does not have: an alias of
 | `Plain` is not a type declared with `#[undra::api]` | Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate | add `#[undra::api]` to `Plain`, or, if it is an alias, write the type it stands for where it is used |
 | `Id` is not a type declared with `#[undra::api]` | Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate | add `#[undra::api]` to `Id`, or, if it is an alias, write the type it stands for where it is used |
 | `Kid` here is an alias or a renamed import of an object that is declared under another name | Undra describes an object to the platforms by the name it is written with, while the handle the core issues is of the type that name resolves to; with `type Kid = Other` or `use path::Other as Kid` the platforms would wrap it as `Kid` | write the object under the name it is declared with (`Other` in the examples above) |
+| `LostPage` here is an alias or a renamed import of an Undra type that is declared under another name | Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type LostPage = Other` or `use path::Other as LostPage` the platforms would be told `LostPage` and receive the layout of `Other` | write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct LostPage` if you mean a distinct type |
 | `Todo` here is an alias or a renamed import of an Undra type that is declared under another name | Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Todo = Other` or `use path::Other as Todo` the platforms would be told `Todo` and receive the layout of `Other` | write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Todo` if you mean a distinct type |
 | `Entry` here is an alias or a renamed import of an Undra type that is declared under another name | Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Entry = Other` or `use path::Other as Entry` the platforms would be told `Entry` and receive the layout of `Other` | write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Entry` if you mean a distinct type |
 
@@ -2435,6 +2436,7 @@ Raised by macros.
 
 | What you see | Why | Fix |
 | --- | --- | --- |
+| nested option `Option<Option<u8>>` cannot cross the boundary | Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null` | wrap the inner option in a record or an enum that names the two cases |
 | nested option `Option<Option<i32>>` cannot cross the boundary | Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null` | wrap the inner option in a record or an enum that names the two cases |
 | nested option `Option<Box<Option<u8>>>` cannot cross the boundary | Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null` | wrap the inner option in a record or an enum that names the two cases |
 
@@ -2446,12 +2448,12 @@ an object (`#[undra::api] impl`) used as a value (a field, a parameter or a retu
 
 | What you see | Why | Fix |
 | --- | --- | --- |
+| `Calculator` is an object and cannot be used as a value | an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value | return it as `Arc<Calculator>`, take it as `&Calculator` or `Arc<Calculator>` (a method, constructor or function parameter or return), or use a record with the data the platform needs |
 | `NotAnObject` is not an object | an object is a type with an `#[undra::api] impl` block: the macro generates what lets the core hand it to the platforms as a handle, and without one there is nothing to hand out | add `#[undra::api]` to an `impl NotAnObject { .. }` block, or use a record (`#[undra::api] struct`) if it is plain data |
 | object `Arc<Child>` cannot be a field of a record or enum | a record or enum field holds a value: it is copied, compared, hashed and `Codable`, and none of that can carry a reference to an object | keep the data the platform needs in the field (an id, a record), and put the child object behind a method of the parent (the object here is `Child`) |
 | object `Arc<Child>` cannot be used here | an object can only stand alone, or inside `Option` or `Vec`, as a method or function parameter or return | use `Arc<T>`, `Option<Arc<T>>` or `Vec<Arc<T>>` (a parameter may also be `&T` or `Option<&T>`) (the object here is `Child`) |
 | `&Child` cannot be an element of a list | a list owns its elements, and a borrow of an object cannot outlive the call that made it | write the list as `Vec<Arc<Child>>` |
 | object `Arc<Child>` cannot be the result of a query or mutation | query and mutation values are cached, compared and persisted, so they must be values | use a record or an id, and return the object from a method that calls the query (the object here is `Child`) |
-| `Child` is an object and cannot be used as a value | an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value | return it as `Arc<Child>`, take it as `&Child` or `Arc<Child>` (a method, constructor or function parameter or return), or use a record with the data the platform needs |
 
 ### `E0065` a signal of a store written off its owning runtime's core (ADR-035): a runtime message
 

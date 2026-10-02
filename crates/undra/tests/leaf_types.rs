@@ -111,7 +111,10 @@ fn the_schema_names_the_wire_leaves() {
     assert_eq!(*field("id"), TypeRef::Uuid);
     assert_eq!(*field("account"), TypeRef::Named("AccountId".into()));
     assert_eq!(*field("opened"), TypeRef::Timestamp);
-    assert_eq!(*field("closed"), TypeRef::Option(Box::new(TypeRef::Timestamp)));
+    assert_eq!(
+        *field("closed"),
+        TypeRef::Option(Box::new(TypeRef::Timestamp))
+    );
     assert_eq!(*field("took"), TypeRef::Duration);
     assert_eq!(*field("seen"), TypeRef::Timestamp);
     assert_eq!(*field("synced"), TypeRef::Timestamp);
@@ -122,12 +125,22 @@ fn the_schema_names_the_wire_leaves() {
         *field("by_id"),
         TypeRef::Map(Box::new(TypeRef::Uuid), Box::new(TypeRef::U8))
     );
-    let account = schema.records.iter().find(|r| r.name == "AccountId").unwrap();
+    let account = schema
+        .records
+        .iter()
+        .find(|r| r.name == "AccountId")
+        .unwrap();
     assert!(account.transparent);
     assert_eq!(account.fields[0].ty, TypeRef::Uuid);
-    let function = schema.functions.iter().find(|f| f.name == "latest").unwrap();
+    let function = schema
+        .functions
+        .iter()
+        .find(|f| f.name == "latest")
+        .unwrap();
     assert_eq!(function.params[0].ty, TypeRef::Timestamp);
-    schema.validate().expect("a schema of foreign leaves is valid");
+    schema
+        .validate()
+        .expect("a schema of foreign leaves is valid");
 }
 
 #[test]
@@ -136,8 +149,14 @@ fn what_a_foreign_type_cannot_hold_is_a_typed_error_never_a_panic() {
     let before = DateTime::<Utc>::from_timestamp_nanos(-1);
     assert_eq!(before.encode_to_vec(), Timestamp(-1).encode_to_vec());
     // A negative duration encodes as zero.
-    assert_eq!(TimeDelta::milliseconds(-5).encode_to_vec(), 0_i64.to_le_bytes());
-    assert_eq!(time::Duration::seconds(-1).encode_to_vec(), 0_i64.to_le_bytes());
+    assert_eq!(
+        TimeDelta::milliseconds(-5).encode_to_vec(),
+        0_i64.to_le_bytes()
+    );
+    assert_eq!(
+        time::Duration::seconds(-1).encode_to_vec(),
+        0_i64.to_le_bytes()
+    );
     // A wire value the foreign type cannot hold is an error.
     assert!(matches!(
         DateTime::<Utc>::decode_exact(&Timestamp(i64::MAX).encode_to_vec()),
@@ -146,5 +165,8 @@ fn what_a_foreign_type_cannot_hold_is_a_typed_error_never_a_panic() {
     let too_wide = Decimal::new(i128::MAX, 0).encode_to_vec();
     assert!(rust_decimal::Decimal::decode_exact(&too_wide).is_err());
     // The built-in `Decimal` still holds it.
-    assert_eq!(Decimal::decode_exact(&too_wide).unwrap(), Decimal::new(i128::MAX, 0));
+    assert_eq!(
+        Decimal::decode_exact(&too_wide).unwrap(),
+        Decimal::new(i128::MAX, 0)
+    );
 }

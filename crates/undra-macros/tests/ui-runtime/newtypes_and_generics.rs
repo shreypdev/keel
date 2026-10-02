@@ -70,6 +70,32 @@ pub mod api {
         Loadable::Loading
     }
 
+    #[undra::error]
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum Failure {
+        #[error("not found")]
+        NotFound,
+    }
+
+    impl From<undra::runtime::PortError> for Failure {
+        fn from(_: undra::runtime::PortError) -> Self {
+            Failure::NotFound
+        }
+    }
+
+    /// A newtype crosses as a query parameter and an instantiation as its result.
+    #[undra::query(key = "todos:{owner}", stale = "30s")]
+    pub async fn todos_of(ctx: &undra::prelude::Ctx, owner: UserId) -> Result<TodoPage, Failure> {
+        let _ = (ctx, owner);
+        Err(Failure::NotFound)
+    }
+
+    /// A port takes newtypes and instantiations by value.
+    #[undra::port]
+    pub trait Directory {
+        async fn find(&self, id: UserId) -> Result<LoadableTodos, Failure>;
+    }
+
     #[undra::api]
     pub fn owners(counts: HashMap<UserId, u32>) -> Option<UserId> {
         counts.into_keys().next()

@@ -1350,16 +1350,20 @@ fn alias_hint(ty: &Type) -> String {
     }
 }
 
+/// The leaf features of `undra` (ADR-042) and whether this crate was built with its mirror of each.
+const LEAF_FEATURES: [(&str, bool); 5] = [
+    ("uuid", cfg!(feature = "uuid")),
+    ("chrono", cfg!(feature = "chrono")),
+    ("time", cfg!(feature = "time")),
+    ("rust_decimal", cfg!(feature = "rust_decimal")),
+    ("bytes", cfg!(feature = "bytes")),
+];
+
 /// Whether a leaf feature of `undra` (mirrored by a feature of this crate, see `Cargo.toml`) is on.
 fn leaf_feature(feature: &str) -> bool {
-    match feature {
-        "uuid" => cfg!(feature = "uuid"),
-        "chrono" => cfg!(feature = "chrono"),
-        "time" => cfg!(feature = "time"),
-        "rust_decimal" => cfg!(feature = "rust_decimal"),
-        "bytes" => cfg!(feature = "bytes"),
-        _ => false,
-    }
+    LEAF_FEATURES
+        .iter()
+        .any(|(name, on)| *name == feature && *on)
 }
 
 /// A type of a leaf feature: the schema type it crosses as when the feature is on, E0001 naming
