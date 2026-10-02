@@ -8,13 +8,21 @@
 // bench.json: { machine, method, source, stressScreen, rows: [Row], harsh: [Row] } where a Row is
 // { id, operation, value, unit, budget, budgetUnit, gate|null, source, floor?, measured? }. Units: ns, µs, ms, KB, MB, % for ceilings; /s, k/s, M/s for floor rows (throughput gates, `floor: true`).
 //
-// MEASURED ROWS. A row with `measured: { file, artifact }` is not typed by hand: its `value` is the
-// `gzipped` size (KB = 1,000 bytes, one decimal) of the JSON line whose `artifact` matches in `file`
-// (relative to the repository root; `scripts/wasm-size.sh --record` writes it, ADR-052), and this
-// script writes it back into bench.json. The record's `budget` must be the row's. The same numbers
-// fill every `<!--measured:NAME-->..<!--/measured-->` slot of the site's pages and of README.md
-// (NAME is a key of SLOTS below), so a hand edit of any copy is undone here and fails CI's
-// "generated files are up to date" check.
+// MEASURED ROWS. A row with a `measured` object is not typed by hand: this script reads its `value`
+// from a record file (paths are relative to the repository root) and writes it back into bench.json.
+//   * { file, artifact, field? }: a size. `file` is a JSONL record (`scripts/wasm-size.sh --record`
+//     writes the web one, ADR-052); the line whose `artifact` matches gives `field` (default
+//     `gzipped`, bytes), shown in KB (1,000 bytes, one decimal). The record's `budget` (bytes) must be
+//     the row's.
+//   * { file, path }: a number of a whole-file JSON record (the harsh-conditions results of
+//     bench/results/), `path` dotted ("result.per_sec"), converted to the row's unit (ns, µs, ms for a
+//     time, /s, k/s, M/s for a rate, % as it is) and rounded to the row's `digits` decimals (default 1).
+//     The row's `operation` may carry `{path|time}`, `{path|int}` or `{path|pct}` tokens (a value of the same
+//     file, as a time with three significant figures, as a whole number, or as a signed percentage
+//     with two decimals); they are filled in when the card is drawn, and the template stays in bench.json.
+// The same size numbers fill every `<!--measured:NAME-->..<!--/measured-->` slot of the site's pages
+// and of README.md (NAME is a key of SLOTS below), so a hand edit of any copy is undone here and
+// fails CI's "generated files are up to date" check.
 import { join } from "node:path";
 import { SITE, read, writeIfChanged, replaceRegion, esc, htmlFiles } from "./lib.mjs";
 
@@ -23,17 +31,29 @@ const ROOT = join(SITE, "..");
 const SLOTS = {
   "web-size": { file: "bench/results/web-size.jsonl", artifact: "web/hello-wasm" },
   "web-runtime-js": { file: "bench/results/web-size.jsonl", artifact: "web/hello-runtime-js" },
+  "android-size": { file: "bench/results/android-size.jsonl", artifact: "android/hello-arm64-v8a", field: "bytes" },
 };
 
-/** The JSON line of `artifact` in the record `file` (one JSON object per line). */
-function recordOf({ file, artifact }) {
+/** The JSON line of `artifact` in the record `file` (one JSON object per line), and its `field` in bytes. */
+function recordOf({ file, artifact, field = "gzipped" }) {
   const lines = read(join(ROOT, file)).split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
   const line = lines.find((l) => l.artifact === artifact);
-  if (!line) throw new Error(`${file} has no line for ${artifact}; run scripts/wasm-size.sh --record`);
-  if (typeof line.gzipped !== "number") throw new Error(`${file}: ${artifact} was not measured (${line.error ?? "no gzipped size"}); run scripts/wasm-size.sh --record with the TypeScript runtime's node_modules installed`);
-  return line;
+  if (!line) throw new Error(`${file} has no line for ${artifact}; record it again (scripts/wasm-size.sh --record for the web, bench/results/android-size.jsonl for Android)`);
+  if (typeof line[field] !== "number") throw new Error(`${file}: ${artifact} was not measured (${line.error ?? `no ${field}`}); run scripts/wasm-size.sh --record with the TypeScript runtime's node_modules installed`);
+  return { ...line, bytes: line[field] };
 }
-/** A gzipped size in KB, one decimal, as the cards and the prose print it. */
+/** The value at a dotted `path` of a whole-file JSON record. */
+function jsonAt(file, path) {
+  const value = path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), JSON.parse(read(join(ROOT, file))));
+  if (typeof value !== "number") throw new Error(`${file} has no number at ${path}`);
+  return value;
+}
+/** A time in nanoseconds as a card label prints it: three significant figures, in ns, µs or ms. */
+function fmtTime(ns) {
+  const [v, unit] = ns < 1e3 ? [ns, "ns"] : ns < 1e6 ? [ns / 1e3, "µs"] : [ns / 1e6, "ms"];
+  return `${Number(v.toPrecision(3))} ${unit}`;
+}
+/** A size in KB, one decimal, as the cards and the prose print it. */
 const kb = (bytes) => Math.round(bytes / 100) / 10;
 
 const FACTOR = { ns: 1, "µs": 1e3, ms: 1e6, KB: 1, MB: 1e3, "%": 1 };
@@ -66,7 +86,7 @@ function card(row, span) {
   const count = Number.isInteger(row.value) ? 0 : (String(row.value).split(".")[1] || "").length;
   return [
     `<article class="stat${span === 4 ? " w4" : ""} reveal" data-bar>`,
-    `<a class="lbl" href="${esc(row.source)}" rel="noopener">${esc(row.operation)}</a>`,
+    `<a class="lbl" href="${esc(row.source)}" rel="noopener">${esc(labels[row.id] ?? row.operation)}</a>`,
     `<div class="val"><span data-count="${row.value}" data-dec="${count}" data-final="${esc(fmtNum(row.value))}">${esc(fmtNum(row.value))}</span><small>${esc(row.unit)}</small></div>`,
     `<div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:${Math.min(100, r * 100).toFixed(1)}%"></span></div><div class="meter-cap">${row.floor ? `<span><b>${fmtNum((row.value * RATE[row.unit]) / (row.budget * RATE[row.budgetUnit]))}×</b> the gate</span><span>gate ≥ ${esc(fmtNum(row.budget))} ${esc(row.budgetUnit)}</span>` : `<span><b>${pct(r)}</b> of budget</span><span>budget ≤ ${esc(fmtNum(row.budget))} ${esc(row.budgetUnit)}</span>`}</div></div>`,
     "</article>",
@@ -82,16 +102,29 @@ const benchPath = join(SITE, "data", "bench.json");
 const bench = JSON.parse(read(benchPath));
 if (!Array.isArray(bench.rows) || !Array.isArray(bench.harsh)) throw new Error("bench.json needs rows[] and harsh[]");
 
+/** The label of each row, with the `{path|format}` tokens of a record-backed row filled in. */
+const labels = {};
 for (const row of [...bench.rows, ...bench.harsh].filter((r) => r.measured)) {
-  const line = recordOf(row.measured);
-  if (row.unit !== "KB" || row.budgetUnit !== "KB") throw new Error(`bench row ${row.id}: a measured row is in KB`);
-  if (line.budget !== row.budget * 1000) throw new Error(`bench row ${row.id}: budget ${row.budget} KB, but ${row.measured.file} says ${line.budget} bytes`);
-  row.value = kb(line.gzipped);
+  const m = row.measured;
+  if (m.path) {
+    const per = (row.floor ? RATE : FACTOR)[row.unit];
+    if (!per) throw new Error(`bench row ${row.id}: unknown unit ${row.unit}`);
+    row.value = Number((jsonAt(m.file, m.path) / per).toFixed(row.digits ?? 1));
+    labels[row.id] = row.operation.replace(/\{([\w.]+)\|(time|int|pct)\}/g, (_, path, format) => {
+      const v = jsonAt(m.file, path);
+      return format === "time" ? fmtTime(v) : format === "pct" ? `+${v.toFixed(2)} %` : fmtNum(Math.round(v));
+    });
+    continue;
+  }
+  const line = recordOf(m);
+  if (row.unit !== "KB" || !(row.budgetUnit in FACTOR)) throw new Error(`bench row ${row.id}: a measured size is in KB`);
+  if (line.budget !== Math.round(row.budget * FACTOR[row.budgetUnit] * 1000)) throw new Error(`bench row ${row.id}: budget ${row.budget} ${row.budgetUnit}, but ${m.file} says ${line.budget} bytes`);
+  row.value = kb(line.bytes);
 }
 if (writeIfChanged(benchPath, JSON.stringify(bench, null, 2) + "\n")) console.log("build-numbers: updated site/data/bench.json from the measured records");
 
 // The prose copies of the measured numbers.
-const slotText = Object.fromEntries(Object.entries(SLOTS).map(([name, at]) => [name, `${kb(recordOf(at).gzipped)} KB`]));
+const slotText = Object.fromEntries(Object.entries(SLOTS).map(([name, at]) => [name, `${kb(recordOf(at).bytes)} KB`]));
 const SLOT = /<!--measured:([a-z0-9-]+)-->[^<]*<!--\/measured-->/g;
 for (const file of [...htmlFiles(SITE), join(ROOT, "README.md")]) {
   const text = read(file);
@@ -115,7 +148,7 @@ for (const file of [...htmlFiles(SITE), join(ROOT, "README.md")]) {
 const parts = [grid(bench.rows, `Benchmark results, measured on ${bench.machine}`)];
 if (bench.harsh.length) parts.push('<h3 class="stats-h">Harsh conditions</h3>', grid(bench.harsh, "Harsh-conditions benchmark results"));
 
-parts.push(`<details class="measured"><summary>How these are measured</summary><p>${esc(bench.method)} Measured on ${esc(bench.machine)}. Device-measured rows are not claimed here; they are on the <a href="roadmap/">roadmap</a>.</p></details>`);
+parts.push(`<details class="measured"><summary>How these are measured</summary><p>${esc(bench.method)} Measured on ${esc(bench.machine)}. Simulator, emulator and Chromium rows are in the <a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#device-numbers-ios-android-web" rel="noopener">benchmark results</a>; real-phone rows are not claimed and are on the <a href="roadmap/">roadmap</a>.</p></details>`);
 
 const indexPath = join(SITE, "index.html");
 let html = read(indexPath);
