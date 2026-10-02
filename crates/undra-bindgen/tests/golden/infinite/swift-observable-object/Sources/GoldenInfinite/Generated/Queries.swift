@@ -91,6 +91,7 @@ public final class FeedQueryHandle: UndraStore, ObservableObject, @unchecked Sen
 
     /// Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
     /// The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+    /// An interval below 1 second or above 7 days is clamped to that range.
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func setPollInterval(_ interval: UndraDuration?) {
         var w = UndraWriter()
@@ -277,6 +278,7 @@ public final class ProfileQueryHandle: UndraStore, ObservableObject, @unchecked 
 
     /// Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
     /// The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+    /// An interval below 1 second or above 7 days is clamped to that range.
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func setPollInterval(_ interval: UndraDuration?) {
         var w = UndraWriter()
@@ -449,6 +451,7 @@ public final class SearchQueryHandle: UndraStore, ObservableObject, @unchecked S
 
     /// Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
     /// The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+    /// An interval below 1 second or above 7 days is clamped to that range.
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func setPollInterval(_ interval: UndraDuration?) {
         var w = UndraWriter()

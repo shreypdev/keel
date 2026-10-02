@@ -778,7 +778,7 @@ fn query_handle(query: &QueryDef) -> ObjectDef {
             name: "interval".to_owned(),
             ty: TypeRef::option(TypeRef::Duration),
         }],
-        "Overrides how often the query polls while this handle observes it, counted from the end of a fetch.\nThe entry polls at the smallest interval among its observers; no interval clears this handle's override.",
+        "Overrides how often the query polls while this handle observes it, counted from the end of a fetch.\nThe entry polls at the smallest interval among its observers; no interval clears this handle's override.\nAn interval below 1 second or above 7 days is clamped to that range.",
     ));
     let mut docs = format!(
         "Observes the `{}` query (cache key `{}`).\nConstructing it registers an observer and fetches when the data is stale or missing.",

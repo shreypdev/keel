@@ -98,6 +98,7 @@ class FeedQueryHandle internal constructor(core: UndraCore, handle: Long) : Undr
     /**
      * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
      * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
      * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
      */
     fun setPollInterval(interval: Duration?) {
@@ -254,6 +255,7 @@ class ProfileQueryHandle internal constructor(core: UndraCore, handle: Long) : U
     /**
      * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
      * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
      * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
      */
     fun setPollInterval(interval: Duration?) {
@@ -406,6 +408,7 @@ class SearchQueryHandle internal constructor(core: UndraCore, handle: Long) : Un
     /**
      * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
      * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
      * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
      */
     fun setPollInterval(interval: Duration?) {

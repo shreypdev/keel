@@ -105,6 +105,7 @@ export class LatestResponseQueryHandle extends UndraStore {
   /**
    * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
    * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+   * An interval below 1 second or above 7 days is clamped to that range.
    * A failure is logged and passed to `onError`; the returned promise never rejects.
    */
   async setPollInterval(ms: Duration | null): Promise<void> {
