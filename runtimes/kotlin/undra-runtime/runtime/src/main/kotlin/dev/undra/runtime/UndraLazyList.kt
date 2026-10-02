@@ -135,7 +135,7 @@ public class UndraLazyList<T> internal constructor(
      * Items per page, default 50. Changing it drops the cached pages (they are cut differently), so set it before
      * the list is read.
      *
-     * @throws IllegalArgumentException when set outside `1..65536`.
+     * @throws IllegalArgumentException when set outside `1..4096` (the core cuts a page call's limit to 4,096 rows, SPEC 3.3).
      */
     public var pageSize: Int
         get() = synchronized(lock) { pageRows }
@@ -533,7 +533,7 @@ public class UndraLazyList<T> internal constructor(
     internal companion object {
         const val DEFAULT_PAGE_SIZE: Int = 50
         const val DEFAULT_MAX_CACHED_PAGES: Int = 24
-        const val MAX_PAGE_SIZE: Int = 65_536
+        const val MAX_PAGE_SIZE: Int = 4_096
 
         /** How often a page is asked for again after replies older than the list's version. */
         const val MAX_STALE_REPLIES: Int = 4

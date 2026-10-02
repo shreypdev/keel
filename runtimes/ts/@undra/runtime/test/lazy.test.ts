@@ -399,9 +399,19 @@ describe.each([
       list.maxCachedPages = 6;
       expect(list.pageSize).toBe(20);
       expect(list.maxCachedPages).toBe(6);
-      for (const bad of [0, -1, 1.5, Number.NaN, 0x10000]) expect(() => (list.pageSize = bad)).toThrow(RangeError);
+      for (const bad of [0, -1, 1.5, Number.NaN, 4097, 0x10000]) expect(() => (list.pageSize = bad)).toThrow(RangeError);
       for (const bad of [0, -3, 2.5, Number.NaN]) expect(() => (list.maxCachedPages = bad)).toThrow(RangeError);
       expect(list.pageSize).toBe(20);
+    });
+
+    it("a page size is at most 4,096, the core's cut of a page call's limit: a page of that size loads whole", async () => {
+      const { list } = await numbersList(10_000, { synchronous });
+      expect(() => (list.pageSize = 4097)).toThrow(RangeError);
+      list.pageSize = 4096;
+      list.get(5000);
+      await answered();
+      expect(list.get(5000)).toBe(row(5000));
+      expect(list.get(4096 + 4095)).toBe(row(4096 + 4095));
     });
 
     it("a page size of its own sets the limit of the page calls and drops the cache", async () => {

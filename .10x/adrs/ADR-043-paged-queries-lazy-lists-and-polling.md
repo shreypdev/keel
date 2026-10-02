@@ -329,7 +329,8 @@ the guides are `site/docs/paging.html` and `polling.html`. Deviations, each date
    a lazy container; `UndraLazyListObject` (the `ObservableObject` twin) is observed directly (`@ObservedObject`), not through its store.
 5. **Platform details.** Swift: the `RandomAccessCollection` conformance is `@preconcurrency` (a `@MainActor` class cannot satisfy its nonisolated
    requirements in Swift 6; isolated conformances need a newer runtime than the iOS 15 floor), one page call per page, `pageSize` clamped to
-   1...1,048,576, `UndraStats.hostPageCalls`. Kotlin: the list makes its own scope on `UndraDispatchers.main` for asynchronous calls, `addChangeListener`
+   1...4,096 (review, 2026-10-02: it was 1,048,576, Kotlin's 65,536 and TypeScript's 65,535, past the core's cut of a page call at 4,096 rows, so a larger page never
+   arrived whole and its rows never loaded; all three now stop at 4,096), `UndraStats.hostPageCalls`. Kotlin: the list makes its own scope on `UndraDispatchers.main` for asynchronous calls, `addChangeListener`
    bridges `StateFlow` to Compose, a public `version`. TypeScript: a refused page call (status 5) means the page server is gone and the list stops
    asking quietly (closing a store with a page queued must not report), `LazyList.version`, `useLoadMore` takes an optional `error` signal on the
    query and does not fetch while it is set. A read of a loaded page asks once for the page beyond it when it is not loaded, so scrolling stays one

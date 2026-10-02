@@ -239,7 +239,7 @@ final class LazyListTests: XCTestCase {
         rig.list.pageSize = -7
         XCTAssertEqual(rig.list.pageSize, 1)
         rig.list.pageSize = Int.max
-        XCTAssertEqual(rig.list.pageSize, 1 << 20)
+        XCTAssertEqual(rig.list.pageSize, 4096, "the core cuts a page call at 4,096 rows: a larger page would never arrive whole")
         rig.list.pageSize = 1
         rig.read(3)
         XCTAssertEqual(rig.list[3], 3)

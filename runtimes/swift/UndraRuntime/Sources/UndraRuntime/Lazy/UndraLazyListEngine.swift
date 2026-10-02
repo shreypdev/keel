@@ -69,7 +69,7 @@ final class UndraLazyListEngine<Item: UndraCodec & Sendable> {
     /// The default bound of the page cache.
     static var defaultMaxCachedPages: Int { return 24 }
     /// The largest page a list asks for: the wire's `limit` is a `u32`, and a page this big is already a mistake.
-    static var largestPageSize: Int { return 1 << 20 }
+    static var largestPageSize: Int { return 4096 }
     /// How often a page is asked for again after replies older than the list's version, before the failure is reported.
     static var maxStaleRetries: Int { return 3 }
 
@@ -127,7 +127,8 @@ final class UndraLazyListEngine<Item: UndraCodec & Sendable> {
 
     // MARK: Configuration
 
-    /// The number of rows in a page. Changing it drops the cache (page boundaries move). Between 1 and 1,048,576.
+    /// The number of rows in a page. Changing it drops the cache (page boundaries move). Between 1 and 4,096 (the core cuts a
+    /// page call's limit there, SPEC 3.3).
     var pageSize: Int {
         get {
             return pageSizeValue

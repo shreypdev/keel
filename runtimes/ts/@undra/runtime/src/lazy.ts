@@ -25,8 +25,8 @@ const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_MAX_CACHED_PAGES = 24;
 /** A page whose reply is older than the list's version is asked for again this often before it counts as a protocol error. */
 const MAX_STALE_REPLIES = 2;
-/** The largest `pageSize`: the limit of a page call is a `u32`, and a page is decoded in one go. */
-const MAX_PAGE_SIZE = 0xffff;
+/** The largest `pageSize`: the core cuts a page call's limit to 4,096 rows (docs/SPEC.md section 3.3), so a larger page never arrives whole. */
+const MAX_PAGE_SIZE = 4096;
 const NO_ARGS = new Uint8Array(0);
 
 /** One cached page: its decoded rows and what the cache needs to know about it. */
@@ -136,8 +136,10 @@ export class LazyList<T> {
   }
 
   /**
-   * Rows per page request (default 50). A read also fetches the page before and after the one it needs.
-   * Changing it drops the cache, since the pages' boundaries move.
+   * Rows per page request (default 50, at most 4,096: the core cuts a page call there). A read also fetches the page
+   * before and after the one it needs. Changing it drops the cache, since the pages' boundaries move.
+   *
+   * @throws RangeError for anything but an integer from 1 to 4,096.
    */
   get pageSize(): number {
     return this._pageSize;

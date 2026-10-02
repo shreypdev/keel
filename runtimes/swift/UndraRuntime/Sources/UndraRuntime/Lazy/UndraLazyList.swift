@@ -73,7 +73,7 @@ public final class UndraLazyList<Item: UndraCodec & Sendable> {
         }
     }
 
-    /// The number of rows in a page: 50 by default, between 1 and 1,048,576. Setting another value drops the cache. Set it once,
+    /// The number of rows in a page: 50 by default, between 1 and 4,096 (the core cuts a page call's limit there). Setting another value drops the cache. Set it once,
     /// before the list is read.
     public var pageSize: Int {
         get {
@@ -225,7 +225,7 @@ public final class UndraLazyListObject<Item: UndraCodec & Sendable>: ObservableO
         }
     }
 
-    /// The number of rows in a page: 50 by default, between 1 and 1,048,576. Setting another value drops the cache. Set it once,
+    /// The number of rows in a page: 50 by default, between 1 and 4,096 (the core cuts a page call's limit there). Setting another value drops the cache. Set it once,
     /// before the list is read.
     public var pageSize: Int {
         get {

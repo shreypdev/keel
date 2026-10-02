@@ -67,9 +67,9 @@ export class LazyServer<T> {
     return this;
   }
 
-  /** The reply to a page call now. */
+  /** The reply to a page call now. Like the core, a `limit` above 4,096 is cut to it (docs/SPEC.md section 3.3). */
   page(offset: number, limit: number): Uint8Array {
-    const items = this.rows.slice(offset, offset + limit);
+    const items = this.rows.slice(offset, offset + Math.min(limit, 4096));
     return encodeLazyPage(this.codec, { version: this.version, total: this.rows.length, items });
   }
 

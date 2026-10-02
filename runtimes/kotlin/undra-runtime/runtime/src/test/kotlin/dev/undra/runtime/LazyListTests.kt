@@ -342,6 +342,11 @@ class LazyListTests : Suite() {
                 assertEq(50, r.list.pageSize)
                 assertThrows<IllegalArgumentException> { r.list.pageSize = 0 }
                 assertThrows<IllegalArgumentException> { r.list.pageSize = 65_537 }
+                // The core cuts a page call's limit to 4,096 rows (SPEC 3.3): a larger page would never arrive whole.
+                assertThrows<IllegalArgumentException> { r.list.pageSize = 4_097 }
+                r.list.pageSize = 4_096
+                assertEq(4_096, r.list.pageSize)
+                r.list.pageSize = 50
                 r.full()
                 r.list[0]
                 r.turn()
