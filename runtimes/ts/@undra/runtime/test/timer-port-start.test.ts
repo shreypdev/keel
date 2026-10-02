@@ -19,7 +19,16 @@ afterEach(() => {
 
 /** A remote fake that, as a core does the moment it is connected, calls `Timer.set` on the macrotask after its Hello. */
 class EagerCore extends FakeCoreTransport {
+  /** The reply to the first `Timer.set`, once the core has made the call (`called` settles when it has). */
   firstReply: Promise<{ status: number }> | undefined;
+  readonly called: Promise<void>;
+  #made!: () => void;
+  constructor(...args: ConstructorParameters<typeof FakeCoreTransport>) {
+    super(...args);
+    this.called = new Promise((resolve) => {
+      this.#made = resolve;
+    });
+  }
   override start(handler: TransportHandler): Promise<HelloPayload> {
     const hello = super.start(handler);
     setTimeout(() => {
@@ -27,6 +36,7 @@ class EagerCore extends FakeCoreTransport {
       w.writeU32(0x8000_0001);
       w.writeU64(10n);
       this.firstReply = this.callPort(PortIds.Timer.portId, PortIds.Timer.set, w.finish());
+      this.#made();
     }, 0);
     return hello;
   }
@@ -49,7 +59,7 @@ describe("the Timer port of a remote core with an explicit timer adapter", () =>
         adapters: { log: captureLog(), http: null, timer: { set: (id) => void armed.push(id) } },
       }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await fake.called; // the call is made on a macrotask of its own: wait for it, not for a time
     const reply = await (fake.firstReply as Promise<{ status: number }>);
     expect(reply.status, "the core's first Timer.set was answered, not refused as unavailable").toBe(PortStatus.Ok);
     expect(armed).toEqual([0x8000_0001]);

@@ -178,8 +178,7 @@ final class SseBindingTests: XCTestCase {
             try await binding.next(stream: finished, max: 16)
         }
         let open = try await binding.open(url: "https://feed.test", headers: [], lastEventId: nil)
-        let waiting = Task { try await binding.next(stream: open, max: 16) }
-        try await Task.sleep(nanoseconds: 20_000_000)
+        let waiting = await runningThrowing { try await binding.next(stream: open, max: 16) }
         await expectThrows(SseError.protocol("a next is already pending on stream \(open)")) { () async throws(SseError) -> [SseEvent] in
             try await binding.next(stream: open, max: 16)
         }

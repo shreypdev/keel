@@ -188,6 +188,31 @@ func eventually(_ what: String, file: StaticString = #filePath, line: UInt = #li
     }
 }
 
+/// Starts `body` in a task and returns the task once it has begun running `body`. What `body` does before it first suspends has then been
+/// done too, short of a preemption in the few instructions between the flag and that: a binding registers a pending pull (`receive`,
+/// `next`) or a waiter for a transaction inside the call, before it waits. The 20 to 50 ms sleeps this replaces bet on how soon a machine
+/// starts a task; lost, a "second" receive was the first one and waited for a message that never came, or a close came before the call.
+func running<Success: Sendable>(_ body: @escaping @Sendable () async -> Success) async -> Task<Success, Never> {
+    let begun = Locked(false)
+    let task = Task { () async -> Success in
+        begun.withLock { $0 = true }
+        return await body()
+    }
+    await eventually("the task to start") { begun.withLock { $0 } }
+    return task
+}
+
+/// `running` for a body that throws.
+func runningThrowing<Success: Sendable>(_ body: @escaping @Sendable () async throws -> Success) async -> Task<Success, any Error> {
+    let begun = Locked(false)
+    let task = Task { () async throws -> Success in
+        begun.withLock { $0 = true }
+        return try await body()
+    }
+    await eventually("the task to start") { begun.withLock { $0 } }
+    return task
+}
+
 /// `body`'s outcome as a typed `Result` (a `Task` can only carry `any Error`).
 func capture<Value, Failure: Error>(_ body: () async throws(Failure) -> Value) async -> Result<Value, Failure> {
     do {
@@ -281,8 +306,7 @@ final class WebSocketBindingTests: XCTestCase {
         let conn = try await binding.connect(url: "ws://x.test", protocols: [], headers: []).conn
         let socket = try XCTUnwrap(adapter.sockets.first)
         // A pull waiting when a burst starts gets the burst, not its first message.
-        let waiting = Task { try await binding.receive(conn: conn, max: 16) }
-        try await Task.sleep(nanoseconds: 20_000_000)
+        let waiting = await runningThrowing { try await binding.receive(conn: conn, max: 16) }
         for message in texts(0 ..< 10) {
             socket.push(message)
         }
@@ -290,8 +314,7 @@ final class WebSocketBindingTests: XCTestCase {
         XCTAssertEqual(burst, texts(0 ..< 10))
         // A lone message is answered once the burst gap passed.
         let started = Date()
-        let lone = Task { try await binding.receive(conn: conn, max: 16) }
-        try await Task.sleep(nanoseconds: 20_000_000)
+        let lone = await runningThrowing { try await binding.receive(conn: conn, max: 16) }
         socket.push(.text("lone"))
         let answer = try await lone.value
         XCTAssertEqual(answer, [.text("lone")])
@@ -303,8 +326,7 @@ final class WebSocketBindingTests: XCTestCase {
         let binding = WebSocketBinding(adapter: adapter)
         let conn = try await binding.connect(url: "ws://x.test", protocols: [], headers: []).conn
         let socket = try XCTUnwrap(adapter.sockets.first)
-        let waiting = Task { try await binding.receive(conn: conn, max: 16) }
-        try await Task.sleep(nanoseconds: 50_000_000)
+        let waiting = await runningThrowing { try await binding.receive(conn: conn, max: 16) }
         await expectThrows(WsError.protocol("a receive is already pending on connection \(conn)")) { () async throws(WsError) -> [WsMessage] in
             try await binding.receive(conn: conn, max: 16)
         }
@@ -341,8 +363,7 @@ final class WebSocketBindingTests: XCTestCase {
         let adapter = ScriptedWebSocket()
         let binding = WebSocketBinding(adapter: adapter)
         let dropped = try await binding.connect(url: "ws://x.test", protocols: [], headers: []).conn
-        let waiting = Task { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: dropped, max: 16) } }
-        try await Task.sleep(nanoseconds: 20_000_000)
+        let waiting = await running { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: dropped, max: 16) } }
         adapter.sockets[0].end(.network("reset"))
         await expectThrows(WsError.network("reset")) { () async throws(WsError) -> [WsMessage] in try await waiting.value.get() }
 
@@ -360,8 +381,7 @@ final class WebSocketBindingTests: XCTestCase {
         let socket = try XCTUnwrap(adapter.sockets.first)
         try await binding.send(conn: conn, message: .text("hi"))
         XCTAssertEqual(socket.sent, [.text("hi")])
-        let waiting = Task { try await binding.receive(conn: conn, max: 16) }
-        try await Task.sleep(nanoseconds: 20_000_000)
+        let waiting = await runningThrowing { try await binding.receive(conn: conn, max: 16) }
         try await binding.close(conn: conn, code: 4000, reason: "bye")
         let answered = try await waiting.value
         XCTAssertEqual(answered, [], "the core's close ends its pending receive cleanly")

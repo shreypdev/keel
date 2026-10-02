@@ -11,13 +11,21 @@
 # skipped silently, and `--list` shows every step's disposition without running anything.
 #
 #   ci-local.rb --root DIR [--workflows ci,bench,site,two-cores] [--only ci/rust,ci/ts] [--skip ci/android]
-#                          [--slow [--rounds 3] [--burners 16]] [--list] [-v] [--logs DIR]
+#                          [--slow [--rounds 3] [--burners 8]] [--list] [-v] [--logs DIR]
 #
-# `--slow` is the slow-runner pass: only the steps in SLOW_STEPS (the timing-sensitive test suites) run, each under
-# `taskpolicy -b` (background QoS: efficiency cores, lowest priority) with CPU burners (`yes`) occupying the cores for the
-# length of the step, RUST_TEST_THREADS=4 and CARGO_BUILD_JOBS=4 (a hosted runner has four vCPUs), repeated `--rounds`
-# times. It reuses what a normal pass built and installed in the same clone (run that first), so what is throttled is the
-# tests and not the compiler. A test that fails only there depends on the speed of the machine: fix it at its cause.
+# `--slow` is the slow-runner pass: only the steps in SLOW_STEPS (the timing-sensitive test suites: the Swift, Kotlin and
+# TypeScript runtime tests, the contract grid's runners, the real-time recipe) and the Rust tests in SLOW_EXTRA (the workspace's
+# tests but those that drive a compiler, bench/tests, the dev-reload tests) run, each with CPU burners (`yes`, at normal priority, `--burners`, default 8) occupying the cores for the length of the
+# step, RUST_TEST_THREADS=4 and CARGO_BUILD_JOBS=4 (a hosted runner has four vCPUs), repeated `--rounds` times. The
+# workflow's `cargo test --workspace` is not run as such: the tests of the three packages that drive a compiler are a build, and
+# starved they tell nothing about timing (SLOW_EXTRA).
+# Nothing here runs under `taskpolicy -b`: that class of QoS together with burners at normal priority leaves the test with no CPU
+# at all (a step that would take a minute does not finish). It reuses what a normal pass built and installed in the same clone
+# (run that first), so what is slowed is the tests and not the compiler. A test that fails only there depends on the speed of
+# the machine: fix it at its cause.
+#
+# Every `cargo test` of a workflow step runs with `--no-fail-fast` (SUBSTITUTIONS), so one pass lists every failing test
+# binary and not only the first. The burners cannot outlive ci-local (see `start_burners`).
 
 require "fileutils"
 require "json"
@@ -62,12 +70,14 @@ module CiLocal
   ].freeze
 
   # Text of a step's script rewritten for the host: [pattern, replacement, why].
-  SUBSTITUTIONS = [].freeze
+  SUBSTITUTIONS = [
+    [/\bcargo test\b(?![^\n]*--no-fail-fast)/, "cargo test --no-fail-fast",
+     "a failing test binary must not hide the ones after it: one pass lists every failure (CI stops at the first, and costs a push per failure)"]
+  ].freeze
 
   # The timing-sensitive test steps: what `--slow` runs. "workflow/job" => step-name patterns.
   SLOW_STEPS = {
-    "ci/rust" => [/\ATest\z/, /\AThe real-time recipe/, /\ABuild integrations/, /\AThe write rule in release/],
-    "ci/leaf-features" => [/\ATests with every feature on/],
+    "ci/rust" => [/\AThe real-time recipe/],
     "ci/ts" => [/\ATest\z/, /\ATesting kit/, /\ADevtools page/],
     "ci/kotlin" => [/\ATest \(incl\. JNI smoke/],
     "ci/wasm-ffi" => [/\Awasm acceptance/],
@@ -76,6 +86,22 @@ module CiLocal
     "ci/contracts-swift" => [/\ARun the Swift scenario runner\z/],
     "ci/react-native" => [/\AUnit tests/, /\AContract scenarios through NativeTransport/],
     "two-cores/jvm-and-node" => [/\AJVM\z/, /\ANode\z/]
+  }.freeze
+
+  # The Rust tests `--slow` runs in place of the workflow's `cargo test --workspace`: "workflow/job" => [name, command]. They run
+  # in the job's environment after its provisioning, as steps of their own (they are not in the workflow, whose
+  # `cargo test --workspace` runs them with everything else). What is left out is the three packages whose tests drive a
+  # compiler (undra-bindgen's goldens and typechecks, undra-macros' trybuild cases, undra-cli's `undra build`s): starved, those
+  # are a build, and they assert nothing about time. Every other package's tests run, because many read the clock (undra-ffi,
+  # undra-runtime, undra-query and undra-transport bound waits and deadlines); bench/tests and the dev-server tests of undra-cli
+  # run as steps of their own.
+  SLOW_EXTRA = {
+    "ci/rust" => [
+      ["the workspace's tests but those that drive a compiler (undra-bindgen, undra-macros, undra-cli)",
+       "cargo test --no-fail-fast --workspace --exclude undra-bindgen --exclude undra-macros --exclude undra-cli --exclude undra-bench"],
+      ["bench/tests: the stress scenarios, their fault-injection tests and the budgets (debug)", "cargo test --no-fail-fast -p undra-bench --tests"],
+      ["undra-cli: the dev-server and dev-reload tests", "cargo test --no-fail-fast -p undra-cli --test dev --test dev_reload --test dev_devtools"]
+    ]
   }.freeze
 
   # A tiny evaluator for the `${{ }}` expressions the workflows use: dotted context lookups, strings, `&& || ! == !=`,
@@ -226,7 +252,7 @@ module CiLocal
           list << { wf: wf, id: id, key: "#{wf}/#{id}", job: job, wf_env: yaml["env"] || {} }
         end
       end
-      list.select { |j| selected?(j[:key], j[:id]) && (!@opts[:slow] || SLOW_STEPS.key?(j[:key])) }
+      list.select { |j| selected?(j[:key], j[:id]) && (!@opts[:slow] || SLOW_STEPS.key?(j[:key]) || SLOW_EXTRA.key?(j[:key])) }
     end
 
     def selected?(key, id)
@@ -358,9 +384,27 @@ module CiLocal
           break
         end
       end
-      return if @opts[:list]
+      if @opts[:list]
+        (SLOW_EXTRA[key] || []).each { |extra, _| puts "    run    #{extra}  (slow pass only)" } if @opts[:slow]
+        return
+      end
 
+      failed ||= run_slow_extras(j, env)
       report(j, label, failed ? :failed : :passed, failed ? "#{failed[0]}: #{failed[1]}" : "", Time.now - t0, skipped)
+    end
+
+    # The Rust test targets of SLOW_EXTRA, in the slow pass, in the environment the job's steps left. Returns [name, why] of the
+    # first that failed (the rest still run: one pass lists every failure), or nil.
+    def run_slow_extras(j, env)
+      return nil unless @opts[:slow]
+
+      failed = nil
+      (SLOW_EXTRA[j[:key]] || []).each_with_index do |(name, command), n|
+        ok, secs = run_step(j, { "name" => name, "run" => command }, name, env, 100 + n)
+        puts format("    %-6s %-70s %s", ok ? "ok" : "FAIL", name[0, 70], fmt_secs(secs))
+        failed ||= [name, "exit status != 0 (log: #{@last_log})"] unless ok
+      end
+      failed
     end
 
     def round_label(key, round)
@@ -493,33 +537,40 @@ module CiLocal
       File.write(script, body)
       wd = File.join(@root, expand(step["working-directory"] || "."))
       @last_log = File.join(@logs, "#{j[:wf]}-#{j[:id]}-#{format("%02d", index)}-#{name.gsub(/[^A-Za-z0-9]+/, "-")[0, 40]}.log")
+      # Never under `taskpolicy -b`: background QoS next to burners at normal priority leaves the step no CPU at all.
       cmd = ["bash", "--noprofile", "--norc", "-eo", "pipefail", script]
-      cmd = ["taskpolicy", "-b", *cmd] if @opts[:slow] && system("command -v taskpolicy >/dev/null 2>&1")
-      start_burners if @opts[:slow]
       t0 = Time.now
       tail = []
       status = nil
-      File.open(@last_log, "w") do |log|
-        Open3.popen2e(env, *cmd, chdir: wd, pgroup: true) do |stdin, out, wait|
-          stdin.close
-          @child = wait.pid
-          timer = Thread.new do
-            sleep(@opts[:step_timeout] * 60)
-            log.puts "ci-local: step timed out after #{@opts[:step_timeout]} minutes, killing it"
-            kill_group(wait.pid)
+      begin
+        start_burners if @opts[:slow]
+        File.open(@last_log, "w") do |log|
+          Open3.popen2e(env, *cmd, chdir: wd, pgroup: true) do |stdin, out, wait|
+            stdin.close
+            @child = wait.pid
+            timer = Thread.new do
+              sleep(@opts[:step_timeout] * 60)
+              log.puts "ci-local: step timed out after #{@opts[:step_timeout]} minutes, killing it"
+              kill_group(wait.pid)
+            end
+            begin
+              out.each_line do |line|
+                log.write(line)
+                tail << line
+                tail.shift while tail.size > 80
+                $stdout.write(line) if @opts[:verbose]
+              end
+              status = wait.value
+            ensure
+              timer.kill
+            end
           end
-          out.each_line do |line|
-            log.write(line)
-            tail << line
-            tail.shift while tail.size > 80
-            $stdout.write(line) if @opts[:verbose]
-          end
-          timer.kill
-          status = wait.value
         end
+      ensure
+        # Whatever happened to the step (it failed, it was killed, ci-local was interrupted), the burners stop with it.
+        @child = nil
+        stop_burners
       end
-      @child = nil
-      stop_burners
       apply_exports(env_target: job_env, path: gh_path, env_file: gh_env, output: gh_out, step: step)
       ok = status.success?
       unless ok || @opts[:verbose]
@@ -554,13 +605,28 @@ module CiLocal
 
     # ---- the slow-runner pass: burners --------------------------------------------------------------------------
 
+    # One burner is a shell that runs `yes` and cannot outlive ci-local: `yes` dies with the shell (EXIT, TERM, HUP and INT are
+    # trapped), and the shell dies within a second of its parent, even when the parent was killed with SIGKILL and trapped nothing.
+    # (`sleep 1 & wait` and not a bare `sleep 1`: bash runs a trap only when the foreground command ends, and `wait` is cut short
+    # by it, so stopping a burner takes milliseconds, not a second.)
+    BURNER = <<~'SH'
+      parent=$PPID
+      yes >/dev/null 2>&1 &
+      burner=$!
+      trap 'kill "$burner" 2>/dev/null; wait "$burner" 2>/dev/null; exit 0' EXIT TERM HUP INT
+      while kill -0 "$parent" 2>/dev/null; do
+        sleep 1 &
+        wait $!
+      done
+    SH
+
     def start_burners
-      n = @opts[:burners]
-      n.times { @burners << Process.spawn("yes", out: File::NULL, err: File::NULL) }
+      @opts[:burners].times { @burners << Process.spawn("sh", "-c", BURNER, out: File::NULL, err: File::NULL) }
     end
 
     def install_traps
-      %w[INT TERM].each do |sig|
+      at_exit { stop_burners }
+      %w[INT TERM HUP QUIT].each do |sig|
         Signal.trap(sig) do
           stop_burners
           kill_group(@child) if @child
@@ -570,13 +636,18 @@ module CiLocal
     end
 
     def stop_burners
-      @burners.each do |pid|
+      pids = @burners.dup
+      @burners.clear
+      pids.each do |pid|
         Process.kill("TERM", pid)
+      rescue StandardError
+        nil
+      end
+      pids.each do |pid|
         Process.wait(pid)
       rescue StandardError
         nil
       end
-      @burners.clear
     end
 
     # ---- output -------------------------------------------------------------------------------------------------
@@ -614,7 +685,7 @@ module CiLocal
   end
 end
 
-opts = { workflows: CiLocal::WORKFLOWS, only: [], skip: [], slow: false, rounds: 3, burners: 16, list: false,
+opts = { workflows: CiLocal::WORKFLOWS, only: [], skip: [], slow: false, rounds: 3, burners: 8, list: false,
          verbose: false, root: nil, branch: nil, logs: nil, step_timeout: 120 }
 OptionParser.new do |o|
   o.on("--root DIR") { |v| opts[:root] = v }

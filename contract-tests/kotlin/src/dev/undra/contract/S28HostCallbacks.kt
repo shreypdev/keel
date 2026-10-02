@@ -172,7 +172,9 @@ private fun cancellation(w: World, workshop: Workshop) {
         }
     }
     expectEq("run(1) after its cancellation", "cancelled", outcome)
-    awaitUntil("the host's confirm to observe the cancellation", timeoutMs = 1_000) { observed.contains("cancelled") }
+    // The default wait (WAIT_MS), a hang detector: `confirm` waits for its cancellation and nothing else, on no timer, so a
+    // cancellation that did not reach it would leave it waiting; how soon it is seen is the machine's.
+    awaitUntil("the host's confirm to observe the cancellation") { observed.contains("cancelled") }
     awaitEq("the registry's count of the cancelled run's reporter once the core dropped its proxy", 0) { w.core.callbacks.count(r4) }
     holdsFor("no report after the cancellation") { w.unhandled.isEmpty() }
 }

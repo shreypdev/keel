@@ -192,8 +192,17 @@ class CoreCallTests : Suite() {
 
         case("a continuation that would run inline is resumed off the core thread, so no application code runs there") {
             val t = FakeTransport()
-            // The reply comes after the caller has suspended (a reply that beat the suspension would simply not suspend it).
-            t.onCall = { call -> t.onCore { Thread.sleep(150); t.events.onReply(call.callId, ReplyStatus.OK, string("x")) } }
+            // The reply comes after the caller has suspended (a reply that beat the suspension would simply not suspend it): the core thread
+            // waits until the caller's thread is parked in runBlocking's event loop, which it is only once the call suspended. Waited for, not
+            // slept for (150 ms was a bet on how soon the caller suspends); the 10 s are a hang detector.
+            val caller = Thread.currentThread()
+            t.onCall = { call ->
+                t.onCore {
+                    val giveUp = System.nanoTime() + 10_000_000_000L
+                    while (!parkedInRunBlocking(caller) && System.nanoTime() < giveUp) Thread.sleep(1)
+                    t.events.onReply(call.callId, ReplyStatus.OK, string("x"))
+                }
+            }
             attach(t).use { core ->
                 val thread = runBlocking(Dispatchers.Unconfined) {
                     core.call(TARGET, METHOD, ARGS)
@@ -514,3 +523,8 @@ class CoreCallTests : Suite() {
     @Test
     fun allCases() = assertPassed()
 }
+
+/** Whether [thread] is parked inside `runBlocking`'s event loop: the coroutine it runs has suspended and nothing else is queued. */
+private fun parkedInRunBlocking(thread: Thread): Boolean =
+    (thread.state == Thread.State.WAITING || thread.state == Thread.State.TIMED_WAITING) &&
+        thread.stackTrace.any { it.methodName == "joinBlocking" && it.className.endsWith("BlockingCoroutine") }

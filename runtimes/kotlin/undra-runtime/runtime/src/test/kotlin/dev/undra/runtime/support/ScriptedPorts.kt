@@ -43,6 +43,13 @@ class ScriptedInbound<T> {
     /** How many items the binding has taken so far. */
     val taken: Int get() = takenCount.get()
 
+    /**
+     * `System.nanoTime()` as the binding took each item, in order (an entry is there before [taken] counts the item): when the items reached the binding,
+     * which is what a test about bursts needs to know and is not when the test pushed them (a pump that is not scheduled for a few milliseconds delivers
+     * two items that were pushed a millisecond apart far apart).
+     */
+    val takenAt = CopyOnWriteArrayList<Long>()
+
     /** How many times the flow was collected. */
     val collected: Int get() = collections.get()
 
@@ -52,6 +59,7 @@ class ScriptedInbound<T> {
         for (item in outbox) {
             when (item) {
                 is Scripted.Item -> {
+                    takenAt.add(System.nanoTime())
                     takenCount.incrementAndGet()
                     emit(item.value)
                 }

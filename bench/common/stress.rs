@@ -474,6 +474,24 @@ pub struct StressConfig {
     /// most 200 ms); `Some(Duration::ZERO)` measures from the first operation. The measured
     /// `duration` is unchanged, so a run lasts `warmup + duration`.
     pub warmup: Option<Duration>,
+    /// Operations the measured run does **at least**, whatever its duration: a run whose time is up
+    /// before it has done that many goes on until it has, so a machine that is slow (or busy) takes
+    /// longer instead of reporting less. The tests that need a fault to fire (every 101st patch is
+    /// dropped) or a scenario to have done something ask for the count they need. `0` is a run of
+    /// `duration` alone. A run that has not reached it [`GIVE_UP`] after its time is up stops with
+    /// what it has: a hang detector, never a performance claim (the report's `ops` is then below
+    /// the floor, and the test that asked says so).
+    pub min_ops: u64,
+}
+
+/// How long past its duration a run waits for its [`min_ops`](StressConfig::min_ops) before it gives
+/// up. It only detects a run that cannot make progress at all, so it is generous.
+pub const GIVE_UP: Duration = Duration::from_secs(120);
+
+/// Whether a run is over: its time is up and it has done at least `min_ops` operations (or has
+/// waited [`GIVE_UP`] for them).
+fn run_is_over(now: Instant, deadline: Instant, ops: u64, min_ops: u64) -> bool {
+    now >= deadline && (ops >= min_ops || now >= deadline + GIVE_UP)
 }
 
 /// The warm-up of a run of `duration` that nobody configured: a tenth of it, at most 200 ms (a 10 s
@@ -497,6 +515,7 @@ impl StressConfig {
             rss: true,
             fault: Fault::None,
             warmup: None,
+            min_ops: 0,
         }
     }
 
@@ -659,10 +678,11 @@ fn warm_up(warmup: Duration, round: usize, mut op: impl FnMut(usize)) -> u64 {
     }
 }
 
-/// Times `op` one call at a time until `duration` has passed, in rounds of `round` operations
-/// (the clock is checked once per round).
+/// Times `op` one call at a time until `duration` has passed and `min_ops` have been done, in
+/// rounds of `round` operations (the clock is checked once per round).
 fn time_ops(
     duration: Duration,
+    min_ops: u64,
     round: usize,
     mut op: impl FnMut(usize),
 ) -> (Histogram, u64, Duration) {
@@ -677,7 +697,7 @@ fn time_ops(
             hist.record(nanos(t0.elapsed()));
         }
         ops += round as u64;
-        if Instant::now() >= deadline {
+        if run_is_over(Instant::now(), deadline, ops, min_ops) {
             break;
         }
     }
@@ -712,7 +732,7 @@ pub fn firehose(cfg: &StressConfig) -> StressReport {
     });
     let (sets, bytes) = (host.counts.change_sets(), host.counts.change_set_bytes());
 
-    let (latency, ops, elapsed) = time_ops(cfg.duration, payloads.len(), |i| {
+    let (latency, ops, elapsed) = time_ops(cfg.duration, cfg.min_ops, payloads.len(), |i| {
         let reply = rt.call_sync(&payloads[i]);
         black_box(&reply);
     });
@@ -762,7 +782,7 @@ pub fn event_firehose(cfg: &StressConfig) -> StressReport {
     });
     let (sets, bytes) = (host.counts.change_sets(), host.counts.change_set_bytes());
 
-    let (latency, ops, elapsed) = time_ops(cfg.duration, events.len(), |i| {
+    let (latency, ops, elapsed) = time_ops(cfg.duration, cfg.min_ops, events.len(), |i| {
         let (port, method, payload) = &events[i];
         rt.event(*port, *method, payload);
     });
@@ -825,7 +845,7 @@ pub fn keyed_churn(cfg: &StressConfig) -> StressReport {
         black_box(rt.call_sync(&call));
     });
     let (sets, bytes) = (host.counts.change_sets(), host.counts.change_set_bytes());
-    let (latency, ops, elapsed) = time_ops(cfg.duration, 10, |_| {
+    let (latency, ops, elapsed) = time_ops(cfg.duration, cfg.min_ops, 10, |_| {
         let reply = rt.call_sync(&call);
         black_box(&reply);
     });
@@ -919,7 +939,7 @@ pub fn derived_churn(cfg: &StressConfig) -> StressReport {
         black_box(rt.call_sync(&call));
     });
     let (sets, bytes) = (host.counts.change_sets(), host.counts.change_set_bytes());
-    let (latency, ops, elapsed) = time_ops(cfg.duration, 10, |_| {
+    let (latency, ops, elapsed) = time_ops(cfg.duration, cfg.min_ops, 10, |_| {
         let reply = rt.call_sync(&call);
         black_box(&reply);
     });
@@ -1013,8 +1033,12 @@ pub fn derived_churn(cfg: &StressConfig) -> StressReport {
     }
 }
 
-/// Runs `CellFanout` transactions until `duration` has passed.
-fn run_cell_fanout(fan: &mut CellFanout, duration: Duration) -> (Histogram, u64, Duration) {
+/// Runs `CellFanout` transactions until `duration` has passed and `min_ops` have been done.
+fn run_cell_fanout(
+    fan: &mut CellFanout,
+    duration: Duration,
+    min_ops: u64,
+) -> (Histogram, u64, Duration) {
     let mut hist = Histogram::new();
     let mut ops = 0_u64;
     let start = Instant::now();
@@ -1025,7 +1049,7 @@ fn run_cell_fanout(fan: &mut CellFanout, duration: Duration) -> (Histogram, u64,
         let t1 = Instant::now();
         hist.record(nanos(t1 - t0));
         ops += 1;
-        if t1 >= deadline {
+        if run_is_over(t1, deadline, ops, min_ops) {
             break;
         }
     }
@@ -1042,16 +1066,16 @@ pub fn fanout(cfg: &StressConfig) -> StressReport {
     let big_time = cfg.duration.mul_f64(0.75);
     let small_time = cfg.duration - big_time;
     let mut big = CellFanout::new(100_000, 1_000);
-    run_cell_fanout(&mut big, cfg.warmup_for(big_time));
+    run_cell_fanout(&mut big, cfg.warmup_for(big_time), 0);
     let (big_sets0, big_bytes0) = (big.change_sets(), big.bytes());
-    let (latency, ops, elapsed) = run_cell_fanout(&mut big, big_time);
+    let (latency, ops, elapsed) = run_cell_fanout(&mut big, big_time, cfg.min_ops);
     let (big_sets, big_bytes) = (big.change_sets() - big_sets0, big.bytes() - big_bytes0);
     drop(big);
 
     let mut small = CellFanout::new(10_000, 1_000);
-    run_cell_fanout(&mut small, cfg.warmup_for(small_time));
+    run_cell_fanout(&mut small, cfg.warmup_for(small_time), 0);
     let (small_sets0, small_bytes0) = (small.change_sets(), small.bytes());
-    let (small_latency, small_ops, _) = run_cell_fanout(&mut small, small_time);
+    let (small_latency, small_ops, _) = run_cell_fanout(&mut small, small_time, cfg.min_ops);
     let (small_sets, small_bytes) = (
         small.change_sets() - small_sets0,
         small.bytes() - small_bytes0,
@@ -1119,7 +1143,7 @@ pub fn fanout_stores(cfg: &StressConfig) -> StressReport {
         let t1 = Instant::now();
         hist.record(nanos(t1 - t0));
         ops += 1;
-        if t1 >= deadline {
+        if run_is_over(t1, deadline, ops, cfg.min_ops) {
             break;
         }
     }
@@ -1185,16 +1209,22 @@ pub fn stream_backpressure(cfg: &StressConfig) -> StressReport {
         }
     };
 
-    // Half one: a slow consumer, 16 credits a round.
+    // Half one: a slow consumer, 16 credits a round. At least one round, and `min_ops` items,
+    // whatever the clock says: a machine that spends the whole run on the first round still runs
+    // the check that the producer is never ahead.
     let half = cfg.duration / 2;
     let mut rounds = 0_u64;
     sample(&mut series, &mut excluded, cfg.rss);
-    while run_start.elapsed() < half {
+    loop {
         rt.stream_credit(call_id, 16);
         rt.run_pending();
         check(&producer, &host);
         rounds += 1;
         sample(&mut series, &mut excluded, cfg.rss);
+        let (now, items) = (run_start.elapsed(), host.stream_items());
+        if now >= half && (items >= cfg.min_ops || now >= half + GIVE_UP) {
+            break;
+        }
     }
     let slow_items = host.stream_items();
 
@@ -1203,11 +1233,16 @@ pub fn stream_backpressure(cfg: &StressConfig) -> StressReport {
     let fast_start = Instant::now();
     let items_before = host.stream_items();
     let item_bytes_before = host.stream_item_bytes.load(Ordering::Relaxed);
-    while run_start.elapsed() < cfg.duration {
+    loop {
         rt.stream_credit(call_id, 100_000);
         rt.run_pending();
         check(&producer, &host);
         sample(&mut series, &mut excluded, cfg.rss);
+        // The same rule as the slow half: a round at least, and the floor of items.
+        let (now, items) = (run_start.elapsed(), host.stream_items() - items_before);
+        if now >= cfg.duration && (items >= cfg.min_ops || now >= cfg.duration + GIVE_UP) {
+            break;
+        }
     }
     let fast_elapsed = fast_start.elapsed().saturating_sub(excluded);
     let fast_items = host.stream_items() - items_before;
@@ -1288,12 +1323,15 @@ struct WriterOutcome {
 }
 
 /// A host thread writing the `Fetcher` store through `call_sync` (`Fetcher::bump`, adds one to the
-/// same signal the completions add one to) until `stop` is set.
+/// same signal the completions add one to) until `stop` is set; `made` says how many it has made since
+/// the warm-up ended, so the issuer can wait for the writer to have done its share on a machine that
+/// starves it.
 fn spawn_writer(
     rt: &Arc<Core>,
     bump: Vec<u8>,
     stop: Arc<AtomicBool>,
     warmed: Arc<AtomicBool>,
+    made: Arc<AtomicU64>,
 ) -> JoinHandle<WriterOutcome> {
     let rt = rt.clone();
     std::thread::Builder::new()
@@ -1317,6 +1355,9 @@ fn spawn_writer(
                 let reply = rt.call_sync(&bump);
                 out.latency.record(nanos(t0.elapsed()));
                 out.calls += 1;
+                if counted_warmup {
+                    made.store(out.calls - out.warm_calls, Ordering::Relaxed);
+                }
                 // `call_id u32, status u8, body`: 0 is Ok.
                 if reply.get(4) == Some(&0) {
                     out.ok += 1;
@@ -1378,16 +1419,34 @@ fn run_completions(cfg: &StressConfig, name: &'static str, contended: bool) -> S
     let completers = spawn_completers(&rt, &host);
     let writer_stop = Arc::new(AtomicBool::new(false));
     let warmed = Arc::new(AtomicBool::new(false));
+    let writes_made = Arc::new(AtomicU64::new(0));
     let writer = contended.then(|| {
         let bump = method_call(fetcher, "Fetcher", "bump", 3, &[]);
-        spawn_writer(&rt, bump, writer_stop.clone(), warmed.clone())
+        spawn_writer(
+            &rt,
+            bump,
+            writer_stop.clone(),
+            warmed.clone(),
+            writes_made.clone(),
+        )
     });
 
     let mut issued = 0_u64;
     let mut rejected = 0_u64;
     let mut call_id = 10_u32;
-    let mut issue_until = |deadline: Instant| {
-        while Instant::now() < deadline {
+    // Issues calls until `deadline` has passed, `floor` calls have been issued by this call and,
+    // when `writes` is given, the writer thread has made that many writes since the warm-up: a
+    // machine that is slow or busy (a writer that is not scheduled for a whole run) takes longer,
+    // it does not report less.
+    let mut issue_until = |deadline: Instant, floor: u64, writes: Option<u64>| {
+        let first = issued;
+        loop {
+            let now = Instant::now();
+            let enough = issued - first >= floor
+                && writes.is_none_or(|n| writes_made.load(Ordering::Relaxed) >= n);
+            if now >= deadline && (enough || now >= deadline + GIVE_UP) {
+                break;
+            }
             // The clock is read every `CLOCK_EVERY` calls, not once the window fills: when the
             // completers keep pace the window never fills, and a loop that looks at the clock
             // only then runs as long as it likes (a 200 ms debug run took 154 s under load).
@@ -1412,14 +1471,17 @@ fn run_completions(cfg: &StressConfig, name: &'static str, contended: bool) -> S
     // is not measured; the invariants still cover it (they hold over the whole run).
     let warmup = cfg.warmup();
     if !warmup.is_zero() {
-        issue_until(Instant::now() + warmup);
+        issue_until(Instant::now() + warmup, 0, None);
     }
     let warm_sets = host.counts.change_sets() - base_sets;
     drop(host.take_latency());
     warmed.store(true, Ordering::Relaxed);
 
     let start = Instant::now();
-    issue_until(start + cfg.duration);
+    // The contended scenario is about two committers: the writer makes at least `min_ops` writes
+    // (one at least) in the measured run as well, whatever its share of the machine.
+    let writes_wanted = contended.then(|| cfg.min_ops.max(1));
+    issue_until(start + cfg.duration, cfg.min_ops, writes_wanted);
     // The writer stops with the issuer; then let the calls in flight finish.
     writer_stop.store(true, Ordering::Relaxed);
     let written = writer.map(|w| w.join().expect("the writer thread finishes"));

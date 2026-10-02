@@ -14,7 +14,7 @@ import {
 import { BASE_URL, boot } from "../src/harness.js";
 import { replies } from "../src/fake-server.js";
 import { MemoryKv, Persisted } from "../src/memory-kv.js";
-import { sleep, step, waitFor } from "../src/wait.js";
+import { WAIT_TIMEOUT_MS, sleep, step, waitFor } from "../src/wait.js";
 
 // S14 offline queue replay: while the device is offline an idempotent mutation keeps waiting
 // (queued, persisted, its placeholder on show) and is replayed, with the same Idempotency-Key,
@@ -87,6 +87,7 @@ test("S14 offline queue replay", async () => {
 
   await step("3. a mutation that is not idempotent fails at once", async () => {
     server.on("PATCH", PATCH_URL, replies.networkError("offline"));
+    const patchesBefore = server.count("PATCH", PATCH_URL);
     const started = performance.now();
     const error = await setRemoteDone(LIST, 1, true, core).then(
       () => {
@@ -94,7 +95,11 @@ test("S14 offline queue replay", async () => {
       },
       (e: unknown) => e,
     );
-    expect(performance.now() - started, "at once, not after a retry's backoff").toBeLessThan(1_000);
+    // "At once, not after a retry's backoff" is counted, not timed: the server saw the one PATCH, so the error came from it and not
+    // from a retry. The time is bounded by WAIT_TIMEOUT_MS, a hang detector, as on Swift and Kotlin (half of a first retry's backoff,
+    // BACKOFF_BASE_MS less 20 % jitter: 400 ms, would be no more stall-proof than the second this was).
+    expect(server.count("PATCH", PATCH_URL), "PATCHes of set_remote_done while offline: it was not retried").toBe(patchesBefore + 1);
+    expect(performance.now() - started, "failed within the 5 s wait, not queued").toBeLessThan(WAIT_TIMEOUT_MS);
     expect(error).toBeInstanceOf(RemoteError.Http);
     const cause = (error as RemoteError.Http).cause;
     expect(cause).toBeInstanceOf(HttpError.Network);

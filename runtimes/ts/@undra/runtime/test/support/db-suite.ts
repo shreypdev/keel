@@ -36,6 +36,13 @@ const SCHEMA = [
   },
 ];
 
+/** The first index at which two byte arrays differ (the shorter one's length when it is a prefix of the other), or -1 when they are the same. */
+function firstDifference(a: Uint8Array, b: Uint8Array): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) if (a[i] !== b[i]) return i;
+  return a.length === b.length ? -1 : n;
+}
+
 /** Defines the suite for `target` under the title `title`. */
 export function dbSuite(title: string, target: () => DbSuiteTarget): void {
   const open = (options: { busyTimeoutMs?: number } = {}) => dbCalls(dbPort(target().adapter(), { ...options, wal: target().wal }));
@@ -117,7 +124,7 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       expect(quoted, "a ? in a string, an identifier or a comment is not a parameter").toEqual({ columns: ["a?", "b?"], rows: [cells("?", 5n)] });
     });
 
-    it("a statement on the database during a transaction waits, then fails Busy past the (shortened) timeout", async () => {
+    it("a statement on the database during a transaction fails Busy past the (shortened) timeout", async () => {
       const api = open({ busyTimeoutMs: 100 });
       const { db } = ok(await api.open(":memory:"));
       ok(await api.execute(db, "CREATE TABLE x (v INTEGER)"));
@@ -126,6 +133,14 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       expect(err(await api.execute(db, "INSERT INTO x VALUES (2)"))).toEqual(new DbError.Busy());
       ok(await api.rollback(tx));
       expect(ok(await api.query(db, "SELECT COUNT(*) FROM x")).rows, "the rollback undid the insert").toEqual([cells(0n)]);
+    });
+
+    // A busy timeout that never elapses here (60 s: a hang detector, not a speed): with the 100 ms of the test above, a machine that took that long between this
+    // statement and the commit made it Busy, and the test failed for the machine's speed.
+    it("a statement on the database during a transaction waits for it, however long that takes, and runs after the commit", async () => {
+      const api = open({ busyTimeoutMs: 60_000 });
+      const { db } = ok(await api.open(":memory:"));
+      ok(await api.execute(db, "CREATE TABLE x (v INTEGER)"));
       const tx2 = ok(await api.begin(db));
       ok(await api.execute(tx2, "INSERT INTO x VALUES (3)"));
       const outside = api.query(db, "SELECT COUNT(*) FROM x");
@@ -139,16 +154,48 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       ok(await api.execute(db, "CREATE TABLE x (v INTEGER)"));
       const tx = ok(await api.begin(db));
       const started = Date.now();
-      const outside = api.execute(db, "INSERT INTO x VALUES (0)");
+      // When the outer statement settled, and whether a guard timer for one and a half times the timeout had fired by then. Both are taken as it
+      // settles, not after the transaction's statements below, which a slow machine can make take longer than either bound.
+      let guardFired = false;
+      let settled: { waited: number; late: boolean } | undefined;
+      const outside = api.execute(db, "INSERT INTO x VALUES (0)").then((outcome) => {
+        settled = { waited: Date.now() - started, late: guardFired };
+        return outcome;
+      });
+      // The guard is armed after the call, which armed the statement's own timer of the busy timeout synchronously: its deadline is the later one on
+      // the same clock. Overdue timers fire in the order of their deadlines, with the microtasks of each run before the next, so on any machine the
+      // Busy that the statement's timer produces settles before the guard fires; one that settles after it is late by the code's doing.
+      const guard = setTimeout(() => {
+        guardFired = true;
+      }, 1.5 * 200);
       for (let i = 1n; i <= 5n; i++) ok(await api.execute(tx, "INSERT INTO x VALUES (?)", cells(i)));
-      expect(Date.now() - started, "the transaction's statements did not wait behind the outer one").toBeLessThan(200);
       expect(err(await outside)).toEqual(new DbError.Busy());
-      const waited = Date.now() - started;
-      expect(waited, "not before the timeout").toBeGreaterThanOrEqual(190);
-      expect(waited, "not long after it").toBeLessThan(1200);
+      clearTimeout(guard);
+      expect(settled?.waited, "not before the timeout").toBeGreaterThanOrEqual(190);
+      expect(settled?.late, "and not long after it: Busy came before a timer for one and a half times the timeout, armed after the statement's").toBe(false);
       ok(await api.commit(tx));
       expect(ok(await api.query(db, "SELECT v FROM x ORDER BY v")).rows, "the outer insert never ran").toEqual([1n, 2n, 3n, 4n, 5n].map((v) => cells(v)));
     });
+
+    // The busy timeout here is one that never elapses (60 s, so a hang detector and not a speed): the outer statement is still waiting when the transaction's
+    // five statements are done, on any machine. Queued behind it they would wait for it, and it for them, and the test would hang to its timeout.
+    it("the transaction's own statements are not queued behind an outer statement that waits for the transaction", async () => {
+      const api = open({ busyTimeoutMs: 60_000 });
+      const { db } = ok(await api.open(":memory:"));
+      ok(await api.execute(db, "CREATE TABLE x (v INTEGER)"));
+      const tx = ok(await api.begin(db));
+      let settled = false;
+      const outside = api.execute(db, "INSERT INTO x VALUES (0)").finally(() => {
+        settled = true;
+      });
+      for (let i = 1n; i <= 5n; i++) {
+        ok(await api.execute(tx, "INSERT INTO x VALUES (?)", cells(i)));
+        expect(settled, `statement ${i} of the transaction ran while the outer one was still waiting`).toBe(false);
+      }
+      ok(await api.commit(tx));
+      expect(ok(await outside), "the outer statement ran once the transaction ended").toMatchObject({ changes: 1n });
+      expect(ok(await api.query(db, "SELECT v FROM x ORDER BY v")).rows).toEqual([0n, 1n, 2n, 3n, 4n, 5n].map((v) => cells(v)));
+    }, 30_000);
 
     it("binds values, never splices them: SQL in a text parameter is data", async () => {
       const api = open();
@@ -160,8 +207,8 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       expect(ok(await api.query(db, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", cells("t"))).rows, "t is still there").toEqual([cells(1n)]);
     });
 
-    // A 2 MB row in and out (the worker variant: through postMessage both ways): seconds on a slow runner (5.2 s on a hosted one,
-    // past vitest's default 5 s). The bound only catches a hang; the test asserts what arrives, not how fast.
+    // `toEqual` over a million bytes took most of the test's second (and prints a million lines when it fails); this is the same byte-for-byte check. The timeout is a hang
+    // detector, generous because a throttled machine took more than the default 5 s: it says nothing about speed.
     it("carries a 2 MB row whole, and integers past 2^53 exactly", async () => {
       const api = open();
       const { db } = ok(await api.open(":memory:"));
@@ -175,7 +222,8 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       expect(rows).toHaveLength(1);
       const [t, b, i, j] = rows[0] as DbValue[];
       expect(t?.kind === "text" && t.value === text, "the text, U+0000 and all").toBe(true);
-      expect(b).toEqual({ kind: "blob", value: blob });
+      expect(b?.kind).toBe("blob");
+      expect(b?.kind === "blob" ? firstDifference(b.value, blob) : -2, "the blob, byte for byte (-1: the same; otherwise the first index that differs)").toBe(-1);
       expect([i, j]).toEqual(cells(2n ** 53n + 1n, -(2n ** 53n) - 3n));
     }, 60_000);
 
