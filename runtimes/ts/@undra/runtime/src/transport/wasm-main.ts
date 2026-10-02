@@ -22,6 +22,11 @@ import {
 import type { PortCallPayload } from "../wire/index.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
 
+/** The error of a call the core refused without a reply (`undra_call` returned `code`). */
+function refused(code: number): UndraReplyError {
+  return new UndraReplyError(ReplyStatus.BadRequest, encodeValue(codecs.string, `the core refused the call (undra_call returned ${code})`));
+}
+
 /** The wasm ABI version this transport speaks (`undra_abi_version`). */
 const ABI_VERSION = 1;
 /** Payloads up to this size travel through one reusable scratch buffer in wasm memory. */
@@ -258,12 +263,7 @@ export class WasmMainTransport implements Transport {
     switch (kind) {
       case Kind.Call: {
         const code = this._invoke(payload, (e, ptr, len) => e.undra_call(ptr, len));
-        if (code !== 0) {
-          throw new UndraReplyError(
-            ReplyStatus.BadRequest,
-            encodeValue(codecs.string, `the core refused the call (undra_call returned ${code})`),
-          );
-        }
+        if (code !== 0) throw refused(code);
         return;
       }
       case Kind.Cancel: {
@@ -310,6 +310,15 @@ export class WasmMainTransport implements Transport {
 
   callSync(payload: Uint8Array): Uint8Array {
     return this._invoke(payload, (e, ptr, len) => this._takeBuf(e, e.undra_call_sync(ptr, len)));
+  }
+
+  callSyncParts(head: Uint8Array, tail: Uint8Array): Uint8Array {
+    return this._invoke(head, (e, ptr, len) => this._takeBuf(e, e.undra_call_sync(ptr, len)), tail);
+  }
+
+  sendCall(head: Uint8Array, tail: Uint8Array): void {
+    const code = this._invoke(head, (e, ptr, len) => e.undra_call(ptr, len), tail);
+    if (code !== 0) throw refused(code);
   }
 
   stats(): Promise<string | null> {
@@ -417,7 +426,7 @@ export class WasmMainTransport implements Transport {
   }
 
   /** Runs `call` with a copy of `bytes` in wasm memory. */
-  private _invoke<R>(bytes: Uint8Array, call: (e: CoreExports, ptr: number, len: number) => R): R {
+  private _invoke<R>(bytes: Uint8Array, call: (e: CoreExports, ptr: number, len: number) => R, tail?: Uint8Array): R {
     const e = this._live();
     // A payload copied while another export is running (a sync port reply
     // from inside `port_call`) must not reuse the scratch buffer the outer
@@ -427,14 +436,16 @@ export class WasmMainTransport implements Transport {
     let owned = 0;
     let ptr = 0;
     try {
-      const len = bytes.length;
+      const len = tail === undefined ? bytes.length : bytes.length + tail.length;
       if (!nested && len <= SCRATCH_LIMIT) {
         ptr = this._scratch(e, len);
       } else {
         owned = Math.max(len, 1);
         ptr = allocate(e, owned);
       }
-      this._bytes().set(bytes, ptr >>> 0);
+      const memory = this._bytes();
+      memory.set(bytes, ptr >>> 0);
+      if (tail !== undefined) memory.set(tail, (ptr >>> 0) + bytes.length);
       return call(e, ptr, len);
     } catch (error) {
       throw this._classify(error);

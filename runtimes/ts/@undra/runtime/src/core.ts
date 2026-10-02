@@ -296,8 +296,11 @@ function put32(out: Uint8Array, at: number, v: number): void {
   out[at + 3] = v >>> 24;
 }
 
-/** A `Call` payload (SPEC 3.3) for a free function or a method, laid out in one allocation: `encodeCall` without its writer. */
-function encodeTarget(target: CallTargetArg, methodId: number, callId: number, args: Uint8Array): Uint8Array {
+/** The length of the `Call` header of a free function or a method (SPEC 3.3): target u8, handle u64, method id u32, call id u32. */
+const HEAD_LEN = 17;
+
+/** Writes that header into `out` (which holds at least {@link HEAD_LEN} bytes), clearing what an earlier call left in it. */
+function writeHead(out: Uint8Array, target: CallTargetArg, methodId: number, callId: number): void {
   let handle: Handle | undefined;
   if (typeof target === "number") {
     if (target !== CallTarget.FreeFunction) {
@@ -307,14 +310,21 @@ function encodeTarget(target: CallTargetArg, methodId: number, callId: number, a
     handle = target.handle;
   }
   if (methodId >>> 0 !== methodId) throw new RangeError(`u32 out of range: ${String(methodId)}`);
-  const out = new Uint8Array(17 + args.length);
-  if (handle !== undefined) {
+  if (handle === undefined) {
+    out.fill(0, 0, 9);
+  } else {
     out[0] = CallTarget.ObjectMethod;
     putHandle(out, 1, handle);
   }
   put32(out, 9, methodId);
   put32(out, 13, callId);
-  if (args.length > 0) out.set(args, 17);
+}
+
+/** A `Call` payload (SPEC 3.3) for a free function or a method, in one allocation: `encodeCall` without its writer. */
+function encodeTarget(target: CallTargetArg, methodId: number, callId: number, args: Uint8Array): Uint8Array {
+  const out = new Uint8Array(HEAD_LEN + args.length);
+  writeHead(out, target, methodId, callId);
+  if (args.length > 0) out.set(args, HEAD_LEN);
   return out;
 }
 
@@ -539,6 +549,8 @@ export class UndraCore {
   /** Handles released while the connection was down: released in the core once it is back. */
   private readonly _releasedWhileDown = new Set<Handle>();
   private readonly _connection = new Signal<ConnectionState>({ kind: "connecting" });
+  /** The header of the call being sent, reused: an in-process transport copies it before it returns (`Transport.sendCall`). */
+  private readonly _head = new Uint8Array(HEAD_LEN);
   private _nextCallId = 0;
   private _closed = false;
   /** What a call on this closed core says; the default is "the core is closed". */
@@ -630,7 +642,13 @@ export class UndraCore {
     const transport = this._transport;
     if (transport.callSync === undefined) throw new UndraModeError("callSync", transport.mode);
     this._assertOpen();
-    const reply = transport.callSync(encodeTarget(target, methodId, this._allocCallId(), args));
+    let reply: Uint8Array;
+    if (transport.callSyncParts === undefined) {
+      reply = transport.callSync(encodeTarget(target, methodId, this._allocCallId(), args));
+    } else {
+      writeHead(this._head, target, methodId, this._allocCallId());
+      reply = transport.callSyncParts(this._head, args);
+    }
     // Read-your-writes (docs/SPEC.md section 11): the call's change-sets are queued by now.
     this.mirror.flush();
     if (reply.length < 5) throw new UndraTransportError("protocol", "the core returned a truncated reply");
@@ -1148,7 +1166,13 @@ export class UndraCore {
     const entry = new DirectCall();
     this._pending.set(callId, entry);
     try {
-      this._transport.send(Kind.Call, encodeTarget(target, methodId, callId, args));
+      const transport = this._transport;
+      if (transport.sendCall === undefined) {
+        transport.send(Kind.Call, encodeTarget(target, methodId, callId, args));
+      } else {
+        writeHead(this._head, target, methodId, callId);
+        transport.sendCall(this._head, args);
+      }
     } catch (error) {
       if (this._pending.get(callId) === entry) this._pending.delete(callId);
       return Promise.reject(error);
