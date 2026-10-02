@@ -97,6 +97,22 @@ impl Ring {
         }
     }
 
+    /// A capture found the newest step's state again, after the change-sets up to `through_seq` (the
+    /// transaction `txn` the last of them) were delivered: the step covers them. A capture reads the
+    /// sequence number before it snapshots, so a commit that lands in between is in the snapshot and
+    /// not in the number, and the capture the commit's own wake-up causes then finds nothing new:
+    /// without this the page would be told the newest step ends before a commit it holds. The updated
+    /// info when the step moved (the page applies a step it knows by replacing it), else `None`.
+    pub(crate) fn cover_newest(&mut self, through_seq: u64, txn: u64) -> Option<StepInfo> {
+        let newest = self.steps.back_mut()?;
+        if through_seq <= newest.info.through_seq {
+            return None;
+        }
+        newest.info.through_seq = through_seq;
+        newest.info.txn = txn;
+        Some(newest.info.clone())
+    }
+
     /// The step `n`, when it is still in the ring.
     pub(crate) fn get(&self, n: u32) -> Option<&Step> {
         let first = self.steps.front()?.info.step;
@@ -217,6 +233,25 @@ mod tests {
         assert!(ring.get(big.step).unwrap().bytes.is_none());
         assert_eq!(ring.bytes(), 0);
         assert!(ring.newest_bytes().is_none());
+    }
+
+    #[test]
+    fn a_step_found_again_covers_the_change_sets_that_came_with_the_snapshot() {
+        let mut ring = Ring::new(10, 1 << 20, 1 << 10);
+        assert!(ring.cover_newest(5, 5).is_none(), "no step, nothing to cover");
+        let mut first = info();
+        first.through_seq = 10;
+        first.txn = 10;
+        ring.push(first, vec![1]);
+        assert!(ring.cover_newest(10, 10).is_none(), "already covered");
+        assert!(ring.cover_newest(7, 7).is_none(), "never backwards");
+        let moved = ring.cover_newest(18, 17).unwrap();
+        assert_eq!((moved.step, moved.through_seq, moved.txn), (1, 18, 17));
+        assert_eq!(ring.get(1).unwrap().info, moved, "the ring's own copy moved with it");
+        // Only the newest step moves.
+        ring.push(info(), vec![2]);
+        assert_eq!(ring.cover_newest(30, 29).unwrap().step, 2);
+        assert_eq!(ring.get(1).unwrap().info.through_seq, 18);
     }
 
     #[test]

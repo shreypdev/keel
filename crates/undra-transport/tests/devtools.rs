@@ -931,7 +931,14 @@ fn a_page_cannot_reach_the_core_through_its_socket_whatever_it_sends() {
     let _ = page.ws.send(Message::Binary(vec![1; 200 * 1024]));
     assert!(closed_within(&mut page, Duration::from_secs(5)));
 
-    // The core and the app client did not notice: nothing was called, nothing was restored.
+    // The core and the app client did not notice: nothing was called, nothing was restored. A page's leaving
+    // is not nothing: the last one out gives the app's observations back to the runtime, which answers each with
+    // the signal's value (`Hub::release_observation`). The hub has let go when it says it is idle, those values
+    // are queued for the app by then, and the round trip below, behind them, takes them out of the way: how long
+    // the server takes to notice the last close is the machine's business, not this test's.
+    fx.eventually("the hub to let go of the last page", |fx| {
+        !fx.bridge.devtools_attached()
+    });
     assert_eq!(value(&mut app), 10, "the Call envelope was not executed");
     assert_eq!(
         stat(&fx.rt, "calls") - calls_before,
@@ -1273,6 +1280,36 @@ fn storm(app: &mut TestClient, counter: u64, n: usize) {
     }
 }
 
+/// Sets the label of `counter` `n` times, each to a different text of `size` bytes (a number and
+/// padding), `BATCH` calls in flight at a time; returns the last text.
+fn storm_labels(app: &mut TestClient, counter: u64, n: usize, size: usize) -> String {
+    const BATCH: usize = 50;
+    let text = |i: usize| format!("{i:06}{}", "x".repeat(size - 6));
+    let mut sent = 0;
+    while sent < n {
+        let batch = BATCH.min(n - sent);
+        let ids: Vec<u32> = (sent..sent + batch)
+            .map(|i| {
+                let id = app.next_call_id();
+                app.send_call(
+                    undra::wire::payload::CallTarget::Method {
+                        handle: undra::wire::Handle(counter),
+                        method_id: SET_LABEL,
+                    },
+                    id,
+                    &enc(&text(i)),
+                );
+                id
+            })
+            .collect();
+        for id in ids {
+            assert_eq!(app.await_reply(id).0, undra::wire::payload::ReplyStatus::Ok);
+        }
+        sent += batch;
+    }
+    text(n - 1)
+}
+
 /// Reads the page until it has been quiet for `quiet`.
 fn drain_page(page: &mut Page, quiet: Duration) -> Vec<ServerMsg> {
     let mut got = Vec::new();
@@ -1395,9 +1432,13 @@ fn a_page_that_stops_reading_is_dropped_and_the_core_and_the_app_do_not_wait_for
     app.recv_kind(Kind::ChangeSet);
     let mut page = Page::connect(&fx);
     page.step();
-    // The page does not read from here on.
+    // The page does not read from here on. What a socket holds before the writer blocks is the machine's:
+    // a few hundred KiB on macOS, several MiB on Linux, whose loopback buffers grow with the traffic. So the
+    // commits are big (16 KiB each, 48 MiB in all, every one different: the same value is not a change) and
+    // what is sent is far more than any socket holds, as the app-side test of a slow client sends far
+    // more than the queue holds (`a_client_that_stops_reading_is_dropped_and_never_blocks_the_core`).
     let started = Instant::now();
-    storm(&mut app, b, 40_000);
+    let last = storm_labels(&mut app, b, 3_000, 16 * 1024);
     let took = started.elapsed();
     assert!(
         took < Duration::from_secs(60),
@@ -1407,7 +1448,10 @@ fn a_page_that_stops_reading_is_dropped_and_the_core_and_the_app_do_not_wait_for
         !fx.bridge.devtools_attached()
     });
     // The app converged and is sent only its own signal; nothing of B reached it.
-    assert_eq!(i32_of(&app.method(b, GET, &[]).1), 40_000);
+    assert_eq!(
+        String::decode_exact(&app.method(b, GET_LABEL, &[]).1).unwrap(),
+        last
+    );
     app.method(a, ADD, &enc(&1_i32));
     drain(&mut app);
     assert_eq!(
