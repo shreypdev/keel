@@ -9,6 +9,8 @@ import { type PanicSupport, panicSupport } from "./panic-report.js";
 import type { PortImpl } from "./port.js";
 import { errorMessage } from "./platform.js";
 import type { CoreTransport, Transport, TransportHandler } from "./transport/transport.js";
+import { WasmHost } from "./transport/wasm-main.js";
+import { restoreInto, takeSnapshot, twin } from "./transport/wasm-snapshot.js";
 import { type Handle, type HelloPayload, decodeSnapshot, encodeSnapshot, handleGeneration } from "./wire/index.js";
 
 /*
@@ -287,21 +289,24 @@ export class UndraCoreRestarted extends UndraUnhandledError implements CoreResta
 // ----- the restart sequence ----------------------------------------------------------------------------
 
 /**
- * A transport whose core runs on this thread (`WasmMainTransport`): the snapshots are kept here, and a restart runs here,
- * on a twin of the transport that trapped.
+ * What a restart brings back: a core, not started, that is started and given a snapshot. A `WasmMainTransport` is one (the
+ * worker's core is); `Recovering` makes one of the in-process host (`WasmHost`), whose snapshot operations are functions
+ * (`wasm-snapshot.ts`).
  */
-export interface Reinstantiable extends CoreTransport {
-  /** `undra_snapshot`, copied out of wasm memory; throws when the core cannot be asked now (closed, trapped). */
-  takeSnapshot(): Uint8Array;
-  /** A new transport over the same compiled module (no recompile) and options, not started. */
-  twin(): Reinstantiable;
+export interface Restartable {
+  /** Starts the new instance with `handler`. */
+  start(handler: TransportHandler): Promise<HelloPayload>;
   /** `undra_restore`; rejects `UndraRestoreError` for a refused snapshot. */
   restore(bytes: Uint8Array): Promise<void>;
 }
 
-/** Whether `transport` is {@link Reinstantiable}. */
-function reinstantiable(transport: object): transport is Reinstantiable {
-  return typeof (transport as Partial<Reinstantiable>).twin === "function";
+/** `run`'s result as a promise, or its failure as a rejection. */
+function promised<T>(run: () => T): Promise<T> {
+  try {
+    return Promise.resolve(run());
+  } catch (error) {
+    return Promise.reject(error);
+  }
 }
 
 /**
@@ -332,7 +337,7 @@ export function keeperOf(
  * refuses it), an empty one raises the floor alone and no store comes back.
  */
 export async function restartHere(
-  twin: Reinstantiable,
+  twin: Restartable,
   handler: TransportHandler,
   keeper: SnapshotKeeper,
   floor: number,
@@ -483,7 +488,7 @@ class Recovering implements CoreTransport {
   readonly #settings: ResolvedRecovery;
   readonly #host: RecoveryHost;
   /** `#inner` when the core runs on this thread (`wasm-main`): snapshots are kept here, and the restart runs here. */
-  #here: Reinstantiable | null;
+  #here: WasmHost | null;
   /** The snapshots of a core on this thread (`null` in `wasm-worker`: the worker keeps them). */
   readonly keeper: SnapshotKeeper | null;
   readonly #onRestarted: ((event: UndraCoreRestarted) => void) | undefined;
@@ -517,13 +522,13 @@ class Recovering implements CoreTransport {
     this.#inner = inner;
     this.#settings = settings;
     this.#host = host;
-    this.#here = reinstantiable(inner) ? inner : null;
+    this.#here = inner instanceof WasmHost ? inner : null;
     this.keeper =
       this.#here === null
         ? null
         : keeperOf(
             settings,
-            () => (this.#here as Reinstantiable).takeSnapshot(),
+            () => takeSnapshot(this.#here as WasmHost),
             (level, target, message) => {
               this.#log(level, target, message);
             },
@@ -546,8 +551,14 @@ class Recovering implements CoreTransport {
       };
     }
     if (inner.stats !== undefined) self.stats = () => (this.#restarting ? Promise.resolve(null) : current().stats());
-    if (inner.snapshot !== undefined) self.snapshot = () => (this.#restarting ? Promise.reject(restarting()) : current().snapshot());
-    if (inner.restore !== undefined) self.restore = (bytes) => (this.#restarting ? Promise.reject(restarting()) : current().restore(bytes));
+    if (this.#here !== null) {
+      // The in-process host: its snapshot operations are functions over whichever host is current (a restart replaces it with its twin).
+      self.snapshot = () => (this.#restarting ? Promise.reject(restarting()) : promised(() => takeSnapshot(this.#here as WasmHost)));
+      self.restore = (bytes) => (this.#restarting ? Promise.reject(restarting()) : promised(() => restoreInto(this.#here as WasmHost, bytes)));
+    } else {
+      if (inner.snapshot !== undefined) self.snapshot = () => (this.#restarting ? Promise.reject(restarting()) : current().snapshot());
+      if (inner.restore !== undefined) self.restore = (bytes) => (this.#restarting ? Promise.reject(restarting()) : current().restore(bytes));
+    }
     if (inner.portAdded !== undefined) {
       self.portAdded = (portId, impl) => {
         current().portAdded(portId, impl);
@@ -711,11 +722,12 @@ class Recovering implements CoreTransport {
     if (here === null || this.keeper === null || this.#wrapped === null) {
       return (this.#inner as Transport & { restart(floor: number): Promise<RestartResult> }).restart(floor);
     }
-    const twin = here.twin();
+    const next = twin(here);
     here.close();
-    this.#inner = twin;
-    this.#here = twin;
-    return restartHere(twin, this.#wrapped, this.keeper, floor, (level, target, message) => {
+    this.#inner = next;
+    this.#here = next;
+    const restartable: Restartable = { start: (handler) => next.start(handler), restore: (bytes) => promised(() => restoreInto(next, bytes)) };
+    return restartHere(restartable, this.#wrapped, this.keeper, floor, (level, target, message) => {
       this.#log(level, target, message);
     });
   }

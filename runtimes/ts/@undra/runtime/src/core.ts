@@ -245,9 +245,6 @@ export interface WorkerModeOptions {
   readonly ports?: URL | string;
 }
 
-/** Statistics counters exposed by `undra_stats_json` that this runtime reads. */
-type CoreStatsJson = Readonly<Record<string, unknown>>;
-
 interface PendingCall {
   readonly kind: "call";
   resolve(body: Uint8Array): void;
@@ -300,6 +297,16 @@ function replyBody(reply: Uint8Array): Uint8Array {
 /** Whether `transport` passes the control messages as calls (the in-process host, ADR-057) and needs no framing. */
 function typed(transport: Transport | CoreTransport): transport is CoreTransport {
   return transport.observe !== undefined;
+}
+
+/** `background.pending` of the core's JSON statistics (`undra_stats_json`): `0` for a core that reports none or a text that is not JSON. */
+function backgroundPending(json: string | null | undefined): number {
+  try {
+    const pending = (JSON.parse(json ?? "{}") as { background?: { pending?: unknown } }).background?.pending;
+    return typeof pending === "number" ? pending : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** Overlays `overrides` on `base`: a value replaces, `null` removes. */
@@ -528,7 +535,8 @@ export class UndraCore {
   private readonly _ports = new Map<number, PortImpl>();
   /** The calls and streams waiting for the core, by call id. @internal Read by the stream support. */
   readonly _pending = new Map<number, PendingCall | PendingStream>();
-  private readonly _handles = new Set<Handle>();
+  /** The handles the host owns a reference to. @internal Read by `stats` (`core-extras.ts`) and crash recovery. */
+  readonly _handles = new Set<Handle>();
   /** The signals the app observes, per handle: what a reconnect observes again. */
   /** @internal Read by crash recovery and by what a core outside this thread adds (`transport/framed.ts`): they observe it again. */
   readonly _observed = new Map<Handle, Set<number>>();
@@ -894,47 +902,9 @@ export class UndraCore {
     }
   }
 
-  /** Live counters of this core; see {@link UndraStats}. */
+  /** Live counters of this core; see {@link UndraStats}. (Built by a module that loads on the first call: this is asynchronous already.) */
   async stats(): Promise<UndraStats> {
-    let core: CoreStatsJson | null = null;
-    const json = this._closed ? null : await this._transport.stats?.().catch(() => null);
-    if (typeof json === "string") {
-      try {
-        const parsed: unknown = JSON.parse(json);
-        if (typeof parsed === "object" && parsed !== null) core = parsed as CoreStatsJson;
-      } catch {
-        core = null;
-      }
-    }
-    let calls = 0;
-    let streams = 0;
-    for (const p of this._pending.values()) {
-      if (p.kind === "call") calls++;
-      else streams++;
-    }
-    const coreHandles = core?.live_handles;
-    const count = (value: unknown): number => (typeof value === "number" ? value : 0);
-    const background = (core?.background ?? {}) as CoreStatsJson;
-    const hostRefs = core?.host_refs;
-    return {
-      liveHandles: typeof coreHandles === "number" ? coreHandles : this._handles.size,
-      hostRefs: typeof hostRefs === "number" ? hostRefs : this._handles.size,
-      pendingCalls: calls,
-      openStreams: streams,
-      mirroredStores: this.mirror.size,
-      droppedEntries: this.mirror.dropped,
-      mirror: this.mirror.stats(),
-      core,
-      panicReports: count(core?.panic_reports),
-      background: {
-        tasks: count(background.tasks),
-        pending: count(background.pending),
-        runs: count(background.runs),
-        finished: count(background.finished),
-        replayed: count(background.replayed),
-        refetched: count(background.refetched),
-      },
-    };
+    return (await onDemand("statistics", () => import("./core-extras.js"))).stats(this);
   }
 
   /**
@@ -955,8 +925,9 @@ export class UndraCore {
    */
   async runInBackground(deadlineMs: number, options: { readonly signal?: AbortSignal } = {}): Promise<UndraBackgroundReport> {
     try {
-      // Loaded on demand (`background.ts`): a hello page, whose core has no background task, never runs it (ADR-052).
-      return await (await import("./background.js")).runInBackground(this, deadlineMs, options.signal);
+      // Loaded on demand (`core-extras.ts`): a hello page, whose core has no background task, never runs it (ADR-052). A chunk that cannot
+      // be fetched is `UndraCallError.Unavailable`, as every failure of this call is.
+      return await (await onDemand("background runs", () => import("./core-extras.js"))).runInBackground(this, deadlineMs, options.signal);
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
@@ -971,9 +942,7 @@ export class UndraCore {
    */
   async snapshot(): Promise<Uint8Array> {
     this._assertOpen();
-    const transport = this._transport;
-    if (transport.snapshot === undefined) throw new UndraModeError("snapshot", transport.mode);
-    return transport.snapshot();
+    return (await onDemand("snapshots", () => import("./core-extras.js"))).snapshot(this._transport);
   }
 
   /**
@@ -988,9 +957,7 @@ export class UndraCore {
    */
   async restore(bytes: Uint8Array): Promise<void> {
     this._assertOpen();
-    const transport = this._transport;
-    if (transport.restore === undefined) throw new UndraModeError("restore", transport.mode);
-    await transport.restore(bytes);
+    await (await onDemand("snapshots", () => import("./core-extras.js"))).restore(this._transport, bytes);
     // Read-your-writes (docs/SPEC.md section 11): what the restore delivered is applied before the caller resumes.
     this.mirror.flush();
   }
@@ -1042,8 +1009,10 @@ export class UndraCore {
   private _backgroundWindow(): void {
     if (this._backgroundRunning || this._options.backgroundRun === false || typeof document === "undefined") return;
     this._backgroundRunning = true;
-    this.stats()
-      .then((stats) => (stats.background.pending > 0 ? this.runInBackground(PAGE_BACKGROUND_MS) : undefined))
+    // Only `background.pending` of the core's own statistics: the full `stats()` is a module of its own, and a page that is hidden
+    // with nothing to drain imports nothing.
+    Promise.resolve(this._transport.stats?.())
+      .then((json) => (backgroundPending(json) > 0 ? this.runInBackground(PAGE_BACKGROUND_MS) : undefined))
       .catch((error: unknown) => {
         if (!this._closed) this._reportError("runInBackground", error);
       })

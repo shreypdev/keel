@@ -10,14 +10,15 @@ import {
 } from "../wire/index.js";
 import type { Transport } from "./transport.js";
 import { WasmHost } from "./wasm-main.js";
+import { restoreInto, takeSnapshot, twin } from "./wasm-snapshot.js";
 
 export type { WasmMainOptions, WasmSource } from "./wasm-main.js";
 
 /**
  * Runs an Undra core in this thread (the `wasm-main` mode): the in-process host plus `send(kind, payload)`, which takes
- * the framed messages a worker's script or an embedder passes along and decodes each into the host's call. `UndraCore.load`
- * runs the host itself, which has no payload decoder (ADR-057); this class is what the worker script, recovery, tests and
- * `UndraCore.attach(new WasmMainTransport(..))` use.
+ * the framed messages a worker's script or an embedder passes along and decodes each into the host's call, and the snapshot
+ * operations as methods (over the functions of `wasm-snapshot.ts`). `UndraCore.load` runs the host itself, which has no payload
+ * decoder (ADR-057); this class is what the worker script, recovery, tests and `UndraCore.attach(new WasmMainTransport(..))` use.
  */
 export class WasmMainTransport extends WasmHost implements Transport {
   send(kind: Kind, payload: Uint8Array): void {
@@ -53,10 +54,46 @@ export class WasmMainTransport extends WasmHost implements Transport {
         this.timerFired(decodeTimerFired(payload).timerId);
         return;
       case Kind.Restore:
-        this._restore(payload);
+        restoreInto(this, payload);
         return;
       default:
         throw new UndraTransportError("protocol", `cannot send a ${Kind[kind] ?? String(kind)} message to a wasm core`);
     }
+  }
+
+  /** The persisted state of every store (`undra_snapshot`, SPEC 5.9). Rejects `UndraTransportError` when the core is closed or exports no `undra_snapshot`. */
+  snapshot(): Promise<Uint8Array> {
+    try {
+      return Promise.resolve(takeSnapshot(this));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  /** `undra_snapshot`, copied out of wasm memory, at once; throws `UndraTransportError` when the core cannot be asked. */
+  takeSnapshot(): Uint8Array {
+    return takeSnapshot(this);
+  }
+
+  /**
+   * Rebuilds the stores from `bytes` (`undra_restore`). The change-sets of the observed signals the core re-delivers during the
+   * restore (ADR-023) have reached the handler when this resolves. Rejects with `UndraRestoreError` when the core refuses the
+   * bytes (it is unchanged).
+   */
+  restore(bytes: Uint8Array): Promise<void> {
+    try {
+      restoreInto(this, bytes);
+      return Promise.resolve();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  /**
+   * A new transport over the same compiled module (no recompile) and options, not started: what a restart after a trap runs on
+   * (ADR-049, `crashRecovery`). This one stays dead.
+   */
+  twin(): this {
+    return twin(this);
   }
 }
