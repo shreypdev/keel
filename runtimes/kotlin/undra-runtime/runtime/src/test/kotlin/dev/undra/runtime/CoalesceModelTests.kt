@@ -4,6 +4,8 @@ import dev.undra.runtime.support.ManualFramePacer
 import dev.undra.runtime.support.ManualMainThread
 import dev.undra.runtime.support.flushOnThisThread
 import dev.undra.runtime.support.full
+import dev.undra.runtime.support.lazyInvalidated
+import dev.undra.runtime.support.lazyValue
 import dev.undra.runtime.support.manualMirror
 import dev.undra.runtime.support.patch
 import dev.undra.runtime.testing.Suite
@@ -36,6 +38,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * mirrored value equals the core's; between those points (without corrupt patches) a signal never shows a
  * value the core never had; the `no_coalesce` signal sees a subsequence of its committed values (all of
  * them while no compaction ran), ending with the last.
+ *
+ * One signal of each store is a lazy list (ADR-043; added by the types-paging review): a commit sends an invalidation
+ * (length, version) and now and then a restart of its page server sends a full value with a new handle. ADR-031's
+ * amended fold rule (a full value supersedes everything before it, an invalidation only earlier invalidations) must
+ * never lose the handle: reverting it to "an invalidation supersedes everything" fails this model.
  */
 
 private val HANDLES = listOf(1L, 2L)
@@ -44,7 +51,9 @@ private const val STRING_LIST = 4
 private val SCALARS = listOf(1, 3)
 private const val NO_COALESCE_HANDLE = 2L
 private const val NO_COALESCE_SIGNAL = 3
-private val ALL_KEYS = U32_LISTS + STRING_LIST + SCALARS
+/** A `Lazy<T>` signal: its value is (page server handle, length, version). */
+private const val LAZY = 5
+private val ALL_KEYS = U32_LISTS + STRING_LIST + SCALARS + LAZY
 private val u32List = Codecs.vec(Codecs.u32)
 private val strList = Codecs.vec(Codecs.string)
 
@@ -63,8 +72,12 @@ private class StoreState {
     val lists = HashMap<Int, List<UInt>>().apply { for (id in U32_LISTS) put(id, emptyList()) }
     var strings: List<String> = emptyList()
     val scalars = HashMap<Int, UInt>().apply { for (id in SCALARS) put(id, 0u) }
+    var lazyHandle = 1L
+    var lazyLen = 0
+    var lazyVersion = 0uL
 
     fun render(id: Int): String = when {
+        id == LAZY -> "$lazyHandle/$lazyLen/$lazyVersion"
         id == STRING_LIST -> "#${strings.size}/" + strings.joinToString(",") { it.take(12) }
         id in U32_LISTS -> lists.getValue(id).toString()
         else -> scalars.getValue(id).toString()
@@ -95,6 +108,7 @@ private class ModelCore(val rand: ModelRng, val bulk: Boolean, val corrupt: Bool
     fun full(h: Long, id: Int): Payloads.ChangeEntry {
         val s = truth.getValue(h)
         val value = when {
+            id == LAZY -> lazyValue(s.lazyHandle, s.lazyLen, s.lazyVersion)
             id == STRING_LIST -> strList.encodeToByteArray(s.strings)
             id in U32_LISTS -> u32List.encodeToByteArray(s.lists.getValue(id))
             else -> Codecs.u32.encodeToByteArray(s.scalars.getValue(id))
@@ -110,6 +124,16 @@ private class ModelCore(val rand: ModelRng, val bulk: Boolean, val corrupt: Bool
             repeat(1 + rand(3)) {
                 val pick = rand(100)
                 when {
+                    pick >= 92 -> {
+                        // The lazy list changes (an invalidation), or its page server restarts (a full value with a new
+                        // handle). One entry per signal per change-set: after a restart in this transaction, a full value.
+                        val s = truth.getValue(h)
+                        val restart = pick >= 97 || touched[LAZY]?.op == ChangeOp.FULL
+                        if (pick >= 97) s.lazyHandle++
+                        s.lazyLen = rand(500)
+                        s.lazyVersion++
+                        touched[LAZY] = if (restart) full(h, LAZY) else lazyInvalidated(h, LAZY.toUInt(), s.lazyLen, s.lazyVersion)
+                    }
                     pick < 30 -> {
                         val id = SCALARS[rand(SCALARS.size)]
                         val v = item++
@@ -210,6 +234,19 @@ private class ModelHost(val core: ModelCore) {
         val s = state.getValue(h)
         val id = signal.toInt()
         when {
+            id == LAZY -> if (op == ChangeOp.FULL) {
+                val v = Payloads.LazyValue.decode(reader)
+                reader.finish()
+                s.lazyHandle = v.handle.raw
+                s.lazyLen = v.len.toInt()
+                s.lazyVersion = v.version
+            } else {
+                // An invalidation is relative to the page server a full value named: it keeps the handle.
+                val v = Payloads.LazyInvalidated.decode(reader)
+                reader.finish()
+                s.lazyLen = v.len.toInt()
+                s.lazyVersion = v.version
+            }
             id == STRING_LIST -> if (op == ChangeOp.FULL) {
                 s.strings = strList.decode(reader)
                 reader.finish()

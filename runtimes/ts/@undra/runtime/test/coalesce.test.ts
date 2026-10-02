@@ -336,6 +336,26 @@ describe("a drain merges per signal", () => {
       expect(seen).toEqual(["full 1", "patch 2"]);
     });
 
+    it("discards an invalidation of a signal that waits for a full value, as Swift and Kotlin do (it names a page server this host never saw)", () => {
+      const resyncs: number[] = [];
+      const errors: unknown[] = [];
+      const mirror = new Mirror({ schedule: () => {}, resync: (_h, signalId) => resyncs.push(signalId), onError: (e) => errors.push(e) });
+      const seen: string[] = [];
+      mirror.register(1n, (_id, op, value) => seen.push(`${ChangeOp[op]}:${value.length < 4 ? "" : decodeValue(codecs.u32, value)}`));
+      // A keyed patch without its operation count cannot be merged: the signal waits for a full value.
+      mirror.enqueue(cs({ signalId: 0, value: u32(1) }, { signalId: 0, op: ChangeOp.KeyedPatch, value: new Uint8Array([1, 0]) }));
+      mirror.flush();
+      expect(resyncs).toEqual([0]);
+      expect(errors).toHaveLength(1);
+      seen.length = 0;
+      mirror.enqueue(cs({ signalId: 0, op: INV, value: u32(2) }));
+      mirror.flush();
+      expect(seen).toEqual([]);
+      mirror.enqueue(cs({ signalId: 0, value: u32(3) }, { signalId: 0, op: INV, value: u32(4) }));
+      mirror.flush();
+      expect(seen).toEqual(["FullValue:3", "LazyInvalidated:4"]);
+    });
+
     it("counts each delivery: the pair is two applied entries", () => {
       const mirror = new Mirror({ schedule: () => {} });
       mirror.register(1n, () => {});

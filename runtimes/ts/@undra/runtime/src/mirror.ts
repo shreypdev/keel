@@ -580,8 +580,9 @@ export class Mirror {
         lastAwaiting = awaiting.size > 0 ? awaiting.get(entry.handle) : undefined;
       }
       if (lastAwaiting?.has(entry.signalId) === true) {
-        // Its patches are relative to a list this host never saw: wait for a full value.
-        if (entry.op === ChangeOp.KeyedPatch) continue;
+        // Its patches are relative to a list this host never saw, an invalidation to a page server it never saw:
+        // wait for a full value.
+        if (entry.op !== ChangeOp.FullValue) continue;
         lastAwaiting.delete(entry.signalId);
         if (lastAwaiting.size === 0) {
           awaiting.delete(entry.handle);
