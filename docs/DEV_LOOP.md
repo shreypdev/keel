@@ -91,7 +91,7 @@ new one starts fresh, and the line says why (`state reset: ...`):
 
 | The line says | Why | What the app does |
 |---|---|---|
-| `state reset: schema changed (was 0x.., now 0x..)` | A public type or signature changed, so the apps' bindings are not the core's. A snapshot restores by position into whatever types the new core has; across a schema change that could put wrong values in the right places, so the state is not carried (this changes when persisted-state migrations, ADR-037, land). | An app built from the old bindings reports a schema mismatch and stops (`closed(schemaMismatch)`, the bar says so). Run `undra bindgen`, rebuild the app, relaunch it. |
+| `state reset: the core refused the snapshot: store `Counter` .. signal `..`: ..` | A store's signals changed in a way that does not migrate by itself (a signal renamed or retyped, a new one without `#[undra(default)]`) and no `#[undra::migrate]` hook converts it (ADR-037). Across a schema change that only adds (methods, types, signals with a default, fields with a default or an `Option`) the state is kept: `state kept (..)`, and the app is told `Reloaded, state kept (the schema changed)`. | An app built from the old bindings reports a schema mismatch and stops (`closed(schemaMismatch)`, the bar says so). Run `undra bindgen`, rebuild the app, relaunch it. |
 | `state reset: snapshot over 16 MiB` | A core with more state than that is better reset than stalled. | The app is told its session is lost (4001), loads a new core and starts over; its dev bar says `Reloaded, state reset: snapshot over 16 MiB`. |
 | `state reset: the core refused the snapshot: ...` | The new core could not rebuild a store from the snapshot (it is unchanged: restore is all or nothing). | As above. |
 | `state reset: the previous core did not ...` | The old core could not produce a snapshot (it died, or did not answer in 15 s). | As above. |
@@ -157,7 +157,7 @@ The states are `connecting` (during `load`), `connected`, `reconnecting(attempt)
 reason is `requested` (you closed the core), `schemaMismatch`, `sessionLost` or `failed`.
 
 `onDevNotice` receives the one-line messages the dev server says about itself (`Reloaded, state kept`, `Reloaded, state
-reset: schema changed`): a `Log` record with the target `undra::dev`, sent once to every client that attaches within 30
+reset: ..`): a `Log` record with the target `undra::dev`, sent once to every client that attaches within 30
 seconds of a rebuild. It is for a status bar; the playground's and the generated apps' bars show it for four seconds. It is
 **development only and inert otherwise**: an in-process or production core never produces such a record, and each runtime
 dispatches it from its `remote` transport only. The target is the dev server's: a record your core logs under
@@ -236,7 +236,7 @@ a client (ios) asked to resume session 319c2156, which this core does not hold (
 | The status stays amber | The server is down or unreachable: check the terminal running `undra dev` (a failed rebuild keeps the old core serving, a crashed core stops the server: run it again). |
 | `adb reverse` fails or `--android` finds nothing | `adb devices`: a device must say `device`, not `unauthorized` or `offline`. With several devices set `ANDROID_SERIAL`. |
 | A web page does not reconnect | The page must be allowed to reach the address (`undra dev` accepts pages on this machine and private networks); try `127.0.0.1`, not `localhost`, and a plain `ws://` URL from an `http://` page. |
-| The app's screen resets after every save | Read the `Restarted:` line: it says whether the state was carried and, if not, why (a schema change, a state over 16 MiB, `--no-keep-state`). The app's dev bar says it too. |
+| The app's screen resets after every save | Read the `Restarted:` line: it says whether the state was carried and, if not, why (a schema change the state cannot follow, a state over 16 MiB, `--no-keep-state`). The app's dev bar says it too. |
 | `1 object not carried over`, and `refetch` is refused with a stale handle | A query handle (or another object that is not a store) does not survive a reload. Run the query again: construct the query handle again, for example by re-mounting its screen. |
 | A spinner or a `loading` flag stays on after a save | A call that was still running when the core was replaced was cancelled and left its store at the value it had written; trigger the action again. |
 | A tap right as you saved did nothing; the bar said `(1 call lost in the reload)` | Calls made while the old core was being swapped out are not run (their writes are not in the carried state); tap again. |

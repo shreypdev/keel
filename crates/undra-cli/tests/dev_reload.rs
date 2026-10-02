@@ -426,7 +426,9 @@ fn a_rebuild_keeps_the_screen_the_client_was_on() {
 }
 
 #[test]
-fn a_schema_change_resets_the_state_and_says_so() {
+fn an_additive_schema_change_keeps_the_state() {
+    // ADR-037: a restore matches signals by name and migrates what changed structurally, so a
+    // schema change (here: a method added) no longer means fresh state.
     let project = playground_copy("reload-schema");
     let dev = Dev::start(&project, &[]);
     let counter_rs = project.root.join("core/src/counter.rs");
@@ -445,10 +447,8 @@ fn a_schema_change_resets_the_state_and_says_so() {
     assert_ne!(original, edited, "the edit applies");
     std::fs::write(&counter_rs, edited).unwrap();
     let restarted = dev.wait_line("Restarted: ws://", BUILD);
-    assert!(
-        restarted.contains("state reset: schema changed (was 0x"),
-        "{restarted}"
-    );
+    eprintln!("{restarted}");
+    assert!(restarted.contains("state kept (1 store,"), "{restarted}");
     let new_hash = restarted
         .split("schema hash ")
         .nth(1)
@@ -457,7 +457,7 @@ fn a_schema_change_resets_the_state_and_says_so() {
         .expect("the new hash is printed");
     assert_ne!(new_hash, dev.hash);
 
-    // An app built from the old bindings is told so by the server's Hello, then closed (1008).
+    // An app built from the old bindings is told so by the server's Hello, then closed (1008): R7.
     let (code, _) = client.expect_close();
     assert_eq!(code, 1001);
     let mut stale = Client::connect(&dev, dev.hash, "reload-schema-token", true);
@@ -467,19 +467,68 @@ fn a_schema_change_resets_the_state_and_says_so() {
     );
     assert_eq!(stale.expect_close().0, 1008);
 
-    // The rebuilt app starts on fresh state, and is told why.
-    let mut fresh = Client::connect(&dev, new_hash, "reload-schema-fresh", false);
-    let counter = fresh.construct("Counter");
-    let values = fresh.observe(counter);
+    // The app on the new bindings finds its counter where it was, with the value it had.
+    let mut back = Client::connect(&dev, new_hash, "reload-schema-token", true);
+    let values = back.observe(counter);
     assert_eq!(
         (i32_of(&values[&COUNT]), u32_of(&values[&CHANGES])),
-        (0, 0),
-        "fresh values"
+        (5, 1),
+        "the counter survived the schema change"
     );
+    back.method(counter, "Counter", "increment", &[]);
+    back.await_count(counter, 6);
+    let notices = back.notices_after(Duration::from_millis(500));
+    assert_eq!(
+        notices,
+        ["Reloaded, state kept (the schema changed)"],
+        "{notices:?}"
+    );
+    drop(back);
+    dev.kill_and_expect_the_port_to_close();
+}
+
+#[test]
+fn a_schema_change_the_state_cannot_follow_resets_it_and_says_why() {
+    // `changes` renamed to `edits` (no `#[undra(default)]`, no hook): not structural, so the new
+    // core refuses the snapshot as a whole and starts fresh, naming the store and the signal.
+    let project = playground_copy("reload-schema-refused");
+    let dev = Dev::start(&project, &[]);
+    let counter_rs = project.root.join("core/src/counter.rs");
+
+    let mut client = Client::connect(&dev, dev.hash, "reload-refused-token", false);
+    let counter = client.construct("Counter");
+    client.method(counter, "Counter", "add", &5_i32.encode_to_vec());
+    assert_eq!(i32_of(&client.observe(counter)[&COUNT]), 5);
+
+    let original = std::fs::read_to_string(&counter_rs).unwrap();
+    let edited = original.replace("changes", "edits");
+    assert_ne!(original, edited, "the edit applies");
+    std::fs::write(&counter_rs, edited).unwrap();
+    let restarted = dev.wait_line("Restarted: ws://", BUILD);
+    eprintln!("{restarted}");
+    assert!(
+        restarted.contains("state reset: the core refused the snapshot")
+            && restarted.contains("Counter")
+            && restarted.contains("edits"),
+        "{restarted}"
+    );
+    let new_hash = restarted
+        .split("schema hash ")
+        .nth(1)
+        .and_then(|rest| rest.split(')').next())
+        .map(|hash| u64::from_str_radix(hash.trim_start_matches("0x"), 16).unwrap())
+        .expect("the new hash is printed");
+    let (code, _) = client.expect_close();
+    assert_eq!(code, 1001);
+
+    // The rebuilt app starts on fresh state, and is told why.
+    let mut fresh = Client::connect(&dev, new_hash, "reload-refused-fresh", false);
+    let counter = fresh.construct("Counter");
+    assert_eq!(i32_of(&fresh.observe(counter)[&COUNT]), 0, "fresh values");
     let notices = fresh.notices_after(Duration::from_millis(500));
     assert_eq!(notices.len(), 1, "{notices:?}");
     assert!(
-        notices[0].starts_with("Reloaded, state reset: schema changed"),
+        notices[0].starts_with("Reloaded, state reset: the core refused the snapshot"),
         "{notices:?}"
     );
     drop(fresh);

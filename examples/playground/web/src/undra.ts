@@ -85,7 +85,7 @@ export async function startUndra(): Promise<Playground> {
       adapters,
       onError,
       // `undra dev` carries the core's state across a rebuild and the runtime reconnects by itself, so the page
-      // usually stays where it is. When the state could not be carried (a schema change, a state too big), the
+      // usually stays where it is. When the state could not be carried (a change the stores cannot follow, a state too big), the
       // runtime finds a new core and says so: reload the page onto it.
       onClose: (error) => {
         if (error instanceof UndraSessionLostError) location.reload();
