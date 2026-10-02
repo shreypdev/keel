@@ -69,6 +69,10 @@ extension ContractScenarios {
             defer { ticks.stop() }
             try await waitUntil("data == 1") { ticker.data == 1 }
             try await waitUntil("data == 2", timeout: within) { ticker.data == 2 }
+            // The recorder reads the store every 5 ms and this wait every 10: the gap is read once the recorder has seen the
+            // second tick too. (The first tick is already there when the recorder starts: the handle's first fetch runs while it
+            // is made, so the recorder's first entry is that tick, and a gap read before the second entry is 0.)
+            try await waitUntil("the recorder to see the second tick") { ticks.changes.last?.value == 2 }
             let afterSecond = try fetches()
             try check(afterSecond >= 2, "ticker_fetches() after the second tick: \(afterSecond)")
             try check(ticks.lastGap >= 0.9, "the gap between the first two ticks was \(ticks.lastGap) s (expected at least 0.9 s)")
