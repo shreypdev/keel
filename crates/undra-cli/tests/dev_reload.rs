@@ -1069,7 +1069,8 @@ fn a_query_whose_parameter_type_the_edit_changes_is_not_carried_over_and_the_res
     );
     assert_ne!(original, edited, "the edit applies");
     std::fs::write(&updates_rs, edited).unwrap();
-    let restarted = dev.wait_line("Restarted: ws://", BUILD);
+    // The restart that changes the schema: a loaded machine can rebuild once before the write lands.
+    let restarted = dev.wait_restart_changing_schema(dev.hash, BUILD);
     eprintln!("{restarted}");
     assert!(restarted.contains("state kept (1 store,"), "{restarted}");
     assert!(
