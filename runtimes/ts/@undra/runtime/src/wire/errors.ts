@@ -54,10 +54,30 @@ export type WireErrorDetail =
 export type WireErrorCode = WireErrorDetail["code"];
 
 function describe(d: WireErrorDetail): string {
-  // The production form (ADR-057 lever b): the code and its values; the sentences are the development build's.
-  return Object.entries(d)
-    .map(([k, v]) => `${k}=${String(v)}`)
-    .join(" ");
+  switch (d.code) {
+    case "unexpected_eof":
+      return `unexpected end of input at offset ${d.at}: needed ${d.needed} more byte${d.needed === 1 ? "" : "s"}`;
+    case "invalid_utf8":
+      return `invalid UTF-8 in string at offset ${d.at}`;
+    case "invalid_tag":
+      return `invalid ${d.ty} tag ${d.tag} at offset ${d.at}`;
+    case "length_too_large":
+      return `length ${d.len} at offset ${d.at} exceeds the available input`;
+    case "trailing_bytes":
+      return `${d.count} trailing byte${d.count === 1 ? "" : "s"} after the end of the message`;
+    case "bad_magic":
+      return "bad magic: envelope does not start with 554e4452";
+    case "unsupported_version":
+      return `unsupported wire version ${d.version}`;
+    case "schema_mismatch":
+      return `schema mismatch: expected 0x${d.expected.toString(16).padStart(16, "0")}, got 0x${d.got.toString(16).padStart(16, "0")}`;
+    case "duplicate_key":
+      return `duplicate map key at offset ${d.at}`;
+    case "negative_duration":
+      return `negative duration (${d.nanos} ns)`;
+    case "unsafe_integer":
+      return `integer ${d.value} at offset ${d.at} is outside the JS safe integer range`;
+  }
 }
 
 /**

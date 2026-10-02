@@ -151,41 +151,70 @@ export function durationFromNanos(nanos: bigint): Duration {
 export type Uuid = string;
 
 const UUID_LEN = 36;
-/** The two hex digits of every byte. */
-const HEX: string[] = [];
-for (let i = 256; i < 512; i++) HEX.push(i.toString(16).slice(1));
+/** Character offsets of the four hyphens. */
+const HYPHENS = [8, 13, 18, 23] as const;
+
+/** Scratch text for `decodeUuid`, hyphens pre-filled; single-threaded and never re-entered. */
+const UUID_SCRATCH = new Uint8Array(UUID_LEN);
+for (const h of HYPHENS) UUID_SCRATCH[h] = 0x2d;
+const ASCII_DECODER = new TextDecoder();
 
 function hexValue(c: number): number {
   if (c >= 0x30 && c <= 0x39) return c - 0x30;
   const lower = c | 0x20;
   if (lower >= 0x61 && lower <= 0x66) return lower - 0x57;
-  return NaN;
+  return -1;
 }
 
 /**
- * Parses the canonical text form of a UUID (8-4-4-4-12 hex digits, either case) into its 16 bytes, written to `out` at
- * `offset` (a new array without `out`). Throws `RangeError` for anything else, or when the bytes do not fit.
+ * Encodes a UUID string as its 16 raw bytes (RFC 4122 big-endian order).
+ *
+ * Parsing is case-insensitive but the layout is strict: exactly 36 characters
+ * with hyphens at positions 8, 13, 18 and 23. Throws `RangeError` otherwise.
+ * Writes into `out` at `offset` when given (no allocation), else allocates a
+ * fresh 16-byte array. Returns the array that was written.
  */
 export function encodeUuid(uuid: Uuid, out?: Uint8Array, offset = 0): Uint8Array {
+  if (uuid.length !== UUID_LEN) throw new RangeError(`invalid UUID (length ${uuid.length}): ${uuid}`);
   const dst = out ?? new Uint8Array(16);
-  let o = offset;
-  let bad = uuid.length !== UUID_LEN || !Number.isInteger(offset) || offset < 0 || offset + 16 > dst.length;
-  for (let i = 0; !bad && i < UUID_LEN; i += 2) {
-    if (i === 8 || i === 13 || i === 18 || i === 23) bad = uuid.charCodeAt(i++) !== 0x2d;
-    const byte = hexValue(uuid.charCodeAt(i)) * 16 + hexValue(uuid.charCodeAt(i + 1));
-    dst[o++] = byte;
-    bad ||= byte !== byte;
+  if (!Number.isInteger(offset) || offset < 0 || offset + 16 > dst.length) {
+    throw new RangeError(`UUID does not fit at offset ${String(offset)} of ${dst.length} bytes`);
   }
-  if (bad) throw new RangeError(`invalid UUID "${uuid}" (or 16 bytes do not fit at offset ${String(offset)} of ${dst.length})`);
+  let o = offset;
+  for (let i = 0; i < UUID_LEN; ) {
+    if (i === 8 || i === 13 || i === 18 || i === 23) {
+      if (uuid.charCodeAt(i) !== 0x2d) throw new RangeError(`invalid UUID (expected '-' at ${i}): ${uuid}`);
+      i++;
+      continue;
+    }
+    const hi = hexValue(uuid.charCodeAt(i));
+    const lo = hexValue(uuid.charCodeAt(i + 1));
+    if (hi < 0 || lo < 0) throw new RangeError(`invalid UUID (bad hex digit near ${i}): ${uuid}`);
+    dst[o++] = (hi << 4) | lo;
+    i += 2;
+  }
   return dst;
 }
 
-/** The canonical lower-case text form of the 16 bytes of `bytes` at `offset`. Throws `RangeError` when there are fewer. */
+/**
+ * Decodes 16 raw bytes starting at `offset` into the canonical lowercase
+ * hyphenated string. Allocates nothing but the result string (the digits are
+ * assembled in a shared scratch buffer). Throws `RangeError` if fewer than 16
+ * bytes are available.
+ */
 export function decodeUuid(bytes: Uint8Array, offset = 0): Uuid {
   if (!Number.isInteger(offset) || offset < 0 || offset + 16 > bytes.length) {
     throw new RangeError(`need 16 bytes for a UUID at offset ${String(offset)} of ${bytes.length}`);
   }
-  let out = "";
-  for (let i = 0; i < 16; i++) out += (i === 4 || i === 6 || i === 8 || i === 10 ? "-" : "") + HEX[bytes[offset + i] as number];
-  return out;
+  let t = 0;
+  for (let i = 0; i < 16; i++) {
+    if (t === 8 || t === 13 || t === 18 || t === 23) t++;
+    // In range: offset + 16 <= bytes.length was checked above.
+    const b = bytes[offset + i] as number;
+    const hi = b >> 4;
+    const lo = b & 0x0f;
+    UUID_SCRATCH[t++] = hi < 10 ? 0x30 + hi : 0x57 + hi;
+    UUID_SCRATCH[t++] = lo < 10 ? 0x30 + lo : 0x57 + lo;
+  }
+  return ASCII_DECODER.decode(UUID_SCRATCH);
 }

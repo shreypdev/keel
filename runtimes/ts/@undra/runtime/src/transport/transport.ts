@@ -62,24 +62,7 @@ export interface TransportHandler {
  * {@link RemoteTransport}; tests and embedders can supply their own through
  * `UndraCore.attach`.
  */
-/**
- * PROTOTYPE (ADR-057 lever d4). The control messages as calls, for a transport whose core runs in this thread: nothing is
- * encoded only to be decoded again. `UndraCore` drives every transport through these; one that has only `send` is wrapped
- * by `framed` (transport/framed.ts), which encodes each into its `Kind` payload.
- */
-export interface Channel {
-  /** `Call`: the header (or the whole payload) and, apart, the encoded arguments. Copies both before it returns. */
-  sendCall(head: Uint8Array, tail?: Uint8Array): void;
-  observe(handle: bigint, signalId: number, on: boolean): void;
-  release(handle: bigint): void;
-  cancel(callId: number): void;
-  streamCredit(callId: number, credit: number): void;
-  event(portId: number, methodId: number, payload: Uint8Array): void;
-  timerFired(timerId: number): void;
-  portReply(reply: Uint8Array): void;
-}
-
-export interface Transport extends Partial<Omit<Channel, "sendCall">> {
+export interface Transport {
   /** Name of the mode, for messages and `UndraModeError` (`"wasm-main"`, `"wasm-worker"`, `"remote"`). */
   readonly mode: string;
   /**

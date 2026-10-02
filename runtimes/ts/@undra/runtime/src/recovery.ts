@@ -1,7 +1,6 @@
 import { UndraCallError, UndraUnhandledError } from "./call-error.js";
 import type { UndraCore } from "./core.js";
-import { UndraTransportError } from "./errors.js";
-import { UndraRestoreError } from "./errors-rare.js";
+import { UndraRestoreError, UndraTransportError } from "./errors.js";
 import { wrapperOf } from "./identity.js";
 import { type RecreateCall, type UndraStore, _rebindObject } from "./object.js";
 import type { UndraPanicFrame, UndraPanicReport } from "./adapters/types.js";

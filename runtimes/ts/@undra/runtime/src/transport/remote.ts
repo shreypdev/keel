@@ -1,5 +1,4 @@
-import { UndraError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
-import { UndraSessionLostError } from "../errors-rare.js";
+import { UndraError, UndraSchemaMismatchError, UndraSessionLostError, UndraTransportError } from "../errors.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 import { RUNTIME_VERSION } from "../version.js";
 import {
@@ -457,18 +456,4 @@ export class RemoteTransport implements Transport {
       this.#post(Kind.PortReply, encodePortReply({ portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));
     }
   }
-}
-
-/** PROTOTYPE (ADR-057 lever d9): the remote transport of `UndraCore.load`'s options. */
-export function remoteTransport(options: import("../core.js").LoadOptions): RemoteTransport {
-  if (options.url === undefined) throw new UndraError("options", "mode 'remote' needs the `url` option");
-  return new RemoteTransport({
-    url: options.url,
-    expectedSchemaHash: options.expectedSchemaHash,
-    ...(options.platform !== undefined && { platform: options.platform }),
-    ...(options.devtools !== undefined && { devtools: options.devtools }),
-    ...(options.webSocket !== undefined && { webSocket: options.webSocket }),
-    ...(options.handshakeTimeoutMs !== undefined && { handshakeTimeoutMs: options.handshakeTimeoutMs }),
-    ...(options.reconnect !== undefined && { reconnect: options.reconnect }),
-  });
 }

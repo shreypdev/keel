@@ -1,5 +1,5 @@
 import { UndraWriter } from "../wire/index.js";
-import { CONNECTIVITY_CHANGED, CONNECTIVITY_PORT, LIFECYCLE_CHANGED, LIFECYCLE_PORT } from "./port-literals.js";
+import { PortIds } from "./ids.js";
 import type { Adapters } from "./types.js";
 
 /*
@@ -45,14 +45,14 @@ export function emitConnectivity(core: EventSink, online: boolean, kind: NetKind
   const w = new UndraWriter(4);
   w.writeBool(online);
   writeNetKind(w, kind);
-  core.event(CONNECTIVITY_PORT, CONNECTIVITY_CHANGED, w.finish());
+  core.event(PortIds.Connectivity.portId, PortIds.Connectivity.changed, w.finish());
 }
 
 /** Sends `Lifecycle.changed(state)` to the core. */
 export function emitLifecycle(core: EventSink, state: AppState): void {
   const w = new UndraWriter(2);
   writeAppState(w, state);
-  core.event(LIFECYCLE_PORT, LIFECYCLE_CHANGED, w.finish());
+  core.event(PortIds.Lifecycle.portId, PortIds.Lifecycle.changed, w.finish());
 }
 
 /**

@@ -1,6 +1,4 @@
-import { WEB_CRYPTO_REQUIRED, hasCryptoRandom } from "../adapters/system.js";
-import { UndraError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
-import { UndraRestoreError } from "../errors-rare.js";
+import { UndraError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
 import { isTrap } from "../panic.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 import {
@@ -15,7 +13,7 @@ import {
   encodePortReply,
 } from "../wire/index.js";
 import type { PortImpl } from "../port.js";
-import { portName } from "../port-dispatch.js";
+import { syncPortRefusal } from "../port-dispatch.js";
 import type { RestartResult, SnapshotPolicy } from "../recovery.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
 import type { WasmSource } from "./wasm-main.js";
@@ -514,31 +512,4 @@ export class WasmWorkerTransport implements Transport {
       this.#post(Kind.PortReply, encodePortReply({ portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));
     }
   }
-}
-
-/** PROTOTYPE (ADR-057 lever d9): the worker transport of `UndraCore.load`'s options (the checks and the option mapping live with the mode). */
-export function workerTransport(options: import("../core.js").LoadOptions, recovery: WasmWorkerOptions["recovery"]): WasmWorkerTransport {
-  if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-worker' needs the `wasm` option");
-  if (!hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
-  const worker = options.worker;
-  const { create, ports } = (typeof worker === "object" && !("postMessage" in worker) ? worker : { create: worker }) as import("../core.js").WorkerModeOptions;
-  return new WasmWorkerTransport({
-    wasm: options.wasm,
-    expectedSchemaHash: options.expectedSchemaHash,
-    ...(create && { worker: create }),
-    ...(ports !== undefined && { ports }),
-    ...(recovery && { recovery }),
-    ...(options.platform !== undefined && { platform: options.platform }),
-    ...(options.devtools !== undefined && { devtools: options.devtools }),
-    ...(options.logLevel !== undefined && { logLevel: options.logLevel }),
-    ...(options.handshakeTimeoutMs !== undefined && { startTimeoutMs: options.handshakeTimeoutMs }),
-  });
-}
-
-/**
- * The text of the error that refuses a synchronous port on a thread the core cannot wait for (`wasm-worker`, ADR-049):
- * the port and the fix (the other fix, mode `"wasm-main"`, is in the docs of `registerPort`).
- */
-function syncPortRefusal(portId: number, impl?: Pick<PortImpl, "name">): string {
-  return `${portName(portId, impl)} is synchronous: in wasm-worker mode, register it in LoadOptions.worker.ports`;
 }

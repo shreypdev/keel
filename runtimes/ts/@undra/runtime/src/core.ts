@@ -2,6 +2,7 @@ import { lightAdapters } from "./adapters/browser-events.js";
 import { UNNAMED_NAMESPACE, checkNamespace } from "./adapters/names.js";
 import { defaultPorts } from "./adapters/default-ports.js";
 import { startEventSources } from "./adapters/events.js";
+import { PortIds } from "./adapters/ids.js";
 import { WEB_CRYPTO_REQUIRED, consoleLog, hasCryptoRandom } from "./adapters/system.js";
 import type { Adapters, AdapterOverrides, UndraBackgroundReport, UndraBackgroundStats, UndraPanicReport } from "./adapters/types.js";
 import {
@@ -9,6 +10,7 @@ import {
   UndraModeError,
   UndraReplyError,
   UndraSchemaMismatchError,
+  UndraSessionLostError,
   UndraTransportError,
 } from "./errors.js";
 import { nextCallId } from "./callid.js";
@@ -22,20 +24,32 @@ import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
 import { dispatchPortCall, portOperation } from "./port-dispatch.js";
 import { Signal } from "./signal.js";
-import type { StreamSupport } from "./stream-support.js";
+import { StreamCall } from "./stream.js";
 import type { ReconnectOptions, WebSocketFactory } from "./transport/remote.js";
-import type { Channel, PortOutcome, Transport, TransportHandler } from "./transport/transport.js";
-import { WasmHost, type WasmMainOptions, type WasmSource } from "./transport/wasm-main.js";
+import type { PortOutcome, Transport, TransportHandler } from "./transport/transport.js";
+import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
 import type { WorkerLike } from "./transport/wasm-worker.js";
 import {
   ALL_SIGNALS,
   CallTarget,
   type Handle,
   type HelloPayload,
+  Kind,
   ReplyStatus,
+  StreamFlag,
   type PortCallPayload,
+  type StreamFailure,
   codecs,
+  decodeStreamFailure,
   decodeValue,
+  encodeCall,
+  encodeCancel,
+  encodeEvent,
+  encodeObserve,
+  encodeRelease,
+  encodeStreamCredit,
+  encodeTimerFired,
+  streamFailureReplyBody,
 } from "./wire/index.js";
 
 /** How the core is reached (SPEC 17.1). */
@@ -88,6 +102,9 @@ export interface UndraStats {
 
 /** How long the runtime lets the core drain its background work when a page goes to the background (ADR-046 decision 3.4), in ms. */
 const PAGE_BACKGROUND_MS = 1000;
+
+/** The `Log` target of the messages `undra dev` addresses to the developer (ADR-053); see `AttachOptions.onDevNotice`. */
+const DEV_NOTICE_TARGET = "undra::dev";
 
 /** Why a core is `closed`: the app closed it, its schema is not the bindings', the dev server lost its session (ADR-051), or the connection failed for good. */
 export type ConnectionClosedReason = "requested" | "schemaMismatch" | "sessionLost" | "failed";
@@ -280,13 +297,9 @@ class DirectCall implements PendingCall {
   }
 }
 
-/** A stream's entry in the pending map: the stream support (`stream-support.ts`) owns what happens to it. */
-export interface PendingStream {
+interface PendingStream {
   readonly kind: "stream";
-  /** The reply to the stream's call (`StreamOpened`, or its failure). */
-  reply(status: number, body: Uint8Array): void;
-  reject(error: unknown): void;
-  cleanup?: undefined;
+  readonly stream: StreamCall;
 }
 
 const UNLOADED_MESSAGE =
@@ -354,32 +367,12 @@ function writeHead(out: Uint8Array, target: CallTargetArg, methodId: number, cal
   put32(out, 13, callId);
 }
 
-/** A `Call` payload (SPEC 3.3) in one allocation: a free function or a method with its arguments, or a page call (no arguments, 21 bytes). */
-export function encodeTarget(target: CallTargetArg, methodId: number, callId: number, args: Uint8Array): Uint8Array {
-  if ((target as CallTargetRef).target === CallTarget.LazyListPage) {
-    const page = target as PageTarget;
-    const out = new Uint8Array(21);
-    out[0] = CallTarget.LazyListPage;
-    putHandle(out, 1, page.handle);
-    put32(out, 9, page.offset);
-    put32(out, 13, page.limit);
-    put32(out, 17, callId);
-    return out;
-  }
+/** A `Call` payload (SPEC 3.3) for a free function or a method, in one allocation: `encodeCall` without its writer. */
+function encodeTarget(target: CallTargetArg, methodId: number, callId: number, args: Uint8Array): Uint8Array {
+  if ((target as CallTargetRef).target === CallTarget.LazyListPage) return encodeCall({ ...(target as PageTarget), callId });
   const out = new Uint8Array(HEAD_LEN + args.length);
   writeHead(out, target, methodId, callId);
   if (args.length > 0) out.set(args, HEAD_LEN);
-  return out;
-}
-
-/** The `Call` payload of a constructor (SPEC 3.3): target u8, type id u32, method id u32, call id u32, the arguments. */
-function encodeConstructor(typeId: number, methodId: number, callId: number, args: Uint8Array): Uint8Array {
-  const out = new Uint8Array(13 + args.length);
-  out[0] = CallTarget.Constructor;
-  put32(out, 1, typeId);
-  put32(out, 5, methodId);
-  put32(out, 9, callId);
-  out.set(args, 13);
   return out;
 }
 
@@ -391,9 +384,6 @@ function encodeConstructor(typeId: number, methodId: number, callId: number, arg
 function replyBody(reply: Uint8Array): Uint8Array {
   return reply.length <= 64 ? reply.slice(5) : reply.subarray(5);
 }
-
-/** What loads on its first use: `stats`, `snapshot`, `restore`, `runInBackground`. */
-const extras = () => import("./extras.js");
 
 /** Overlays `overrides` on `base`: a value replaces, `null` removes. */
 function mergeAdapters(base: Partial<Adapters>, overrides: AdapterOverrides | undefined): Partial<Adapters> {
@@ -461,7 +451,21 @@ export class UndraCore {
   /** The placeholder `shared` returns while no core is loaded: a core that was closed from the start. */
   private static _placeholder(): UndraCore {
     if (UndraCore._unloaded === null) {
-      const core = new UndraCore({ mode: "wasm-main", synchronous: true, close() {} } as unknown as Transport & Channel, { expectedSchemaHash: 0n, shared: false }, {});
+      const gone = (): never => {
+        throw new UndraTransportError("closed", UNLOADED_MESSAGE);
+      };
+      const core = new UndraCore(
+        {
+          mode: "wasm-main",
+          synchronous: true,
+          start: () => Promise.reject(new UndraTransportError("closed", UNLOADED_MESSAGE)),
+          send: gone,
+          callSync: gone,
+          close: () => {},
+        },
+        { expectedSchemaHash: 0n, shared: false },
+        {},
+      );
       core._closed = true;
       core._closedMessage = UNLOADED_MESSAGE;
       UndraCore._unloaded = core;
@@ -494,23 +498,65 @@ export class UndraCore {
     // The worker keeps the snapshots of a core in `wasm-worker` mode: it is told the policy (data, not code).
     const recovery = options.recovery?.options;
     let transport: Transport;
-    const mode = options.mode;
-    if (mode === "wasm-main") {
-      if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-main' needs the `wasm` option");
-      // The core's only random source is the `random` import: refuse before instantiating rather than let its
-      // `Rng` fail at the first idempotency key (ADR-049). An app that supplies its own `rng` adapter has one.
-      if (options.adapters?.rng == null && !hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
-      transport = new WasmHost(options as WasmMainOptions, adapters, (error) => {
-        adapters.log?.log(4, "undra::runtime", `import failed: ${errorMessage(error)}`);
-      }) as unknown as Transport;
-    } else if (mode === "wasm-worker") {
-      // Fetched when an app asks for this mode; the module checks its own options.
-      transport = (await import("./transport/wasm-worker.js")).workerTransport(options, recovery);
-    } else if (mode === "remote") {
-      // Fetched when an app asks for this mode (a development page served by `undra dev`, a native core over a socket), not by every page.
-      transport = (await import("./transport/remote.js")).remoteTransport(options);
-    } else {
-      throw new UndraError("options", `unknown mode '${String(mode)}'`);
+    switch (options.mode) {
+      case "wasm-main": {
+        if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-main' needs the `wasm` option");
+        // The core's only random source is the `random` import: refuse before instantiating rather than let its
+        // `Rng` fail at the first idempotency key (ADR-049). An app that supplies its own `rng` adapter has one.
+        if (options.adapters?.rng == null && !hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
+        transport = new WasmMainTransport({
+          wasm: options.wasm,
+          expectedSchemaHash: options.expectedSchemaHash,
+          ...(options.platform !== undefined && { platform: options.platform }),
+          ...(options.devtools !== undefined && { devtools: options.devtools }),
+          ...(options.logLevel !== undefined && { logLevel: options.logLevel }),
+          ...(adapters.clock && { clock: adapters.clock }),
+          ...(adapters.rng && { rng: adapters.rng }),
+          ...(adapters.timer && { timer: adapters.timer }),
+          onError: (error) => {
+            adapters.log?.log(4, "undra::runtime", `import failed: ${errorMessage(error)}`);
+          },
+        });
+        break;
+      }
+      case "wasm-worker": {
+        if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-worker' needs the `wasm` option");
+        // Checked here, before the worker is spawned; the worker reads its own `crypto` (ADR-049).
+        if (!hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
+        const { WasmWorkerTransport } = await import("./transport/wasm-worker.js");
+        // A Worker (anything with `postMessage`) or a function creating one is `{ create }` in short.
+        const worker = options.worker;
+        const { create, ports } = (typeof worker === "object" && !("postMessage" in worker) ? worker : { create: worker }) as WorkerModeOptions;
+        transport = new WasmWorkerTransport({
+          wasm: options.wasm,
+          expectedSchemaHash: options.expectedSchemaHash,
+          ...(create && { worker: create }),
+          ...(ports !== undefined && { ports }),
+          ...(recovery && { recovery }),
+          ...(options.platform !== undefined && { platform: options.platform }),
+          ...(options.devtools !== undefined && { devtools: options.devtools }),
+          ...(options.logLevel !== undefined && { logLevel: options.logLevel }),
+          ...(options.handshakeTimeoutMs !== undefined && { startTimeoutMs: options.handshakeTimeoutMs }),
+        });
+        break;
+      }
+      case "remote": {
+        if (options.url === undefined) throw new UndraError("options", "mode 'remote' needs the `url` option");
+        // Fetched when an app asks for this mode (a development page served by `undra dev`, a native core over a socket), not by every page.
+        const { RemoteTransport } = await import("./transport/remote.js");
+        transport = new RemoteTransport({
+          url: options.url,
+          expectedSchemaHash: options.expectedSchemaHash,
+          ...(options.platform !== undefined && { platform: options.platform }),
+          ...(options.devtools !== undefined && { devtools: options.devtools }),
+          ...(options.webSocket !== undefined && { webSocket: options.webSocket }),
+          ...(options.handshakeTimeoutMs !== undefined && { handshakeTimeoutMs: options.handshakeTimeoutMs }),
+          ...(options.reconnect !== undefined && { reconnect: options.reconnect }),
+        });
+        break;
+      }
+      default:
+        throw new UndraError("options", `unknown mode '${String((options as { mode: unknown }).mode)}'`);
     }
     return UndraCore._attach(transport, options, adapters);
   }
@@ -527,13 +573,7 @@ export class UndraCore {
   }
 
   private static async _attach(transport: Transport, options: CoreOptions, adapters: Partial<Adapters>): Promise<UndraCore> {
-    // A transport that only has `send(kind, payload)` (remote, worker, a custom one) is driven through the framed adapter.
-    const framing = transport.observe === undefined || !transport.synchronous ? await import("./transport/framed.js") : undefined;
-    const channel = transport.observe === undefined ? framing!.framed(transport) : (transport as Transport & Channel);
-    const core = new UndraCore(channel, options, adapters);
-    // A core that answers later resolves `observe` when the initial change-set was applied: the mirror's waiters.
-    if (!transport.synchronous) core.mirror._w = framing!.mirrorWaiters(core.mirror);
-    core._ext = framing?.extension;
+    const core = new UndraCore(transport, options, adapters);
     try {
       await core._start();
     } catch (error) {
@@ -549,20 +589,17 @@ export class UndraCore {
   /** What the core said in its `Hello` (for wasm modes, synthesised from the module). Set once `load` resolves. */
   hello: HelloPayload = { undraVersion: "", schemaHash: 0n, platform: "", mode: "" };
 
-  /** @internal */
-  readonly _transport: Transport & Channel;
+  private readonly _transport: Transport;
   private readonly _options: CoreOptions;
   private readonly _adapters: Partial<Adapters>;
   private readonly _observeTimeoutMs: number;
   private readonly _ports = new Map<number, PortImpl>();
-  /** @internal */
-  readonly _pending = new Map<number, PendingCall | PendingStream>();
+  private readonly _pending = new Map<number, PendingCall | PendingStream>();
   private readonly _handles = new Set<Handle>();
   /** The signals the app observes, per handle: what a reconnect observes again. */
-  /** @internal */
-  readonly _observed = new Map<Handle, Set<number>>();
-  /** @internal What a core that is not in this thread adds (`transport/framed.ts`): reconnects, its ports, the dev notice. */
-  _ext: import("./transport/framed.js").CoreExtension | undefined;
+  private readonly _observed = new Map<Handle, Set<number>>();
+  /** References given back while the connection was down, one per reference: released in the core once it is back. */
+  private readonly _releasedWhileDown: Handle[] = [];
   /** @internal How many times crash recovery restarted the core: a wrapper's finalizer compares it with the count at its birth. */
   _era = 0;
   private readonly _connection = new Signal<ConnectionState>({ kind: "connecting" });
@@ -571,8 +608,7 @@ export class UndraCore {
   private _nextCallId = 0;
   private _closed = false;
   /** What a call on this closed core says; the default is "the core is closed". */
-  /** @internal */
-  _closedMessage = "the core is closed";
+  private _closedMessage = "the core is closed";
   private _reporting = false;
   /** The failures of calls the `onError` handler started (see `report`): reported, they are only logged. */
   private readonly _handlerFailures = new WeakSet<object>();
@@ -584,12 +620,12 @@ export class UndraCore {
   /** A background run the page started is in flight. */
   private _backgroundRunning = false;
 
-  private constructor(transport: Transport & Channel, options: CoreOptions, adapters: Partial<Adapters>) {
+  private constructor(transport: Transport, options: CoreOptions, adapters: Partial<Adapters>) {
     this._options = options;
     this._adapters = adapters;
     // With `recovery`, the core runs over the layer that restarts it after a trap (ADR-049; `crashRecovery`).
     this._transport =
-      (options.recovery?.attach(
+      options.recovery?.attach(
         transport,
         {
           core: this,
@@ -606,7 +642,7 @@ export class UndraCore {
           ports: this._ports,
         },
         options.onCoreRestarted,
-      ) as (Transport & Channel) | undefined) ?? transport;
+      ) ?? transport;
     this._notifyConnection(this._connection.peek());
     this._observeTimeoutMs = options.observeTimeoutMs ?? DEFAULT_OBSERVE_TIMEOUT_MS;
     this.mirror = new Mirror({
@@ -724,19 +760,9 @@ export class UndraCore {
    * that it panicked, cancelled the stream or refused it (ADR-036).
    */
   stream(target: CallTargetArg, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array> {
-    const core = this;
-    return {
-      [Symbol.asyncIterator]: () =>
-        core._streams?.open(core, target, methodId, args) ??
-        // No `features: [streams]` (a core loaded without its generated entry): the support loads on the first stream.
-        (async function* () {
-          yield* (core._streams = (await import("./stream-support.js")).streams).open(core, target, methodId, args);
-        })(),
-    };
+    return { [Symbol.asyncIterator]: () => this._openStream(target, methodId, args) };
   }
 
-  /** @internal The stream support, once a feature or the first stream installed it. */
-  _streams: StreamSupport | undefined;
   /**
    * Runs a constructor (`typeId` names the object type, `methodId` the
    * constructor) and resolves with the new object's handle. Rejects like `call`,
@@ -744,7 +770,9 @@ export class UndraCore {
    * with the null handle.
    */
   async construct(typeId: number, methodId: number, args: Uint8Array): Promise<Handle> {
-    const body = await this._request((callId) => encodeConstructor(typeId, methodId, callId, args));
+    const body = await this._request((callId) =>
+      encodeCall({ target: CallTarget.Constructor, typeId, methodId, callId, args }),
+    );
     const handle = decodeValue(codecs.u64, body);
     if (handle === 0n) throw new UndraTransportError("protocol", "the core returned the null handle for a constructor");
     this._handles.add(handle);
@@ -764,7 +792,7 @@ export class UndraCore {
   observe(handle: Handle, signalId: number, on: boolean): Promise<void> {
     try {
       this._assertOpen();
-      this._transport.observe(handle, signalId, on);
+      this._transport.send(Kind.Observe, encodeObserve({ handle, signalId, on }));
     } catch (error) {
       return Promise.reject(error);
     }
@@ -774,7 +802,7 @@ export class UndraCore {
       this.mirror.flush();
       return Promise.resolve();
     }
-    return on ? this.mirror._w!.when(handle, signalId, this._observeTimeoutMs) : Promise.resolve();
+    return on ? this.mirror.whenObserved(handle, signalId, this._observeTimeoutMs) : Promise.resolve();
   }
 
   /** Releases an object handle: the store is unregistered from the mirror and the core drops its reference. Unknown handles and a closed core are ignored. */
@@ -793,10 +821,13 @@ export class UndraCore {
    */
   _giveBack(handle: Handle): void {
     if (this._closed) return;
-    // While a `remote` core reconnects it keeps the object for us (ADR-051); the extension releases it when the connection is back.
-    if (this._ext?.held(this, handle)) return;
+    if (this._connection.peek().kind === "reconnecting") {
+      // The core keeps the object for us (ADR-051); it is released when the connection is back.
+      this._releasedWhileDown.push(handle);
+      return;
+    }
     try {
-      this._transport.release(handle);
+      this._transport.send(Kind.Release, encodeRelease({ handle }));
     } catch (error) {
       this._reportError("release", error);
     }
@@ -830,13 +861,13 @@ export class UndraCore {
   /** Sends a host-to-core event of an event port (`Connectivity.changed`, `Lifecycle.changed`, ...). Throws {@link UndraTransportError} when the core is closed. */
   event(portId: number, methodId: number, payload: Uint8Array): void {
     this._assertOpen();
-    this._transport.event(portId, methodId, payload);
+    this._transport.send(Kind.Event, encodeEvent({ portId, methodId, payload }));
   }
 
   /** Tells the core that a timer it set through a foreign `Timer` port is due (see `timerPort`). Wasm cores own their timers and do not need this. */
   timerFired(timerId: number): void {
     this._assertOpen();
-    this._transport.timerFired(timerId);
+    this._transport.send(Kind.TimerFired, encodeTimerFired({ timerId }));
   }
 
   /**
@@ -877,7 +908,7 @@ export class UndraCore {
    */
   report(error: unknown, operation: string): void {
     const unhandled = new UndraUnhandledError(operation, UndraCallError.asCallError(error), error);
-    if (this._ext?.down(this, unhandled.error)) {
+    if (this._isConnectionDown(unhandled.error)) {
       this._log(3, "undra::runtime", `${unhandled.message} (the connection to the core is down: see UndraCore.connection)`);
       return;
     }
@@ -899,9 +930,58 @@ export class UndraCore {
     }
   }
 
-  /** Live counters of this core; see {@link UndraStats}. (Built by a module that loads on the first call.) */
+  /**
+   * Whether `error` is the connection of a `remote` core being down, which {@link UndraCore.connection} already reports:
+   * the core is `reconnecting`, or `closed` for a reason other than the app's own `close()`. A wasm core that trapped is
+   * not a connection, and a core the app closed is a programming error: both are still reported.
+   */
+  private _isConnectionDown(error: UndraCallError): boolean {
+    if (error.kind !== "unavailable" || this._transport.mode !== "remote") return false;
+    const state = this._connection.peek();
+    return state.kind === "reconnecting" || (state.kind === "closed" && state.reason !== "requested");
+  }
+
+  /** Live counters of this core; see {@link UndraStats}. */
   async stats(): Promise<UndraStats> {
-    return (await extras()).stats(this, this._transport, this._pending, this._handles);
+    let core: CoreStatsJson | null = null;
+    const json = this._closed ? null : await this._transport.stats?.().catch(() => null);
+    if (typeof json === "string") {
+      try {
+        const parsed: unknown = JSON.parse(json);
+        if (typeof parsed === "object" && parsed !== null) core = parsed as CoreStatsJson;
+      } catch {
+        core = null;
+      }
+    }
+    let calls = 0;
+    let streams = 0;
+    for (const p of this._pending.values()) {
+      if (p.kind === "call") calls++;
+      else streams++;
+    }
+    const coreHandles = core?.live_handles;
+    const count = (value: unknown): number => (typeof value === "number" ? value : 0);
+    const background = (core?.background ?? {}) as CoreStatsJson;
+    const hostRefs = core?.host_refs;
+    return {
+      liveHandles: typeof coreHandles === "number" ? coreHandles : this._handles.size,
+      hostRefs: typeof hostRefs === "number" ? hostRefs : this._handles.size,
+      pendingCalls: calls,
+      openStreams: streams,
+      mirroredStores: this.mirror.size,
+      droppedEntries: this.mirror.dropped,
+      mirror: this.mirror.stats(),
+      core,
+      panicReports: count(core?.panic_reports),
+      background: {
+        tasks: count(background.tasks),
+        pending: count(background.pending),
+        runs: count(background.runs),
+        finished: count(background.finished),
+        replayed: count(background.replayed),
+        refetched: count(background.refetched),
+      },
+    };
   }
 
   /**
@@ -923,7 +1003,7 @@ export class UndraCore {
   async runInBackground(deadlineMs: number, options: { readonly signal?: AbortSignal } = {}): Promise<UndraBackgroundReport> {
     try {
       // Loaded on demand (`background.ts`): a hello page, whose core has no background task, never runs it (ADR-052).
-      return await (await extras()).runInBackground(this, deadlineMs, options.signal);
+      return await (await import("./background.js")).runInBackground(this, deadlineMs, options.signal);
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
@@ -938,15 +1018,26 @@ export class UndraCore {
    */
   async snapshot(): Promise<Uint8Array> {
     this._assertOpen();
-    return (await extras()).snapshot(this._transport);
+    const transport = this._transport;
+    if (transport.snapshot === undefined) throw new UndraModeError("snapshot", transport.mode);
+    return transport.snapshot();
   }
 
   /**
-   * Rebuilds the stores from `bytes` (a `snapshot`); the handles the app holds stay valid. (See the class documentation.)
+   * Rebuilds the stores from `bytes` (a `snapshot`); the handles the app holds stay valid. Resolves
+   * after the restored values reached the stores (the core re-delivers the observed signals, and
+   * the mirror is flushed, so code after `await core.restore(..)` reads the restored values). A
+   * call or stream in flight on a store the restore replaced ends as cancelled by the core
+   * (reply status 3; a stream ends with a flag-3 failure of status 3); an object that is not a store becomes a
+   * stale handle. Rejects with `UndraRestoreError` when the core refuses the bytes, in which case
+   * it is unchanged and still usable, with {@link UndraTransportError} when the core is closed, and
+   * with {@link UndraModeError} over a transport that cannot restore (`remote`).
    */
   async restore(bytes: Uint8Array): Promise<void> {
     this._assertOpen();
-    await (await extras()).restore(this._transport, bytes);
+    const transport = this._transport;
+    if (transport.restore === undefined) throw new UndraModeError("restore", transport.mode);
+    await transport.restore(bytes);
     // Read-your-writes (docs/SPEC.md section 11): what the restore delivered is applied before the caller resumes.
     this.mirror.flush();
   }
@@ -964,8 +1055,16 @@ export class UndraCore {
 
   private async _start(): Promise<void> {
     const reporterLoaded = this._loadPanics();
-    // What only a core that is not in this thread needs before and after its Hello (`transport/framed.ts`).
-    const started = await this._ext?.starting(this, this._options, this._adapters, this._ports);
+    // In `wasm-worker` the core's Clock, Rng and timers are the worker's (ADR-049): explicit adapters for them are said not to reach it.
+    const given = (["clock", "rng", "timer"] as const).filter((name) => this._options.adapters?.[name] != null);
+    if (given.length > 0 && this._transport.mode === "wasm-worker") {
+      this._log(3, "undra::worker", `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`);
+    }
+    // What a native core is served by ports built from a module that loads on demand (`adapters/ports.js`): its `Diagnostics` port, to which
+    // it reports each panic it contained (ADR-046 decision 4.2), and the Timer port of an explicit adapter. Fetched before the transport
+    // starts, so that they are registered before the first message after the Hello can reach them. A wasm core needs neither: it traps.
+    const ports = this._transport.mode.startsWith("wasm") ? undefined : await import("./adapters/ports.js");
+    ports?.serveDiagnostics(this, this._ports, this._options.onPanic, this._adapters.log);
     const hello = await this._transport.start(this._handler);
     if (hello.schemaHash !== this._options.expectedSchemaHash) {
       throw new UndraSchemaMismatchError(this._options.expectedSchemaHash, hello.schemaHash);
@@ -974,7 +1073,19 @@ export class UndraCore {
     await reporterLoaded;
     this.hello = hello;
     this._setConnection({ kind: "connected" });
-    started?.();
+    if (ports !== undefined && this._transport.mode === "remote" && this._options.adapters?.timer) {
+      // A native core normally times itself; an explicit Timer adapter is a request to serve its Timer port.
+      this._ports.set(
+        PortIds.Timer.portId,
+        ports.timerPort(this._options.adapters.timer, (timerId) => {
+          try {
+            this.timerFired(timerId);
+          } catch (error) {
+            this._reportError("timer", error);
+          }
+        }),
+      );
+    }
     this._stopEvents = startEventSources(
       this,
       this._adapters,
@@ -996,9 +1107,8 @@ export class UndraCore {
   private _backgroundWindow(): void {
     if (this._backgroundRunning || this._options.backgroundRun === false || typeof document === "undefined") return;
     this._backgroundRunning = true;
-    // Only `background.pending` of the core's own statistics: the full `stats()` is a module of its own.
-    Promise.resolve(this._transport.stats?.())
-      .then((json) => ((JSON.parse(json ?? "{}") as { background?: { pending?: number } }).background?.pending ?? 0) > 0 ? this.runInBackground(PAGE_BACKGROUND_MS) : undefined)
+    this.stats()
+      .then((stats) => (stats.background.pending > 0 ? this.runInBackground(PAGE_BACKGROUND_MS) : undefined))
       .catch((error: unknown) => {
         if (!this._closed) this._reportError("runInBackground", error);
       })
@@ -1041,13 +1151,16 @@ export class UndraCore {
   }
 
   /** Fails every call, stream and `observe` that waits for the core with `failure`; returns how many calls and streams there were. */
-  /** @internal */
-  _failInFlight(failure: Error): number {
+  private _failInFlight(failure: Error): number {
     const pending = [...this._pending.values()];
     this._pending.clear();
     for (const p of pending) {
-      p.cleanup?.();
-      p.reject(failure);
+      if (p.kind === "call") {
+        p.cleanup?.();
+        p.reject(failure);
+      } else {
+        p.stream.fail(failure);
+      }
     }
     this.mirror.failWaiters(failure);
     return pending.length;
@@ -1064,7 +1177,7 @@ export class UndraCore {
   private _lostForGood(error: Error): void {
     if (this._closed) return;
     const why: ConnectionClosedReason =
-      error instanceof UndraSchemaMismatchError ? "schemaMismatch" : (error as Partial<UndraError>).kind === "sessionLost" ? "sessionLost" : "failed";
+      error instanceof UndraSchemaMismatchError ? "schemaMismatch" : error instanceof UndraSessionLostError ? "sessionLost" : "failed";
     this._dispose(error, why);
     try {
       this._options.onClose?.(error);
@@ -1092,8 +1205,40 @@ export class UndraCore {
     return report;
   }
 
-  /** @internal */
-  _setConnection(state: ConnectionState): void {
+  /** The connection dropped and the transport reconnects: what was in flight is lost, the core stays open. */
+  private _reconnecting(attempt: number, error: Error): void {
+    if (this._closed) return;
+    if (attempt === 1) {
+      this._failInFlight(
+        new UndraTransportError("closed", `the connection to the core was lost (${error.message}); reconnecting`, { cause: error }),
+      );
+    }
+    this._setConnection({ kind: "reconnecting", attempt, error });
+  }
+
+  /**
+   * The connection is back: release what was released meanwhile and observe what the app observes
+   * again. The core answers each `Observe` with the current values, so every mirror converges.
+   */
+  private _reconnected(hello: HelloPayload): void {
+    if (this._closed) return;
+    this.hello = hello;
+    try {
+      for (const handle of this._releasedWhileDown) this._transport.send(Kind.Release, encodeRelease({ handle }));
+      this._releasedWhileDown.length = 0;
+      for (const [handle, signals] of this._observed) {
+        for (const signalId of signals) this._transport.send(Kind.Observe, encodeObserve({ handle, signalId, on: true }));
+      }
+    } catch (error) {
+      // The connection dropped again already: not connected after all. The transport reports the loss and the
+      // next reconnect replays.
+      this._reportError("reconnect", error);
+      return;
+    }
+    this._setConnection({ kind: "connected" });
+  }
+
+  private _setConnection(state: ConnectionState): void {
     this._connection._set(state);
     this._notifyConnection(state);
   }
@@ -1110,14 +1255,13 @@ export class UndraCore {
   private _resync(handle: Handle, signalId: number): void {
     if (this._closed) return;
     try {
-      this._transport.observe(handle, signalId, true);
+      this._transport.send(Kind.Observe, encodeObserve({ handle, signalId, on: true }));
     } catch (error) {
       this._reportError("resync", error);
     }
   }
 
-  /** @internal */
-  _allocCallId(): number {
+  private _allocCallId(): number {
     this._nextCallId = nextCallId(this._nextCallId, (id) => this._pending.has(id));
     return this._nextCallId;
   }
@@ -1169,7 +1313,7 @@ export class UndraCore {
           if (orphan === undefined) this._pending.delete(callId);
           else entry.resolve = orphan;
           try {
-            this._transport.cancel(callId);
+            this._transport.send(Kind.Cancel, encodeCancel({ callId }));
           } catch {
             // The channel is gone; the core cancels with it.
           }
@@ -1180,7 +1324,7 @@ export class UndraCore {
         };
       }
       try {
-        this._transport.sendCall(encode(callId));
+        this._transport.send(Kind.Call, encode(callId));
       } catch (error) {
         if (this._pending.get(callId) === entry) {
           this._pending.delete(callId);
@@ -1202,11 +1346,12 @@ export class UndraCore {
     const entry = new DirectCall();
     this._pending.set(callId, entry);
     try {
-      if ((target as CallTargetRef).target === CallTarget.LazyListPage) {
-        this._transport.sendCall(encodeTarget(target, methodId, callId, args));
+      const transport = this._transport;
+      if (transport.sendCall === undefined) {
+        transport.send(Kind.Call, encodeTarget(target, methodId, callId, args));
       } else {
         writeHead(this._head, target, methodId, callId);
-        this._transport.sendCall(this._head, args);
+        transport.sendCall(this._head, args);
       }
     } catch (error) {
       // A send that fails before the core answered fails the call. One that fails after (a trap in the same export, the
@@ -1224,6 +1369,33 @@ export class UndraCore {
     });
   }
 
+  private _openStream(target: CallTargetArg, methodId: number, args: Uint8Array): StreamCall {
+    const callId = this._closed ? 0 : this._allocCallId();
+    const stream = new StreamCall(callId, {
+      sendCredit: (id, credit) => {
+        this._assertOpen();
+        this._transport.send(Kind.StreamCredit, encodeStreamCredit({ callId: id, credit }));
+      },
+      cancel: (id) => {
+        this._pending.delete(id);
+        if (this._closed) return;
+        this._transport.send(Kind.Cancel, encodeCancel({ callId: id }));
+      },
+    });
+    if (this._closed) {
+      stream.fail(new UndraTransportError("closed", this._closedMessage));
+      return stream;
+    }
+    this._pending.set(callId, { kind: "stream", stream });
+    try {
+      this._transport.send(Kind.Call, encodeTarget(target, methodId, callId, args));
+    } catch (error) {
+      this._pending.delete(callId);
+      stream.fail(error);
+    }
+    return stream;
+  }
+
   // ----- what the transport tells us --------------------------------------------------
 
   private readonly _handler: TransportHandler = {
@@ -1234,23 +1406,23 @@ export class UndraCore {
       this.mirror.enqueue(payload);
     },
     streamItem: (payload) => {
-      this._streams?.item(this, payload);
+      this._onStreamItem(payload);
     },
     portCall: (call) => this._onPortCall(call),
     log: (level, target, message) => {
       // The panic's own record, logged by the core before it traps: what the panic report says (ADR-046).
       if (level >= 5 && target === "undra::panic") this._lastPanicRecord = message;
       this._log(level, target, message);
-      this._ext?.logged(this, this._options, target, message);
+      if (target === DEV_NOTICE_TARGET && this._transport.mode === "remote") this._devNotice(message);
     },
     closed: (error) => {
       this._lost(error);
     },
     reconnecting: (attempt, error) => {
-      this._ext?.reconnecting(this, attempt, error);
+      this._reconnecting(attempt, error);
     },
     reconnected: (hello) => {
-      this._ext?.reconnected(this, hello);
+      this._reconnected(hello);
     },
     holdsObjects: () => this._handles.size > 0,
     ports: () => this._ports,
@@ -1267,14 +1439,29 @@ export class UndraCore {
     const entry = this._pending.get(callId);
     if (entry === undefined) return; // aborted or cancelled meanwhile, or never ours
 
-    if (entry.kind === "stream") {
-      entry.reply(status, body);
-      return;
-    }
     if (status > ReplyStatus.BadRequest) {
       this._pending.delete(callId);
-      entry.cleanup?.();
-      entry.reject(new UndraTransportError("protocol", `the core sent reply status ${status}`));
+      const error = new UndraTransportError("protocol", `the core sent reply status ${status}`);
+      if (entry.kind === "call") {
+        entry.cleanup?.();
+        entry.reject(error);
+      } else {
+        entry.stream.fail(error);
+      }
+      return;
+    }
+
+    if (entry.kind === "stream") {
+      if (status === ReplyStatus.StreamOpened) {
+        entry.stream.opened();
+        return;
+      }
+      this._pending.delete(callId);
+      entry.stream.fail(
+        status === ReplyStatus.Ok
+          ? new UndraTransportError("protocol", "the core answered a stream call with a plain result")
+          : new UndraReplyError(status as ReplyStatus, body),
+      );
       return;
     }
 
@@ -1284,7 +1471,7 @@ export class UndraCore {
       entry.cleanup?.();
       entry.reject(new UndraError("state", "this method is a stream; call it with UndraCore.stream"));
       try {
-        this._transport.cancel(callId);
+        this._transport.send(Kind.Cancel, encodeCancel({ callId }));
       } catch {
         // Closing anyway.
       }
@@ -1297,6 +1484,52 @@ export class UndraCore {
     this.mirror.queueFlush();
     if (status === ReplyStatus.Ok) entry.resolve(body);
     else entry.reject(new UndraReplyError(status as ReplyStatus, body));
+  }
+
+  private _onStreamItem(payload: Uint8Array): void {
+    if (payload.length < 5) {
+      this._reportError("stream", new UndraTransportError("protocol", "the core sent a truncated stream item"));
+      return;
+    }
+    const callId = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint32(0, true);
+    const flag = payload[4] as number;
+    const entry = this._pending.get(callId);
+    if (entry?.kind !== "stream") return;
+    const body = payload.subarray(5);
+    switch (flag) {
+      case StreamFlag.Item:
+        entry.stream.push(body);
+        return;
+      case StreamFlag.End:
+        this._pending.delete(callId);
+        entry.stream.end();
+        return;
+      case StreamFlag.Error:
+        // The stream's own `E`; generated code decodes it.
+        this._pending.delete(callId);
+        entry.stream.fail(new UndraReplyError(ReplyStatus.Error, body));
+        return;
+      case StreamFlag.Failed: {
+        // Panicked, cancelled by the core or refused: exactly the failed reply with that status (ADR-036).
+        this._pending.delete(callId);
+        let failure: StreamFailure;
+        try {
+          failure = decodeStreamFailure(body);
+        } catch (error) {
+          entry.stream.fail(
+            new UndraTransportError("protocol", `the core sent a malformed stream failure: ${errorMessage(error)}`, {
+              cause: error,
+            }),
+          );
+          return;
+        }
+        entry.stream.fail(new UndraReplyError(failure.status, streamFailureReplyBody(failure)));
+        return;
+      }
+      default:
+        this._pending.delete(callId);
+        entry.stream.fail(new UndraTransportError("protocol", `the core sent stream flag ${flag}`));
+    }
   }
 
   private _onPortCall(call: PortCallPayload): PortOutcome {
@@ -1314,14 +1547,22 @@ export class UndraCore {
   private _sendPortReply(reply: Uint8Array): void {
     if (this._closed) return;
     try {
-      this._transport.portReply(reply);
+      this._transport.send(Kind.PortReply, reply);
     } catch (error) {
       this._reportError("port reply", error);
     }
   }
 
-  /** @internal */
-  _log(level: number, target: string, message: string): void {
+  /** Hands a dev server's message to `onDevNotice` (only a `remote` core gets here: see the `log` handler). */
+  private _devNotice(message: string): void {
+    try {
+      this._options.onDevNotice?.(message);
+    } catch (error) {
+      this._reportError("onDevNotice", error);
+    }
+  }
+
+  private _log(level: number, target: string, message: string): void {
     try {
       (this._adapters.log ?? consoleLog()).log(level, target, message);
     } catch {

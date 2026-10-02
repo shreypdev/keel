@@ -1,6 +1,6 @@
 import { UndraError } from "./errors.js";
 import { batch } from "./signal.js";
-import { type ChangeEntry, ChangeOp, type Handle, decodeChangeSet } from "./wire/index.js";
+import { ALL_SIGNALS, type ChangeEntry, ChangeOp, type Handle, decodeChangeSet } from "./wire/index.js";
 
 /** Applies one signal update to the store registered for a handle (`UndraStore._apply`). */
 export type ApplyFn = (signalId: number, op: ChangeOp, value: Uint8Array) => void;
@@ -153,21 +153,11 @@ interface Registration {
   readonly noCoalesce: ReadonlySet<number> | null;
 }
 
-/**
- * The promises behind `UndraCore.observe` on a core that answers later (a worker, a socket): `mirror-waiters.ts`, installed
- * by the core for such a transport. A core in this thread delivers the initial values inside `observe` and needs none.
- */
-export interface MirrorWaiters {
-  /** Whether a promise waits: change-sets are then drained without waiting for a frame. */
-  readonly waiting: boolean;
-  /** An entry of `signalId` of `handle` was applied. */
-  applied(handle: Handle, signalId: number): void;
-  /** The drain's rounds are done and its subscribers notified: settle what was satisfied. */
-  drained(): void;
-  /** `handle` was unregistered. */
-  gone(handle: Handle): void;
-  when(handle: Handle, signalId: number, timeoutMs: number): Promise<void>;
-  fail(error: unknown): void;
+interface Waiter {
+  readonly signalId: number;
+  readonly resolve: () => void;
+  readonly reject: (error: unknown) => void;
+  timer: ReturnType<typeof setTimeout> | undefined;
 }
 
 /** `true` once the signal's merged patch was dropped and nothing re-observed it yet; `false` once re-observed. */
@@ -289,8 +279,7 @@ function own(value: Uint8Array): Uint8Array {
  */
 export class Mirror {
   private readonly _registry = new Map<Handle, Registration>();
-  /** @internal Installed by the core for a transport that answers later (see {@link MirrorWaiters}). */
-  _w: MirrorWaiters | undefined;
+  private readonly _waiters = new Map<Handle, Waiter[]>();
   private readonly _listeners: DrainListener[] = [];
   private readonly _awaiting: Awaiting = new Map();
   private readonly _onError: (error: unknown) => void;
@@ -360,7 +349,10 @@ export class Mirror {
   unregister(handle: Handle): void {
     this._registry.delete(handle);
     this._awaiting.delete(handle);
-    this._w?.gone(handle);
+    const waiters = this._waiters.get(handle);
+    if (waiters === undefined) return;
+    this._waiters.delete(handle);
+    for (const w of waiters) this._settle(w, undefined);
   }
 
   /** Whether `handle` is registered. */
@@ -447,7 +439,7 @@ export class Mirror {
     // A running flush applies what arrives while it runs (see `flush`), so it needs no second one.
     if (this._flushing) return;
     // Someone waits for an initial change-set (`observe` over a worker or a socket): no frame wait.
-    if (this._w?.waiting) this.queueFlush();
+    if (this._waiters.size > 0) this.queueFlush();
     else this._scheduleFlush();
   }
 
@@ -506,6 +498,7 @@ export class Mirror {
     this._flushing = true;
     const timed = this._listeners.length > 0;
     const started = timed ? now() : 0;
+    const satisfied: Waiter[] = [];
     let changeSets = 0;
     let entries = 0;
     this._applied = 0;
@@ -529,7 +522,7 @@ export class Mirror {
         entries += this._queuedEntries;
         this._queuedChangeSets = 0;
         this._queuedEntries = 0;
-        if (queued.length > 0) this._applyUnits(this._fold(queued, false));
+        if (queued.length > 0) this._applyUnits(this._fold(queued, false), satisfied);
         this._requestResyncs();
       }
     } finally {
@@ -539,7 +532,7 @@ export class Mirror {
       // Left over by the round cap or by an error that unwound the loop: drained later, never stranded.
       if (this._queue.length > 0 || this._resyncDue) this._scheduleFlush();
     }
-    this._w?.drained();
+    for (const waiter of satisfied) this._settle(waiter, undefined);
     if (timed) {
       const stats: DrainStats = { changeSets, entries, appliedEntries: this._applied, durationMs: now() - started };
       for (const listener of [...this._listeners]) {
@@ -682,7 +675,7 @@ export class Mirror {
    * (a signal error handler that rethrows), the units not applied yet go back to the front of the
    * queue for a later drain.
    */
-  private _applyUnits(units: readonly Unit[]): void {
+  private _applyUnits(units: readonly Unit[], satisfied: Waiter[]): void {
     let next = 0;
     try {
       while (next < units.length) {
@@ -691,7 +684,7 @@ export class Mirror {
           next++;
           if (first instanceof Single) {
             batch(() => {
-              this._applyEntry(first.entry);
+              this._applyEntry(first.entry, satisfied);
             });
           } else {
             try {
@@ -707,7 +700,7 @@ export class Mirror {
             const unit = units[next] as Unit;
             if (!(unit instanceof Slot)) break;
             next++;
-            this._applySlot(unit);
+            this._applySlot(unit, satisfied);
           }
         });
       }
@@ -734,7 +727,7 @@ export class Mirror {
     this._queue = older.concat(this._queue);
   }
 
-  private _applySlot(slot: Slot): void {
+  private _applySlot(slot: Slot, satisfied: Waiter[]): void {
     const registration = this._registry.get(slot.handle);
     if (registration === undefined) {
       this._dropped += slot.entries;
@@ -743,17 +736,17 @@ export class Mirror {
     if (slot.full.length === 0 && slot.patches.length === 0) return; // dropped for a resync
     for (const entry of slot.full) this._call(registration, slot.signalId, entry.op, entry.value);
     if (slot.patches.length > 0) this._call(registration, slot.signalId, ChangeOp.KeyedPatch, slot.mergedPatch());
-    this._w?.applied(slot.handle, slot.signalId);
+    this._satisfy(slot.handle, slot.signalId, satisfied);
   }
 
-  private _applyEntry(entry: ChangeEntry): void {
+  private _applyEntry(entry: ChangeEntry, satisfied: Waiter[]): void {
     const registration = this._registry.get(entry.handle);
     if (registration === undefined) {
       this._dropped++;
       return;
     }
     this._call(registration, entry.signalId, entry.op, entry.value);
-    this._w?.applied(entry.handle, entry.signalId);
+    this._satisfy(entry.handle, entry.signalId, satisfied);
   }
 
   private _call(registration: Registration, signalId: number, op: ChangeOp, value: Uint8Array): void {
@@ -763,6 +756,18 @@ export class Mirror {
     } catch (error) {
       this._onError(error);
     }
+  }
+
+  private _satisfy(handle: Handle, signalId: number, satisfied: Waiter[]): void {
+    const waiters = this._waiters.get(handle);
+    if (waiters === undefined) return;
+    const rest: Waiter[] = [];
+    for (const w of waiters) {
+      if (w.signalId === ALL_SIGNALS || w.signalId === signalId) satisfied.push(w);
+      else rest.push(w);
+    }
+    if (rest.length === 0) this._waiters.delete(handle);
+    else this._waiters.set(handle, rest);
   }
 
   /** Re-observes the signals whose merged patch was dropped, once each, from the drain. */
@@ -789,17 +794,54 @@ export class Mirror {
   }
 
   /**
-   * A promise that resolves once an entry for `signalId` of `handle` (any signal of it for `ALL_SIGNALS`) has been applied
-   * by a drain and its subscribers have been notified: the "initial change-set" barrier behind `UndraCore.observe` on a
-   * core that answers later. The waiters are a module of their own, loaded with such a transport; a mirror used on its own
-   * loads it here.
+   * A promise that resolves once an entry for `signalId` of `handle` (any
+   * signal of it for `ALL_SIGNALS`) has been applied by a drain and its
+   * subscribers have been notified: the "initial change-set" barrier behind
+   * `UndraCore.observe`. It also resolves when the handle is unregistered, and
+   * rejects with `UndraError("observe")` after `timeoutMs` (never, for 0).
+   * While a promise waits, change-sets are drained without waiting for a frame.
    */
   whenObserved(handle: Handle, signalId: number, timeoutMs = 0): Promise<void> {
-    return (this._w as MirrorWaiters).when(handle, signalId, timeoutMs);
+    return new Promise<void>((resolve, reject) => {
+      const waiter: Waiter = { signalId, resolve, reject, timer: undefined };
+      if (timeoutMs > 0) {
+        waiter.timer = setTimeout(() => {
+          this._remove(handle, waiter);
+          reject(
+            new UndraError(
+              "observe",
+              `no change-set arrived for signal ${signalId === ALL_SIGNALS ? "*" : String(signalId)} of handle ${String(handle)} within ${timeoutMs} ms; is the handle a live store?`,
+            ),
+          );
+        }, timeoutMs);
+      }
+      const list = this._waiters.get(handle);
+      if (list === undefined) this._waiters.set(handle, [waiter]);
+      else list.push(waiter);
+      // Entries that arrived before the promise was made are drained now, not at the next frame.
+      this.queueFlush();
+    });
   }
 
   /** Rejects every pending {@link Mirror.whenObserved} promise with `error` (the transport went away). */
   failWaiters(error: unknown): void {
-    this._w?.fail(error);
+    const all = [...this._waiters.values()].flat();
+    this._waiters.clear();
+    for (const w of all) this._settle(w, { error });
+  }
+
+  private _remove(handle: Handle, waiter: Waiter): void {
+    const list = this._waiters.get(handle);
+    if (list === undefined) return;
+    const rest = list.filter((w) => w !== waiter);
+    if (rest.length === 0) this._waiters.delete(handle);
+    else this._waiters.set(handle, rest);
+  }
+
+  private _settle(waiter: Waiter, failure: { readonly error: unknown } | undefined): void {
+    if (waiter.timer !== undefined) clearTimeout(waiter.timer);
+    waiter.timer = undefined;
+    if (failure === undefined) waiter.resolve();
+    else waiter.reject(failure.error);
   }
 }
