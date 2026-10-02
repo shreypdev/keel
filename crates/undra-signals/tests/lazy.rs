@@ -123,7 +123,8 @@ fn every_kind_of_change_sends_exactly_one_invalidation_of_twelve_bytes() {
     let f = fixture(10_000);
     f.rig.observe_all();
     let books = &f.books;
-    let changes: Vec<(&str, Box<dyn Fn()>)> = vec![
+    type Change<'a> = Box<dyn Fn() + 'a>;
+    let changes: Vec<(&str, Change)> = vec![
         ("push", Box::new(|| books.push(todo(20_000, "p", false)))),
         (
             "insert",

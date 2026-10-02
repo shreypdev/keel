@@ -2127,7 +2127,7 @@ impl Runtime {
         self.insert_lazy_source(Arc::new(list.clone()))
     }
 
-    /// Stores a page server for any [`LazySource`] and returns its handle, which platforms page
+    /// Stores a page server for any [`LazySource`](undra_signals::LazySource) and returns its handle, which platforms page
     /// through with `LazyPage` calls (the host owns one reference to it, as to any object it
     /// constructs). A store's `Lazy<T>` signals are registered by the runtime when the store is
     /// inserted; this is for a core that serves a list of its own.

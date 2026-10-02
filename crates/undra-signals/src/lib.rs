@@ -34,6 +34,21 @@
 //! that reads its own list panics in every build. A `DerivedList` attached to a store
 //! ([`StoreCell::attach_derived`]) is isolated like a computed when a closure panics.
 //!
+//! # Lazy lists
+//!
+//! A `Signal<Vec<T>>` reaches the host whole (or as keyed patches); a 100,000-row table should not.
+//! [`Lazy`] (ADR-043) is a core-owned list that **never crosses the boundary as a value**: the host
+//! is told its length and a *version* (change-set op 0 when it observes it), asks for the window it
+//! shows with page calls (a page of 50 rows is encoded on request, microseconds), and is told that
+//! something changed by one 12-byte entry (op 2: the new length and version), whatever the change
+//! was and however many a transaction made, after which it asks for its window again. Nothing the
+//! host does not show is encoded. [`Lazy::new`] and [`Lazy::from_vec`] make an owned list with the
+//! recorded API of a `Signal<Vec<T>>`; [`Lazy::over`] makes a read-only view of a
+//! [`DerivedList`] that pages through the derived list's index. [`LazySource`] is the type-erased
+//! page server the runtime keeps in its object table, and [`StoreCell::attach_lazy`] binds a list
+//! to a store slot. A snapshot carries an owned list's items (as the `Vec<T>` of them); a view is
+//! derived data and is rebuilt by the store's restore hook.
+//!
 //! # Panics
 //!
 //! A panic inside [`txn`], a computed closure, an effect, an encoder or a sink leaves the

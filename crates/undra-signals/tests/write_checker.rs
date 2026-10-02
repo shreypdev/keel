@@ -299,7 +299,9 @@ fn a_lazy_list_of_a_store_follows_the_same_write_rule_as_a_signal() {
         };
         refuse(&|| list.push(4));
         refuse(&|| list.insert(0, 4));
-        refuse(&|| drop(list.remove(0)));
+        refuse(&|| {
+            let _ = list.remove(0);
+        });
         refuse(&|| list.update_at(0, |n| *n = 9));
         refuse(&|| list.move_item(0, 1));
         refuse(&|| list.replace(vec![7]));

@@ -180,7 +180,7 @@ enum Repr<T> {
     View(Arc<LazyView<T>>),
 }
 
-/// A core-owned list the host pages through (ADR-043): see the [module documentation](self).
+/// A core-owned list the host pages through (ADR-043): see "Lazy lists" in the crate documentation.
 ///
 /// [`Clone`] gives another handle to the **same** list, as for a [`Signal`]. Writes follow the
 /// rules of a signal's (ADR-035): outside a [`txn`](crate::txn) each is a transaction of its own,
@@ -825,7 +825,10 @@ mod tests {
         assert_eq!(clamp_range(&(3..), 5), 3..5);
         assert_eq!(clamp_range(&(..=9), 5), 0..5);
         assert_eq!(clamp_range(&(7..9), 5), 5..5);
-        assert_eq!(clamp_range(&(4..2), 5), 4..4);
+        assert_eq!(
+            clamp_range(&(Bound::Included(4), Bound::Excluded(2)), 5),
+            4..4
+        );
         assert_eq!(
             clamp_range(&(Bound::Excluded(1), Bound::Excluded(4)), 5),
             2..4

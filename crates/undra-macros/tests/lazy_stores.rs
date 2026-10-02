@@ -409,8 +409,7 @@ fn a_defaulted_lazy_list_is_empty_when_the_snapshot_lacks_it() {
     body.write_u32(0);
     let mut r = Reader::new(body.as_slice());
     let error = (restorer.restore)(rt.ctx(), 0x0000_0002_0000_0009, &mut r)
-        .err()
-        .expect("`books` is missing");
+        .expect_err("`books` is missing");
     assert!(error.to_string().contains("missing signal"), "{error}");
 }
 
