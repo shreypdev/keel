@@ -20,7 +20,7 @@ public final class TodoByIdQueryHandle: UndraStore, ObservableObject, @unchecked
     /// When `data` was last updated.
     @Published public private(set) var updatedAt: Date? = nil
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
@@ -161,7 +161,7 @@ public final class TodoCountQueryHandle: UndraStore, ObservableObject, @unchecke
     /// When `data` was last updated.
     @Published public private(set) var updatedAt: Date? = nil
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
@@ -295,7 +295,7 @@ public final class TodosQueryHandle: UndraStore, ObservableObject, @unchecked Se
     /// When `data` was last updated.
     @Published public private(set) var updatedAt: Date? = nil
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
