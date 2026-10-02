@@ -19,7 +19,8 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "bench/results/web-size.jsonl"
+      - "bench/results/**"
+      - "contract-tests/scenarios.md"
       - "README.md"
       - ".github/workflows/site.yml"
   pull_request:
@@ -32,7 +33,8 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "bench/results/web-size.jsonl"
+      - "bench/results/**"
+      - "contract-tests/scenarios.md"
       - "README.md"
       - ".github/workflows/site.yml"
   workflow_dispatch:
@@ -75,6 +77,11 @@ jobs:
       # 1. The playground: one Rust core, compiled to wasm, under a React UI.
       - name: Build the playground core (wasm32)
         run: cargo run -p undra-cli -- build --platform web -C examples/playground
+      # The playground imports the runtime from the workspace, and the runtime's Db worker imports
+      # its optional peer wa-sqlite: without the runtime's own install, vite cannot resolve it.
+      - name: Install the TypeScript runtime's dependencies
+        working-directory: runtimes/ts/@undra/runtime
+        run: npm ci
       - name: Build the playground web app
         working-directory: examples/playground/web
         run: |
