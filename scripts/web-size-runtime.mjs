@@ -18,6 +18,9 @@
 //                                                                `=exports` adds the exports each one keeps
 //   UNDRA_SIZE_TARGET=es2020 node scripts/web-size-runtime.mjs ...   build for that target instead of the pinned
 //                                                                Vite's default (Vite 6's default lowers `#private`)
+//   UNDRA_SIZE_SOURCEMAP=1 node scripts/web-size-runtime.mjs ... also write each chunk's source map next to it (hidden: the
+//                                                                chunks are byte for byte the same), for
+//                                                                scripts/web-size-attribute.mjs
 //
 // Prints one JSON object: { runtime, bindings, app, lazy } with each chunk's path (relative to out-dir);
 // `lazy` lists the other JavaScript chunks (loaded on demand).
@@ -74,6 +77,7 @@ await vite.build({
     emptyOutDir: true,
     assetsInlineLimit: 0,
     minify: true,
+    sourcemap: process.env.UNDRA_SIZE_SOURCEMAP ? "hidden" : false,
     // The pinned Vite's own default target (ES2022-capable browsers) unless asked: UNDRA_SIZE_TARGET=es2020 is
     // what an app on Vite 6's default ships (`#private` fields become WeakMap helpers).
     ...(process.env.UNDRA_SIZE_TARGET ? { target: process.env.UNDRA_SIZE_TARGET } : {}),

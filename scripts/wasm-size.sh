@@ -233,7 +233,8 @@ if record and not failed:
 if failed:
     for message in failed:
         print(message, file=sys.stderr)
-    print("Find what grew (ADR-052 has the twiggy recipe for the wasm); if the growth is intended, re-record with "
+    print("Find what grew (ADR-052 has the twiggy recipe for the wasm; scripts/web-size-attribute.mjs says where the "
+          "JavaScript chunk's bytes are, per declaration); if the growth is intended, re-record with "
           "scripts/wasm-size.sh --record in the same commit, where review sees it.", file=sys.stderr)
     sys.exit(1)
 PY
