@@ -55,7 +55,18 @@ macro_rules! ts_cases {
 }
 
 ts_cases!(
-    records, enums, errors, objects, stores, ports, queries, full, stdlib, recursive
+    object_graph,
+    callbacks,
+    records,
+    enums,
+    errors,
+    objects,
+    stores,
+    ports,
+    queries,
+    full,
+    stdlib,
+    recursive
 );
 
 #[test]

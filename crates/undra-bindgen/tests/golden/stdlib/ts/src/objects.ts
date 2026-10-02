@@ -13,6 +13,7 @@ import {
   UndraCore,
   UndraObject,
   UndraWriter,
+  adopt,
   decodeValue,
 } from "@undra/runtime";
 import { UndraGoldenStdlib } from "./core.js";
@@ -38,7 +39,7 @@ export class Syncer extends UndraObject {
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    return new Syncer(core, handle);
+    return adopt(core, handle, Syncer);
   }
 
   /**

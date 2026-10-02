@@ -8,6 +8,7 @@ import {
   UndraCore,
   UndraStore,
   UndraWriter,
+  adopt,
   codecs,
   decodeValue,
 } from "@undra/runtime";
@@ -66,7 +67,7 @@ export class Outline extends UndraStore {
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new Outline(core, handle);
+    const store = adopt(core, handle, Outline);
     await store._observeAll();
     return store;
   }
