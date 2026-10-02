@@ -11,8 +11,9 @@
 //!   floors at a fifth of what an Apple-silicon laptop measures, tail ceilings at 5x and 10x),
 //!   not device targets. `bench/RESULTS.md`, "Harsh conditions", says which is which.
 //! * Without optimisations the numbers mean nothing, so a debug build (plain `cargo test`) runs
-//!   every scenario for 100 ms and asserts **invariants only**: the scenarios stay working
-//!   under `cargo test --workspace`, and the timing gates are left to `--release`.
+//!   every scenario for 100 ms and at least 100 operations (a slow machine takes longer, it does
+//!   not do less) and asserts **invariants only**: the scenarios stay working under
+//!   `cargo test --workspace`, and the timing gates are left to `--release`.
 //! * A noisy run gets three attempts: a scenario passes if any attempt meets every gate. An
 //!   invariant that breaks is never retried; it is not noise.
 //! * `UNDRA_BENCH_BASELINE=<name or path>` adds a gate against what one machine class measured
@@ -54,6 +55,30 @@ use common::stress::{BYTES_EXACT, Fault, Scenario, StressConfig, StressReport, s
 static SERIAL: Mutex<()> = Mutex::new(());
 
 const ATTEMPTS: usize = 3;
+
+/// Operations a debug smoke run does at least, whatever the clock says (`StressConfig::min_ops`):
+/// a machine that is slow or busy takes longer; it does not run fewer and report "nothing ran".
+const SMOKE_OPS: u64 = 100;
+
+/// Operations a run that injects a fault does at least. The mirror drops its 101st patch; a round
+/// of ten operations puts at least four patches on every mirror (the cycle's four updates each move
+/// a row in or out of the derived view), so 30 rounds make more than 101 patches wherever they
+/// are counted, and 300 completions give the "main thread" a frame with two change-sets in it.
+const FAULT_OPS: u64 = 300;
+
+/// The report of a run that was asked for `cfg.min_ops` operations says it did them: with a floor a
+/// slow machine takes longer, so too few means the run could not make progress for `GIVE_UP`.
+fn assert_ran(report: &StressReport, cfg: &StressConfig) {
+    assert!(
+        report.ops >= cfg.min_ops,
+        "{}: the machine did not run {} operations in {:?} (it ran {}); a run waits for its floor, \
+         so it made no progress",
+        report.name,
+        cfg.min_ops,
+        report.elapsed,
+        report.ops
+    );
+}
 
 fn serial() -> std::sync::MutexGuard<'static, ()> {
     SERIAL.lock().unwrap_or_else(|e| e.into_inner())
@@ -216,11 +241,12 @@ fn stress() {
             rss: false,
             fault: Fault::None,
             warmup: None,
+            min_ops: SMOKE_OPS,
         };
         for (name, run) in &scenarios {
             let report = run(&cfg);
             assert_eq!(report.name, *name);
-            assert!(report.ops > 0, "{name}: nothing ran");
+            assert_ran(&report, &cfg);
             let broken = report.broken();
             assert!(
                 broken.is_empty(),
@@ -576,17 +602,27 @@ fn record(path: &std::path::Path, mut baseline: Baseline, load_before: Option<f6
     eprintln!("recorded {rows} scenarios to {}", path.display());
 }
 
+/// The words of every invariant that broke when `scenario` ran with `fault`: a run of no set time
+/// that goes on until it has done `FAULT_OPS` operations, so the fault always has the operations
+/// it needs to fire (a fixed time did fewer than 101 on a slow machine, and the fault never
+/// fired).
+fn broken_by(scenario: fn(&StressConfig) -> StressReport, fault: Fault) -> Vec<String> {
+    let cfg = StressConfig {
+        duration: Duration::ZERO,
+        rss: false,
+        fault,
+        warmup: None,
+        min_ops: FAULT_OPS,
+    };
+    let report = scenario(&cfg);
+    assert_ran(&report, &cfg);
+    report.broken().iter().map(|i| i.what.clone()).collect()
+}
+
 #[test]
 fn a_skipped_patch_fails_the_equality_invariant() {
     let _serial = serial();
-    let cfg = StressConfig {
-        duration: Duration::from_millis(200),
-        rss: false,
-        fault: Fault::SkipPatches,
-        warmup: None,
-    };
-    let report = common::stress::keyed_churn(&cfg);
-    let broken: Vec<_> = report.broken().iter().map(|i| i.what.clone()).collect();
+    let broken = broken_by(common::stress::keyed_churn, Fault::SkipPatches);
     assert!(
         broken
             .iter()
@@ -599,14 +635,7 @@ fn a_skipped_patch_fails_the_equality_invariant() {
 fn a_skipped_view_patch_fails_the_view_invariant() {
     // ADR-039: the host's derived view must equal filter + stable sort of the core's rows.
     let _serial = serial();
-    let cfg = StressConfig {
-        duration: Duration::from_millis(200),
-        rss: false,
-        fault: Fault::SkipPatches,
-        warmup: None,
-    };
-    let report = common::stress::derived_churn(&cfg);
-    let broken: Vec<_> = report.broken().iter().map(|i| i.what.clone()).collect();
+    let broken = broken_by(common::stress::derived_churn, Fault::SkipPatches);
     assert!(
         broken
             .iter()
@@ -625,14 +654,7 @@ fn a_single_dropped_update_fails_the_mirror_invariants() {
     // One lost `Update` keeps every id in place, and a later update of the same row repairs
     // the content: only counting the patches applied sees it for certain.
     let _serial = serial();
-    let cfg = StressConfig {
-        duration: Duration::from_millis(200),
-        rss: false,
-        fault: Fault::DropOneUpdate,
-        warmup: None,
-    };
-    let report = common::stress::keyed_churn(&cfg);
-    let broken: Vec<_> = report.broken().iter().map(|i| i.what.clone()).collect();
+    let broken = broken_by(common::stress::keyed_churn, Fault::DropOneUpdate);
     assert!(
         broken
             .iter()
@@ -698,14 +720,17 @@ fn a_warm_up_runs_first_and_is_not_measured() {
             rss: false,
             fault: Fault::None,
             warmup: Some(Duration::from_millis(60)),
+            min_ops: SMOKE_OPS,
         };
         let report = scenario(&cfg);
         assert_eq!(report.warmup, Duration::from_millis(60), "{name}");
         assert!(report.broken().is_empty(), "{name}: {:?}", report.broken());
-        assert!(report.ops > 0, "{name}");
-        // The measured run is the 100 ms (plus a round, or the in-flight calls), not 160.
+        assert_ran(&report, &cfg);
+        // The measured run is at least its 100 ms. No upper bound: how much longer than that a
+        // run takes (a round, the calls in flight, the floor of operations) is the machine's, and
+        // a run that cannot finish is the watchdog's (`GIVE_UP`).
         assert!(
-            report.elapsed < Duration::from_secs(5),
+            report.elapsed >= cfg.duration,
             "{name}: {:?}",
             report.elapsed
         );
@@ -731,6 +756,7 @@ fn the_completions_scenario_stops_near_its_deadline() {
         rss: false,
         fault: Fault::None,
         warmup: None,
+        min_ops: 0,
     };
     for _ in 0..4 {
         // On a thread with a watchdog: the old loop did not return at all (over 150 s, twice, in
@@ -749,21 +775,6 @@ fn the_completions_scenario_stops_near_its_deadline() {
         );
         assert!(report.broken().is_empty());
     }
-}
-
-/// The words of every invariant that broke when `scenario` ran with `fault`.
-fn broken_by(scenario: fn(&StressConfig) -> StressReport, fault: Fault) -> Vec<String> {
-    let cfg = StressConfig {
-        duration: Duration::from_millis(200),
-        rss: false,
-        fault,
-        warmup: None,
-    };
-    scenario(&cfg)
-        .broken()
-        .iter()
-        .map(|i| i.what.clone())
-        .collect()
 }
 
 #[test]
@@ -822,8 +833,10 @@ fn the_contended_scenario_really_has_two_threads_writing_one_store() {
         rss: false,
         fault: Fault::None,
         warmup: None,
+        min_ops: SMOKE_OPS,
     };
     let report = common::stress::completions_contended(&cfg);
+    assert_ran(&report, &cfg);
     assert!(report.broken().is_empty(), "{:?}", report.broken());
     let writer = report
         .notes
