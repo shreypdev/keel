@@ -144,7 +144,10 @@ fn record_writes_the_session_as_an_undra_recording() {
     };
     assert_eq!(recording["format"], "undra.recording");
     assert_eq!(recording["version"], 1);
-    assert_eq!(recording["source"], "dev-server");
+    assert_eq!(
+        recording["source"], "dev-server (SecureStore payloads left out)",
+        "secrets are left out unless --record-secrets"
+    );
     assert_eq!(
         recording["schema_hash"],
         format!("{:#018x}", dev.hash),
@@ -161,6 +164,38 @@ fn record_writes_the_session_as_an_undra_recording() {
         undra_meta::ids::function_id("greeting"),
         "ids are the schema's"
     );
+    dev.kill_and_expect_the_port_to_close();
+}
+
+#[test]
+fn a_recording_that_cannot_be_written_warns_and_the_server_keeps_serving() {
+    let project = init_project("devrecordfail", "web");
+    // The directory does not exist: the first write fails, as a full disk would.
+    let file = project.root.join("no-such-dir").join("session.json");
+    let dev = Dev::start(
+        &project,
+        &[
+            "--no-watch",
+            "--record",
+            file.to_str().expect("a utf-8 path"),
+        ],
+    );
+    dev.wait_log("cannot write the recording", Duration::from_secs(30));
+    let (mut ws, _) = connect(&dev);
+    assert_eq!(
+        greeting(&mut ws, dev.hash, "Ada"),
+        "Hello, Ada, from the devrecordfail core",
+        "the dev server serves after the recording stopped"
+    );
+    drop(ws);
+    std::thread::sleep(Duration::from_millis(1_200));
+    let log = dev.log.lock().unwrap().clone();
+    assert_eq!(
+        log.matches("cannot write the recording").count(),
+        1,
+        "said once, not every flush: {log}"
+    );
+    assert!(!file.exists());
     dev.kill_and_expect_the_port_to_close();
 }
 

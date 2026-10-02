@@ -73,6 +73,9 @@ public sealed interface ReplayError {
     /** The core called a port more often than the recording did. */
     public class Exhausted(public val port: UInt, public val called: String, public val recorded: Int) : ReplayError
 
+    /** The core made the recorded call, but the recording holds no reply for it (the session ended while it was in flight, or the file was cut): it was answered "unavailable". */
+    public class Unanswered(public val port: UInt, public val called: String, public val nth: Int) : ReplayError
+
     /** The replay ended with recorded calls the core never made. */
     public class Unconsumed(public val port: UInt, public val next: String, public val remaining: Int) : ReplayError
 
@@ -82,6 +85,7 @@ public sealed interface ReplayError {
             if (argsDiffer) "replay: call $nth of the port was $called with other arguments than the recording's"
             else "replay: call $nth of the port was $called, the recording has $expected next"
         is Exhausted -> "replay: $called was called after the recording's $recorded call(s) of the port were used up"
+        is Unanswered -> "replay: call $nth of the port, $called, has no reply in the recording; it was answered unavailable"
         is Unconsumed -> "replay: $remaining recorded call(s) were never made, the next is $next"
     }
 }
@@ -150,6 +154,7 @@ public class Replayer(recording: Recording, private val policy: ArgsPolicy = Arg
         queues[port]?.removeFirst()
         answered[port] = nth + 1
         val reply = next.reply
+        if (reply == null) deviations += ReplayError.Unanswered(port, label(port, method), nth)
         when {
             reply == null || reply.first == PortStatusName.UNAVAILABLE -> throw UndraException("the recorded port reply is unavailable")
             reply.first == PortStatusName.ERROR -> throw UndraPortException(reply.second)

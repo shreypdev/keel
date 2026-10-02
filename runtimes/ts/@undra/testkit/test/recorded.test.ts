@@ -1,7 +1,7 @@
 import { UndraIds, Todos } from "@playground/core";
-import { CallTarget, UndraSchemaMismatchError } from "@undra/runtime";
+import { ALL_SIGNALS, CallTarget, Kind, UndraSchemaMismatchError, encodeObserve, type TransportHandler } from "@undra/runtime";
 import { afterEach, describe, expect, it } from "vitest";
-import { RecordedCore, type Recording } from "../src/index.js";
+import { RecordedCore, ReplayTransport, parseRecording, toHex, type Recording } from "../src/index.js";
 import { fixture } from "./support/fixtures.js";
 
 const cores: RecordedCore[] = [];
@@ -67,8 +67,38 @@ describe("RecordedCore replays a recorded session of the playground's Todos stor
     expect((await todos.add("x")).title).toBe("Walk the dog");
   });
 
-  it("refuses a recording of another schema", async () => {
-    await expect(RecordedCore.load(fixture("fixtures/session-todos.json"), { expectedSchemaHash: 1n })).rejects.toBeInstanceOf(UndraSchemaMismatchError);
+  it("refuses a recording of another schema, with both hashes in the message", async () => {
+    const error = await RecordedCore.load(fixture("fixtures/session-todos.json"), { expectedSchemaHash: 1n }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(UndraSchemaMismatchError);
+    expect((error as Error).message).toContain(UndraIds.schemaHash.toString(16));
+    expect((error as Error).message).toContain("1");
+  });
+
+  it("releases byte-identical change-sets on every replay, equal timestamps in file order", () => {
+    const entry = (n: number) => ({ handle: "0x0000000100000000", signal: 0, op: "full", value: toHex(Uint8Array.of(n, 0, 0, 0)) });
+    const set = (t: number, txn: number) => ({ t, kind: "change_set", txn, entries: [entry(txn)] });
+    const text = JSON.stringify({
+      format: "undra.recording",
+      version: 1,
+      schema_hash: "0x1",
+      source: "hand",
+      events: [set(10, 1), set(20, 2), set(20, 3), set(20, 4), set(30, 5)],
+    });
+    const play = (): string[] => {
+      const seen: string[] = [];
+      const transport = new ReplayTransport(parseRecording(text));
+      void transport.start({ changeSet: (bytes: Uint8Array) => seen.push(toHex(bytes)) } as unknown as TransportHandler);
+      transport.send(Kind.Observe, encodeObserve({ handle: 0x0000000100000000n, signalId: ALL_SIGNALS, on: true }));
+      transport.advance(5);
+      transport.advance(15);
+      transport.advance(100);
+      return seen;
+    };
+    const first = play();
+    // The observe answers with what the playhead start (t = 10) has seen; then 2, 3 and 4 share a timestamp and keep their file order.
+    expect(first).toHaveLength(5);
+    expect(first.map((hex) => Number.parseInt(hex.slice(0, 2), 16))).toEqual([0, 2, 3, 4, 5]);
+    expect(play()).toEqual(first);
   });
 
   it("replays a stream's items with the call id of the live call", async () => {

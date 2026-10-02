@@ -112,6 +112,27 @@ final class PortTests: XCTestCase {
     }
 
     @MainActor
+    func testACallTheRecordingHoldsNoReplyForIsReportedNamingThePortAndTheMethod() async throws {
+        let core = try scratchCore()
+        defer { core.close() }
+        let recording = Recording(
+            schemaHash: 1, source: "hand",
+            events: [RecordedEvent(t: 0, kind: .portCall(port: undraPortId("Kv"), method: kvGet, call: 1, args: keyArgs("a")))]
+        )
+        let replayer = Replayer(recording)
+        let kv = methods(replayer.adapters().all.first!.makePortImpl(core: core.core))
+        do {
+            _ = try await kv[kvGet]!(keyArgs("a"))
+            XCTFail("expected unavailable")
+        } catch {}
+        XCTAssertEqual(replayer.errors(), [.unanswered(port: undraPortId("Kv"), called: "Kv.get", nth: 0)])
+        XCTAssertThrowsError(try replayer.finish()) { error in
+            XCTAssertTrue("\(error)".contains("Kv.get"), "\(error)")
+            XCTAssertTrue("\(error)".contains("no reply in the recording"), "\(error)")
+        }
+    }
+
+    @MainActor
     func testArgumentsThatChangeFromRunToRunCanBeIgnored() async throws {
         let core = try scratchCore()
         defer { core.close() }

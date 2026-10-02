@@ -42,7 +42,7 @@ use std::sync::Arc;
 use undra_runtime::testing::TestRuntime;
 use undra_runtime::{Port, Runtime};
 
-pub use clock::FakeClock;
+pub use clock::{FakeClock, MAX_TIMERS_PER_ADVANCE};
 pub use events::{ScriptedConnectivity, ScriptedLifecycle};
 pub use fs::MemFs;
 pub use http::{FakeHttp, Matcher};
@@ -222,6 +222,11 @@ impl Fakes {
     /// assert_eq!(*woke_at.lock().unwrap(), [start + 10_000, start + 20_000]);
     /// assert_eq!(fakes.clock.now_ms(), start + 60_000);
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// After [`MAX_TIMERS_PER_ADVANCE`] timers with time still to move: a task that sleeps again
+    /// without time passing would otherwise never end the call.
     pub fn advance(&self, t: &TestRuntime, duration: Duration) -> usize {
         let mut fired = 0;
         let mut remaining = duration;
@@ -234,6 +239,10 @@ impl Fakes {
                 .next_due_in()
                 .map_or(remaining, |due| due.min(remaining));
             fired += self.clock.advance(step).len();
+            assert!(
+                fired <= MAX_TIMERS_PER_ADVANCE,
+                "Fakes::advance fired {fired} timers: a task that sleeps again without time passing never ends (the cap is {MAX_TIMERS_PER_ADVANCE})"
+            );
             t.run_pending();
             self.sync_timers(t);
             remaining -= step;
@@ -363,5 +372,20 @@ mod tests {
         assert_eq!(fakes.advance(&t, Duration::from_millis(15)), 1);
         assert_eq!(fakes.clock.now_ms(), start + 30);
         assert_eq!(fakes.clock.monotonic_ns(), 30_000_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "a task that sleeps again without time passing never ends")]
+    fn a_task_that_sleeps_forever_stops_at_the_cap_instead_of_hanging_the_test() {
+        let t = TestRuntime::new();
+        let fakes = install(&t);
+        let ctx = t.ctx();
+        let inner = ctx.clone();
+        ctx.spawn(async move {
+            loop {
+                inner.sleep(Duration::from_millis(1)).await;
+            }
+        });
+        fakes.advance(&t, Duration::from_secs(1_000_000));
     }
 }

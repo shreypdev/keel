@@ -2,7 +2,7 @@
 //! `remote` transport.
 //!
 //! ```text
-//! undra-dev-runner [ADDR] [--log-level N] [--standby] [--devtools] [--print-schema] [--record FILE]
+//! undra-dev-runner [ADDR] [--log-level N] [--standby] [--devtools] [--print-schema] [--record FILE [--record-secrets]]
 //! ```
 //!
 //! It talks to `undra dev` over its stdin and stdout, in lines (docs/DEV_LOOP.md has the table; the
@@ -364,19 +364,28 @@ fn take_snapshot(server: &Server, runtime: &Runtime) {
     ));
 }
 
-/// Writes the recording whole, through a temporary file, so a reader never sees half of it.
-fn write_recording(path: &str, recorder: &Recorder) {
+/// Writes the recording whole, through a temporary file, so a reader never sees half of it. Returns
+/// `false` (after saying so once) when it cannot: the disk is full, the directory is gone. The caller
+/// stops recording then; the dev server goes on serving.
+fn write_recording(path: &str, recorder: &Recorder) -> bool {
     let temporary = format!("{path}.tmp");
-    let written = std::fs::write(&temporary, recorder.finish().to_json())
-        .and_then(|()| std::fs::rename(&temporary, path));
+    let written = std::fs::write(&temporary, recorder.finish().to_json()).and_then(|()| std::fs::rename(&temporary, path));
     if let Err(e) = written {
-        eprintln!("undra-dev-runner: cannot write the recording {path}: {e}");
+        let _ = std::fs::remove_file(&temporary);
+        print_log(
+            3,
+            "undra-dev-runner",
+            &format!("cannot write the recording {path}: {e}; the recording stops here (what was written before is kept), the dev server keeps serving"),
+        );
+        return false;
     }
+    true
 }
 
 fn main() {
     let mut addr = "127.0.0.1:7443".to_owned();
     let mut record: Option<String> = None;
+    let mut record_secrets = false;
     let mut log_level = 1_u8;
     let mut print_schema = false;
     let mut standby = false;
@@ -387,6 +396,7 @@ fn main() {
             "--print-schema" => print_schema = true,
             "--standby" => standby = true,
             "--record" => record = args.next(),
+            "--record-secrets" => record_secrets = true,
             "--devtools" => with_devtools = true,
             "--log-level" => {
                 log_level = args.next().and_then(|v| v.parse().ok()).unwrap_or(log_level);
@@ -422,8 +432,18 @@ fn main() {
         }
     };
     // `--record FILE`: everything the server relays, and the readings of the native ports, in an
-    // `undra.recording`, rewritten twice a second while it grows and once more at the end.
-    let recorder = record.as_ref().map(|_| Arc::new(Recorder::new(runtime.schema_hash(), "dev-server")));
+    // `undra.recording`, rewritten twice a second while it grows and once more at the end. The
+    // calls of the `SecureStore` port are recorded without their payloads unless `--record-secrets`.
+    // When the file cannot be written the recording stops (`Recorder::stop`): the tap and the native
+    // ports stop feeding it, and the server goes on.
+    let recorder = record.as_ref().map(|_| {
+        let source = if record_secrets { "dev-server" } else { "dev-server (SecureStore payloads left out)" };
+        let recorder = Recorder::new(runtime.schema_hash(), source);
+        if !record_secrets {
+            recorder.redact_secrets();
+        }
+        Arc::new(recorder)
+    });
     let tap = recorder.as_ref().map(|recorder| {
         let recorder = recorder.clone();
         FrameTap::new(move |_direction, kind, payload| {
@@ -445,7 +465,10 @@ fn main() {
                 }
                 if recorder.len() != written {
                     written = recorder.len();
-                    write_recording(&path, &recorder);
+                    if !write_recording(&path, &recorder) {
+                        recorder.stop();
+                        return;
+                    }
                 }
                 std::thread::sleep(Duration::from_millis(500));
             }

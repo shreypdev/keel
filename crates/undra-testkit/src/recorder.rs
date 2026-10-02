@@ -6,8 +6,9 @@
 //! with [`Recorder::record_envelope`] too. The time of an event is read from the recorder's
 //! clock, so a recorder built on a manual clock writes the same bytes every run.
 
+use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Instant;
 
 use parking_lot::Mutex;
@@ -24,11 +25,20 @@ use crate::recording::{Entry, Event, EventKind, Recording, RecordingError, Targe
 
 type Now = Box<dyn Fn() -> u64 + Send + Sync>;
 
+/// The ports whose payloads a [`Recorder`] leaves out, and the calls of those ports still waiting for their reply.
+#[derive(Default)]
+struct Redaction {
+    ports: HashSet<u32>,
+    open: HashSet<u32>,
+}
+
 /// Collects a [`Recording`]. Cheap to share: every method takes `&self`.
 pub struct Recorder {
     now: Now,
     start: u64,
     state: Mutex<Recording>,
+    redaction: Mutex<Redaction>,
+    stopped: AtomicBool,
 }
 
 impl Recorder {
@@ -52,7 +62,36 @@ impl Recorder {
             now: Box::new(now),
             start,
             state: Mutex::new(Recording::new(schema_hash, source)),
+            redaction: Mutex::new(Redaction::default()),
+            stopped: AtomicBool::new(false),
         }
+    }
+
+    /// Stops recording: every later event is dropped, what was recorded stays. For a recorder
+    /// whose file can no longer be written (the dev runner stops there, and the server goes on).
+    pub fn stop(&self) {
+        self.stopped.store(true, Ordering::Release);
+    }
+
+    /// Whether [`stop`](Recorder::stop) was called.
+    pub fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
+    }
+
+    /// Leaves the payloads of the calls of `ports` (by port id) out of the recording: the events
+    /// are there (port, method, call id, status), their `args` and `body` are empty. For ports
+    /// that carry secrets ([`redact_secrets`](Recorder::redact_secrets)). Applies to what is
+    /// pushed from now on.
+    pub fn redact_ports(&self, ports: &[u32]) {
+        self.redaction.lock().ports.extend(ports.iter().copied());
+    }
+
+    /// [`redact_ports`](Recorder::redact_ports) for the port that holds secrets, `SecureStore`: a
+    /// token or a password the app stores never reaches the file. (`Http` headers and bodies,
+    /// `Kv` values and `Fs` contents are recorded as they are: do not commit a recording of a
+    /// session with a real account.)
+    pub fn redact_secrets(&self) {
+        self.redact_ports(&[undra_meta::ids::port_id("SecureStore")]);
     }
 
     /// Names the host platform in the recording (informational).
@@ -71,10 +110,42 @@ impl Recorder {
     /// Appends `kind`, stamped with the time since the recorder started. Times never go
     /// backwards, even if the clock does.
     pub fn push(&self, kind: EventKind) {
+        self.push_all([kind]);
+    }
+
+    /// Appends `kinds` in order under one lock, so another thread's events never fall between
+    /// them (a call and its reply).
+    fn push_all<const N: usize>(&self, kinds: [EventKind; N]) {
+        if self.is_stopped() {
+            return;
+        }
         let t = (self.now)().saturating_sub(self.start);
         let mut state = self.state.lock();
-        let t = state.events.last().map_or(t, |last| last.t.max(t));
-        state.events.push(Event { t, kind });
+        for mut kind in kinds {
+            self.redact(&mut kind);
+            let t = state.events.last().map_or(t, |last| last.t.max(t));
+            state.events.push(Event { t, kind });
+        }
+    }
+
+    fn redact(&self, kind: &mut EventKind) {
+        let mut redaction = self.redaction.lock();
+        if redaction.ports.is_empty() {
+            return;
+        }
+        match kind {
+            EventKind::PortCall {
+                port, call, args, ..
+            } if redaction.ports.contains(port) => {
+                args.clear();
+                redaction.open.insert(*call);
+            }
+            EventKind::PortReply { call, body, .. } if redaction.open.remove(call) => body.clear(),
+            EventKind::PortEvent { port, payload, .. } if redaction.ports.contains(port) => {
+                payload.clear();
+            }
+            _ => {}
+        }
     }
 
     /// How many events have been recorded.
@@ -260,26 +331,25 @@ impl core::fmt::Debug for Recorder {
 /// never crossed a host (the core's own bindings): above any id the runtime hands out.
 const SYNTHETIC_CALL_IDS: u32 = 0x8000_0000;
 
-fn record_native_call(
-    rec: &Recorder,
-    next: &AtomicU32,
-    port: &str,
-    method: &str,
-    args: Vec<u8>,
-    body: Vec<u8>,
-) {
-    let call = SYNTHETIC_CALL_IDS + next.fetch_add(1, Ordering::Relaxed);
-    rec.push(EventKind::PortCall {
-        port: undra_meta::ids::port_id(port),
-        method: undra_meta::ids::port_method_id(port, method),
-        call,
-        args,
-    });
-    rec.push(EventKind::PortReply {
-        call,
-        status: PortStatus::Ok,
-        body,
-    });
+/// One counter for every native binding: a clock and an rng that both counted from zero would
+/// write two calls with the same id, and a reader pairs a reply with the call of its id.
+static NEXT_SYNTHETIC_CALL: AtomicU32 = AtomicU32::new(0);
+
+fn record_native_call(rec: &Recorder, port: &str, method: &str, args: Vec<u8>, body: Vec<u8>) {
+    let call = SYNTHETIC_CALL_IDS.wrapping_add(NEXT_SYNTHETIC_CALL.fetch_add(1, Ordering::Relaxed));
+    rec.push_all([
+        EventKind::PortCall {
+            port: undra_meta::ids::port_id(port),
+            method: undra_meta::ids::port_method_id(port, method),
+            call,
+            args,
+        },
+        EventKind::PortReply {
+            call,
+            status: PortStatus::Ok,
+            body,
+        },
+    ]);
 }
 
 /// A [`Clock`] that records every reading it gives, so a recording made where the core's `Clock`
@@ -288,17 +358,12 @@ fn record_native_call(
 pub struct RecordingClock {
     rec: Arc<Recorder>,
     inner: Arc<dyn Clock>,
-    next: AtomicU32,
 }
 
 impl RecordingClock {
     /// Wraps `inner`.
     pub fn new(rec: Arc<Recorder>, inner: Arc<dyn Clock>) -> RecordingClock {
-        RecordingClock {
-            rec,
-            inner,
-            next: AtomicU32::new(0),
-        }
+        RecordingClock { rec, inner }
     }
 }
 
@@ -307,7 +372,6 @@ impl Clock for RecordingClock {
         let now = self.inner.now_ms();
         record_native_call(
             &self.rec,
-            &self.next,
             "Clock",
             "now_ms",
             Vec::new(),
@@ -320,7 +384,6 @@ impl Clock for RecordingClock {
         let now = self.inner.monotonic_ns();
         record_native_call(
             &self.rec,
-            &self.next,
             "Clock",
             "monotonic_ns",
             Vec::new(),
@@ -334,17 +397,12 @@ impl Clock for RecordingClock {
 pub struct RecordingRng {
     rec: Arc<Recorder>,
     inner: Arc<dyn Rng>,
-    next: AtomicU32,
 }
 
 impl RecordingRng {
     /// Wraps `inner`.
     pub fn new(rec: Arc<Recorder>, inner: Arc<dyn Rng>) -> RecordingRng {
-        RecordingRng {
-            rec,
-            inner,
-            next: AtomicU32::new(0),
-        }
+        RecordingRng { rec, inner }
     }
 }
 
@@ -353,7 +411,6 @@ impl Rng for RecordingRng {
         let bytes = self.inner.fill(len);
         record_native_call(
             &self.rec,
-            &self.next,
             "Rng",
             "fill",
             len.to_le_bytes().to_vec(),
@@ -600,5 +657,91 @@ mod tests {
         ));
         assert_eq!(inner.port_calls().len(), 2, "forwarded");
         assert_eq!(inner.change_set_count(), 1);
+    }
+
+    #[test]
+    fn redacted_ports_keep_their_events_and_lose_their_payloads() {
+        let (_, rec) = manual();
+        rec.redact_secrets();
+        let secure = undra_meta::ids::port_id("SecureStore");
+        let set = undra_meta::ids::port_method_id("SecureStore", "set");
+        let http = undra_meta::ids::port_id("Http");
+        let request = undra_meta::ids::port_method_id("Http", "request");
+        let push_call = |port, method, call, args: &[u8]| {
+            rec.push(EventKind::PortCall {
+                port,
+                method,
+                call,
+                args: args.to_vec(),
+            });
+        };
+        let push_reply = |call, body: &[u8]| {
+            rec.push(EventKind::PortReply {
+                call,
+                status: PortStatus::Ok,
+                body: body.to_vec(),
+            });
+        };
+        push_call(secure, set, 1, b"token=hunter2");
+        push_call(http, request, 2, b"GET /a");
+        push_reply(2, b"a body");
+        push_reply(1, b"hunter2");
+        // A later call that reuses the id of a finished redacted one is not redacted by it.
+        push_reply(1, b"stray");
+        let events = rec.finish().events;
+        let payloads: Vec<&[u8]> = events
+            .iter()
+            .map(|e| match &e.kind {
+                EventKind::PortCall { args, .. } => args.as_slice(),
+                EventKind::PortReply { body, .. } => body.as_slice(),
+                _ => &[],
+            })
+            .collect();
+        assert_eq!(
+            payloads,
+            [&b""[..], b"GET /a", b"a body", b"", b"stray"],
+            "the SecureStore call and its reply are empty, Http is as it was"
+        );
+        assert!(!rec.finish().to_json().contains("hunter2"));
+        assert!(
+            !rec.finish()
+                .to_json()
+                .contains(&crate::hex::encode(b"hunter2"))
+        );
+    }
+
+    #[test]
+    fn a_stopped_recorder_keeps_what_it_has_and_drops_the_rest() {
+        let (_, rec) = manual();
+        rec.push(EventKind::Cancel { call: 1 });
+        rec.stop();
+        rec.push(EventKind::Cancel { call: 2 });
+        assert!(rec.is_stopped());
+        assert_eq!(rec.len(), 1);
+    }
+
+    #[test]
+    fn a_clock_and_an_rng_never_write_the_same_call_id() {
+        let (_, rec) = manual();
+        let rec = Arc::new(rec);
+        let clock =
+            RecordingClock::new(rec.clone(), Arc::new(undra_ports::fakes::FakeClock::new()));
+        let rng = RecordingRng::new(rec.clone(), Arc::new(undra_ports::fakes::SeededRng::new(1)));
+        clock.now_ms();
+        rng.fill(4);
+        clock.monotonic_ns();
+        let mut ids: Vec<u32> = rec
+            .finish()
+            .events
+            .iter()
+            .filter_map(|e| match e.kind {
+                EventKind::PortCall { call, .. } => Some(call),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids.len(), 3);
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), 3, "three calls, three ids");
     }
 }

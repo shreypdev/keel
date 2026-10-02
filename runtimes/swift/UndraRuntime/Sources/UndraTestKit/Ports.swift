@@ -147,6 +147,9 @@ public enum ReplayError: Error, Equatable, Sendable, CustomStringConvertible {
     case mismatch(port: UInt32, called: String, expected: String, argsDiffer: Bool, nth: Int)
     /// The core called a port more often than the recording did.
     case exhausted(port: UInt32, called: String, recorded: Int)
+    /// The core made the recorded call, but the recording holds no reply for it (the session ended while it was in flight, or the file was cut): it
+    /// was answered "unavailable".
+    case unanswered(port: UInt32, called: String, nth: Int)
     /// The replay ended with recorded calls the core never made.
     case unconsumed(port: UInt32, next: String, remaining: Int)
 
@@ -158,6 +161,8 @@ public enum ReplayError: Error, Equatable, Sendable, CustomStringConvertible {
                 : "replay: call \(nth) of the port was \(called), the recording has \(expected) next"
         case .exhausted(_, let called, let recorded):
             return "replay: \(called) was called after the recording's \(recorded) call(s) of the port were used up"
+        case .unanswered(_, let called, let nth):
+            return "replay: call \(nth) of the port, \(called), has no reply in the recording; it was answered unavailable"
         case .unconsumed(_, let next, let remaining):
             return "replay: \(remaining) recorded call(s) were never made, the next is \(next)"
         }
@@ -251,6 +256,9 @@ public final class Replayer: @unchecked Sendable {
             }
             s.queues[port]?.removeFirst()
             s.answered[port] = nth + 1
+            if next.reply == nil {
+                s.deviations.append(.unanswered(port: port, called: label(port, method), nth: nth))
+            }
             return .success(next.reply)
         }
         switch outcome {

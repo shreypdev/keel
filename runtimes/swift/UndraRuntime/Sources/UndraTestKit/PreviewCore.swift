@@ -16,9 +16,14 @@ import UndraRuntime
 /// (a refreshed preview does the same), unless `replaceCurrent` is `false`.
 ///
 /// The manual clock moves the `Clock` port and the timers armed through the `Timer` port. A native core runs its own `ctx.sleep` on the runtime's
-/// timer thread, in real time (the C ABI never hands sleeps to the host), so a delay the core sleeps through is waited for, not advanced; on web
-/// the sleeps follow the manual clock too.
+/// timer thread, in real time (the C ABI never hands sleeps to the host), so a delay the core sleeps through is waited for, not advanced:
+/// ``advance(ms:maxTimers:)`` returns at once and the sleeping task wakes after its real duration. A preview of such a flow shortens the delay (a
+/// store argument the preview passes), waits the real time and then ``settle(quietMs:timeoutMs:)``, or uses ``RecordedCore``; on web the sleeps
+/// follow the manual clock too.
 public final class PreviewCore: @unchecked Sendable {
+    /// The most timers one ``advance(ms:maxTimers:)`` fires by default (the core settles after each one).
+    public static let maxTimersPerAdvance = 1_000
+
     /// The core.
     public let core: UndraCore
     /// The fakes it runs on: script `fakes.http`, seed `fakes.kv`, read `fakes.log`.
@@ -94,13 +99,20 @@ public final class PreviewCore: @unchecked Sendable {
     /// Moves the manual clock forward by `ms`, one deadline at a time: at each deadline the clock reads exactly that instant, the due timer fires
     /// into the core, and the core settles before time moves on, so a task that sleeps again inside the window is served within the same call.
     /// Returns how many timers fired.
+    ///
+    /// - Parameter maxTimers: the most timers one call may fire (the core settles after each, so a timer that re-arms itself without time passing
+    ///   would otherwise never end).
+    /// - Throws: ``TimerStormError`` when `maxTimers` fired and another is still due (the clock stays at the last deadline).
     @MainActor
     @discardableResult
-    public func advance(ms: Int64) async -> Int {
+    public func advance(ms: Int64, maxTimers: Int = PreviewCore.maxTimersPerAdvance) async throws -> Int {
         var left = max(0, ms)
         var fired = 0
         await settle()
         while let due = fakes.clock.nextDueInMs(), due <= left {
+            if fired >= maxTimers {
+                throw TimerStormError(fired: fired, timerId: fakes.clock.pendingTimerIds().first ?? 0, atMs: Int64(fakes.clock.monotonicNs / 1_000_000))
+            }
             guard fakes.clock.fireNext(limitMs: left) != nil else {
                 break
             }

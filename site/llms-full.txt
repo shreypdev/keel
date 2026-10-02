@@ -980,7 +980,7 @@ The same three exist in Swift (`UndraTestKit`, a product of the `UndraRuntime` p
 
 `PreviewCore.load` starts your app&rsquo;s own core in the process with a deterministic fake behind every standard port. A seed fills them; `advance` moves the clock one deadline at a time and lets the core settle between.
 
-**Sleeps in a native core run in real time.** The manual clock moves what the core reads (`Clock`, staleness, timestamps) and timers armed through the `Timer` port. A native core&rsquo;s `ctx.sleep` is waited for, as the C ABI never hands sleeps to the host. On the web, sleeps follow the clock.
+**Sleeps in a native core run in real time.** The manual clock moves what the core reads (`Clock`, staleness, timestamps) and timers armed through the `Timer` port. A native core&rsquo;s `ctx.sleep` is waited for, as the C ABI never hands sleeps to the host: `advance(5_000)` does not finish a 5-second sleep, it returns at once and the task still wakes 5 real seconds later. In a native preview, make that delay a parameter the preview sets to a few milliseconds, wait the real duration and then `settle()`, preview the state after the wait with `RecordedCore`, or run the story on the web, where sleeps follow the clock. `advance` stops after `maxTimers` firings with a typed `TimerStormError` (a timer that re-arms itself without time passing never ends).
 
 ## Play a recording
 
@@ -996,11 +996,13 @@ bash
 undra dev --record session.json
 ```
 
+A recording holds what the app asked the platform and was answered, so it can hold secrets. `SecureStore` payloads are left out by default (the calls are there, their arguments and replies are empty; `--record-secrets` keeps them). HTTP headers and bodies, `Kv` values and files are recorded as they are: do not share a recording of a real account&rsquo;s session. If the file cannot be written the runner warns once, stops recording and keeps serving.
+
 A recording is one canonical JSON document, `undra.recording` version 1: payloads in hex, handles as strings, times in milliseconds. A recording made on one platform is read by all of them.
 
 ## Replay port traffic
 
-A `Replayer` answers a core&rsquo;s port calls from a recording, in order per port. A call that differs is a typed `mismatch`, an extra one is `exhausted`, and a recorded call never made is `unconsumed`. A deviation consumes nothing, so one wrong call does not shift every later answer.
+A `Replayer` answers a core&rsquo;s port calls from a recording, in order per port. A call that differs is a typed `mismatch`, an extra one is `exhausted`, a recorded call with no reply in the file is `unanswered`, and a recorded call never made is `unconsumed`. A deviation consumes nothing, so one wrong call does not shift every later answer.
 
 ## In the playground
 
@@ -1141,6 +1143,7 @@ Runs the core on this machine and serves it over a WebSocket. A simulator, a pho
 | `--android` | run `adb reverse` for the server's port on every attached Android device or emulator (only the one in `ANDROID_SERIAL`, when set) |
 | `--no-keep-state` | start every rebuilt core from fresh state instead of carrying the running core's state over |
 | `--record <file>` | write the session as an `undra.recording` (calls, replies, change-sets, port traffic, with times), rewritten twice a second; a rebuilt core starts `NAME-2.json`. See [Testing your app](https://shreypdev.github.io/undra/docs/testing.html) |
+| `--record-secrets` | keep `SecureStore` values in the recording (by default the calls of that port are recorded with empty arguments and replies) |
 | `--devtools <auto\|on\|off>` | serve the devtools page at `/devtools`: `auto` (default) on a loopback address only, `on` always, `off` never |
 
 How each platform connects (the banner prints these with the real port):

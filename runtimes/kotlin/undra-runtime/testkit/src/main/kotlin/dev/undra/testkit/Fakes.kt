@@ -37,6 +37,20 @@ private inline fun <T> readArgs(args: ByteArray, read: (UndraReader) -> T): T {
 private class Armed(val deadlineNs: Long, val seq: Long, val id: UInt)
 
 /**
+ * Thrown by [FakeClock.advance] and [PreviewCore.advance] when one call fires more timers than its cap and another is still due: a timer
+ * that re-arms itself at the same instant (or every millisecond across a long window) never lets time move on. The clock stays at the last
+ * deadline that fired and the timers still armed stay armed.
+ *
+ * @property fired how many timers fired before the cap stopped the call.
+ * @property timerId the id of the timer that was due next.
+ * @property atMs the monotonic reading of the clock when it stopped, in whole milliseconds.
+ */
+public class TimerStormException(public val fired: Int, public val timerId: UInt, public val atMs: Long) : IllegalStateException(
+    "advance fired $fired timers and timer $timerId is due again at $atMs ms: a timer that re-arms itself without time passing never ends " +
+        "(raise maxTimers if the window really holds that many)",
+)
+
+/**
  * A deterministic `Clock` and `Timer`: time only moves when the test says so.
  *
  * [nowMs] is a wall clock you can [setNowMs]; [monotonicNs] starts at 0 and [advance] moves both by the same amount. [set] arms a timer on the
@@ -118,14 +132,21 @@ public class FakeClock(nowMs: Long = DEFAULT_NOW_MS) {
         }
     }
 
-    /** Moves time forward by [ms] and fires the timers that come due, in order; returns their ids. The hook runs synchronously. */
-    public fun advance(ms: Long): List<UInt> {
+    /**
+     * Moves time forward by [ms] and fires the timers that come due, in order; returns their ids. The hook runs synchronously, and may arm timers
+     * that fall inside the window (they fire in the same call).
+     *
+     * @param maxTimers the most timers one call may fire.
+     * @throws TimerStormException when [maxTimers] fired and another is still due.
+     */
+    public fun advance(ms: Long, maxTimers: Int = MAX_TIMERS_PER_ADVANCE): List<UInt> {
         val fired = ArrayList<UInt>()
         var left = ms.coerceAtLeast(0) * NS_PER_MS
         while (true) {
             val step = synchronized(lock) {
                 val next = timers.firstOrNull() ?: return@synchronized null
                 if (next.deadlineNs > monoNs + left) return@synchronized null
+                if (fired.size >= maxTimers) throw TimerStormException(fired.size, next.id, monoNs / NS_PER_MS)
                 (next.deadlineNs - monoNs).coerceAtLeast(0)
             } ?: break
             left -= step
@@ -168,6 +189,9 @@ public class FakeClock(nowMs: Long = DEFAULT_NOW_MS) {
     public companion object {
         /** The wall-clock reading of a new clock: 2023-11-14T22:13:20Z. */
         public const val DEFAULT_NOW_MS: Long = 1_700_000_000_000L
+
+        /** The most timers one [advance] fires by default. */
+        public const val MAX_TIMERS_PER_ADVANCE: Int = 100_000
     }
 }
 

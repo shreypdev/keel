@@ -79,6 +79,16 @@ pub enum ReplayError {
         /// How many calls of this port the recording held.
         recorded: usize,
     },
+    /// The core made the recorded call, but the recording holds no reply for it (the session
+    /// ended while it was in flight, or the file was cut): it was answered `Unavailable`.
+    Unanswered {
+        /// The port id.
+        port: u32,
+        /// The call, `"Http.request"` or the ids.
+        called: String,
+        /// How many calls of this port had been answered before.
+        nth: usize,
+    },
     /// The replay ended with recorded calls the core never made.
     Unconsumed {
         /// The port id.
@@ -118,6 +128,10 @@ impl fmt::Display for ReplayError {
                 f,
                 "replay: {called} was called after the recording's {recorded} call(s) of the port were used up"
             ),
+            ReplayError::Unanswered { called, nth, .. } => write!(
+                f,
+                "replay: call {nth} of the port, {called}, has no reply in the recording; it was answered unavailable"
+            ),
             ReplayError::Unconsumed {
                 next, remaining, ..
             } => write!(
@@ -145,7 +159,7 @@ struct State {
     errors: Vec<ReplayError>,
 }
 
-/// Answers port calls from a recording. See the [module documentation](self).
+/// Answers port calls from a recording, per port in recorded order; a call that is not the next recorded one is a typed [`ReplayError`].
 pub struct Replayer {
     policy: ArgsPolicy,
     state: Mutex<State>,
@@ -240,7 +254,15 @@ impl Replayer {
         };
         *state.answered.entry(port).or_default() += 1;
         match expected.reply {
-            Some((PortStatus::Unavailable, _)) | None => PortCallOutcome::Unavailable,
+            None => {
+                state.errors.push(ReplayError::Unanswered {
+                    port,
+                    called: label(port, method),
+                    nth,
+                });
+                PortCallOutcome::Unavailable
+            }
+            Some((PortStatus::Unavailable, _)) => PortCallOutcome::Unavailable,
             Some((status, body)) => PortCallOutcome::Sync(port_reply(port_call_id, status, &body)),
         }
     }
@@ -446,23 +468,73 @@ mod tests {
     }
 
     #[test]
-    fn a_call_with_no_recorded_reply_is_unavailable() {
+    fn a_call_with_no_recorded_reply_is_unavailable_and_reported() {
         let mut r = Recording::new(1, "test");
         r.events.push(Event {
             t: 0,
             kind: EventKind::PortCall {
-                port: 3,
-                method: 4,
+                port: port_id("Http"),
+                method: port_method_id("Http", "request"),
                 call: 1,
                 args: vec![],
             },
         });
         let rp = Replayer::new(&r);
-        assert_eq!(rp.answer(3, 4, 9, &[]), PortCallOutcome::Unavailable);
         assert_eq!(
-            rp.finish(),
-            Ok(()),
-            "it was made, the answer was just empty"
+            rp.answer(port_id("Http"), port_method_id("Http", "request"), 9, &[]),
+            PortCallOutcome::Unavailable
         );
+        let errors = rp.finish().unwrap_err();
+        assert!(
+            matches!(&errors[..], [ReplayError::Unanswered { called, nth: 0, .. }] if called == "Http.request"),
+            "{errors:?}"
+        );
+        assert!(errors[0].to_string().contains("Http.request"));
+    }
+
+    #[test]
+    fn a_reply_that_arrives_before_other_ports_calls_still_pairs_by_call_id() {
+        // Replies are matched to their call by id, not by position: an Http reply that lands
+        // after a Kv call and reply is still Http's.
+        let mut r = Recording::new(1, "test");
+        let (http, request) = (port_id("Http"), port_method_id("Http", "request"));
+        let (kv, get) = (port_id("Kv"), port_method_id("Kv", "get"));
+        let mut t = 0;
+        let mut push = |kind| {
+            r.events.push(Event { t, kind });
+            t += 1;
+        };
+        push(EventKind::PortCall {
+            port: http,
+            method: request,
+            call: 1,
+            args: vec![],
+        });
+        push(EventKind::PortCall {
+            port: kv,
+            method: get,
+            call: 2,
+            args: vec![],
+        });
+        push(EventKind::PortReply {
+            call: 2,
+            status: PortStatus::Ok,
+            body: vec![2],
+        });
+        push(EventKind::PortReply {
+            call: 1,
+            status: PortStatus::Ok,
+            body: vec![1],
+        });
+        let rp = Replayer::new(&r);
+        assert_eq!(
+            reply_body(rp.answer(http, request, 7, &[])),
+            Some(port_reply(7, PortStatus::Ok, &[1]))
+        );
+        assert_eq!(
+            reply_body(rp.answer(kv, get, 8, &[])),
+            Some(port_reply(8, PortStatus::Ok, &[2]))
+        );
+        assert_eq!(rp.finish(), Ok(()));
     }
 }

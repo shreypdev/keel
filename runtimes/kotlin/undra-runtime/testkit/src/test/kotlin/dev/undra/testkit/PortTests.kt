@@ -74,6 +74,19 @@ class PortTests : Suite() {
             assertEq(setOf("Clock.now_ms", "Rng.fill", "Http.request"), problems.map { (it as ReplayError.Unconsumed).next }.toSet())
             assertTrue(assertThrows<ReplayException> { replayer.finish() }.message!!.contains("never made"))
         }
+        case("a call the recording holds no reply for is reported, naming the port and the method") {
+            val recording = Recording(
+                1uL, "hand", null,
+                listOf(RecordedEvent(0, RecordedKind.PortCall(KV.PORT_ID, KV.GET, 1u, keyArgs("a")))),
+            )
+            val replayer = Replayer(recording)
+            assertThrows<dev.undra.runtime.UndraException> { replayer.ports().getValue(KV.PORT_ID).call(KV.GET, keyArgs("a")) }
+            val errors = replayer.errors()
+            assertEq(1, errors.size)
+            assertTrue(errors[0] is ReplayError.Unanswered && (errors[0] as ReplayError.Unanswered).called == "Kv.get", errors[0].describe())
+            assertTrue(assertThrows<ReplayException> { replayer.finish() }.message!!.contains("Kv.get"), "finish names the method")
+            assertTrue(errors[0].describe().contains("no reply in the recording"), errors[0].describe())
+        }
         case("arguments that change from run to run can be ignored") {
             val recorder = PortRecorder(1uL, now = { 0L })
             recorder.wrapAll(mapOf(KV.PORT_ID to MemKv().portImpl())).getValue(KV.PORT_ID).call(KV.GET, keyArgs("a"))

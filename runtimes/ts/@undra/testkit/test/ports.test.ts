@@ -115,4 +115,42 @@ describe("PortRecorder and Replayer", () => {
     expect(() => methods[2]!(new Uint8Array(0))).toThrow(/unavailable/);
     expect(() => replayer.finish()).not.toThrow();
   });
+
+  it("report a call the recording holds no reply for, naming the port and the method", () => {
+    const recording = parseRecording(
+      JSON.stringify({
+        format: "undra.recording",
+        version: 1,
+        schema_hash: "0x1",
+        source: "hand",
+        events: [{ t: 0, kind: "port_call", port: kv.portId, method: kv.get, call: 1, args: toHex(keyArgs("a")) }],
+      }),
+    );
+    const replayer = new Replayer(recording);
+    expect(() => replayer.ports()[kv.portId]!.methods[kv.get]!(keyArgs("a"))).toThrow(/no reply/);
+    expect(replayer.errors()).toEqual([{ kind: "unanswered", port: kv.portId, called: "Kv.get", nth: 0 }]);
+    expect(() => replayer.finish()).toThrow(/Kv\.get.*no reply in the recording/s);
+  });
+
+  it("pair a reply with its call by id, not by position", () => {
+    const recording = parseRecording(
+      JSON.stringify({
+        format: "undra.recording",
+        version: 1,
+        schema_hash: "0x1",
+        source: "hand",
+        events: [
+          { t: 0, kind: "port_call", port: kv.portId, method: kv.get, call: 1, args: toHex(keyArgs("a")) },
+          { t: 1, kind: "port_call", port: PortIds.Http.portId, method: PortIds.Http.request, call: 2, args: "" },
+          { t: 2, kind: "port_reply", call: 2, status: "ok", body: "02" },
+          { t: 3, kind: "port_reply", call: 1, status: "ok", body: "01" },
+        ],
+      }),
+    );
+    const replayer = new Replayer(recording);
+    const ports = replayer.ports();
+    expect(ports[PortIds.Http.portId]!.methods[PortIds.Http.request]!(new Uint8Array(0))).toEqual(Uint8Array.of(2));
+    expect(ports[kv.portId]!.methods[kv.get]!(keyArgs("a"))).toEqual(Uint8Array.of(1));
+    expect(() => replayer.finish()).not.toThrow();
+  });
 });

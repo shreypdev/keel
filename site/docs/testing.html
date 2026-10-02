@@ -93,7 +93,7 @@ await preview.advance(31_000);</code></pre></div>
   ]
 }</code></pre></div>
 </details>
-<div class="callout"><p><strong>Sleeps in a native core run in real time.</strong> The manual clock moves what the core reads (<code>Clock</code>, staleness, timestamps) and timers armed through the <code>Timer</code> port. A native core&rsquo;s <code>ctx.sleep</code> is waited for, as the C ABI never hands sleeps to the host. On the web, sleeps follow the clock.</p></div>
+<div class="callout"><p><strong>Sleeps in a native core run in real time.</strong> The manual clock moves what the core reads (<code>Clock</code>, staleness, timestamps) and timers armed through the <code>Timer</code> port. A native core&rsquo;s <code>ctx.sleep</code> is waited for, as the C ABI never hands sleeps to the host: <code>advance(5_000)</code> does not finish a 5-second sleep, it returns at once and the task still wakes 5 real seconds later. In a native preview, make that delay a parameter the preview sets to a few milliseconds, wait the real duration and then <code>settle()</code>, preview the state after the wait with <code>RecordedCore</code>, or run the story on the web, where sleeps follow the clock. <code>advance</code> stops after <code>maxTimers</code> firings with a typed <code>TimerStormError</code> (a timer that re-arms itself without time passing never ends).</p></div>
 <h2 id="play-a-recording">Play a recording<a class="anchor" href="#play-a-recording" aria-label="Link to this section">#</a></h2>
 <p><code>RecordedCore</code> loads a recording and releases its change-sets with a playhead you move. Calls are answered by the next recorded reply for the same target; a call the recording has no reply for is a typed refusal that names it.</p>
 <details class="reveal-code"><summary>Show Swift <span>3 lines</span></summary>
@@ -104,12 +104,13 @@ recorded.advance(ms: 300)                      // the change-sets up to 300 ms i
 <h2 id="record-a-session">Record a session<a class="anchor" href="#record-a-session" aria-label="Link to this section">#</a></h2>
 <p>The dev server sees every call, reply, change-set and port call, on iOS, Android and the web alike, so one flag captures a session. A reload starts a new core, so a new file (<code>session-2.json</code>).</p>
 <div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">undra dev --record session.json</code></pre></div>
+<p>A recording holds what the app asked the platform and was answered, so it can hold secrets. <code>SecureStore</code> payloads are left out by default (the calls are there, their arguments and replies are empty; <code>--record-secrets</code> keeps them). HTTP headers and bodies, <code>Kv</code> values and files are recorded as they are: do not share a recording of a real account&rsquo;s session. If the file cannot be written the runner warns once, stops recording and keeps serving.</p>
 <p>A recording is one canonical JSON document, <code>undra.recording</code> version 1: payloads in hex, handles as strings, times in milliseconds. A recording made on one platform is read by all of them.</p>
 <details class="reveal-code"><summary>Show the format <span>an excerpt</span></summary>
 <div class="code"><div class="code-bar"><span>session.json</span></div><pre><code data-lang="json">{
   "format": "undra.recording",
   "version": 1,
-  "schema_hash": "0xc5f05c376fde398c",
+  "schema_hash": "0xfa536b9ac6f06149",
   "source": "dev-server",
   "platform": "ios",
   "events": [
@@ -122,7 +123,7 @@ recorded.advance(ms: 300)                      // the change-sets up to 300 ms i
 }</code></pre></div>
 </details>
 <h2 id="replay-port-traffic">Replay port traffic<a class="anchor" href="#replay-port-traffic" aria-label="Link to this section">#</a></h2>
-<p>A <code>Replayer</code> answers a core&rsquo;s port calls from a recording, in order per port. A call that differs is a typed <code>mismatch</code>, an extra one is <code>exhausted</code>, and a recorded call never made is <code>unconsumed</code>. A deviation consumes nothing, so one wrong call does not shift every later answer.</p>
+<p>A <code>Replayer</code> answers a core&rsquo;s port calls from a recording, in order per port. A call that differs is a typed <code>mismatch</code>, an extra one is <code>exhausted</code>, a recorded call with no reply in the file is <code>unanswered</code>, and a recorded call never made is <code>unconsumed</code>. A deviation consumes nothing, so one wrong call does not shift every later answer.</p>
 <details class="reveal-code"><summary>Show Swift and Rust <span>2 snippets</span></summary>
 <div class="code"><div class="code-bar"><span>Swift</span></div><pre><code data-lang="swift">let replayer = Replayer(try Recording(json: text))
 let core = try UndraPlaygroundCore.load(.inproc(adapters: replayer.adapters()))

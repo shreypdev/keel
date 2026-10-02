@@ -25,6 +25,11 @@ import kotlinx.coroutines.runBlocking
  * is also the core the bindings' stores use by default. Android Studio's preview pane runs on a desktop JVM that cannot load an Android library,
  * so a Compose `@Preview` uses [RecordedCore] instead.
  *
+ * The manual clock moves the `Clock` port and the timers armed through the `Timer` port. A native core runs its own `ctx.sleep` on the runtime's timer
+ * thread, in real time (the C ABI never hands sleeps to the host), so a delay the core sleeps through is waited for, not advanced: [advance] returns
+ * at once and the sleeping task wakes after its real duration. A preview of such a flow shortens the delay (a store argument the preview passes),
+ * waits the real time and then calls [settle], or uses [RecordedCore].
+ *
  * A process holds one in-process core per namespace. [load] closes the shared one first (a refreshed preview does the same), unless
  * `replaceCurrent` is `false`.
  */
@@ -65,16 +70,21 @@ public class PreviewCore private constructor(
 
     /**
      * Moves the manual clock forward by [ms], one deadline at a time: at each deadline the clock reads exactly that instant, the due timer fires
-     * into the core (completing a `ctx.sleep`, or a stale-time refetch), and the core settles before time moves on, so a task that sleeps again
+     * into the core (a stale-time refetch, a `Timer` port timer; not a native `ctx.sleep`, see the class documentation), and the core settles before time moves on, so a task that sleeps again
      * inside the window is served within the same call. Returns how many timers fired.
+     *
+     * @param maxTimers the most timers one call may fire; the core settles after each, so a timer that re-arms itself without time passing would
+     *   otherwise never end.
+     * @throws TimerStormException when [maxTimers] fired and another is still due (the clock stays at the last deadline).
      */
-    public fun advance(ms: Long): Int {
+    public fun advance(ms: Long, maxTimers: Int = MAX_TIMERS_PER_ADVANCE): Int {
         var left = ms.coerceAtLeast(0)
         var fired = 0
         settle()
         while (true) {
             val due = fakes.clock.nextDueInMs() ?: break
             if (due > left) break
+            if (fired >= maxTimers) throw TimerStormException(fired, fakes.clock.pendingTimerIds().first(), fakes.clock.monotonicNs.toLong() / 1_000_000)
             if (fakes.clock.fireNext(left) == null) break
             left -= due
             fired++
@@ -93,6 +103,9 @@ public class PreviewCore private constructor(
 
     /** Loading. */
     public companion object {
+        /** The most timers one [advance] fires by default (the core settles after each one). */
+        public const val MAX_TIMERS_PER_ADVANCE: Int = 1_000
+
         /**
          * Loads the core with the fakes installed.
          *

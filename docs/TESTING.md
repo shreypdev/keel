@@ -66,11 +66,21 @@ event sources for `Connectivity` and `Lifecycle` (`preview.fakes.connectivity.go
   On the web, `ctx.sleep` in the core follows this clock. **In a native core (Swift, Kotlin) it does not**: the runtime runs its own `ctx.sleep`
   on its timer thread in real time (the C ABI never hands sleeps to the host, SPEC 5.8). The manual clock there moves what the core *reads*
   (`Clock`: staleness, timestamps) and timers armed through the `Timer` port. A delay a native core sleeps through is waited for, not advanced.
+  **What a native preview author does about it:** `advance(5_000)` does not finish a 5-second `ctx.sleep` (a debounce, a retry back-off, a polling
+  loop): it returns at once, fires no timer for it, and the task still wakes 5 real seconds after it went to sleep. So either (1) make the
+  delay a parameter the preview sets to a few milliseconds (a store argument, a setting), (2) wait the real duration yourself and then `settle()`
+  (a sleeping core is idle, so `settle()` alone does not wait for it), (3) preview the state *after* the wait with `RecordedCore` or by scripting the
+  ports, or (4) run that story on the web, where sleeps follow the clock. Staleness and expiry (`Clock` reads) need none of this: `advance` moves them.
+* **Runaway timers.** `advance` fires at most `maxTimers` timers per call (1,000 for `PreviewCore`, 100,000 for a bare `FakeClock`; the core settles
+  after each one) and then throws `TimerStormError` (Kotlin `TimerStormException`; the Rust fakes panic): a timer that re-arms itself without time
+  passing, or every millisecond over a very long window, would otherwise never end. The clock stays at the last deadline that fired.
 * **Settling.** The core runs on its own thread (native) or after microtasks (web), so a preview waits for it to be idle: `settle()` and every
   `advance` do. "Idle" is observed (the core's counters stand still and no port call is pending), so raise the quiet window on a busy machine.
 * **One core per namespace.** Swift and Kotlin load the core through the entry of its bindings (`UndraPlaygroundCore.load`, ADR-044), which knows its
   library and schema hash and is also what the generated stores use by default. `load` shuts down the shared core first (a refreshed preview does
   the same) unless `replaceCurrent` is off; the entry refuses a second load of a core that is still open.
+* **Fault injection.** The Rust fakes can fail on command (`MemStore::fail`, `fail_times`, `heal`: a full disk, a locked Keychain; ADR-049). The
+  Swift, Kotlin and TypeScript fakes do not have it yet: script a failing adapter by hand to preview those paths.
 * **Loading order.** The core's start-up work (the query cache reads the `Kv` port) runs concurrently with the host registering its ports in Swift
   (SPEC 6: a port registered after `undra_init` is racy against the hooks). The kit registers the stores first; do not rely on a persisted cache
   being hydrated in a preview. Seed the data through the `Http` fake instead.
@@ -130,7 +140,7 @@ One JSON document, `undra.recording`, version 1. The same shape holds change-set
 {
   "format": "undra.recording",
   "version": 1,
-  "schema_hash": "0xc5f05c376fde398c",
+  "schema_hash": "0xfa536b9ac6f06149",
   "source": "dev-server",
   "platform": "ios",
   "events": [
@@ -162,6 +172,13 @@ wraps its own `Clock` and `Rng` (they are native bindings that never cross the s
 and so a new file: `<file>`, then `<name>-2.<ext>`, `<name>-3.<ext>` (a recording belongs to one schema hash). The file is rewritten twice a second
 while it grows and once more when `undra dev` stops.
 
+A recording holds what the app asked the platform and was answered, so it can hold secrets. **`SecureStore` payloads are left out by default**: the
+calls of that port are in the file (port, method, call id, status) with empty arguments and replies, and `source` says so; `--record-secrets` keeps
+them (a `Replayer` then cannot answer those calls from the file: it reports them as `mismatch`, so keep the secrets, or script that port, for a replay that reads them). Everything else is recorded as it happened: HTTP headers (an `Authorization` header included) and bodies, `Kv` values, files. Do not commit or
+share a recording of a session on a real account. (`PortRecorder` and the Rust `Recorder` record what they wrap; `Recorder::redact_secrets()` leaves
+the `SecureStore` payloads out there too.) When the recording file cannot be written (a full disk, a removed directory) the runner says so once,
+stops recording and keeps serving.
+
 **`PortRecorder`** (all three runtimes) wraps the real adapters in a session that is not a dev one (a device, a test) and records port traffic only:
 
 ```swift
@@ -184,6 +201,7 @@ recorded one of its port (same method and, by default, the same arguments) gets 
 |---|---|
 | `mismatch` | the core called another method, or the same method with other arguments, than the recording's next call of the port |
 | `exhausted` | the core called a port more often than the recording did |
+| `unanswered` | the core made a recorded call that has no reply in the recording (the session ended while it was in flight, or the file was cut); it was answered "unavailable" |
 | `unconsumed` | the replay ended with recorded calls the core never made |
 
 A deviation consumes nothing (one wrong call does not shift every later answer) and is answered "unavailable". `finish()` throws with every error of

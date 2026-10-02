@@ -70,7 +70,7 @@ final class ConformanceTests: XCTestCase {
                 case "timer":
                     clock.set(timerId: UInt32(step["id"]!.int!), delayMs: UInt64(step["delay_ms"]!.int!))
                 case "advance":
-                    let fired = clock.advance(ms: step["ms"]!.int!)
+                    let fired = try clock.advance(ms: step["ms"]!.int!)
                     same(step["fired"], "[" + fired.map(String.init).joined(separator: ",") + "]", "fired")
                     same(step["state"], state(), "state after advance")
                 case "set_now":

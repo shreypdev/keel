@@ -8,6 +8,7 @@ fun main() {
     val suites: List<Suite> = listOf(
         RecordingTests(),
         ConformanceTests(),
+        ClockTests(),
         PortTests(),
         RecordedCoreTests(),
     )

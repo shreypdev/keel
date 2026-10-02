@@ -1,5 +1,5 @@
 import { UndraCore, type AdapterOverrides, type AttachOptions, type PortImpl, type WasmSource } from "@undra/runtime";
-import { createFakes, type Fakes, type FakeClock } from "./fakes.js";
+import { createFakes, TimerStormError, type Fakes, type FakeClock } from "./fakes.js";
 import { settleCore } from "./recorded.js";
 import { applySeed, parseSeed, type Seed } from "./seed.js";
 
@@ -36,6 +36,8 @@ export interface PreviewOptions extends Pick<AttachOptions, "onError" | "shared"
  * The fakes sit in this thread, so only the `wasm-main` mode is offered.
  */
 export class PreviewCore {
+  /** The most timers one {@link PreviewCore.advance} fires by default (the core settles after each one). */
+  static readonly MAX_TIMERS_PER_ADVANCE = 1_000;
   /** The core. */
   readonly core: UndraCore;
   /** The fakes it runs on: script `fakes.http`, seed `fakes.kv`, read `fakes.log`. */
@@ -91,8 +93,12 @@ export class PreviewCore {
    * Moves the manual clock forward by `ms`, one deadline at a time: at each deadline the clock reads exactly that instant, the due timer
    * fires into the core (completing a `ctx.sleep`, or a stale-time refetch), and the core settles before time moves on, so a task that
    * sleeps again inside the window is served within the same call. Returns how many timers fired.
+   *
+   * @param maxTimers the most timers one call may fire (default {@link PreviewCore.MAX_TIMERS_PER_ADVANCE}); the core settles after each, so
+   *   a timer that re-arms itself without time passing would otherwise never end.
+   * @throws TimerStormError when `maxTimers` fired and another is still due (the clock stays at the last deadline).
    */
-  async advance(ms: number): Promise<number> {
+  async advance(ms: number, maxTimers: number = PreviewCore.MAX_TIMERS_PER_ADVANCE): Promise<number> {
     const clock = this.fakes.clock;
     let left = Math.max(0, Math.ceil(ms));
     let fired = 0;
@@ -100,6 +106,7 @@ export class PreviewCore {
     for (;;) {
       const due = clock.nextDueInMs();
       if (due === undefined || due > left) break;
+      if (fired >= maxTimers) throw new TimerStormError(fired, clock.pendingTimerIds()[0] ?? 0, Number(clock.monotonicNs() / 1_000_000n));
       if (clock.fireNext(left) === undefined) break;
       left -= due;
       fired += 1;

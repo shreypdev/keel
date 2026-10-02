@@ -101,6 +101,7 @@ export class PortRecorder {
 export type ReplayError =
   | { readonly kind: "mismatch"; readonly port: number; readonly called: string; readonly expected: string; readonly argsDiffer: boolean; readonly nth: number }
   | { readonly kind: "exhausted"; readonly port: number; readonly called: string; readonly recorded: number }
+  | { readonly kind: "unanswered"; readonly port: number; readonly called: string; readonly nth: number }
   | { readonly kind: "unconsumed"; readonly port: number; readonly next: string; readonly remaining: number };
 
 /** Describes a {@link ReplayError} in a sentence. */
@@ -112,6 +113,8 @@ export function describeReplayError(e: ReplayError): string {
         : `replay: call ${e.nth} of the port was ${e.called}, the recording has ${e.expected} next`;
     case "exhausted":
       return `replay: ${e.called} was called after the recording's ${e.recorded} call(s) of the port were used up`;
+    case "unanswered":
+      return `replay: call ${e.nth} of the port, ${e.called}, has no reply in the recording; it was answered unavailable`;
     case "unconsumed":
       return `replay: ${e.remaining} recorded call(s) were never made, the next is ${e.next}`;
   }
@@ -191,7 +194,11 @@ export class Replayer {
     queue?.shift();
     this.#answered.set(port, nth + 1);
     const reply = next.reply;
-    if (reply === undefined || reply.status === "unavailable") throw new Error("the recorded port reply is unavailable");
+    if (reply === undefined) {
+      this.#errors.push({ kind: "unanswered", port, called: label(port, method), nth });
+      throw new Error("the recording holds no reply for this port call");
+    }
+    if (reply.status === "unavailable") throw new Error("the recorded port reply is unavailable");
     if (reply.status === "error") throw new UndraPortError(reply.body);
     return reply.body;
   }

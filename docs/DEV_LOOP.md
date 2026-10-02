@@ -218,6 +218,9 @@ iOS, Android and web alike, because the server sees the same envelopes from all 
 * A recording belongs to one core and so to one schema hash: a rebuild starts a new core, and its session goes to `NAME-2.EXT` (`session-2.json`, `session-3.json`, ...);
   the first file keeps what the first core did.
 * A core that polls the clock a lot writes a lot: record a session you want to keep, not a benchmark.
+* **Secrets.** The calls of the `SecureStore` port are recorded with empty arguments and replies (the file's `source` says "SecureStore payloads left out");
+  `--record-secrets` keeps them. HTTP headers and bodies, `Kv` values and files are recorded as they are: do not share a recording of a real account's session.
+* If the file cannot be written (a full disk, a removed directory) the runner logs one warning, stops recording and keeps serving; what was written before stays.
 
 ## The devtools page
 

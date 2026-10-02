@@ -18,7 +18,7 @@ use crate::config::Platform;
 use crate::devtools;
 use crate::error::{CliError, Code, Result};
 use crate::reload::{self, Outcome, Restored, Snapshot, Swap};
-use crate::runner::{self, RunnerEvent, Running};
+use crate::runner::{self, RecordTo, RunOptions, RunnerEvent, Running};
 use crate::session::Session;
 
 use super::Env;
@@ -59,15 +59,21 @@ pub fn run(env: &Env<'_>, args: &DevArgs) -> Result<()> {
 
     let mut run_id = 0_u64;
     let mut addr = args.addr.clone();
-    let record = args.record.as_deref();
+    let record = args.record.as_deref().map(|base| RecordTo {
+        base,
+        secrets: args.record_secrets,
+    });
     // The page of the devtools needs this run's secret in its address, whichever runner serves it.
     let token = devtools::enabled(args.devtools, &args.addr).then(devtools::new_token);
+    let options = RunOptions {
+        record,
+        devtools: token.as_deref(),
+    };
     let (first, ready, _) = start(
         &exe,
         &addr,
         args.log_level,
-        record,
-        token.as_deref(),
+        options,
         &mut run_id,
         &runner_tx,
         &rx,
@@ -125,8 +131,7 @@ pub fn run(env: &Env<'_>, args: &DevArgs) -> Result<()> {
                             exe: &exe,
                             addr: &addr,
                             log_level: args.log_level,
-                            record,
-                            devtools: token.as_deref(),
+                            options,
                             run_id: &mut run_id,
                             runner_tx: &runner_tx,
                             rx: &rx,
@@ -211,24 +216,14 @@ fn start(
     exe: &Path,
     addr: &str,
     log_level: u8,
-    record: Option<&Path>,
-    devtools: Option<&str>,
+    options: RunOptions<'_>,
     run_id: &mut u64,
     runner_tx: &Sender<RunnerEvent>,
     rx: &Receiver<Event>,
 ) -> Result<(Running, (String, String), bool)> {
     *run_id += 1;
     let id = *run_id;
-    let running = runner::spawn(
-        exe,
-        addr,
-        log_level,
-        id,
-        false,
-        record,
-        devtools,
-        runner_tx.clone(),
-    )?;
+    let running = runner::spawn(exe, addr, log_level, id, false, options, runner_tx.clone())?;
     let deadline = Instant::now() + READY_TIMEOUT;
     let mut changed = false;
     loop {
@@ -279,9 +274,8 @@ struct ProcOps<'a> {
     exe: &'a Path,
     addr: &'a str,
     log_level: u8,
-    record: Option<&'a Path>,
-    /// This run's devtools token, when the page is served.
-    devtools: Option<&'a str>,
+    /// What a run does besides serving: record the session, serve the devtools page.
+    options: RunOptions<'a>,
     run_id: &'a mut u64,
     runner_tx: &'a Sender<RunnerEvent>,
     rx: &'a Receiver<Event>,
@@ -342,8 +336,7 @@ impl reload::Ops for ProcOps<'_> {
             self.log_level,
             id,
             true,
-            self.record,
-            self.devtools,
+            self.options,
             self.runner_tx.clone(),
         )
         .map_err(|e| e.what)?;

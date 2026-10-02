@@ -111,7 +111,8 @@ class RecordedCoreTests : Suite() {
             }
         }
         case("a recording of another schema is refused") {
-            assertThrows<UndraSchemaMismatchException> { load(hash = 1uL) }
+            val error = assertThrows<UndraSchemaMismatchException> { load(hash = 1uL) }
+            assertTrue(error.message!!.contains("0x1 ") && error.message!!.contains("0x"), "the message carries both hashes: ${error.message}")
         }
         case("replays a stream's items with the call id of the live call") {
             val recording = Recording(

@@ -33,6 +33,27 @@ interface Armed {
 }
 
 /**
+ * Thrown by {@link FakeClock.advance} and `PreviewCore.advance` when one call fires more timers than its cap and another is still due:
+ * a timer that re-arms itself at the same instant (or every millisecond across a long window) never lets time move on. The clock
+ * stays at the last deadline that fired and the timers still armed stay armed.
+ */
+export class TimerStormError extends Error {
+  constructor(
+    /** How many timers fired before the cap stopped the call. */
+    readonly fired: number,
+    /** The id of the timer that was due next. */
+    readonly timerId: number,
+    /** The monotonic reading of the clock when it stopped, in whole milliseconds. */
+    readonly atMs: number,
+  ) {
+    super(
+      `advance fired ${fired} timers and timer ${timerId} is due again at ${atMs} ms: a timer that re-arms itself without time passing never ends (raise maxTimers if the window really holds that many)`,
+    );
+    this.name = "TimerStormError";
+  }
+}
+
+/**
  * A deterministic `Clock` and `Timer`: time only moves when the test says so.
  *
  * `nowMs()` is a wall clock you can {@link FakeClock.setNowMs}; `monotonicNs()` starts at 0 and `advance` moves both by the
@@ -42,6 +63,8 @@ interface Armed {
 export class FakeClock implements ClockAdapter, TimerAdapter {
   /** The wall-clock reading of a new clock: 2023-11-14T22:13:20Z. */
   static readonly DEFAULT_NOW_MS = 1_700_000_000_000;
+  /** The most timers one {@link FakeClock.advance} fires by default. */
+  static readonly MAX_TIMERS_PER_ADVANCE = 100_000;
 
   #wallNs: bigint;
   #monoNs = 0n;
@@ -116,13 +139,20 @@ export class FakeClock implements ClockAdapter, TimerAdapter {
     this.#wallNs += by;
   }
 
-  /** Moves time forward by `ms` and fires the timers that come due, in order; returns their ids. The callbacks run synchronously. */
-  advance(ms: number): number[] {
+  /**
+   * Moves time forward by `ms` and fires the timers that come due, in order; returns their ids. The callbacks run synchronously, and may arm
+   * timers that fall inside the window (they fire in the same call).
+   *
+   * @param maxTimers the most timers one call may fire (default {@link FakeClock.MAX_TIMERS_PER_ADVANCE}).
+   * @throws TimerStormError when `maxTimers` fired and another is still due.
+   */
+  advance(ms: number, maxTimers: number = FakeClock.MAX_TIMERS_PER_ADVANCE): number[] {
     const fired: number[] = [];
     let left = BigInt(Math.max(0, Math.ceil(ms))) * NS_PER_MS;
     for (;;) {
       const next = this.#timers[0];
       if (next === undefined || next.deadlineNs > this.#monoNs + left) break;
+      if (fired.length >= maxTimers) throw new TimerStormError(fired.length, next.id, Number(this.#monoNs / NS_PER_MS));
       const step = next.deadlineNs > this.#monoNs ? next.deadlineNs - this.#monoNs : 0n;
       left -= step;
       const id = this.fireNext(Number((step + NS_PER_MS - 1n) / NS_PER_MS));

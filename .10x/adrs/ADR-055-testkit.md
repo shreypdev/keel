@@ -84,3 +84,18 @@ by the host anyway; and the dev server already sees every envelope of every plat
 * **A binary recording.** Rejected: a recording is a fixture, so it is reviewed, diffed and hand-edited. Hex doubles
   the size and nobody notices.
 * **Storybook as a dependency.** Rejected: a large toolchain for a rendering host; CSF is the portable part.
+
+## Amendments from the adversarial review (2026-10-02, `.10x/reviews/2026-10-02-testkit-review.md`)
+
+None of these touch the envelope, a payload, the C ABI, the wasm ABI, the schema or a generated shape.
+
+* **`advance` is capped.** One `advance` fires at most `maxTimers` timers (1,000 for `PreviewCore`, 100,000 for a bare `FakeClock`) and then
+  fails with a typed `TimerStormError` (Swift `advance` is now `throws`; Kotlin `TimerStormException`; the Rust fakes panic): a timer that
+  re-arms itself without time passing never lets time move on, and a test that hangs says nothing. The clock stays at the last deadline.
+* **`unanswered`** is a fourth `ReplayError` (all four kits): the core made a recorded call that has no reply in the recording (the session ended
+  while it was in flight, or the file was cut). It is still answered `Unavailable`, and `finish()` now reports it.
+* **Secrets in a recording.** `undra dev --record` leaves the payloads of the `SecureStore` port out by default (`Recorder::redact_secrets`; the
+  events stay, their arguments and replies are empty, `source` says so) and `--record-secrets` keeps them. HTTP, `Kv` and `Fs` payloads are
+  recorded as they are and the docs say so. A recording file that cannot be written stops the recording after one warning; the dev server serves on.
+* The calls of the dev runner's native `Clock` and `Rng` get call ids from one counter (two counters starting at zero wrote the same id twice, and a
+  reader pairs a reply with the call of its id).

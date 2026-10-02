@@ -52,14 +52,14 @@ final class PreviewAndRecordedTests: XCTestCase {
         XCTAssertEqual(preview.fakes.http.calls.map { $0.url }, ["https://api.test/lists/inbox/todos"])
 
         // Fresh for 30 s: a second observer is served from the cache.
-        await preview.advance(ms: 10_000)
+        try await preview.advance(ms: 10_000)
         _ = try RemoteTodosQueryHandle(list: "inbox", ctx: preview.core)
         XCTAssertEqual(preview.fakes.http.calls.count, 1, "a fresh entry was fetched again")
 
         // Past it, the next observer fetches again, and everyone sees the new list.
         preview.fakes.http.reset()
         preview.fakes.http.respond(url: "https://api.test/lists/inbox/todos", httpResponse(status: 200, body: "[{\"id\":3,\"title\":\"Third\",\"done\":false}]"))
-        await preview.advance(ms: 31_000)
+        try await preview.advance(ms: 31_000)
         _ = try RemoteTodosQueryHandle(list: "inbox", ctx: preview.core)
         await preview.settle()
         try await waitUntil("the refreshed list") { first.data?.map { $0.title } == ["Third"] }

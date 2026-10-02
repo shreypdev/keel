@@ -87,9 +87,14 @@ final class RecordedCoreTests: XCTestCase {
         XCTAssertEqual(bodies[2], bodies[4])
     }
 
-    func testARecordingOfAnotherSchemaIsRefused() {
+    func testARecordingOfAnotherSchemaIsRefused() throws {
         XCTAssertThrowsError(try load(hash: 1)) { error in
             XCTAssertTrue(error is UndraSchemaMismatchError, "\(error)")
+        }
+        // The error carries both hashes, so a stale recording says which schema it belongs to.
+        let recorded = try Recording(json: try fixture("fixtures/session-todos.json")).schemaHash
+        XCTAssertThrowsError(try load(hash: 1)) { error in
+            XCTAssertEqual(error as? UndraSchemaMismatchError, UndraSchemaMismatchError(expected: 1, got: recorded))
         }
     }
 

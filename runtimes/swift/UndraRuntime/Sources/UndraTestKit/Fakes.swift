@@ -9,6 +9,23 @@ private let nsPerMs: Int64 = 1_000_000
 
 // MARK: - Clock and Timer
 
+/// Thrown by ``FakeClock/advance(ms:maxTimers:)`` and ``PreviewCore/advance(ms:maxTimers:)`` when one call fires more timers than its cap and another
+/// is still due: a timer that re-arms itself at the same instant (or every millisecond across a long window) never lets time move on. The clock
+/// stays at the last deadline that fired and the timers still armed stay armed.
+public struct TimerStormError: Error, Equatable, Sendable, CustomStringConvertible {
+    /// How many timers fired before the cap stopped the call.
+    public let fired: Int
+    /// The id of the timer that was due next.
+    public let timerId: UInt32
+    /// The monotonic reading of the clock when it stopped, in whole milliseconds.
+    public let atMs: Int64
+
+    public var description: String {
+        return "advance fired \(fired) timers and timer \(timerId) is due again at \(atMs) ms: a timer that re-arms itself without time passing never ends "
+            + "(raise maxTimers if the window really holds that many)"
+    }
+}
+
 /// A deterministic `Clock` and `Timer`: time only moves when the test says so.
 ///
 /// ``nowMs`` is a wall clock you can ``setNowMs(_:)``; ``monotonicNs`` starts at 0 and ``advance(ms:)`` moves both by the same amount.
@@ -18,6 +35,8 @@ private let nsPerMs: Int64 = 1_000_000
 public final class FakeClock: @unchecked Sendable {
     /// The wall-clock reading of a new clock: 2023-11-14T22:13:20Z.
     public static let defaultNowMs: Int64 = 1_700_000_000_000
+    /// The most timers one ``advance(ms:maxTimers:)`` fires by default.
+    public static let maxTimersPerAdvance = 100_000
 
     private struct Armed {
         let deadlineNs: Int64
@@ -125,20 +144,28 @@ public final class FakeClock: @unchecked Sendable {
         }
     }
 
-    /// Moves time forward by `ms` and fires the timers that come due, in order; returns their ids. The hook runs synchronously.
+    /// Moves time forward by `ms` and fires the timers that come due, in order; returns their ids. The hook runs synchronously, and may arm timers
+    /// that fall inside the window (they fire in the same call).
+    ///
+    /// - Parameter maxTimers: the most timers one call may fire.
+    /// - Throws: ``TimerStormError`` when `maxTimers` fired and another is still due: a timer that re-arms itself without time passing never ends.
+    ///   The clock stays at the last deadline that fired and the timers still armed stay armed.
     @discardableResult
-    public func advance(ms: Int64) -> [UInt32] {
+    public func advance(ms: Int64, maxTimers: Int = FakeClock.maxTimersPerAdvance) throws -> [UInt32] {
         var fired = [UInt32]()
         var left = max(0, ms) * nsPerMs
         while true {
-            let step = state.withLock { (s: inout State) -> Int64? in
+            let step = state.withLock { (s: inout State) -> (step: Int64, id: UInt32, atMs: Int64)? in
                 guard let next = s.timers.first, next.deadlineNs <= s.monoNs + left else {
                     return nil
                 }
-                return max(0, next.deadlineNs - s.monoNs)
+                return (max(0, next.deadlineNs - s.monoNs), next.id, s.monoNs / nsPerMs)
             }
-            guard let step = step else {
+            guard let (step, nextId, atMs) = step else {
                 break
+            }
+            if fired.count >= maxTimers {
+                throw TimerStormError(fired: fired.count, timerId: nextId, atMs: atMs)
             }
             left -= step
             guard let id = fireNext(limitMs: (step + nsPerMs - 1) / nsPerMs) else {
