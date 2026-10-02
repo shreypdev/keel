@@ -87,8 +87,8 @@ core, load 10 (the earlier files: load 2 to 4), p50:
 | the merged 1,667-patch frame | 4.03 to 4.28 ms | 2.25 ms | **1.26 to 1.54 ms** |
 
 (The middle column is one run at load 28 to 31, from before the last two levers; it is there for the target, not for
-the host.) The call is 7x cheaper, the change-set 5x, and the call is now within 2.2x to 3.7x of the core's own
-130 to 200 ns export plus its copies, not 20x. The blueprint's 80 ns is still out of reach in JavaScript; what is left
+the host.) The call is 7x cheaper, the change-set 5x, and the call is now within 2x to 4x of the core's own
+130 to 200 ns export, where it was 15x to 25x. The blueprint's 80 ns is still out of reach in JavaScript; what is left
 of a call is the writer, the 17-byte header, two wasm calls (`undra_call_sync`, `undra_buf_free`), the reply copy and
 the `await`.
 
