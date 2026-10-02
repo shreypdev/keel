@@ -600,7 +600,8 @@ playground's `Locale` port (`hello()` answers `"Hola"`).
 ### S23 WebSocket (ADR-047)
 
 The opt-in `WebSocket` port through the **platform's default adapter** (Swift `URLSessionWebSocketTask`, Kotlin
-the runtime's own client, TypeScript Node's global `WebSocket`) against the shared local server
+the runtime's own client, TypeScript `nodeWebSocket()`: Node's `http` upgrade with the runtime's own framing, because
+Node's global `WebSocket` hides a refusal's status, `ts/NOTES.md`) against the shared local server
 `contract-tests/servers/realtime-server.mjs` (started once per run; `WS` is its `ws://127.0.0.1:<port>`). The
 core's side is `ws_echo` and the `Live` object of `examples/playground/core/src/live.rs`.
 

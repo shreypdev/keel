@@ -1,3 +1,4 @@
+import { useSignal } from "@undra/runtime/react";
 import { useState } from "react";
 import type { StatsChannel } from "./embed-stats";
 import type { Playground } from "./undra";
@@ -42,6 +43,9 @@ export function App({
   const [tab, setTab] = useState<TabId>(() => resolveTab(params, location.hash));
   // `?autostart=1` is for the view the page opened on: coming back to the stress screen later does not start it again.
   const [autostart, setAutostart] = useState(params.autostart);
+  // A crash restart (ADR-049) keeps the stores but not the other objects: the Live view's `Live` goes stale, so the view
+  // is mounted afresh after each restart and makes a new one.
+  const lastRestart = useSignal(playground.restarts.entries)?.[0]?.at ?? 0;
 
   const choose = (next: TabId): void => {
     setAutostart(false);
@@ -56,7 +60,7 @@ export function App({
       {tab === "biglist" && <BigListView bigList={playground.bigList} autoStream={params.stream} />}
       {tab === "remote" && <RemoteView playground={playground} />}
       {tab === "stress" && <StressView channel={channel} initialRate={params.rate} initialMode={params.mode} autostart={autostart} />}
-      {tab === "live" && <LiveView initialUrl={params.ws} />}
+      {tab === "live" && <LiveView key={lastRestart} initialUrl={params.ws} />}
       {tab === "notes" && <NotesView />}
     </>
   );
