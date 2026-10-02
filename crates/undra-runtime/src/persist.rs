@@ -322,7 +322,8 @@ impl From<WireError> for MigrateError {
 ///
 /// A [`MigrateError`] for bytes that do not decode as `ty`, a named type the closure does not
 /// describe, nesting deeper than [`MAX_DEPTH`], and types that are never persisted values
-/// (`Unit`, `Lazy`, `Result`, `Stream`).
+/// (`Unit`, `Result`, `Stream`, `Object`, `Callback`). A `Lazy<T>` signal decodes as the list of
+/// its items, the `Vec<T>` it is persisted as (ADR-043).
 ///
 /// ```
 /// use undra_meta::{Schema, TypeRef};
@@ -382,13 +383,9 @@ fn min_len(ty: &TypeRef) -> usize {
         | TypeRef::String
         | TypeRef::Bytes
         | TypeRef::Vec(_)
+        | TypeRef::Lazy(_)
         | TypeRef::Map(..) => 4,
-        TypeRef::I64
-        | TypeRef::U64
-        | TypeRef::F64
-        | TypeRef::Duration
-        | TypeRef::Timestamp
-        | TypeRef::Lazy(_) => 8,
+        TypeRef::I64 | TypeRef::U64 | TypeRef::F64 | TypeRef::Duration | TypeRef::Timestamp => 8,
         TypeRef::Uuid => 16,
         TypeRef::Decimal => 17,
         TypeRef::Unit
@@ -454,7 +451,8 @@ fn decode_from(
                 }
             }
         }
-        TypeRef::Vec(item) => {
+        // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4).
+        TypeRef::Vec(item) | TypeRef::Lazy(item) => {
             let count = r.read_count(min_len(item))?;
             let mut items = Vec::with_capacity(count.min(1024));
             for i in 0..count {
@@ -508,7 +506,6 @@ fn decode_from(
             }
         }
         TypeRef::Unit
-        | TypeRef::Lazy(_)
         | TypeRef::Result(..)
         | TypeRef::Stream(_)
         | TypeRef::Object(_)
@@ -708,7 +705,7 @@ fn put_value(
             w.write_u8(1);
             put_value(w, other, inner, closure, depth + 1)?;
         }
-        (TypeRef::Vec(item), DynValue::List(items)) => {
+        (TypeRef::Vec(item) | TypeRef::Lazy(item), DynValue::List(items)) => {
             w.write_len(len_u32(items.len())?);
             for (i, v) in items.iter().enumerate() {
                 put_value(w, v, item, closure, depth + 1)
@@ -758,6 +755,14 @@ fn put_value(
         _ => return Err(mismatch()),
     }
     Ok(())
+}
+
+/// The type a signal's persisted bytes are: a `Lazy<T>` is stored as the `Vec<T>` of its items.
+pub(crate) fn stored_as(ty: &TypeRef) -> std::borrow::Cow<'_, TypeRef> {
+    match ty {
+        TypeRef::Lazy(item) => std::borrow::Cow::Owned(TypeRef::Vec(item.clone())),
+        other => std::borrow::Cow::Borrowed(other),
+    }
 }
 
 fn list_bytes(items: &[DynValue]) -> Option<Vec<u8>> {
@@ -1007,6 +1012,18 @@ impl Converter<'_> {
     ) -> Result<(), MigrateError> {
         if depth > MAX_DEPTH {
             return Err(not_structural("the value nests too deeply"));
+        }
+        // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4), so
+        // `Lazy<T>`, `Vec<T>` and their items convert as lists do.
+        if matches!(old_ty, TypeRef::Lazy(_)) || matches!(new_ty, TypeRef::Lazy(_)) {
+            return self.convert(
+                w,
+                value,
+                &stored_as(old_ty),
+                &stored_as(new_ty),
+                depth,
+                hook_here,
+            );
         }
         let refuse = || not_structural(format!("{old_ty} cannot become {new_ty}"));
         match (old_ty, new_ty) {

@@ -41,7 +41,8 @@
 //!   `__undra_cell` field and struct literals of the type inside that impl block get it added.
 //!   Stores with `Computed` fields name a rebuild function with
 //!   `#[undra::store(restore = "Self::rebuild")]`. See [`store`].
-//! * `Lazy<T>` (a lazily paged list) is rejected with E0001 in v1, like in `undra-bindgen`.
+//! * `Lazy<T>` (a list the platforms page through, ADR-043) is a store field and nothing else: anywhere
+//!   else, and inside a `Signal`, `Computed` or `DerivedList`, it is E0001.
 //! * `#[undra::error]` derives `Debug` unless the enum already does.
 //! * `async fn`s of a port trait become methods returning boxed futures (`async fn` in traits
 //!   is not dyn compatible); `#[undra::port]` on `impl Trait for Type` blocks rewrites them back

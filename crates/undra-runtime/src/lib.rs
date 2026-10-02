@@ -90,7 +90,7 @@ pub use dispatch::{DispatchBytes, DispatchLayer, DispatchResult};
 pub use ext::{InitHook, InspectFn, StatsSection};
 pub use host::{Host, PortCallOutcome};
 pub use issue::{IssueError, IssueScope};
-pub use lazy::{LazyList, LazyListInner};
+pub use lazy::{LazyList, LazyListInner, MAX_PAGE_ITEMS};
 pub use object::{
     AnyObject, CellFn, RestoreFn, StoreObject, StoreRestorer, UndraObject, UndraObjectDyn, plain,
     store,

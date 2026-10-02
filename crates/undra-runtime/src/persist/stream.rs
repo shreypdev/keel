@@ -13,7 +13,8 @@ use undra_meta::{ClosureField, TypeClosure, TypeRef};
 use undra_wire::{MAX_DEPTH, Reader, WireError, Writer};
 
 use super::{
-    HookSource, MigrateError, SortedEntries, len_u32, not_structural, put_missing, widens,
+    HookSource, MigrateError, SortedEntries, len_u32, not_structural, put_missing, stored_as,
+    widens,
 };
 
 pub(super) struct Streamer<'a> {
@@ -54,6 +55,18 @@ impl<'a> Streamer<'a> {
     ) -> Result<(), MigrateError> {
         if depth > MAX_DEPTH {
             return Err(WireError::NestingTooDeep { at: r.position() }.into());
+        }
+        // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4), so
+        // `Lazy<T>`, `Vec<T>` and their items convert as lists do.
+        if matches!(old_ty, TypeRef::Lazy(_)) || matches!(new_ty, TypeRef::Lazy(_)) {
+            return self.convert(
+                r,
+                w,
+                &stored_as(old_ty),
+                &stored_as(new_ty),
+                depth,
+                hook_here,
+            );
         }
         let refuse = || not_structural(format!("{old_ty} cannot become {new_ty}"));
         match (old_ty, new_ty) {
@@ -367,7 +380,8 @@ pub(super) fn skip(
                 }
             }
         }
-        TypeRef::Vec(item) => {
+        // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4).
+        TypeRef::Vec(item) | TypeRef::Lazy(item) => {
             let count = r.read_count(1)?;
             for _ in 0..count {
                 skip(r, item, closure, depth + 1)?;
@@ -406,7 +420,6 @@ pub(super) fn skip(
             }
         }
         TypeRef::Unit
-        | TypeRef::Lazy(_)
         | TypeRef::Result(..)
         | TypeRef::Stream(_)
         | TypeRef::Object(_)

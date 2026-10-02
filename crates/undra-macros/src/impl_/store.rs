@@ -2,14 +2,18 @@
 //!
 //! # Signals
 //!
-//! Fields typed `Signal<T>`, `Computed<T>` and `DerivedList<T>` are the store's signals, numbered
-//! `0..n` in declaration order (other fields are private state, `Ctx` included).
+//! Fields typed `Signal<T>`, `Computed<T>`, `DerivedList<T>` and `Lazy<T>` are the store's signals,
+//! numbered `0..n` in declaration order (other fields are private state, `Ctx` included).
 //! `#[undra(key = "id")]` on a `Signal<Vec<T>>` makes it a keyed list that ships patches; a
 //! `DerivedList<T>` (ADR-039) must have one, and is described as a read-only keyed list
 //! (`computed: true` with a `key`, the schema of a `Vec<T>`);
 //! `#[undra(no_coalesce)]` makes every commit of a signal reach the platforms, and is recorded in
-//! the signal's schema entry so their mirrors apply every one of them (ADR-031). `Lazy<T>` fields
-//! are rejected (E0001): lazily paged lists are not available in v1.
+//! the signal's schema entry so their mirrors apply every one of them (ADR-031). A `Lazy<T>`
+//! (ADR-043) is a list the platforms page through instead of mirroring: its schema type is
+//! `Lazy(T)`, it is persisted as the `Vec<T>` of its items (so it restores like a plain signal and
+//! takes `#[undra(default)]`), and `#[undra(key = "id")]` names the field that identifies its
+//! rows for the platform. `Lazy<T>` is legal only as a store field: inside a `Signal`, `Computed` or
+//! `DerivedList` it is E0001.
 //!
 //! # The hidden cell
 //!
@@ -39,8 +43,8 @@
 //! Signals are attached with the `StoreCell` family that fits the field: `attach` for a plain
 //! `Signal<T>`, `attach_keyed` (with a typed `fn(&Item) -> u64` that hashes the encoded key
 //! field) for `#[undra(key = "..")]`, `attach_computed` for a `Computed<T>`, `attach_derived` (with
-//! the same key function) for a `DerivedList<T>`, and `set_no_coalesce` after any of them for
-//! `#[undra(no_coalesce)]`.
+//! the same key function) for a `DerivedList<T>`, `attach_lazy` for a `Lazy<T>`, and
+//! `set_no_coalesce` after any of them for `#[undra(no_coalesce)]`.
 //!
 //! # Restore
 //!
@@ -52,9 +56,10 @@
 //!   (downgraded from it; what a store should keep, ADR-034) or `Default`, and there are no
 //!   `Computed` or `DerivedList` fields: a struct literal;
 //! * through a hook, `#[undra::store(restore = "Self::rebuild")]`, with the signature
-//!   `fn(ctx: Ctx, <one Signal<T> per non-computed signal, in order>) -> Self`. Use it when
-//!   the store has computed fields (only your code knows how to derive them) or other
-//!   state without a `Default`.
+//!   `fn(ctx: Ctx, <one Signal<T> (or Lazy<T>) per non-computed signal, in order>) -> Self`. Use it
+//!   when the store has computed fields (only your code knows how to derive them), a `Lazy::over`
+//!   view (derived data: a snapshot holds an empty list for it, and the hook rebuilds the view from
+//!   the list it is derived from) or other state without a `Default`.
 
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
@@ -76,13 +81,20 @@ enum SigKind {
     Computed,
     /// `DerivedList<T>` (ADR-039): computed by the core, shipped as keyed patches.
     Derived,
+    /// `Lazy<T>` (ADR-043): a list the platforms page through; store state like a plain signal.
+    Lazy,
 }
 
 impl SigKind {
     /// Evaluated by the core, not written: read-only on the platforms, left out of snapshots,
     /// rebuilt by the restore hook.
     fn is_computed(self) -> bool {
-        self != SigKind::Signal
+        matches!(self, SigKind::Computed | SigKind::Derived)
+    }
+
+    /// A plain value of the store, written by it and persisted: a `Signal<T>` or a `Lazy<T>`.
+    fn is_plain(self) -> bool {
+        matches!(self, SigKind::Signal | SigKind::Lazy)
     }
 }
 
@@ -91,9 +103,11 @@ struct SignalField {
     name: String,
     id: u32,
     kind: SigKind,
-    /// The `T` of `Signal<T>` / `Computed<T>`, and `Vec<T>` for a `DerivedList<T>`: the value
-    /// the platforms see.
+    /// The `T` of `Signal<T>` / `Computed<T>`, and `Vec<T>` for a `DerivedList<T>` or a `Lazy<T>`:
+    /// the value the platforms see (a `Lazy` is persisted as the `Vec` of its items).
     value_ty: syn::Type,
+    /// The item type `T` of a `Lazy<T>`.
+    lazy_item: Option<syn::Type>,
     /// The schema type of the signal.
     kty: KType,
     /// `#[undra(key = "..")]`: the key field and the list's item type.
@@ -154,19 +168,20 @@ fn wrapper_of(ty: &syn::Type) -> Option<(String, syn::Type)> {
     Some((seg.ident.to_string(), value.clone()))
 }
 
-/// `Signal<T>`, `Computed<T>` or `DerivedList<T>` (by last path segment) with its `T`.
+/// `Signal<T>`, `Computed<T>`, `DerivedList<T>` or `Lazy<T>` (by last path segment) with its `T`.
 fn signal_wrapper(ty: &syn::Type) -> Option<(SigKind, syn::Type)> {
     let (name, value) = wrapper_of(ty)?;
     match name.as_str() {
         "Signal" => Some((SigKind::Signal, value)),
         "Computed" => Some((SigKind::Computed, value)),
         "DerivedList" => Some((SigKind::Derived, value)),
+        "Lazy" => Some((SigKind::Lazy, value)),
         _ => None,
     }
 }
 
-/// `DerivedList` spelled without exactly one type argument.
-fn is_bare_derived(ty: &syn::Type) -> bool {
+/// `name` spelled without exactly one type argument (`DerivedList`, `Lazy`).
+fn is_bare(ty: &syn::Type, name: &str) -> bool {
     let syn::Type::Path(path) = ty else {
         return false;
     };
@@ -175,11 +190,21 @@ fn is_bare_derived(ty: &syn::Type) -> bool {
             .path
             .segments
             .last()
-            .is_some_and(|seg| seg.ident == "DerivedList")
+            .is_some_and(|seg| seg.ident == name)
         && wrapper_of(ty).is_none()
 }
 
-/// `Lazy<T>`: recognised only to be rejected with a teaching diagnostic (not in v1).
+/// `DerivedList` spelled without exactly one type argument.
+fn is_bare_derived(ty: &syn::Type) -> bool {
+    is_bare(ty, "DerivedList")
+}
+
+/// `Lazy` spelled without exactly one type argument.
+fn is_bare_lazy(ty: &syn::Type) -> bool {
+    is_bare(ty, "Lazy")
+}
+
+/// `Lazy<T>` (by last path segment).
 fn is_lazy(ty: &syn::Type) -> bool {
     wrapper_of(ty).is_some_and(|(name, _)| name == "Lazy")
 }
@@ -346,6 +371,30 @@ fn key_function(root: &Root, signal: &SignalField, keyed: &KeyedList) -> TokenSt
     }
 }
 
+/// The diagnostic for a `Lazy<T>` written inside a `Signal`, `Computed` or `DerivedList` (E0001): it
+/// is a store field of its own, so a computed or derived value cannot be one.
+fn lazy_in_a_signal(outer: &syn::Type, lazy: &syn::Type, kind: SigKind) -> Diag {
+    let outer_name = match kind {
+        SigKind::Computed => "a `Computed`",
+        SigKind::Derived => "a `DerivedList`",
+        SigKind::Signal | SigKind::Lazy => "a `Signal`",
+    };
+    let item = wrapper_of(lazy).map_or_else(|| "Row".to_owned(), |(_, item)| ty_string(&item));
+    Diag::new(
+        code::E0001,
+        format!(
+            "`{}` cannot hold a `Lazy`: it is a store field, not a value",
+            ty_string(outer)
+        ),
+        format!(
+            "a `Lazy<T>` is a list the core owns and the platforms page through, so it stands as a store field of its own; it is never the value of {outer_name}, which is evaluated, compared and sent as a value"
+        ),
+        format!(
+            "write the field as `Lazy<{item}>`; to page a computed or filtered list, derive it (`source.derive().filter(..).build()`) and build the field with `Lazy::over(&derived)`"
+        ),
+    )
+}
+
 /// Expands `#[undra::store]` on a struct.
 pub(crate) fn expand_store(
     args_root: Option<Root>,
@@ -377,17 +426,14 @@ pub(crate) fn expand_store(
                     );
                     continue;
                 }
-                if is_lazy(&field.ty) {
+                if is_bare_lazy(&field.ty) {
                     take(&mut field.attrs, Site::SIGNAL, &mut errors);
                     errors.push(
                         Diag::new(
                             code::E0001,
-                            format!(
-                                "`{}` is not available in v1: lazy lists cannot be mirrored yet",
-                                ty_string(&field.ty)
-                            ),
-                            "a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it",
-                            "expose the items as a `Signal<Vec<T>>` (keyed with `#[undra(key = \"..\")]` if they have an id) or as a paged method that takes an offset and a limit",
+                            format!("`{}` needs the type of its rows", ty_string(&field.ty)),
+                            "a lazy list is paged by the platforms, which decode each row, so the schema needs the row type, written as the one type argument",
+                            format!("write `Lazy<Row>` for `{ident}`, with the type of the list's items"),
                         )
                         .on(&field.ty),
                     );
@@ -408,8 +454,16 @@ pub(crate) fn expand_store(
                 }
                 match signal_wrapper(&field.ty) {
                     Some((kind, item_or_value)) => {
-                        // A derived list of `T` is a `Vec<T>` to the schema and the type checks.
-                        let (value_ty, derived_item) = if kind == SigKind::Derived {
+                        // A signal wrapped in a `Signal`, `Computed` or `DerivedList` that is a `Lazy`:
+                        // `Lazy<T>` is a field of its own, never a value (E0001, with where it may stand).
+                        if kind != SigKind::Lazy && is_lazy(&item_or_value) {
+                            take(&mut field.attrs, Site::SIGNAL, &mut errors);
+                            errors.push(lazy_in_a_signal(&field.ty, &item_or_value, kind).on(&field.ty));
+                            continue;
+                        }
+                        // A derived list of `T` is a `Vec<T>` to the schema and the type checks; so
+                        // is a lazy list, which is persisted as the `Vec<T>` of its items.
+                        let (value_ty, derived_item) = if matches!(kind, SigKind::Derived | SigKind::Lazy) {
                             (
                                 syn::parse_quote!(::std::vec::Vec<#item_or_value>),
                                 Some(item_or_value),
@@ -441,12 +495,12 @@ pub(crate) fn expand_store(
                             let key_name = lit.value();
                             let item_ty = match kind {
                                 SigKind::Signal => vec_item(&value_ty),
-                                SigKind::Derived => derived_item.clone(),
+                                SigKind::Derived | SigKind::Lazy => derived_item.clone(),
                                 SigKind::Computed => None,
                             };
                             let Some(item_ty) = item_ty else {
                                 let what = format!(
-                                    "`#[undra(key = \"{key_name}\")]` on `{ident}` needs a `Signal<Vec<T>>` or a `DerivedList<T>`"
+                                    "`#[undra(key = \"{key_name}\")]` on `{ident}` needs a `Signal<Vec<T>>`, a `DerivedList<T>` or a `Lazy<T>`"
                                 );
                                 let diag = if kind == SigKind::Computed {
                                     Diag::new(
@@ -490,16 +544,22 @@ pub(crate) fn expand_store(
                                 .on(&field.ty),
                             );
                         }
+                        let lazy_item = if kind == SigKind::Lazy {
+                            derived_item.clone()
+                        } else {
+                            None
+                        };
                         signals.push(SignalField {
                             name: unraw(&ident),
                             ident,
                             id: u32::try_from(signals.len()).unwrap_or(u32::MAX),
                             kind,
                             value_ty,
+                            lazy_item,
                             kty,
                             key,
                             no_coalesce: attr.no_coalesce,
-                            default: attr.default && kind == SigKind::Signal,
+                            default: attr.default && kind.is_plain(),
                         });
                     }
                     None => {
@@ -573,7 +633,14 @@ pub(crate) fn expand_store(
     let signal_metas = signals.iter().map(|s| {
         let sname = &s.name;
         let id = s.id;
-        let ty = s.kty.meta(&meta);
+        // A `Lazy<T>` is `Lazy(T)` in the schema; the platforms page it (ADR-043).
+        let ty = match (s.kind, &s.kty) {
+            (SigKind::Lazy, KType::Vec(item)) => {
+                let item = item.meta(&meta);
+                quote!(#meta::TypeRefMeta::Lazy(&#item))
+            }
+            _ => s.kty.meta(&meta),
+        };
         // A derived list is a computed with a key (ADR-039): no new schema field.
         let computed = s.kind.is_computed();
         let key = match &s.key {
@@ -616,6 +683,14 @@ pub(crate) fn expand_store(
             }
             // Refused above (E0008): the build has already failed.
             (SigKind::Derived, None) => TokenStream::new(),
+            // The core never diffs a lazy list: the key only names the field that identifies a row
+            // for the platforms, and its function is referenced so that a key that names no field
+            // is the same E0008 as everywhere else.
+            (SigKind::Lazy, Some(_)) => {
+                let fn_name = format_ident!("__undra_key_{}", s.ident);
+                quote!(let _ = #fn_name; __cell.attach_lazy(&self.#ident, #id)?;)
+            }
+            (SigKind::Lazy, None) => quote!(__cell.attach_lazy(&self.#ident, #id)?;),
         };
         let coalesce = if s.no_coalesce {
             quote!(__cell.set_no_coalesce(#id)?;)
@@ -626,10 +701,7 @@ pub(crate) fn expand_store(
     });
 
     // --- restore ----------------------------------------------------------------------------
-    let plain: Vec<&SignalField> = signals
-        .iter()
-        .filter(|s| s.kind == SigKind::Signal)
-        .collect();
+    let plain: Vec<&SignalField> = signals.iter().filter(|s| s.kind.is_plain()).collect();
     let slots: Vec<syn::Ident> = plain
         .iter()
         .map(|s| format_ident!("__slot_{}", s.ident))
@@ -715,7 +787,14 @@ pub(crate) fn expand_store(
         Some(hook) => {
             let wrapped = plain.iter().zip(&values).map(|(s, value)| {
                 let value_ty = &s.value_ty;
-                quote_spanned!(value_ty.span()=> #signals_path::Signal::<#value_ty>::new(#value))
+                match &s.lazy_item {
+                    Some(item) => {
+                        quote_spanned!(value_ty.span()=> #signals_path::Lazy::<#item>::from_vec(#value))
+                    }
+                    None => {
+                        quote_spanned!(value_ty.span()=> #signals_path::Signal::<#value_ty>::new(#value))
+                    }
+                }
             });
             quote!(#hook(__ctx, #(#wrapped),*))
         }
@@ -735,7 +814,14 @@ pub(crate) fn expand_store(
             let signal_inits = plain.iter().zip(&values).map(|(s, value)| {
                 let ident = &s.ident;
                 let value_ty = &s.value_ty;
-                quote_spanned!(value_ty.span()=> #ident: #signals_path::Signal::<#value_ty>::new(#value))
+                match &s.lazy_item {
+                    Some(item) => {
+                        quote_spanned!(value_ty.span()=> #ident: #signals_path::Lazy::<#item>::from_vec(#value))
+                    }
+                    None => {
+                        quote_spanned!(value_ty.span()=> #ident: #signals_path::Signal::<#value_ty>::new(#value))
+                    }
+                }
             });
             quote! {{
                 let _ = &__ctx;
@@ -930,6 +1016,9 @@ pub(crate) fn recover(args_root: Option<Root>, item: &mut syn::Item) -> TokenStr
             if is_bare_derived(&field.ty) {
                 field.ty = syn::parse_quote!(#signals::DerivedList<()>);
             }
+            if is_bare_lazy(&field.ty) {
+                field.ty = syn::parse_quote!(#signals::Lazy<()>);
+            }
         }
         let has_cell = named.named.iter().any(|field| {
             field
@@ -1061,23 +1150,121 @@ mod tests {
     }
 
     #[test]
-    fn lazy_lists_are_not_available_in_v1() {
-        for src in [
-            "struct S { a: Signal<i32>, l: Lazy<Row> }",
-            "struct S { #[undra(no_coalesce)] l: Lazy<Row> }",
+    fn a_lazy_list_is_a_plain_signal_the_platforms_page() {
+        let out = expand(
+            "struct S { a: Signal<i32>, #[undra(key = \"id\")] books: Lazy<Row>, #[undra(default)] tail: Lazy<String> }",
+        )
+        .unwrap();
+        // The schema type is `Lazy(T)`, persisted (not computed), keyed for the platform.
+        assert!(
+            has(
+                &out,
+                "SignalMeta { name: \"books\", signal_id: 1u32, ty: ::undra::meta::TypeRefMeta::Lazy(&::undra::meta::TypeRefMeta::Named(\"Row\")), computed: false, key: ::core::option::Option::Some(\"id\"), no_coalesce: false, default: false }"
+            ),
+            "{out}"
+        );
+        assert!(
+            has(
+                &out,
+                "SignalMeta { name: \"tail\", signal_id: 2u32, ty: ::undra::meta::TypeRefMeta::Lazy(&::undra::meta::TypeRefMeta::String), computed: false, key: ::core::option::Option::None, no_coalesce: false, default: true }"
+            ),
+            "{out}"
+        );
+        // Attached with `attach_lazy`; a key is checked (E0008) through its function and the core
+        // never uses it.
+        assert!(
+            has(
+                &out,
+                "let _ = __undra_key_books; __cell.attach_lazy(&self.books, 1u32)?;"
+            ),
+            "{out}"
+        );
+        assert!(has(&out, "__cell.attach_lazy(&self.tail, 2u32)?;"), "{out}");
+        // Restored from the `Vec` of its items; a missing `#[undra(default)]` one is empty.
+        assert!(
+            has(
+                &out,
+                "books: ::undra::signals::Lazy::<Row>::from_vec(__value_books)"
+            ),
+            "{out}"
+        );
+        assert!(
+            has(
+                &out,
+                "<::std::vec::Vec<String> as ::core::default::Default>::default()"
+            ),
+            "{out}"
+        );
+        assert!(
+            has(
+                &out,
+                "<::std::vec::Vec<Row> as ::undra::wire::Decode>::decode_exact(__bytes)?"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_lazy_list_goes_through_a_restore_hook_as_a_lazy() {
+        let out = expand_with_hook("struct S { a: Signal<i32>, l: Lazy<Row>, d: Computed<i32> }")
+            .unwrap();
+        assert!(
+            has(
+                &out,
+                "Self::rebuild(__ctx, ::undra::signals::Signal::<i32>::new(__value_a), ::undra::signals::Lazy::<Row>::from_vec(__value_l))"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_lazy_list_is_not_a_computed_so_a_store_of_lazies_restores_automatically() {
+        expand("struct S { ctx: Ctx, l: Lazy<Row> }").unwrap();
+    }
+
+    #[test]
+    fn a_lazy_needs_its_row_type() {
+        let message = expand("struct S { l: Lazy }").unwrap_err();
+        assert!(
+            message.starts_with("error[undra::E0001]: `Lazy` needs the type of its rows"),
+            "{message}"
+        );
+        assert!(message.contains("write `Lazy<Row>` for `l`"), "{message}");
+    }
+
+    #[test]
+    fn a_lazy_inside_a_signal_computed_or_derived_list_says_where_it_may_stand() {
+        for (src, outer) in [
+            ("struct S { l: Signal<Lazy<Row>> }", "a `Signal`"),
+            ("struct S { l: Computed<Lazy<Row>> }", "a `Computed`"),
+            (
+                "struct S { #[undra(key = \"id\")] l: DerivedList<Lazy<Row>> }",
+                "a `DerivedList`",
+            ),
         ] {
-            for message in [expand(src).unwrap_err(), expand_with_hook(src).unwrap_err()] {
-                assert!(
-                    message.starts_with("error[undra::E0001]: `Lazy<Row>` is not available in v1"),
-                    "{message}"
-                );
-                assert!(
-                    message.contains("lazy lists cannot be mirrored yet"),
-                    "{message}"
-                );
-                assert!(message.contains("Signal<Vec<T>>"), "{message}");
-            }
+            let message = expand_with_hook(src).unwrap_err();
+            assert!(message.starts_with("error[undra::E0001]: `"), "{message}");
+            assert!(
+                message.contains("cannot hold a `Lazy`: it is a store field, not a value"),
+                "{message}"
+            );
+            assert!(message.contains(outer), "{message}");
+            assert!(
+                message.contains("write the field as `Lazy<Row>`")
+                    && message.contains("Lazy::over(&derived)"),
+                "{message}"
+            );
         }
+    }
+
+    #[test]
+    fn key_on_a_lazy_needs_nothing_else_and_default_works_on_it() {
+        let message = expand("struct S { #[undra(key = \"id\")] n: Signal<i32> }").unwrap_err();
+        assert!(
+            message.contains("needs a `Signal<Vec<T>>`, a `DerivedList<T>` or a `Lazy<T>`"),
+            "{message}"
+        );
+        expand("struct S { #[undra(default, key = \"id\")] l: Lazy<Row> }").unwrap();
     }
 
     #[test]
@@ -1217,7 +1404,7 @@ mod tests {
             let message = expand_with_hook(src).unwrap_err();
             assert!(message.contains("error[undra::E0008]"), "{message}");
             assert!(
-                message.contains("needs a `Signal<Vec<T>>` or a `DerivedList<T>`"),
+                message.contains("needs a `Signal<Vec<T>>`, a `DerivedList<T>` or a `Lazy<T>`"),
                 "{message}"
             );
         }

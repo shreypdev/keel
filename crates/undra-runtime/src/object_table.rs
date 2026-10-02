@@ -233,6 +233,12 @@ struct Entry {
     /// First issued by a return, not by a host-called constructor: a snapshot leaves it out and
     /// a restore makes its handle stale.
     transient: bool,
+    /// The page servers the runtime registered for this store's `Lazy` signals (ADR-043), by
+    /// signal id: entries of the table's own, removed with this one.
+    lazy: Vec<(u32, Handle)>,
+    /// A page server registered for a store: the host holds no reference to it, so it cannot
+    /// release it; it goes with its store.
+    table_owned: bool,
 }
 
 struct Slot {
@@ -428,6 +434,13 @@ impl ObjectTable {
 
     /// Stores `object` as a new entry holding one host reference.
     fn place(&self, object: Arc<dyn AnyObject>, transient: bool) -> Handle {
+        self.place_with(object, transient, false)
+    }
+
+    /// Stores `object` as a new entry: holding one host reference, or (`table_owned`) none, for an
+    /// entry the table registers for a store and removes with it.
+    fn place_with(&self, object: Arc<dyn AnyObject>, transient: bool, table_owned: bool) -> Handle {
+        let host_refs = u32::from(!table_owned);
         let cell = object.as_store().cloned();
         let is_store = cell.is_some();
         let address = object.address();
@@ -456,12 +469,14 @@ impl ObjectTable {
                 object,
                 poisoned: false,
                 observed: Observed::default(),
-                host_refs: 1,
+                host_refs,
                 transient,
+                lazy: Vec::new(),
+                table_owned,
             });
             let handle = Handle::new(index, generation);
             inner.live += 1;
-            inner.host_refs += 1;
+            inner.host_refs += u64::from(host_refs);
             inner.by_address.insert(address, index);
             if is_store {
                 inner.stores.insert(index);
@@ -472,8 +487,35 @@ impl ObjectTable {
             // The owner first: a commit that sees the handle must route to the right runtime.
             cell.set_owner(self.owner.load(Ordering::Relaxed));
             cell.set_handle(handle.0);
+            self.register_lazy(&cell, handle);
         }
         handle
+    }
+
+    /// Registers a page server for each `Lazy` signal of the store at `store` and tells its cell
+    /// the handle (ADR-043): transient entries the table owns, so they are never in a snapshot and
+    /// the host cannot release them; they are removed with the store. A store without a `Lazy`
+    /// costs one empty call.
+    fn register_lazy(&self, cell: &undra_signals::StoreCell, store: Handle) {
+        let sources = cell.lazy_sources();
+        if sources.is_empty() {
+            return;
+        }
+        let mut registered = Vec::with_capacity(sources.len());
+        for (signal_id, source) in sources {
+            let server = self.place_with(crate::lazy::page_server(source), true, true);
+            cell.set_lazy_handle(signal_id, server.0);
+            registered.push((signal_id, server));
+        }
+        let mut inner = self.inner.write();
+        if let Some(entry) = inner
+            .slots
+            .get_mut(store.index() as usize)
+            .filter(|slot| slot.generation == store.generation())
+            .and_then(|slot| slot.entry.as_mut())
+        {
+            entry.lazy = registered;
+        }
     }
 
     /// Gives the host one more reference to the object at `address`, if the table holds it:
@@ -572,6 +614,8 @@ impl ObjectTable {
                 observed: Observed::default(),
                 host_refs: 1,
                 transient: false,
+                lazy: Vec::new(),
+                table_owned: false,
             });
             inner.live += 1;
             inner.host_refs += 1;
@@ -583,6 +627,7 @@ impl ObjectTable {
         if let Some(cell) = cell {
             cell.set_owner(self.owner.load(Ordering::Relaxed));
             cell.set_handle(handle.0);
+            self.register_lazy(&cell, handle);
         }
         Ok(())
     }
@@ -643,6 +688,15 @@ impl ObjectTable {
         let mut inner = self.inner.write();
         Self::check(&inner, handle)?;
         let index = handle.index();
+        if inner.slots[index as usize]
+            .entry
+            .as_ref()
+            .is_some_and(|e| e.table_owned)
+        {
+            // A page server the table registered for a store: the host holds no reference to
+            // give back, and it must not be able to take the list away from its own store.
+            return Ok(Released::Kept { remaining: 0 });
+        }
         let kept = {
             let Some(entry) = inner.slots[index as usize].entry.as_mut() else {
                 return Err(BadHandle {
@@ -668,6 +722,15 @@ impl ObjectTable {
                 if inner.by_address.get(&address) == Some(&index) {
                     inner.by_address.remove(&address);
                 }
+                // The page servers of the store's `Lazy` signals go with it. They only hold the
+                // lists the store itself holds, so dropping them here runs no destructor of an item.
+                let cell = entry.object.as_store();
+                for (signal_id, server) in &entry.lazy {
+                    Self::remove_table_owned(&mut inner, *server);
+                    if let Some(cell) = cell {
+                        cell.set_lazy_handle(*signal_id, 0);
+                    }
+                }
                 Ok(Released::Removed(entry.object))
             }
             // `check` proved the slot occupied while we held the write lock.
@@ -675,6 +738,26 @@ impl ObjectTable {
                 handle,
                 reason: BadHandleReason::Stale,
             }),
+        }
+    }
+
+    /// Removes an entry the table registered (a page server), whatever its host references.
+    fn remove_table_owned(inner: &mut Inner, handle: Handle) {
+        let index = handle.index();
+        let Some(slot) = inner.slots.get_mut(index as usize) else {
+            return;
+        };
+        if slot.generation != handle.generation() {
+            return;
+        }
+        let Some(entry) = slot.entry.take() else {
+            return;
+        };
+        inner.free.push(index);
+        inner.live -= 1;
+        let address = entry.object.address();
+        if inner.by_address.get(&address) == Some(&index) {
+            inner.by_address.remove(&address);
         }
     }
 
