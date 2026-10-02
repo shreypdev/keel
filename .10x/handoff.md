@@ -35,34 +35,36 @@ ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5)
 with their context when told to):
 Landed: devtools, persistence, testkit, docs-v1x, ports (all reviewed) (ADR-037/049 Accepted; opus review `.10x/reviews/2026-10-02-persistence-review.md`: 3 High fixed — a wrong-typed migration hook spliced bytes, RN storage not on ADR-049, a dead web core after a trap during restart; hello wasm 116.8 KB, JS 25,984/26,000; Rust 2,891 · Swift 553 · Kotlin 652 · TS 1,264 · contracts 65/65; hash `0xfa536b9ac6f06149`). Still to land: testkit (review) then ports (review; it must cross persistence: `check.sh`, `run-all.sh`, `scenarios.md`, SPEC §8).
 
-**Launch wave (2026-10-02, evening).** Founder's rules now binding: (1) no piece lands on `main` unless CI is
-green on its pushed head (`scripts/wt.sh merge` enforces it once `ci-green` lands; agents push their own
-`wt/<name>` branch and iterate until CI, Bench, Two cores and Site are green); (2) Fable designs where the
-difficulty is in deciding, a cheaper model implements, then an adversarial review. In flight:
-- **Landed:** `ci-green` (`fc326d6`: main green, Rust 1.99.0, Node 24, the gate in `scripts/wt.sh merge`) and
-  `diagram-rn` (`b7efd61`, the first piece through the gate). `main` is `b7efd61` plus state commits.
-- **The gate costs a CI cycle (about 30 minutes) per push, so:** a branch must contain `main` to merge, which
-  means every commit on `main` sends each waiting piece back through a merge and a run; batch state commits with
-  a merge, never push to a branch whose run is in flight, and pre-merge the next ready piece onto the one in CI.
-  Tests: no absolute time bound (measure against a reference armed beside the thing, or count events), wait for
-  what is in flight to land before changing a fake, commit by path. Stress loops must not leave `yes` burners.
-- `reload-handles` — ADR-059 (Fable design, prototyped): query handles survive every restore path through an
-  in-band snapshot record and build-on-first-use; implemented, opus review verdict merge (5 review tests added);
-  the reviewer merges main, pushes once and watches CI; removes the TS replay; S35.
-- `generics-fn-obj` — landed at `aa04821` (status checkpoint 30). `generics-followups` closes the review's L6,
-  L7 and L8.
-- `ts-runtime-16k` — ADR-057 (Fable design, 15 measured levers: 22,100 → 15,958 B, 15,384 with Vite's preload
-  helper apart); sonnet implementing, the 16,000 gate is met on the branch; adversarial review next; gates:
-  runtime 16,000, with the helper 16,600, all-features 42,400.
-- `test-pacing` — the tests that still fail on time alone under a throttled local pass (status checkpoint 29
-  lists them) and `ci-local`'s gaps (`--no-fail-fast`, a `--slow` pass that does not starve).
-- **Founder, 2026-10-02 (afternoon):** start nothing new; finish what is in flight with every review finding
-  addressed and tell him. He then protects `main`, and from then on every change lands through a pull request
-  (`scripts/wt.sh merge` pushes `main` directly and will need a PR flow: propose it, do not start it unasked).
-- **On hold by the founder (2026-10-02):** the Android emulator CI job for `android-adapters`, `android-work`
-  and `undra-compose`. Do not start it. Finish everything else in flight first, then tell him all is done and
-  ask whether to start it. Priority order: CI green on main, then the other work in progress. Each implemented piece still gets its adversarial review before the merge.
+**Launch wave (2026-10-02) — closed with `main` green and three branches open.** Rules now binding: (1) no
+piece lands unless CI is green on its pushed head (`scripts/wt.sh merge` enforces it; it also demands a Site run on
+the exact head when site paths changed — `gh workflow run site.yml --ref wt/<name>` when the filter skipped it);
+(2) Fable designs where the difficulty is in deciding, a cheaper model implements, an adversarial review follows;
+(3) **the founder protects `main` now: every change, state commits included, lands through a pull request.**
+`scripts/wt.sh merge` fast-forwards and pushes `main` directly — it must become "open the PR, let the checks run,
+merge the PR, then clean up" before it is used again (propose the change first; `docs/AGENT_WORKFLOW.md` and
+[[undra-ci-green-gate]] describe the gate). Landed today, in order: `ci-green` (`fc326d6`), `diagram-rn`
+(`b7efd61`), `generics-fn-obj` (`aa04821`), `generics-followups` (`3c279a6`). Main is `3c279a6` plus state commits.
+
+Open branches (status checkpoint 31 has the full table):
+- `wt/reload-handles` `31ce274` — ADR-059, review verdict merge, grid 35/101, roadmap and post updated. Its CI run
+  was red only on S30's 100 ms bound (Swift contract column), the flake `test-pacing` fixes. Order: land
+  `test-pacing` first (or merge its head in), re-run, PR. The reviewer (opus) finished; nothing of it runs.
+- `wt/test-pacing` `8782a64` — review found the hand-over not mergeable; H1 and M1–M8 are fixed on the branch,
+  nothing open; the Kotlin/TS/RN contract columns and `ci-local --slow --only ci/rust` were not re-run after
+  the last fixes. Run them, fmt/clippy, CI, PR. **Land this first: it removes the S30 flake from main.**
+- `wt/ts-runtime-16k` `1b593df` — ADR-057 at 15,811 B (gate 16,000), review verdict merge after green CI, four
+  Highs fixed; lows L3, L5, L6 open (one-line each in the status table). Close them, CI, PR.
+- Known flakes on main until `test-pacing` lands: contract S30 (100 ms, Swift and Kotlin columns), Swift S14
+  build B (5 s).
+- **On hold by the founder:** the Android emulator CI job for `android-adapters`, `android-work` and
+  `undra-compose`. Not started. Ask him before starting it. (The "Android emulator (API 34, x86_64)" job in
+  `two-cores.yml` is older and unrelated.)
 - A separate session is bisecting a cold-start restore slowdown (two rows 1.7–1.8x the machine baseline).
+- Lessons that cost a CI cycle each today, for every brief: no absolute time bound in a test (measure against a
+  reference armed beside the thing, or count events); wait for what is in flight to land before changing a fake;
+  commit by path; never push while a run is in flight on the branch; stress loops must not leave `yes` burners
+  (56 orphans once put the load average at 91); never `taskpolicy -b` under load; signal only your own PIDs
+  (a `pgrep -f ci-local` kill took out two other agents' runs).
 
 **Also owed:** a custom port in the playground for the reference's Ports section; `undra bindgen --declarations`.
 
