@@ -361,7 +361,9 @@ final class DbBindingTests: XCTestCase {
         let slow = Task { () async throws(DbError) -> DbExecuted in
             try await binding.execute(db, "INSERT INTO notes (title) VALUES ('slow')", [])
         }
-        try await Task.sleep(nanoseconds: 20_000_000)
+        // The slow statement is running (its 100 ms are under way) before the fast one is asked for: waited for, where 20 ms was a bet on how soon a machine
+        // starts a task and, lost, put the fast statement first.
+        await eventually("the slow statement to start") { recorder.ran(1).contains("INSERT INTO notes (title) VALUES ('slow')") }
         let fast = try await binding.execute(db, "INSERT INTO notes (title) VALUES ('fast')", [])
         let first = try await slow.value
         XCTAssertEqual(first.lastInsertId, 1)

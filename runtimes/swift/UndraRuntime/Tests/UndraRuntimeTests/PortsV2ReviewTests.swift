@@ -9,6 +9,15 @@ import XCTest
 
 // MARK: - Helpers
 
+/// A sleep of `milliseconds`, started now: the instant it ended. What a bound on the binding's own timer is measured against: a machine that is slow or
+/// busy runs it as late as the timer of the binding it was armed beside, so how much later than it the binding finished is the binding's, not the machine's.
+private func referenceSleep(milliseconds: UInt64) -> Task<UInt64, Never> {
+    Task { () async -> UInt64 in
+        try? await Task.sleep(nanoseconds: milliseconds * 1_000_000)
+        return DispatchTime.now().uptimeNanoseconds
+    }
+}
+
 /// Wraps a WebSocket adapter and counts how many messages the binding's pump took from each
 /// connection's stream (what the platform delivered into the binding's memory).
 final class CountingWebSocket: WebSocketAdapter, @unchecked Sendable {
@@ -458,6 +467,7 @@ final class DbReviewTests: XCTestCase {
         let id = try await db.open(name: "deadline", migrations: notesMigrations).db
         let tx = try await db.begin(id)
         let started = DispatchTime.now().uptimeNanoseconds
+        let reference = referenceSleep(milliseconds: 400) // armed as the statement is: the busy timeout's own clock
         let outer = Task { () async -> (Result<DbExecuted, DbError>, UInt64) in
             let result = await capture { () async throws(DbError) -> DbExecuted in
                 try await db.execute(id, "INSERT INTO notes (title) VALUES ('outer')", [])
@@ -478,7 +488,10 @@ final class DbReviewTests: XCTestCase {
             return XCTFail("expected busy, got \(result)")
         }
         XCTAssertGreaterThanOrEqual(waited, 395, "busy came before the timeout")
-        XCTAssertLessThan(waited, 600, "busy came well after the timeout")
+        // "Well after the timeout" is not 200 ms of wall clock (a stalled machine made it 600 and more): it is more than half the timeout after a sleep of
+        // the timeout's own length that was started beside the statement, which a slow machine ends as late as it ends the binding's.
+        let late = (Double(ended) - Double(await reference.value)) / 1e6
+        XCTAssertLessThan(late, 200, "busy came \(late) ms after a sleep of the timeout's length started beside the statement")
         // Blocked by the waiting statement, one of them takes what is left of its 400 ms; 200 is far from both that
         // and a statement that a busy machine held up.
         XCTAssertLessThan(Double(slowest) / 1e6, 200, "a transaction statement was blocked by the waiting one")
@@ -640,12 +653,16 @@ final class DbReviewTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(started), 0.055, "the open waited for the lock")
         recorder.fail("PRAGMA journal_mode = WAL", with: .busy)
         let again = Date()
+        let reference = referenceSleep(milliseconds: 300) // the busy timeout's own length, armed as the open is
         await expectThrows(DbError.busy) { () async throws(DbError) -> DbOpened in
             try await db.open(name: "wal", migrations: notesMigrations)
         }
+        let ended = DispatchTime.now().uptimeNanoseconds
         let waited = Date().timeIntervalSince(again)
         XCTAssertGreaterThanOrEqual(waited, 0.29, "busy before the busy timeout")
-        XCTAssertLessThan(waited, 0.6, "busy well after the busy timeout")
+        // As above: not a wall-clock ceiling, but half the timeout after a sleep of its length started beside the open.
+        let late = (Double(ended) - Double(await reference.value)) / 1e6
+        XCTAssertLessThan(late, 150, "busy came \(late) ms after a sleep of the timeout's length started beside the open")
         XCTAssertEqual(recorder.ran(2).last, "close", "the connection of a failed open is closed")
     }
 
