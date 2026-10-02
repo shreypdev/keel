@@ -103,6 +103,76 @@ struct Writer {
   }
 };
 
+/// A bounds-checked reader of the wire format, for the records of ADR-046.
+struct Reader {
+  const std::vector<uint8_t> &bytes;
+  std::size_t at = 0;
+  explicit Reader(const std::vector<uint8_t> &bytes) : bytes(bytes) {}
+  void need(std::size_t n) { check(bytes.size() - at >= n, "the record is long enough"); }
+  uint8_t u8() {
+    need(1);
+    return bytes[at++];
+  }
+  uint32_t u32() {
+    need(4);
+    const uint32_t v = getU32(&bytes[at]);
+    at += 4;
+    return v;
+  }
+  uint64_t u64() {
+    need(8);
+    uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) v |= static_cast<uint64_t>(bytes[at + i]) << (8 * i);
+    at += 8;
+    return v;
+  }
+  std::string str() {
+    const uint32_t n = u32();
+    need(n);
+    std::string s(bytes.begin() + at, bytes.begin() + at + n);
+    at += n;
+    return s;
+  }
+  std::optional<std::string> optStr() { return u8() == 0 ? std::nullopt : std::optional<std::string>(str()); }
+  bool done() const { return at == bytes.size(); }
+};
+
+/// A `PanicReport` (ADR-046) as the core's `Diagnostics.panicked` hands it over.
+struct PanicFrame {
+  uint64_t address = 0;
+  std::optional<std::string> symbol, file;
+  std::optional<uint32_t> line;
+};
+struct PanicReport {
+  std::string message, location, operation, thread;
+  std::vector<PanicFrame> frames;
+  std::string ns, coreVersion;
+  uint64_t schemaHash = 0;
+  std::string imageId;
+};
+PanicReport readPanicReport(const std::vector<uint8_t> &bytes) {
+  Reader r(bytes);
+  PanicReport report;
+  report.message = r.str();
+  report.location = r.str();
+  report.operation = r.str();
+  report.thread = r.str();
+  for (uint32_t n = r.u32(); n > 0; --n) {
+    PanicFrame frame;
+    frame.address = r.u64();
+    frame.symbol = r.optStr();
+    frame.file = r.optStr();
+    if (r.u8() != 0) frame.line = r.u32();
+    report.frames.push_back(frame);
+  }
+  report.ns = r.str();
+  report.coreVersion = r.str();
+  report.schemaHash = r.u64();
+  report.imageId = r.str();
+  check(r.done(), "the report has no trailing bytes");
+  return report;
+}
+
 uint64_t getU64(const uint8_t *in) {
   uint64_t v = 0;
   for (int i = 0; i < 8; ++i) v |= static_cast<uint64_t>(in[i]) << (8 * i);
@@ -169,6 +239,7 @@ constexpr const char *kSecondNamespace = UNDRA_TEST_SECOND_NAMESPACE;
 // The playground's ids (examples/playground/generated/ts/src/ids.ts), recomputed from the names.
 const uint32_t kAdd = fnv1a32("fn.add");
 const uint32_t kAddLater = fnv1a32("fn.add_later");
+const uint32_t kExplode = fnv1a32("fn.explode");
 const uint32_t kConfigureRemote = fnv1a32("fn.configure_remote");
 const uint32_t kCounter = fnv1a32("Counter");
 const uint32_t kCounterNew = fnv1a32("Counter.new");
@@ -514,6 +585,112 @@ void testsWithOneCore(const Api *api) {
     f.host->shutdown(); // idempotent
   }
   ok("shutdown with a call in flight returns, is idempotent, and frees the core's slot");
+}
+
+/// ADR-046: a core that contained a panic reports it to its `Diagnostics` port, from the thread that panicked. The host answers
+/// it natively and queues it for the JS thread, once, in the order the panics happened; the schema declares the method
+/// synchronous, which must not make it "unavailable" from a core thread.
+void testsOfPanicReports(const Api *api) {
+  Fixture f(api);
+  // The plan the TypeScript side builds from the schema: Diagnostics is a port with a synchronous method.
+  std::vector<PortSpec> ports{{kHttp, {}}, {kKv, {}}, {ports::kDiagnostics, {ports::kDiagnosticsPanicked}}};
+  const std::vector<uint8_t> cfg = config();
+  {
+    CallScope scope(*f.host, nullptr);
+    const uint32_t code = f.host->start(cfg.data(), static_cast<uint32_t>(cfg.size()), ports);
+    check(code == 0, "the core starts with the Diagnostics port in its plan, got " + std::to_string(code));
+  }
+  f.settle();
+
+  // A report with a call id 0 (what the core sends): nothing allocated, nothing waits, one PortCall record for JS.
+  {
+    f.seen.clear();
+    Writer report;
+    report.str("boom").str("lab.rs:1:1");
+    const uint64_t before = f.host->counters().nativePortCalls;
+    UndraBuf out{};
+    check(HostTestAccess::native(*f.host, ports::kDiagnostics, ports::kDiagnosticsPanicked, 0, report.bytes, &out) == 1 && out.ptr == nullptr,
+          "a fire-and-forget panic report allocates nothing and is answered async");
+    check(f.host->counters().nativePortCalls == before + 1, "counted as a native port call");
+    const std::vector<Record> queued = f.drain();
+    check(queued.size() == 1 && queued[0].kind == RecordKind::PortCall, "one PortCall record is queued for JS");
+    const std::vector<uint8_t> &payload = queued[0].payload;
+    check(payload.size() == 12 + report.bytes.size() && getU32(payload.data()) == ports::kDiagnostics &&
+              getU32(&payload[4]) == ports::kDiagnosticsPanicked && getU32(&payload[8]) == 0,
+          "it names the port and the method, with call id 0");
+    check(std::vector<uint8_t>(payload.begin() + 12, payload.end()) == report.bytes, "and carries the report as it came");
+  }
+  ok("a panic report is answered natively and queued as one PortCall record for the JS thread");
+
+  // A call that does wait (a nonzero id) gets an empty ok answer, malloc'ed; the report is queued all the same.
+  {
+    Writer report;
+    report.str("x");
+    UndraBuf out{};
+    check(HostTestAccess::native(*f.host, ports::kDiagnostics, ports::kDiagnosticsPanicked, 9, report.bytes, &out) == 0, "answered ok");
+    check(out.len == 5 && getU32(out.ptr) == 9 && out.ptr[4] == 0 && out.cap == 0, "an empty PortReply, cap 0");
+    std::free(out.ptr);
+    check(f.drain().size() == 1, "and queued");
+    out = {};
+    check(HostTestAccess::native(*f.host, ports::kDiagnostics, ports::kLogLog, 0, report.bytes, &out) == 2, "another method is unavailable");
+    check(HostTestAccess::native(*f.host, ports::kDiagnostics, ports::kDiagnosticsPanicked, 0, {}, &out) == 2, "an empty report is unavailable");
+    check(f.drain().empty(), "neither was queued");
+  }
+  ok("a report with a call id is answered ok; a malformed call is unavailable and queues nothing");
+
+  // From a core thread, many at once: every one is queued, none is lost, none is run in JavaScript.
+  {
+    std::vector<std::thread> threads;
+    for (uint32_t t = 0; t < 4; ++t) {
+      threads.emplace_back([&, t] {
+        Writer report;
+        report.str("from thread " + std::to_string(t));
+        UndraBuf out{};
+        check(HostTestAccess::native(*f.host, ports::kDiagnostics, ports::kDiagnosticsPanicked, 0, report.bytes, &out) == 1, "queued from a thread");
+      });
+    }
+    for (std::thread &t : threads) t.join();
+    check(f.drain().size() == 4, "four reports, four records");
+    check(f.host->counters().unavailableSyncPortCalls == 0, "no JavaScript sync call was refused");
+  }
+  ok("reports from several core threads are all queued");
+
+  // The real thing: the playground core panics in `explode`; the report arrives once, whole, and the call fails as ever.
+  {
+    f.seen.clear();
+    Writer args;
+    args.str("kaboom");
+    const uint32_t id = f.nextCall++;
+    check(f.call(freeCall(kExplode, id, args.bytes)) == 0, "explode is accepted");
+    check(f.waitFor([&] { return f.replied(id); }), "explode replies within 5 s");
+    const Record *reply = f.reply(id);
+    check(reply->payload[4] == 2, "the call fails with status 2 (a contained panic), as before");
+    f.settle();
+    std::vector<PanicReport> reports;
+    for (const Record &r : f.seen) {
+      if (r.kind != RecordKind::PortCall || getU32(r.payload.data()) != ports::kDiagnostics) continue;
+      check(getU32(&r.payload[4]) == ports::kDiagnosticsPanicked && getU32(&r.payload[8]) == 0, "a Diagnostics.panicked record, call id 0");
+      reports.push_back(readPanicReport(std::vector<uint8_t>(r.payload.begin() + 12, r.payload.end())));
+    }
+    check(reports.size() == 1, "exactly one report, got " + std::to_string(reports.size()));
+    const PanicReport &report = reports[0];
+    check(report.message.find("kaboom") != std::string::npos, "the panic message: " + report.message);
+    check(report.location.find("lab.rs:") != std::string::npos, "the panic location: " + report.location);
+    check(report.operation == "explode", "what was running: " + report.operation);
+    check(!report.thread.empty(), "the thread that panicked");
+    check(report.ns == kCoreNamespace, "the core's namespace: " + report.ns);
+    check(!report.coreVersion.empty(), "the core's version");
+    check(report.schemaHash == api->schema_hash, "the core's schema hash");
+    check(!report.frames.empty(), "frames");
+    check(report.imageId.empty() || report.imageId.find_first_not_of("0123456789abcdef") == std::string::npos, "the image id is lowercase hex or empty");
+    // The core still works.
+    Writer add;
+    add.i32(1).i32(2);
+    std::vector<uint8_t> sum = f.callSync(freeCall(kAdd, f.nextCall++, add.bytes));
+    check(sum.size() == 9 && static_cast<int32_t>(getU32(&sum[5])) == 3, "the core keeps working after a contained panic");
+  }
+  ok("a panic in the real core is reported once through the host, whole, and the core keeps working");
+  f.host->shutdown();
 }
 
 void testsWithSyncPorts(const Api *api) {
@@ -1246,6 +1423,7 @@ int main() {
   }
   testsOfTheTable(api);
   testsWithOneCore(api);
+  testsOfPanicReports(api);
   testsWithSyncPorts(api);
   testsWithAReloadRace(api);
   testsWithTwoCores(api, second);

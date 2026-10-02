@@ -49,9 +49,13 @@ inline constexpr uint32_t kRngFill = fnv1a32("Rng.fill");
 inline constexpr uint32_t kLog = fnv1a32("port.Log");
 inline constexpr uint32_t kLogLog = fnv1a32("Log.log");
 inline constexpr uint32_t kTimer = fnv1a32("port.Timer");
+/// ADR-046: the core reports each panic it contained here, fire and forget (`port_call_id` 0), after its FATAL log record.
+inline constexpr uint32_t kDiagnostics = fnv1a32("port.Diagnostics");
+inline constexpr uint32_t kDiagnosticsPanicked = fnv1a32("Diagnostics.panicked");
 } // namespace ports
 
-/// What an inbox record carries; the values are the envelope kinds of docs/SPEC.md section 3.2.
+/// What an inbox record carries; the values are the envelope kinds of docs/SPEC.md section 3.2. (A panic report is a
+/// `PortCall` record of the `Diagnostics` port: the JavaScript side answers it like any port call.)
 enum class RecordKind : uint8_t {
   /// A `Reply` payload (3.4).
   Reply = 2,
