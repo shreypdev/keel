@@ -19,7 +19,12 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      # What the site's cards and README read (site/scripts/build-numbers.mjs, build-trust.mjs): the size records, the
+      # harsh-conditions result files, and the scenarios the contract grid is drawn from (site/data/tests.json is in site/**).
       - "bench/results/web-size.jsonl"
+      - "bench/results/android-size.jsonl"
+      - "bench/results/*.json"
+      - "contract-tests/scenarios.md"
       - "README.md"
       - ".github/workflows/site.yml"
   pull_request:
@@ -32,7 +37,12 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      # What the site's cards and README read (site/scripts/build-numbers.mjs, build-trust.mjs): the size records, the
+      # harsh-conditions result files, and the scenarios the contract grid is drawn from (site/data/tests.json is in site/**).
       - "bench/results/web-size.jsonl"
+      - "bench/results/android-size.jsonl"
+      - "bench/results/*.json"
+      - "contract-tests/scenarios.md"
       - "README.md"
       - ".github/workflows/site.yml"
   workflow_dispatch:
@@ -75,6 +85,8 @@ jobs:
       # 1. The playground: one Rust core, compiled to wasm, under a React UI.
       - name: Build the playground core (wasm32)
         run: cargo run -p undra-cli -- build --platform web -C examples/playground
+      # The app installs what it imports, `wa-sqlite` (the optional peer of the runtime's Db worker) and `react` included,
+      # and its Vite config resolves them to its own copies: the runtime's node_modules is not needed here.
       - name: Build the playground web app
         working-directory: examples/playground/web
         run: |
