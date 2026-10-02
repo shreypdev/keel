@@ -154,6 +154,11 @@ measured_ns = 15.0
 budget_ns = 250
 measured_ns = 15.6
 
+# ADR-042: a money amount at the largest scale (16 bytes of mantissa and one of scale): the same cost class as a uuid.
+[bench."wire/decimal/roundtrip"]
+budget_ns = 250
+measured_ns = 16.0
+
 [bench."wire/record5/roundtrip"]
 budget_ns = 470
 measured_ns = 92.3
