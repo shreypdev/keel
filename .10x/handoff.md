@@ -35,6 +35,12 @@ ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5)
 with their context when told to):
 Landed: devtools, persistence, testkit, docs-v1x, ports (all reviewed) (ADR-037/049 Accepted; opus review `.10x/reviews/2026-10-02-persistence-review.md`: 3 High fixed — a wrong-typed migration hook spliced bytes, RN storage not on ADR-049, a dead web core after a trap during restart; hello wasm 116.8 KB, JS 25,984/26,000; Rust 2,891 · Swift 553 · Kotlin 652 · TS 1,264 · contracts 65/65; hash `0xfa536b9ac6f06149`). Still to land: testkit (review) then ports (review; it must cross persistence: `check.sh`, `run-all.sh`, `scenarios.md`, SPEC §8).
 
+**Waiting to land:** `ns-storage` (ADR-044 Amendment A; sonnet review `.10x/reviews/2026-10-02-ns-storage-review.md`:
+merge after one decision — F3 the hello-world JS is 26,221 B against the 26,000 gate because the namespace is
+now validated at `attach`/`load`; F1 unvalidated namespace path components fixed on every host, F2 the bindgen TS
+fixtures fixed). Decision: do not raise the gate; land `ts-size-e4` first (it targets 16 KB), then cross
+`ns-storage` over it, re-run `scripts/wasm-size.sh`, fast-forward. HEAD `0d3733f`.
+
 **Also owed:** the Rust 1.99.0 bump (ci.yml header says how; do it when no worktree is mid-build);
 `ts-runtime-size` (16 KB target);  a custom port in the playground for the reference's Ports section; `undra bindgen --declarations`.
 
