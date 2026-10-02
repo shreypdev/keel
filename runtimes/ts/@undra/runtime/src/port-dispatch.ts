@@ -20,6 +20,12 @@ export interface PortDispatchHooks {
   untyped(call: PortCallPayload, error: unknown): void;
 }
 
+/**
+ * What a port method rejects with to answer "unavailable" without a report: it reported the failure itself, or there
+ * is nothing to report (a host callback whose instance is gone, ADR-041).
+ */
+export const QUIETLY_UNAVAILABLE: unique symbol = Symbol("unavailable");
+
 function isThenable(value: unknown): value is PromiseLike<Uint8Array> {
   return typeof value === "object" && value !== null && typeof (value as { then?: unknown }).then === "function";
 }
@@ -35,7 +41,7 @@ export function dispatchPortCall(impl: PortImpl | undefined, call: PortCallPaylo
   if (method === undefined) return UNAVAILABLE;
   let result: Uint8Array | PromiseLike<Uint8Array>;
   try {
-    result = method(call.args);
+    result = method(call.args, call.portCallId);
   } catch (error) {
     return { kind: "sync", reply: portFailureReply(call, error, hooks) };
   }
@@ -58,7 +64,7 @@ export function portFailureReply(call: PortCallPayload, error: unknown, hooks: P
   if (error instanceof UndraPortError) {
     return encodePortReply({ portCallId: call.portCallId, status: PortStatus.Error, body: error.body });
   }
-  hooks.untyped(call, error);
+  if (error !== QUIETLY_UNAVAILABLE) hooks.untyped(call, error);
   return encodePortReply({ portCallId: call.portCallId, status: PortStatus.Unavailable, body: NO_BYTES });
 }
 

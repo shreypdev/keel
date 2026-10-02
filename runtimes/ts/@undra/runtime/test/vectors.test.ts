@@ -291,14 +291,14 @@ function changeSetCase(v: Vector): Case {
  */
 function snapshotCase(v: Vector): Case {
   const json = v.value as {
-    generation_floor: number;
+    generation_floor: string;
     schema_hash: string;
     types: { type_id: string; fingerprint: string }[];
     description: string;
     stores: { handle: string; type_id: string; signals: { signal_id: number; value: number[] }[] }[];
   };
   const snapshot: SnapshotPayload = {
-    generationFloor: json.generation_floor,
+    generationFloor: Number(json.generation_floor),
     schemaHash: BigInt(json.schema_hash),
     types: json.types.map((t) => ({ typeId: Number(t.type_id), fingerprint: BigInt(t.fingerprint) })),
     description: json.description,

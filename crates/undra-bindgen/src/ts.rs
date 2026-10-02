@@ -20,10 +20,17 @@ use undra_meta::{
 };
 
 use crate::emit::CodeWriter;
-use crate::model::{self, Model, MsgPart, NamedKind, Ret, doc_lines, parse_message};
+use crate::model::{
+    self, CallbackUse, Model, MsgPart, NamedKind, ObjectUse, Ret, doc_lines, parse_message,
+};
 use crate::naming;
 use crate::zero::ZeroState;
 use crate::{GeneratedFile, Generator};
+
+#[path = "ts_callbacks.rs"]
+mod ts_callbacks;
+#[path = "ts_objects.rs"]
+mod ts_objects;
 
 /// The placeholder of a type that has no finite value (every way to build it needs itself). No
 /// Rust type that crosses can be like this (a store could not hold its initial value), so the text
@@ -71,6 +78,7 @@ enum Module {
     Stores,
     Ports,
     Queries,
+    Callbacks,
 }
 
 impl Module {
@@ -82,6 +90,7 @@ impl Module {
             Module::Stores => "stores",
             Module::Ports => "ports",
             Module::Queries => "queries",
+            Module::Callbacks => "callbacks",
         }
     }
 }
@@ -101,10 +110,11 @@ pub(crate) fn generate(model: &Model, cfg: &Generator) -> Vec<GeneratedFile> {
         ts.stores_file(),
         ts.ports_file(),
         ts.queries_file(),
-        ts.ids_file(),
-        ts.core_file(),
-        ts.index_file(),
     ];
+    if !model.callbacks.is_empty() {
+        files.push(ts.callbacks_file());
+    }
+    files.extend([ts.ids_file(), ts.core_file(), ts.index_file()]);
     files.push(GeneratedFile {
         path: "package.json".to_owned(),
         contents: ts.package_json(),
@@ -503,9 +513,12 @@ impl<'a> Ctx<'a> {
                 self.use_type(name);
                 name.clone()
             }
-            // todo(objects-callbacks): objects and callbacks (ADR-040, ADR-041)
-            TypeRef::Object(name) | TypeRef::Callback(name) => {
-                self.use_type(name);
+            TypeRef::Object(name) => {
+                self.use_object_type(name);
+                name.clone()
+            }
+            TypeRef::Callback(name) => {
+                self.use_callback_type(name);
                 name.clone()
             }
             // Rejected by validation before generation starts.
@@ -1127,6 +1140,7 @@ impl TsGen<'_> {
                     ));
                 }
             });
+            self.callback_ids(w);
         });
         GeneratedFile {
             path: "src/ids.ts".to_owned(),
@@ -1253,7 +1267,11 @@ impl TsGen<'_> {
             Module::Stores,
             Module::Ports,
             Module::Queries,
+            Module::Callbacks,
         ] {
+            if module == Module::Callbacks && self.model.callbacks.is_empty() {
+                continue;
+            }
             w.line(format!("export * from \"./{}.js\";", module.stem()));
         }
         w.line("export * from \"./ids.js\";");
@@ -1685,15 +1703,31 @@ impl<'a> Ctx<'a> {
     }
 
     /// Writes `const w = new UndraWriter(); w.writeX(..);` for `params` and
-    /// returns the expression holding the encoded arguments.
-    fn encode_args(&mut self, w: &mut CodeWriter, params: &[ParamDef], writer: &str) -> String {
+    /// returns the expression holding the encoded arguments. Objects are written for a call into
+    /// `core` (ADR-040); callbacks are lent with `lend`, the function `lending` passes its `send`,
+    /// or, without one, with the runtime's `lend` (ADR-041).
+    fn encode_args(
+        &mut self,
+        w: &mut CodeWriter,
+        params: &[ParamDef],
+        writer: &str,
+        core: &str,
+        lend: Option<&str>,
+    ) -> String {
         if params.is_empty() {
             return "new Uint8Array(0)".to_owned();
         }
         self.rt_value("UndraWriter");
         w.line(format!("const {writer} = new UndraWriter();"));
         for p in params {
-            let stmt = self.write_stmt(&p.ty, &param_ident(&p.name), writer);
+            let value = param_ident(&p.name);
+            let stmt = if let Some(object) = ObjectUse::of(&p.ty) {
+                self.write_object(&object, &value, writer, core)
+            } else if let Some(callback) = CallbackUse::of(&p.ty) {
+                self.write_callback(&callback, &value, writer, lend, core)
+            } else {
+                self.write_stmt(&p.ty, &value, writer)
+            };
             w.line(stmt);
         }
         format!("{writer}.finish()")
@@ -1833,6 +1867,8 @@ impl<'a> Ctx<'a> {
         let handle = naming::avoid("handle", &taken_refs);
         let store = naming::avoid("store", &taken_refs);
         let recorded = naming::avoid("args", &taken_refs);
+        let lend = naming::avoid("lend", &taken_refs);
+        let lends = c.params.iter().any(|p| CallbackUse::of(&p.ty).is_some());
         let mut params = self.param_list(&c.params);
         let default_core = self.default_core();
         params.push(format!("{core}: UndraCore = {default_core}"));
@@ -1845,7 +1881,11 @@ impl<'a> Ctx<'a> {
         let prefix = format!("static async {name}");
         let suffix = format!(": Promise<{}>", o.name);
         w.call_block(prefix, &params, suffix, true, |w| {
-            let mut args = self.encode_args(w, &c.params, &writer);
+            let mut args = if lends {
+                String::new()
+            } else {
+                self.encode_args(w, &c.params, &writer, &core, None)
+            };
             if recreatable {
                 // The encoded arguments are kept: the runtime runs this constructor again after a restart (ADR-049).
                 w.line(format!("const {recorded} = {args};"));
@@ -1866,16 +1906,35 @@ impl<'a> Ctx<'a> {
             try_catch(
                 w,
                 |w| {
-                    w.call(
-                        format!("{handle} = {construct}"),
-                        &construct_args,
-                        ";",
-                        true,
-                    )
+                    if lends {
+                        // The callbacks are lent for the call (ADR-041).
+                        self.rt_value("lending");
+                        w.line(format!("{handle} = await lending({core}, ({lend}) => {{"));
+                        w.indented(|w| {
+                            let args = self.encode_args(w, &c.params, &writer, &core, Some(&lend));
+                            let [type_id, method_id, _] = &construct_args;
+                            w.call(
+                                format!("return {core}.construct"),
+                                &[type_id.clone(), method_id.clone(), args],
+                                ";",
+                                true,
+                            );
+                        });
+                        w.line("});");
+                    } else {
+                        w.call(
+                            format!("{handle} = {construct}"),
+                            &construct_args,
+                            ";",
+                            true,
+                        );
+                    }
                 },
                 |w| w.line(format!("throw {mapped};")),
             );
             if is_store && recreatable {
+                // A query handle: re-created, not restored, after a crash recovery (ADR-049), and
+                // never returned by a method, so it is made here rather than adopted.
                 w.line(format!(
                     "const {store} = new {}({core}, {handle}, {recorded});",
                     o.name
@@ -1883,11 +1942,16 @@ impl<'a> Ctx<'a> {
                 w.line(format!("await {store}._observeAll();"));
                 w.line(format!("return {store};"));
             } else if is_store {
-                w.line(format!("const {store} = new {}({core}, {handle});", o.name));
+                self.rt_value("adopt");
+                w.line(format!(
+                    "const {store} = adopt({core}, {handle}, {});",
+                    o.name
+                ));
                 w.line(format!("await {store}._observeAll();"));
                 w.line(format!("return {store};"));
             } else {
-                w.line(format!("return new {}({core}, {handle});", o.name));
+                self.rt_value("adopt");
+                w.line(format!("return adopt({core}, {handle}, {});", o.name));
             }
         });
     }
@@ -1912,6 +1976,8 @@ impl<'a> Ctx<'a> {
         let body_var = naming::avoid("body", &taken_refs);
         let signal = naming::avoid("signal", &taken_refs);
         let source = naming::avoid("source", &taken_refs);
+        let lend = naming::avoid("lend", &taken_refs);
+        let lends = c.params.iter().any(|p| CallbackUse::of(&p.ty).is_some());
         let (core, target, id, prefix, is_function, operation) = match site {
             Site::Method { id, owner } => (
                 "this.core".to_owned(),
@@ -1972,7 +2038,7 @@ impl<'a> Ctx<'a> {
             let head = format!("{prefix}{function_kw}{name}");
             let suffix = format!(": AsyncIterable<{item_ty}>");
             w.call_block(head, &params, suffix, true, |w| {
-                let args = self.encode_args(w, c.params, &writer);
+                let args = self.encode_args(w, c.params, &writer, &core, None);
                 self.needs_decode_stream = true;
                 let codec = self.codec(item);
                 w.call(
@@ -1998,34 +2064,59 @@ impl<'a> Ctx<'a> {
             // A command's arguments are encoded inside the `try` too: it cannot reject, and a
             // click handler has no way to handle a `RangeError` from the writer. Any other
             // call encodes them first: a value the wire cannot represent is the caller's bug.
-            let encoded_before = if is_command {
+            //
+            // A call that lends callbacks encodes inside `lending` (ADR-041), which gives the
+            // references back when the call never reached the core.
+            let encoded_before = if is_command || lends {
                 None
             } else {
-                Some(self.encode_args(w, c.params, &writer))
+                Some(self.encode_args(w, c.params, &writer, &core, None))
             };
             w.line("try {");
             w.indented(|w| {
-                let args = match encoded_before {
-                    Some(args) => args,
-                    None => self.encode_args(w, c.params, &writer),
-                };
-                let mut call_args = vec![target.clone(), id.clone(), args];
-                if c.is_async {
-                    call_args.push(signal.clone());
-                }
-                let call = format!("await {core}.call");
-                if is_unit {
-                    w.call(call, &call_args, ";", true);
+                let assign = if is_unit {
+                    String::new()
                 } else {
-                    w.call(format!("const {body_var} = {call}"), &call_args, ";", true);
-                    let ok = match &ret {
-                        Ret::Plain(t) | Ret::Result { ok: t, .. } => Some(*t),
-                        _ => None,
-                    };
-                    if let Some(ok) = ok {
-                        let expr = self.decode_all(ok, &body_var);
-                        w.line(format!("return {expr};"));
+                    format!("const {body_var} = ")
+                };
+                if lends {
+                    self.rt_value("lending");
+                    w.line(format!("{assign}await lending({core}, ({lend}) => {{"));
+                    w.indented(|w| {
+                        let args = self.encode_args(w, c.params, &writer, &core, Some(&lend));
+                        let mut call_args = vec![target.clone(), id.clone(), args];
+                        if c.is_async {
+                            call_args.push(signal.clone());
+                        }
+                        w.call(format!("return {core}.call"), &call_args, ";", true);
+                    });
+                    if c.is_async {
+                        w.line(format!("}}, {signal});"));
+                    } else {
+                        w.line("});");
                     }
+                } else {
+                    let args = match encoded_before {
+                        Some(args) => args,
+                        None => self.encode_args(w, c.params, &writer, &core, None),
+                    };
+                    let mut call_args = vec![target.clone(), id.clone(), args];
+                    if c.is_async {
+                        call_args.push(signal.clone());
+                    }
+                    w.call(format!("{assign}await {core}.call"), &call_args, ";", true);
+                }
+                let ok = match &ret {
+                    Ret::Plain(t) | Ret::Result { ok: t, .. } if !is_unit => Some(*t),
+                    _ => None,
+                };
+                if let Some(ok) = ok {
+                    // An object is adopted (ADR-040): the wrapper the host already has, or a new one.
+                    let expr = match ObjectUse::of(ok) {
+                        Some(object) => self.adopt_expr(&object, &body_var, &core),
+                        None => self.decode_all(ok, &body_var),
+                    };
+                    w.line(format!("return {expr};"));
                 }
             });
             w.line("} catch (error) {");
@@ -2286,7 +2377,7 @@ impl<'a> Ctx<'a> {
                 w.block(format!("{member}({}): void", params.join(", ")), |w| {
                     w.line("try {");
                     w.indented(|w| {
-                        let args = self.encode_args(w, &m.params, &writer);
+                        let args = self.encode_args(w, &m.params, &writer, "this.core", None);
                         w.call(
                             "this.core.event",
                             &[

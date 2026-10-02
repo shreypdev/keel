@@ -62,15 +62,41 @@ export class UndraCore {
   get closed() {
     return false;
   }
+
+  /** The connection state (ADR-051); the callback registry (ADR-041) listens to it. */
+  connection = new Signal({ kind: "connected" });
+
+  /** The ports registered (a callback interface's bridge is registered at its first lend, ADR-041). */
+  ports = new Map();
+
+  registerPort(portId, impl) {
+    this.ports.set(portId, impl);
+  }
+
+  /** ADR-040: one reference given back (a duplicate in a reply); `adopt` calls it. */
+  _giveBack(handle) {
+    (this.givenBack ??= []).push(handle);
+  }
+
+  /** ADR-040: a handle a new wrapper now holds; `adopt` calls it. */
+  _held() {}
 }
 
 export class UndraObject {
+  #closed = false;
+
   constructor(core, handle) {
     this.core = core;
     this.handle = handle;
   }
 
+  get closed() {
+    return this.#closed;
+  }
+
   close() {
+    if (this.#closed) return;
+    this.#closed = true;
     this.core.release(this.handle);
   }
 }

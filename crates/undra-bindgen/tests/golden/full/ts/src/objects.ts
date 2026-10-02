@@ -7,6 +7,7 @@ import {
   UndraCore,
   UndraObject,
   UndraWriter,
+  adopt,
   codecs,
   decodeValue,
 } from "@undra/runtime";
@@ -33,7 +34,7 @@ export class Calculator extends UndraObject {
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    return new Calculator(core, handle);
+    return adopt(core, handle, Calculator);
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */

@@ -50,6 +50,8 @@ export interface MirrorStats {
   readonly pendingBytes: number;
   /** Entries dropped because no store was registered for their handle. */
   readonly droppedEntries: number;
+  /** Host callback invocations the drain delivered (ADR-041, `main` delivery; see {@link Mirror.enqueueCall}). */
+  readonly callbacksDelivered: number;
 }
 
 /** Options of a {@link Mirror}. */
@@ -228,7 +230,16 @@ class Single {
   constructor(readonly entry: ChangeEntry) {}
 }
 
-type Unit = Slot | Single;
+/**
+ * A host callback's invocation queued with the change-sets (ADR-041, `main` delivery): run by the drain in arrival
+ * order; it returns whether it delivered anything (a superseded or cancelled invocation does not).
+ */
+export type MirrorCall = () => boolean;
+
+/** What the queue holds: change-set entries and callback invocations, in arrival order. */
+type Queued = ChangeEntry | MirrorCall;
+
+type Unit = Slot | Single | MirrorCall;
 
 /** A copy of `value` when it is a small view into a larger buffer, so the queue does not keep that buffer alive. */
 function own(value: Uint8Array): Uint8Array {
@@ -254,7 +265,9 @@ function own(value: Uint8Array): Uint8Array {
  * declared `no_coalesce` are applied entry by entry, each announced on its
  * own. Entries for a handle nobody registered (a store closed while updates
  * were in flight) are dropped and counted. The queue is bounded: past
- * `maxPendingEntries` or `maxPendingBytes` it is folded in place.
+ * `maxPendingEntries` or `maxPendingBytes` it is folded in place. A host
+ * callback's invocation ({@link Mirror.enqueueCall}) runs in its place in the
+ * queue and is never folded with entries.
  */
 export class Mirror {
   readonly #registry = new Map<Handle, Registration>();
@@ -268,7 +281,7 @@ export class Mirror {
   readonly #maxBytes: number;
   #compactAtEntries: number;
   #compactAtBytes: number;
-  #queue: ChangeEntry[] = [];
+  #queue: Queued[] = [];
   #queueBytes = 0;
   /** Change-sets and entries received since the queue was last taken by a drain. */
   #queuedChangeSets = 0;
@@ -285,6 +298,7 @@ export class Mirror {
   #drains = 0;
   #compactions = 0;
   #resyncs = 0;
+  #calls = 0;
 
   /** @param options See {@link MirrorOptions}. */
   constructor(options: MirrorOptions = {}) {
@@ -370,6 +384,7 @@ export class Mirror {
       pendingEntries: this.#queue.length,
       pendingBytes: this.#queueBytes,
       droppedEntries: this.#dropped,
+      callbacksDelivered: this.#calls,
     };
   }
 
@@ -418,6 +433,18 @@ export class Mirror {
     // Someone waits for an initial change-set (`observe` over a worker or a socket): no frame wait.
     if (this.#waiters.size > 0) this.queueFlush();
     else this.#scheduleFlush();
+  }
+
+  /**
+   * Queues a host callback's invocation for the drain, in arrival order with the change-sets (ADR-041, `main`
+   * delivery): the drain applies what was queued before it, runs it, then applies what arrived after it, so it sees
+   * the stores as they were when the core made the call. It is never folded with change-set entries, it counts in
+   * the backlog (17 bytes), and what it throws goes to `onError`.
+   */
+  enqueueCall(call: MirrorCall): void {
+    this.#queue.push(call);
+    this.#queueBytes += ENTRY_OVERHEAD;
+    if (!this.#flushing) this.#scheduleFlush();
   }
 
   /**
@@ -516,15 +543,22 @@ export class Mirror {
    * signal, in place. A compaction folds every signal. Entries of a signal whose merged patch was
    * dropped are discarded until its next full value.
    */
-  #fold(entries: readonly ChangeEntry[], everyKey: boolean): Unit[] {
+  #fold(entries: readonly Queued[], everyKey: boolean): Unit[] {
     const units: Unit[] = [];
-    const slots = new Map<Handle, Map<number, Slot>>();
+    let slots = new Map<Handle, Map<number, Slot>>();
     const awaiting = this.#awaiting;
     let lastHandle: Handle | undefined;
     let lastSlots = new Map<number, Slot>();
     let lastNoCoalesce: ReadonlySet<number> | null = null;
     let lastAwaiting: Map<number, boolean> | undefined;
     for (const entry of entries) {
+      if (typeof entry === "function") {
+        // A callback is a barrier: what arrived after it folds apart from what arrived before it.
+        units.push(entry);
+        slots = new Map();
+        lastHandle = undefined;
+        continue;
+      }
       if (entry.handle !== lastHandle) {
         lastHandle = entry.handle;
         const found = slots.get(entry.handle);
@@ -595,9 +629,14 @@ export class Mirror {
    */
   #compact(): void {
     const units = this.#fold(this.#queue, true);
-    const queue: ChangeEntry[] = [];
+    const queue: Queued[] = [];
     let bytes = 0;
     for (const unit of units) {
+      if (typeof unit === "function") {
+        queue.push(unit);
+        bytes += ENTRY_OVERHEAD;
+        continue;
+      }
       if (unit instanceof Single) continue; // a compaction folds every signal
       if (unit.oversized) {
         this.#markDropped(unit);
@@ -632,17 +671,25 @@ export class Mirror {
     try {
       while (next < units.length) {
         const first = units[next] as Unit;
-        if (first instanceof Single) {
+        if (!(first instanceof Slot)) {
           next++;
-          batch(() => {
-            this.#applyEntry(first.entry, satisfied);
-          });
+          if (first instanceof Single) {
+            batch(() => {
+              this.#applyEntry(first.entry, satisfied);
+            });
+          } else {
+            try {
+              if (first()) this.#calls++;
+            } catch (error) {
+              this.#onError(error);
+            }
+          }
           continue;
         }
         batch(() => {
           while (next < units.length) {
             const unit = units[next] as Unit;
-            if (unit instanceof Single) break;
+            if (!(unit instanceof Slot)) break;
             next++;
             this.#applySlot(unit, satisfied);
           }
@@ -655,11 +702,11 @@ export class Mirror {
   }
 
   #requeue(units: readonly Unit[], from: number): void {
-    const older: ChangeEntry[] = [];
+    const older: Queued[] = [];
     for (let i = from; i < units.length; i++) {
       const unit = units[i] as Unit;
-      if (unit instanceof Single) {
-        older.push(unit.entry);
+      if (typeof unit === "function" || unit instanceof Single) {
+        older.push(typeof unit === "function" ? unit : unit.entry);
         continue;
       }
       if (unit.full !== null) older.push(unit.full);
@@ -667,7 +714,7 @@ export class Mirror {
         older.push({ handle: unit.handle, signalId: unit.signalId, op: ChangeOp.KeyedPatch, value: unit.mergedPatch() });
       }
     }
-    for (const entry of older) this.#queueBytes += ENTRY_OVERHEAD + entry.value.length;
+    for (const entry of older) this.#queueBytes += ENTRY_OVERHEAD + (typeof entry === "function" ? 0 : entry.value.length);
     this.#queue = older.concat(this.#queue);
   }
 

@@ -23,6 +23,7 @@ swift/Sources/PlaygroundBCoreFFI/include/module.modulemap
 swift/Sources/PlaygroundBCoreFFI/include/playground_b_undra.h
 swift/Sources/PlaygroundBCoreFFI/playground_b_undra.c
 ts/package.json
+ts/src/callbacks.ts
 ts/src/core.ts
 ts/src/errors.ts
 ts/src/ids.ts

@@ -16,6 +16,7 @@ import {
   UndraCallError,
   UndraCore,
   UndraStore,
+  adopt,
   codecs,
   decodeValue,
 } from "@undra/runtime";
@@ -47,7 +48,7 @@ export class Link extends UndraStore {
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new Link(core, handle);
+    const store = adopt(core, handle, Link);
     await store._observeAll();
     return store;
   }

@@ -10,6 +10,7 @@ import {
   UndraReader,
   UndraStore,
   UndraWriter,
+  adopt,
   applyPatch,
   codecs,
   decodePatch,
@@ -47,7 +48,7 @@ export class TodoStore extends UndraStore {
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new TodoStore(core, handle);
+    const store = adopt(core, handle, TodoStore);
     await store._observeAll();
     return store;
   }
@@ -69,7 +70,7 @@ export class TodoStore extends UndraStore {
     } catch (error) {
       throw UndraCallError.mapped(error, TodoErrorCodec);
     }
-    const store = new TodoStore(core, handle);
+    const store = adopt(core, handle, TodoStore);
     await store._observeAll();
     return store;
   }

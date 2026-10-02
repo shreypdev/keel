@@ -234,6 +234,7 @@ pub const RESERVED_ENTRIES: &[&str] = &[
     "UndraNative",
     "UndraNativeModule",
     "UndraObject",
+    "UndraObjectClass",
     "UndraPanicReport",
     "UndraPayload",
     "UndraPluginOptions",

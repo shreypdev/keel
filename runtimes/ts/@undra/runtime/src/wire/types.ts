@@ -8,10 +8,10 @@ export type Bytes = Uint8Array;
 // ---------------------------------------------------------------------------
 
 /**
- * Reference to an object owned by the core: a `u64` whose low 32 bits are the
- * slot index and whose high 32 bits are the generation (starting at 1). `0n`
- * is the null handle. Handles are only meaningful inside the runtime instance
- * that issued them.
+ * Reference to an object owned by the core: a `u64` whose low 24 bits are the
+ * slot index and whose high 40 bits are the generation (starting at 1; ADR-040
+ * repartitioned ADR-022's 32/32). `0n` is the null handle. Handles are opaque
+ * to hosts and only meaningful inside the runtime instance that issued them.
  */
 export type Handle = bigint;
 
@@ -19,32 +19,38 @@ export type Handle = bigint;
 export const NULL_HANDLE: Handle = 0n;
 
 const MASK32 = 0xffff_ffffn;
+/** The largest slot index of a handle (24 bits). */
+export const MAX_HANDLE_INDEX = 0xff_ffff;
+/** The largest generation of a handle (40 bits). */
+export const MAX_HANDLE_GENERATION = 0xff_ffff_ffff;
 
 /** The two 32-bit halves of a handle, as used by the wasm ABI (`handle_lo`, `handle_hi`). */
 export interface HandleParts {
-  /** Low 32 bits (the slot index), as an unsigned number. */
+  /** Low 32 bits, as an unsigned number. */
   readonly lo: number;
-  /** High 32 bits (the generation), as an unsigned number. */
+  /** High 32 bits, as an unsigned number. */
   readonly hi: number;
 }
 
-/** Slot index of a handle (its low 32 bits). */
+/** Slot index of a handle (its low 24 bits). */
 export function handleIndex(handle: Handle): number {
-  return Number(handle & MASK32);
+  return Number(handle & 0xff_ffffn);
 }
 
-/** Generation of a handle (its high 32 bits). */
+/** Generation of a handle (its high 40 bits). */
 export function handleGeneration(handle: Handle): number {
-  return Number((handle >> 32n) & MASK32);
+  return Number((handle >> 24n) & 0xff_ffff_ffffn);
 }
 
-/** Builds a handle from a slot index and a generation, both `u32`. */
+/** Builds a handle from a slot index (24 bits) and a generation (40 bits). */
 export function makeHandle(index: number, generation: number): Handle {
-  if (index >>> 0 !== index) throw new RangeError(`handle index out of range: ${String(index)}`);
-  if (generation >>> 0 !== generation) {
+  if (!Number.isInteger(index) || index < 0 || index > MAX_HANDLE_INDEX) {
+    throw new RangeError(`handle index out of range: ${String(index)}`);
+  }
+  if (!Number.isInteger(generation) || generation < 0 || generation > MAX_HANDLE_GENERATION) {
     throw new RangeError(`handle generation out of range: ${String(generation)}`);
   }
-  return (BigInt(generation) << 32n) | BigInt(index);
+  return (BigInt(generation) << 24n) | BigInt(index);
 }
 
 /**

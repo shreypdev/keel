@@ -55,7 +55,18 @@ macro_rules! ts_cases {
 }
 
 ts_cases!(
-    records, enums, errors, objects, stores, ports, queries, full, stdlib, recursive
+    object_graph,
+    callbacks,
+    records,
+    enums,
+    errors,
+    objects,
+    stores,
+    ports,
+    queries,
+    full,
+    stdlib,
+    recursive
 );
 
 #[test]
@@ -70,5 +81,44 @@ fn js_number_output_type_checks() {
     let files = generator.typescript(&schema).unwrap();
     if let Err(diagnostics) = typecheck("records-js-number", &files) {
         panic!("the js_number TypeScript does not type-check:\n{diagnostics}");
+    }
+}
+
+/// A stream whose arguments take an object and a callback (no golden case has one): the object is
+/// written after `requireOwn`, the callback lent with the runtime's `lend`.
+#[test]
+fn a_stream_that_takes_objects_and_callbacks_type_checks() {
+    if ts_runtime_declarations().is_none() {
+        skip("no TypeScript compiler (tsc) found");
+        return;
+    }
+    let mut schema = common::case("callbacks");
+    let uploader = schema
+        .objects
+        .iter_mut()
+        .find(|o| o.name == "Uploader")
+        .expect("the callbacks case has an Uploader");
+    uploader.methods.push(common::method(
+        "Uploader",
+        "follow",
+        "Follows `watch`, telling `listener`.",
+        vec![
+            common::param("watch", common::obj("Watch")),
+            common::param("listener", common::cb("UploadListener")),
+        ],
+        undra_meta::TypeRef::Stream(Box::new(undra_meta::TypeRef::U32)),
+        false,
+    ));
+    let generator = common::generator_for("callbacks", &schema);
+    let files = generator.typescript(&schema).unwrap();
+    let objects = &files
+        .iter()
+        .find(|f| f.path == "src/objects.ts")
+        .unwrap()
+        .contents;
+    assert!(objects.contains("w.writeU64(requireOwn(this.core, watch));"));
+    assert!(objects.contains("w.writeU64(lend(this.core, listener, UploadListenerCallback));"));
+    if let Err(diagnostics) = typecheck("callbacks-stream", &files) {
+        panic!("a stream with object and callback arguments does not type-check:\n{diagnostics}");
     }
 }

@@ -10,6 +10,7 @@ import {
   UndraReader,
   UndraStore,
   UndraWriter,
+  adopt,
   applyPatch,
   codecs,
   decodePatch,
@@ -52,7 +53,7 @@ export class Auth extends UndraStore {
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new Auth(core, handle);
+    const store = adopt(core, handle, Auth);
     await store._observeAll();
     return store;
   }
@@ -171,7 +172,7 @@ export class Notebook extends UndraStore {
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new Notebook(core, handle);
+    const store = adopt(core, handle, Notebook);
     await store._observeAll();
     return store;
   }
