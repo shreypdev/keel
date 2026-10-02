@@ -46,9 +46,17 @@ on the call path's classes**, the plugin's `es2022` default (and the playground'
   `callSync` 9.65 to 9.85 -> 1.69 to 1.72 us, `encodeCall` 6.0 to 6.7 -> 1.5 us, an awaited generated call 24.6 to 25.3 ->
   7.7 us, the 1,667-patch frame (parse and drain) 21.5 to 22.0 -> 5.0 to 5.4 ms of 16.7. `docs/REACT_NATIVE.md`'s limit is
   restated (it did not fit a frame; it does).
-* Counts: runtime `npm test` 1,463 pass (was 1,432: the new files are `call-path`, `direct-call`, `wire-small-paths` and
-  `default-ports`), the RN package 87 pass, the playground web 121 pass and its Playwright smoke 5/5, `[web]` budget tests
-  in `undra-bench`. COUNTS_PLACEHOLDER
+* Counts, on the tree merged with `main` (`d1b35b5`): `cargo fmt --check` and `cargo clippy --workspace --all-targets
+  -- -D warnings` clean; `cargo test --workspace --no-fail-fast` **3,079 pass, 0 fail, 16 ignored**; the runtime's `npm
+  test` **1,463 pass** in 48 files (1,432 before: the new files are `call-path`, `direct-call`, `wire-small-paths` and
+  `default-ports`) and its three typechecks; `crates/undra-ffi/tests/wasm/run.sh` pass; **the contract grid 74/74**
+  (S01..S26 on TypeScript, Kotlin and Swift, less S21/S22 on the native ones); the interop run pass; the RN package 87
+  pass, typecheck clean, its contract column pass; the testkit 32, the devtools page 71 (and `build.sh --check`: the
+  committed assets match a rebuild), the playground web 121 and its Playwright smoke 5/5, the fieldbook web 13; `undra
+  bindgen -C ... --check --docs` clean on the playground, `two-cores/{a,b}`, the cookbook and the fieldbook (no generated
+  file moved); `node --test scripts/bench-device-report.test.mjs` 16; `undra-bench`'s 22 budget unit tests (the `[web]`
+  table among them); `scripts/wasm-size.sh`: hello-wasm 116,966 (gate 120,000), hello-runtime-js 21,159 (gate 21,500);
+  `node site/scripts/build-all.mjs` current, `check-links --words` 342 of 350 words.
 
 ## Deviations
 
@@ -71,7 +79,8 @@ on the call path's classes**, the plugin's `es2022` default (and the playground'
    to `playground_core.wasm`; `npm run build` of the playground failed on `main`. One path fixed.
 7. `crates/undra-transport/interop/run.sh` failed once in its Kotlin reconnect step (`ConnectedCore.failAll`, a
    `NoSuchElementException` from a concurrent map during a reconnect; every TypeScript step passed, the reconnect, the
-   resumed session and the time travel included); it is the JVM client and not this piece's code. INTEROP_PLACEHOLDER
+   resumed session and the time travel included); it is the JVM client and not this piece's code, and the whole interop run passed when it was repeated on the merged
+   tree (it ran under a host load of 40 to 60 the first time).
 8. `check-links` reports the chrome of `docs/db.html` and `docs/realtime.html` out of sync (and one over-long
    description on `main` itself); both are on `main`.
 9. The commit trailer is the brief's (`Claude Fable 5.1`), not the harness's default.
