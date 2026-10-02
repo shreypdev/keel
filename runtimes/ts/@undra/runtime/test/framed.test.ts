@@ -10,7 +10,7 @@ import { framed } from "../src/transport/framed.js";
 import type { CoreTransport, Transport } from "../src/transport/transport.js";
 import { CallTarget, ChangeOp, Kind, UndraWriter, encodeCancel, encodeChangeSet, encodeEvent, encodeObserve, encodeRelease, encodeStreamCredit, encodeTimerFired, encodeValue } from "../src/wire/index.js";
 import { FakeCoreTransport, SCHEMA } from "./support/fake-core.js";
-import { captureLog, track } from "./support/harness.js";
+import { captureLog, macrotask, track } from "./support/harness.js";
 import { fromHex, toHex } from "./helpers.js";
 
 /*
@@ -321,9 +321,13 @@ describe("what a core outside this thread adds (ADR-057): the observe waiters an
     const observed = core.observe(5n, 0, true).then(() => {
       resolved = true;
     });
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(resolved, "nothing arrived yet").toBe(false);
-    handler().changeSet(encodeChangeSet({ txnId: 1n, entries: [{ handle: 5n, signalId: 0, op: ChangeOp.FullValue, value: Uint8Array.of(1, 0, 0, 0) }] }));
+    // Ordered by events, not by a wait: an entry of another signal, applied by a drain, then a macrotask, after which a promise that
+    // settled on anything delivered so far has run its callbacks.
+    handler().changeSet(encodeChangeSet({ txnId: 1n, entries: [{ handle: 5n, signalId: 1, op: ChangeOp.FullValue, value: Uint8Array.of(9, 0, 0, 0) }] }));
+    core.mirror.flush();
+    await macrotask();
+    expect(resolved, "an entry of another signal does not settle it").toBe(false);
+    handler().changeSet(encodeChangeSet({ txnId: 2n, entries: [{ handle: 5n, signalId: 0, op: ChangeOp.FullValue, value: Uint8Array.of(1, 0, 0, 0) }] }));
     await observed;
     expect(resolved).toBe(true);
   });
