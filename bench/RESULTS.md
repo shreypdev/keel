@@ -681,7 +681,7 @@ recovery as `crashRecovery()`, a layer over the transport (load average about 13
 `ts/snapshot_take_100kb` is what the snapshot keeper pays to keep one (the core's `snapshot` plus the copy kept, 50
 batches of 10 per run, so its p99 is over batch means); `ts/recovery_restart_100kb` is a trap until `onCoreRestarted`
 (the panic report, failing what was in flight, a new instance of the same compiled module, the restore, re-observing
-every store and re-creating the query handles; 30 samples per run, so its p99 is the maximum). The ranges are over five
+every store (a query handle the core re-issues is observed again like any store, ADR-059, so the replay of the query handles this row once included is gone); 30 samples per run, so its p99 is the maximum). The ranges are over five
 runs in fresh pages. `bench/recovery.spec.ts` fails a run whose p50 is over its budget (R9).
 
 | Benchmark | p50 | p99 | Budget (desktop Chromium) | Verdict |

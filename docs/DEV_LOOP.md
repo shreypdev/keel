@@ -148,10 +148,10 @@ lines, and nothing else: no port, no file. It is internal, and documented here b
 
 ```
 undra dev -> runner  (stdin)                     runner -> undra dev  (stdout)
-  snapshot                                         UNDRA-DEV snapshot ok <settled> <cancelled> <not run> <stores> <bytes> <token|-> <handles|-> <hex>
+  snapshot                                         UNDRA-DEV snapshot ok <settled> <cancelled> <not run> <stores> <query handles> <bytes> <token|-> <handles|-> <hex>
                                                    UNDRA-DEV snapshot failed <reason>
   state <old-hash> <lost calls> <token|-> <handles|-> <hex>
-                                                   UNDRA-DEV restored <stores> <lost objects> <bytes> <microseconds>
+                                                   UNDRA-DEV restored <stores> <query handles> <lost objects> <bytes> <microseconds>
                                                    UNDRA-DEV reset <reason>
   reset <reason>                                   (nothing)
   listen                                           UNDRA-DEV ready <ws-url> <schema-hash>
