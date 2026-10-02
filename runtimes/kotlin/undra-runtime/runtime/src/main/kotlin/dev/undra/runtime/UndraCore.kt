@@ -44,6 +44,13 @@ public open class UndraCore protected constructor() : AutoCloseable {
     public companion object {
         private val slot = AtomicReference<UndraCore?>(null)
 
+        /**
+         * The [namespace] of a core that was loaded without one (a test double, a [Mode.REMOTE] core loaded without its
+         * generated entry): `_`, which no real namespace is (a namespace starts with a lowercase letter), so it never
+         * collides with a core's.
+         */
+        public const val UNNAMED_NAMESPACE: String = "_"
+
         /** The placeholder [shared] returns while no core is loaded. */
         private val unloaded: UndraCore by lazy { UnloadedCore(null) }
 
@@ -129,7 +136,9 @@ public open class UndraCore protected constructor() : AutoCloseable {
             checkModeOptions(options)
             if (options.expectedSchemaHash == null) throw missingSchemaHash()
             val transport = createTransport(options, native)
-            return attach(transport, options, makeShared = true)
+            // The namespace the default stores are kept under: the entry's, else the natives' own.
+            val named = if (options.namespace == null && transport is InprocTransport) options.withNamespaceDefault(transport.namespace) else options
+            return attach(transport, named, makeShared = true)
         }
 
         /**
@@ -157,6 +166,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
                 onConnectionChange = options.onConnectionChange,
                 onError = options.onError,
                 onDevNotice = options.onDevNotice,
+                namespace = options.namespace ?: UNNAMED_NAMESPACE,
             )
             try {
                 val expected = options.expectedSchemaHash ?: throw missingSchemaHash()
@@ -229,6 +239,14 @@ public open class UndraCore protected constructor() : AutoCloseable {
 
     /** The mode this core runs in. */
     public open val mode: Mode get() = throw unsupported("mode")
+
+    /**
+     * The namespace of the core (`[core] namespace` in `undra.toml`, `UndraIds.NAMESPACE`): the one its generated entry
+     * loaded it under ([LoadOptions.namespace]), else its natives'. The default `Kv`, `SecureStore`, `Fs` and `Db`
+     * adapters (the JVM's and `android-adapters`') keep their data under it (ADR-044, amendment A), so two cores of one
+     * app never share a store. [UNNAMED_NAMESPACE] for a core that was loaded without one.
+     */
+    public open val namespace: String get() = UNNAMED_NAMESPACE
 
     private val inertConnection: StateFlow<ConnectionState> by lazy { MutableStateFlow(ConnectionState.Connected) }
 

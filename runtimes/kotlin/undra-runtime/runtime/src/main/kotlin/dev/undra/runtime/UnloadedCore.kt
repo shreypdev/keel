@@ -12,12 +12,14 @@ import kotlinx.coroutines.flow.flow
  * [LoadOptions.onError] to call); [release], [timerFired] and [close] do nothing. It never becomes the shared core
  * and never reaches a native library.
  *
- * @param namespace the core it stands in for (named in its messages), or `null` for [UndraCore.shared]'s.
+ * @param standsInFor the namespace of the core it stands in for (named in its messages), or `null` for [UndraCore.shared]'s.
  */
-internal class UnloadedCore(private val namespace: String?) : UndraCore() {
+internal class UnloadedCore(private val standsInFor: String?) : UndraCore() {
     override val mode: Mode get() = Mode.INPROC
 
-    private val what: String get() = if (namespace == null) "no Undra core is loaded" else "the Undra core `$namespace` is not loaded"
+    override val namespace: String get() = standsInFor ?: UNNAMED_NAMESPACE
+
+    private val what: String get() = if (standsInFor == null) "no Undra core is loaded" else "the Undra core `$standsInFor` is not loaded"
 
     private fun gone(): UndraTransportException =
         UndraTransportException(

@@ -41,6 +41,11 @@ public enum class Mode {
  *   every standard port not in [adapters]. On Android only the portable ones (Clock, Rng, Log, Timer) are
  *   installed; Http, Kv, SecureStore, Fs, Connectivity and Lifecycle come from the `android-adapters` module, which
  *   installs all ten with `AndroidPlatformDefaults.install(core, context)` after the core is loaded.
+ * @property namespace the core's namespace (`UndraIds.NAMESPACE`), which the default `Kv`, `SecureStore`, `Fs` and `Db`
+ *   adapters keep their data under (`<dataDir>/<namespace>/...`, `<filesDir>/undra/<namespace>/...`, ADR-044 amendment A):
+ *   two cores of one app never share a store. `null` (the default) lets the generated `Undra<Namespace>.load` fill it
+ *   in, and an in-process core takes its natives'; a core loaded without either is [UndraCore.UNNAMED_NAMESPACE]. An
+ *   adapter given its own directory or alias ignores it.
  * @property remoteTimeout how long a blocking call (`callSync`, `construct`) and the connection
  *   handshake wait for the remote core before giving up.
  * @property mirror how change-sets are delivered to stores: the frame pacer and the backlog bounds.
@@ -77,6 +82,7 @@ public class LoadOptions(
     public val onConnectionChange: ((ConnectionState) -> Unit)? = null,
     public val onError: ((UndraUnhandledError) -> Unit)? = null,
     public val onDevNotice: ((String) -> Unit)? = null,
+    public val namespace: String? = null,
 ) {
     override fun toString(): String =
         "LoadOptions(mode=$mode, remoteUrl=$remoteUrl, adapters=${adapters.keys.sorted()}, " +
@@ -85,22 +91,27 @@ public class LoadOptions(
 
     /** These options with [expectedSchemaHash] set to [hash] when it is not set already. */
     internal fun withSchemaHashDefault(hash: ULong): LoadOptions =
-        if (expectedSchemaHash != null) {
-            this
-        } else {
-            LoadOptions(
-                mode = mode,
-                remoteUrl = remoteUrl,
-                adapters = adapters,
-                expectedSchemaHash = hash,
-                defaultAdapters = defaultAdapters,
-                remoteTimeout = remoteTimeout,
-                mirror = mirror,
-                reconnect = reconnect,
-                onConnectionChange = onConnectionChange,
-                onError = onError,
-            )
-        }
+        if (expectedSchemaHash != null) this else copyWith(expectedSchemaHash = hash, namespace = namespace)
+
+    /** These options with [namespace] set to [value] when it is not set already. */
+    internal fun withNamespaceDefault(value: String): LoadOptions =
+        if (namespace != null) this else copyWith(expectedSchemaHash = expectedSchemaHash, namespace = value)
+
+    private fun copyWith(expectedSchemaHash: ULong?, namespace: String?): LoadOptions =
+        LoadOptions(
+            mode = mode,
+            remoteUrl = remoteUrl,
+            adapters = adapters,
+            expectedSchemaHash = expectedSchemaHash,
+            defaultAdapters = defaultAdapters,
+            remoteTimeout = remoteTimeout,
+            mirror = mirror,
+            reconnect = reconnect,
+            onConnectionChange = onConnectionChange,
+            onError = onError,
+            onDevNotice = onDevNotice,
+            namespace = namespace,
+        )
 }
 
 /**

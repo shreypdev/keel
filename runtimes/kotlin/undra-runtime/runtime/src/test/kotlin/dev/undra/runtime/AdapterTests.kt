@@ -348,6 +348,42 @@ class AdapterTests : Suite() {
             }
         }
 
+        case("the default JVM stores are per core namespace: two cores' defaults never see each other's keys, secrets, files or databases (ADR-044 amendment A)") {
+            TempDir().use { dir ->
+                val previous = System.getProperty(JvmAdapters.DATA_DIR_PROPERTY)
+                try {
+                    System.setProperty(JvmAdapters.DATA_DIR_PROPERTY, dir.path.toString())
+                    assertEq(dir.path.resolve("playground_a"), JvmAdapters.defaultDataDir("playground_a"))
+                    val a = JvmAdapters.defaults("playground_a") { }
+                    val b = JvmAdapters.defaults("playground_b") { }
+                    for (port in listOf(StandardPorts.Kv.PORT_ID, StandardPorts.SecureStore.PORT_ID)) {
+                        val set = if (port == StandardPorts.Kv.PORT_ID) StandardPorts.Kv.SET else StandardPorts.SecureStore.SET
+                        val get = if (port == StandardPorts.Kv.PORT_ID) StandardPorts.Kv.GET else StandardPorts.SecureStore.GET
+                        call(a.getValue(port), set, args { writeStr("k"); writeBytes(byteArrayOf(1)) })
+                        call(b.getValue(port), set, args { writeStr("k"); writeBytes(byteArrayOf(2)) })
+                        call(a.getValue(port), set, args { writeStr("only-a"); writeBytes(byteArrayOf(3)) })
+                        assertEq(1.toByte(), Codecs.option(Codecs.bytes).decodeAll(call(a.getValue(port), get, args { writeStr("k") }))!![0])
+                        assertEq(2.toByte(), Codecs.option(Codecs.bytes).decodeAll(call(b.getValue(port), get, args { writeStr("k") }))!![0])
+                        assertEq(null, Codecs.option(Codecs.bytes).decodeAll(call(b.getValue(port), get, args { writeStr("only-a") })), "a key of A is not in B")
+                    }
+                    call(a.getValue(StandardPorts.Fs.PORT_ID), StandardPorts.Fs.WRITE, args { writeStr("notes/a.txt"); writeBytes(byteArrayOf(4)) })
+                    assertThrows<UndraPortException> { call(b.getValue(StandardPorts.Fs.PORT_ID), StandardPorts.Fs.READ, args { writeStr("notes/a.txt") }) }
+                    for (ns in listOf("playground_a", "playground_b")) {
+                        for (store in listOf("kv", "secure")) assertTrue(dir.path.resolve(ns).resolve(store).toFile().isDirectory, "$ns/$store")
+                    }
+                    assertTrue(dir.path.resolve("playground_a/fs/notes/a.txt").toFile().isFile)
+                    assertTrue(!dir.path.resolve("playground_b/fs/notes/a.txt").toFile().exists())
+                    assertTrue(!dir.path.resolve("kv").toFile().exists(), "nothing is kept at the old, shared location")
+                    // A directory the app passes is used as it is, for every core.
+                    val own = JvmAdapters.standard(dir.path.resolve("own")) { }
+                    call(own.getValue(StandardPorts.Kv.PORT_ID), StandardPorts.Kv.SET, args { writeStr("k"); writeBytes(byteArrayOf(9)) })
+                    assertTrue(dir.path.resolve("own/kv").toFile().isDirectory)
+                } finally {
+                    if (previous != null) System.setProperty(JvmAdapters.DATA_DIR_PROPERTY, previous) else System.clearProperty(JvmAdapters.DATA_DIR_PROPERTY)
+                }
+            }
+        }
+
         case("Platform detection says JVM here") {
             assertEq(false, Platform.isAndroid)
             assertEq("jvm", Platform.name)

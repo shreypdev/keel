@@ -58,6 +58,7 @@ class CoreEntryTests : Suite() {
             val sharedBefore = UndraCore.current
             val core = entry.load(bare())
             try {
+                assertEq("entry_lifecycle", core.namespace, "the entry's namespace is the core's: the default stores are kept under it (ADR-044 amendment A)")
                 assertEq(1, made.get())
                 assertEq(1, native.inits.get())
                 assertTrue(entry.core === core, "the loaded core is the entry's core")
@@ -80,6 +81,27 @@ class CoreEntryTests : Suite() {
                 again.close()
             }
             assertTrue(entry.core === placeholder)
+        }
+
+        case("a core's namespace is the entry's, else its natives', else the unnamed one") {
+            val viaEntry = CoreEntry("entry_ns_a", HASH) { fake("entry_ns_a") }.load(bare())
+            val direct = UndraCore.load(bare().let { LoadOptions(defaultAdapters = false, expectedSchemaHash = HASH) }, fake("entry_ns_b"))
+            try {
+                assertEq("entry_ns_a", viaEntry.namespace)
+                assertEq("entry_ns_b", direct.namespace, "a direct load takes the natives' namespace")
+            } finally {
+                viaEntry.close()
+                direct.close()
+            }
+            assertEq(UndraCore.UNNAMED_NAMESPACE, UnloadedCore(null).namespace)
+            assertEq("_", UndraCore.UNNAMED_NAMESPACE, "no real namespace is `_`: it starts with a lowercase letter")
+            assertEq("entry_ns_c", UnloadedCore("entry_ns_c").namespace)
+            // The options the entry fills in keep everything else, `onDevNotice` included.
+            val notice: (String) -> Unit = { }
+            val filled = LoadOptions(defaultAdapters = false, onDevNotice = notice).withSchemaHashDefault(HASH).withNamespaceDefault("x")
+            assertTrue(filled.onDevNotice === notice, "the copy keeps onDevNotice")
+            assertEq("x", filled.namespace)
+            assertEq("y", LoadOptions(namespace = "y").withNamespaceDefault("x").namespace, "a namespace in the options wins")
         }
 
         case("an entry refuses a second load while its core is loaded; another entry for the namespace is refused by the in-process claim") {

@@ -13,7 +13,8 @@ import java.io.File
 import java.nio.file.Path
 
 /**
- * The `Fs` port over a directory of the app's private storage: `<filesDir>/undra/fs`.
+ * The `Fs` port over a directory of the app's private storage: `<filesDir>/undra/<namespace>/fs` (the core's namespace, so two
+ * cores of one app never share files: ADR-044 amendment A).
  *
  * It behaves like the Swift (`FileManager`) and TypeScript (OPFS) adapters:
  *
@@ -38,8 +39,8 @@ public class AndroidFsAdapter internal constructor(root: Path) {
     /** The adapter over the directory [root]; created on the first write. */
     public constructor(root: File) : this(root.toPath())
 
-    /** The adapter over `<filesDir>/undra/fs` of [context]'s application. */
-    public constructor(context: Context) : this(File(context.applicationContext.filesDir, DEFAULT_PATH))
+    /** The adapter over `<filesDir>/undra/<namespace>/fs` of [context]'s application: [namespace] is the core's (`UndraCore.namespace`). */
+    public constructor(context: Context, namespace: String) : this(rootOf(context, namespace))
 
     private val root: Path = root.toAbsolutePath().normalize()
     private val fs = FsAdapter(this.root)
@@ -113,20 +114,23 @@ public class AndroidFsAdapter internal constructor(root: Path) {
             throw UndraPortException(FsError.encodeToByteArray(e))
         }
 
-    private companion object {
-        const val DEFAULT_PATH = "undra/fs"
+    /** Where the default adapter keeps a core's files. */
+    public companion object {
+        /** `<filesDir>/undra/<namespace>/fs`: the root of [context]'s application for the core [namespace]. */
+        public fun rootOf(context: Context, namespace: String): File =
+            File(context.applicationContext.filesDir, "undra/$namespace/fs")
 
         /**
          * The non-empty components of [path] (`.` and empty ones dropped), after the leading separators that [FsAdapter]
          * ignores (`/` and `\`): what it resolves to the root must count as the root here too.
          */
-        fun segments(path: String): List<String> = path.trimStart('/', '\\').split('/').filter { it.isNotEmpty() && it != "." }
+        private fun segments(path: String): List<String> = path.trimStart('/', '\\').split('/').filter { it.isNotEmpty() && it != "." }
 
         /**
          * [path] if no component is `..` (the other platforms refuse it outright, even where it would stay inside the root)
          * and no byte is NUL (no file system takes it; the JVM would throw an untyped `InvalidPathException`).
          */
-        fun confined(path: String): String {
+        private fun confined(path: String): String {
             if (path.indexOf('\u0000') >= 0) throw FsError.Io("the path contains a NUL byte")
             if (segments(path).any { it == ".." }) throw FsError.Denied
             return path

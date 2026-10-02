@@ -20,7 +20,9 @@ import kotlinx.coroutines.withContext
 
 /**
  * The `SecureStore` port: each value is encrypted with AES-256-GCM under a key that lives in the Android Keystore and
- * never leaves it, and the ciphertext is kept in a file under `<noBackupFilesDir>/undra/secure`.
+ * never leaves it, and the ciphertext is kept in a file under `<noBackupFilesDir>/undra/<namespace>/secure`. The default
+ * alias and directory carry the core's namespace (`<namespace>.dev.undra.securestore`), so two cores of one app never read
+ * each other's secrets (ADR-044 amendment A).
  *
  *  - **The key** is generated on first use in the `AndroidKeyStore` provider (hardware-backed where the device has a TEE
  *    or StrongBox; not extractable; usable only by this app) under the alias [keyAlias]: AES-256, GCM, no padding, for
@@ -74,8 +76,12 @@ public class AndroidSecureStoreAdapter internal constructor(
     public constructor(directory: File, keyAlias: String = DEFAULT_KEY_ALIAS) :
         this(directory.toPath(), KeystoreKeySource(keyAlias, File(directory, KEY_LOCK_FILE)))
 
-    /** The adapter over `<noBackupFilesDir>/undra/secure` of [context]'s application, with the default key alias. */
-    public constructor(context: Context) : this(File(context.applicationContext.noBackupFilesDir, DEFAULT_PATH))
+    /**
+     * The adapter over `<noBackupFilesDir>/undra/<namespace>/secure` of [context]'s application, with the key alias
+     * `<namespace>.dev.undra.securestore`: [namespace] is the core's (`UndraCore.namespace`).
+     */
+    public constructor(context: Context, namespace: String) :
+        this(directoryOf(context, namespace), keyAliasOf(namespace))
 
     private val store = FileKv(directory)
 
@@ -179,10 +185,16 @@ public class AndroidSecureStoreAdapter internal constructor(
 
     /** Defaults. */
     public companion object {
-        /** The Keystore alias of the AES key unless another is given. */
+        /** What the default Keystore alias of a core is made of, after the core's namespace: `<namespace>.dev.undra.securestore`. */
         public const val DEFAULT_KEY_ALIAS: String = "dev.undra.securestore"
 
-        private const val DEFAULT_PATH = "undra/secure"
+        /** The default Keystore alias of the core [namespace]: `<namespace>.dev.undra.securestore`. */
+        public fun keyAliasOf(namespace: String): String = "$namespace.$DEFAULT_KEY_ALIAS"
+
+        /** `<noBackupFilesDir>/undra/<namespace>/secure`: the directory of [context]'s application for the core [namespace]. */
+        public fun directoryOf(context: Context, namespace: String): File =
+            File(context.applicationContext.noBackupFilesDir, "undra/$namespace/secure")
+
         private const val KEY_LOCK_FILE = ".keystore.lock"
         private const val KEYSTORE = "AndroidKeyStore"
         private const val KEY_BITS = 256

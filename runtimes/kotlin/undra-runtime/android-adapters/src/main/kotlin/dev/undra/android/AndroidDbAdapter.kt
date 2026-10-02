@@ -38,9 +38,10 @@ import kotlinx.coroutines.withContext
  * The `Db` port's SQLite on Android (ADR-048): `android.database.sqlite`, the platform's own SQLite, no dependency.
  * Serve it with [DbPortAdapter] (`AndroidPlatformDefaults.install` does).
  *
- * * Files are `context.getDatabasePath("undra-<name>.sqlite")` (the React Native module uses the same file, so either shell
- *   reads the other's database); `":memory:"` is a private in-memory database. The directory constructor roots them
- *   elsewhere (tests).
+ * * Files are `context.getDatabasePath("undra-<namespace>-<name>.sqlite")`, the namespace being the core's (a namespace has
+ *   no `-`, so the name is what follows the second one; two cores of one app never share a file: ADR-044 amendment A). The
+ *   React Native module uses the same file, so either shell reads the other's database; `":memory:"` is a private in-memory
+ *   database. The directory constructor roots `undra-<name>.sqlite` elsewhere, for every core (tests, and apps that choose).
  * * Each database has one connection and one thread of its own; every call runs there, so Android's thread-bound
  *   transactions are the binding's. Android's own write-ahead-logging pool is turned off (one connection: the pragmas the
  *   binding sets and `last_insert_rowid()` are that connection's); the binding switches the file to WAL itself.
@@ -54,8 +55,12 @@ import kotlinx.coroutines.withContext
  * * A cursor window holds about 2 MB: a row larger than that (a big blob) fails with `Sql`.
  */
 public class AndroidDbAdapter private constructor(private val fileOf: (String) -> File) : DbAdapter {
-    /** Databases under the app's database directory: `context.getDatabasePath("undra-<name>.sqlite")`. */
-    public constructor(context: Context) : this({ name -> context.applicationContext.getDatabasePath("undra-$name.sqlite") })
+    /**
+     * Databases under the app's database directory: `context.getDatabasePath("undra-<namespace>-<name>.sqlite")`,
+     * [namespace] being the core's (`UndraCore.namespace`).
+     */
+    public constructor(context: Context, namespace: String) :
+        this({ name -> context.applicationContext.getDatabasePath(fileNameOf(namespace, name)) })
 
     /** Databases in [directory] (`<directory>/undra-<name>.sqlite`), for tests. */
     public constructor(directory: File) : this({ name -> File(directory, "undra-$name.sqlite") })
@@ -96,8 +101,12 @@ public class AndroidDbAdapter private constructor(private val fileOf: (String) -
         }
     }
 
-    private companion object {
-        val threadIds = AtomicInteger(1)
+    /** Where the default adapter keeps a core's databases. */
+    public companion object {
+        /** The file name of database [name] of the core [namespace] in the app's database directory: `undra-<namespace>-<name>.sqlite`. */
+        public fun fileNameOf(namespace: String, name: String): String = "undra-$namespace-$name.sqlite"
+
+        private val threadIds = AtomicInteger(1)
     }
 }
 
