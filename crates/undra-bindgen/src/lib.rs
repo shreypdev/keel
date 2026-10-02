@@ -18,7 +18,10 @@ use std::path::Path;
 
 use undra_meta::Schema;
 
-pub use model::{QUERY_INVALIDATE_ID, QUERY_REFETCH_ID, QUERY_STATUS};
+pub use model::{
+    QUERY_FETCH_NEXT_PAGE_ID, QUERY_INVALIDATE_ID, QUERY_REFETCH_ID, QUERY_SET_POLL_INTERVAL_ID,
+    QUERY_STATUS,
+};
 pub use validate::{BindgenError, validate};
 
 /// One generated source file: a path relative to the output root and its

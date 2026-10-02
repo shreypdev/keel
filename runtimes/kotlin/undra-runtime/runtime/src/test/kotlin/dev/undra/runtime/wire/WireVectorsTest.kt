@@ -68,7 +68,9 @@ class WireVectorsTest : Suite() {
             "timestamp" -> codec(v, Codecs.timestamp, Timestamp(value.asLong()))
             "uuid" -> codec(v, Codecs.uuid, UUID.fromString(value.asString()))
             "decimal" -> decimal(v)
-            "lazy value", "lazy invalidated", "lazy page (item i32)" -> {} // checked by the lazy-list suite
+            "lazy value" -> lazyValue(v)
+            "lazy invalidated" -> lazyInvalidated(v)
+            "lazy page (item i32)" -> lazyPage(v)
             "handle" -> handle(v)
             "record Todo{id:uuid,title:string,done:bool}" -> {
                 val o = value.asObj()
@@ -161,6 +163,44 @@ class WireVectorsTest : Suite() {
         val number = BigDecimal(BigInteger(mantissa), o["scale"].asInt())
         assertEq(o["text"].asString(), number.toPlainString(), "${v.name} text")
         codec(v, Codecs.decimal, number)
+    }
+
+    /** The value of a `Lazy<T>` signal: the page server, the length and the version. */
+    private fun lazyValue(v: WireVector) {
+        val o = v.value.asObj()
+        val expected = Payloads.LazyValue(Handle(o["handle"].asLong()), o["len"].asLong().toUInt(), o["version"].asULong())
+        verify(v, expected, { expected.encode(it) }, { Payloads.LazyValue.decode(it) }, { Payloads.LazyValue.decode(it) })
+        assertEq(expected, Payloads.LazyValue.decode(expected.toByteArray()), "${v.name}: toByteArray round trip")
+    }
+
+    /** The value of change-set op 2: the new length and version. */
+    private fun lazyInvalidated(v: WireVector) {
+        val o = v.value.asObj()
+        val expected = Payloads.LazyInvalidated(o["len"].asLong().toUInt(), o["version"].asULong())
+        verify(v, expected, { expected.encode(it) }, { Payloads.LazyInvalidated.decode(it) }, { Payloads.LazyInvalidated.decode(it) })
+    }
+
+    /** A page reply: the header, then `count` items of the item type (`i32` here). */
+    private fun lazyPage(v: WireVector) {
+        val o = v.value.asObj()
+        val items = o["items"].asList().map { it.asInt() }
+        val header = Payloads.LazyPageHeader(o["version"].asULong(), o["total"].asLong().toUInt(), items.size.toUInt())
+        val expected: Pair<Payloads.LazyPageHeader, List<Int>> = header to items
+        val decode = { r: UndraReader ->
+            val h = Payloads.LazyPageHeader.decode(r)
+            val rows = ArrayList<Int>()
+            for (i in 0 until r.readLenOf(h.count)) rows.add(Codecs.i32.decode(r))
+            h to (rows as List<Int>)
+        }
+        verify(v, expected, { w ->
+            header.encode(w)
+            for (x in items) Codecs.i32.encode(w, x)
+        }, { bytes -> UndraReader(bytes).let { r -> decode(r).also { r.finish() } } }, decode)
+    }
+
+    private fun UndraReader.readLenOf(count: UInt): Int {
+        if (count.toLong() * 4 > remaining) throw WireException.LengthTooLarge(count, position)
+        return count.toInt()
     }
 
     private fun handle(v: WireVector) {

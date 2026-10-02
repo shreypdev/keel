@@ -38,6 +38,7 @@ fun main() {
         CallErrorTests(),
         StreamTests(),
         MirrorTests(),
+        LazyListTests(),
         CoalesceTests(),
         CoalesceModelTests(),
         StoreTests(),

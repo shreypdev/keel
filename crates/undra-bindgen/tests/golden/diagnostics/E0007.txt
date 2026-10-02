@@ -1,0 +1,9 @@
+error[undra::E0007]: the newtype `UserId` does not have exactly one field
+  = note: a newtype crosses the boundary as its one inner value, so the schema describes it as a transparent record with a single field called `value`
+  = help: give the record exactly one field named `value`, without `#[undra(default)]`, or make it an ordinary record
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+
+error[undra::E0007]: the newtype `UserId` has a field that is not called `value`
+  = note: a newtype crosses the boundary as its one inner value, so the schema describes it as a transparent record with a single field called `value`
+  = help: give the record exactly one field named `value`, without `#[undra(default)]`, or make it an ordinary record
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007

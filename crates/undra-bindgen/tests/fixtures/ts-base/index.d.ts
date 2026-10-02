@@ -16,7 +16,7 @@ export * from "./adapters/codecs.js";
 export * from "./errors.js";
 export * from "./call-error.js";
 
-import type { CallTarget, ChangeOp, Handle, UndraReader } from "./wire/index.js";
+import type { CallTarget, ChangeOp, Codec, Handle, UndraReader } from "./wire/index.js";
 
 export type LoadMode = "wasm-main" | "wasm-worker" | "remote";
 
@@ -175,3 +175,20 @@ export declare function lending<R>(core: UndraCore, send: (lend: Lend) => Promis
 export declare function lend<T extends object>(core: UndraCore, impl: T, callback: CallbackInterface<T>): bigint;
 /** Addition (ADR-041): what a weak wrapper's async method answers once its target is gone. */
 export declare function callbackGone(): Promise<never>;
+
+/**
+ * Addition (ADR-043): the list a `Lazy<T>` signal is, as generated stores use it: made with the store's core and the row
+ * codec, given each change-set entry of its signal as a reader (which it consumes and checks), and paged through by
+ * `get`. Declared here against this file's own `UndraCore` and `Signal`; the real class is `src/lazy.ts` of the runtime.
+ */
+export declare class LazyList<T> {
+  constructor(core: UndraCore, codec: Codec<T>);
+  readonly length: Signal<number>;
+  readonly revision: Signal<number>;
+  pageSize: number;
+  maxCachedPages: number;
+  get(index: number): T | undefined;
+  prefetch(start: number, end: number): void;
+  applyFull(reader: UndraReader): void;
+  applyInvalidated(reader: UndraReader): void;
+}

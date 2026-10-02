@@ -41,12 +41,14 @@ public enum UndraIds {
             public static let new: UInt32 = 0x36fc3cfc
             public static let refetch: UInt32 = 0x21d1b9e2
             public static let invalidate: UInt32 = 0x44cec2fa
+            public static let setPollInterval: UInt32 = 0xe327e53b
         }
         public enum ProfileQueryHandle {
             public static let typeId: UInt32 = 0x9cc44f88
             public static let new: UInt32 = 0x9cc44f88
             public static let refetch: UInt32 = 0x21d1b9e2
             public static let invalidate: UInt32 = 0x44cec2fa
+            public static let setPollInterval: UInt32 = 0xe327e53b
         }
     }
 

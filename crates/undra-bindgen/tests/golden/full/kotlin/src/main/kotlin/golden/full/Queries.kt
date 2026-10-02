@@ -13,6 +13,7 @@ import dev.undra.runtime.wire.Timestamp
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.decodeAll
+import kotlin.time.Duration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -67,6 +68,25 @@ class TodosQueryHandle internal constructor(core: UndraCore, handle: Long) : Und
             )
         } catch (e: Exception) {
             this.core.report(e, "TodosQueryHandle.invalidate")
+        }
+    }
+
+    /**
+     * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+     * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setPollInterval(interval: Duration?) {
+        try {
+            val w = UndraWriter()
+            codecOptionDuration.encode(w, interval)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodosQueryHandle.SET_POLL_INTERVAL),
+                UndraIds.Objects.TodosQueryHandle.SET_POLL_INTERVAL,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "TodosQueryHandle.setPollInterval")
         }
     }
 
@@ -147,6 +167,7 @@ suspend fun addTodo(title: String, ctx: UndraCore = UndraPlaygroundCore.core): T
     }
 }
 
+private val codecOptionDuration = Codecs.option(Codecs.duration)
 private val codecOptionPage = Codecs.option(Page)
 private val codecOptionTodoError = Codecs.option(TodoError)
 private val codecOptionTimestamp = Codecs.option(Codecs.timestamp)

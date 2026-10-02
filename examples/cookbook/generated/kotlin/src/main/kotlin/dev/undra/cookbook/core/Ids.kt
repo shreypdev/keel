@@ -45,12 +45,14 @@ object UndraIds {
             const val NEW: UInt = 0x36fc3cfcu
             const val REFETCH: UInt = 0x21d1b9e2u
             const val INVALIDATE: UInt = 0x44cec2fau
+            const val SET_POLL_INTERVAL: UInt = 0xe327e53bu
         }
         object ProfileQueryHandle {
             const val TYPE_ID: UInt = 0x9cc44f88u
             const val NEW: UInt = 0x9cc44f88u
             const val REFETCH: UInt = 0x21d1b9e2u
             const val INVALIDATE: UInt = 0x44cec2fau
+            const val SET_POLL_INTERVAL: UInt = 0xe327e53bu
         }
     }
 
