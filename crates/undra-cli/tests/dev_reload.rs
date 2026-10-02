@@ -15,7 +15,9 @@ use common::devserver::Dev;
 use common::playground_copy;
 use tungstenite::{Message, WebSocket};
 use undra_meta::ids;
-use undra_wire::payload::{Call, CallTarget, ChangeSet, Hello, Log, Observe, Reply, ReplyStatus};
+use undra_wire::payload::{
+    Call, CallTarget, ChangeSet, Hello, LazyPage, LazyValue, Log, Observe, Reply, ReplyStatus,
+};
 use undra_wire::{Decode, Encode, Envelope, Handle, Kind, Reader, Writer};
 
 const BUILD: Duration = Duration::from_secs(600);
@@ -879,6 +881,230 @@ fn a_change_during_a_reload_is_built_next_and_the_state_survives_both_swaps() {
     let mut back = Client::connect(&dev, dev.hash, "reload-twice-token", true);
     back.observe(counter);
     assert_eq!(count_of(&back, counter), Some((4, 1)));
+    drop(back);
+    dev.kill_and_expect_the_port_to_close();
+}
+
+// ----- query handles and lazy lists across a rebuild (ADR-059) -----------------------------------------
+
+/// `new TickerQueryHandle()`: the playground's polling query, the Remote tab's kind of handle.
+fn ticker_handle(client: &mut Client) -> u64 {
+    let ticker = ids::fnv1a32("query.ticker");
+    let (status, body) = client.call(
+        CallTarget::Constructor {
+            type_id: ticker,
+            method_id: ticker,
+        },
+        &[],
+    );
+    assert_eq!(status, ReplyStatus::Ok, "TickerQueryHandle()");
+    u64::decode_exact(&body).unwrap()
+}
+
+/// The ticker's `data` (signal 0) as the client last saw it.
+fn ticks(client: &Client, handle: u64) -> Option<u32> {
+    client
+        .values
+        .get(&(handle, 0))
+        .and_then(|v| Option::<u32>::decode_exact(v).ok().flatten())
+}
+
+/// Reads until the ticker has shown `at_least`.
+fn await_ticks(client: &mut Client, handle: u64, at_least: u32) {
+    for _ in 0..100 {
+        if ticks(client, handle).is_some_and(|n| n >= at_least) {
+            return;
+        }
+        let _ = client.read_within(Duration::from_millis(200));
+    }
+    panic!(
+        "the ticker never reached {at_least}: {:?}",
+        ticks(client, handle)
+    );
+}
+
+/// A page of the library's `books` through the page server its `LazyValue` (signal 0) names: the
+/// list's total and how many rows the page held.
+fn page_of_books(client: &mut Client, library: u64) -> (u32, u32) {
+    let value = client
+        .values
+        .get(&(library, 0))
+        .cloned()
+        .expect("the library's books were observed");
+    let lazy = LazyValue::decode(&mut Reader::new(&value)).expect("a LazyValue");
+    let (status, body) = client.call(
+        CallTarget::LazyPage {
+            handle: lazy.handle,
+            offset: 0,
+            limit: 3,
+        },
+        &[],
+    );
+    assert_eq!(status, ReplyStatus::Ok, "a page of the books");
+    let page = LazyPage::decode(&mut Reader::new(&body)).expect("a page header");
+    (page.total, page.count)
+}
+
+/// The Remote tab across a rebuild: a raw client holding the polling `ticker` query's handle and a
+/// `Library`, whose `books` it pages. The edit rebuilds the core; the client reconnects and observes
+/// again, as every platform runtime does, and runs no code of its own for the handle.
+#[test]
+fn a_query_handle_and_a_paged_list_keep_working_across_a_rebuild() {
+    let project = playground_copy("reload-query");
+    let dev = Dev::start(&project, &[]);
+    let paging_rs = project.root.join("core/src/paging.rs");
+    let refetch = ids::fnv1a32("query.refetch");
+
+    let mut client = Client::connect(&dev, dev.hash, "reload-query-token", false);
+    let counter = client.construct("Counter");
+    client.method(counter, "Counter", "add", &5_i32.encode_to_vec());
+    let ticker = ticker_handle(&mut client);
+    let library = client.construct("Library");
+    client.observe(ticker);
+    client.observe(library);
+    await_ticks(&mut client, ticker, 2);
+    assert_eq!(page_of_books(&mut client, library), (10_000, 3));
+
+    append(&paging_rs, "\n// touched\n");
+    let restarted = dev.wait_line("Restarted: ws://", BUILD);
+    eprintln!("{restarted}");
+    assert!(
+        restarted.contains("state kept (2 stores, 1 query handle,"),
+        "{restarted}"
+    );
+    assert!(!restarted.contains("not carried over"), "{restarted}");
+    let (code, _) = client.expect_close();
+    assert_eq!(code, 1001);
+
+    let mut back = Client::connect(&dev, dev.hash, "reload-query-token", true);
+    // The same handle value answers the observe with the handle's values (a fresh core: nothing
+    // cached, so it is fetching), and a `refetch` on it is accepted: status 5 before ADR-059.
+    let first = back.observe(ticker);
+    assert!(
+        first.contains_key(&1),
+        "status arrives for the same handle: {first:?}"
+    );
+    let (status, _) = back.call(
+        CallTarget::Method {
+            handle: Handle(ticker),
+            method_id: refetch,
+        },
+        &[],
+    );
+    assert_eq!(
+        status,
+        ReplyStatus::Ok,
+        "refetch on the handle the client kept"
+    );
+    // The new core fetches and keeps polling: the tick counter of the new process climbs from 1.
+    let mut seen = Vec::new();
+    for _ in 0..60 {
+        if let Some(n) = ticks(&back, ticker) {
+            if seen.last() != Some(&n) {
+                seen.push(n);
+            }
+        }
+        if seen.len() >= 3 {
+            break;
+        }
+        let _ = back.read_within(Duration::from_millis(200));
+    }
+    eprintln!("ticks seen after the reload: {seen:?}");
+    assert!(
+        seen.len() >= 3,
+        "polling continues after the reload: {seen:?}"
+    );
+    // The `Library`'s page server is a new one in the new core; the host's `Observe` names it.
+    back.observe(library);
+    assert_eq!(page_of_books(&mut back, library), (10_000, 3));
+    let values = back.observe(counter);
+    assert_eq!(i32_of(&values[&COUNT]), 5);
+    assert_eq!(
+        back.notices_after(Duration::from_millis(500)),
+        ["Reloaded, state kept"]
+    );
+    drop(back);
+    dev.kill_and_expect_the_port_to_close();
+}
+
+/// An edit that changes the parameter type of a query: its handle is refused by the restore, counted
+/// in the notice with the objects not carried over, and the rest of the state is kept.
+#[test]
+fn a_query_whose_parameter_type_the_edit_changes_is_not_carried_over_and_the_rest_is() {
+    let project = playground_copy("reload-query-schema");
+    let dev = Dev::start(&project, &[]);
+    let updates_rs = project.root.join("core/src/updates.rs");
+    let roster = ids::fnv1a32("query.roster");
+    let refetch = ids::fnv1a32("query.refetch");
+
+    let mut client = Client::connect(&dev, dev.hash, "reload-query-schema-token", false);
+    let counter = client.construct("Counter");
+    client.method(counter, "Counter", "add", &5_i32.encode_to_vec());
+    let (status, body) = client.call(
+        CallTarget::Constructor {
+            type_id: roster,
+            method_id: roster,
+        },
+        &7_u32.encode_to_vec(),
+    );
+    assert_eq!(status, ReplyStatus::Ok, "RosterQueryHandle(7)");
+    let roster_handle = u64::decode_exact(&body).unwrap();
+    assert_eq!(i32_of(&client.observe(counter)[&COUNT]), 5);
+    client.observe(roster_handle);
+
+    // `team` was a number; the edit makes it a string (the query's id does not change).
+    let original = std::fs::read_to_string(&updates_rs).unwrap();
+    let edited = original.replacen(
+        "pub async fn roster(_ctx: &Ctx, team: u32)",
+        "pub async fn roster(_ctx: &Ctx, team: String)",
+        1,
+    );
+    assert_ne!(original, edited, "the edit applies");
+    std::fs::write(&updates_rs, edited).unwrap();
+    let restarted = dev.wait_line("Restarted: ws://", BUILD);
+    eprintln!("{restarted}");
+    assert!(restarted.contains("state kept (1 store,"), "{restarted}");
+    assert!(
+        restarted.contains("1 object not carried over"),
+        "the handle of the query whose parameter changed is counted: {restarted}"
+    );
+    let new_hash = restarted
+        .split("schema hash ")
+        .nth(1)
+        .and_then(|rest| rest.split(')').next())
+        .map(|hash| u64::from_str_radix(hash.trim_start_matches("0x"), 16).unwrap())
+        .expect("the new hash is printed");
+    assert_ne!(new_hash, dev.hash);
+    let (code, _) = client.expect_close();
+    assert_eq!(code, 1001);
+
+    let mut back = Client::connect(&dev, new_hash, "reload-query-schema-token", true);
+    assert_eq!(
+        i32_of(&back.observe(counter)[&COUNT]),
+        5,
+        "the store was restored"
+    );
+    let (status, _) = back.call(
+        CallTarget::Method {
+            handle: Handle(roster_handle),
+            method_id: refetch,
+        },
+        &[],
+    );
+    assert_eq!(
+        status,
+        ReplyStatus::BadRequest,
+        "a refused handle is stale, as every object a restore does not carry"
+    );
+    assert_eq!(
+        back.notices_after(Duration::from_millis(500)),
+        ["Reloaded, state kept (the schema changed; 1 object not carried over)"]
+    );
+    let log = dev.log.lock().unwrap().clone();
+    assert!(
+        log.contains("is not re-issued: the types it was made from changed"),
+        "the core says why: {log}"
+    );
     drop(back);
     dev.kill_and_expect_the_port_to_close();
 }

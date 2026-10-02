@@ -250,13 +250,14 @@ fn parse_protocol(id: u64, line: &str) -> Option<RunnerEvent> {
         "snapshot" => parse_snapshot(rest).map(|result| RunnerEvent::Snapshot { id, result }),
         "restored" => {
             let numbers: Vec<&str> = rest.split_whitespace().collect();
-            let [stores, lost, bytes, micros] = numbers[..] else {
+            let [stores, queries, lost, bytes, micros] = numbers[..] else {
                 return None;
             };
             Some(RunnerEvent::Restored {
                 id,
                 restored: Restored {
                     stores: stores.parse().ok()?,
+                    queries: queries.parse().ok()?,
                     lost: lost.parse().ok()?,
                     bytes: bytes.parse().ok()?,
                     micros: micros.parse().ok()?,
@@ -271,7 +272,7 @@ fn parse_protocol(id: u64, line: &str) -> Option<RunnerEvent> {
     }
 }
 
-/// `ok <settled> <cancelled> <not run> <stores> <bytes> <token|-> <handles|-> <hex>` or
+/// `ok <settled> <cancelled> <not run> <stores> <query handles> <bytes> <token|-> <handles|-> <hex>` or
 /// `failed <reason>`.
 fn parse_snapshot(rest: &str) -> Option<std::result::Result<Snapshot, String>> {
     if let Some(why) = rest.strip_prefix("failed ") {
@@ -281,12 +282,13 @@ fn parse_snapshot(rest: &str) -> Option<std::result::Result<Snapshot, String>> {
         }));
     }
     let ok = rest.strip_prefix("ok ")?;
-    let parts: Vec<&str> = ok.splitn(8, ' ').collect();
+    let parts: Vec<&str> = ok.splitn(9, ' ').collect();
     let [
         settled,
         cancelled,
         dropped,
         stores,
+        queries,
         bytes_len,
         token,
         handles,
@@ -308,6 +310,7 @@ fn parse_snapshot(rest: &str) -> Option<std::result::Result<Snapshot, String>> {
     Some(Ok(Snapshot {
         bytes,
         stores: stores.parse().ok()?,
+        queries: queries.parse().ok()?,
         session: (token != "-")
             .then(|| Some((token.to_owned(), parse_handles(handles)?)))
             .flatten(),
@@ -563,12 +566,13 @@ mod tests {
             }
         );
         assert_eq!(
-            parse_line(2, "UNDRA-DEV restored 3 1 209008 189"),
+            parse_line(2, "UNDRA-DEV restored 3 1 2 209008 189"),
             RunnerEvent::Restored {
                 id: 2,
                 restored: Restored {
                     stores: 3,
-                    lost: 1,
+                    queries: 1,
+                    lost: 2,
                     bytes: 209_008,
                     micros: 189
                 }
@@ -585,7 +589,7 @@ mod tests {
 
     #[test]
     fn a_snapshot_answer_round_trips_through_the_state_command() {
-        let line = "UNDRA-DEV snapshot ok 1 0 0 2 4 abcdef12 1a,2b00 00ff10ab";
+        let line = "UNDRA-DEV snapshot ok 1 0 0 2 0 4 abcdef12 1a,2b00 00ff10ab";
         let RunnerEvent::Snapshot {
             id: 5,
             result: Ok(snapshot),
@@ -598,6 +602,7 @@ mod tests {
             (snapshot.stores, snapshot.settled, snapshot.cancelled),
             (2, true, 0)
         );
+        assert_eq!(snapshot.queries, 0);
         assert_eq!(
             snapshot.session,
             Some(("abcdef12".to_owned(), vec![0x1a, 0x2b00]))
@@ -606,7 +611,7 @@ mod tests {
             state_command("0xaa", &snapshot),
             "state 0xaa 0 abcdef12 1a,2b00 00ff10ab"
         );
-        let none = parse_line(5, "UNDRA-DEV snapshot ok 0 2 3 0 0 - - ");
+        let none = parse_line(5, "UNDRA-DEV snapshot ok 0 2 3 0 0 0 - - ");
         let RunnerEvent::Snapshot {
             result: Ok(none), ..
         } = none
@@ -626,6 +631,27 @@ mod tests {
         assert!(
             state_command("0xbb", &none).starts_with("state 0xbb 5 - - "),
             "the notice learns of the lost calls"
+        );
+    }
+
+    /// The query handles in a snapshot are counted apart from its stores (ADR-059).
+    #[test]
+    fn a_snapshot_answer_counts_query_handles_apart_from_stores() {
+        let RunnerEvent::Snapshot {
+            result: Ok(snapshot),
+            ..
+        } = parse_line(5, "UNDRA-DEV snapshot ok 1 0 0 3 2 2 abcdef12 1a 00ff")
+        else {
+            panic!("a snapshot answer");
+        };
+        assert_eq!((snapshot.stores, snapshot.queries), (3, 2));
+        // The count that is not a number is a damaged answer, not a zero.
+        assert_eq!(
+            parse_line(5, "UNDRA-DEV snapshot ok 1 0 0 3 x 2 abcdef12 1a 00ff"),
+            RunnerEvent::Snapshot {
+                id: 5,
+                result: Err("the previous core's answer was damaged".into())
+            }
         );
     }
 
@@ -652,9 +678,9 @@ mod tests {
         // The byte count disagrees with the hex, the hex is not hex, fields are missing: a failed
         // snapshot at once (not a megabyte line to print, nor a 15 s wait for an answer).
         for text in [
-            "UNDRA-DEV snapshot ok 1 0 0 1 5 - - 00ff",
-            "UNDRA-DEV snapshot ok 1 0 0 1 2 - - 0",
-            "UNDRA-DEV snapshot ok 1 0 0 1 2 - - zz11",
+            "UNDRA-DEV snapshot ok 1 0 0 1 0 5 - - 00ff",
+            "UNDRA-DEV snapshot ok 1 0 0 1 0 2 - - 0",
+            "UNDRA-DEV snapshot ok 1 0 0 1 0 2 - - zz11",
             "UNDRA-DEV snapshot ok 1 0",
             "UNDRA-DEV snapshot ok 1 0 1 2 - - 00ff",
         ] {
@@ -674,7 +700,7 @@ mod tests {
         let limit = reload::STATE_LIMIT_BYTES;
         // Exactly the limit is carried: `undra dev` reads it whole and decodes it.
         let at = format!(
-            "UNDRA-DEV snapshot ok 1 0 0 1 {limit} - - {}",
+            "UNDRA-DEV snapshot ok 1 0 0 1 0 {limit} - - {}",
             "00".repeat(limit)
         );
         assert!(at.len() <= LINE_LIMIT);
@@ -687,7 +713,7 @@ mod tests {
         };
         assert_eq!(snapshot.bytes.len(), limit);
         // One byte over is refused from the count alone, with the reason the terminal shows.
-        let over = format!("UNDRA-DEV snapshot ok 1 0 0 1 {} - - 00", limit + 1);
+        let over = format!("UNDRA-DEV snapshot ok 1 0 0 1 0 {} - - 00", limit + 1);
         assert_eq!(
             parse_line(1, &over),
             RunnerEvent::Snapshot {
@@ -785,7 +811,7 @@ mod tests {
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nexec perl -e '$| = 1; print \"UNDRA-DEV snapshot ok 1 0 0 1 {limit} - - \", \"ab\" x {limit}, \"\\n\"; while (<STDIN>) {{ chomp; print \"UNDRA-DEV restored 1 0 \", length($_), \" 7\\n\"; }}'\n"
+                "#!/bin/sh\nexec perl -e '$| = 1; print \"UNDRA-DEV snapshot ok 1 0 0 1 0 {limit} - - \", \"ab\" x {limit}, \"\\n\"; while (<STDIN>) {{ chomp; print \"UNDRA-DEV restored 1 0 0 \", length($_), \" 7\\n\"; }}'\n"
             ),
         )
         .unwrap();
@@ -823,6 +849,7 @@ mod tests {
                 id: 9,
                 restored: Restored {
                     stores: 1,
+                    queries: 0,
                     lost: 0,
                     bytes: line.len(),
                     micros: 7

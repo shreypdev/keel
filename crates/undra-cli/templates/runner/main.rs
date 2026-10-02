@@ -231,10 +231,28 @@ impl Handover {
     }
 }
 
+/// The handles a snapshot names, as `(stores, query handles)`. A record with one field under the
+/// reserved id is a recreation record (ADR-059: a query handle's), not a store, so counting the
+/// records (the snapshot's leading word) would call every query handle a store.
+fn handles_of(snapshot: &Snapshot) -> (HashSet<u64>, HashSet<u64>) {
+    let (queries, stores): (Vec<_>, Vec<_>) = snapshot.stores.iter().partition(|s| s.recreation().is_some());
+    (
+        stores.iter().map(|s| s.handle.0).collect(),
+        queries.iter().map(|s| s.handle.0).collect(),
+    )
+}
+
 /// `state <old-hash> <lost-calls> <token|-> <handles|-> <hex>`: restores the snapshot into the new
 /// core, before anything listens. `lost-calls` counts the calls the reload cut off (cancelled at the
 /// end of the settle, or sent after the old core stopped running calls): the notice says so, because
 /// their writes are not in the state. Answers `UNDRA-DEV restored ..` or `UNDRA-DEV reset <reason>`.
+///
+/// The handles of the client's session that survive are its stores and the query handles the core
+/// re-issued (the client observes them again and each is built then, ADR-059); the others (plain
+/// objects, objects a method returned, what the rebuild removed or refused) are counted as not carried
+/// over. A re-issued query handle the session does not hold, every one of them when no session was
+/// handed over, is released at once: nothing will use it, and a dev session must not carry inert
+/// handles from reload to reload.
 fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
     let reset = |handover: &mut Handover, reason: String| {
         handover.reset(&reason);
@@ -251,10 +269,10 @@ fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
     let (Some(bytes), Some(handles)) = (from_hex(hex), parse_handles(handles)) else {
         return reset(handover, "the state handed over did not decode".to_owned());
     };
-    let mut stores: HashSet<u64> = {
+    let (mut stores, mut queries) = {
         let mut reader = Reader::new(&bytes);
         match Snapshot::decode(&mut reader) {
-            Ok(snapshot) => snapshot.stores.iter().map(|s| s.handle.0).collect(),
+            Ok(snapshot) => handles_of(&snapshot),
             Err(e) => return reset(handover, format!("the snapshot is malformed: {e}")),
         }
     };
@@ -267,16 +285,32 @@ fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
         Err(e) => return reset(handover, format!("the core refused the snapshot: {e}")),
     };
     let micros = started.elapsed().as_micros();
-    // A store type the rebuild removed was left out: its handles are stale, like a plain object's.
+    // A store type the rebuild removed was left out: its handles are stale, like a plain object's. So
+    // is a query handle whose record the core refused (its query is gone, or its parameter types
+    // changed) or whose slot a store needed.
     for dropped in &report.dropped {
         for handle in &dropped.handles {
             stores.remove(handle);
+            queries.remove(handle);
         }
     }
+    for refused in &report.refused {
+        queries.remove(&refused.handle);
+    }
+    for handle in &report.displaced {
+        queries.remove(handle);
+    }
     let restored = stores.len();
-    // Objects that are not stores (and query handles) do not survive a restore: their handles
-    // are stale and the app re-creates them.
-    let (kept, lost): (Vec<u64>, Vec<u64>) = handles.into_iter().partition(|h| stores.contains(h));
+    // Objects that are not stores and not query handles do not survive a restore: their handles are
+    // stale and the app creates them again.
+    let held: HashSet<u64> = handles.iter().copied().collect();
+    let (kept, lost): (Vec<u64>, Vec<u64>) = handles
+        .into_iter()
+        .partition(|h| stores.contains(h) || queries.contains(h));
+    for handle in queries.iter().filter(|h| !held.contains(h)) {
+        runtime.release(*handle);
+    }
+    let kept_queries = kept.iter().filter(|h| queries.contains(h)).count();
     let mut text = "Reloaded, state kept".to_owned();
     let mut caveats = Vec::new();
     if old_hash != ours {
@@ -304,7 +338,7 @@ fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
         window: NOTICE_WINDOW,
         ..AttachNotices::default()
     };
-    say(&format!("restored {restored} {} {} {micros}", lost.len(), bytes.len()));
+    say(&format!("restored {restored} {kept_queries} {} {} {micros}", lost.len(), bytes.len()));
 }
 
 /// Binds `addr` and serves `runtime`, holding the handed-over session and telling the clients what
@@ -341,7 +375,7 @@ fn listen(
 
 /// `snapshot`: suspends the server (no new calls, open calls finish or are cancelled, the client is
 /// closed, its session is kept) and answers with the core's state and that session:
-/// `snapshot ok <settled> <cancelled> <not run> <stores> <bytes> <token|-> <handles|-> <hex>`.
+/// `snapshot ok <settled> <cancelled> <not run> <stores> <query handles> <bytes> <token|-> <handles|-> <hex>`.
 fn take_snapshot(server: &Server, runtime: &Runtime) {
     let suspended = server.suspend(SETTLE);
     let bytes = runtime.snapshot();
@@ -349,13 +383,17 @@ fn take_snapshot(server: &Server, runtime: &Runtime) {
         say(&format!("snapshot failed too-large {}", bytes.len()));
         return;
     }
-    let stores = bytes.first_chunk::<4>().map_or(0, |n| u32::from_le_bytes(*n));
+    // Counted by decoding: the snapshot's leading word counts its recreation records too.
+    let (stores, queries) = Snapshot::decode(&mut Reader::new(&bytes)).map_or((0, 0), |snapshot| {
+        let (stores, queries) = handles_of(&snapshot);
+        (stores.len(), queries.len())
+    });
     let (token, handles) = match &suspended.session {
         Some(session) => (session.token.as_str(), handles_text(&session.handles)),
         None => ("-", "-".to_owned()),
     };
     say(&format!(
-        "snapshot ok {} {} {} {stores} {} {token} {handles} {}",
+        "snapshot ok {} {} {} {stores} {queries} {} {token} {handles} {}",
         u8::from(suspended.settled),
         suspended.cancelled_calls,
         suspended.dropped_calls,
