@@ -21,7 +21,7 @@ default core is its package's own), creates a `Counter` in each and changes it (
 reaches only its own mirror), compares their statistics, closes A and checks that B still answers and
 observes while a call on A fails as unavailable. Both use the platform's default adapters, whose `Kv` is per core namespace
 (ADR-044 amendment A): each core writes the same key and reads its own value back, a key only A wrote is not B's, and the
-two stores are in two places (`undra/playground_a/kv` and `undra/playground_b/kv` in Application Support, `filesDir` or the
+two stores are in two places (`Undra/playground_a/kv` and `Undra/playground_b/kv` in Application Support, `undra/...` in `filesDir`, the
 JVM's data directory, IndexedDB `undra.playground_a.kv` and `undra.playground_b.kv` on Node). It prints one `two-cores <platform>: ok ...` line per
 check, then `passed`; its `run.sh` builds what it needs with the `undra` CLI and exits non-zero otherwise.
 

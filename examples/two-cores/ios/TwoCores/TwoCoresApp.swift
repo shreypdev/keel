@@ -109,7 +109,7 @@ enum TwoCoreChecks {
 
     /// The default stores of two cores are two stores (ADR-044 amendment A): the same `Kv` key written through each core
     /// reads back that core's own value, a key one core wrote is not the other's, and the files are in
-    /// `<Application Support>/<bundle id>/undra/<namespace>/kv`.
+    /// `<Application Support>/<bundle id>/Undra/<namespace>/kv`.
     private static func checkStorage(_ check: (String, Bool) -> Void) async {
         let nonce = UUID().uuidString.prefix(8).lowercased()
         let key = "two-cores.key"
@@ -132,7 +132,7 @@ enum TwoCoreChecks {
             )
             let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent(Bundle.main.bundleIdentifier ?? "app", isDirectory: true)
-                .appendingPathComponent("undra", isDirectory: true)
+                .appendingPathComponent("Undra", isDirectory: true)
             let directories = [UndraPlaygroundA.namespace, UndraPlaygroundB.namespace].map {
                 base.appendingPathComponent($0, isDirectory: true).appendingPathComponent("kv", isDirectory: true)
             }

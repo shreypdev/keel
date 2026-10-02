@@ -87,7 +87,7 @@ public class LoadOptions(
     override fun toString(): String =
         "LoadOptions(mode=$mode, remoteUrl=$remoteUrl, adapters=${adapters.keys.sorted()}, " +
             "expectedSchemaHash=${expectedSchemaHash?.let { "0x" + it.toString(16) } ?: "unset"}, defaultAdapters=$defaultAdapters, remoteTimeout=$remoteTimeout, " +
-            "mirror=$mirror, reconnect=$reconnect, onError=${if (onError == null) "none" else "set"})"
+            "mirror=$mirror, reconnect=$reconnect, onError=${if (onError == null) "none" else "set"}, namespace=${namespace ?: "unset"})"
 
     /** These options with [expectedSchemaHash] set to [hash] when it is not set already. */
     internal fun withSchemaHashDefault(hash: ULong): LoadOptions =

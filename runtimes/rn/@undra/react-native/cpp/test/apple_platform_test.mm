@@ -1,6 +1,6 @@
 // The Apple platform of @undra/react-native's default ports (ios/UndraPlatformApple.mm) on this Mac: where each
 // core's stores are (ADR-044 amendment A). Every default store is per core namespace, in the Swift runtime's
-// layout: `<Application Support>/<bundle id>/undra/<namespace>/{kv,fs,db}` and the Keychain service
+// layout: `<Application Support>/<bundle id>/Undra/<namespace>/{kv,fs,db}` and the Keychain service
 // `<namespace>.dev.undra.securestore`, so two cores of one app never share one, and the SwiftUI shell and the
 // React Native shell of an app agree where a core's data is. `run.sh` builds it with the platform's sources; it
 // touches no file and no Keychain item (it only asks where they would be).
@@ -47,19 +47,19 @@ int main() {
 
   const std::string kvA = a->kvDirectory();
   const std::string kvB = b->kvDirectory();
-  check(endsWith(kvA, "/undra/playground_a/kv"), "Kv is <Application Support>/<bundle id>/undra/<namespace>/kv, got " + kvA);
-  check(endsWith(kvB, "/undra/playground_b/kv"), "the other core's Kv is its own, got " + kvB);
+  check(endsWith(kvA, "/Undra/playground_a/kv"), "Kv is <Application Support>/<bundle id>/Undra/<namespace>/kv, got " + kvA);
+  check(endsWith(kvB, "/Undra/playground_b/kv"), "the other core's Kv is its own, got " + kvB);
   check(kvA != kvB, "two namespaces, two Kv directories");
   check(kvA.find("/Application Support/") != std::string::npos || kvA.find("/tmp") != std::string::npos || kvA.find("/T/") != std::string::npos,
       "under the app's Application Support (or the temporary directory where there is none), got " + kvA);
-  ok("Kv: <Application Support>/<bundle id>/undra/<namespace>/kv, one per core");
+  ok("Kv: <Application Support>/<bundle id>/Undra/<namespace>/kv, one per core");
 
   const std::string fsA = a->fsRoot();
-  check(endsWith(fsA, "/undra/playground_a/fs") && endsWith(b->fsRoot(), "/undra/playground_b/fs") && fsA != b->fsRoot(),
-      "Fs is .../undra/<namespace>/fs, one per core, got " + fsA);
+  check(endsWith(fsA, "/Undra/playground_a/fs") && endsWith(b->fsRoot(), "/Undra/playground_b/fs") && fsA != b->fsRoot(),
+      "Fs is .../Undra/<namespace>/fs, one per core, got " + fsA);
   // The Kv and Fs of a core are siblings, as the Swift runtime's are.
   check(fsA.substr(0, fsA.size() - 2) == kvA.substr(0, kvA.size() - 2), "Kv and Fs of a core share the namespace directory");
-  ok("Fs: .../undra/<namespace>/fs, one per core");
+  ok("Fs: .../Undra/<namespace>/fs, one per core");
 
   std::unique_ptr<SecretStore> secretsA = a->makeSecretStore();
   std::unique_ptr<SecretStore> secretsB = b->makeSecretStore();
@@ -72,9 +72,9 @@ int main() {
   std::unique_ptr<DbBackend> dbA = a->makeDbBackend();
   std::unique_ptr<DbBackend> dbB = b->makeDbBackend();
   check(dbA != nullptr && dbB != nullptr, "the platform has a SQLite");
-  check(dbA->describe().find("/undra/playground_a/db") != std::string::npos, "Db is .../undra/<namespace>/db, got " + dbA->describe());
-  check(dbB->describe().find("/undra/playground_b/db") != std::string::npos && dbA->describe() != dbB->describe(), "the other core's databases are its own");
-  ok("Db: .../undra/<namespace>/db/<name>.sqlite, one per core");
+  check(dbA->describe().find("/Undra/playground_a/db") != std::string::npos, "Db is .../Undra/<namespace>/db, got " + dbA->describe());
+  check(dbB->describe().find("/Undra/playground_b/db") != std::string::npos && dbA->describe() != dbB->describe(), "the other core's databases are its own");
+  ok("Db: .../Undra/<namespace>/db/<name>.sqlite, one per core");
 
   std::printf("# %d checks\n", g_checks);
   return 0;

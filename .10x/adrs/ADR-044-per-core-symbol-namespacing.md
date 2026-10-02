@@ -290,7 +290,7 @@ used for every core it serves; sharing a store between two cores is an explicit 
 
 | Platform | `Kv` | `Fs` | `SecureStore` | `Db` |
 |---|---|---|---|---|
-| Swift, React Native iOS | `<Application Support>/<bundle id>/undra/<ns>/kv` | `.../undra/<ns>/fs` | Keychain service `<ns>.dev.undra.securestore` | `.../undra/<ns>/db/<name>.sqlite` |
+| Swift, React Native iOS | `<Application Support>/<bundle id>/Undra/<ns>/kv` | `.../Undra/<ns>/fs` | Keychain service `<ns>.dev.undra.securestore` | `.../Undra/<ns>/db/<name>.sqlite` |
 | `android-adapters`, React Native Android | `<filesDir>/undra/<ns>/kv` | `<filesDir>/undra/<ns>/fs` | Keystore alias `<ns>.dev.undra.securestore`, files `<noBackupFilesDir>/undra/<ns>/secure` | `getDatabasePath("undra-<ns>-<name>.sqlite")` |
 | Kotlin (JVM) | `<dataDir>/<ns>/kv` | `<dataDir>/<ns>/fs` | `<dataDir>/<ns>/secure` | `<dataDir>/<ns>/db/<name>.sqlite` |
 | TypeScript (browser) | IndexedDB `undra.<ns>.kv` | OPFS `undra/<ns>/fs` | IndexedDB `undra.<ns>.secure`, keys in `undra.<ns>.secure-keys` | wa-sqlite pool in OPFS `undra/<ns>/db` |
@@ -308,8 +308,12 @@ loaded with none (a scripted test transport, `UndraCore.load` of a remote core w
 cannot collide with a core's. Swift and Kotlin publish it as `UndraCore.namespace`.
 
 **Deviations from the ADR's sketch.**
-1. Apple keeps `undra`, lowercase, where the pre-amendment Swift and React Native iOS used `Undra`: nothing is released, and one
-   spelling on every platform is simpler than two.
+1. Apple keeps `Undra`, capitalised, as the Swift runtime and the React Native module always spelt it, where the rule says
+   `undra`. The first cut spelt it `undra` everywhere; the React Native device checks found why that is wrong: Apple's
+   file systems are case-insensitive, and a directory that differs from an existing one only in case is "there" for
+   `mkdir` yet cannot be created in under the iOS simulator (`mkdir .../undra/<ns>` is ENOENT while `.../Undra` exists), so every
+   simulator or device that held the older `Undra` directory failed on its first write. The casing on Apple is therefore the
+   one already on disk; Android, the JVM and the browser spell it `undra`.
 2. The Keychain service and the Keystore alias are *prefixed* (`<ns>.dev.undra.securestore`), as the rule says; the Android
    database file carries the namespace in its name (`getDatabasePath` takes no path separator), unambiguously because a
    namespace has no `-`.

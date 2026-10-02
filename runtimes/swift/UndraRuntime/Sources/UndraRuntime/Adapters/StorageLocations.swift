@@ -3,7 +3,7 @@
 // One rule for `Kv`, `Fs`, `SecureStore` and `Db`: the location is per core namespace, so two cores
 // of one app never share a store unless the app hands them one of its own.
 //
-//   Kv, Fs, Db   <Application Support>/<bundle id>/undra/<namespace>/{kv,fs,db}
+//   Kv, Fs, Db   <Application Support>/<bundle id>/Undra/<namespace>/{kv,fs,db}
 //   SecureStore  Keychain service "<namespace>.dev.undra.securestore"
 //
 // The namespace is the core's (`UndraCore.namespace`), known when the adapter's port is made for a
@@ -17,17 +17,20 @@ enum StorageLocations {
     /// The Keychain service of the default `SecureStore`, before the namespace is put in front.
     static let secureStoreService = "dev.undra.securestore"
 
-    /// `<Application Support>/<bundle id>/undra`: the root every core's data is under.
+    /// `<Application Support>/<bundle id>/Undra`: the root every core's data is under. The casing is the one the Swift
+    /// runtime has always used on disk: the file systems of Apple platforms are case-insensitive, and a directory that
+    /// differs from an existing one only in case is "there" for `mkdir` yet cannot be created in under the simulator,
+    /// so renaming it to `undra` would break every container that holds the older directory.
     static func root() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let bundle = Bundle.main.bundleIdentifier ?? "app"
         return base
             .appendingPathComponent(bundle, isDirectory: true)
-            .appendingPathComponent("undra", isDirectory: true)
+            .appendingPathComponent("Undra", isDirectory: true)
     }
 
-    /// `<Application Support>/<bundle id>/undra/<namespace>/<store>`, `store` being `kv`, `fs` or `db`.
+    /// `<Application Support>/<bundle id>/Undra/<namespace>/<store>`, `store` being `kv`, `fs` or `db`.
     static func directory(namespace: String, store: String) -> URL {
         return root()
             .appendingPathComponent(namespace, isDirectory: true)

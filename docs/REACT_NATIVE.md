@@ -170,15 +170,15 @@ answers the core directly, off the JS thread:
 
 | Port | Default | iOS | Android |
 |---|---|---|---|
-| `Kv` | native (C++, one implementation for both) | files in `<Application Support>/<bundle id>/undra/<namespace>/kv`, the Swift runtime's layout | files in `<filesDir>/undra/<namespace>/kv`, `android-adapters`' layout |
+| `Kv` | native (C++, one implementation for both) | files in `<Application Support>/<bundle id>/Undra/<namespace>/kv`, the Swift runtime's layout | files in `<filesDir>/undra/<namespace>/kv`, `android-adapters`' layout |
 | `SecureStore` | native | the Keychain (service `<namespace>.dev.undra.securestore`, `AfterFirstUnlockThisDeviceOnly`), the Swift runtime's items | AES-256-GCM under the Android Keystore key `<namespace>.dev.undra.securestore`, sealed files in `<noBackupFilesDir>/undra/<namespace>/secure`, `android-adapters`' layout |
-| `Fs` | native (C++) | `<Application Support>/<bundle id>/undra/<namespace>/fs` | `<filesDir>/undra/<namespace>/fs` |
+| `Fs` | native (C++) | `<Application Support>/<bundle id>/Undra/<namespace>/fs` | `<filesDir>/undra/<namespace>/fs` |
 | `Connectivity` | native | `NWPathMonitor` (Network.framework) | `ConnectivityManager` default-network callback |
 | `Http` | `reactNativeHttp()`: React Native's `fetch` | `NSURLSession`, through React Native's networking | OkHttp, through React Native's networking |
 | `Lifecycle` | `AppState` | `active`, `inactive`, `background` | `active`, `background` (React Native reports no `inactive` on Android) |
 | `Clock`, `Rng`, `Log` | native, in the module (`Log` records also reach your `log` adapter, default the console) | | |
 | `Timer` | the core's own timer thread | | |
-| `Db` (opt-in, ADR-048) | native (C++ binding: migrations, one worker per database, transactions, busy timeout) | the system SQLite, `<Application Support>/<bundle id>/undra/<namespace>/db/<name>.sqlite`, the Swift runtime's file | `android.database.sqlite` through JNI, `getDatabasePath("undra-<namespace>-<name>.sqlite")`, `android-adapters`' file |
+| `Db` (opt-in, ADR-048) | native (C++ binding: migrations, one worker per database, transactions, busy timeout) | the system SQLite, `<Application Support>/<bundle id>/Undra/<namespace>/db/<name>.sqlite`, the Swift runtime's file | `android.database.sqlite` through JNI, `getDatabasePath("undra-<namespace>-<name>.sqlite")`, `android-adapters`' file |
 | `WebSocket` (opt-in, ADR-047) | `reactNativeWebSocket()`: React Native's `WebSocket`, headers as its third argument | a dropped connection ends `Network`, or `Closed(1001, "Stream end encountered")` when iOS reports it as the end of its stream (React Native forwards no `wasClean`) | a dropped connection ends `Network` |
 | `Sse` (opt-in, ADR-047) | `reactNativeSse()`: `fetch` body streams where present, else `XMLHttpRequest` progress events | | |
 

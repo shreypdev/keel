@@ -1,8 +1,8 @@
 // The Apple platform of @undra/react-native's default ports (ADR-038 amendment B, B1): Objective-C++
 // over the C APIs of Foundation, Security and Network.framework; no Swift.
 //
-//  * `Kv` and `Fs`: the portable C++ stores over `<Application Support>/<bundle id>/undra/<namespace>/kv`
-//    (FNV names) and `.../undra/<namespace>/fs`: the directories and names of the Swift runtime's
+//  * `Kv` and `Fs`: the portable C++ stores over `<Application Support>/<bundle id>/Undra/<namespace>/kv`
+//    (FNV names) and `.../Undra/<namespace>/fs`: the directories and names of the Swift runtime's
 //    `KvAdapter` and `FsAdapter` for the core's namespace (ADR-044 amendment A: two cores of one app never
 //    share a store), so a value the SwiftUI shell of an app wrote is read here and the reverse;
 //  * `SecureStore`: Keychain generic passwords, service `<namespace>.dev.undra.securestore`, account =
@@ -10,7 +10,7 @@
 //  * `Connectivity`: `nw_path_monitor` on a serial queue of its own, classified as the Swift
 //    `ConnectivityAdapter` does (online when the path is satisfied; Wi-Fi, cellular, wired, unknown);
 //  * `Db` (ADR-048): the sqlite3 C API of the system `libsqlite3` (`cpp/UndraDbSqlite.cpp`) over
-//    `<Application Support>/<bundle id>/undra/<namespace>/db/<name>.sqlite`, the Swift `SQLiteDbAdapter`'s
+//    `<Application Support>/<bundle id>/Undra/<namespace>/db/<name>.sqlite`, the Swift `SQLiteDbAdapter`'s
 //    files (`SQLiteDbAdapter.defaultDirectory(namespace:)`), so either shell reads the other's database.
 #import <Foundation/Foundation.h>
 #import <Network/Network.h>
@@ -32,7 +32,7 @@ NSString *nsString(const std::string &text) {
   return [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
 }
 
-/// `<Application Support>/<bundle id>/undra/<namespace>/<name>` (the Swift
+/// `<Application Support>/<bundle id>/Undra/<namespace>/<name>` (the Swift
 /// `KvAdapter.defaultDirectory(namespace:named:)`).
 std::string undraDirectory(const std::string &name_space, NSString *name) {
   @autoreleasepool {
@@ -41,7 +41,7 @@ std::string undraDirectory(const std::string &name_space, NSString *name) {
       base = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
     }
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier ?: @"app";
-    NSURL *url = [[[[base URLByAppendingPathComponent:bundle isDirectory:YES] URLByAppendingPathComponent:@"undra" isDirectory:YES]
+    NSURL *url = [[[[base URLByAppendingPathComponent:bundle isDirectory:YES] URLByAppendingPathComponent:@"Undra" isDirectory:YES]
         URLByAppendingPathComponent:nsString(name_space)
                         isDirectory:YES] URLByAppendingPathComponent:name
                                                          isDirectory:YES];

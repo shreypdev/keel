@@ -6,7 +6,7 @@
 //   delete(key: String) -> Result<(), StorageError>
 //   list(prefix: String) -> Result<Vec<String>, StorageError>
 //
-// Kv keeps one file per key in Application Support (`undra/<namespace>/kv`); SecureStore keeps one
+// Kv keeps one file per key in Application Support (`Undra/<namespace>/kv`); SecureStore keeps one
 // Keychain item per key (service `<namespace>.dev.undra.securestore`): the defaults are per core
 // namespace (ADR-044 amendment A, `StorageLocations`).
 // A backend failure answers port status 1 with the encoded `StorageError` (an `UndraPortError`),
@@ -220,7 +220,7 @@ enum StorageFailure {
 /// `list` can recover keys of any length and a hash collision can never return another key's
 /// value. Writes are atomic.
 ///
-/// The default adapter keeps its files in `<Application Support>/<bundle id>/undra/<namespace>/kv`,
+/// The default adapter keeps its files in `<Application Support>/<bundle id>/Undra/<namespace>/kv`,
 /// the namespace being the core's it is registered with (ADR-044 amendment A): two cores of one app
 /// never see each other's keys. ``init(directory:)`` keeps them in a directory of the app's choice
 /// instead, whatever the core.
@@ -233,7 +233,7 @@ public struct KvAdapter: UndraAdapter {
     /// The backend for the core with the namespace given.
     private let backendFor: @Sendable (String) -> any KeyValueBackend
 
-    /// Creates the adapter over `<Application Support>/<bundle id>/undra/<namespace>/kv`, the
+    /// Creates the adapter over `<Application Support>/<bundle id>/Undra/<namespace>/kv`, the
     /// namespace being that of the core it is registered with.
     public init() {
         self.backendFor = { namespace in
@@ -267,7 +267,7 @@ public struct KvAdapter: UndraAdapter {
         return backendFor(namespace)
     }
 
-    /// `<Application Support>/<bundle id>/undra/<namespace>/<name>`.
+    /// `<Application Support>/<bundle id>/Undra/<namespace>/<name>`.
     static func defaultDirectory(namespace: String, named name: String) -> URL {
         return StorageLocations.directory(namespace: namespace, store: name)
     }

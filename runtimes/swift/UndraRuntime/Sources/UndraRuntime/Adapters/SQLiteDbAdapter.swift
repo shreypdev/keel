@@ -7,7 +7,7 @@ import SQLite3
 /// `Db` on the SQLite library every Apple platform ships (`import SQLite3`).
 ///
 /// Each database is a file `<directory>/<name>.sqlite`, the directory being
-/// `Application Support/<bundle id>/undra/<namespace>/db` (next to the `Kv` adapter's directories,
+/// `Application Support/<bundle id>/Undra/<namespace>/db` (next to the `Kv` adapter's directories,
 /// the namespace being that of the core the adapter is registered with: ADR-044 amendment A, so two
 /// cores of one app never share a database file) unless one is given (the directories are
 /// created); `":memory:"` is a private in-memory database. Every connection runs on a serial
@@ -28,7 +28,7 @@ public final class SQLiteDbAdapter: NamespaceScopedDb, UndraAdapter, @unchecked 
     public let directory: URL?
     private let bindings = BindingSet<DbBinding>()
 
-    /// Keeps the databases in `Application Support/<bundle id>/undra/<namespace>/db`, the namespace
+    /// Keeps the databases in `Application Support/<bundle id>/Undra/<namespace>/db`, the namespace
     /// being that of the core the adapter is registered with.
     public convenience init() {
         self.init(optionalDirectory: nil)
@@ -44,7 +44,7 @@ public final class SQLiteDbAdapter: NamespaceScopedDb, UndraAdapter, @unchecked 
         self.directory = optionalDirectory
     }
 
-    /// `<Application Support>/<bundle id>/undra/<namespace>/db`: next to the `Kv` adapter's
+    /// `<Application Support>/<bundle id>/Undra/<namespace>/db`: next to the `Kv` adapter's
     /// directory of the same namespace, so two apps on a Mac never share a database, nor two cores
     /// of one app.
     public static func defaultDirectory(namespace: String) -> URL {

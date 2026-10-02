@@ -26,7 +26,7 @@ final class NamespaceStorageTests: XCTestCase {
 
     func testTheDefaultLocationsAreUndraNamespaceStore() {
         let root = StorageLocations.root()
-        XCTAssertEqual(root.lastPathComponent, "undra")
+        XCTAssertEqual(root.lastPathComponent, "Undra", "the casing the Swift runtime has always used on disk (the file systems of Apple platforms are case-insensitive)")
         XCTAssertEqual(root.deletingLastPathComponent().lastPathComponent, Bundle.main.bundleIdentifier ?? "app")
         for store in ["kv", "fs", "db"] {
             let directory = StorageLocations.directory(namespace: "playground_a", store: store)

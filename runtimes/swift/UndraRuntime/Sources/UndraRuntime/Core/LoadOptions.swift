@@ -43,7 +43,7 @@ public struct LoadOptions: Sendable {
     /// ``UndraLoadError/missingSchemaHash`` without one.
     public var expectedSchemaHash: UInt64?
     /// The namespace of the core (`UndraIds.namespace`), which the default `Kv`, `Fs`, `SecureStore`
-    /// and `Db` adapters keep their data under (`<Application Support>/<bundle id>/undra/<namespace>/…`,
+    /// and `Db` adapters keep their data under (`<Application Support>/<bundle id>/Undra/<namespace>/…`,
     /// ADR-044 amendment A). `nil` lets the generated entry fill it in; an in-process core
     /// without one takes its table's namespace. An adapter given its own directory or service ignores it.
     public var namespace: String? = nil

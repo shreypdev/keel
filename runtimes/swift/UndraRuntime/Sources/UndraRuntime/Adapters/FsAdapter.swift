@@ -11,7 +11,7 @@ import Foundation
 /// missing parent directories and is atomic. `list` returns the entry names of one directory,
 /// sorted; a name that is a directory has no trailing slash.
 ///
-/// The default adapter's root is `<Application Support>/<bundle id>/undra/<namespace>/fs`, the
+/// The default adapter's root is `<Application Support>/<bundle id>/Undra/<namespace>/fs`, the
 /// namespace being the core's it is registered with (ADR-044 amendment A): two cores of one app
 /// never share files. ``init(root:)`` confines the core to a directory of the app's choice instead.
 ///
@@ -34,7 +34,7 @@ public struct FsAdapter: UndraAdapter {
     private let rootFor: @Sendable (String) -> URL
     private let writeAtomically: AtomicWriter
 
-    /// Creates the adapter over `<Application Support>/<bundle id>/undra/<namespace>/fs`, the
+    /// Creates the adapter over `<Application Support>/<bundle id>/Undra/<namespace>/fs`, the
     /// namespace being that of the core it is registered with.
     public init() {
         self.rootFor = { namespace in KvAdapter.defaultDirectory(namespace: namespace, named: "fs") }

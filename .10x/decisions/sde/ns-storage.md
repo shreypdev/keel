@@ -2,7 +2,7 @@
 
 ADR-044's amendment A, implemented. Two cores of one app shared nothing in memory but the default `Kv`, `Fs`,
 `SecureStore` and `Db` of every runtime still used one location per app, so two cores that both used the defaults read
-and overwrote each other's keys and files. **Now every default store lives under `…/undra/<namespace>/<store>`** on every
+and overwrote each other's keys and files. **Now every default store lives under `…/undra/<namespace>/<store>`** (`Undra` on Apple) on every
 platform; an adapter the app supplies is untouched. No legacy path, no migration (nothing is released). **No wire change, no
 schema change, no ABI change**: contract scenarios and the schema hash do not move. The rule is in SPEC 8 (the table), the
 as-built record in ADR-044 amendment A.
@@ -11,7 +11,7 @@ as-built record in ADR-044 amendment A.
 
 | | `Kv` | `Fs` | `SecureStore` | `Db` |
 |---|---|---|---|---|
-| Swift, RN iOS | `<Application Support>/<bundle id>/undra/<ns>/kv` | `…/undra/<ns>/fs` | Keychain service `<ns>.dev.undra.securestore` | `…/undra/<ns>/db/<name>.sqlite` |
+| Swift, RN iOS | `<Application Support>/<bundle id>/Undra/<ns>/kv` | `…/Undra/<ns>/fs` | Keychain service `<ns>.dev.undra.securestore` | `…/Undra/<ns>/db/<name>.sqlite` |
 | `android-adapters`, RN Android | `<filesDir>/undra/<ns>/kv` | `<filesDir>/undra/<ns>/fs` | Keystore alias `<ns>.dev.undra.securestore`, files `<noBackupFilesDir>/undra/<ns>/secure` | `getDatabasePath("undra-<ns>-<name>.sqlite")` |
 | Kotlin JVM | `<dataDir>/<ns>/kv` | `<dataDir>/<ns>/fs` | `<dataDir>/<ns>/secure` | `<dataDir>/<ns>/db/<name>.sqlite` |
 | TS browser | IndexedDB `undra.<ns>.kv` | OPFS `undra/<ns>/fs` | IndexedDB `undra.<ns>.secure`, `undra.<ns>.secure-keys` | wa-sqlite pool, OPFS `undra/<ns>/db` |
@@ -24,7 +24,7 @@ as-built record in ADR-044 amendment A.
    `UndraCoreEntry.load` fills it in; an in-process load without it takes the table's), `StorageLocations`, and the default
    `KvAdapter()`, `FsAdapter()`, `SecureStoreAdapter()` (`service: String? = nil`), `SQLiteDbAdapter()` resolving their location
    in `makePortImpl(core:)`, so one adapter value can serve two cores. `DbPortAdapter` over a default `SQLiteDbAdapter` scopes it
-   too (`NamespaceScopedDb`). Apple uses lowercase `undra` (the old `Undra` is gone).
+   too (`NamespaceScopedDb`). Apple keeps the capital `Undra` (see Deviations: the device checks found that `undra` breaks on a container that holds the older directory).
 2. **Kotlin** (`4e6c4b3`). `UndraCore.namespace`, `UNNAMED_NAMESPACE`, `LoadOptions.namespace` (`CoreEntry` fills it in, an
    in-process load takes the natives'), `JvmAdapters.defaults(namespace, …)` / `defaultDataDir(namespace)`; `android-adapters`
    constructors `(context, namespace)`, `keyAliasOf`, `directoryOf`, `rootOf`, `fileNameOf`; `AndroidPlatformDefaults.install` reads
@@ -60,8 +60,11 @@ as-built record in ADR-044 amendment A.
 
 ## Deviations
 
-* Apple lowercase `undra`; the JVM `<dataDir>/<ns>/…` (no second `undra` segment); Android's database file carries the namespace in its
-  name (`getDatabasePath` takes no separator): see ADR-044 amendment A, "as built".
+* Apple spells the root `Undra`, not `undra` as the rule says: Apple's file systems are case-insensitive, and under the iOS
+  simulator `mkdir <…>/undra/<ns>` is ENOENT while `<…>/Undra` exists (found by `scripts/rn-device-checks.sh ios` on a container
+  that held the older directory: `UndraError: storage I/O error: cannot create …/undra/playground_core`), so the casing stays the
+  one already on disk. The JVM is `<dataDir>/<ns>/…` (no second `undra` segment); Android's database file carries the namespace in
+  its name (`getDatabasePath` takes no separator): see ADR-044 amendment A, "as built".
 * `SQLiteDbAdapter.directory` is optional, `AndroidKvAdapter(context)`, `AndroidFsAdapter(context)`, `AndroidSecureStoreAdapter(context)`
   and `AndroidDbAdapter(context)` no longer exist (they take the namespace): public-API changes of a library nothing has released.
 * `PortImpl.bind` is the one new TypeScript runtime member; a wa-sqlite worker serves one core's directory and refuses another
