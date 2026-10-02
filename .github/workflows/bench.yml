@@ -155,7 +155,7 @@ jobs:
           key: wasm-size
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: runtimes/ts/@undra/runtime/package-lock.json
       # Pinned: wasm-opt's output size moves between binaryen releases, and Ubuntu's package is

@@ -404,7 +404,7 @@ fn the_workflow_parses_and_names_every_job() {
     ] {
         assert!(core.contains(needle), "core lacks {needle}:\n{core}");
     }
-    // The web app: Node 20, npm ci, test, build.
+    // The web app: Node 24, npm ci, test, build.
     let web = jobs.get("web").unwrap().get("steps").unwrap().seq();
     let node = web
         .iter()
@@ -415,7 +415,7 @@ fn the_workflow_parses_and_names_every_job() {
         .expect("setup-node");
     assert_eq!(
         node.get("with").unwrap().get("node-version").unwrap().str(),
-        "20"
+        "24"
     );
     let web_runs = runs("web");
     for needle in ["npm ci", "npm test --if-present", "npm run build"] {

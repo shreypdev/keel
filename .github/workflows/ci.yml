@@ -28,7 +28,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: TS runtime dev dependencies (the bindgen fixtures compile it with tsc)
         working-directory: runtimes/ts/@undra/runtime
         run: npm ci
@@ -125,7 +125,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Test
         working-directory: runtimes/ts/@undra/runtime
         run: |
@@ -158,6 +158,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Install kotlinc
         run: |
           curl -sSfL -o kotlinc.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
@@ -195,7 +198,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Install the TypeScript runtime's dependencies
         working-directory: runtimes/ts/@undra/runtime
         run: npm ci
@@ -211,6 +214,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Swift tests
         working-directory: runtimes/swift/UndraRuntime
         run: swift test
@@ -258,6 +264,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: iOS targets of the core, and the undra CLI
         run: |
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim
@@ -362,7 +371,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -402,6 +411,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Run the Swift scenario runner
         run: bash contract-tests/run-all.sh swift
 
@@ -418,7 +430,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: The undra CLI, then the playground core for the web
         run: |
           cargo build -p undra-cli
@@ -447,7 +459,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             runtimes/rn/@undra/react-native/package-lock.json
@@ -463,13 +475,15 @@ jobs:
           # The runner's kernel randomises mmap with more bits than ASan's shadow layout accepted until
           # recently; 28 is what LLVM's own CI sets (runner-images issue 9491).
           sudo sysctl -w vm.mmap_rnd_bits=28
-      - name: The undra CLI, then the playground core for this machine (the C++ test) and for the web (the contract column)
+      - name: The undra CLI, then the playground core for this machine (the C++ test) and the wasm cores of the contract column
         run: |
           cargo build -p undra-cli
           target/debug/undra build -C examples/playground --platform host
           # the C++ test's second core: the same crate under the namespace playground_a (ADR-044)
           target/debug/undra build -C examples/two-cores/a --platform host
-          target/debug/undra build -C examples/playground --platform web
+          # the contract column's cores, none of them committed: build A and build B of the playground (S14, S15) and the
+          # two-cores pair (S27), the same script the TypeScript column's run.sh starts with
+          bash contract-tests/ts/build-cores.sh
       - name: The derived-list recording S19 replays (the contract column)
         run: bash contract-tests/derived-vectors.sh
       # The package's build config (tsconfig.build.json) compiles against @undra/runtime's emitted declarations,

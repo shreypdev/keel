@@ -32,5 +32,5 @@ contract-tests/run-all.sh ts kotlin  # a subset
   ordinary check in a scenario or in the runtime's own tests.
 * `wire-vectors.json` is the shared byte-level vector table the three runtimes' codec tests read.
 
-Environment: Node 22+, Rust with `wasm32-unknown-unknown`, `kotlinc` (set `UNDRA_KOTLIN_STDLIB` and
+Environment: Node 24, Rust with `wasm32-unknown-unknown`, `kotlinc` (set `UNDRA_KOTLIN_STDLIB` and
 `UNDRA_KOTLINX_COROUTINES`, see `scripts/env.sh`), JDK 17, and full Xcode for the Swift runner.

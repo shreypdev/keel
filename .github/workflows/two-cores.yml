@@ -109,7 +109,7 @@ jobs:
           java-version: "17"
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Install kotlinc and kotlinx-coroutines
         run: |
           curl -sSfL -o kotlinc.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
