@@ -1256,9 +1256,22 @@ fn restarted(
 
 /// Pipelines `n` `add(1)` calls on `counter` (a commit each) and waits for every reply.
 fn storm(app: &mut TestClient, counter: u64, n: usize) {
+    storm_paced(app, counter, n, 500, |_| {});
+}
+
+/// Pipelines `n` `add(1)` calls on `counter` (a commit each), `batch` in flight at a time, and waits for every reply;
+/// `after_batch` is told how many commits the batch made once its replies are in (a test that has a page reading
+/// holds the next batch back until the page has what this one made).
+fn storm_paced(
+    app: &mut TestClient,
+    counter: u64,
+    n: usize,
+    batch: usize,
+    mut after_batch: impl FnMut(usize),
+) {
     let mut sent = 0;
     while sent < n {
-        let batch = 500.min(n - sent);
+        let batch = batch.min(n - sent);
         let ids: Vec<u32> = (0..batch)
             .map(|_| {
                 let id = app.next_call_id();
@@ -1276,6 +1289,7 @@ fn storm(app: &mut TestClient, counter: u64, n: usize) {
         for id in ids {
             assert_eq!(app.await_reply(id).0, undra::wire::payload::ReplyStatus::Ok);
         }
+        after_batch(batch);
         sent += batch;
     }
 }
@@ -1328,11 +1342,69 @@ fn a_commit_storm_costs_steps_by_time_not_by_commit_and_the_ring_stays_bounded()
     page.step();
     drain_page(&mut page, Duration::from_millis(200));
 
+    // The storm is paced by the page's own reads: `BATCH` commits, then the page reads until it has all of them,
+    // then the next batch. A page that reads at its own speed (a 4-core runner, a laptop under load) therefore
+    // misses nothing, whatever that speed is: the queue the server keeps per page holds one batch and never
+    // overflows, so "a page that reads misses nothing" is a property of the server and not of how fast this
+    // machine drains a socket. How long the storm takes is then the machine's business, and the step bound below
+    // is stated against the elapsed time, which is what the claim is about (a step per window, not per commit).
     const N: usize = 20_000;
+    const BATCH: usize = 256;
+    const DEADLINE: Duration = Duration::from_secs(600);
     let started = Instant::now();
-    storm(&mut app, counter, N);
+    let mut got: Vec<ServerMsg> = Vec::new();
+    let mut received = 0;
+    storm_paced(&mut app, counter, N, BATCH, |made| {
+        let want = received + made;
+        while received < want {
+            let left = DEADLINE.saturating_sub(started.elapsed());
+            let msg = page
+                .next_within(left.max(Duration::from_millis(1)))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the page received {received} of {want} commit change-sets after {:?} (it was dropped, \
+                         or {DEADLINE:?} is not enough on this machine)",
+                        started.elapsed()
+                    )
+                });
+            if matches!(
+                msg,
+                ServerMsg::ChangeSet {
+                    delivery: Delivery::Commit,
+                    ..
+                }
+            ) {
+                received += 1;
+            }
+            got.push(msg);
+        }
+    });
     let storm_took = started.elapsed();
-    let got = drain_page(&mut page, Duration::from_millis(700));
+    // The final state's step arrives one coalescing window after the last commit (the snapshot is taken by
+    // time): wait for it, then for a quiet 700 ms, so the statistics that follow are in `got` too.
+    let last_seq = got
+        .iter()
+        .filter_map(|m| match m {
+            ServerMsg::ChangeSet { seq, .. } => Some(*seq),
+            _ => None,
+        })
+        .max()
+        .unwrap();
+    let covered = |got: &[ServerMsg]| {
+        got.iter()
+            .any(|m| matches!(m, ServerMsg::Step(s) if s.through_seq == last_seq))
+    };
+    while !covered(&got) {
+        let left = DEADLINE.saturating_sub(started.elapsed());
+        match page.next_within(left.max(Duration::from_millis(1))) {
+            Some(msg) => got.push(msg),
+            None => panic!(
+                "no step covering the last commit (seq {last_seq}) after {:?}",
+                started.elapsed()
+            ),
+        }
+    }
+    got.extend(drain_page(&mut page, Duration::from_millis(700)));
     let elapsed = started.elapsed();
 
     let commits = got
@@ -1375,14 +1447,6 @@ fn a_commit_storm_costs_steps_by_time_not_by_commit_and_the_ring_stays_bounded()
         steps.len()
     );
     // The page is not left behind: the last step covers the last commit.
-    let last_seq = got
-        .iter()
-        .filter_map(|m| match m {
-            ServerMsg::ChangeSet { seq, .. } => Some(*seq),
-            _ => None,
-        })
-        .max()
-        .unwrap();
     assert_eq!(
         steps.last().unwrap().through_seq,
         last_seq,

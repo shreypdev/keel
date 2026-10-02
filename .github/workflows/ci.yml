@@ -133,6 +133,13 @@ jobs:
   ts:
     name: TypeScript runtime
     runs-on: ubuntu-latest
+    env:
+      # The runtime's call-path guard (test/call-path.test.ts, the `[web."node/..."]` budgets of bench/budgets.toml; read by
+      # scripts/web-budgets.mjs) is the one test of this workflow that holds an absolute time to a budget. Runner classes
+      # measured 3.5x-6.2x slower than the M5 host in Oct 2026, against the 5x the budgets were set with; the same
+      # 2x of headroom bench.yml carries keeps the guard honest about a real regression and stops it failing on the slowest
+      # runner (callSync measured 952 ns against 800 ns). It scales ceilings only. No other job runs the test.
+      UNDRA_BENCH_SCALE: "2"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
