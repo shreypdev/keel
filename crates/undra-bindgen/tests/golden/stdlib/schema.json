@@ -12,7 +12,7 @@
             "kind": "bool"
           },
           "default": false,
-          "docs": "Every background task ran to completion before the deadline."
+          "docs": "Everything ran to completion."
         },
         {
           "name": "replayed",
@@ -20,7 +20,7 @@
             "kind": "u32"
           },
           "default": false,
-          "docs": "Queued mutations that were sent."
+          "docs": "Mutations sent."
         },
         {
           "name": "refetched",
@@ -28,7 +28,7 @@
             "kind": "u32"
           },
           "default": false,
-          "docs": "Queries that were fetched again."
+          "docs": "Queries fetched again."
         },
         {
           "name": "still_pending",
@@ -36,7 +36,7 @@
             "kind": "u32"
           },
           "default": false,
-          "docs": "Work that is still waiting: queued mutations and unfinished fetches."
+          "docs": "Work still waiting."
         }
       ],
       "docs": "What a background run did."
@@ -167,7 +167,7 @@
             "kind": "u64"
           },
           "default": false,
-          "docs": "The instruction address minus the load address of the image (the offset a symbolicator takes), 0 if unknown."
+          "docs": "Offset of the instruction into its image; 0 if unknown."
         },
         {
           "name": "symbol",
@@ -178,7 +178,7 @@
             }
           },
           "default": false,
-          "docs": "The function, when this build can name it (debug builds)."
+          "docs": "The function, in builds that name it."
         },
         {
           "name": "file",
@@ -189,7 +189,7 @@
             }
           },
           "default": false,
-          "docs": "The source file, when this build knows it (debug builds)."
+          "docs": "The source file."
         },
         {
           "name": "line",
@@ -231,7 +231,7 @@
             "kind": "string"
           },
           "default": false,
-          "docs": "What was running: `Todos.add`, `task`, `computed Todos.visible`."
+          "docs": "What was running."
         },
         {
           "name": "thread",
@@ -239,7 +239,7 @@
             "kind": "string"
           },
           "default": false,
-          "docs": "The name of the thread that panicked."
+          "docs": "The panicking thread."
         },
         {
           "name": "frames",
@@ -251,7 +251,7 @@
             }
           },
           "default": false,
-          "docs": "The backtrace, innermost frame first."
+          "docs": "The backtrace."
         },
         {
           "name": "namespace",
@@ -283,10 +283,10 @@
             "kind": "string"
           },
           "default": false,
-          "docs": "The identity of the image the addresses belong to: Mach-O UUID, ELF build id or wasm SHA-256, in hex."
+          "docs": "The image the addresses belong to, in hex."
         }
       ],
-      "docs": "A panic the core contained: what a crash reporter needs."
+      "docs": "A panic the core contained."
     },
     {
       "name": "Endpoint",
@@ -1014,7 +1014,7 @@
       },
       "is_async": true,
       "takes_ctx": true,
-      "docs": "Runs the core's background work, for at most `deadline_ms` (the window the OS granted).\n\nEvery background task of the runtime (the offline queue's replay, the refetch of stale queries\nand the flush of what waits to be persisted, `undra-query`'s; the app's own) starts at once. The\ncall returns when they are all done, or half a second before the deadline so the host can still\ntell the OS it finished, with what got done and what is left. A host that is about to lose its\nwindow cancels the call; work already done is kept."
+      "docs": "Runs the background tasks for at most `deadline_ms` (the window the OS granted)."
     }
   ],
   "ports": [
@@ -1103,10 +1103,10 @@
           },
           "is_async": false,
           "takes_ctx": false,
-          "docs": "The core contained a panic. Fire and forget: the core does not wait, so never throw."
+          "docs": "A panic was contained."
         }
       ],
-      "docs": "Where the reports of contained panics go (ADR-046): forward them to the app's crash reporter."
+      "docs": "Receives the reports of contained panics."
     },
     {
       "name": "Fs",
