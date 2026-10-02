@@ -16,6 +16,7 @@ use crate::derived::DerivedList;
 use crate::derived::slot::{Attached, DerivedSlot, Emitted};
 use crate::error::SignalsError;
 use crate::graph::{Binding, SlotFlags};
+use crate::lazy::{Lazy, LazyCell, LazyEmit, LazySlot, LazySource, isolated};
 use crate::oplog::{KeyedLog, ListLog, Taken, apply_ops};
 use crate::signal::Signal;
 use crate::sink::ChangeSink;
@@ -62,6 +63,9 @@ enum SlotKind {
     /// A derived list (ADR-039): a computed that ships keyed patches. Isolated like a computed
     /// when its closures panic (ADR-019 amendment).
     Derived(Box<dyn DerivedSlot>),
+    /// A `Lazy<T>` (ADR-043): the host pages it, and is told by length and version, never by value.
+    /// Persisted like a plain signal (a snapshot carries the items).
+    Lazy(Box<dyn LazySlot>),
 }
 
 impl SlotKind {
@@ -77,6 +81,7 @@ impl SlotKind {
         match self {
             SlotKind::Keyed(state) => state.forget(),
             SlotKind::Derived(state) => state.forget(),
+            SlotKind::Lazy(state) => state.forget(),
             SlotKind::Plain | SlotKind::Computed => {}
         }
     }
@@ -202,7 +207,7 @@ impl Health {
 }
 
 /// The message of a caught panic.
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         (*s).to_owned()
     } else if let Some(s) = payload.downcast_ref::<String>() {
@@ -373,6 +378,53 @@ impl StoreCell {
         )
     }
 
+    /// Binds a [`Lazy`] list to the next slot (ADR-043). The host never receives its items by
+    /// value: observing the slot sends `LazyValue { handle, len, version }` (change-set op 0), where
+    /// `handle` is the page server the runtime registered for the slot (see
+    /// [`lazy_sources`](StoreCell::lazy_sources)), and every commit that follows a change sends
+    /// `LazyInvalidated { len, version }` (op 2, 12 bytes, whatever and however many the changes
+    /// were). The host then asks for the window it shows with page calls. A snapshot carries the
+    /// items of an owned list.
+    ///
+    /// A view ([`Lazy::over`]) is announced when its derived list's view changes; a write of the
+    /// source that the view ignores sends nothing. Like a derived list, a view whose pipeline
+    /// panics while a commit or an observe evaluates it is held back on its own
+    /// ([`failed_signals`](StoreCell::failed_signals)).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`attach`](StoreCell::attach).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use undra_signals::{Lazy, StoreCell, ALL_SIGNALS};
+    /// use undra_wire::Writer;
+    ///
+    /// let cell = StoreCell::new(7);
+    /// let books = Lazy::from_vec(vec![1_u32, 2, 3]);
+    /// cell.attach_lazy(&books, 0).unwrap();
+    /// cell.set_handle(0x1_0000_0001);
+    /// // The runtime registers `cell.lazy_sources()` and tells the cell the handle of each.
+    /// cell.set_lazy_handle(0, 0x1_0000_0002);
+    /// assert_eq!(cell.observe(ALL_SIGNALS, true, &mut Writer::new()), 1);
+    /// ```
+    pub fn attach_lazy<T: SignalValue>(
+        self: &Arc<Self>,
+        lazy: &Lazy<T>,
+        signal_id: u32,
+    ) -> Result<(), SignalsError> {
+        let snapshot = lazy.clone();
+        let encode: Encoder = Box::new(move |w| snapshot.encode_snapshot(w));
+        let source: Arc<dyn LazySource> = Arc::new(lazy.clone());
+        self.install(
+            signal_id,
+            lazy.binding(),
+            encode,
+            SlotKind::Lazy(Box::new(LazyCell::new(source))),
+        )
+    }
+
     fn install(
         self: &Arc<Self>,
         signal_id: u32,
@@ -492,6 +544,47 @@ impl StoreCell {
     pub fn is_failed(&self, signal_id: u32) -> bool {
         self.slot(signal_id)
             .is_some_and(|slot| slot.flags.failed.load(Ordering::SeqCst))
+    }
+
+    /// The lazy lists of this store: each `Lazy` signal's id and its page server, in id order.
+    ///
+    /// The runtime calls this when the store enters its object table, registers each page server
+    /// there (a transient entry that lives and dies with the store) and tells the cell the handle
+    /// ([`set_lazy_handle`](StoreCell::set_lazy_handle)). Empty for a store without a `Lazy`.
+    pub fn lazy_sources(&self) -> Vec<(u32, Arc<dyn LazySource>)> {
+        let slots = self.slots.read();
+        slots
+            .iter()
+            .enumerate()
+            .filter_map(|(index, slot)| match &slot.kind {
+                SlotKind::Lazy(lazy) => {
+                    Some((u32::try_from(index).unwrap_or(ALL_SIGNALS), lazy.source()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Records the object-table handle of the page server of lazy signal `signal_id`: what its
+    /// `LazyValue` entries carry. Ignored for a signal that is not a `Lazy`.
+    pub fn set_lazy_handle(&self, signal_id: u32, handle: u64) {
+        if let Some(slot) = self.slot(signal_id) {
+            if let SlotKind::Lazy(lazy) = &slot.kind {
+                lazy.set_handle(handle);
+            }
+        }
+    }
+
+    /// The handle recorded by [`set_lazy_handle`](StoreCell::set_lazy_handle) (`0` before, and for a
+    /// signal that is not a `Lazy`).
+    pub fn lazy_handle(&self, signal_id: u32) -> u64 {
+        match self.slot(signal_id) {
+            Some(slot) => match &slot.kind {
+                SlotKind::Lazy(lazy) => lazy.handle(),
+                _ => 0,
+            },
+            None => 0,
+        }
     }
 
     /// Records what a delivery's computed evaluations did and tells the sink: once per transition
@@ -770,6 +863,19 @@ impl StoreCell {
                             continue;
                         }
                     },
+                    // A lazy list announces its length and version, never its items; a view's
+                    // pipeline is isolated as a derived list's is.
+                    SlotKind::Lazy(state) => match isolated(|| state.write_full(&mut value)) {
+                        Ok(()) => {
+                            if slot.flags.failed.load(Ordering::SeqCst) {
+                                health.recovered.push(*id);
+                            }
+                        }
+                        Err(message) => {
+                            health.failed.push((*id, message));
+                            continue;
+                        }
+                    },
                     // A derived list is isolated as a computed is.
                     SlotKind::Derived(state) => {
                         let resynced = catch_unwind(AssertUnwindSafe(|| {
@@ -1001,6 +1107,26 @@ impl StoreCell {
                         continue;
                     }
                 },
+                // A lazy list sends 12 bytes of length and version, or nothing at all when the
+                // host already knows them (ADR-043).
+                SlotKind::Lazy(state) => {
+                    let retain = slot.flags.observed.load(Ordering::SeqCst);
+                    scratch.clear();
+                    let emitted = isolated(|| state.commit(retain, &mut scratch));
+                    let op = match emitted {
+                        Ok(LazyEmit::Invalidated) => ChangeOp::LazyInvalidated,
+                        Ok(LazyEmit::Full) => ChangeOp::Full,
+                        Ok(LazyEmit::Nothing) => continue,
+                        Err(message) => {
+                            health.failed.push((*id, message));
+                            continue;
+                        }
+                    };
+                    builder.push(handle, *id, op, scratch.as_slice());
+                    if slot.flags.failed.load(Ordering::SeqCst) {
+                        health.recovered.push(*id);
+                    }
+                }
                 // A derived list sends its pending derived ops, the full value, or nothing at
                 // all (ADR-039); its closures' panics are isolated as a computed's are.
                 SlotKind::Derived(state) => {

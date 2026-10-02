@@ -279,3 +279,43 @@ fn ow2_commits_name_the_owner_of_each_store_and_refusals_are_reported_to_the_sin
     assert!(reports[0].1.contains("E0065"), "{}", reports[0].1);
     assert_eq!(x.get(), 1);
 }
+
+#[test]
+fn a_lazy_list_of_a_store_follows_the_same_write_rule_as_a_signal() {
+    use undra_signals::Lazy;
+    install();
+    let rig = owned_rig(5);
+    let list = Lazy::from_vec(vec![1_u32, 2, 3]);
+    rig.cell.attach_lazy(&list, 0).unwrap();
+    rig.observe_all();
+
+    // Off the core: every write method refuses (E0065) and nothing changes, not even the version.
+    holding(&[], || {
+        assert!(!list.can_write());
+        let refuse = |f: &dyn Fn()| {
+            let result = catch_unwind(AssertUnwindSafe(|| rig.run(f)));
+            let message = panic_text(&*result.expect_err("the write must be refused"));
+            assert!(message.contains("E0065"), "{message}");
+        };
+        refuse(&|| list.push(4));
+        refuse(&|| list.insert(0, 4));
+        refuse(&|| drop(list.remove(0)));
+        refuse(&|| list.update_at(0, |n| *n = 9));
+        refuse(&|| list.move_item(0, 1));
+        refuse(&|| list.replace(vec![7]));
+        refuse(&|| list.clear());
+    });
+    assert_eq!((list.to_vec(), list.version()), (vec![1, 2, 3], 0));
+    assert!(rig.sets().is_empty());
+
+    // On the core it is written and announced.
+    holding(&[5], || {
+        assert!(list.can_write());
+        rig.run(|| list.push(4));
+    });
+    let set = rig.one_set();
+    assert_eq!(
+        set.entries[0].op,
+        undra_wire::payload::ChangeOp::LazyInvalidated
+    );
+}
