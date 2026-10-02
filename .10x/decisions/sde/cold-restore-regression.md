@@ -128,6 +128,40 @@ comment. CI does not run this half of the test (its `cargo test` job has no `was
 the run with names folds fewer functions, and whether 0.2% is acceptable for the shipped module, is open; the module
 doc of `builds/web.rs` still says 0.1%.
 
+## The review and what it changed
+
+`.10x/reviews/2026-10-02-cold-restore-regression-review.md` (adversarial, 2026-10-02). No High: the writer's bytes
+equalled `undra-meta` at `a309e9f` and `serde_json` on 820,400 generated schemas, every Unicode scalar value, the
+integer boundaries, all committed schema files, the four example cores' collected schemas and 10 million closures, on
+the host and on wasm32. The fix round:
+
+* **M1 (the loosened test still failed with an Android device online).** True: the first round ran without the
+  emulator, so the Android half was skipped and the tally above ("3,540 passed") did not include it. With
+  `emulator-5554` up, the x86_64 library built with symbols is 16 bytes larger than the plain one on this branch (32
+  smaller on main; the difference is in `.text`: a build with debug info compiles to a few bytes of other code). The
+  Android comparison now has a stated tolerance of 256 bytes, with the measurements in its comment; the test passes
+  with the device online (web, Android, iOS and host halves all compared).
+* **L1 (a `TypeRef` variant added later would be written without its payload, tests green).**
+  `closure_json::type_ref` now names every leaf and has no wildcard arm, so a new variant does not compile there
+  until its payload is written. It decides the schema hash and the fingerprints.
+* **L2 (nothing committed measured what was fixed).** New row `snapshot/cold_start_schema_hash`: `Schema::hash` of
+  the schema the bench binary registers (checked equal to a runtime's `schema_hash`). 47.9 µs here; the path through
+  a clone and `serde` measured 88 µs, 1.84x, which fails the 1.5x baseline gates by itself. Budget 240 µs
+  (`bench/budgets.toml`); the `apple-m5-pro` baseline gains this one row (a new row, noted in its `[meta]`; no
+  existing row was touched or re-recorded).
+* **L3 (the module doc of `builds/web.rs` contradicted the test).** The doc now carries the 2026-10-02 measurement
+  and points at the test; the test's comment no longer states a mechanism ("folds fewer") that nobody established.
+* **N1 (the generated schemas hold lists of at most 19).** Left: the long-list path is covered by `sort.rs`'s own
+  property tests (0 to 80 items) and by the equal-keyed fixture of `canonical.rs` (lists of 40 and 20 with repeated
+  names), which this branch compares with the oracle too.
+* **N4 (the absolute times need a quiet machine; the parts add up to more than the whole).** Both true. The table's
+  parts were each timed alone, so each p50 carries its own allocator and cache state, and their sum (67.8 µs) is over
+  `Runtime::new` timed whole (61.1 µs). At load 91 to 99 the reviewer measured the two rows at 1.41x and 1.20x to
+  1.37x of the baseline: inside the gate with about 6 µs of room, not 20. `..._core_thread` waits for a thread to
+  wake and moves most with load (1.46x at load 7 to 9 in the last run here).
+* **N5 (sizes carry the checkout path).** The sizes above are this worktree's path; the reviewer's differ by tens of
+  bytes.
+
 ## Deviations from the brief
 
 * The brief offered "fix it" or "re-record with the justification". The answer is both halves of that sentence: the
@@ -148,7 +182,7 @@ doc of `builds/web.rs` still says 0.1%.
    not done here.
 2. What was run in this worktree (rustc 1.99.0): `cargo test --workspace` (192 suites, 3,540 passed; the two tests of
    `undra-macros --test compile_fail` fail, as they do on main at `a309e9f` with this compiler: the trybuild goldens
-   are 1.98.1's), `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check`, `cargo doc -p
+   are 1.98.1's; that run had no Android device online, see M1 above), `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check`, `cargo doc -p
    undra-meta`, `crates/undra-ffi/tests/wasm/run.sh` (36 pass), `crates/undra-ffi/tests/c/run.sh`, the budgets test
    with the baseline, `scripts/wasm-size.sh` (the wasm half; the JavaScript half needs `npm ci`). Not run: the
    TypeScript, Kotlin and Swift runtimes' suites and the contract tests. Nothing they read changed (both JSON forms

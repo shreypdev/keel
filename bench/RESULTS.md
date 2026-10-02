@@ -604,7 +604,11 @@ The rows after it, the budgets test on a host at load 2.4 to 2.8, three runs: `s
 80.12 to 81.29 µs (1.18x the baseline, was 1.82x) and `..._core_thread` 88.12 to 90.00 µs (1.10x, was 1.66x). The
 baseline is **not** re-recorded: what is left over it (about 12 µs) is `collect_schema` and `fnv1a64` on the 17.9 KB
 this binary's schema gained, and the next piece that adds fixture types to the harness will move these two rows by
-about 1.5 µs per KB of canonical schema (it was 2.6). Two things this did not change, both read in the code and not
+about 1.5 µs per KB of canonical schema (it was 2.6). These are quiet-machine numbers: at load 90 and more the
+review measured the same rows at 1.41x and 1.20x to 1.37x of the baseline (within the gate, with less room). The hash
+has a row of its own now, `snapshot/cold_start_schema_hash` (47.9 µs; the previous path measures 88 µs, 1.84x, which
+fails the baseline gates by itself), so the canonical form going back through a clone or `serde` is caught where it
+happens. Two things this did not change, both read in the code and not
 yet measured on a device: a native core computes all of this twice per launch (`UndraApi::new` hashes the schema for
 the table before `init`, then `Runtime::new` collects and hashes it again), and `fnv1a64` is now three quarters of the
 hash.
