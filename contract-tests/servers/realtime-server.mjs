@@ -129,16 +129,14 @@ export function startRealtimeServer({ port = 0, host = "127.0.0.1" } = {}) {
   const server = createServer((req, res) => {
     const url = new URL(req.url, "http://x");
     const path = url.pathname;
-    // The records change while they are polled (a connection's close code arrives after the first look for it): no client
-    // may answer a poll from a cache.
     if (path === "/stats") {
-      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ connections }));
       return;
     }
     if (path === "/reset") {
       connections = [];
-      res.writeHead(204, { "cache-control": "no-store" });
+      res.writeHead(204);
       res.end();
       return;
     }

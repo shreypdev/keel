@@ -2,6 +2,12 @@
 
 import Foundation
 
+// TEMPORARY DIAGNOSTIC (ci-green): a timeline of one connection on stderr.
+func wsdbg(_ message: @autoclosure () -> String) {
+    let now = Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1000)
+    FileHandle.standardError.write(Data(String(format: "WSDBG %.3f %@\n", now, message()).utf8))
+}
+
 /// `WebSocket` on `URLSessionWebSocketTask`.
 ///
 /// Each connection has a session of its own, whose delegate learns when the handshake succeeded
@@ -147,6 +153,7 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
     }
 
     func close(code: UInt16, reason: String) async {
+        wsdbg("close(code: \(code), reason: \(reason)) entered; task.state=\(task.state.rawValue)")
         let first = state.withLock { (current: inout State) -> Bool in
             if current.closing {
                 return false
@@ -155,10 +162,13 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
             return true
         }
         guard first else {
+            wsdbg("close: already closing, nothing done")
             return
         }
         let closeCode = URLSessionWebSocketTask.CloseCode(rawValue: Int(code)) ?? .normalClosure
+        wsdbg("cancel(with: \(closeCode.rawValue)) now; task.state=\(task.state.rawValue)")
         task.cancel(with: closeCode, reason: reason.isEmpty ? nil : Data(reason.utf8))
+        wsdbg("cancel(with:) returned; task.state=\(task.state.rawValue) closeCode=\(task.closeCode.rawValue)")
         // Lets the close frame go out, then releases the delegate.
         session.finishTasksAndInvalidate()
     }
@@ -171,9 +181,12 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
             return nil
         }
         let message: URLSessionWebSocketTask.Message
+        wsdbg("receive() starting")
         do {
             message = try await task.receive()
+            wsdbg("receive() returned a message")
         } catch {
+            wsdbg("receive() failed: \(error); isClosing=\(isClosing)")
             if isClosing {
                 return nil
             }
@@ -227,6 +240,7 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
     // MARK: URLSessionWebSocketDelegate
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol negotiated: String?) {
+        wsdbg("delegate didOpen")
         let opening = state.withLock { (current: inout State) -> CheckedContinuation<Result<String, WsError>, Never>? in
             current.opened = true
             current.negotiated = negotiated ?? ""
@@ -243,6 +257,7 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
         reason: Data?
     ) {
+        wsdbg("delegate didCloseWith \(closeCode.rawValue)")
         state.withLock { (current: inout State) -> Void in
             if current.peerClose == nil {
                 current.peerClose = (
@@ -254,6 +269,7 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        wsdbg("delegate didCompleteWithError \(String(describing: error))")
         let opening = state.withLock { (current: inout State) -> CheckedContinuation<Result<String, WsError>, Never>? in
             current.completed = true
             let taken = current.opening

@@ -107,10 +107,7 @@ final class RealtimeServer: @unchecked Sendable {
 
     /// Every connection the server saw, newest last.
     func connections() async throws -> [Connection] {
-        // The records change while they are polled: never answered from the URL cache (the server says `no-store` too).
-        var request = URLRequest(url: URL(string: "\(http)/stats")!)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, _) = try await URLSession.shared.data(from: URL(string: "\(http)/stats")!)
         return try JSONDecoder().decode(Stats.self, from: data).connections
     }
 
