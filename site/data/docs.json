@@ -12,6 +12,18 @@
       { "file": "updates.html", "title": "Shipping an update" },
       { "file": "several-cores.html", "title": "One core or several" }
     ] },
+    { "title": "Cookbook", "pages": [
+      { "file": "cookbook/index.html", "title": "All recipes", "pager": "Cookbook, all recipes" },
+      { "file": "cookbook/auth.html", "title": "Auth" },
+      { "file": "cookbook/pagination.html", "title": "Pagination" },
+      { "file": "cookbook/forms.html", "title": "Forms" },
+      { "file": "cookbook/upload.html", "title": "File upload" },
+      { "file": "cookbook/realtime.html", "title": "Real-time" },
+      { "file": "cookbook/offline.html", "title": "Offline-first" },
+      { "file": "cookbook/from-kmp.html", "title": "From Kotlin Multiplatform", "pager": "Cookbook, from Kotlin Multiplatform" },
+      { "file": "cookbook/from-uniffi.html", "title": "From UniFFI", "pager": "Cookbook, from UniFFI" },
+      { "file": "sample.html", "title": "Sample app" }
+    ] },
     { "title": "Reference", "pages": [
       { "file": "cli.html", "title": "The CLI" },
       { "file": "architecture.html", "title": "Architecture" },

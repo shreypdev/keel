@@ -13,6 +13,8 @@ on:
     paths:
       - "site/**"
       - "examples/playground/**"
+      - "examples/cookbook/**"
+      - "examples/fieldbook/**"
       - "runtimes/ts/**"
       - "crates/**"
       - "Cargo.toml"
@@ -24,6 +26,8 @@ on:
     paths:
       - "site/**"
       - "examples/playground/**"
+      - "examples/cookbook/**"
+      - "examples/fieldbook/**"
       - "runtimes/ts/**"
       - "crates/**"
       - "Cargo.toml"

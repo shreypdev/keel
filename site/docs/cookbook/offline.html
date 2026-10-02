@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline-first · Undra cookbook</title>
+<meta name="description" content="Persisted queries, writes that queue and survive a restart, an outbox the UI can show, and an update that changes the data on the device.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/cookbook/offline.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Offline-first · Undra cookbook">
+<meta property="og:description" content="Persisted queries, writes that queue and survive a restart, an outbox the UI can show, and an update that changes the data on the device.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/cookbook/offline.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Offline-first · Undra cookbook">
+<meta name="twitter:description" content="Persisted queries, writes that queue and survive a restart, an outbox the UI can show, and an update that changes the data on the device.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/cookbook/offline.html#article","headline":"Offline-first · Undra cookbook","description":"Persisted queries, writes that queue and survive a restart, an outbox the UI can show, and an update that changes the data on the device.","url":"https://shreypdev.github.io/undra/docs/cookbook/offline.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Offline-first","item":"https://shreypdev.github.io/undra/docs/cookbook/offline.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../../assets/base.css">
+<link rel="stylesheet" href="../../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../../docs/" aria-current="page">Docs</a>
+      <a href="../../blog/">Blog</a>
+      <a href="../../roadmap/">Roadmap</a>
+      <a href="../../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../concepts.html">Core concepts</a></li><li><a href="../queries.html">Queries &amp; mutations</a></li><li><a href="../ports.html">Ports &amp; adapters</a></li><li><a href="../web.html">Workers &amp; crash recovery</a></li><li><a href="../updates.html">Shipping an update</a></li><li><a href="../several-cores.html">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="index.html">All recipes</a></li><li><a href="auth.html">Auth</a></li><li><a href="pagination.html">Pagination</a></li><li><a href="forms.html">Forms</a></li><li><a href="upload.html">File upload</a></li><li><a href="realtime.html">Real-time</a></li><li><a href="offline.html" aria-current="page">Offline-first</a></li><li><a href="from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="from-uniffi.html">From UniFFI</a></li><li><a href="../sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../cli.html">The CLI</a></li><li><a href="../architecture.html">Architecture</a></li><li><a href="../errors.html">Error codes</a></li><li><a href="../../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../api-swift.html">Swift</a></li><li><a href="../api-kotlin.html">Kotlin</a></li><li><a href="../api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../concepts.html">Core concepts</a></li><li><a href="../queries.html">Queries &amp; mutations</a></li><li><a href="../ports.html">Ports &amp; adapters</a></li><li><a href="../web.html">Workers &amp; crash recovery</a></li><li><a href="../updates.html">Shipping an update</a></li><li><a href="../several-cores.html">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="index.html">All recipes</a></li><li><a href="auth.html">Auth</a></li><li><a href="pagination.html">Pagination</a></li><li><a href="forms.html">Forms</a></li><li><a href="upload.html">File upload</a></li><li><a href="realtime.html">Real-time</a></li><li><a href="offline.html" aria-current="page">Offline-first</a></li><li><a href="from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="from-uniffi.html">From UniFFI</a></li><li><a href="../sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../cli.html">The CLI</a></li><li><a href="../architecture.html">Architecture</a></li><li><a href="../errors.html">Error codes</a></li><li><a href="../../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../api-swift.html">Swift</a></li><li><a href="../api-kotlin.html">Kotlin</a></li><li><a href="../api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Cookbook</p>
+    <h1>Offline-first</h1>
+    <p class="lede">Offline-first is three decisions the core makes once: reads come from disk, writes queue, and an update never loses what the last build left on the device.</p>
+<h2 id="the-recipe">The recipe<a class="anchor" href="#the-recipe" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Reads come from disk.</strong> <code>notes</code> is a <code>persist</code> query: the list is on screen from the first frame of the next launch, and refreshed in the background.</li><li><strong>Writes queue.</strong> <code>add_note</code> is <code>idempotent</code>: offline it goes into a persisted queue and is replayed in order when the network returns, after a restart too. <code>create_note</code> shows the note at once and takes it back if the server refuses.</li><li><strong>The outbox is data.</strong> <code>outbox()</code> says how many writes wait and which ones an update could not carry over (dead letters), with the reason.</li><li><strong>An update is two rules.</strong> Build 2 renamed a field and added another. <code>#[undra(default)]</code> fills the new field in old data. A <code>#[undra::migrate]</code> hook handles the rename in cached lists and queued writes. Whatever a hook refuses is never lost: a queued write becomes a dead letter.</li></ul>
+<details class="reveal-code"><summary>Show the Rust</summary>
+<!-- snippet:examples/cookbook/core/src/offline.rs#offline-queue rust -->
+<div class="code"><div class="code-bar"><span>core/src/offline.rs</span></div><pre><code data-lang="rust">/// The notes of `list`: `GET /lists/{list}/notes`. Persisted, so the next launch shows them before
+/// the network answers.
+#[undra::query(key = &quot;notes:{list}&quot;, stale = &quot;30s&quot;, persist, retry = 1)]
+pub async fn notes(ctx: &amp;Ctx, list: String) -&gt; Result&lt;Vec&lt;Note&gt;, NetError&gt; {
+    let url = net::url(ctx, &amp;format!(&quot;/lists/{list}/notes&quot;))?;
+    net::json(&amp;net::ok(net::send(ctx, HttpRequest::get(url)).await?)?)
+}
+
+/// Adds a note to `list`: `POST /lists/{list}/notes`. Idempotent: the key stays the same across
+/// retries and offline replays. `pinned` is build 2's; a queued build-1 call has none (`None`).
+#[undra::mutation(key = &quot;notes:{list}&quot;, idempotent)]
+pub async fn add_note(
+    ctx: &amp;Ctx,
+    list: String,
+    text: String,
+    pinned: Option&lt;bool&gt;,
+) -&gt; Result&lt;Note, NetError&gt; {
+    let url = net::url(ctx, &amp;format!(&quot;/lists/{list}/notes&quot;))?;
+    let body = serde_json::json!({ &quot;text&quot;: text, &quot;pinned&quot;: pinned.unwrap_or(false) });
+    let mut request = net::post_json(url, &amp;body);
+    if let Some(key) = undra::query::idempotency_key() {
+        request = request.with_header(&quot;Idempotency-Key&quot;, key.to_string());
+    }
+    net::json(&amp;net::ok(net::send(ctx, request).await?)?)
+}
+
+/// Adds a note the way a UI wants it: it shows at once, the server is asked, and the placeholder is
+/// taken back if the server refuses. Offline, the call keeps waiting and the placeholder stays
+/// until the queue replays the write.
+#[undra::api]
+pub async fn create_note(
+    ctx: &amp;Ctx,
+    list: String,
+    text: String,
+    pinned: bool,
+) -&gt; Result&lt;Note, NetError&gt; {
+    let placeholder = Note {
+        id: u32::MAX,
+        text: text.clone(),
+        pinned,
+    };
+    let cached = list.clone();
+    ctx.mutate::&lt;AddNoteMutation&gt;((list, text, Some(pinned)))
+        .optimistic(move |cache| {
+            cache.update::&lt;NotesQuery&gt;((cached,), |notes| notes.push(placeholder));
+        })
+        .await
+}</code></pre></div>
+<!-- /snippet -->
+<!-- snippet:examples/cookbook/core/src/offline.rs#offline-update rust -->
+<div class="code"><div class="code-bar"><span>core/src/offline.rs</span></div><pre><code data-lang="rust">/// A note. Build 1 had `{ id, body }`; build 2 renamed the text and added `pinned`.
+#[undra::api]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Note {
+    /// The server's identity of the note. A note that is only shown optimistically, and that the
+    /// server has not answered for yet, has an identity counting down from `u32::MAX`.
+    pub id: u32,
+    /// What the note says.
+    pub text: String,
+    /// Whether it is pinned to the top. Added in build 2: build-1 data reads it as `false`.
+    #[undra(default)]
+    #[serde(default)]
+    pub pinned: bool,
+}
+
+/// Build 1's notes (`{ id, body }`) become build 2's. Structural migration cannot do this one, a
+/// rename is a removal and an addition to it, so the hook reads the old name.
+#[undra::migrate(ty = &quot;Note&quot;)]
+fn note_from_build_1(old: &amp;DynValue) -&gt; Result&lt;Note, MigrateError&gt; {
+    let id = old
+        .field(&quot;id&quot;)
+        .and_then(DynValue::as_i64)
+        .and_then(|id| u32::try_from(id).ok())
+        .ok_or_else(|| MigrateError::new(&quot;a note without an id&quot;))?;
+    let text = old
+        .field(&quot;text&quot;)
+        .or_else(|| old.field(&quot;body&quot;))
+        .and_then(DynValue::as_str)
+        .ok_or_else(|| MigrateError::new(&quot;a note without text&quot;))?;
+    let pinned = old.field(&quot;pinned&quot;).and_then(DynValue::as_bool);
+    Ok(Note {
+        id,
+        text: text.to_owned(),
+        pinned: pinned.unwrap_or(false),
+    })
+}
+
+/// A queued build-1 `add_note(list, body)` becomes build 2's `add_note(list, text, pinned)`:
+/// `pinned` is an `Option` and fills itself with `None`; the renamed parameter is the hook's job.
+#[undra::migrate(mutation = &quot;add_note&quot;)]
+fn add_note_from_build_1(old: &amp;DynRecord) -&gt; Result&lt;DynRecord, MigrateError&gt; {
+    let mut new = old.clone();
+    new.rename(&quot;body&quot;, &quot;text&quot;);
+    Ok(new)
+}</code></pre></div>
+<!-- /snippet -->
+</details>
+<h2 id="on-the-platform">On the platform<a class="anchor" href="#on-the-platform" aria-label="Link to this section">#</a></h2>
+<p>A cached list, a write that returns when the server has it, and a count for the "waiting to sync" line.</p>
+<details class="reveal-code"><summary>Show the Swift, Kotlin and TypeScript</summary>
+<div data-tabs data-label="Platform">
+<div class="tab-panel" data-label="Swift">
+<!-- snippet:examples/cookbook/snippets/swiftui/Sources/Snippets/Snippets.swift#offline-swift swift -->
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">@MainActor func notesScreen() async throws {
+    let notes = try NotesQueryHandle(list: &quot;inbox&quot;)       // cached on disk: shown before the network answers
+    _ = notes.data
+
+    // Shows at once; returns when the server has it, even if that is after the train leaves the tunnel.
+    _ = try await createNote(list: &quot;inbox&quot;, text: &quot;Buy milk&quot;, pinned: false)
+
+    let waiting = try outbox().pending                    // &quot;2 changes waiting to sync&quot;
+    _ = waiting
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+<div class="tab-panel" data-label="Kotlin">
+<!-- snippet:examples/cookbook/snippets/kotlin/Snippets.kt#offline-kotlin kotlin -->
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">suspend fun notesScreen() {
+    val notes = NotesQueryHandle.create(&quot;inbox&quot;)      // cached on disk: shown before the network answers
+    notes.data
+
+    // Shows at once; returns when the server has it, even if that is after the tunnel.
+    createNote(list = &quot;inbox&quot;, text = &quot;Buy milk&quot;, pinned = false)
+
+    val waiting = outbox().pending             // &quot;2 changes waiting to sync&quot;
+    println(waiting)
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+<div class="tab-panel" data-label="TypeScript">
+<!-- snippet:examples/cookbook/snippets/ts/snippets.tsx#offline-ts tsx -->
+<div class="code"><div class="code-bar"><span><span class="lang">tsx</span></span></div><pre><code data-lang="tsx">export async function notesScreen() {
+  const notes = await NotesQueryHandle.create(&quot;inbox&quot;);   // cached on disk: shown before the network answers
+  void notes.data;
+
+  // Shows at once; returns when the server has it, even if that is after the tunnel.
+  await createNote(&quot;inbox&quot;, &quot;Buy milk&quot;, false);
+
+  const waiting = (await outbox()).pending;               // &quot;2 changes waiting to sync&quot;
+  return waiting;
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+</div>
+</details>
+<h2 id="what-the-tests-prove">What the tests prove<a class="anchor" href="#what-the-tests-prove" aria-label="Link to this section">#</a></h2>
+<ul><li>A note created offline shows at once; when the network returns the server gets it and the placeholder gives way to its note.</li><li>The app is killed with a write queued: the new process finds it on disk and replays it with the same <code>Idempotency-Key</code>.</li><li>A refused write takes its placeholder back; sign-out is refused while a write is queued.</li><li>Both hooks turn build-1 data (<code>body</code>) into build-2 data (<code>text</code>), and refuse what is not a note.</li></ul>
+<h2 id="limits">Limits<a class="anchor" href="#limits" aria-label="Link to this section">#</a></h2>
+<ul><li>Only a failure while the <code>Connectivity</code> port says offline queues a write. A <code>500</code> is returned to the caller like any error.</li><li>A migration across two builds needs two builds to prove end to end. The recipe tests the hooks directly; the playground's contract scenarios run build A's data under build B on all three platforms (<a href="../updates.html">Shipping an update</a>).</li></ul>
+<p>Source: <a href="https://github.com/shreypdev/undra/blob/main/examples/cookbook/core/src/offline.rs" rel="noopener"><code class="cw">examples/cookbook/core/src/offline.rs</code></a>.</p>
+  
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/cookbook/offline.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="realtime.html"><span>Previous</span><b>Real-time</b></a>
+    <a class="next" href="from-kmp.html"><span>Next</span><b>Cookbook, from Kotlin Multiplatform</b></a>
+  </nav>
+  </main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#the-recipe">The recipe</a></li><li><a href="#on-the-platform">On the platform</a></li><li><a href="#what-the-tests-prove">What the tests prove</a></li><li><a href="#limits">Limits</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../../docs/cli.html">The CLI</a></li>
+          <li><a href="../../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../../blog/">Blog</a></li>
+          <li><a href="../../roadmap/">Roadmap</a></li>
+          <li><a href="../../playground/">Playground</a></li>
+          <li><a href="../../feed.xml">RSS feed</a></li>
+          <li><a href="../../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../../assets/site.js" defer></script>
+</body>
+</html>
