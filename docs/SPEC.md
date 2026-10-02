@@ -850,7 +850,7 @@ public final class Account: UndraObject, @unchecked Sendable {
     @MainActor public func chat(peer: UserId) throws -> ChatStore         // a returned store observes when its wrapper is made; stores are main-actor types
 }
 // a callback interface: a protocol the app implements, and a weak forwarding wrapper
-@MainActor public protocol UploadListener: AnyObject {
+@MainActor public protocol UploadListener: AnyObject, Sendable {
     func progress(sent: UInt64, total: UInt64)
     func confirmReplace(name: String) async throws(PromptError) -> Bool
 }
