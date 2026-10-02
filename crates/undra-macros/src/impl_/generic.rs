@@ -697,12 +697,12 @@ fn instantiate_object_in(items: Vec<syn::Item>, here: &str) -> syn::Result<Token
     };
     // The impls of an instantiation are only legal in the crate of its template.
     if !config.crate_name.is_empty() && !here.is_empty() && config.crate_name != here {
-        return Err(foreign_alias(
-            &alias,
-            &config.template,
-            &config.crate_name,
-            here,
-        ));
+        let mut diag = foreign_alias_diag(&alias, &config.template, &config.crate_name, here);
+        diag.help = format!(
+            "declare the alias next to the template, in `{}`, and use it from here; or write the object out in this crate, with an `#[undra::api]` impl block of its own",
+            config.crate_name
+        );
+        return Err(diag.at(alias.span()));
     }
     let docs = if config.alias_docs.is_empty() {
         config.docs.clone()

@@ -1234,6 +1234,14 @@ fn e0070_an_alias_of_a_generic_object_in_another_crate() {
         ),
         "{error}"
     );
+    // The other way out is an object of this crate's own, not a record.
+    assert!(
+        error.contains(
+            "or write the object out in this crate, with an `#[undra::api]` impl block of its own"
+        ),
+        "{error}"
+    );
+    assert!(!error.contains("struct or enum"), "{error}");
 }
 
 #[test]
