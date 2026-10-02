@@ -1,4 +1,5 @@
 import { UndraError } from "./errors.js";
+import { msg } from "./messages.js";
 
 /*
  * Client side of a core stream (docs/SPEC.md section 3.7): a queue of received
@@ -163,7 +164,7 @@ export class StreamCall implements AsyncIterableIterator<Uint8Array> {
     try {
       this._host.sendCredit(this.callId, credit);
     } catch (error) {
-      this.fail(error instanceof UndraError ? error : new UndraError("state", "could not grant stream credit", { cause: error }));
+      this.fail(error instanceof UndraError ? error : new UndraError("state", msg(172), { cause: error }));
     }
   }
 }

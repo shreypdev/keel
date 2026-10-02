@@ -1,4 +1,5 @@
 import { CallTarget, type Handle } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * The `Call` header (SPEC 3.3) of a free function or a method, written without a writer, a context object or a closure: what the
@@ -34,7 +35,7 @@ function putHandle(out: Uint8Array, at: number, handle: Handle): void {
   let i = handleKeys.length;
   while (i-- > 0) if (handleKeys[i] === handle) break;
   if (i < 0) {
-    if (BigInt.asUintN(64, handle) !== handle) throw new RangeError(`u64 out of range: ${String(handle)}`);
+    if (BigInt.asUintN(64, handle) !== handle) throw new RangeError(msg(39, String(handle)));
     i = handleNext;
     handleNext = (handleNext + 1) % HANDLE_HALVES;
     handleKeys[i] = handle;
@@ -60,12 +61,12 @@ export function writeHead(out: Uint8Array, target: CallTargetArg, methodId: numb
   let handle: Handle | undefined;
   if (typeof target === "number") {
     if (target !== CallTarget.FreeFunction) {
-      throw new TypeError("a bare CallTarget must be FreeFunction; pass { target, handle } for a method");
+      throw new TypeError(msg(40));
     }
   } else if (target.target === CallTarget.ObjectMethod) {
     handle = target.handle;
   }
-  if (methodId >>> 0 !== methodId) throw new RangeError(`u32 out of range: ${String(methodId)}`);
+  if (methodId >>> 0 !== methodId) throw new RangeError(msg(41, String(methodId)));
   if (handle === undefined) {
     out.fill(0, 0, 9);
   } else {

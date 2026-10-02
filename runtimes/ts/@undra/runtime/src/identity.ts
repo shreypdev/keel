@@ -3,6 +3,7 @@ import type { UndraCore } from "./core.js";
 import { UndraTransportError } from "./errors.js";
 import type { UndraObject } from "./object.js";
 import { type Handle, UndraReader } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * One wrapper per handle (ADR-040 decision 7). Every handle in a successful reply is one reference the host owns; a
@@ -76,7 +77,7 @@ export function adopt<T extends UndraObject>(core: UndraCore, handle: Handle, ty
 /** Reads a handle that must not be null (ADR-040 decision 3: absence is an `Option`). */
 function readHandle(r: UndraReader): Handle {
   const handle = r.readU64();
-  if (handle === 0n) throw new UndraTransportError("protocol", "the core sent the null handle where an object was expected");
+  if (handle === 0n) throw new UndraTransportError("protocol", msg(96));
   return handle;
 }
 
@@ -111,7 +112,7 @@ export async function adoptOptional<T extends UndraObject>(core: UndraCore, body
     r.finish();
     return null;
   }
-  if (tag !== 1) throw new UndraTransportError("protocol", `the core sent option tag ${tag}`);
+  if (tag !== 1) throw new UndraTransportError("protocol", msg(97, tag));
   const handle = readHandle(r);
   r.finish();
   return ready(core, handle, type);
@@ -156,7 +157,7 @@ export function reclaim(core: UndraCore, shape: 0 | 1 | 2): (body: Uint8Array) =
  */
 export function requireOwn(core: UndraCore, object: UndraObject): Handle {
   if (object.core === core) return object.handle;
-  throw new UndraCallError.Refused(`${object.constructor.name} belongs to another core: pass an object of the core the call goes to`);
+  throw new UndraCallError.Refused(msg(98, object.constructor.name));
 }
 
 /**

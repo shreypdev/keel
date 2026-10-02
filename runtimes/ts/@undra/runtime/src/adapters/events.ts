@@ -1,6 +1,7 @@
 import { UndraWriter } from "../wire/index.js";
 import { CONNECTIVITY_CHANGED, CONNECTIVITY_PORT, LIFECYCLE_CHANGED, LIFECYCLE_PORT } from "./port-literals.js";
 import type { Adapters } from "./types.js";
+import { msg } from "../messages.js";
 
 /*
  * Host events: what the Connectivity and Lifecycle sources tell the core. Separate from `ports.ts` (the
@@ -21,7 +22,7 @@ export type AppState = (typeof APP_STATES)[number];
 /** Writes `v` as its `u16` index in `variants` (the encoding half of a unit enum's codec). */
 export function writeIndex<T extends string>(w: UndraWriter, name: string, variants: readonly T[], v: T): void {
   const index = variants.indexOf(v);
-  if (index < 0) throw new RangeError(`unknown ${name} variant: ${String(v)}`);
+  if (index < 0) throw new RangeError(msg(1, name, String(v)));
   w.writeU16(index);
 }
 

@@ -40,6 +40,7 @@ import {
   codecs,
   decodeValue,
 } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 export type { CallTargetArg, CallTargetRef } from "./call-head.js";
 
@@ -274,12 +275,12 @@ class DirectCall implements PendingCall {
 }
 
 const UNLOADED_MESSAGE =
-  "the core is not loaded: load it at app startup (the bindings' Undra<Namespace>.load(...), or UndraCore.load(...)), before creating any Undra object, or pass a core explicitly";
+  msg(44);
 const DEFAULT_OBSERVE_TIMEOUT_MS = 10_000;
 
 function abortReason(signal: AbortSignal): unknown {
   if (signal.reason !== undefined) return signal.reason;
-  const error = new Error("The operation was aborted");
+  const error = new Error(msg(45));
   error.name = "AbortError";
   return error;
 }
@@ -386,7 +387,7 @@ export class UndraCore {
       consoleLog().log(
         4,
         "undra::runtime",
-        "a core was used while it is not loaded (before its load(...) succeeded, or after it was closed); calls on it reject with UndraCallError.Unavailable. Load the core at app startup, before creating any Undra object.",
+        msg(46),
       );
     }
     return UndraCore._unloaded;
@@ -414,12 +415,12 @@ export class UndraCore {
     let transport: Transport | CoreTransport;
     const mode = options.mode;
     if (mode === "wasm-main") {
-      if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-main' needs the `wasm` option");
+      if (options.wasm === undefined) throw new UndraError("options", msg(47));
       // The core's only random source is the `random` import: refuse before instantiating rather than let its
       // `Rng` fail at the first idempotency key (ADR-049). An app that supplies its own `rng` adapter has one.
       if (options.adapters?.rng == null && !hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
       transport = new WasmHost(options as LoadOptions & { readonly wasm: WasmSource }, adapters, (error) => {
-        adapters.log?.log(4, "undra::runtime", `import failed: ${errorMessage(error)}`);
+        adapters.log?.log(4, "undra::runtime", msg(48, errorMessage(error)));
       });
     } else if (mode === "wasm-worker") {
       // Fetched when an app asks for this mode; the module checks and maps its own options (ADR-057).
@@ -428,7 +429,7 @@ export class UndraCore {
       // Fetched when an app asks for this mode (a development page served by `undra dev`, a native core over a socket), not by every page.
       transport = (await onDemand("remote transport", () => import("./transport/remote.js"))).remoteTransport(options);
     } else {
-      throw new UndraError("options", `unknown mode '${String(mode)}'`);
+      throw new UndraError("options", msg(49, String(mode)));
     }
     return UndraCore._attach(transport, options, adapters);
   }
@@ -491,7 +492,7 @@ export class UndraCore {
   private _nextCallId = 0;
   private _closed = false;
   /** What a call on this closed core says; the default is "the core is closed". @internal Read by the stream support. */
-  _closedMessage = "the core is closed";
+  _closedMessage = msg(50);
   /** The stream support, once `features: [streams]` or the first stream installed it (`stream-support.ts`). @internal */
   _streams: StreamSupport | undefined = undefined;
   private _reporting = false;
@@ -606,7 +607,7 @@ export class UndraCore {
     }
     // Read-your-writes (docs/SPEC.md section 11): the call's change-sets are queued by now.
     this.mirror.flush();
-    if (reply.length < 5) throw new UndraTransportError("protocol", "the core returned a truncated reply");
+    if (reply.length < 5) throw new UndraTransportError("protocol", msg(51));
     const status = reply[4] as number;
     const body = replyBody(reply);
     if (status === ReplyStatus.Ok) return body;
@@ -690,7 +691,7 @@ export class UndraCore {
   async construct(typeId: number, methodId: number, args: Uint8Array): Promise<Handle> {
     const body = await this._request((callId) => encodeConstructor(typeId, methodId, callId, args));
     const handle = decodeValue(codecs.u64, body);
-    if (handle === 0n) throw new UndraTransportError("protocol", "the core returned the null handle for a constructor");
+    if (handle === 0n) throw new UndraTransportError("protocol", msg(52));
     this._handles.add(handle);
     return handle;
   }
@@ -822,7 +823,7 @@ export class UndraCore {
   report(error: unknown, operation: string): void {
     const unhandled = new UndraUnhandledError(operation, UndraCallError.asCallError(error), error);
     if (this._ext?.down(this, unhandled.error)) {
-      this._log(3, "undra::runtime", `${unhandled.message} (the connection to the core is down: see UndraCore.connection)`);
+      this._log(3, "undra::runtime", msg(53, unhandled.message));
       return;
     }
     this._log(4, "undra::runtime", unhandled.message);
@@ -837,7 +838,7 @@ export class UndraCore {
     try {
       handler(unhandled);
     } catch (thrown) {
-      this._log(4, "undra::runtime", `the onError handler threw while handling "${unhandled.message}": ${errorMessage(thrown)}`);
+      this._log(4, "undra::runtime", msg(54, unhandled.message, errorMessage(thrown)));
     } finally {
       this._reporting = false;
     }
@@ -909,7 +910,7 @@ export class UndraCore {
    * Idempotent. Later calls reject or throw.
    */
   close(): void {
-    this._dispose(new UndraTransportError("closed", "the core was closed"));
+    this._dispose(new UndraTransportError("closed", msg(55)));
   }
 
   // ----- internals -------------------------------------------------------------------
@@ -989,7 +990,7 @@ export class UndraCore {
     if (UndraCore._shared === this) UndraCore._shared = null;
     this._stopEvents?.();
     this._stopEvents = null;
-    this._failInFlight(reason ?? new UndraTransportError("closed", "the core is closed"));
+    this._failInFlight(reason ?? new UndraTransportError("closed", msg(50)));
     this._setConnection(reason === null || why === "requested" ? { kind: "closed", reason: why } : { kind: "closed", reason: why, error: reason });
     this._transport.close();
     // Ports that hold platform resources for the core (the opt-in bindings) release them; `dispose` must not throw.
@@ -1214,7 +1215,7 @@ export class UndraCore {
 
   private _onReply(payload: Uint8Array): void {
     if (payload.length < 5) {
-      this._reportError("reply", new UndraTransportError("protocol", "the core sent a truncated reply"));
+      this._reportError("reply", new UndraTransportError("protocol", msg(56)));
       return;
     }
     const callId = ((payload[0] as number) | ((payload[1] as number) << 8) | ((payload[2] as number) << 16) | ((payload[3] as number) << 24)) >>> 0;
@@ -1230,7 +1231,7 @@ export class UndraCore {
     if (status > ReplyStatus.BadRequest) {
       this._pending.delete(callId);
       entry.cleanup?.();
-      entry.reject(new UndraTransportError("protocol", `the core sent reply status ${status}`));
+      entry.reject(new UndraTransportError("protocol", msg(57, status)));
       return;
     }
 
@@ -1238,7 +1239,7 @@ export class UndraCore {
       // A plain call to a stream method: free the stream the core just registered.
       this._pending.delete(callId);
       entry.cleanup?.();
-      entry.reject(new UndraError("state", "this method is a stream; call it with UndraCore.stream"));
+      entry.reject(new UndraError("state", msg(58)));
       try {
         this._transport.cancel(callId);
       } catch {

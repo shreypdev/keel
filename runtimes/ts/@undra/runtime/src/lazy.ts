@@ -12,6 +12,7 @@ import {
   readLazyValue,
   type UndraReader,
 } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * `LazyList<T>`: the host side of a core `Lazy<T>` signal (ADR-043 decision 3.5, docs/SPEC.md sections 3.3, 3.5
@@ -40,7 +41,7 @@ interface CachedPage<T> {
 
 function asPositiveInt(name: string, value: number, max: number): number {
   if (!Number.isInteger(value) || value < 1 || value > max) {
-    throw new RangeError(`${name} must be an integer between 1 and ${max}, not ${String(value)}`);
+    throw new RangeError(msg(99, name, max, String(value)));
   }
   return value;
 }
@@ -265,7 +266,7 @@ export class LazyList<T> {
     reader.finish();
     if (this._handle === null) {
       // An invalidation has no handle to page from; the value that carries it was lost or never sent.
-      this._report(new UndraTransportError("protocol", "a lazy list was invalidated before its value (and so its page server) reached the host"));
+      this._report(new UndraTransportError("protocol", msg(100)));
       return;
     }
     batch(() => {
@@ -417,13 +418,13 @@ export class LazyList<T> {
       if (page.items.length !== expected) {
         throw new UndraTransportError(
           "protocol",
-          `the core sent ${page.items.length} rows for page ${at} of a list of ${page.total}, which holds ${expected}`,
+          msg(101, page.items.length, at, page.total, expected),
         );
       }
       if (page.version === this._version && page.total !== this._len) {
         throw new UndraTransportError(
           "protocol",
-          `the core sent a list length of ${page.total} at version ${page.version}, which it told us had ${this._len}`,
+          msg(102, page.total, page.version, this._len),
         );
       }
     } catch (error) {
@@ -438,7 +439,7 @@ export class LazyList<T> {
         this._stale.delete(at);
         this._failed.add(at);
         this._report(
-          new UndraTransportError("protocol", `the core keeps answering page ${at} at version ${page.version}, older than the list's ${this._version}`),
+          new UndraTransportError("protocol", msg(103, at, page.version, this._version)),
         );
         return;
       }

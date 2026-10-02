@@ -7,6 +7,7 @@ import { onDemand } from "../on-demand.js";
 import type { PortImpl } from "../port.js";
 import { type HelloPayload, Kind, encodeCancel, encodeEvent, encodeObserve, encodeRelease, encodeStreamCredit, encodeTimerFired } from "../wire/index.js";
 import type { CoreTransport, Transport } from "./transport.js";
+import { msg } from "../messages.js";
 
 // The observe waiters of a core that answers later arrive with the transport that needs them (a re-export from a module with code puts the module in this chunk).
 export { mirrorWaiters } from "../mirror-waiters.js";
@@ -121,7 +122,7 @@ export const extension: CoreExtension = {
   async starting(core, options, adapters, ports) {
     const given = (["clock", "rng", "timer"] as const).filter((name) => options.adapters?.[name] != null);
     if (given.length > 0 && core.mode === "wasm-worker") {
-      core._log(3, "undra::worker", `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`);
+      core._log(3, "undra::worker", msg(173, given.join(", adapters.")));
     }
     // A wasm core needs neither port: it traps instead of reporting.
     const built = core.mode.startsWith("wasm") ? undefined : await onDemand("port adapters", () => import("../adapters/ports.js"));
@@ -165,7 +166,7 @@ export const extension: CoreExtension = {
   reconnecting(core, attempt, error) {
     if (core.closed) return;
     if (attempt === 1) {
-      core._failInFlight(new UndraTransportError("closed", `the connection to the core was lost (${error.message}); reconnecting`, { cause: error }));
+      core._failInFlight(new UndraTransportError("closed", msg(174, error.message), { cause: error }));
     }
     core._setConnection({ kind: "reconnecting", attempt, error });
   },

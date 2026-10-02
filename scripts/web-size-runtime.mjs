@@ -11,6 +11,11 @@
 // chunk of its own, loaded on demand, and is reported next to the number (`lazy`), not in it (ADR-052,
 // amendment of ts-size-e4). The `wasm-worker` mode's Worker script is likewise a separate asset.
 //
+// The runtime is what an installed app gets (ADR-057, decision 5): the package is built (`npm run build` of the runtime: the production
+// flavour in `dist`, the readable one in `dist/dev`) and linked into the project's `node_modules`, and Vite resolves `@undra/runtime`
+// through its `exports` with its default conditions in production mode, which selects the production flavour. A run whose chunk
+// holds a sentence of the development flavour fails: the number would be of the wrong build.
+//
 //   node scripts/web-size-runtime.mjs <project-dir> <runtime-dir> <out-dir>
 //   UNDRA_SIZE_MODULES=1 node scripts/web-size-runtime.mjs ...   also print, on stderr, the unminified
 //                                                                bytes each source module contributes
@@ -25,8 +30,9 @@
 // Prints one JSON object: { runtime, bindings, app, lazy } with each chunk's path (relative to out-dir);
 // `lazy` lists the other JavaScript chunks (loaded on demand).
 // Exit 3 when the runtime's node_modules are not installed (`npm ci` in <runtime-dir>).
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const [project, runtime, out] = process.argv.slice(2).map((p) => p && resolve(p));
@@ -40,6 +46,13 @@ if (!existsSync(viteEntry)) {
   process.exit(3);
 }
 const vite = await import(pathToFileURL(viteEntry).href);
+
+// The package as an app installs it: built, then linked where both the app's loader and the generated bindings resolve a bare import.
+if (!process.env.UNDRA_SIZE_NO_BUILD) execFileSync(process.execPath, [join(runtime, "scripts", "build.mjs")], { cwd: runtime, stdio: ["ignore", "ignore", "inherit"] });
+const linked = join(project, "node_modules", "@undra", "runtime");
+mkdirSync(dirname(linked), { recursive: true });
+if (existsSync(linked) || lstatSync(linked, { throwIfNoEntry: false })) rmSync(linked, { recursive: true, force: true });
+symlinkSync(runtime, linked, "dir");
 const bindings = JSON.parse(readFileSync(join(project, "generated", "ts", "package.json"), "utf8")).name;
 
 /** Collects each module's rendered (unminified) size per chunk, for `UNDRA_SIZE_MODULES=1`. */
@@ -69,7 +82,6 @@ await vite.build({
   resolve: {
     alias: {
       [bindings]: join(project, "generated", "ts", "src", "index.ts"),
-      "@undra/runtime": join(runtime, "src", "index.ts"),
     },
   },
   build: {
@@ -111,4 +123,12 @@ const lazy = assets
   .filter((f) => f.endsWith(".js"))
   .map((f) => join("assets", f))
   .filter((f) => ![runtimeChunk, bindingsChunk, appChunk].includes(f));
+
+// The number must be of the production flavour: its chunk says no sentence of the development table (a build that resolved the other
+// flavour, or a module that kept its prose, would measure something no production page ships).
+const messages = readFileSync(join(runtime, "src", "messages.ts"), "utf8");
+const sentences = [...messages.matchAll(/^ {2}\d+: "((?:[^"\\]|\\.)*)",/gm)].map((m) => JSON.parse(`"${m[1]}"`)).filter((t) => t.length >= 30 && !t.includes("{"));
+const code = readFileSync(join(out, runtimeChunk), "utf8");
+const leaked = sentences.find((t) => code.includes(t));
+if (leaked !== undefined) throw new Error(`web-size-runtime: the runtime chunk holds a sentence of the development flavour (${JSON.stringify(leaked)}): the package did not resolve to its production build`);
 console.log(JSON.stringify({ runtime: runtimeChunk, bindings: bindingsChunk, app: appChunk, lazy }));

@@ -1,6 +1,7 @@
 import { UndraTransportError } from "../errors.js";
 import { UndraRestoreError } from "../errors-rare.js";
 import type { HostAdapters, HostOptions, WasmHost } from "./wasm-main.js";
+import { msg } from "../messages.js";
 
 /*
  * Snapshot, restore and the twin of the in-process host (ADR-049, ADR-057), as functions over it: a page that never takes a
@@ -11,7 +12,7 @@ import type { HostAdapters, HostOptions, WasmHost } from "./wasm-main.js";
 /** `undra_snapshot`, copied out of wasm memory, at once; throws `UndraTransportError` when the core cannot be asked (closed, trapped, no such export). */
 export function takeSnapshot(host: WasmHost): Uint8Array {
   return host._run((e) => {
-    if (e.undra_snapshot === undefined) throw new UndraTransportError("unsupported", "the core does not export undra_snapshot");
+    if (e.undra_snapshot === undefined) throw new UndraTransportError("unsupported", msg(203));
     return host._takeBuf(e, e.undra_snapshot());
   });
 }
@@ -23,7 +24,7 @@ export function takeSnapshot(host: WasmHost): Uint8Array {
  */
 export function restoreInto(host: WasmHost, bytes: Uint8Array): void {
   const code = host._invoke(bytes, (e, ptr, len) => {
-    if (e.undra_restore === undefined) throw new UndraTransportError("unsupported", "the core does not export undra_restore");
+    if (e.undra_restore === undefined) throw new UndraTransportError("unsupported", msg(204));
     return e.undra_restore(ptr, len);
   });
   if (code !== 0) throw new UndraRestoreError(code);

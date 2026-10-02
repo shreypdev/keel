@@ -1,5 +1,6 @@
 import { UndraError } from "./base-error.js";
 import { UndraReader, ReplyStatus } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * Typed errors of the runtime (docs/SPEC.md section 17.1). Everything the
@@ -26,19 +27,19 @@ function readStrings(body: Uint8Array, count: number): string[] | undefined {
 function describeReply(status: ReplyStatus, body: Uint8Array): string {
   switch (status) {
     case ReplyStatus.Error:
-      return "the call failed with a typed error";
+      return msg(86);
     case ReplyStatus.Panic: {
       const [message] = readStrings(body, 2) ?? [];
-      return message === undefined ? "the core panicked" : `the core panicked: ${message}`;
+      return message === undefined ? msg(87) : msg(88, message);
     }
     case ReplyStatus.Cancelled:
-      return "the call was cancelled";
+      return msg(89);
     case ReplyStatus.BadRequest: {
       const [reason] = readStrings(body, 1) ?? [];
-      return reason === undefined ? "the core rejected the request" : `the core rejected the request: ${reason}`;
+      return reason === undefined ? msg(90) : msg(91, reason);
     }
     default:
-      return `unexpected reply status ${String(status)}`;
+      return msg(92, String(status));
   }
 }
 
@@ -91,7 +92,7 @@ export class UndraModeError extends UndraError {
 
   /** @param operation Name of the attempted operation. @param mode The mode of the core. */
   constructor(operation: string, mode: string) {
-    super("mode", `${operation} is not available in mode '${mode}'`);
+    super("mode", msg(93, operation, mode));
     this.operation = operation;
     this.mode = mode;
   }
@@ -113,7 +114,7 @@ export class UndraSchemaMismatchError extends UndraError {
   constructor(expected: bigint, got: bigint) {
     super(
       "schemaMismatch",
-      `schema mismatch: the bindings expect ${hex64(expected)} but the core reports ${hex64(got)}; regenerate the bindings or rebuild the core`,
+      msg(94, hex64(expected), hex64(got)),
     );
     this.expected = expected;
     this.got = got;
@@ -132,7 +133,7 @@ export class UndraPortError extends UndraError {
 
   /** @param body The encoded error value. */
   constructor(body: Uint8Array) {
-    super("port", "typed port failure");
+    super("port", msg(95));
     this.body = body;
   }
 }

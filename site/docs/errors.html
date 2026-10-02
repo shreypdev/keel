@@ -533,6 +533,271 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <tr><td>core/Cargo.toml pins Undra at tag v999.0.0, newer than this undra (&lt;version&gt;)</td><td><code>undra upgrade</code> moves a project forward only, and a CLI older than the project's runtimes would generate bindings they do not match (ahead is &lt;dir&gt;/ahead)</td><td>update this <code>undra</code> first (<code>curl -fsSL https://shreypdev.github.io/undra/install.sh | sh</code>, <code>brew upgrade undra</code> or <code>npm update -g @undra/cli</code>) and run <code>undra upgrade</code> again</td></tr>
 <tr><td>undra.toml says Undra is at /somewhere/else, but the core's <code>undra</code> dependency is at &lt;repo&gt;</td><td>the library Undra ships is built from the same Undra as the core, and the platform runtimes come from <code>[undra] path</code>; if they differ, the core and the apps would speak different wire formats</td><td>make them agree: set <code>path</code> of the core's <code>undra</code> dependency and <code>[undra] path</code> in undra.toml to the same checkout (or remove <code>[undra] path</code> to use released runtimes)</td></tr>
 </tbody></table></div>
+<h2 id="runtime-messages">Runtime messages<a class="anchor" href="#runtime-messages" aria-label="Link to this section">#</a></h2>
+<p>The JavaScript runtime (<code>@undra/runtime</code>) throws and logs these. Its <strong>production build</strong> (what <code>vite build</code>, webpack in production mode and anything else that asks for neither the <code>development</code> nor the <code>react-native</code> condition resolve) says a code, the values and a link instead of a sentence, so a page does not carry the prose of an error whose class, <code>kind</code> and fields it already has: <code>T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017</code>. Its <strong>development build</strong> (Vite's dev server, Vitest, React Native) says the sentence. Both throw the same classes with the same <code>kind</code> and fields; only <code>message</code> differs, so nothing a program can branch on changes. Codes are never reused.</p>
+<h3 id="runtime-messages-table">The T codes (244)<a class="anchor" href="#runtime-messages-table" aria-label="Link to this section">#</a></h3>
+<p>The sentence is what the development build says; <code>{0}</code>, <code>{1}</code>, ... are the values the production message lists, in that order.</p>
+<div class="table-wrap"><table><thead><tr><th>Code</th><th>The development build says</th><th>Raised by</th></tr></thead><tbody>
+<tr id="T0001"><td><a href="#T0001"><code>T0001</code></a></td><td>unknown {0} variant: {1}</td><td>adapters/codecs.ts: TypeError; adapters/events.ts: RangeError</td></tr>
+<tr id="T0002"><td><a href="#T0002"><code>T0002</code></a></td><td>unknown WsMessage variant: {0}</td><td>adapters/codecs.ts: TypeError</td></tr>
+<tr id="T0003"><td><a href="#T0003"><code>T0003</code></a></td><td>unknown WsError variant: {0}</td><td>adapters/codecs.ts: TypeError</td></tr>
+<tr id="T0004"><td><a href="#T0004"><code>T0004</code></a></td><td>unknown SseError variant: {0}</td><td>adapters/codecs.ts: TypeError</td></tr>
+<tr id="T0005"><td><a href="#T0005"><code>T0005</code></a></td><td>unknown DbValue variant: {0}</td><td>adapters/codecs.ts: TypeError</td></tr>
+<tr id="T0006"><td><a href="#T0006"><code>T0006</code></a></td><td>unknown DbError variant: {0}</td><td>adapters/codecs.ts: TypeError</td></tr>
+<tr id="T0007"><td><a href="#T0007"><code>T0007</code></a></td><td>needs the origin private file system</td><td>adapters/fs.ts: VariableDeclaration</td></tr>
+<tr id="T0008"><td><a href="#T0008"><code>T0008</code></a></td><td>the path is empty</td><td>adapters/fs.ts: FsError.Io</td></tr>
+<tr id="T0009"><td><a href="#T0009"><code>T0009</code></a></td><td>fetch is not available on this platform</td><td>adapters/http.ts: HttpError.Network</td></tr>
+<tr id="T0010"><td><a href="#T0010"><code>T0010</code></a></td><td>could not open IndexedDB database {0}</td><td>adapters/idb.ts: Error</td></tr>
+<tr id="T0011"><td><a href="#T0011"><code>T0011</code></a></td><td>opening IndexedDB database {0} is blocked by another connection</td><td>adapters/idb.ts: Error</td></tr>
+<tr id="T0012"><td><a href="#T0012"><code>T0012</code></a></td><td>IndexedDB request failed</td><td>adapters/idb.ts: Error</td></tr>
+<tr id="T0013"><td><a href="#T0013"><code>T0013</code></a></td><td>IndexedDB transaction failed</td><td>adapters/idb.ts: Error</td></tr>
+<tr id="T0014"><td><a href="#T0014"><code>T0014</code></a></td><td>IndexedDB transaction aborted</td><td>adapters/idb.ts: Error</td></tr>
+<tr id="T0015"><td><a href="#T0015"><code>T0015</code></a></td><td>a stored value is not binary</td><td>adapters/idb.ts: TypeError</td></tr>
+<tr id="T0016"><td><a href="#T0016"><code>T0016</code></a></td><td>{0} is not bytes</td><td>adapters/kv.ts: StorageError.Corrupt</td></tr>
+<tr id="T0017"><td><a href="#T0017"><code>T0017</code></a></td><td>IndexedDB cursor failed</td><td>adapters/kv.ts: Error</td></tr>
+<tr id="T0018"><td><a href="#T0018"><code>T0018</code></a></td><td>namespace {0} is not [a-z][a-z0-9_]{0,31}</td><td>adapters/names.ts: UndraError(&quot;options&quot;)</td></tr>
+<tr id="T0019"><td><a href="#T0019"><code>T0019</code></a></td><td>Rng.fill: {0} bytes requested, the limit is {1}</td><td>adapters/ports.ts: RangeError</td></tr>
+<tr id="T0020"><td><a href="#T0020"><code>T0020</code></a></td><td>{0}: {1} ({2})</td><td>adapters/ports.ts: log</td></tr>
+<tr id="T0021"><td><a href="#T0021"><code>T0021</code></a></td><td>needs a secure context</td><td>adapters/secure.ts: VariableDeclaration</td></tr>
+<tr id="T0022"><td><a href="#T0022"><code>T0022</code></a></td><td>{0} is not in the secure-store format</td><td>adapters/secure.ts: StorageError.Corrupt</td></tr>
+<tr id="T0023"><td><a href="#T0023"><code>T0023</code></a></td><td>{0} does not decrypt</td><td>adapters/secure.ts: StorageError.Corrupt</td></tr>
+<tr id="T0024"><td><a href="#T0024"><code>T0024</code></a></td><td>WebCrypto is required (crypto.getRandomValues)</td><td>adapters/system.ts: VariableDeclaration</td></tr>
+<tr id="T0025"><td><a href="#T0025"><code>T0025</code></a></td><td>a typed error that does not decode ({0} bytes)</td><td>call-error.ts: UndraCallError.Malformed</td></tr>
+<tr id="T0026"><td><a href="#T0026"><code>T0026</code></a></td><td>a stream without an error type ended with a typed error item ({0} bytes)</td><td>call-error.ts: UndraCallError.Malformed</td></tr>
+<tr id="T0027"><td><a href="#T0027"><code>T0027</code></a></td><td>an unexpected failure: {0}</td><td>call-error.ts: UndraCallError.Malformed</td></tr>
+<tr id="T0028"><td><a href="#T0028"><code>T0028</code></a></td><td>the Undra core cancelled the call (a restore replaced its object, or the core shut down)</td><td>call-error.ts: super(&quot;cancelledByCore&quot;)</td></tr>
+<tr id="T0029"><td><a href="#T0029"><code>T0029</code></a></td><td>the Undra core panicked: {0}</td><td>call-error.ts: super(&quot;panicked&quot;)</td></tr>
+<tr id="T0030"><td><a href="#T0030"><code>T0030</code></a></td><td>the Undra core refused the call: {0}</td><td>call-error.ts: super(&quot;refused&quot;)</td></tr>
+<tr id="T0031"><td><a href="#T0031"><code>T0031</code></a></td><td>the Undra core is unavailable: {0}</td><td>call-error.ts: super(&quot;unavailable&quot;)</td></tr>
+<tr id="T0032"><td><a href="#T0032"><code>T0032</code></a></td><td>the Undra core sent a reply the bindings cannot read: {0}</td><td>call-error.ts: BinaryExpression</td></tr>
+<tr id="T0033"><td><a href="#T0033"><code>T0033</code></a></td><td>{0} failed: {1}</td><td>call-error.ts: super(&quot;unhandled&quot;); worker.ts: log</td></tr>
+<tr id="T0034"><td><a href="#T0034"><code>T0034</code></a></td><td>the reply does not decode: {0}</td><td>call-error.ts: UndraCallError.Malformed</td></tr>
+<tr id="T0035"><td><a href="#T0035"><code>T0035</code></a></td><td>a port implementation's typed failure reached a call</td><td>call-error.ts: UndraCallError.Malformed</td></tr>
+<tr id="T0036"><td><a href="#T0036"><code>T0036</code></a></td><td>the core answered with a typed error, but this method has none ({0} bytes)</td><td>call-error.ts: UndraCallError.Malformed</td></tr>
+<tr id="T0037"><td><a href="#T0037"><code>T0037</code></a></td><td>the core opened a stream where a single reply was expected</td><td>call-error.ts: UndraCallError.Malformed</td></tr>
+<tr id="T0038"><td><a href="#T0038"><code>T0038</code></a></td><td>the core answered with status {0} as a failure</td><td>call-error.ts: UndraCallError.Malformed</td></tr>
+<tr id="T0039"><td><a href="#T0039"><code>T0039</code></a></td><td>u64 out of range: {0}</td><td>call-head.ts: RangeError</td></tr>
+<tr id="T0040"><td><a href="#T0040"><code>T0040</code></a></td><td>a bare CallTarget must be FreeFunction; pass { target, handle } for a method</td><td>call-head.ts: TypeError</td></tr>
+<tr id="T0041"><td><a href="#T0041"><code>T0041</code></a></td><td>u32 out of range: {0}</td><td>call-head.ts: RangeError</td></tr>
+<tr id="T0042"><td><a href="#T0042"><code>T0042</code></a></td><td>the callback's target was garbage-collected</td><td>callbacks.ts: UndraError(&quot;state&quot;)</td></tr>
+<tr id="T0043"><td><a href="#T0043"><code>T0043</code></a></td><td>callback instance {0} was released more often than it was lent</td><td>callbacks.ts: UndraError(&quot;state&quot;)</td></tr>
+<tr id="T0044"><td><a href="#T0044"><code>T0044</code></a></td><td>the core is not loaded: load it at app startup (the bindings' Undra&lt;Namespace&gt;.load(...), or UndraCore.load(...)), before creating any Undra object, or pass a core explicitly</td><td>core.ts: VariableDeclaration</td></tr>
+<tr id="T0045"><td><a href="#T0045"><code>T0045</code></a></td><td>The operation was aborted</td><td>core.ts: Error</td></tr>
+<tr id="T0046"><td><a href="#T0046"><code>T0046</code></a></td><td>a core was used while it is not loaded (before its load(...) succeeded, or after it was closed); calls on it reject with UndraCallError.Unavailable. Load the core at app startup, before creating any Undra object.</td><td>core.ts: log</td></tr>
+<tr id="T0047"><td><a href="#T0047"><code>T0047</code></a></td><td>mode 'wasm-main' needs the <code>wasm</code> option</td><td>core.ts: UndraError(&quot;options&quot;)</td></tr>
+<tr id="T0048"><td><a href="#T0048"><code>T0048</code></a></td><td>import failed: {0}</td><td>core.ts: log</td></tr>
+<tr id="T0049"><td><a href="#T0049"><code>T0049</code></a></td><td>unknown mode '{0}'</td><td>core.ts: UndraError(&quot;options&quot;)</td></tr>
+<tr id="T0050"><td><a href="#T0050"><code>T0050</code></a></td><td>the core is closed</td><td>core.ts: PropertyDeclaration; core.ts: UndraTransportError(&quot;closed&quot;); transport/wasm-main.ts: UndraTransportError(&quot;closed&quot;); ...</td></tr>
+<tr id="T0051"><td><a href="#T0051"><code>T0051</code></a></td><td>the core returned a truncated reply</td><td>core.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0052"><td><a href="#T0052"><code>T0052</code></a></td><td>the core returned the null handle for a constructor</td><td>core.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0053"><td><a href="#T0053"><code>T0053</code></a></td><td>{0} (the connection to the core is down: see UndraCore.connection)</td><td>core.ts: log</td></tr>
+<tr id="T0054"><td><a href="#T0054"><code>T0054</code></a></td><td>the onError handler threw while handling &quot;{0}&quot;: {1}</td><td>core.ts: log</td></tr>
+<tr id="T0055"><td><a href="#T0055"><code>T0055</code></a></td><td>the core was closed</td><td>core.ts: UndraTransportError(&quot;closed&quot;)</td></tr>
+<tr id="T0056"><td><a href="#T0056"><code>T0056</code></a></td><td>the core sent a truncated reply</td><td>core.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0057"><td><a href="#T0057"><code>T0057</code></a></td><td>the core sent reply status {0}</td><td>core.ts: UndraTransportError(&quot;protocol&quot;); stream-support.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0058"><td><a href="#T0058"><code>T0058</code></a></td><td>this method is a stream; call it with UndraCore.stream</td><td>core.ts: UndraError(&quot;state&quot;)</td></tr>
+<tr id="T0059"><td><a href="#T0059"><code>T0059</code></a></td><td>this database worker keeps the databases of the core <code>{0}</code> ({1}), not those of <code>{2}</code>: give each core its own waSqliteDb(), or set <code>directory</code></td><td>db-worker.ts: DbError.Unavailable</td></tr>
+<tr id="T0060"><td><a href="#T0060"><code>T0060</code></a></td><td>wa-sqlite could not start ({0}): {1}</td><td>db-worker.ts: DbError.Unavailable</td></tr>
+<tr id="T0061"><td><a href="#T0061"><code>T0061</code></a></td><td>invalid database name {0}: use 1 to 64 of A-Z a-z 0-9 . _ - (not starting with .), or &quot;:memory:&quot;</td><td>db/binding.ts: DbError.Unavailable</td></tr>
+<tr id="T0062"><td><a href="#T0062"><code>T0062</code></a></td><td>migration versions must strictly increase, starting at 1</td><td>db/binding.ts: DbError.Migration</td></tr>
+<tr id="T0063"><td><a href="#T0063"><code>T0063</code></a></td><td>migration versions must be at most {0}: SQLite keeps the version in a signed 32-bit integer (PRAGMA user_version)</td><td>db/binding.ts: DbError.Migration</td></tr>
+<tr id="T0064"><td><a href="#T0064"><code>T0064</code></a></td><td>no open database or transaction {0}</td><td>db/binding.ts: DbError.Unavailable</td></tr>
+<tr id="T0065"><td><a href="#T0065"><code>T0065</code></a></td><td>transaction {0} is over</td><td>db/binding.ts: DbError.Unavailable</td></tr>
+<tr id="T0066"><td><a href="#T0066"><code>T0066</code></a></td><td>the database is at version {0}, newer than the newest migration ({1})</td><td>db/binding.ts: DbError.Migration</td></tr>
+<tr id="T0067"><td><a href="#T0067"><code>T0067</code></a></td><td>the core went away while the database opened</td><td>db/binding.ts: DbError.Unavailable</td></tr>
+<tr id="T0068"><td><a href="#T0068"><code>T0068</code></a></td><td>a transaction cannot begin inside a transaction</td><td>db/binding.ts: DbError.Sql</td></tr>
+<tr id="T0069"><td><a href="#T0069"><code>T0069</code></a></td><td>node:sqlite returned a value of an unknown kind ({0})</td><td>db/node-sqlite.ts: DbError.Sql</td></tr>
+<tr id="T0070"><td><a href="#T0070"><code>T0070</code></a></td><td>the database is closed</td><td>db/node-sqlite.ts: DbError.Unavailable; db/wa-sqlite-engine.ts: DbError.Unavailable</td></tr>
+<tr id="T0071"><td><a href="#T0071"><code>T0071</code></a></td><td>the SQL holds no statement</td><td>db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql</td></tr>
+<tr id="T0072"><td><a href="#T0072"><code>T0072</code></a></td><td>only one statement per call: use a migration for several</td><td>db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql</td></tr>
+<tr id="T0073"><td><a href="#T0073"><code>T0073</code></a></td><td>the statement has {0} parameters, {1} were given</td><td>db/node-sqlite.ts: DbError.Sql; db/wa-sqlite-engine.ts: DbError.Sql</td></tr>
+<tr id="T0074"><td><a href="#T0074"><code>T0074</code></a></td><td>node:sqlite is not available (Node 22.5 or later): {0}</td><td>db/node-sqlite.ts: DbError.Unavailable</td></tr>
+<tr id="T0075"><td><a href="#T0075"><code>T0075</code></a></td><td>cannot create {0}: {1}</td><td>db/node-sqlite.ts: DbError.Unavailable</td></tr>
+<tr id="T0076"><td><a href="#T0076"><code>T0076</code></a></td><td>the database worker has no connection {0}</td><td>db/protocol.ts: DbError.Unavailable</td></tr>
+<tr id="T0077"><td><a href="#T0077"><code>T0077</code></a></td><td>the database worker failed{0}</td><td>db/protocol.ts: fail</td></tr>
+<tr id="T0078"><td><a href="#T0078"><code>T0078</code></a></td><td>the database worker sent a message that could not be read</td><td>db/protocol.ts: fail</td></tr>
+<tr id="T0079"><td><a href="#T0079"><code>T0079</code></a></td><td>the database worker could not start: {0}</td><td>db/protocol.ts: fail</td></tr>
+<tr id="T0080"><td><a href="#T0080"><code>T0080</code></a></td><td>the database worker cannot take the call: {0}</td><td>db/protocol.ts: DbError.Unavailable</td></tr>
+<tr id="T0081"><td><a href="#T0081"><code>T0081</code></a></td><td>parameter {0} is out of range</td><td>db/wa-sqlite-engine.ts: sqliteError</td></tr>
+<tr id="T0082"><td><a href="#T0082"><code>T0082</code></a></td><td>parameter {0} could not be bound</td><td>db/wa-sqlite-engine.ts: sqliteError</td></tr>
+<tr id="T0083"><td><a href="#T0083"><code>T0083</code></a></td><td>this platform has no Worker: pass <code>worker</code></td><td>db/wa-sqlite.ts: Error</td></tr>
+<tr id="T0084"><td><a href="#T0084"><code>T0084</code></a></td><td>the dev server no longer has this core's objects (it was restarted, or the session expired); load a new core</td><td>errors-rare.ts: Parameter</td></tr>
+<tr id="T0085"><td><a href="#T0085"><code>T0085</code></a></td><td>the Undra core rejected the snapshot (code {0}); a rejected restore leaves the core unchanged</td><td>errors-rare.ts: super(&quot;restore&quot;)</td></tr>
+<tr id="T0086"><td><a href="#T0086"><code>T0086</code></a></td><td>the call failed with a typed error</td><td>errors.ts: ReturnStatement</td></tr>
+<tr id="T0087"><td><a href="#T0087"><code>T0087</code></a></td><td>the core panicked</td><td>errors.ts: ConditionalExpression</td></tr>
+<tr id="T0088"><td><a href="#T0088"><code>T0088</code></a></td><td>the core panicked: {0}</td><td>errors.ts: ConditionalExpression</td></tr>
+<tr id="T0089"><td><a href="#T0089"><code>T0089</code></a></td><td>the call was cancelled</td><td>errors.ts: ReturnStatement</td></tr>
+<tr id="T0090"><td><a href="#T0090"><code>T0090</code></a></td><td>the core rejected the request</td><td>errors.ts: ConditionalExpression</td></tr>
+<tr id="T0091"><td><a href="#T0091"><code>T0091</code></a></td><td>the core rejected the request: {0}</td><td>errors.ts: ConditionalExpression</td></tr>
+<tr id="T0092"><td><a href="#T0092"><code>T0092</code></a></td><td>unexpected reply status {0}</td><td>errors.ts: ReturnStatement</td></tr>
+<tr id="T0093"><td><a href="#T0093"><code>T0093</code></a></td><td>{0} is not available in mode '{1}'</td><td>errors.ts: super(&quot;mode&quot;)</td></tr>
+<tr id="T0094"><td><a href="#T0094"><code>T0094</code></a></td><td>schema mismatch: the bindings expect {0} but the core reports {1}; regenerate the bindings or rebuild the core</td><td>errors.ts: super(&quot;schemaMismatch&quot;)</td></tr>
+<tr id="T0095"><td><a href="#T0095"><code>T0095</code></a></td><td>typed port failure</td><td>errors.ts: super(&quot;port&quot;)</td></tr>
+<tr id="T0096"><td><a href="#T0096"><code>T0096</code></a></td><td>the core sent the null handle where an object was expected</td><td>identity.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0097"><td><a href="#T0097"><code>T0097</code></a></td><td>the core sent option tag {0}</td><td>identity.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0098"><td><a href="#T0098"><code>T0098</code></a></td><td>{0} belongs to another core: pass an object of the core the call goes to</td><td>identity.ts: UndraCallError.Refused</td></tr>
+<tr id="T0099"><td><a href="#T0099"><code>T0099</code></a></td><td>{0} must be an integer between 1 and {1}, not {2}</td><td>lazy.ts: RangeError</td></tr>
+<tr id="T0100"><td><a href="#T0100"><code>T0100</code></a></td><td>a lazy list was invalidated before its value (and so its page server) reached the host</td><td>lazy.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0101"><td><a href="#T0101"><code>T0101</code></a></td><td>the core sent {0} rows for page {1} of a list of {2}, which holds {3}</td><td>lazy.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0102"><td><a href="#T0102"><code>T0102</code></a></td><td>the core sent a list length of {0} at version {1}, which it told us had {2}</td><td>lazy.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0103"><td><a href="#T0103"><code>T0103</code></a></td><td>the core keeps answering page {0} at version {1}, older than the list's {2}</td><td>lazy.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0104"><td><a href="#T0104"><code>T0104</code></a></td><td>no change-set arrived for signal {0} of handle {1} within {2} ms; is the handle a live store?</td><td>mirror-waiters.ts: UndraError(&quot;observe&quot;)</td></tr>
+<tr id="T0105"><td><a href="#T0105"><code>T0105</code></a></td><td>handle {0} is already registered with the mirror</td><td>mirror.ts: UndraError(&quot;state&quot;)</td></tr>
+<tr id="T0106"><td><a href="#T0106"><code>T0106</code></a></td><td>the mirror applied {0} rounds of change-sets in one flush: a signal subscriber keeps causing changes to a store it observes</td><td>mirror.ts: UndraError(&quot;state&quot;)</td></tr>
+<tr id="T0107"><td><a href="#T0107"><code>T0107</code></a></td><td>a keyed patch for signal {0} of handle {1} has no operation count; the signal is re-observed</td><td>mirror.ts: UndraError(&quot;state&quot;)</td></tr>
+<tr id="T0108"><td><a href="#T0108"><code>T0108</code></a></td><td>this mirror has no observe waiters: the core installs them for a transport that answers later (mirrorWaiters)</td><td>mirror.ts: UndraError(&quot;state&quot;)</td></tr>
+<tr id="T0109"><td><a href="#T0109"><code>T0109</code></a></td><td>{0} needs Node; this is not Node</td><td>node-builtin.ts: ConditionalExpression</td></tr>
+<tr id="T0110"><td><a href="#T0110"><code>T0110</code></a></td><td>{0} needs Node 20.16 or 22.3 or later (process.getBuiltinModule); this is Node {1}</td><td>node-builtin.ts: ConditionalExpression</td></tr>
+<tr id="T0111"><td><a href="#T0111"><code>T0111</code></a></td><td>this Node has no {0}</td><td>node-builtin.ts: Error</td></tr>
+<tr id="T0112"><td><a href="#T0112"><code>T0112</code></a></td><td>the runtime's {0} could not be loaded: {1}</td><td>on-demand.ts: UndraTransportError(&quot;closed&quot;)</td></tr>
+<tr id="T0113"><td><a href="#T0113"><code>T0113</code></a></td><td>{0} method 0x{1}</td><td>port-dispatch.ts: ReturnStatement</td></tr>
+<tr id="T0114"><td><a href="#T0114"><code>T0114</code></a></td><td>this platform cannot send WebSocket headers: put the credential in the URL or a subprotocol</td><td>realtime/browser-websocket.ts: VariableDeclaration</td></tr>
+<tr id="T0115"><td><a href="#T0115"><code>T0115</code></a></td><td>the core did not keep up</td><td>realtime/browser-websocket.ts: VariableDeclaration</td></tr>
+<tr id="T0116"><td><a href="#T0116"><code>T0116</code></a></td><td>a binary message arrived as a Blob: the platform ignored binaryType &quot;arraybuffer&quot;</td><td>realtime/browser-websocket.ts: WsError.Protocol</td></tr>
+<tr id="T0117"><td><a href="#T0117"><code>T0117</code></a></td><td>the connection dropped without a close frame (1006)</td><td>realtime/browser-websocket.ts: WsError.Network</td></tr>
+<tr id="T0118"><td><a href="#T0118"><code>T0118</code></a></td><td>the WebSocket is not open</td><td>realtime/browser-websocket.ts: WsError.Network; realtime/node-websocket.ts: WsError.Network</td></tr>
+<tr id="T0119"><td><a href="#T0119"><code>T0119</code></a></td><td>the connection closed while a message was queued</td><td>realtime/browser-websocket.ts: WsError.Network; realtime/node-websocket.ts: WsError.Network</td></tr>
+<tr id="T0120"><td><a href="#T0120"><code>T0120</code></a></td><td>this platform has no WebSocket</td><td>realtime/browser-websocket.ts: WsError.Refused</td></tr>
+<tr id="T0121"><td><a href="#T0121"><code>T0121</code></a></td><td>the WebSocket could not connect</td><td>realtime/browser-websocket.ts: VariableDeclaration</td></tr>
+<tr id="T0122"><td><a href="#T0122"><code>T0122</code></a></td><td>the events of this stream were already taken</td><td>realtime/fetch-sse.ts: TypeError</td></tr>
+<tr id="T0123"><td><a href="#T0123"><code>T0123</code></a></td><td>the event stream is not UTF-8</td><td>realtime/fetch-sse.ts: SseError.Protocol</td></tr>
+<tr id="T0124"><td><a href="#T0124"><code>T0124</code></a></td><td>this platform has no fetch</td><td>realtime/fetch-sse.ts: SseError.Refused</td></tr>
+<tr id="T0125"><td><a href="#T0125"><code>T0125</code></a></td><td>the server answered {0}{1}</td><td>realtime/fetch-sse.ts: SseError.Refused</td></tr>
+<tr id="T0126"><td><a href="#T0126"><code>T0126</code></a></td><td>expected text/event-stream, got {0}</td><td>realtime/fetch-sse.ts: SseError.Protocol</td></tr>
+<tr id="T0127"><td><a href="#T0127"><code>T0127</code></a></td><td>the answer has no body</td><td>realtime/fetch-sse.ts: SseError.Protocol</td></tr>
+<tr id="T0128"><td><a href="#T0128"><code>T0128</code></a></td><td>the messages of this connection were already taken</td><td>realtime/inbox.ts: TypeError</td></tr>
+<tr id="T0129"><td><a href="#T0129"><code>T0129</code></a></td><td>a next() is already pending</td><td>realtime/inbox.ts: TypeError</td></tr>
+<tr id="T0130"><td><a href="#T0130"><code>T0130</code></a></td><td>ByteQueue.at past the end</td><td>realtime/node-websocket.ts: RangeError</td></tr>
+<tr id="T0131"><td><a href="#T0131"><code>T0131</code></a></td><td>the connection dropped without a close frame</td><td>realtime/node-websocket.ts: this.#dropped</td></tr>
+<tr id="T0132"><td><a href="#T0132"><code>T0132</code></a></td><td>a frame has reserved bits set</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0133"><td><a href="#T0133"><code>T0133</code></a></td><td>the server masked a frame</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0134"><td><a href="#T0134"><code>T0134</code></a></td><td>a frame of {0} bytes is larger than the limit ({1})</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0135"><td><a href="#T0135"><code>T0135</code></a></td><td>a control frame is fragmented or longer than 125 bytes</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0136"><td><a href="#T0136"><code>T0136</code></a></td><td>unknown control opcode {0}</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0137"><td><a href="#T0137"><code>T0137</code></a></td><td>a new message started inside a fragmented one</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0138"><td><a href="#T0138"><code>T0138</code></a></td><td>a continuation frame without a message</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0139"><td><a href="#T0139"><code>T0139</code></a></td><td>unknown data opcode {0}</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0140"><td><a href="#T0140"><code>T0140</code></a></td><td>a message is larger than the limit ({0} bytes)</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0141"><td><a href="#T0141"><code>T0141</code></a></td><td>a text message is not UTF-8</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0142"><td><a href="#T0142"><code>T0142</code></a></td><td>a close frame with a one-byte payload</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0143"><td><a href="#T0143"><code>T0143</code></a></td><td>a close reason is not UTF-8</td><td>realtime/node-websocket.ts: this.#fail</td></tr>
+<tr id="T0144"><td><a href="#T0144"><code>T0144</code></a></td><td>invalid URL: {0}</td><td>realtime/node-websocket.ts: WsError.Refused; realtime/sse.ts: SseError.Refused; realtime/websocket.ts: WsError.Refused</td></tr>
+<tr id="T0145"><td><a href="#T0145"><code>T0145</code></a></td><td>nodeWebSocket needs Node ({0})</td><td>realtime/node-websocket.ts: WsError.Refused</td></tr>
+<tr id="T0146"><td><a href="#T0146"><code>T0146</code></a></td><td>the server's Sec-WebSocket-Accept does not match the key</td><td>realtime/node-websocket.ts: WsError.Protocol</td></tr>
+<tr id="T0147"><td><a href="#T0147"><code>T0147</code></a></td><td>the server chose a subprotocol that was not offered: {0}</td><td>realtime/node-websocket.ts: WsError.Protocol</td></tr>
+<tr id="T0148"><td><a href="#T0148"><code>T0148</code></a></td><td>the server answered the upgrade with {0} {1}</td><td>realtime/node-websocket.ts: PropertyAccessExpression</td></tr>
+<tr id="T0149"><td><a href="#T0149"><code>T0149</code></a></td><td>no event stream {0}</td><td>realtime/sse.ts: SseError.Network</td></tr>
+<tr id="T0150"><td><a href="#T0150"><code>T0150</code></a></td><td>a next is already pending on stream {0}</td><td>realtime/sse.ts: SseError.Protocol</td></tr>
+<tr id="T0151"><td><a href="#T0151"><code>T0151</code></a></td><td>the core went away while the stream opened</td><td>realtime/sse.ts: SseError.Network</td></tr>
+<tr id="T0152"><td><a href="#T0152"><code>T0152</code></a></td><td>no WebSocket connection {0}</td><td>realtime/websocket.ts: WsError.Network</td></tr>
+<tr id="T0153"><td><a href="#T0153"><code>T0153</code></a></td><td>a receive is already pending on connection {0}</td><td>realtime/websocket.ts: WsError.Protocol</td></tr>
+<tr id="T0154"><td><a href="#T0154"><code>T0154</code></a></td><td>the connection ended</td><td>realtime/websocket.ts: WsError.Network</td></tr>
+<tr id="T0155"><td><a href="#T0155"><code>T0155</code></a></td><td>the core went away while the connection opened</td><td>realtime/websocket.ts: WsError.Network</td></tr>
+<tr id="T0156"><td><a href="#T0156"><code>T0156</code></a></td><td>the wasm core trapped and was restarted from its last snapshot; this call may or may not have run before the trap, and it is not retried ({0})</td><td>recovery.ts: UndraTransportError(&quot;restarted&quot;)</td></tr>
+<tr id="T0157"><td><a href="#T0157"><code>T0157</code></a></td><td>the wasm core trapped ({0}) and was restarted from no snapshot</td><td>recovery.ts: BinaryExpression</td></tr>
+<tr id="T0158"><td><a href="#T0158"><code>T0158</code></a></td><td>a snapshot of {0} bytes was not kept for crash recovery: it is larger than maxSnapshotBytes ({1}); the previous one stays (said once)</td><td>recovery.ts: log</td></tr>
+<tr id="T0159"><td><a href="#T0159"><code>T0159</code></a></td><td>a snapshot for crash recovery failed: {0}</td><td>recovery.ts: log</td></tr>
+<tr id="T0160"><td><a href="#T0160"><code>T0160</code></a></td><td>the core refused its last snapshot (code {0}) after the restart; it runs without its stores</td><td>recovery.ts: log</td></tr>
+<tr id="T0161"><td><a href="#T0161"><code>T0161</code></a></td><td>this crashRecovery() already belongs to a core: make one per core</td><td>recovery.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0162"><td><a href="#T0162"><code>T0162</code></a></td><td>the wasm core is restarting after a trap</td><td>recovery.ts: UndraTransportError(&quot;restarted&quot;)</td></tr>
+<tr id="T0163"><td><a href="#T0163"><code>T0163</code></a></td><td>the wasm core could not be restarted: {0}</td><td>recovery.ts: this.#log</td></tr>
+<tr id="T0164"><td><a href="#T0164"><code>T0164</code></a></td><td>{0}: {1} call(s) in flight failed, {2} object(s) went stale</td><td>recovery.ts: this.#log</td></tr>
+<tr id="T0165"><td><a href="#T0165"><code>T0165</code></a></td><td>the onCoreRestarted handler threw: {0}</td><td>recovery.ts: this.#log</td></tr>
+<tr id="T0166"><td><a href="#T0166"><code>T0166</code></a></td><td>re-creating a query handle after a restart (type 0x{0})</td><td>recovery.ts: core.report</td></tr>
+<tr id="T0167"><td><a href="#T0167"><code>T0167</code></a></td><td>observing a re-created query handle after a restart</td><td>recovery.ts: core.report</td></tr>
+<tr id="T0168"><td><a href="#T0168"><code>T0168</code></a></td><td>the core answered a stream call with a plain result</td><td>stream-support.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0169"><td><a href="#T0169"><code>T0169</code></a></td><td>the core sent a truncated stream item</td><td>stream-support.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0170"><td><a href="#T0170"><code>T0170</code></a></td><td>the core sent a malformed stream failure: {0}</td><td>stream-support.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0171"><td><a href="#T0171"><code>T0171</code></a></td><td>the core sent stream flag {0}</td><td>stream-support.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0172"><td><a href="#T0172"><code>T0172</code></a></td><td>could not grant stream credit</td><td>stream.ts: UndraError(&quot;state&quot;)</td></tr>
+<tr id="T0173"><td><a href="#T0173"><code>T0173</code></a></td><td>adapters.{0} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports</td><td>transport/framed.ts: log</td></tr>
+<tr id="T0174"><td><a href="#T0174"><code>T0174</code></a></td><td>the connection to the core was lost ({0}); reconnecting</td><td>transport/framed.ts: UndraTransportError(&quot;closed&quot;)</td></tr>
+<tr id="T0175"><td><a href="#T0175"><code>T0175</code></a></td><td>this platform has no WebSocket; pass <code>webSocket</code> to use another implementation</td><td>transport/remote.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0176"><td><a href="#T0176"><code>T0176</code></a></td><td>could not connect to {0}: {1}</td><td>transport/remote.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0177"><td><a href="#T0177"><code>T0177</code></a></td><td>could not send Hello: {0}</td><td>transport/remote.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0178"><td><a href="#T0178"><code>T0178</code></a></td><td>the core sent a text message; Undra speaks binary envelopes</td><td>transport/remote.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0179"><td><a href="#T0179"><code>T0179</code></a></td><td>the connection to {0} closed (code {1}{2})</td><td>transport/remote.ts: VariableDeclaration</td></tr>
+<tr id="T0180"><td><a href="#T0180"><code>T0180</code></a></td><td>{0} before the core answered Hello</td><td>transport/remote.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0181"><td><a href="#T0181"><code>T0181</code></a></td><td>could not connect to {0}</td><td>transport/remote.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0182"><td><a href="#T0182"><code>T0182</code></a></td><td>{0} did not complete the Hello exchange within {1} ms</td><td>transport/remote.ts: UndraTransportError(&quot;timeout&quot;)</td></tr>
+<tr id="T0183"><td><a href="#T0183"><code>T0183</code></a></td><td>the connection is closed</td><td>transport/remote.ts: ConditionalExpression</td></tr>
+<tr id="T0184"><td><a href="#T0184"><code>T0184</code></a></td><td>the core is not connected</td><td>transport/remote.ts: ConditionalExpression</td></tr>
+<tr id="T0185"><td><a href="#T0185"><code>T0185</code></a></td><td>the core is not connected: reconnecting</td><td>transport/remote.ts: ConditionalExpression</td></tr>
+<tr id="T0186"><td><a href="#T0186"><code>T0186</code></a></td><td>expected Hello from the core, got {0}</td><td>transport/remote.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0187"><td><a href="#T0187"><code>T0187</code></a></td><td>bad Hello from the core: {0}</td><td>transport/remote.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0188"><td><a href="#T0188"><code>T0188</code></a></td><td>bad message from the core: {0}</td><td>transport/remote.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0189"><td><a href="#T0189"><code>T0189</code></a></td><td>mode 'remote' needs the <code>url</code> option</td><td>transport/remote.ts: UndraError(&quot;options&quot;)</td></tr>
+<tr id="T0190"><td><a href="#T0190"><code>T0190</code></a></td><td>cannot send a {0} message to a wasm core</td><td>transport/wasm-main-transport.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0191"><td><a href="#T0191"><code>T0191</code></a></td><td>the core refused the call (undra_call returned {0})</td><td>transport/wasm-main.ts: encodeValue</td></tr>
+<tr id="T0192"><td><a href="#T0192"><code>T0192</code></a></td><td>undra_alloc({0}) returned 0 instead of trapping</td><td>transport/wasm-main.ts: Error</td></tr>
+<tr id="T0193"><td><a href="#T0193"><code>T0193</code></a></td><td>WebAssembly is not available on this platform</td><td>transport/wasm-main.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0194"><td><a href="#T0194"><code>T0194</code></a></td><td>GET {0} answered {1}</td><td>transport/wasm-main.ts: Error</td></tr>
+<tr id="T0195"><td><a href="#T0195"><code>T0195</code></a></td><td>could not instantiate the wasm core: {0}</td><td>transport/wasm-main.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0196"><td><a href="#T0196"><code>T0196</code></a></td><td>the module is not an Undra core: it does not export {0}</td><td>transport/wasm-main.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0197"><td><a href="#T0197"><code>T0197</code></a></td><td>the core speaks wasm ABI {0}, this runtime speaks {1}</td><td>transport/wasm-main.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0198"><td><a href="#T0198"><code>T0198</code></a></td><td>undra_init failed with code {0}</td><td>transport/wasm-main.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0199"><td><a href="#T0199"><code>T0199</code></a></td><td>the core handed out [{0}, {1}) beyond its {2} bytes of memory</td><td>transport/wasm-main.ts: RangeError</td></tr>
+<tr id="T0200"><td><a href="#T0200"><code>T0200</code></a></td><td>the core returned a null UndraBuf</td><td>transport/wasm-main.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0201"><td><a href="#T0201"><code>T0201</code></a></td><td>the core is not started</td><td>transport/wasm-main.ts: ConditionalExpression; transport/wasm-worker.ts: ConditionalExpression</td></tr>
+<tr id="T0202"><td><a href="#T0202"><code>T0202</code></a></td><td>the wasm core trapped: {0}</td><td>transport/wasm-main.ts: UndraTransportError(&quot;trap&quot;)</td></tr>
+<tr id="T0203"><td><a href="#T0203"><code>T0203</code></a></td><td>the core does not export undra_snapshot</td><td>transport/wasm-snapshot.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0204"><td><a href="#T0204"><code>T0204</code></a></td><td>the core does not export undra_restore</td><td>transport/wasm-snapshot.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0205"><td><a href="#T0205"><code>T0205</code></a></td><td>the worker gave an incomplete answer</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0206"><td><a href="#T0206"><code>T0206</code></a></td><td>worker.ports needs this @undra/runtime's worker script (protocol 3)</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0207"><td><a href="#T0207"><code>T0207</code></a></td><td>the worker sent an <code>envelopes</code> message without a list of envelopes</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0208"><td><a href="#T0208"><code>T0208</code></a></td><td>worker error: {0}</td><td>transport/wasm-worker.ts: UndraTransportError</td></tr>
+<tr id="T0209"><td><a href="#T0209"><code>T0209</code></a></td><td>the worker sent a message that could not be deserialised</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0210"><td><a href="#T0210"><code>T0210</code></a></td><td>the worker did not start within {0} ms</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;timeout&quot;)</td></tr>
+<tr id="T0211"><td><a href="#T0211"><code>T0211</code></a></td><td>could not reach the worker: {0}</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;handshake&quot;); transport/wasm-worker.ts: UndraTransportError(&quot;closed&quot;)</td></tr>
+<tr id="T0212"><td><a href="#T0212"><code>T0212</code></a></td><td>the worker script cannot {0}: rebuild it with this @undra/runtime</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0213"><td><a href="#T0213"><code>T0213</code></a></td><td>this platform has no Worker; pass <code>worker</code> to run the core on one</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0214"><td><a href="#T0214"><code>T0214</code></a></td><td>bad message from the worker: {0}</td><td>transport/wasm-worker.ts: UndraTransportError(&quot;protocol&quot;)</td></tr>
+<tr id="T0215"><td><a href="#T0215"><code>T0215</code></a></td><td>{0} is synchronous: in wasm-worker mode, register it in LoadOptions.worker.ports</td><td>transport/wasm-worker.ts: ReturnStatement</td></tr>
+<tr id="T0216"><td><a href="#T0216"><code>T0216</code></a></td><td>mode 'wasm-worker' needs the <code>wasm</code> option</td><td>transport/wasm-worker.ts: UndraError(&quot;options&quot;)</td></tr>
+<tr id="T0217"><td><a href="#T0217"><code>T0217</code></a></td><td>a decimal's scale is an integer from 0 to {0}, got {1}</td><td>wire/decimal.ts: RangeError</td></tr>
+<tr id="T0218"><td><a href="#T0218"><code>T0218</code></a></td><td>a decimal's mantissa must fit a signed 128-bit integer</td><td>wire/decimal.ts: RangeError</td></tr>
+<tr id="T0219"><td><a href="#T0219"><code>T0219</code></a></td><td>not a decimal: {0}</td><td>wire/decimal.ts: SyntaxError</td></tr>
+<tr id="T0220"><td><a href="#T0220"><code>T0220</code></a></td><td>unknown envelope kind: {0}</td><td>wire/envelope.ts: RangeError</td></tr>
+<tr id="T0221"><td><a href="#T0221"><code>T0221</code></a></td><td>envelope seq out of range: {0}</td><td>wire/envelope.ts: RangeError</td></tr>
+<tr id="T0222"><td><a href="#T0222"><code>T0222</code></a></td><td>envelope schema hash out of range: {0}</td><td>wire/envelope.ts: RangeError</td></tr>
+<tr id="T0223"><td><a href="#T0223"><code>T0223</code></a></td><td>raw length out of range: {0}</td><td>wire/reader.ts: RangeError</td></tr>
+<tr id="T0224"><td><a href="#T0224"><code>T0224</code></a></td><td>handle index out of range: {0}</td><td>wire/types.ts: RangeError</td></tr>
+<tr id="T0225"><td><a href="#T0225"><code>T0225</code></a></td><td>handle generation out of range: {0}</td><td>wire/types.ts: RangeError</td></tr>
+<tr id="T0226"><td><a href="#T0226"><code>T0226</code></a></td><td>handle out of range: {0}</td><td>wire/types.ts: RangeError</td></tr>
+<tr id="T0227"><td><a href="#T0227"><code>T0227</code></a></td><td>cannot convert an invalid Date to a Timestamp</td><td>wire/types.ts: RangeError</td></tr>
+<tr id="T0228"><td><a href="#T0228"><code>T0228</code></a></td><td>timestamp {0} is outside the range of a Date</td><td>wire/types.ts: RangeError</td></tr>
+<tr id="T0229"><td><a href="#T0229"><code>T0229</code></a></td><td>duration must be finite: {0}</td><td>wire/types.ts: RangeError</td></tr>
+<tr id="T0230"><td><a href="#T0230"><code>T0230</code></a></td><td>duration exceeds i64 nanoseconds: {0} ms</td><td>wire/types.ts: RangeError</td></tr>
+<tr id="T0231"><td><a href="#T0231"><code>T0231</code></a></td><td>invalid UUID &quot;{0}&quot;: expected 8-4-4-4-12 hex digits (36 characters) and room for 16 bytes at offset {1} of {2}</td><td>wire/types.ts: RangeError</td></tr>
+<tr id="T0232"><td><a href="#T0232"><code>T0232</code></a></td><td>need 16 bytes for a UUID at offset {0} of {1}</td><td>wire/types.ts: RangeError</td></tr>
+<tr id="T0233"><td><a href="#T0233"><code>T0233</code></a></td><td>{0} out of range: {1}</td><td>wire/writer.ts: RangeError</td></tr>
+<tr id="T0234"><td><a href="#T0234"><code>T0234</code></a></td><td>the worker could not import the ports module {0}: {1}</td><td>worker.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0235"><td><a href="#T0235"><code>T0235</code></a></td><td>the default export of the ports module {0} must map port ids to implementations</td><td>worker.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0236"><td><a href="#T0236"><code>T0236</code></a></td><td>the ports module {0} maps {1} to something that is not a port implementation ({ sync, methods }, as registerPort takes)</td><td>worker.ts: UndraTransportError(&quot;handshake&quot;)</td></tr>
+<tr id="T0237"><td><a href="#T0237"><code>T0237</code></a></td><td>the worker's transport cannot snapshot or restore</td><td>worker.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0238"><td><a href="#T0238"><code>T0238</code></a></td><td>{0} port 0x{1} could not release what it held: {2}</td><td>worker.ts: log</td></tr>
+<tr id="T0239"><td><a href="#T0239"><code>T0239</code></a></td><td>could not deliver a port reply: {0}</td><td>worker.ts: log</td></tr>
+<tr id="T0240"><td><a href="#T0240"><code>T0240</code></a></td><td>internal error: {0}</td><td>worker.ts: log</td></tr>
+<tr id="T0241"><td><a href="#T0241"><code>T0241</code></a></td><td>dropped a malformed envelope from the host: {0}</td><td>worker.ts: log</td></tr>
+<tr id="T0242"><td><a href="#T0242"><code>T0242</code></a></td><td>the worker was not started with recovery</td><td>worker.ts: UndraTransportError(&quot;unsupported&quot;)</td></tr>
+<tr id="T0243"><td><a href="#T0243"><code>T0243</code></a></td><td>the wasm core trapped ({0}) and was restarted from a snapshot {1} ms old</td><td>recovery.ts: UndraCoreRestarted</td></tr>
+<tr id="T0244"><td><a href="#T0244"><code>T0244</code></a></td><td>keyed patch operation #{0} ({1}) index {2} is out of bounds for a list of length {3}</td><td>wire/errors.ts: PatchError</td></tr>
+</tbody></table></div>
+<h3 id="wire-failures">Wire failures<a class="anchor" href="#wire-failures" aria-label="Link to this section">#</a></h3>
+<p>A <code>WireError</code> says its code and fields in a production build (<code>wire: code=unexpected_eof at=12 needed=3 — link</code>); the development build says the sentence below, with the values in braces.</p>
+<div class="table-wrap"><table><thead><tr><th>Code</th><th>The development build says</th></tr></thead><tbody>
+<tr id="wire-unexpected_eof"><td><a href="#wire-unexpected_eof"><code>unexpected_eof</code></a></td><td>unexpected end of input at offset {at}: needed {needed} more byte(s)</td></tr>
+<tr id="wire-invalid_utf8"><td><a href="#wire-invalid_utf8"><code>invalid_utf8</code></a></td><td>invalid UTF-8 in string at offset {at}</td></tr>
+<tr id="wire-invalid_tag"><td><a href="#wire-invalid_tag"><code>invalid_tag</code></a></td><td>invalid {ty} tag {tag} at offset {at}</td></tr>
+<tr id="wire-length_too_large"><td><a href="#wire-length_too_large"><code>length_too_large</code></a></td><td>length {len} at offset {at} exceeds the available input</td></tr>
+<tr id="wire-trailing_bytes"><td><a href="#wire-trailing_bytes"><code>trailing_bytes</code></a></td><td>{count} trailing byte(s) after the end of the message</td></tr>
+<tr id="wire-bad_magic"><td><a href="#wire-bad_magic"><code>bad_magic</code></a></td><td>bad magic: envelope does not start with 554e4452</td></tr>
+<tr id="wire-unsupported_version"><td><a href="#wire-unsupported_version"><code>unsupported_version</code></a></td><td>unsupported wire version {version}</td></tr>
+<tr id="wire-schema_mismatch"><td><a href="#wire-schema_mismatch"><code>schema_mismatch</code></a></td><td>schema mismatch: expected 0x{expected}, got 0x{got}</td></tr>
+<tr id="wire-duplicate_key"><td><a href="#wire-duplicate_key"><code>duplicate_key</code></a></td><td>duplicate map key at offset {at}</td></tr>
+<tr id="wire-negative_duration"><td><a href="#wire-negative_duration"><code>negative_duration</code></a></td><td>negative duration ({nanos} ns)</td></tr>
+<tr id="wire-unsafe_integer"><td><a href="#wire-unsafe_integer"><code>unsafe_integer</code></a></td><td>integer {value} at offset {at} is outside the JS safe integer range</td></tr>
+</tbody></table></div>
 <p class="tok-dim">Generated by <code>site/scripts/build-errors.mjs</code> from <code>docs/SPEC.md</code> section 12, the compile-fail tests of the macros crate and the message goldens of the other crates. To change a message, change the code that raises it and regenerate its golden; to change the catalogue, change the specification.</p>
 <!-- errors:end -->
 <p class="edit"><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md#12-diagnostics" rel="noopener">Generated from the specification and the macro tests: edit those, not this page.</a></p>
@@ -543,7 +808,7 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
   </main>
   <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p>
 <!-- errors-toc:start -->
-<ul><li><a href="#how-to-read-one">How to read one</a></li><li><a href="#all-codes">All codes</a></li><li><a href="#types-and-shapes">Types and shapes</a></li><li><a href="#errors-and-stores">Errors and stores</a></li><li><a href="#methods">Methods</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries-and-mutations">Queries and mutations</a></li><li><a href="#names">Names in the generators</a></li><li><a href="#type-identity">Type identity and the schema</a></li><li><a href="#command-line">The command line</a></li></ul>
+<ul><li><a href="#how-to-read-one">How to read one</a></li><li><a href="#all-codes">All codes</a></li><li><a href="#types-and-shapes">Types and shapes</a></li><li><a href="#errors-and-stores">Errors and stores</a></li><li><a href="#methods">Methods</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries-and-mutations">Queries and mutations</a></li><li><a href="#names">Names in the generators</a></li><li><a href="#type-identity">Type identity and the schema</a></li><li><a href="#command-line">The command line</a></li><li><a href="#runtime-messages">Runtime messages</a></li></ul>
 <!-- errors-toc:end -->
 </aside>
 </div>

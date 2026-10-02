@@ -1,4 +1,5 @@
 import { UndraError } from "./errors.js";
+import { msg } from "./messages.js";
 
 /*
  * The two error classes only a mode or an operation throws: the dev server forgot this core's objects (a `remote` core), a snapshot
@@ -17,7 +18,7 @@ export class UndraSessionLostError extends UndraError {
   override readonly name: string = "UndraSessionLostError";
 
   /** @param message The server's reason, when it gave one. */
-  constructor(message = "the dev server no longer has this core's objects (it was restarted, or the session expired); load a new core") {
+  constructor(message = msg(84)) {
     super("sessionLost", message);
   }
 }
@@ -52,7 +53,7 @@ export class UndraRestoreError extends UndraError {
   constructor(code: number) {
     super(
       "restore",
-      `the Undra core rejected the snapshot (code ${String(code)}); a rejected restore leaves the core unchanged`,
+      msg(85, String(code)),
     );
     this.code = code;
   }

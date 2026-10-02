@@ -11,6 +11,7 @@ import {
 import type { Transport } from "./transport.js";
 import { WasmHost, type WasmMainOptions } from "./wasm-main.js";
 import { restoreInto, takeSnapshot, twin } from "./wasm-snapshot.js";
+import { msg } from "../messages.js";
 
 export type { WasmMainOptions, WasmSource } from "./wasm-main.js";
 
@@ -62,7 +63,7 @@ export class WasmMainTransport extends WasmHost implements Transport {
         restoreInto(this, payload);
         return;
       default:
-        throw new UndraTransportError("protocol", `cannot send a ${Kind[kind] ?? String(kind)} message to a wasm core`);
+        throw new UndraTransportError("protocol", msg(190, Kind[kind] ?? String(kind)));
     }
   }
 

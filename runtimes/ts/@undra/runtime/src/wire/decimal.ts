@@ -1,5 +1,6 @@
 import { WireError } from "./errors.js";
 import type { Codec } from "./codec.js";
+import { msg } from "../messages.js";
 
 const MAX_SCALE = 38;
 const I128_MIN = -(1n << 127n);
@@ -33,10 +34,10 @@ export class Decimal {
    */
   constructor(mantissa: bigint, scale = 0) {
     if (!Number.isInteger(scale) || scale < 0 || scale > MAX_SCALE) {
-      throw new RangeError(`a decimal's scale is an integer from 0 to ${MAX_SCALE}, got ${scale}`);
+      throw new RangeError(msg(217, MAX_SCALE, scale));
     }
     if (mantissa < I128_MIN || mantissa > I128_MAX) {
-      throw new RangeError("a decimal's mantissa must fit a signed 128-bit integer");
+      throw new RangeError(msg(218));
     }
     this.mantissa = mantissa;
     this.scale = scale;
@@ -55,7 +56,7 @@ export class Decimal {
     const whole = m?.[2] ?? "";
     const fraction = m?.[3];
     if (m === null || whole.length + (fraction?.length ?? 0) === 0) {
-      throw new SyntaxError(`not a decimal: ${JSON.stringify(text)}`);
+      throw new SyntaxError(msg(219, JSON.stringify(text)));
     }
     const digits = whole + (fraction ?? "");
     const magnitude = BigInt(digits);

@@ -30,6 +30,14 @@ A generated method that can fail does exactly this, on every platform:
 
 All three read well as text: Swift `error.localizedDescription`, Kotlin `error.message`, TypeScript `error.message`.
 
+In a **production build of a TypeScript app**, `error.message` of what the runtime itself words (every `UndraCallError` and
+`UndraTransportError`, the wire errors, the misuse errors) is a code, the values and a link, not a sentence:
+`T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017`, and `wire: code=unexpected_eof at=12 needed=3 — …`
+for a decoding failure. The sentence is on the errors page ("Runtime messages") and is what the development build says (Vite's dev
+server, Vitest, React Native: the `development` and `react-native` export conditions). Nothing a program branches on changes: the
+class, `kind`, `reason`, `status` and every field are the same, and the core's own text (a panic message, a refusal reason) travels as
+a value inside the message. Branch on those, never on the text.
+
 Argument validation is not an outcome of the call. A value the wire cannot represent (a negative `Duration`, a map with
 two keys that encode alike, a TypeScript `number` outside a `u8`) is a programming error: it propagates unchanged
 (`precondition` in the Swift codec, `WireException` / `IllegalArgumentException` in Kotlin, `RangeError` / `TypeError` in

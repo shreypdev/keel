@@ -1,6 +1,7 @@
 import { UndraError } from "./errors.js";
 import type { Mirror, MirrorWaiters } from "./mirror.js";
 import { ALL_SIGNALS, type Handle } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * The "initial change-set" barrier behind `UndraCore.observe` on a core that answers later (a worker, a socket): a promise per
@@ -68,7 +69,7 @@ export function mirrorWaiters(mirror: Mirror): MirrorWaiters {
             reject(
               new UndraError(
                 "observe",
-                `no change-set arrived for signal ${signalId === ALL_SIGNALS ? "*" : String(signalId)} of handle ${String(handle)} within ${timeoutMs} ms; is the handle a live store?`,
+                msg(104, signalId === ALL_SIGNALS ? "*" : String(signalId), String(handle), timeoutMs),
               ),
             );
           }, timeoutMs);

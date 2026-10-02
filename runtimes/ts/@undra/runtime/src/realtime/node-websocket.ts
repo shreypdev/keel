@@ -3,6 +3,7 @@ import { errorMessage } from "../platform.js";
 import { nodeBuiltin } from "../node-builtin.js";
 import { Inbox } from "./inbox.js";
 import type { WebSocketAdapter, WebSocketConnection } from "./websocket.js";
+import { msg } from "../messages.js";
 
 /*
  * `nodeWebSocket()`: the WebSocket adapter of Node, over `node:http` / `node:https` (the upgrade)
@@ -145,7 +146,7 @@ class ByteQueue {
       if (index < chunk.length) return chunk[index] as number;
       index -= chunk.length;
     }
-    throw new RangeError("ByteQueue.at past the end");
+    throw new RangeError(msg(130));
   }
 
   /** Removes and returns the first `n` bytes (`n <= length`). */
@@ -203,11 +204,11 @@ class NodeConnection implements WebSocketConnection {
       this.#parse();
     });
     socket.on("end", () => {
-      this.#dropped("the connection dropped without a close frame");
+      this.#dropped(msg(131));
     });
     socket.on("close", () => {
       if (this.#closeTimer !== undefined) clearTimeout(this.#closeTimer);
-      this.#dropped("the connection dropped without a close frame");
+      this.#dropped(msg(131));
     });
     socket.on("error", (error) => {
       this.#dropped(errorMessage(error));
@@ -225,7 +226,7 @@ class NodeConnection implements WebSocketConnection {
   async send(message: WsMessage): Promise<void> {
     const end = this.#inbox.end;
     if (end !== null) throw end;
-    if (this.#closedByCore || this.#closeSent || this.#socket.destroyed) throw new WsError.Network("the WebSocket is not open");
+    if (this.#closedByCore || this.#closeSent || this.#socket.destroyed) throw new WsError.Network(msg(118));
     const payload = message.kind === "text" ? encoder.encode(message.value) : message.value;
     this.#socket.write(clientFrame(message.kind === "text" ? 0x1 : 0x2, payload));
     if (this.#socket.writableLength > MAX_OUTBOUND) await this.#drained();
@@ -250,7 +251,7 @@ class NodeConnection implements WebSocketConnection {
       };
       const onClose = (): void => {
         this.#socket.removeListener("drain", onDrain);
-        reject((this.#inbox.end as WsError | null) ?? new WsError.Network("the connection closed while a message was queued"));
+        reject((this.#inbox.end as WsError | null) ?? new WsError.Network(msg(119)));
       };
       this.#socket.once("drain", onDrain);
       this.#socket.once("close", onClose);
@@ -329,9 +330,9 @@ class NodeConnection implements WebSocketConnection {
         for (let i = 0; i < 8; i++) big = big * 256 + q.at(2 + i);
         length = big;
       }
-      if ((b0 & 0x70) !== 0) return this.#fail(1002, "a frame has reserved bits set");
-      if (masked) return this.#fail(1002, "the server masked a frame");
-      if (length > this.#maxMessage) return this.#fail(1009, `a frame of ${length} bytes is larger than the limit (${this.#maxMessage})`);
+      if ((b0 & 0x70) !== 0) return this.#fail(1002, msg(132));
+      if (masked) return this.#fail(1002, msg(133));
+      if (length > this.#maxMessage) return this.#fail(1009, msg(134, length, this.#maxMessage));
       if (q.length < header + length) return;
       q.take(header);
       this.#frame(fin, opcode, q.take(length));
@@ -340,7 +341,7 @@ class NodeConnection implements WebSocketConnection {
 
   #frame(fin: boolean, opcode: number, payload: Uint8Array): void {
     if (opcode >= 0x8) {
-      if (!fin || payload.length > 125) return this.#fail(1002, "a control frame is fragmented or longer than 125 bytes");
+      if (!fin || payload.length > 125) return this.#fail(1002, msg(135));
       switch (opcode) {
         case 0x8:
           return this.#closeFrame(payload);
@@ -350,19 +351,19 @@ class NodeConnection implements WebSocketConnection {
         case 0xa:
           return;
         default:
-          return this.#fail(1002, `unknown control opcode ${opcode}`);
+          return this.#fail(1002, msg(136, opcode));
       }
     }
     if (opcode === 0x1 || opcode === 0x2) {
-      if (this.#fragmentOpcode !== 0) return this.#fail(1002, "a new message started inside a fragmented one");
+      if (this.#fragmentOpcode !== 0) return this.#fail(1002, msg(137));
       this.#fragmentOpcode = opcode;
     } else if (opcode === 0x0) {
-      if (this.#fragmentOpcode === 0) return this.#fail(1002, "a continuation frame without a message");
+      if (this.#fragmentOpcode === 0) return this.#fail(1002, msg(138));
     } else {
-      return this.#fail(1002, `unknown data opcode ${opcode}`);
+      return this.#fail(1002, msg(139, opcode));
     }
     this.#fragmentsLength += payload.length;
-    if (this.#fragmentsLength > this.#maxMessage) return this.#fail(1009, `a message is larger than the limit (${this.#maxMessage} bytes)`);
+    if (this.#fragmentsLength > this.#maxMessage) return this.#fail(1009, msg(140, this.#maxMessage));
     this.#fragments.push(payload);
     if (!fin) return;
     const parts = this.#fragments;
@@ -388,7 +389,7 @@ class NodeConnection implements WebSocketConnection {
       try {
         text = this.#decoder.decode(body);
       } catch {
-        return this.#fail(1007, "a text message is not UTF-8");
+        return this.#fail(1007, msg(141));
       }
       this.#inbox.push({ kind: "text", value: text }, body.length);
     } else {
@@ -397,14 +398,14 @@ class NodeConnection implements WebSocketConnection {
   }
 
   #closeFrame(payload: Uint8Array): void {
-    if (payload.length === 1) return this.#fail(1002, "a close frame with a one-byte payload");
+    if (payload.length === 1) return this.#fail(1002, msg(142));
     const code = payload.length >= 2 ? ((payload[0] as number) << 8) | (payload[1] as number) : 1005;
     let reason = "";
     if (payload.length > 2) {
       try {
         reason = this.#decoder.decode(payload.subarray(2));
       } catch {
-        return this.#fail(1007, "a close reason is not UTF-8");
+        return this.#fail(1007, msg(143));
       }
     }
     this.#closeReceived = true;
@@ -431,12 +432,12 @@ export function nodeWebSocket(options: NodeWebSocketOptions = {}): WebSocketAdap
   return {
     async connect(url, protocols, headers) {
       const secure = url.startsWith("wss://");
-      if (!secure && !url.startsWith("ws://")) throw new WsError.Refused(null, `invalid URL: ${url}`);
+      if (!secure && !url.startsWith("ws://")) throw new WsError.Refused(null, msg(144, url));
       let http: NodeHttp;
       try {
         http = nodeBuiltin<NodeHttp>(secure ? "node:https" : "node:http");
       } catch (error) {
-        throw new WsError.Refused(null, `nodeWebSocket needs Node (${errorMessage(error)})`);
+        throw new WsError.Refused(null, msg(145, errorMessage(error)));
       }
       const key = base64(crypto.getRandomValues(new Uint8Array(16)));
       const expected = await acceptFor(key);
@@ -453,10 +454,10 @@ export function nodeWebSocket(options: NodeWebSocketOptions = {}): WebSocketAdap
           const chosen = headerValue(response, "sec-websocket-protocol") ?? "";
           if (headerValue(response, "sec-websocket-accept") !== expected) {
             socket.destroy();
-            reject(new WsError.Protocol("the server's Sec-WebSocket-Accept does not match the key"));
+            reject(new WsError.Protocol(msg(146)));
           } else if (chosen !== "" && !protocols.includes(chosen)) {
             socket.destroy();
-            reject(new WsError.Protocol(`the server chose a subprotocol that was not offered: ${chosen}`));
+            reject(new WsError.Protocol(msg(147, chosen)));
           } else {
             resolve(new NodeConnection(socket, chosen, head, options));
           }
@@ -464,7 +465,7 @@ export function nodeWebSocket(options: NodeWebSocketOptions = {}): WebSocketAdap
         request.on("response", (response) => {
           response.resume();
           const status = response.statusCode ?? 0;
-          reject(new WsError.Refused(status, `the server answered the upgrade with ${status} ${response.statusMessage ?? ""}`.trim()));
+          reject(new WsError.Refused(status, msg(148, status, response.statusMessage ?? "").trim()));
           request.destroy();
         });
         request.on("error", (error) => {

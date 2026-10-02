@@ -1,6 +1,7 @@
 import { UndraError } from "./errors.js";
 import { batch } from "./signal.js";
 import { type ChangeEntry, ChangeOp, type Handle, decodeChangeSet } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /** Applies one signal update to the store registered for a handle (`UndraStore._apply`). */
 export type ApplyFn = (signalId: number, op: ChangeOp, value: Uint8Array) => void;
@@ -355,7 +356,7 @@ export class Mirror {
    */
   register(handle: Handle, apply: ApplyFn, options: RegisterOptions = {}): void {
     if (this._registry.has(handle)) {
-      throw new UndraError("state", `handle ${String(handle)} is already registered with the mirror`);
+      throw new UndraError("state", msg(105, String(handle)));
     }
     const ids = options.noCoalesce === undefined ? null : new Set(options.noCoalesce);
     this._registry.set(handle, { apply, noCoalesce: ids !== null && ids.size > 0 ? ids : null });
@@ -520,7 +521,7 @@ export class Mirror {
           this._onError(
             new UndraError(
               "state",
-              `the mirror applied ${MAX_ROUNDS} rounds of change-sets in one flush: a signal subscriber keeps causing changes to a store it observes`,
+              msg(106, MAX_ROUNDS),
             ),
           );
           break;
@@ -618,7 +619,7 @@ export class Mirror {
         this._onError(
           new UndraError(
             "state",
-            `a keyed patch for signal ${entry.signalId} of handle ${String(entry.handle)} has no operation count; the signal is re-observed`,
+            msg(107, entry.signalId, String(entry.handle)),
           ),
         );
         this._markDropped(slot);
@@ -807,7 +808,7 @@ export class Mirror {
    */
   whenObserved(handle: Handle, signalId: number, timeoutMs = 0): Promise<void> {
     if (this._waiters === undefined) {
-      return Promise.reject(new UndraError("state", "this mirror has no observe waiters: the core installs them for a transport that answers later (mirrorWaiters)"));
+      return Promise.reject(new UndraError("state", msg(108)));
     }
     return this._waiters.when(handle, signalId, timeoutMs);
   }

@@ -1,5 +1,6 @@
 import { storePath } from "./names.js";
 import { type FsAdapter, FsError, fsErrorFrom } from "./types.js";
+import { msg } from "../messages.js";
 
 /** Options of {@link opfsFs}. */
 export interface OpfsFsOptions {
@@ -25,7 +26,7 @@ export function splitPath(path: string): string[] {
 }
 
 /** The text of `FsError.Unavailable` where the platform has no origin private file system (ADR-049). */
-export const NEEDS_OPFS = "needs the origin private file system";
+export const NEEDS_OPFS = msg(7);
 
 /**
  * The `Fs` port over the Origin Private File System. Paths are `/`-separated
@@ -68,7 +69,7 @@ export function opfsFs(options: OpfsFsOptions = {}): FsAdapter {
   const locate = async (path: string, create: boolean): Promise<{ dir: FileSystemDirectoryHandle; name: string }> => {
     const parts = splitPath(path);
     const name = parts.pop();
-    if (name === undefined) throw new FsError.Io("the path is empty");
+    if (name === undefined) throw new FsError.Io(msg(8));
     let dir = await openRoot();
     for (const part of parts) dir = await dir.getDirectoryHandle(part, { create });
     return { dir, name };

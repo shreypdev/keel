@@ -1,3 +1,4 @@
+import { msg } from "../messages.js";
 /*
  * The inbound queue of one WebSocket connection, as an adapter keeps it: what the socket
  * delivered and the consumer has not taken, the end the socket reported, and the async iterator
@@ -86,7 +87,7 @@ export class Inbox<T> {
     if (taken) {
       return {
         [Symbol.asyncIterator]: () => ({
-          next: () => Promise.reject(new TypeError("the messages of this connection were already taken")),
+          next: () => Promise.reject(new TypeError(msg(128))),
         }),
       };
     }
@@ -110,7 +111,7 @@ export class Inbox<T> {
       this.#endReported = true;
       return Promise.reject(this.#end);
     }
-    if (this.#waiter !== null) return Promise.reject(new TypeError("a next() is already pending"));
+    if (this.#waiter !== null) return Promise.reject(new TypeError(msg(129)));
     return new Promise((resolve, reject) => {
       this.#waiter = { resolve, reject };
       this.onWait?.();

@@ -6,6 +6,7 @@ import { errorMessage } from "../platform.js";
 import type { PortImpl } from "../port.js";
 import { codecs, encodeValue } from "../wire/index.js";
 import { Lines, readArgs } from "./lines.js";
+import { msg } from "../messages.js";
 
 /**
  * Opens server-sent event streams for the core's `Sse` port (ADR-047). Implement it to replace
@@ -77,8 +78,8 @@ async function closeQuietly(stream: SseStream): Promise<void> {
  */
 export function ssePort(adapter: SseAdapter): PortImpl {
   const lines = new Lines<SseEvent, Held, SseError>({
-    unknown: (id) => new SseError.Network(`no event stream ${id}`),
-    pending: (id) => new SseError.Protocol(`a next is already pending on stream ${id}`),
+    unknown: (id) => new SseError.Network(msg(149, id)),
+    pending: (id) => new SseError.Protocol(msg(150, id)),
     coerce: asSseError,
     finished: () => new SseError.Ended(),
   });
@@ -92,12 +93,12 @@ export function ssePort(adapter: SseAdapter): PortImpl {
       [ids.open]: (args) => {
         const [url, extra, lastEventId] = readArgs(args, (r) => [r.readStr(), headers.decode(r), optionString.decode(r)] as const);
         return typed(async () => {
-          if (!url.startsWith("http://") && !url.startsWith("https://")) throw new SseError.Refused(null, `invalid URL: ${url}`);
+          if (!url.startsWith("http://") && !url.startsWith("https://")) throw new SseError.Refused(null, msg(144, url));
           const asked = epoch;
           const stream = await adapter.open(url, extra, lastEventId);
           if (epoch !== asked) {
             await closeQuietly(stream);
-            throw new SseError.Network("the core went away while the stream opened");
+            throw new SseError.Network(msg(151));
           }
           return encodeValue(codecs.u32, lines.open({ stream }, () => stream.events()));
         });

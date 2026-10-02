@@ -1,5 +1,6 @@
 import { UndraTransportError } from "./errors.js";
 import { errorMessage } from "./platform.js";
+import { msg } from "./messages.js";
 
 /**
  * Runs the dynamic `import()` of a chunk of the runtime that loads on first use (ADR-057): what cannot be fetched (the network is
@@ -12,6 +13,6 @@ import { errorMessage } from "./platform.js";
  */
 export function onDemand<T>(what: string, load: () => Promise<T>): Promise<T> {
   return load().catch((cause: unknown) => {
-    throw new UndraTransportError("closed", `the runtime's ${what} could not be loaded: ${errorMessage(cause)}`, { cause });
+    throw new UndraTransportError("closed", msg(112, what, errorMessage(cause)), { cause });
   });
 }

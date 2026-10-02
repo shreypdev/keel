@@ -6,6 +6,7 @@ import { errorMessage } from "../platform.js";
 import type { PortImpl } from "../port.js";
 import { codecs, encodeValue } from "../wire/index.js";
 import { Lines, readArgs } from "./lines.js";
+import { msg } from "../messages.js";
 
 /**
  * Opens WebSocket connections for the core's `WebSocket` port (ADR-047). Implement it to replace
@@ -105,10 +106,10 @@ async function closeQuietly(connection: WebSocketConnection, code: number, reaso
  */
 export function webSocketPort(adapter: WebSocketAdapter): PortImpl {
   const lines = new Lines<WsMessage, Held, WsError>({
-    unknown: (id) => new WsError.Network(`no WebSocket connection ${id}`),
-    pending: (id) => new WsError.Protocol(`a receive is already pending on connection ${id}`),
+    unknown: (id) => new WsError.Network(msg(152, id)),
+    pending: (id) => new WsError.Protocol(msg(153, id)),
     coerce: asWsError,
-    finished: () => new WsError.Network("the connection ended"),
+    finished: () => new WsError.Network(msg(154)),
   });
   /** Bumped by `dispose`: a connect that was under way then is closed when it opens. */
   let epoch = 0;
@@ -120,12 +121,12 @@ export function webSocketPort(adapter: WebSocketAdapter): PortImpl {
       [ids.connect]: (args) => {
         const [url, protocols, extra] = readArgs(args, (r) => [r.readStr(), strings.decode(r), headers.decode(r)] as const);
         return typed(async () => {
-          if (!url.startsWith("ws://") && !url.startsWith("wss://")) throw new WsError.Refused(null, `invalid URL: ${url}`);
+          if (!url.startsWith("ws://") && !url.startsWith("wss://")) throw new WsError.Refused(null, msg(144, url));
           const asked = epoch;
           const connection = await adapter.connect(url, protocols, extra);
           if (epoch !== asked) {
             await closeQuietly(connection, GOING_AWAY, "");
-            throw new WsError.Network("the core went away while the connection opened");
+            throw new WsError.Network(msg(155));
           }
           const conn = lines.open({ connection, closedWith: null }, () => connection.messages());
           return encodeValue(WsOpenedCodec, { conn, protocol: connection.protocol });

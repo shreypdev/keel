@@ -22,6 +22,7 @@ import { framed } from "./framed.js";
 import type { CoreTransport, PortOutcome, Transport, TransportHandler } from "./transport.js";
 import type { WasmSource } from "./wasm-main.js";
 import { type HostToWorker, WORKER_PROTOCOL_VERSION, type WorkerFailure, type WorkerToHost, type WorkerWasm } from "./worker-protocol.js";
+import { msg } from "../messages.js";
 
 /**
  * The part of a `Worker` this transport uses; a real `Worker` fits, and so
@@ -131,7 +132,7 @@ function asyncPortIds(ports: Iterable<readonly [number, PortImpl]> = []): number
  */
 function controlFailure(answer: ControlAnswer): Error {
   const failure = "failure" in answer ? answer.failure : undefined;
-  if (failure === undefined) return new UndraTransportError("protocol", "the worker gave an incomplete answer");
+  if (failure === undefined) return new UndraTransportError("protocol", msg(205));
   return failure.kind === "error" ? new UndraTransportError("protocol", failure.message) : failureToError(failure);
 }
 
@@ -237,7 +238,7 @@ export class WasmWorkerTransport implements Transport {
             if (this.#options.ports !== undefined && message.features?.includes("ports") !== true) {
               settle(() => {
                 this.close();
-                reject(new UndraTransportError("unsupported", "worker.ports needs this @undra/runtime's worker script (protocol 3)"));
+                reject(new UndraTransportError("unsupported", msg(206)));
               });
               return;
             }
@@ -262,7 +263,7 @@ export class WasmWorkerTransport implements Transport {
           case "envelopes":
             // One task's worth of the worker's output (protocol 2), in order. A failure stops the rest.
             if (!Array.isArray(message.data)) {
-              this.#fail(new UndraTransportError("protocol", "the worker sent an `envelopes` message without a list of envelopes"));
+              this.#fail(new UndraTransportError("protocol", msg(207)));
               return;
             }
             for (const data of message.data) {
@@ -291,7 +292,7 @@ export class WasmWorkerTransport implements Transport {
       };
       const onError = (event: Event): void => {
         const text = (event as ErrorEvent).message || "the worker failed";
-        const error = new UndraTransportError(this.#open ? "closed" : "handshake", `worker error: ${text}`);
+        const error = new UndraTransportError(this.#open ? "closed" : "handshake", msg(208, text));
         if (settled) this.#fail(error);
         else
           settle(() => {
@@ -300,7 +301,7 @@ export class WasmWorkerTransport implements Transport {
           });
       };
       const onMessageError = (): void => {
-        this.#fail(new UndraTransportError("protocol", "the worker sent a message that could not be deserialised"));
+        this.#fail(new UndraTransportError("protocol", msg(209)));
       };
       worker.addEventListener("message", onMessage);
       worker.addEventListener("error", onError);
@@ -314,7 +315,7 @@ export class WasmWorkerTransport implements Transport {
         timer = setTimeout(() => {
           settle(() => {
             this.close();
-            reject(new UndraTransportError("timeout", `the worker did not start within ${timeoutMs} ms`));
+            reject(new UndraTransportError("timeout", msg(210, timeoutMs)));
           });
         }, timeoutMs);
       }
@@ -337,7 +338,7 @@ export class WasmWorkerTransport implements Transport {
       } catch (error) {
         settle(() => {
           this.close();
-          reject(new UndraTransportError("handshake", `could not reach the worker: ${errorMessage(error)}`, { cause: error }));
+          reject(new UndraTransportError("handshake", msg(211, errorMessage(error)), { cause: error }));
         });
       }
     });
@@ -348,7 +349,7 @@ export class WasmWorkerTransport implements Transport {
     // cache calls the Kv port), and the host's answer to that call is not a message of its own making.
     const starting = !this.#open && kind === Kind.PortReply;
     if ((!this.#open && !starting) || this.#worker === null) {
-      throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
+      throw new UndraTransportError("closed", this.#closed ? msg(50) : msg(201));
     }
     this.#post(kind, payload);
   }
@@ -406,7 +407,7 @@ export class WasmWorkerTransport implements Transport {
     this.#detach?.();
     const worker = this.#worker;
     this.#worker = null;
-    for (const waiting of this.#control.values()) waiting.reject(new UndraTransportError("closed", "the core is closed"));
+    for (const waiting of this.#control.values()) waiting.reject(new UndraTransportError("closed", msg(50)));
     this.#control.clear();
     if (worker === null) return;
     try {
@@ -426,15 +427,15 @@ export class WasmWorkerTransport implements Transport {
   #request(can: boolean, operation: string, message: HostToWorker & { readonly id: number }, transfer: Transferable[] = []): Promise<ControlAnswer> {
     return new Promise<ControlAnswer>((resolve, reject) => {
       const worker = this.#worker;
-      if (!this.#open || worker === null) throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
-      if (!can) throw new UndraTransportError("unsupported", `the worker script cannot ${operation}: rebuild it with this @undra/runtime`);
+      if (!this.#open || worker === null) throw new UndraTransportError("closed", this.#closed ? msg(50) : msg(201));
+      if (!can) throw new UndraTransportError("unsupported", msg(212, operation));
       const id = this.#nextControlId++;
       this.#control.set(id, { resolve, reject });
       try {
         worker.postMessage({ ...message, id }, transfer);
       } catch (error) {
         this.#control.delete(id);
-        reject(new UndraTransportError("closed", `could not reach the worker: ${errorMessage(error)}`, { cause: error }));
+        reject(new UndraTransportError("closed", msg(211, errorMessage(error)), { cause: error }));
       }
     });
   }
@@ -444,7 +445,7 @@ export class WasmWorkerTransport implements Transport {
     if (typeof option === "function") return option();
     if (option !== undefined) return option;
     if (typeof Worker !== "function") {
-      throw new UndraTransportError("unsupported", "this platform has no Worker; pass `worker` to run the core on one");
+      throw new UndraTransportError("unsupported", msg(213));
     }
     return new Worker(new URL("../worker.js", import.meta.url), { type: "module" });
   }
@@ -503,7 +504,7 @@ export class WasmWorkerTransport implements Transport {
       } else if (error instanceof UndraError) {
         this.#fail(error);
       } else {
-        this.#fail(new UndraTransportError("protocol", `bad message from the worker: ${errorMessage(error)}`, { cause: error }));
+        this.#fail(new UndraTransportError("protocol", msg(214, errorMessage(error)), { cause: error }));
       }
     }
   }
@@ -523,7 +524,7 @@ export class WasmWorkerTransport implements Transport {
  * and the fix (the other fix, mode `"wasm-main"`, is in the docs of `registerPort`). Here, with the transport that raises it.
  */
 function syncPortRefusal(portId: number, impl?: Pick<PortImpl, "name">): string {
-  return `${portName(portId, impl)} is synchronous: in wasm-worker mode, register it in LoadOptions.worker.ports`;
+  return msg(215, portName(portId, impl));
 }
 
 /**
@@ -533,7 +534,7 @@ function syncPortRefusal(portId: number, impl?: Pick<PortImpl, "name">): string 
  * snapshots by (data, not code).
  */
 export function workerTransport(options: LoadOptions, recovery: WasmWorkerOptions["recovery"]): CoreTransport {
-  if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-worker' needs the `wasm` option");
+  if (options.wasm === undefined) throw new UndraError("options", msg(216));
   // Checked here, before the worker is spawned; the worker reads its own `crypto` (ADR-049).
   if (!hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
   // A Worker (anything with `postMessage`) or a function creating one is `{ create }` in short.

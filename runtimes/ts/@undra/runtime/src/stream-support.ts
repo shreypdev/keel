@@ -4,6 +4,7 @@ import { UndraReplyError, UndraTransportError } from "./errors.js";
 import { errorMessage } from "./platform.js";
 import { StreamCall } from "./stream.js";
 import { ReplyStatus, type StreamFailure, StreamFlag, decodeStreamFailure, streamFailureReplyBody } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * Everything a core needs to run streams (`UndraCore.stream`, SPEC 3.7), as a feature (ADR-057): a hello page has no stream,
@@ -72,9 +73,9 @@ const support: StreamSupport = {
         pending.delete(callId);
         stream.fail(
           status > ReplyStatus.BadRequest
-            ? new UndraTransportError("protocol", `the core sent reply status ${status}`)
+            ? new UndraTransportError("protocol", msg(57, status))
             : status === ReplyStatus.Ok
-              ? new UndraTransportError("protocol", "the core answered a stream call with a plain result")
+              ? new UndraTransportError("protocol", msg(168))
               : new UndraReplyError(status as ReplyStatus, body),
         );
       },
@@ -92,7 +93,7 @@ const support: StreamSupport = {
   item(core, payload) {
     const pending = core._pending;
     if (payload.length < 5) {
-      core.report(new UndraTransportError("protocol", "the core sent a truncated stream item"), "stream");
+      core.report(new UndraTransportError("protocol", msg(169)), "stream");
       return;
     }
     const callId = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint32(0, true);
@@ -121,7 +122,7 @@ const support: StreamSupport = {
           failure = decodeStreamFailure(body);
         } catch (error) {
           entry.stream.fail(
-            new UndraTransportError("protocol", `the core sent a malformed stream failure: ${errorMessage(error)}`, { cause: error }),
+            new UndraTransportError("protocol", msg(170, errorMessage(error)), { cause: error }),
           );
           return;
         }
@@ -130,7 +131,7 @@ const support: StreamSupport = {
       }
       default:
         pending.delete(callId);
-        entry.stream.fail(new UndraTransportError("protocol", `the core sent stream flag ${flag}`));
+        entry.stream.fail(new UndraTransportError("protocol", msg(171, flag)));
     }
   },
 };

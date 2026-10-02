@@ -13,6 +13,7 @@ import type { CoreTransport, Transport, TransportHandler } from "./transport/tra
 import { WasmHost } from "./transport/wasm-main.js";
 import { restoreInto, takeSnapshot, twin } from "./transport/wasm-snapshot.js";
 import { type Handle, type HelloPayload, decodeSnapshot, encodeSnapshot, handleGeneration } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * Recovering a web core that trapped (ADR-049 decision 3): `crashRecovery(options)`, which `LoadOptions.recovery`
@@ -234,7 +235,7 @@ export interface RestartResult {
 export function restartedError(trap: Error): UndraTransportError {
   return new UndraTransportError(
     "restarted",
-    `the wasm core trapped and was restarted from its last snapshot; this call may or may not have run before the trap, and it is not retried (${errorMessage(trap)})`,
+    msg(156, errorMessage(trap)),
     { cause: trap },
   );
 }
@@ -277,9 +278,7 @@ export class UndraCoreRestarted extends UndraUnhandledError implements CoreResta
   /** @param info What happened. @param trap The trap. */
   constructor(info: CoreRestartInfo, trap: Error) {
     super("wasm core", new UndraCallError.Panicked(info.report.message, info.report.frames.map(formatFrame).join("\n"), { cause: trap }), trap);
-    this.message = `the wasm core trapped (${info.report.message}) and was restarted from ${
-      info.restoredFromAgeMs === null ? "no snapshot" : `a snapshot ${info.restoredFromAgeMs} ms old`
-    }`;
+    this.message = info.restoredFromAgeMs === null ? msg(157, info.report.message) : msg(243, info.report.message, info.restoredFromAgeMs);
     this.report = info.report;
     this.restoredFromAgeMs = info.restoredFromAgeMs;
     this.rejectedCalls = info.rejectedCalls;
@@ -322,10 +321,10 @@ export function keeperOf(
   return new SnapshotKeeper(policy, {
     take,
     tooLarge: (bytes, limit) => {
-      log(3, "undra::recovery", `a snapshot of ${bytes} bytes was not kept for crash recovery: it is larger than maxSnapshotBytes (${limit}); the previous one stays (said once)`);
+      log(3, "undra::recovery", msg(158, bytes, limit));
     },
     failed: (error) => {
-      log(4, "undra::recovery", `a snapshot for crash recovery failed: ${errorMessage(error)}`);
+      log(4, "undra::recovery", msg(159, errorMessage(error)));
     },
   });
 }
@@ -355,7 +354,7 @@ export async function restartHere(
         return { hello, restoredFromAgeMs: Math.max(0, Date.now() - kept.takenAt), storeHandles: snapshotStoreHandles(bytes) };
       } catch (error) {
         if (!(error instanceof UndraRestoreError)) throw error;
-        log(4, "undra::recovery", `the core refused its last snapshot (code ${error.code}) after the restart; it runs without its stores`);
+        log(4, "undra::recovery", msg(160, error.code));
       }
     }
     try {
@@ -462,7 +461,7 @@ export function crashRecovery(options: RecoveryOptions = {}): CrashRecovery {
     },
     keepSnapshotNow: () => attached?.keeper?.takeNow() ?? null,
     attach(transport, host, onCoreRestarted) {
-      if (attached !== null) throw new UndraTransportError("unsupported", "this crashRecovery() already belongs to a core: make one per core");
+      if (attached !== null) throw new UndraTransportError("unsupported", msg(161));
       attached = new Recovering(transport, settings, host, onCoreRestarted);
       return attached;
     },
@@ -474,7 +473,7 @@ export function crashRecovery(options: RecoveryOptions = {}): CrashRecovery {
 
 /** What a call made while the core restarts fails with (ADR-049 decision 3.4.2). */
 function restarting(): UndraTransportError {
-  return new UndraTransportError("restarted", "the wasm core is restarting after a trap");
+  return new UndraTransportError("restarted", msg(162));
 }
 
 /**
@@ -782,7 +781,7 @@ class Recovering implements CoreTransport {
           if (this.#mayRestart()) continue;
         }
         this.#setRestarting(false);
-        this.#log(4, "undra::recovery", `the wasm core could not be restarted: ${errorMessage(error)}`);
+        this.#log(4, "undra::recovery", msg(163, errorMessage(error)));
         host.lose(isTrap(error) ? error : trap);
         return;
       }
@@ -800,11 +799,11 @@ class Recovering implements CoreTransport {
     }
     if (staleObjects === null || host.core.closed || run !== this.#run) return;
     const event = new UndraCoreRestarted({ report, restoredFromAgeMs: result.restoredFromAgeMs, rejectedCalls, staleObjects }, trap);
-    this.#log(3, "undra::recovery", `${event.message}: ${rejectedCalls} call(s) in flight failed, ${staleObjects} object(s) went stale`);
+    this.#log(3, "undra::recovery", msg(164, event.message, rejectedCalls, staleObjects));
     try {
       this.#onRestarted?.(event);
     } catch (thrown) {
-      this.#log(4, "undra::runtime", `the onCoreRestarted handler threw: ${errorMessage(thrown)}`);
+      this.#log(4, "undra::runtime", msg(165, errorMessage(thrown)));
     }
     host.deliver(event);
   }
@@ -860,7 +859,7 @@ class Recovering implements CoreTransport {
         if (run !== this.#run || core.closed) return null;
         if (overtaken(error)) throw error;
         stale++;
-        core.report(error, `re-creating a query handle after a restart (type 0x${entry.call.typeId.toString(16)})`);
+        core.report(error, msg(166, entry.call.typeId.toString(16)));
         continue;
       }
       if (run !== this.#run || core.closed || store.closed) {
@@ -884,7 +883,7 @@ class Recovering implements CoreTransport {
       const failed = outcomes.find((o): o is PromiseRejectedResult => o.status === "rejected");
       if (failed !== undefined) {
         if (overtaken(failed.reason)) throw failed.reason;
-        core.report(failed.reason, "observing a re-created query handle after a restart");
+        core.report(failed.reason, msg(167));
       }
     }
     return stale;

@@ -2,6 +2,7 @@ import { NEEDS_INDEXED_DB, indexedDbKv } from "./kv.js";
 import { openDatabase, result } from "./idb.js";
 import { storeName } from "./names.js";
 import { type KvAdapter, StorageError } from "./types.js";
+import { msg } from "../messages.js";
 
 /** Where the master key of {@link webCryptoSecureStore} is kept between sessions. */
 export interface KeyStore {
@@ -26,7 +27,7 @@ export interface WebCryptoSecureStoreOptions {
 }
 
 /** The text of `StorageError.Unavailable` where the platform has no `crypto.subtle` (an insecure context, ADR-049). */
-export const NEEDS_SECURE_CONTEXT = "needs a secure context";
+export const NEEDS_SECURE_CONTEXT = msg(21);
 
 /** Format version of a stored value, its first byte. */
 const FORMAT = 1;
@@ -121,7 +122,7 @@ export function webCryptoSecureStore(options: WebCryptoSecureStoreOptions = {}):
         const stored = await kv.get(key);
         if (stored === null) return null;
         if (stored.length < 1 + IV_BYTES + 16 || stored[0] !== FORMAT) {
-          throw new StorageError.Corrupt(`${JSON.stringify(key)} is not in the secure-store format`);
+          throw new StorageError.Corrupt(msg(22, JSON.stringify(key)));
         }
         const iv = stored.subarray(1, 1 + IV_BYTES);
         const sealed = stored.subarray(1 + IV_BYTES);
@@ -131,7 +132,7 @@ export function webCryptoSecureStore(options: WebCryptoSecureStoreOptions = {}):
           plain = await webcrypto().subtle.decrypt({ name: "AES-GCM", iv: asBuffer(iv), additionalData: asBuffer(aad(key)) }, master, asBuffer(sealed));
         } catch (error) {
           // AES-GCM fails authentication with an `OperationError`: tampered bytes, a value moved from another key, a lost master key.
-          if ((error as { name?: unknown } | null)?.name === "OperationError") throw new StorageError.Corrupt(`${JSON.stringify(key)} does not decrypt`);
+          if ((error as { name?: unknown } | null)?.name === "OperationError") throw new StorageError.Corrupt(msg(23, JSON.stringify(key)));
           throw error;
         }
         return new Uint8Array(plain);

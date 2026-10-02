@@ -1,6 +1,7 @@
 import { committed, openDatabase, result, toBytes } from "./idb.js";
 import { storeName } from "./names.js";
 import { type KvAdapter, StorageError } from "./types.js";
+import { msg } from "../messages.js";
 
 /** Options of {@link indexedDbKv}. */
 export interface IndexedDbKvOptions {
@@ -63,7 +64,7 @@ export function indexedDbKv(options: IndexedDbKvOptions = {}): KvAdapter {
         try {
           return toBytes(value);
         } catch {
-          throw new StorageError.Corrupt(`${JSON.stringify(key)} is not bytes`);
+          throw new StorageError.Corrupt(msg(16, JSON.stringify(key)));
         }
       }),
     set: (key, value) =>
@@ -103,7 +104,7 @@ export function indexedDbKv(options: IndexedDbKvOptions = {}): KvAdapter {
             cursor.continue();
           };
           request.onerror = () => {
-            reject(request.error ?? new Error("IndexedDB cursor failed"));
+            reject(request.error ?? new Error(msg(17)));
           };
         });
       }),

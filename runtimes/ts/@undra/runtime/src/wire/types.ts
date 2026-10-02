@@ -1,4 +1,5 @@
 import { WireError } from "./errors.js";
+import { msg } from "../messages.js";
 
 /** Raw bytes on the wire (`Bytes` in the schema). */
 export type Bytes = Uint8Array;
@@ -45,10 +46,10 @@ export function handleGeneration(handle: Handle): number {
 /** Builds a handle from a slot index (24 bits) and a generation (40 bits). */
 export function makeHandle(index: number, generation: number): Handle {
   if (!Number.isInteger(index) || index < 0 || index > MAX_HANDLE_INDEX) {
-    throw new RangeError(`handle index out of range: ${String(index)}`);
+    throw new RangeError(msg(224, String(index)));
   }
   if (!Number.isInteger(generation) || generation < 0 || generation > MAX_HANDLE_GENERATION) {
-    throw new RangeError(`handle generation out of range: ${String(generation)}`);
+    throw new RangeError(msg(225, String(generation)));
   }
   return (BigInt(generation) << 24n) | BigInt(index);
 }
@@ -61,7 +62,7 @@ export function makeHandle(index: number, generation: number): Handle {
  */
 export function splitHandle(handle: Handle): HandleParts {
   if (BigInt.asUintN(64, handle) !== handle) {
-    throw new RangeError(`handle out of range: ${String(handle)}`);
+    throw new RangeError(msg(226, String(handle)));
   }
   return { lo: Number(handle & MASK32), hi: Number(handle >> 32n) };
 }
@@ -85,7 +86,7 @@ export type Timestamp = number;
 /** Converts a `Date` to a {@link Timestamp}. Throws `RangeError` for an invalid `Date`. */
 export function timestampFromDate(date: Date): Timestamp {
   const ms = date.getTime();
-  if (Number.isNaN(ms)) throw new RangeError("cannot convert an invalid Date to a Timestamp");
+  if (Number.isNaN(ms)) throw new RangeError(msg(227));
   return ms;
 }
 
@@ -96,7 +97,7 @@ export function timestampFromDate(date: Date): Timestamp {
 export function timestampToDate(timestamp: Timestamp): Date {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) {
-    throw new RangeError(`timestamp ${String(timestamp)} is outside the range of a Date`);
+    throw new RangeError(msg(228, String(timestamp)));
   }
   return date;
 }
@@ -124,12 +125,12 @@ const I64_MAX = 0x7fff_ffff_ffff_ffffn;
  * 292 years).
  */
 export function durationToNanos(ms: Duration): bigint {
-  if (!Number.isFinite(ms)) throw new RangeError(`duration must be finite: ${String(ms)}`);
+  if (!Number.isFinite(ms)) throw new RangeError(msg(229, String(ms)));
   const whole = Math.trunc(ms);
   let nanos = BigInt(whole) * NANOS_PER_MS;
   if (whole !== ms) nanos += BigInt(Math.round((ms - whole) * 1e6));
   if (nanos < 0n) throw new WireError({ code: "negative_duration", nanos });
-  if (nanos > I64_MAX) throw new RangeError(`duration exceeds i64 nanoseconds: ${String(ms)} ms`);
+  if (nanos > I64_MAX) throw new RangeError(msg(230, String(ms)));
   return nanos;
 }
 
@@ -164,7 +165,7 @@ function hexValue(c: number): number {
 
 /** The one error `encodeUuid` raises, for every way a UUID can be wrong: the length, a hyphen, a hex digit, or no room for 16 bytes at `offset`. */
 function invalidUuid(uuid: string, offset: number, size: number): RangeError {
-  return new RangeError(`invalid UUID "${uuid}": expected 8-4-4-4-12 hex digits (36 characters) and room for 16 bytes at offset ${String(offset)} of ${size}`);
+  return new RangeError(msg(231, uuid, String(offset), size));
 }
 
 /**
@@ -200,7 +201,7 @@ export function encodeUuid(uuid: Uuid, out?: Uint8Array, offset = 0): Uint8Array
  */
 export function decodeUuid(bytes: Uint8Array, offset = 0): Uuid {
   if (!Number.isInteger(offset) || offset < 0 || offset + 16 > bytes.length) {
-    throw new RangeError(`need 16 bytes for a UUID at offset ${String(offset)} of ${bytes.length}`);
+    throw new RangeError(msg(232, String(offset), bytes.length));
   }
   let out = "";
   // In range: offset + 16 <= bytes.length was checked above.

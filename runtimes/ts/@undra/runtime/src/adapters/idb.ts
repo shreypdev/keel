@@ -1,3 +1,4 @@
+import { msg } from "../messages.js";
 /*
  * Small promise wrappers over IndexedDB, shared by the Kv and SecureStore
  * adapters. Not exported from the package.
@@ -17,10 +18,10 @@ export function openDatabase(factory: IDBFactory, name: string, stores: readonly
       resolve(request.result);
     };
     request.onerror = () => {
-      reject(request.error ?? new Error(`could not open IndexedDB database ${name}`));
+      reject(request.error ?? new Error(msg(10, name)));
     };
     request.onblocked = () => {
-      reject(new Error(`opening IndexedDB database ${name} is blocked by another connection`));
+      reject(new Error(msg(11, name)));
     };
   });
 }
@@ -32,7 +33,7 @@ export function result<T>(request: IDBRequest<T>): Promise<T> {
       resolve(request.result);
     };
     request.onerror = () => {
-      reject(request.error ?? new Error("IndexedDB request failed"));
+      reject(request.error ?? new Error(msg(12)));
     };
   });
 }
@@ -44,10 +45,10 @@ export function committed(tx: IDBTransaction): Promise<void> {
       resolve();
     };
     tx.onerror = () => {
-      reject(tx.error ?? new Error("IndexedDB transaction failed"));
+      reject(tx.error ?? new Error(msg(13)));
     };
     tx.onabort = () => {
-      reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+      reject(tx.error ?? new Error(msg(14)));
     };
   });
 }
@@ -57,5 +58,5 @@ export function toBytes(value: unknown): Uint8Array {
   if (value instanceof Uint8Array) return value;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
   if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice();
-  throw new TypeError("a stored value is not binary");
+  throw new TypeError(msg(15));
 }

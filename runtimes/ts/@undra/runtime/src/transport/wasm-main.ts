@@ -14,10 +14,11 @@ import {
 } from "../wire/index.js";
 import type { PortCallPayload } from "../wire/index.js";
 import type { CoreTransport, PortOutcome, TransportHandler } from "./transport.js";
+import { missingExports, msg } from "../messages.js";
 
 /** The error of a call the core refused without a reply (`undra_call` returned `code`). */
 function refused(code: number): UndraReplyError {
-  return new UndraReplyError(ReplyStatus.BadRequest, encodeValue(codecs.string, `the core refused the call (undra_call returned ${code})`));
+  return new UndraReplyError(ReplyStatus.BadRequest, encodeValue(codecs.string, msg(191, code)));
 }
 
 /** The wasm ABI version this transport speaks (`undra_abi_version`). */
@@ -85,26 +86,6 @@ export interface CoreExports {
   _initialize?(): void;
 }
 
-const REQUIRED_FUNCTIONS = [
-  "undra_alloc",
-  "undra_free",
-  "undra_abi_version",
-  "undra_schema_hash",
-  "undra_init",
-  "undra_call",
-  "undra_call_sync",
-  "undra_cancel",
-  "undra_stream_credit",
-  "undra_observe",
-  "undra_release",
-  "undra_port_reply",
-  "undra_event",
-  "undra_timer_fired",
-  "undra_poll",
-  "undra_buf_free",
-  "undra_stats_json",
-] as const;
-
 /**
  * `undra_alloc` (SPEC 7) traps when it cannot satisfy a request, so it never returns 0. A 0 is a
  * module that broke that contract, and copying a payload to linear address 0 would overwrite the
@@ -112,20 +93,20 @@ const REQUIRED_FUNCTIONS = [
  */
 function allocate(e: CoreExports, len: number): number {
   const ptr = e.undra_alloc(len);
-  if (ptr === 0) throw new Error(`undra_alloc(${len}) returned 0 instead of trapping`);
+  if (ptr === 0) throw new Error(msg(192, len));
   return ptr;
 }
 
 /** Compiles (unless it is compiled already) and instantiates `source`; the compiled module is kept for a restart (ADR-049: no recompile). */
 async function instantiate(source: WasmSource, imports: WebAssembly.Imports): Promise<WebAssembly.WebAssemblyInstantiatedSource> {
   if (typeof WebAssembly !== "object") {
-    throw new UndraTransportError("unsupported", "WebAssembly is not available on this platform");
+    throw new UndraTransportError("unsupported", msg(193));
   }
   try {
     if (source instanceof WebAssembly.Module) return { module: source, instance: await WebAssembly.instantiate(source, imports) };
     if (source instanceof URL) {
       const response = await fetch(source);
-      if (!response.ok) throw new Error(`GET ${source.href} answered ${response.status}`);
+      if (!response.ok) throw new Error(msg(194, source.href, response.status));
       if (
         typeof WebAssembly.instantiateStreaming === "function" &&
         response.headers.get("content-type")?.startsWith("application/wasm") === true
@@ -136,7 +117,7 @@ async function instantiate(source: WasmSource, imports: WebAssembly.Imports): Pr
     }
     return await WebAssembly.instantiate(source, imports);
   } catch (cause) {
-    throw new UndraTransportError("handshake", `could not instantiate the wasm core: ${errorMessage(cause)}`, {
+    throw new UndraTransportError("handshake", msg(195, errorMessage(cause)), {
       cause,
     });
   }
@@ -228,16 +209,13 @@ export class WasmHost implements CoreTransport {
   async start(handler: TransportHandler): Promise<HelloPayload> {
     this._handler = handler;
     const { module, instance } = await instantiate(this._options.wasm, this._imports());
-    if (this._closed) throw new UndraTransportError("closed", "the core is closed");
+    if (this._closed) throw new UndraTransportError("closed", msg(50));
     this._module = module;
     this._instance = instance;
     const exported = instance.exports as unknown as Record<string, unknown>;
-    const missing = [
-      ...(exported.memory instanceof WebAssembly.Memory ? [] : ["memory"]),
-      ...REQUIRED_FUNCTIONS.filter((name) => typeof exported[name] !== "function"),
-    ];
+    const missing = missingExports(exported);
     if (missing.length > 0) {
-      throw new UndraTransportError("handshake", `the module is not an Undra core: it does not export ${missing.join(", ")}`);
+      throw new UndraTransportError("handshake", msg(196, missing.join(", ")));
     }
     this._exports = exported as unknown as CoreExports;
     const { abi, schemaHash } = this._run((e) => {
@@ -245,7 +223,7 @@ export class WasmHost implements CoreTransport {
       return { abi: e.undra_abi_version(), schemaHash: BigInt.asUintN(64, e.undra_schema_hash()) };
     });
     if (abi !== ABI_VERSION) {
-      throw new UndraTransportError("handshake", `the core speaks wasm ABI ${abi}, this runtime speaks ${ABI_VERSION}`);
+      throw new UndraTransportError("handshake", msg(197, abi, ABI_VERSION));
     }
     if (schemaHash !== this._options.expectedSchemaHash) {
       throw new UndraSchemaMismatchError(this._options.expectedSchemaHash, schemaHash);
@@ -259,7 +237,7 @@ export class WasmHost implements CoreTransport {
     config.writeU8(0); // blocking_threads: no pool on wasm
     config.writeU8(this._options.logLevel ?? 2);
     const code = this._invoke(config.finish(), (e, ptr, len) => e.undra_init(ptr, len));
-    if (code !== 0) throw new UndraTransportError("handshake", `undra_init failed with code ${code}`);
+    if (code !== 0) throw new UndraTransportError("handshake", msg(198, code));
     return { undraVersion: `wasm-abi-${abi}`, schemaHash, platform: "wasm", mode };
   }
 
@@ -342,14 +320,14 @@ export class WasmHost implements CoreTransport {
     const end = start + (len >>> 0);
     const bytes = this._bytes();
     if (end > bytes.length) {
-      throw new RangeError(`the core handed out [${start}, ${end}) beyond its ${bytes.length} bytes of memory`);
+      throw new RangeError(msg(199, start, end, bytes.length));
     }
     return bytes.slice(start, end);
   }
 
   /** Copies the bytes of an `UndraBuf { ptr, len, cap }` and frees it. @internal Used by `wasm-snapshot.ts`. */
   _takeBuf(e: CoreExports, bufPtr: number): Uint8Array {
-    if (bufPtr === 0) throw new UndraTransportError("protocol", "the core returned a null UndraBuf");
+    if (bufPtr === 0) throw new UndraTransportError("protocol", msg(200));
     try {
       this._bytes();
       const ptr = this._view.getUint32(bufPtr, true);
@@ -365,7 +343,7 @@ export class WasmHost implements CoreTransport {
   private _live(): CoreExports {
     if (this._dead !== null) throw this._dead;
     if (this._exports === null) {
-      throw new UndraTransportError("closed", this._closed ? "the core is closed" : "the core is not started");
+      throw new UndraTransportError("closed", this._closed ? msg(50) : msg(201));
     }
     return this._exports;
   }
@@ -433,7 +411,7 @@ export class WasmHost implements CoreTransport {
   private _classify(error: unknown): unknown {
     if (error instanceof UndraError) return error;
     if (this._dead !== null) return this._dead;
-    const dead = new UndraTransportError("trap", `the wasm core trapped: ${errorMessage(error)}`, { cause: error });
+    const dead = new UndraTransportError("trap", msg(202, errorMessage(error)), { cause: error });
     this._dead = dead;
     const handler = this._handler;
     if (handler !== null) queueMicrotask(() => handler.closed(dead));

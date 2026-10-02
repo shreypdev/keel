@@ -3,6 +3,7 @@ import { DbError, type DbExecuted, type DbRows, type DbValue } from "../adapters
 import { errorMessage } from "../platform.js";
 import { decodeValue, encodeValue } from "../wire/index.js";
 import type { DbAdapter, DbConnection } from "./binding.js";
+import { msg } from "../messages.js";
 
 /*
  * The Db worker protocol: a `DbAdapter` that lives in a worker (wa-sqlite over OPFS, whose
@@ -54,7 +55,7 @@ export function serveDb(scope: DbWorkerScope, adapter: DbAdapter): () => void {
   let next = 1;
   const connection = (id: number): DbConnection => {
     const found = connections.get(id);
-    if (found === undefined) throw new DbError.Unavailable(`the database worker has no connection ${id}`);
+    if (found === undefined) throw new DbError.Unavailable(msg(76, id));
     return found;
   };
   const answer = async (request: DbWorkerRequest): Promise<number | DbExecuted | DbRows | null> => {
@@ -134,10 +135,10 @@ export function workerDbAdapter(create: () => DbWorkerLike): DbAdapter {
     });
     made.addEventListener("error", (event) => {
       const message = (event as Partial<ErrorEvent>).message;
-      fail(`the database worker failed${typeof message === "string" && message !== "" ? `: ${message}` : ""}`);
+      fail(msg(77, typeof message === "string" && message !== "" ? `: ${message}` : ""));
     });
     made.addEventListener("messageerror", () => {
-      fail("the database worker sent a message that could not be read");
+      fail(msg(78));
     });
     worker = made;
     return made;
@@ -149,7 +150,7 @@ export function workerDbAdapter(create: () => DbWorkerLike): DbAdapter {
     try {
       target = start();
     } catch (error) {
-      fail(`the database worker could not start: ${errorMessage(error)}`);
+      fail(msg(79, errorMessage(error)));
       return Promise.reject(broken);
     }
     const id = nextId++;
@@ -159,7 +160,7 @@ export function workerDbAdapter(create: () => DbWorkerLike): DbAdapter {
         target.postMessage(request(id));
       } catch (error) {
         waiting.delete(id);
-        reject(new DbError.Unavailable(`the database worker cannot take the call: ${errorMessage(error)}`));
+        reject(new DbError.Unavailable(msg(80, errorMessage(error))));
       }
     });
   };

@@ -2,6 +2,7 @@ import { UndraPortError } from "./errors.js";
 import type { PortImpl } from "./port.js";
 import type { PortOutcome } from "./transport/transport.js";
 import { type PortCallPayload, PortStatus, encodePortReply } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * Running a host port implementation for one `PortCall` (SPEC 6.3), the same way on the main thread
@@ -75,5 +76,5 @@ export function portName(portId: number, impl?: Pick<PortImpl, "name">): string 
 
 /** The operation a failed port method is reported under: `Kv port 0x... method 0x...` (see `portName`). */
 export function portOperation(call: Pick<PortCallPayload, "portId" | "methodId">, impl?: Pick<PortImpl, "name">): string {
-  return `${portName(call.portId, impl)} method 0x${call.methodId.toString(16)}`;
+  return msg(113, portName(call.portId, impl), call.methodId.toString(16));
 }

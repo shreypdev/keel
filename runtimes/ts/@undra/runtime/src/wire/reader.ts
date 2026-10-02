@@ -1,5 +1,6 @@
 import { WireError } from "./errors.js";
 import { type Uuid, decodeUuid } from "./types.js";
+import { msg } from "../messages.js";
 
 /**
  * `fatal` makes invalid UTF-8 throw instead of decoding to U+FFFD. Despite its
@@ -284,7 +285,7 @@ export class UndraReader {
 
   /** Reads exactly `n` raw bytes (no length prefix) as a borrowed view; see {@link readBytes}. */
   readRaw(n: number): Uint8Array {
-    if (!Number.isInteger(n) || n < 0) throw new RangeError(`raw length out of range: ${String(n)}`);
+    if (!Number.isInteger(n) || n < 0) throw new RangeError(msg(223, String(n)));
     const p = this._pos;
     if (n > this._bytes.length - p) this._eof(n);
     this._pos = p + n;
