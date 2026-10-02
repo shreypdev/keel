@@ -160,6 +160,8 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       expect(ok(await api.query(db, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", cells("t"))).rows, "t is still there").toEqual([cells(1n)]);
     });
 
+    // A 2 MB row in and out (the worker variant: through postMessage both ways): seconds on a slow runner (5.2 s on a hosted one,
+    // past vitest's default 5 s). The bound only catches a hang; the test asserts what arrives, not how fast.
     it("carries a 2 MB row whole, and integers past 2^53 exactly", async () => {
       const api = open();
       const { db } = ok(await api.open(":memory:"));
@@ -175,7 +177,7 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       expect(t?.kind === "text" && t.value === text, "the text, U+0000 and all").toBe(true);
       expect(b).toEqual({ kind: "blob", value: blob });
       expect([i, j]).toEqual(cells(2n ** 53n + 1n, -(2n ** 53n) - 3n));
-    });
+    }, 60_000);
 
     it("a garbage file is Corrupt", async () => {
       target().corrupt("garbage");
