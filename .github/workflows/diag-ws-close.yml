@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        vm: [1, 2, 3, 4, 5, 6]
+        vm: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,12 +23,40 @@ jobs:
         run: |
           sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize || true
           uname -a
-      - name: The echo test with each variant of the adapter's close
+      - name: Same VM - raw trials in a plain async XCTest, in a main-actor XCTest, and standalone
         working-directory: runtimes/swift/UndraRuntime
         run: |
           swift build --build-tests 2>&1 | tail -1
-          for v in base onqueue inping main twice; do
-            for t in testEchoTextAndBinaryAndAClientClose testAConnectionTheCoreLetsGoIsClosedGoingAway; do
-              if UNDRA_WS_VARIANT=$v swift test --skip-build --filter URLSessionWebSocketAdapterTests/$t > "$RUNNER_TEMP/out.txt" 2>&1; then echo "VARIANT $v $t: PASS"; else echo "VARIANT $v $t: FAIL"; fi
-            done
-          done
+          t() { perl -e 'alarm 200; exec @ARGV' "$@"; }
+          echo "#### E1: plain async XCTest"
+          t swift test --skip-build --filter DiagRawTests/testRawTrialsInsideXCTest 2>&1 | grep -E "^DIAGRAW echo=false" | head -3
+          echo "#### E2: main-actor XCTest"
+          t swift test --skip-build --filter DiagRawMainTests 2>&1 | grep -E "^DIAGMAIN" | head -4
+          echo "#### E3: the adapter's echo test (plain async XCTest)"
+          if t swift test --skip-build --filter URLSessionWebSocketAdapterTests/testEchoTextAndBinaryAndAClientClose > "$RUNNER_TEMP/o.txt" 2>&1; then echo ADAPTER PASS; else echo ADAPTER FAIL; fi
+          cd ../../..
+          node contract-tests/servers/realtime-server.mjs --port 0 > "$RUNNER_TEMP/s.out" 2>&1 &
+          sleep 2
+          PORT="$(grep READY "$RUNNER_TEMP/s.out" | cut -d' ' -f2)"
+          cat > "$RUNNER_TEMP/main.swift" <<'SWIFT'
+          import Foundation
+          final class Delegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+              var opened: CheckedContinuation<Void, Never>?
+              func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol p: String?) { opened?.resume(); opened = nil }
+          }
+          let port = CommandLine.arguments[1]
+          for _ in 0..<4 {
+              let d = Delegate()
+              let session = URLSession(configuration: .default, delegate: d, delegateQueue: OperationQueue())
+              let task = session.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)/ws/echo")!)
+              task.maximumMessageSize = 16 * 1024 * 1024
+              await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in d.opened = c; task.resume() }
+              task.cancel(with: .normalClosure, reason: Data("done".utf8))
+              session.finishTasksAndInvalidate()
+              try? await Task.sleep(nanoseconds: 500_000_000)
+          }
+          SWIFT
+          swiftc -swift-version 5 -o "$RUNNER_TEMP/diag" "$RUNNER_TEMP/main.swift"
+          echo "#### E4: standalone"
+          "$RUNNER_TEMP/diag" "$PORT"
+          echo "standalone: frames received $(grep -c 'opcode=8' "$RUNNER_TEMP/s.out") of 4, socket ends $(grep -c 'socket end' "$RUNNER_TEMP/s.out")"

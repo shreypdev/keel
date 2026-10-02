@@ -52,3 +52,29 @@ final class DiagRawTests: XCTestCase {
         }
     }
 }
+
+/// The same trials with the test class on the main actor: the main queue is serviced while the test awaits.
+@MainActor
+final class DiagRawMainTests: XCTestCase {
+    func testRawTrialsOnTheMainActor() async throws {
+        if RealtimeAdapterServer.current == nil {
+            RealtimeAdapterServer.current = try RealtimeServer.start()
+        }
+        let server = try XCTUnwrap(RealtimeAdapterServer.current)
+        for _ in 0 ..< 4 {
+            let d = DiagRawTests.Delegate()
+            let session = URLSession(configuration: .default, delegate: d, delegateQueue: OperationQueue())
+            let task = session.webSocketTask(with: URL(string: "\(server.ws)/ws/echo")!)
+            task.maximumMessageSize = 16 * 1024 * 1024
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                d.opened = c
+                task.resume()
+            }
+            task.cancel(with: .normalClosure, reason: Data("done".utf8))
+            session.finishTasksAndInvalidate()
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            let seen = try await server.last("/ws/echo")
+            print("DIAGMAIN closeCode=\(String(describing: seen?.closeCode)) clientClosed=\(String(describing: seen?.clientClosed))")
+        }
+    }
+}
