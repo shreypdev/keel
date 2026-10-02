@@ -9,8 +9,12 @@ import {
   applyPatch,
   codecs,
   decodePatch,
+  decodeLazyInvalidated,
+  decodeLazyValue,
   decodeValue,
   encodeChangeSet,
+  encodeLazyInvalidated,
+  encodeLazyValue,
   encodePatch,
   encodeValue,
   type Codec,
@@ -27,6 +31,8 @@ import {
  * `no_coalesce`, out-of-bounds patches ask for a resync, and resyncs are answered asynchronously (the
  * core sends the full value later, behind whatever it already sent, as a worker or a socket does). A
  * rare bulk patch passes both patch bounds on its own, so a compaction drops it and the mirror re-observes.
+ * One signal of each store is a lazy list (ADR-043): a commit sends an invalidation (length, version), and now and then
+ * a restart of its page server sends a full value with a new handle; a drain that folds the two must never lose the handle.
  *
  * Invariant: whenever the wire is empty, no resync is outstanding and a drain left nothing queued, every
  * mirrored value equals the core's. The `no_coalesce` signal sees a subsequence of the committed values
@@ -37,6 +43,8 @@ const HANDLES: readonly Handle[] = [1n, 2n];
 const U32_LISTS = [0, 2];
 const STRING_LIST = 4;
 const SCALARS = [1, 3];
+/** A `Lazy<T>` signal: its value is (page server handle, length, version). */
+const LAZY = 5;
 /** Signal 3 of handle 2 is declared `no_coalesce`. */
 const NO_COALESCE_HANDLE: Handle = 2n;
 const NO_COALESCE_SIGNAL = 3;
@@ -66,6 +74,7 @@ interface StoreState {
   lists: Map<number, number[]>;
   strings: string[];
   scalars: Map<number, number>;
+  lazy: { handle: number; len: number; version: number };
 }
 
 function emptyState(): StoreState {
@@ -73,22 +82,24 @@ function emptyState(): StoreState {
     lists: new Map(U32_LISTS.map((id) => [id, [] as number[]])),
     strings: [],
     scalars: new Map(SCALARS.map((id) => [id, 0])),
+    lazy: { handle: 1, len: 0, version: 0 },
   };
 }
 
 /** One signal's value, as text. */
 function renderKey(s: StoreState, signalId: number): string {
+  if (signalId === LAZY) return `${s.lazy.handle}/${s.lazy.len}/${s.lazy.version}`;
   if (signalId === STRING_LIST) return `#${s.strings.length}/${s.strings.map((x) => x.slice(0, 12)).join(",")}`;
   if (U32_LISTS.includes(signalId)) return `[${(s.lists.get(signalId) ?? []).join(",")}]`;
   return String(s.scalars.get(signalId) ?? 0);
 }
 
-const ALL_KEYS = [...U32_LISTS, STRING_LIST, ...SCALARS];
+const ALL_KEYS = [...U32_LISTS, STRING_LIST, ...SCALARS, LAZY];
 
 function render(s: StoreState): string {
   const lists = U32_LISTS.map((id) => `${id}:[${(s.lists.get(id) ?? []).join(",")}]`).join(" ");
   const scalars = SCALARS.map((id) => `${id}=${s.scalars.get(id) ?? 0}`).join(" ");
-  return `${lists} ${STRING_LIST}:${renderKey(s, STRING_LIST)} ${scalars}`;
+  return `${lists} ${STRING_LIST}:${renderKey(s, STRING_LIST)} ${scalars} lazy ${renderKey(s, LAZY)}`;
 }
 
 type Entry = { handle: Handle; signalId: number; op: ChangeOp; value: Uint8Array };
@@ -128,7 +139,8 @@ class ModelCore {
   full(h: Handle, signalId: number): Entry {
     const s = this.state(h);
     let value: Uint8Array;
-    if (signalId === STRING_LIST) value = encodeValue(strList, s.strings);
+    if (signalId === LAZY) value = encodeLazyValue({ handle: BigInt(s.lazy.handle), len: s.lazy.len, version: BigInt(s.lazy.version) });
+    else if (signalId === STRING_LIST) value = encodeValue(strList, s.strings);
     else if (U32_LISTS.includes(signalId)) value = encodeValue(u32List, s.lists.get(signalId) ?? []);
     else value = encodeValue(codecs.u32, s.scalars.get(signalId) ?? 0);
     return { handle: h, signalId, op: ChangeOp.FullValue, value };
@@ -144,7 +156,20 @@ class ModelCore {
       const signals = 1 + rand(3);
       for (let i = 0; i < signals; i++) {
         const pick = rand(100);
-        if (pick < 30) {
+        if (pick >= 92) {
+          // The lazy list changes (an invalidation), or its page server restarts (a full value with a new handle).
+          const lazy = this.state(h).lazy;
+          const restart = pick >= 97 || touched.get(LAZY)?.op === ChangeOp.FullValue;
+          if (pick >= 97) lazy.handle++;
+          lazy.len = rand(500);
+          lazy.version++;
+          touched.set(
+            LAZY,
+            restart
+              ? this.full(h, LAZY)
+              : { handle: h, signalId: LAZY, op: ChangeOp.LazyInvalidated, value: encodeLazyInvalidated({ len: lazy.len, version: BigInt(lazy.version) }) },
+          );
+        } else if (pick < 30) {
           const id = SCALARS[rand(SCALARS.length)] as number;
           const v = this.#item++;
           this.state(h).scalars.set(id, v);
@@ -265,6 +290,17 @@ class ModelHost {
   apply(h: Handle): (signalId: number, op: ChangeOp, value: Uint8Array) => void {
     return (signalId, op, value) => {
       const s = this.state.get(h) as StoreState;
+      if (signalId === LAZY) {
+        if (op === ChangeOp.FullValue) {
+          const v = decodeLazyValue(value);
+          s.lazy = { handle: Number(v.handle), len: v.len, version: Number(v.version) };
+        } else {
+          // An invalidation is relative to the page server a full value named: it is never applied to one the host never saw.
+          const v = decodeLazyInvalidated(value);
+          s.lazy = { ...s.lazy, len: v.len, version: Number(v.version) };
+        }
+        return;
+      }
       if (signalId === STRING_LIST) {
         if (op === ChangeOp.FullValue) s.strings = decodeValue(strList, value);
         else {

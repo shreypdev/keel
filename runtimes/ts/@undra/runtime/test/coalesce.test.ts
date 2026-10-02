@@ -283,14 +283,66 @@ describe("a drain merges per signal", () => {
     ]);
   });
 
-  it("lets a lazy invalidation supersede what came before it", () => {
-    const mirror = new Mirror({ schedule: () => {} });
-    const ops: ChangeOp[] = [];
-    mirror.register(1n, (_id, op) => ops.push(op));
-    mirror.enqueue(cs({ signalId: 0, value: u32(1) }));
-    mirror.enqueue(cs({ signalId: 0, op: ChangeOp.LazyInvalidated, value: new Uint8Array(0) }));
-    mirror.flush();
-    expect(ops).toEqual([ChangeOp.LazyInvalidated]);
+  describe("a lazy list's signal (ADR-043: an invalidation carries a length and version, the full value the page server's handle)", () => {
+    /** What a drain delivers for the signal of the given entries, as `op:value` (the value is a `u32`, or empty for none). */
+    function delivered(entries: Array<[ChangeOp, number]>, other: { maxPendingEntries?: number } = {}): string[] {
+      const mirror = new Mirror({ schedule: () => {}, ...other });
+      const seen: string[] = [];
+      mirror.register(1n, (_id, op, value) => seen.push(`${ChangeOp[op]}:${value.length === 0 ? "" : decodeValue(codecs.u32, value)}`));
+      for (const [op, n] of entries) mirror.enqueue(cs({ signalId: 0, op, value: u32(n) }));
+      mirror.flush();
+      return seen;
+    }
+    const FULL = ChangeOp.FullValue;
+    const INV = ChangeOp.LazyInvalidated;
+
+    it("keeps the full value an invalidation follows: [Full, Inv] delivers both, in order", () => {
+      expect(delivered([[FULL, 1], [INV, 2]])).toEqual(["FullValue:1", "LazyInvalidated:2"]);
+    });
+
+    it("an invalidation supersedes only earlier invalidations: [Full, Inv, Inv] delivers the full value and the last one", () => {
+      expect(delivered([[FULL, 1], [INV, 2], [INV, 3]])).toEqual(["FullValue:1", "LazyInvalidated:3"]);
+      expect(delivered([[INV, 2], [INV, 3]])).toEqual(["LazyInvalidated:3"]);
+      expect(delivered([[INV, 2]])).toEqual(["LazyInvalidated:2"]);
+    });
+
+    it("a full value supersedes everything before it: [Inv, Full] delivers the full value; [Full, Inv, Full] the last", () => {
+      expect(delivered([[INV, 1], [FULL, 2]])).toEqual(["FullValue:2"]);
+      expect(delivered([[FULL, 1], [INV, 2], [FULL, 3]])).toEqual(["FullValue:3"]);
+      expect(delivered([[FULL, 1], [INV, 2], [FULL, 3], [INV, 4]])).toEqual(["FullValue:3", "LazyInvalidated:4"]);
+    });
+
+    it("keeps the pair through a compaction of the backlog", () => {
+      const mirror = new Mirror({ schedule: () => {}, maxPendingEntries: 10 });
+      const seen: string[] = [];
+      mirror.register(1n, (id, op, value) => seen.push(`${id}:${ChangeOp[op]}:${decodeValue(codecs.u32, value)}`));
+      mirror.enqueue(cs({ signalId: 0, value: u32(1) }, { signalId: 0, op: INV, value: u32(2) }));
+      for (let i = 0; i < 40; i++) mirror.enqueue(cs({ signalId: 1, value: u32(i) }));
+      mirror.enqueue(cs({ signalId: 0, op: INV, value: u32(3) }));
+      mirror.flush();
+      expect(mirror.stats().compactions).toBeGreaterThan(0);
+      expect(seen).toEqual(["0:FullValue:1", "0:LazyInvalidated:3", "1:FullValue:39"]);
+    });
+
+    it("an ordinary signal is unaffected: the last full value wins, and keyed patches fold as before", () => {
+      expect(delivered([[FULL, 1], [FULL, 2], [FULL, 3]])).toEqual(["FullValue:3"]);
+      const mirror = new Mirror({ schedule: () => {} });
+      const seen: string[] = [];
+      mirror.register(1n, (_id, op, value) => seen.push(op === FULL ? `full ${decodeValue(listCodec, value)}` : `patch ${decodePatch(new UndraReader(value), codecs.u32).length}`));
+      mirror.enqueue(cs({ signalId: 0, value: encodeValue(listCodec, [1]) }));
+      mirror.enqueue(cs({ signalId: 0, op: ChangeOp.KeyedPatch, value: patchBytes([{ op: "insert", index: 1, item: 2 }]) }));
+      mirror.enqueue(cs({ signalId: 0, op: ChangeOp.KeyedPatch, value: patchBytes([{ op: "insert", index: 2, item: 3 }]) }));
+      mirror.flush();
+      expect(seen).toEqual(["full 1", "patch 2"]);
+    });
+
+    it("counts each delivery: the pair is two applied entries", () => {
+      const mirror = new Mirror({ schedule: () => {} });
+      mirror.register(1n, () => {});
+      mirror.enqueue(cs({ signalId: 0, value: u32(1) }, { signalId: 0, op: INV, value: u32(2) }));
+      mirror.flush();
+      expect(mirror.stats().entriesApplied).toBe(2);
+    });
   });
 
   it("applies signals in the order of their first entry, and announces each once at the end", () => {
