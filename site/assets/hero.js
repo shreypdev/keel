@@ -1,7 +1,8 @@
 /* Undra site — the hero diagram.
    A pure function of time drives the picture: frame(T) sets every pulse, glow and label.
    8-second loop: a write leaves one UI, crosses the boundary once, the core commits one
-   change-set, and it fans out to all three local mirrors. The origin rotates each loop.
+   change-set, and it fans out to every local mirror. The origin rotates through the UIs
+   (the [data-node] groups: SwiftUI, Compose, React, React Native), one per loop.
    Under prefers-reduced-motion the labelled still diagram stays put; the button starts it. */
 (function () {
   "use strict";
@@ -33,7 +34,8 @@
     const by = parseFloat(svg.getAttribute("data-by"));
     const rig = { svg, k, nodes: [], chips: {}, cells: [], write: [], change: [], rings: [], commit: null, coreGlow: q("[data-role=core-glow]") };
 
-    for (let i = 0; i < 3; i++) {
+    const count = svg.querySelectorAll("[data-node]").length;
+    for (let i = 0; i < count; i++) {
       const g = q('[data-node="' + i + '"]');
       rig.nodes.push({
         hot: q("[data-role=hot]", g), halo: q("[data-role=halo]", g), call: q("[data-role=call]", g), idle: q("[data-role=idle]", g),
@@ -57,12 +59,20 @@
       return { path, len, g, trails, circles: [c1, c2, c3], trail: 120 * k * (len > 500 ? 1.3 : 1) };
     }
     const beam = (n) => q('[data-beam="' + n + '"]');
-    for (let i = 0; i < 3; i++) { rig.write.push(mkPulse(beam("w" + i), false)); rig.change.push(mkPulse(beam("c" + i), true)); }
+    for (let i = 0; i < count; i++) { rig.write.push(mkPulse(beam("w" + i), false)); rig.change.push(mkPulse(beam("c" + i), true)); }
+    // The fraction of a write beam's length at which it crosses the boundary line (y = by). A beam may leave
+    // its frame sideways and bend before it runs down (the phone layout), so it is found along the path.
+    function crossing(path, len) {
+      let lo = 0, hi = len;
+      for (let i = 0; i < 20; i++) { const m = (lo + hi) / 2; if (path.getPointAtLength(m).y < by) lo = m; else hi = m; }
+      return (lo + hi) / 2 / len;
+    }
     rig.write.forEach((p) => {
-      const a = p.path.getPointAtLength(0), b = p.path.getPointAtLength(p.len);
-      p.uc = clamp((by - a.y) / (b.y - a.y));
+      const b = p.path.getPointAtLength(p.len);
+      p.uc = clamp(crossing(p.path, p.len));
+      const x = p.path.getPointAtLength(p.uc * p.len).x;
       p.tc = 0.7 + 1.5 * invEase(p.uc); // when the pulse crosses the boundary line
-      p.ringCross = el("circle", { class: "ring", cx: a.x, cy: by, r: 6 * k }, gp);
+      p.ringCross = el("circle", { class: "ring", cx: x, cy: by, r: 6 * k }, gp);
       p.ringIn = el("circle", { class: "ring", cx: b.x, cy: b.y, r: 6 * k }, gp);
     });
     rig.change.forEach((p) => {
@@ -95,7 +105,7 @@
   const setOp = (node, v) => { if (node) node.style.opacity = v.toFixed(3); };
 
   function frame(rig, T) {
-    const loop = Math.floor(T / LOOP), t = T - loop * LOOP, origin = loop % 3, k = rig.k;
+    const loop = Math.floor(T / LOOP), t = T - loop * LOOP, origin = loop % rig.nodes.length, k = rig.k;
 
     // 1. the write
     const wH = ease(win(t, 0.7, 2.2)), wD = win(t, 2.2, 2.6);
