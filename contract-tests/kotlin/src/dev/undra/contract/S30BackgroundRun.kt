@@ -38,6 +38,9 @@ fun s30BackgroundRun(w: World) {
     val runsBefore = core.stats().background.runs
     val finishedBefore = core.stats().background.finished
     val replayedBefore = core.stats().background.replayed
+    // The harness failed the first read of the offline queue (S20 step 4); the client reads it again after a backoff, and only a queue it
+    // could read is persisted and replayed.
+    awaitUntil("the offline queue to be readable") { storageStatus().queueReadable }
     w.server.respond(HttpMethod.GET, url, 200, "[]")
     val handle = RemoteTodosQueryHandle.create(list)
     try {

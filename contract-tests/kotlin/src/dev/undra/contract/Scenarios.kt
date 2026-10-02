@@ -14,7 +14,7 @@ private fun scenario(id: String, title: String, body: (World) -> Unit): Scenario
  * The scenarios in the order they run. S16 is first because it is the one that loads the core:
  * its failing load has to come before the load the others use (`UndraCore.load` leaves nothing behind when
  * it fails), and the others need the core it loads. S17 is last because its last steps shut that core down
- * (S17.6) and load and close a fresh one (S17.7), so S18, S19, S20, S26, S29 and S30 run before it. The build-B steps of S14 and S15
+ * (S17.6) and load and close a fresh one (S17.7), so S18, S19, S20, S29, S30 and S26 run before it. The build-B steps of S14 and S15
  * run in a second JVM ([migrationBuildB]).
  */
 val SCENARIOS: List<Scenario> = listOf(
@@ -37,7 +37,10 @@ val SCENARIOS: List<Scenario> = listOf(
     scenario("S18", "coalesced burst", ::s18CoalescedBurst),
     scenario("S19", "derived keyed list", ::s19DerivedKeyedList),
     scenario("S20", "storage failures are typed", ::s20Storage),
-    // S29 and S30 are ADR-046's: panic reports and background runs. S29's panics also feed S17's counts (which are deltas).
+    // S29 and S30 are ADR-046's: panic reports and background runs. S30 comes after the query scenarios, which leave every persisted
+    // entry healthy and fresh (S12's last step): a background run refetches the persisted entries that are stale or in error, and a
+    // leftover would make its offline run wait for them and keep it from finishing. S13 comes first because it expects the first
+    // optimistic placeholder of the process (id u32::MAX), which S30's creations would use up.
     scenario("S29", "panic report", ::s29PanicReport),
     scenario("S30", "background run", ::s30BackgroundRun),
     // S26 loads two other cores (other namespaces) next to the playground core, and closes them again.
