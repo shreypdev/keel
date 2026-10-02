@@ -107,9 +107,6 @@ function frameReader(onFrame, onError) {
   };
 }
 
-// TEMPORARY DIAGNOSTIC (ci-green)
-const dbg = (m) => process.stderr.write(`SRVDBG ${(Date.now() % 1000000) / 1000} ${m}\n`);
-
 export function startRealtimeServer({ port = 0, host = "127.0.0.1" } = {}) {
   let nextId = 1;
   let connections = [];
@@ -133,7 +130,6 @@ export function startRealtimeServer({ port = 0, host = "127.0.0.1" } = {}) {
     const url = new URL(req.url, "http://x");
     const path = url.pathname;
     if (path === "/stats") {
-      dbg(`stats: ${connections.map((c) => `#${c.id}:${c.path}:${c.closeCode}:${c.clientClosed}`).join(" ")}`);
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ connections }));
       return;
@@ -217,13 +213,11 @@ export function startRealtimeServer({ port = 0, host = "127.0.0.1" } = {}) {
     res.end();
   });
 
-  server.on("upgrade", (req, socket, head) => {
+  server.on("upgrade", (req, socket) => {
     const url = new URL(req.url, "http://x");
     const path = url.pathname;
     const c = record(path, req.headers);
-    dbg(`upgrade #${c.id} ${path} head=${head ? head.length : "?"} remote=${socket.remotePort}`);
-    socket.on("error", (e) => dbg(`#${c.id} socket error ${e.code}`));
-    socket.on("end", () => dbg(`#${c.id} socket end`));
+    socket.on("error", () => {});
     if (path === "/ws/deny") {
       const status = Number(url.searchParams.get("status") ?? 403);
       socket.end(`HTTP/1.1 ${status} Refused\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`);
@@ -268,7 +262,6 @@ export function startRealtimeServer({ port = 0, host = "127.0.0.1" } = {}) {
       "data",
       frameReader(
         (fin, opcode, payload) => {
-          dbg(`#${c.id} frame opcode=${opcode} fin=${fin} len=${payload.length}`);
           if (opcode === 0x8) {
             c.closeCode = payload.length >= 2 ? payload.readUInt16BE(0) : 1005;
             c.closeReason = payload.length > 2 ? payload.subarray(2).toString("utf8") : "";
@@ -295,8 +288,11 @@ export function startRealtimeServer({ port = 0, host = "127.0.0.1" } = {}) {
         },
       ),
     );
+    // A client that goes away without a close frame ends its half of the connection and says nothing more (a platform that
+    // tears the connection down before the frame is written: URLSession before macOS 26 / iOS 26): answer it by ending
+    // ours, as a WebSocket server does, so that `clientClosed` says the client left.
+    socket.on("end", () => socket.end());
     socket.on("close", () => {
-      dbg(`#${c.id} socket close`);
       c.clientClosed = true;
     });
 

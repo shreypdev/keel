@@ -2,12 +2,6 @@
 
 import Foundation
 
-// TEMPORARY DIAGNOSTIC (ci-green): a timeline of one connection on stderr.
-func wsdbg(_ message: @autoclosure () -> String) {
-    let now = Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 1000)
-    FileHandle.standardError.write(Data(String(format: "WSDBG %.3f %@\n", now, message()).utf8))
-}
-
 /// `WebSocket` on `URLSessionWebSocketTask`.
 ///
 /// Each connection has a session of its own, whose delegate learns when the handshake succeeded
@@ -146,23 +140,13 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
             frame = .data(Data(bytes))
         }
         do {
-            // As `receive`: the caller's cancellation does not cancel the socket.
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-                task.send(frame) { error in
-                    if let error = error {
-                        continuation.resume(throwing: error)
-                    } else {
-                        continuation.resume()
-                    }
-                }
-            }
+            try await task.send(frame)
         } catch {
             throw await failure(after: error)
         }
     }
 
     func close(code: UInt16, reason: String) async {
-        wsdbg("close(code: \(code), reason: \(reason)) entered; task.state=\(task.state.rawValue)")
         let first = state.withLock { (current: inout State) -> Bool in
             if current.closing {
                 return false
@@ -171,59 +155,10 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
             return true
         }
         guard first else {
-            wsdbg("close: already closing, nothing done")
             return
         }
         let closeCode = URLSessionWebSocketTask.CloseCode(rawValue: Int(code)) ?? .normalClosure
-        let variant = ProcessInfo.processInfo.environment["UNDRA_WS_VARIANT"] ?? "base"
-        if variant.contains("predelay") {
-            try? await Task.sleep(nanoseconds: 30_000_000)
-        }
-        if variant.contains("ping") {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let once = Guarded(false)
-                task.sendPing { _ in
-                    if once.withLock({ (done: inout Bool) -> Bool in let was = done; done = true; return was }) == false { continuation.resume() }
-                }
-                DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
-                    if once.withLock({ (done: inout Bool) -> Bool in let was = done; done = true; return was }) == false { continuation.resume() }
-                }
-            }
-        }
-        wsdbg("cancel(with: \(closeCode.rawValue)) now; task.state=\(task.state.rawValue) variant=\(variant)")
-        let data: Data? = reason.isEmpty ? nil : Data(reason.utf8)
-        if variant == "onqueue" {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                session.delegateQueue.addOperation {
-                    self.task.cancel(with: closeCode, reason: data)
-                    continuation.resume()
-                }
-            }
-        } else if variant == "inping" {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                task.sendPing { _ in
-                    self.task.cancel(with: closeCode, reason: data)
-                    continuation.resume()
-                }
-            }
-        } else if variant == "main" {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                DispatchQueue.main.async {
-                    self.task.cancel(with: closeCode, reason: data)
-                    continuation.resume()
-                }
-            }
-        } else if variant == "twice" {
-            task.cancel(with: closeCode, reason: data)
-            try? await Task.sleep(nanoseconds: 20_000_000)
-            task.cancel(with: closeCode, reason: data)
-        } else {
-            task.cancel(with: closeCode, reason: data)
-        }
-        wsdbg("cancel(with:) returned; task.state=\(task.state.rawValue) closeCode=\(task.closeCode.rawValue)")
-        if variant.contains("delayinv") {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-        }
+        task.cancel(with: closeCode, reason: reason.isEmpty ? nil : Data(reason.utf8))
         // Lets the close frame go out, then releases the delegate.
         session.finishTasksAndInvalidate()
     }
@@ -236,18 +171,9 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
             return nil
         }
         let message: URLSessionWebSocketTask.Message
-        wsdbg("receive() starting")
         do {
-            // The completion-handler `receive`, in a continuation: the awaiting Swift task's cancellation (the binding
-            // cancels its pump when the core closes the connection) must not reach the socket; only `close` does.
-            message = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URLSessionWebSocketTask.Message, any Error>) in
-                task.receive { result in
-                    continuation.resume(with: result)
-                }
-            }
-            wsdbg("receive() returned a message")
+            message = try await task.receive()
         } catch {
-            wsdbg("receive() failed: \(error); isClosing=\(isClosing)")
             if isClosing {
                 return nil
             }
@@ -301,7 +227,6 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
     // MARK: URLSessionWebSocketDelegate
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol negotiated: String?) {
-        wsdbg("delegate didOpen")
         let opening = state.withLock { (current: inout State) -> CheckedContinuation<Result<String, WsError>, Never>? in
             current.opened = true
             current.negotiated = negotiated ?? ""
@@ -318,7 +243,6 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
         reason: Data?
     ) {
-        wsdbg("delegate didCloseWith \(closeCode.rawValue)")
         state.withLock { (current: inout State) -> Void in
             if current.peerClose == nil {
                 current.peerClose = (
@@ -330,7 +254,6 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
-        wsdbg("delegate didCompleteWithError \(String(describing: error))")
         let opening = state.withLock { (current: inout State) -> CheckedContinuation<Result<String, WsError>, Never>? in
             current.completed = true
             let taken = current.opening
@@ -341,9 +264,7 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
             opening.resume(returning: .failure(URLSessionWebSocketConnection.refusal(task: task, error: error)))
         }
         // The task is over: let the session (and with it this delegate) go.
-        if !(ProcessInfo.processInfo.environment["UNDRA_WS_VARIANT"] ?? "").contains("delayinv") {
-            session.finishTasksAndInvalidate()
-        }
+        session.finishTasksAndInvalidate()
     }
 
     /// Why a handshake failed: the HTTP status of a refused upgrade, else a network failure.

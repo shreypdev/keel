@@ -296,8 +296,7 @@ final class RealtimeReviewTests: XCTestCase {
         binding.detach()
         let answered = try await pull.value.get()
         XCTAssertEqual(answered, [])
-        let seen = try await server.waitFor("/ws/stall") { $0.closeCode != nil }
-        XCTAssertEqual(seen?.closeCode, 1001)
+        try await server.waitForTheClientsClose("/ws/stall", code: 1001, reason: nil)
     }
 
     /// 1e: SSE resume sends Last-Event-ID, retry surfaces as retryMs, the body's end is Ended.

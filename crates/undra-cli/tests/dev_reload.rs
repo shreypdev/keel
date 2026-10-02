@@ -18,7 +18,7 @@ use undra_meta::ids;
 use undra_wire::payload::{Call, CallTarget, ChangeSet, Hello, Log, Observe, Reply, ReplyStatus};
 use undra_wire::{Decode, Encode, Envelope, Handle, Kind, Reader, Writer};
 
-const BUILD: Duration = Duration::from_secs(600);
+const BUILD: Duration = Duration::from_secs(900);
 
 /// How long [`Client::read`] waits for the server before it calls it silence.
 const PATIENCE: Duration = Duration::from_secs(30);

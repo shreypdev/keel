@@ -139,6 +139,42 @@ final class RealtimeServer: @unchecked Sendable {
         return seen
     }
 
+    /// The close the client sent, as the server saw it: waits for it, and checks what the platform guarantees.
+    ///
+    /// From macOS 26 / iOS 26 `URLSessionWebSocketTask.cancel(with:reason:)` writes the close frame before it ends the
+    /// connection: the server sees `code` and `reason`. Before that (measured on the hosted macOS 15 runner, a virtual M1,
+    /// where it happens every time the call comes soon after the connection opened or its last frame) the system ends the
+    /// connection without writing the frame: the server sees the TCP connection end and no close frame (a client that
+    /// leaves abnormally, 1006), and `WebSocketPort` cannot tell, because `cancel(with:)` reports nothing. So on the older
+    /// systems what is guaranteed is that the connection ended, and the code is checked when the frame did arrive.
+    /// (SPEC 8.1; docs/ERRORS.md, "Differences that remain".)
+    @discardableResult
+    func waitForTheClientsClose(
+        _ path: String,
+        code: Int,
+        reason: String?,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws -> Connection? {
+        if #available(macOS 26, iOS 26, *) {
+            let seen = try await waitFor(path, file: file, line: line) { $0.closeCode != nil }
+            XCTAssertEqual(seen?.closeCode, code, file: file, line: line)
+            if let reason = reason {
+                XCTAssertEqual(seen?.closeReason, reason, file: file, line: line)
+            }
+            return seen
+        }
+        let seen = try await waitFor(path, file: file, line: line) { $0.closeCode != nil || $0.clientClosed }
+        XCTAssertTrue(seen?.clientClosed == true || seen?.closeCode != nil, "the connection did not end", file: file, line: line)
+        if let sent = seen?.closeCode {
+            XCTAssertEqual(sent, code, file: file, line: line)
+            if let reason = reason {
+                XCTAssertEqual(seen?.closeReason, reason, file: file, line: line)
+            }
+        }
+        return seen
+    }
+
     struct ServerError: Error, CustomStringConvertible {
         let description: String
     }
@@ -186,9 +222,7 @@ final class URLSessionWebSocketAdapterTests: XCTestCase {
         let echoed = try await read(conn, sent.count)
         XCTAssertEqual(echoed, sent)
         try await binding.close(conn: conn, code: 1000, reason: "done")
-        let seen = try await server.waitFor("/ws/echo") { $0.closeCode != nil }
-        XCTAssertEqual(seen?.closeCode, 1000)
-        XCTAssertEqual(seen?.closeReason, "done")
+        try await server.waitForTheClientsClose("/ws/echo", code: 1000, reason: "done")
     }
 
     func testSubprotocolHeadersAndACloseCodeOfTheClients() async throws {
@@ -210,9 +244,7 @@ final class URLSessionWebSocketAdapterTests: XCTestCase {
         let pong = try await read(opened.conn, 1)
         XCTAssertEqual(pong, [.text("ping")])
         try await binding.close(conn: opened.conn, code: 4000, reason: "bye")
-        let seen = try await server.waitFor("/ws/headers") { $0.closeCode != nil }
-        XCTAssertEqual(seen?.closeCode, 4000)
-        XCTAssertEqual(seen?.closeReason, "bye")
+        let seen = try await server.waitForTheClientsClose("/ws/headers", code: 4000, reason: "bye")
         XCTAssertEqual(seen?.protocols, ["v2", "v1"])
     }
 
@@ -309,8 +341,7 @@ final class URLSessionWebSocketAdapterTests: XCTestCase {
     func testAConnectionTheCoreLetsGoIsClosedGoingAway() async throws {
         let conn = try await binding.connect(url: "\(server.ws)/ws/stall", protocols: [], headers: []).conn
         try await binding.close(conn: conn, code: 1001, reason: "")
-        let seen = try await server.waitFor("/ws/stall") { $0.closeCode != nil }
-        XCTAssertEqual(seen?.closeCode, 1001)
+        try await server.waitForTheClientsClose("/ws/stall", code: 1001, reason: nil)
     }
 }
 
