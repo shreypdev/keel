@@ -135,8 +135,8 @@ export async function adoptList<T extends UndraObject>(core: UndraCore, body: Ui
  * What `UndraCore.call` hands the reply of a call whose caller aborted after the core had answered (`orphan`), for a
  * method that returns objects: one reference per handle in the body (`shape` 0: one object, 1: an optional one, 2: a
  * list), given back. Without it the reply would be dropped and its references owned by nobody until the core closes.
- *
- * @internal Generated code passes it for an `async` method that returns objects.
+ * Generated code passes it for an `async` method that returns objects, so it is public: the published declarations must
+ * have it (the build strips internal declarations; `test/declarations.test.ts`).
  */
 export function reclaim(core: UndraCore, shape: 0 | 1 | 2): (body: Uint8Array) => void {
   return (body) => {
