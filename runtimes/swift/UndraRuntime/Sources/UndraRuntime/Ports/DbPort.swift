@@ -7,6 +7,8 @@
 //   open(name, migrations) -> DbOpened     execute(db, sql, params) -> DbExecuted
 //   query(db, sql, params) -> DbRows       begin(db) -> u32     commit(tx)     rollback(tx)     close(db)
 
+import Dispatch
+
 /// Opens SQLite databases for the `Db` port (ADR-048).
 ///
 /// Implement it to replace ``SQLiteDbAdapter`` and register it with ``DbPortAdapter``:
@@ -48,11 +50,13 @@ public protocol DbConnection: Sendable {
 ///
 /// * Ids: databases and transactions share one counter from 1, never reused.
 /// * `open(name, migrations)` checks the name (else `unavailable("invalid database name ...")`)
-///   and that versions strictly increase from 1 (else `migration`), opens the database, runs
-///   `PRAGMA foreign_keys = ON`, `PRAGMA busy_timeout` and `PRAGMA journal_mode = WAL`, reads
-///   `PRAGMA user_version`, refuses a database newer than the newest migration, and runs every
-///   pending migration in one `BEGIN IMMEDIATE` transaction that ends by setting `user_version`
-///   (any failure rolls all of them back: `migration(version, message)`).
+///   and that versions strictly increase from 1 and fit `user_version` (at most 2,147,483,647;
+///   else `migration`), opens the database, runs `PRAGMA foreign_keys = ON`, `PRAGMA busy_timeout`
+///   and `PRAGMA journal_mode = WAL`, reads `PRAGMA user_version`, refuses a database newer than
+///   the newest migration, and runs every pending migration in one `BEGIN IMMEDIATE` transaction
+///   that ends by setting `user_version` (any failure rolls all of them back: `migration(version,
+///   message)`). The version is read again under that transaction's write lock, so two opens of
+///   one file at once migrate it once.
 /// * Every database runs one operation at a time, in arrival order. `begin` waits until no
 ///   transaction is active (at most the busy timeout, then `busy`) and runs `BEGIN IMMEDIATE`;
 ///   statements on the transaction's id run in it, statements on the database's id wait until it
@@ -117,7 +121,11 @@ func validateDatabaseName(_ name: String) throws(DbError) {
     }
 }
 
-/// Checks that migration versions strictly increase from 1.
+/// The largest migration version: SQLite keeps the version in `PRAGMA user_version`, a signed
+/// 32-bit integer, and records a larger value as 0.
+let maximumMigrationVersion = UInt32(Int32.max)
+
+/// Checks that migration versions strictly increase from 1 and fit `PRAGMA user_version`.
 func validateMigrations(_ migrations: [DbMigration]) throws(DbError) {
     var last: UInt32 = 0
     for migration in migrations {
@@ -125,6 +133,12 @@ func validateMigrations(_ migrations: [DbMigration]) throws(DbError) {
             throw DbError.migration(
                 version: migration.version,
                 message: "migration versions must strictly increase, starting at 1"
+            )
+        }
+        if migration.version > maximumMigrationVersion {
+            throw DbError.migration(
+                version: migration.version,
+                message: "migration versions must be at most \(maximumMigrationVersion): SQLite keeps the version in a signed 32-bit integer (PRAGMA user_version)"
             )
         }
         last = migration.version
@@ -286,27 +300,32 @@ final class DbBinding: DetachableBinding, @unchecked Sendable {
     private func prepare(_ connection: any DbConnection, migrations: [DbMigration]) async throws(DbError) -> UInt32 {
         _ = try await connection.execute("PRAGMA foreign_keys = ON", [])
         _ = try await connection.execute("PRAGMA busy_timeout = \(busyTimeoutMs)", [])
-        _ = try await connection.execute("PRAGMA journal_mode = WAL", [])
-        let rows = try await connection.query("PRAGMA user_version", [])
-        var current: UInt32 = 0
-        if case .integer(let value)? = rows.rows.first?.first {
-            current = UInt32(clamping: value)
-        }
+        try await enableWal(connection)
+        let current = try await DbBinding.userVersion(of: connection)
         guard let newest = migrations.last?.version else {
             return current
         }
-        if current > newest {
-            throw DbError.migration(
-                version: current,
-                message: "the database is at version \(current), newer than the newest migration (\(newest))"
-            )
-        }
-        let pending = migrations.filter { (migration: DbMigration) -> Bool in migration.version > current }
-        guard !pending.isEmpty else {
+        try DbBinding.refuseNewer(current, than: newest)
+        guard current < newest else {
             return current
         }
         _ = try await connection.execute("BEGIN IMMEDIATE", [])
-        var step = pending[0].version
+        // Another connection to the file (a second open of it, another process) may have migrated
+        // it since the version was read: what is pending is decided again under the write lock.
+        let pending: [DbMigration]
+        do throws(DbError) {
+            let locked = try await DbBinding.userVersion(of: connection)
+            try DbBinding.refuseNewer(locked, than: newest)
+            pending = migrations.filter { (migration: DbMigration) -> Bool in migration.version > locked }
+        } catch {
+            _ = try? await connection.execute("ROLLBACK", [])
+            throw error
+        }
+        guard let first = pending.first else {
+            _ = try? await connection.execute("ROLLBACK", [])
+            return newest
+        }
+        var step = first.version
         do throws(DbError) {
             for migration in pending {
                 step = migration.version
@@ -320,6 +339,43 @@ final class DbBinding: DetachableBinding, @unchecked Sendable {
             throw DbError.migration(version: step, message: error.description)
         }
         return newest
+    }
+
+    /// `PRAGMA journal_mode = WAL`. While another connection switches the same new file to WAL,
+    /// SQLite answers `BUSY` at once instead of calling its busy handler, so the switch is retried
+    /// here until the busy timeout, as any other lock is waited for.
+    private func enableWal(_ connection: any DbConnection) async throws(DbError) {
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(busyTimeoutMs) * 1_000_000
+        while true {
+            do throws(DbError) {
+                _ = try await connection.execute("PRAGMA journal_mode = WAL", [])
+                return
+            } catch {
+                guard error == .busy, DispatchTime.now().uptimeNanoseconds < deadline else {
+                    throw error
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000)
+            }
+        }
+    }
+
+    /// `PRAGMA user_version` of `connection`.
+    private static func userVersion(of connection: any DbConnection) async throws(DbError) -> UInt32 {
+        let rows = try await connection.query("PRAGMA user_version", [])
+        if case .integer(let value)? = rows.rows.first?.first {
+            return UInt32(clamping: value)
+        }
+        return 0
+    }
+
+    /// A database newer than the newest migration is refused, never downgraded.
+    private static func refuseNewer(_ current: UInt32, than newest: UInt32) throws(DbError) {
+        if current > newest {
+            throw DbError.migration(
+                version: current,
+                message: "the database is at version \(current), newer than the newest migration (\(newest))"
+            )
+        }
     }
 
     // MARK: Statements

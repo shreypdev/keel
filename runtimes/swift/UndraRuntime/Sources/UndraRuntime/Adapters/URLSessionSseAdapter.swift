@@ -25,14 +25,20 @@ public final class URLSessionSseAdapter: SseAdapter, UndraAdapter, @unchecked Se
     }
 
     /// The session used when none is passed: ephemeral, no request timeout while the stream is
-    /// quiet, no waiting for connectivity.
+    /// quiet, no waiting for connectivity, and no practical limit on connections per host (an
+    /// open stream holds its HTTP/1.1 connection, so URLSession's default of 6 would leave the
+    /// seventh stream to one host waiting forever in `open`).
     public static func makeDefaultSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = false
         configuration.timeoutIntervalForRequest = 24 * 60 * 60
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpMaximumConnectionsPerHost = maximumStreamsPerHost
         return URLSession(configuration: configuration)
     }
+
+    /// How many streams the default session keeps open to one host at once.
+    static let maximumStreamsPerHost = 1_024
 
     /// Requests `url` and returns once a 2xx `text/event-stream` answer's head arrived.
     public func open(url: String, headers: [Header], lastEventId: String?) async throws(SseError) -> any SseStream {

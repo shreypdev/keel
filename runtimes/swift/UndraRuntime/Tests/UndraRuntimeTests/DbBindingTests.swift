@@ -146,6 +146,8 @@ final class DbBindingTests: XCTestCase {
             "PRAGMA journal_mode = WAL",
             "PRAGMA user_version",
             "BEGIN IMMEDIATE",
+            // Read again under the write lock: another connection may have migrated meanwhile.
+            "PRAGMA user_version",
             "script \(notesMigrations[0].sql)",
             "script \(notesMigrations[1].sql)",
             "PRAGMA user_version = 2",
