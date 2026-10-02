@@ -77,7 +77,15 @@ done
 "$root/contract-tests/derived-vectors.sh" >&2
 
 # 2. The dependencies (vitest, typescript), from the lockfile.
+#    Never through a symlink: `npm ci` empties the directory a linked `node_modules` points at (another
+#    checkout's, typically a worktree's link to the main checkout's), so a link that needs an install is refused.
 if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
+  if [ -L node_modules ]; then
+    echo "run.sh: node_modules is a symlink (to $(readlink node_modules)) and the lockfile needs an install;" >&2
+    echo "        refusing to run npm ci through it. Remove the link and rerun (npm ci installs a copy here)," >&2
+    echo "        or link a node_modules installed from this package-lock.json." >&2
+    exit 2
+  fi
   echo "==> installing dependencies" >&2
   npm ci --no-audit --no-fund >&2
 fi
