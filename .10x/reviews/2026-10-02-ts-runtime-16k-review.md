@@ -71,7 +71,12 @@ Local, on this machine (load 6 to 15 from other agents' builds):
   tests, `undra bindgen --check` of the cookbook and the fieldbook, the docs, wasm32), `ci/ts`, `ci/wasm-ffi` (the acceptance on the sources and on
   the production build), `ci/playground-web`, `ci/react-native`, `bench/size`, `two-cores/jvm-and-node`, `site/build`: green. `ci/contracts`: the
   TypeScript column passes every scenario (sources and production build); the Kotlin column failed S30 once at load 13 and passed alone (N3).
-  After the second merge of `main` the same jobs ran again on the head that was pushed.
+  After the second merge of `main` the same jobs ran again (green, the generics golden fixed, N4). Pushes: `2e16fcf` (CI red: the Kotlin
+  allocation flake, N6; Bench, Two cores, Site green), `aff1e5f` (CI red: the Swift S14 build-B wait on the iOS floor job, N7; Bench, Two
+  cores, Site green). After the third merge of `main` (`3c279a6`): the three JavaScript rows re-measured unchanged (15,811 / 16,333 /
+  40,221; the wasm is main's 117,165), the golden test green, and `ci/rust` in a clone green up to the cdylib step when the session closed.
+* **Not done when the session closed:** a green CI run on the final head (pushed at the end, not watched), `ci-local` for the other jobs on
+  that head, and a fix of N7 (main's S14 wait) if it recurs. The verdict stands on the findings; landing waits for that run.
 * `node site/scripts/build-all.mjs` (current) and `node site/scripts/check-links.mjs --words` (347 of 350).
 * Not verified here: the Swift column and the iOS jobs (macOS 15 runners; the piece touches no Swift), webpack and Metro resolution (not
   installed; the conditions were read, and Node's `--conditions` reproduce them), the device bench in Chromium (the Node call path was measured
