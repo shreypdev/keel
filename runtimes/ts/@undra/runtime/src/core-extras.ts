@@ -1,16 +1,15 @@
 import type { UndraBackgroundReport } from "./adapters/types.js";
 import type { UndraCore, UndraStats } from "./core.js";
-import { UndraModeError } from "./errors.js";
-import type { CoreTransport } from "./transport/transport.js";
-import { WasmHost } from "./transport/wasm-main.js";
-import { restoreInto, takeSnapshot } from "./transport/wasm-snapshot.js";
+import { RUN_BACKGROUND } from "./adapters/port-literals.js";
+import { UndraRestoreError } from "./errors-rare.js";
 import { CallTarget, UndraReader, codecs, encodeValue } from "./wire/index.js";
 
 /*
- * What `UndraCore` does only when asked, loaded on the first call (ADR-057, ADR-052): `stats`, `snapshot`, `restore` and
- * `runInBackground`. All four answer with a promise already, so a first call that waits for this chunk is an ordinary
- * asynchronous call (SPEC 17.1 is unchanged). A hello page that never asks does not carry them: its background window reads the
- * one number it needs (`background.pending`) from the core's own JSON.
+ * What `UndraCore` does only when asked, loaded on the first call (ADR-057, ADR-052): `stats`, `runInBackground` and the class of a
+ * refused `restore`. Each answers with a promise already, so a first call that waits for this chunk is an ordinary asynchronous call
+ * (SPEC 17.1 is unchanged); `snapshot` and `restore` themselves run at the call (they are ordered with the calls around them), and so
+ * does the page's background window, which reads the one number it needs (`background.pending`) from the core's own JSON and calls
+ * `run_background` itself.
  */
 
 /** Statistics counters exposed by `undra_stats_json` that this runtime reads. */
@@ -59,22 +58,10 @@ export async function stats(core: UndraCore): Promise<UndraStats> {
   };
 }
 
-/** The persisted state of every store: what `UndraCore.snapshot` answers (the core is open; see there). */
-export async function snapshot(transport: CoreTransport): Promise<Uint8Array> {
-  if (transport.snapshot !== undefined) return transport.snapshot();
-  if (transport instanceof WasmHost) return takeSnapshot(transport);
-  throw new UndraModeError("snapshot", transport.mode);
+/** What `UndraCore.restore` rejects with when the in-process core refused the bytes `code` (it is unchanged; the restore itself ran at the call). */
+export function refused(code: number): UndraRestoreError {
+  return new UndraRestoreError(code);
 }
-
-/** Rebuilds the stores from `bytes`: what `UndraCore.restore` does before it flushes the mirror (the core is open; see there). */
-export async function restore(transport: CoreTransport, bytes: Uint8Array): Promise<void> {
-  if (transport.restore !== undefined) return transport.restore(bytes);
-  if (transport instanceof WasmHost) return restoreInto(transport, bytes);
-  throw new UndraModeError("restore", transport.mode);
-}
-
-/** The standard function `run_background` (`fnv1a32("fn.run_background")`, ADR-046): in every schema, called like any free async function. */
-export const RUN_BACKGROUND = 0x0e5b14ff;
 
 /**
  * Calls `run_background(deadlineMs)` on `core` and decodes its `BackgroundReport`: what `UndraCore.runInBackground` does (see

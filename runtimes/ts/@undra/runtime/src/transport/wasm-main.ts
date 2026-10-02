@@ -391,6 +391,29 @@ export class WasmHost implements CoreTransport {
     }
   }
 
+  /**
+   * `undra_snapshot`, copied out of wasm memory, now; throws `UndraTransportError` when the core cannot be asked (closed, trapped,
+   * no such export). Here and not with the other snapshot code because `UndraCore.snapshot` takes it at the call (SPEC 17.1: behind
+   * what was sent before it, ahead of what is sent after), not after a module arrives. @internal
+   */
+  _snapshot(): Uint8Array {
+    return this._run((e) => {
+      if (e.undra_snapshot === undefined) throw new UndraTransportError("unsupported", msg(203));
+      return this._takeBuf(e, e.undra_snapshot());
+    });
+  }
+
+  /**
+   * `undra_restore` of `bytes`, now: `0` when the stores were rebuilt (their change-sets have reached the handler), else the code of
+   * the core's refusal (it is unchanged). At the call for the reason `_snapshot` gives; the refusal's class loads with it. @internal
+   */
+  _restore(bytes: Uint8Array): number {
+    return this._invoke(bytes, (e, ptr, len) => {
+      if (e.undra_restore === undefined) throw new UndraTransportError("unsupported", msg(204));
+      return e.undra_restore(ptr, len);
+    });
+  }
+
   private _scratch(e: CoreExports, len: number): number {
     if (this._scratchCap < len) {
       if (this._scratchPtr !== 0) e.undra_free(this._scratchPtr, this._scratchCap);

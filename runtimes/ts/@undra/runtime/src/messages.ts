@@ -220,8 +220,8 @@ const MESSAGES: Readonly<Record<number, string | null>> = {
   200: "the core returned a null UndraBuf", // transport/wasm-main.ts: UndraTransportError("protocol")
   201: "the core is not started", // transport/wasm-main.ts: ConditionalExpression; transport/wasm-worker.ts: ConditionalExpression
   202: "the wasm core trapped: {0}", // transport/wasm-main.ts: UndraTransportError("trap")
-  203: "the core does not export undra_snapshot", // transport/wasm-snapshot.ts: UndraTransportError("unsupported")
-  204: "the core does not export undra_restore", // transport/wasm-snapshot.ts: UndraTransportError("unsupported")
+  203: "the core does not export undra_snapshot", // transport/wasm-main.ts: UndraTransportError("unsupported")
+  204: "the core does not export undra_restore", // transport/wasm-main.ts: UndraTransportError("unsupported")
   205: "the worker gave an incomplete answer", // transport/wasm-worker.ts: UndraTransportError("protocol")
   206: "worker.ports needs this @undra/runtime's worker script (protocol 3)", // transport/wasm-worker.ts: UndraTransportError("unsupported")
   207: "the worker sent an `envelopes` message without a list of envelopes", // transport/wasm-worker.ts: UndraTransportError("protocol")

@@ -2,6 +2,7 @@ import { lightAdapters } from "./adapters/browser-events.js";
 import { UNNAMED_NAMESPACE, checkNamespace } from "./adapters/names.js";
 import { defaultPorts } from "./adapters/default-ports.js";
 import { startEventSources } from "./adapters/events.js";
+import { RUN_BACKGROUND } from "./adapters/port-literals.js";
 import { WEB_CRYPTO_REQUIRED, consoleLog, hasCryptoRandom } from "./adapters/system.js";
 import type { Adapters, AdapterOverrides, UndraBackgroundReport, UndraBackgroundStats, UndraPanicReport } from "./adapters/types.js";
 import {
@@ -75,8 +76,11 @@ export interface UndraStats {
   readonly background: UndraBackgroundStats;
 }
 
-/** How long the runtime lets the core drain its background work when a page goes to the background (ADR-046 decision 3.4), in ms. */
-const PAGE_BACKGROUND_MS = 1000;
+/**
+ * The argument of the page's background run (ADR-046 decision 3.4): how long the runtime lets the core drain its background work when
+ * a page goes to the background, 1000 ms, as the `u64` `run_background` takes (little-endian).
+ */
+const PAGE_BACKGROUND_ARGS = Uint8Array.of(0xe8, 0x03, 0, 0, 0, 0, 0, 0);
 
 /** Why a core is `closed`: the app closed it, its schema is not the bindings', the dev server lost its session (ADR-051), or the connection failed for good. */
 export type ConnectionClosedReason = "requested" | "schemaMismatch" | "sessionLost" | "failed";
@@ -878,13 +882,19 @@ export class UndraCore {
   /**
    * The persisted state of every store (docs/SPEC.md section 5.9), as opaque bytes that `restore`
    * accepts, also into a core loaded later from the same module. Objects that are not stores are
-   * not part of it. In `wasm-worker` mode the snapshot is taken by the worker behind the messages
-   * sent before it. Rejects with {@link UndraTransportError} when the core is closed, and with
+   * not part of it. It is taken at the call: what was sent before `snapshot()` is in it, what is
+   * sent after is not (in `wasm-worker` mode the worker takes it behind the messages sent before
+   * it). Rejects with {@link UndraTransportError} when the core is closed, and with
    * {@link UndraModeError} over a transport that cannot snapshot (`remote`).
    */
   async snapshot(): Promise<Uint8Array> {
     this._assertOpen();
-    return (await onDemand("snapshots", () => import("./core-extras.js"))).snapshot(this._transport);
+    // At the call, never after a module loads (ADR-057 keeps this up front): a page that snapshots and then calls on, or closes,
+    // gets the state it asked for.
+    const transport = this._transport;
+    if (transport.snapshot !== undefined) return transport.snapshot();
+    if (transport instanceof WasmHost) return transport._snapshot();
+    throw new UndraModeError("snapshot", transport.mode);
   }
 
   /**
@@ -895,11 +905,19 @@ export class UndraCore {
    * (reply status 3; a stream ends with a flag-3 failure of status 3); an object that is not a store becomes a
    * stale handle. Rejects with `UndraRestoreError` when the core refuses the bytes, in which case
    * it is unchanged and still usable, with {@link UndraTransportError} when the core is closed, and
-   * with {@link UndraModeError} over a transport that cannot restore (`remote`).
+   * with {@link UndraModeError} over a transport that cannot restore (`remote`). Like `snapshot`, it
+   * runs at the call: a call made after `restore()` reaches the restored stores and is not one the
+   * restore cancels.
    */
   async restore(bytes: Uint8Array): Promise<void> {
     this._assertOpen();
-    await (await onDemand("snapshots", () => import("./core-extras.js"))).restore(this._transport, bytes);
+    // At the call, as `snapshot`; only the class of a refusal (the core is unchanged) is a module that loads then.
+    const transport = this._transport;
+    if (transport.restore !== undefined) await transport.restore(bytes);
+    else if (transport instanceof WasmHost) {
+      const code = transport._restore(bytes);
+      if (code !== 0) throw (await onDemand("snapshots", () => import("./core-extras.js"))).refused(code);
+    } else throw new UndraModeError("restore", transport.mode);
     // Read-your-writes (docs/SPEC.md section 11): what the restore delivered is applied before the caller resumes.
     this.mirror.flush();
   }
@@ -951,10 +969,11 @@ export class UndraCore {
   private _backgroundWindow(): void {
     if (this._backgroundRunning || this._options.backgroundRun === false || typeof document === "undefined") return;
     this._backgroundRunning = true;
-    // Only `background.pending` of the core's own statistics: the full `stats()` is a module of its own, and a page that is hidden
-    // with nothing to drain imports nothing.
+    // Only `background.pending` of the core's own statistics: the full `stats()` is a module of its own. And `run_background` is called
+    // here, not through `runInBackground`, whose module a page that is being left, or is offline, may not be able to fetch: the window
+    // imports nothing, with or without work to drain (ADR-046 decision 3.4: within the page's life).
     Promise.resolve(this._transport.stats?.())
-      .then((json) => (backgroundPending(json) > 0 ? this.runInBackground(PAGE_BACKGROUND_MS) : undefined))
+      .then((json) => (backgroundPending(json) > 0 ? this.call(CallTarget.FreeFunction, RUN_BACKGROUND, PAGE_BACKGROUND_ARGS) : undefined))
       .catch((error: unknown) => {
         if (!this._closed) this._reportError("runInBackground", error);
       })

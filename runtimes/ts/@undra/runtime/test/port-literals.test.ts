@@ -20,6 +20,7 @@ const pinned: ReadonlyArray<readonly [string, number, number]> = [
   ["LIFECYCLE_PORT", literals.LIFECYCLE_PORT, PortIds.Lifecycle.portId],
   ["LIFECYCLE_CHANGED", literals.LIFECYCLE_CHANGED, PortIds.Lifecycle.changed],
   ["TIMER_PORT", literals.TIMER_PORT, PortIds.Timer.portId],
+  ["RUN_BACKGROUND", literals.RUN_BACKGROUND, fnv1a32("fn.run_background")],
 ];
 
 describe("port-literals", () => {
@@ -37,6 +38,7 @@ describe("port-literals", () => {
     expect(literals.LIFECYCLE_PORT).toBe(fnv1a32("port.Lifecycle"));
     expect(literals.LIFECYCLE_CHANGED).toBe(fnv1a32("Lifecycle.changed"));
     expect(literals.TIMER_PORT).toBe(fnv1a32("port.Timer"));
+    expect(literals.RUN_BACKGROUND).toBe(fnv1a32("fn.run_background"));
   });
 
   it("is every export of the module (a new literal is pinned here too)", () => {

@@ -224,10 +224,28 @@ describe.each(["wasm-main", "wasm-worker"] as const)("snapshot and restore in %s
     );
     b.core.close();
     const outcome = await settled;
-    // wasm-main answers inside `snapshot()` before `close()` can run; the worker's answer is still in flight.
-    if (outcome instanceof Uint8Array) expect(mode).toBe("wasm-main");
+    // wasm-main answers inside `snapshot()` before `close()` can run (the snapshot is taken at the call, not after a module
+    // loads: an app that snapshots and closes at teardown gets its bytes); the worker's answer is still in flight.
+    if (mode === "wasm-main") expect(outcome).toBeInstanceOf(Uint8Array);
     else expect((outcome as UndraTransportError).reason).toBe("closed");
     b.close();
+  });
+
+  it("restore runs at the call: a call made after restore() was called is not one the restore cancels", async () => {
+    const b = await boot(mode);
+    const restored = b.core.restore(snapshotOf(3));
+    // Made after the restore was asked for: the core must see it after the restore, so it is not in flight across it.
+    const after = b.core.call(FREE, STUB.PORT, u32(1)); // the port never answers: the call waits in the core
+    const outcome = after.then(
+      () => "answered",
+      (e: unknown) => e,
+    );
+    await restored;
+    // Every reply the restore produced was delivered before it resolved (a cancellation included): the call is still waiting.
+    const stats = await b.core.stats();
+    expect(stats.pendingCalls, "the call made after restore() still waits in the core").toBe(1);
+    b.close();
+    expect(await outcome).toBeInstanceOf(UndraTransportError);
   });
 });
 
