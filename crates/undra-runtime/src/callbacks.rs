@@ -267,8 +267,11 @@ impl<P: ?Sized + Send + Sync + 'static> ErasedWeak for Weak<P> {
 /// numbers its instances from 1 like every other client.
 #[derive(Default)]
 pub(crate) struct CallbackRegistry {
-    live: Mutex<HashMap<(u64, u32, u64), Box<dyn ErasedWeak>>>,
+    live: Mutex<HashMap<ProxyKey, Box<dyn ErasedWeak>>>,
 }
+
+/// Which proxy: `(origin, port id, instance)`.
+type ProxyKey = (u64, u32, u64);
 
 impl CallbackRegistry {
     /// Forgets `(origin, port_id, instance)` if its proxy is gone (a newer proxy of the same

@@ -428,18 +428,24 @@ class CallbackTests : Suite() {
     }
 
     private fun lifecycle() {
-        case("a lost connection and a closed core drop the registry; a late release is not an error") {
+        case("a lost connection keeps the registry for the session's return and a closed core drops it; a late release is not an error") {
             LogCapture("dev.undra.runtime", Level.ALL).use { log ->
                 val rig = CallbackRig()
                 val a = ListenerLog()
                 val h = rig.core.callbacks.lend(a)
                 rig.t.drop()
-                assertEq(0, rig.core.callbacks.liveCount)
+                // The server keeps the session's objects, and the proxies of the instances lent, for its return (ADR-051).
+                assertEq(1, rig.core.callbacks.liveCount)
+                assertEq(h, rig.core.callbacks.instanceOf(a))
                 rig.core.callbacks.release(h)
+                assertEq(0, rig.core.callbacks.liveCount)
                 assertTrue(log.records.none { it.level == Level.SEVERE }, log.messages().toString())
-                rig.core.callbacks.lend(a)
+                val h2 = rig.core.callbacks.lend(a)
                 rig.close()
                 assertEq(0, rig.core.callbacks.liveCount)
+                // A release that arrives after the close is expected, not an over-release.
+                rig.core.callbacks.release(h2)
+                assertTrue(log.records.none { it.level == Level.SEVERE }, log.messages().toString())
             }
         }
     }
