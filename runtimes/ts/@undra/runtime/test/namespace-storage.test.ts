@@ -298,8 +298,8 @@ const BAD_NAMESPACES: ReadonlyArray<readonly [string, string]> = [
   ["a".repeat(33), "33 characters"],
   ["Upper", "uppercase"],
   ["1abc", "starts with a digit"],
-  ["_", "an explicit `_` (the fallback is not a namespace)"],
   ["_hidden", "starts with `_`"],
+  ["__", "two underscores"],
   ["café", "unicode"],
   ["a\u0000b", "a NUL byte"],
   ["with space", "a space"],
@@ -340,8 +340,6 @@ describe("a namespace an app supplies", () => {
     });
 
     it(`never becomes a store name through an adapter either: ${why}`, () => {
-      // `_` is the fallback's own name, which the adapters take for a core without a namespace; `load` and `attach` refuse it.
-      if (namespace === UNNAMED_NAMESPACE) return;
       expect(() => storeName(namespace, "kv")).toThrow(/namespace/);
       expect(() => storePath(namespace, "fs")).toThrow(/namespace/);
       expect(() => indexedDbKv({ namespace })).toThrow(/namespace/);
@@ -350,6 +348,13 @@ describe("a namespace an app supplies", () => {
       expect(() => opfsFs({ namespace })).toThrow(/namespace/);
     });
   }
+
+  it("of `_` is the unnamed core's own: accepted, and the same stores as none", async () => {
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    const core = track(await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA, shared: false, namespace: "_" }));
+    expect(core.namespace).toBe(UNNAMED_NAMESPACE);
+    expect(storeName("_", "kv")).toBe(storeName(undefined, "kv"));
+  });
 
   it("is refused when it is not a string at all", async () => {
     vi.stubGlobal("indexedDB", new IDBFactory());
@@ -374,7 +379,7 @@ describe("a namespace an app supplies", () => {
       () => new Error("accepted"),
       (e: unknown) => e as Error,
     );
-    expect(error.message).toContain("cannot name a core");
+    expect(error.message).toContain("is not [a-z][a-z0-9_]{0,31}");
     expect(error.message.length).toBeLessThan(600);
   });
 });

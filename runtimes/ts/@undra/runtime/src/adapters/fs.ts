@@ -10,7 +10,7 @@ export interface OpfsFsOptions {
    */
   readonly root?: FileSystemDirectoryHandle | (() => Promise<FileSystemDirectoryHandle>);
   /** The namespace of the core the default directory is made for. Default `"_"`; ignored when `root` is given. */
-  readonly namespace?: string;
+  readonly namespace?: string | undefined;
 }
 
 /** Splits an adapter path into safe segments; `..` is refused so that a path cannot leave the root. */

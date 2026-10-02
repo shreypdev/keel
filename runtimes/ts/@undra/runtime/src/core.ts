@@ -1,5 +1,5 @@
 import { browserAdapters } from "./adapters/browser.js";
-import { UNNAMED_NAMESPACE, checkNamespace } from "./adapters/names.js";
+import { UNNAMED_NAMESPACE } from "./adapters/names.js";
 import { standardPorts, startEventSources, timerPort } from "./adapters/ports.js";
 import { PortIds } from "./adapters/ids.js";
 import { WEB_CRYPTO_REQUIRED, consoleLog, hasCryptoRandom } from "./adapters/system.js";
@@ -375,8 +375,7 @@ export class UndraCore {
    * created, because it names the default stores.
    */
   static async load(options: LoadOptions): Promise<UndraCore> {
-    // The namespace is a path component of the default stores: refused before anything is created (ADR-044 amendment A).
-    checkNamespace(options.namespace);
+    // A namespace that is not a core's is refused (rejects) by the default adapters made next, before anything is created.
     const adapters = mergeAdapters(browserAdapters({ namespace: options.namespace }), options.adapters);
     // The worker keeps the snapshots of a core in `wasm-worker` mode: it is told the policy (data, not code).
     const recovery = options.recovery?.options;
@@ -448,14 +447,9 @@ export class UndraCore {
    * for {@link UndraCore.load}, including the schema check on the transport's
    * `Hello`; a `namespace` that is not a core namespace rejects as it does for {@link UndraCore.load}.
    */
-  static attach(transport: Transport, options: AttachOptions): Promise<UndraCore> {
-    try {
-      // Refused (the promise rejects, the transport is not touched) before it can reach a store name.
-      checkNamespace(options.namespace);
-      return UndraCore.#attach(transport, options, mergeAdapters(browserAdapters({ namespace: options.namespace }), options.adapters));
-    } catch (error) {
-      return Promise.reject(error);
-    }
+  static async attach(transport: Transport, options: AttachOptions): Promise<UndraCore> {
+    // The default adapters refuse a namespace that is not a core's (it rejects, the transport is not touched).
+    return UndraCore.#attach(transport, options, mergeAdapters(browserAdapters({ namespace: options.namespace }), options.adapters));
   }
 
   static async #attach(transport: Transport, options: AttachOptions, adapters: Partial<Adapters>): Promise<UndraCore> {

@@ -7,7 +7,7 @@ export interface IndexedDbKvOptions {
   /** Database name. Default `"undra.<namespace>.kv"` (SPEC 8, ADR-044 amendment A). */
   readonly name?: string;
   /** The namespace of the core the default database name is made for. Default `"_"`; ignored when `name` is given. */
-  readonly namespace?: string;
+  readonly namespace?: string | undefined;
   /** Object store name. Default `"kv"`. */
   readonly store?: string;
   /** The IndexedDB implementation; default the global `indexedDB`. */

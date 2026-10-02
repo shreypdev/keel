@@ -106,11 +106,6 @@ export interface BrowserAdaptersOptions {
   readonly namespace?: string | undefined;
 }
 
-/** `{ namespace }` without the key when it is unset (`exactOptionalPropertyTypes`). */
-function optional(options: { readonly namespace: string | undefined }): { readonly namespace?: string } {
-  return options.namespace === undefined ? {} : { namespace: options.namespace };
-}
-
 /**
  * The default adapters of a browser (SPEC 11): `fetch` for Http, IndexedDB
  * for Kv, WebCrypto plus IndexedDB for SecureStore, the origin private file
@@ -139,9 +134,9 @@ export function browserAdapters(options: BrowserAdaptersOptions = {}): Partial<A
   const adapters: Partial<Adapters> = {
     timer: setTimeoutTimer(),
     log: consoleLog(),
-    kv: indexedDbKv(optional({ namespace })),
-    secureStore: webCryptoSecureStore(optional({ namespace })),
-    fs: opfsFs(optional({ namespace })),
+    kv: indexedDbKv({ namespace }),
+    secureStore: webCryptoSecureStore({ namespace }),
+    fs: opfsFs({ namespace }),
   };
   if (typeof g.fetch === "function") adapters.http = fetchHttp();
   if (typeof g.navigator?.onLine === "boolean" && typeof g.addEventListener === "function") {

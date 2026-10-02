@@ -18,7 +18,7 @@ export interface WebCryptoSecureStoreOptions {
   /** Where the master key lives. Default: another IndexedDB database, `"undra.<namespace>.secure-keys"`. */
   readonly keyStore?: KeyStore;
   /** The namespace of the core the default databases are made for (SPEC 8, ADR-044 amendment A). Default `"_"`; ignored by a `kv` or `keyStore` you give. */
-  readonly namespace?: string;
+  readonly namespace?: string | undefined;
   /** The WebCrypto implementation; default the global `crypto`. */
   readonly crypto?: Crypto;
   /** The IndexedDB implementation for the defaults; default the global `indexedDB`. */
