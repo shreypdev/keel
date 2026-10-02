@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-01",
+  "updated": "2026-10-02",
   "source": "https://github.com/shreypdev/undra/blob/main/.10x/handoff.md",
   "sections": [
     {
@@ -59,8 +59,8 @@
       "id": "since-v1",
       "status": "Shipped",
       "title": "Since v1.0",
-      "when": "30 Sep – 1 Oct 2026",
-      "intro": "Landed in the day after v1.0, each behind an ADR and an adversarial review.",
+      "when": "30 Sep – 2 Oct 2026",
+      "intro": "Landed in the two days after v1.0; the record of each piece is in the repository.",
       "items": [
         {
           "title": "Frame-coalesced delivery (ADR-031)",
@@ -108,7 +108,7 @@
         },
         {
           "title": "The web bundle under its budget (ADR-052)",
-          "text": "The hello-world core ships at 102.7 KB gzipped against a 120 KB budget, measured and gated in CI; the number on this site comes from the record."
+          "text": "The hello-world core ships under its 120 KB gzipped budget, measured and gated in CI, and the JavaScript a page loads up front has a gate of its own; the numbers on this site come from the record."
         },
         {
           "title": "State-preserving reload (ADR-053)",
@@ -145,6 +145,34 @@
         {
           "title": "Newtypes, generics, Decimal; paged and lazy lists; polling (ADR-042, ADR-043)",
           "text": "The boundary types a production app reaches for, each read as native on every platform; a lazy list pages 10,000 rows from the core on demand; polling pauses when the app does."
+        },
+        {
+          "title": "A runtime ends when its owner lets go (ADR-034)",
+          "text": "Tasks hold a WeakCtx; off-core writes are refused in every build (ADR-035); a panicking computed poisons only itself; stream errors are typed on the wire (ADR-036)."
+        },
+        {
+          "title": "Real Android adapters",
+          "text": "Kv, SecureStore, Fs, Http, Connectivity and Lifecycle backed by the platform, installed with one call."
+        },
+        {
+          "title": "React Native (ADR-038)",
+          "text": "@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI."
+        },
+        {
+          "title": "Migration guides",
+          "text": "From Kotlin Multiplatform and from UniFFI, a cookbook of recipes, and Fieldbook, a production-shaped sample beyond the playground."
+        },
+        {
+          "title": "Several cores in one app (ADR-044)",
+          "text": "Each core is a self-contained image with one namespaced entry point, so two Undra libraries share a process without sharing anything, storage included."
+        },
+        {
+          "title": "iOS 15 and 16 (ADR-045)",
+          "text": "A lower deployment target generates ObservableObject stores; the iOS 17 output is unchanged."
+        },
+        {
+          "title": "The web call path (ADR-056)",
+          "text": "A generated TypeScript call went from 3.2–3.5 µs to 0.47–0.68 µs in headless Chromium, and React Native's mirror work at 100,000 updates a second from about 22 ms to about 5 ms a frame on the iPhone simulator."
         }
       ]
     },
@@ -158,18 +186,6 @@
         {
           "title": "Distribution",
           "text": "brew, npm, a curl installer and cargo-from-git. The release pipeline is built, security-reviewed and proved by a green dry run; the three package channels go live with the v1.0.0 tag."
-        },
-        {
-          "title": "A runtime ends when its owner lets go (ADR-034)",
-          "text": "Tasks hold a WeakCtx; off-core writes are refused in every build (ADR-035); a panicking computed poisons only itself; stream errors are typed on the wire (ADR-036)."
-        },
-        {
-          "title": "Real Android adapters",
-          "text": "Kv, SecureStore, Fs, Http, Connectivity and Lifecycle backed by the platform, installed with one call."
-        },
-        {
-          "title": "React Native (ADR-038)",
-          "text": "@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI."
         }
       ]
     },
@@ -189,16 +205,12 @@
           "text": "Release binaries and docs for the undra command on Windows."
         },
         {
-          "title": "Migration guides",
-          "text": "From Kotlin Multiplatform and from UniFFI; a production-shaped sample beyond the playground."
-        },
-        {
           "title": "A custom domain",
           "text": "A home for the site and docs that is ours."
         },
         {
           "title": "Flutter and Dart",
-          "text": "Decided after React Native ships."
+          "text": "Not started: decided after React Native, which has shipped."
         }
       ]
     },
@@ -212,10 +224,6 @@
         {
           "title": "Desktop targets",
           "text": "macOS, Windows and Linux over the same C ABI."
-        },
-        {
-          "title": "A first-party inspector",
-          "text": "Time-travel over change-sets; the wire makes it natural."
         },
         {
           "title": "A sync engine",
