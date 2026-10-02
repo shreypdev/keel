@@ -37,7 +37,9 @@ module CiLocal
   # Jobs that do not run here unless asked for, by "workflow/job", and why.
   JOB_SKIPS = {
     "two-cores/android" => "needs the Android emulator (KVM on the runner); the emulator CI jobs are on hold until the founder says go",
-    "site/deploy" => "publishes to GitHub Pages (main only, needs the Pages environment)"
+    "site/deploy" => "publishes to GitHub Pages (main only, needs the Pages environment)",
+    "ci/ffi-asan" => "Rust under ASan runs on the Linux x86_64 target; macOS's linker rejects an ASan build of crates that use `inventory` " \
+                     "(ld: initializer pointer has no target). The C ABI under ASan runs in ci/rust and ci/macos, Miri in ci/ffi-miri"
   }.freeze
 
   # Steps that cannot run on this machine, by "workflow/job" (a regexp) and the step's name: the reason is printed.
@@ -60,10 +62,7 @@ module CiLocal
   ].freeze
 
   # Text of a step's script rewritten for the host: [pattern, replacement, why].
-  HOST_TRIPLE = `rustc -vV 2>/dev/null`[/^host: (\S+)/, 1].to_s.freeze
-  SUBSTITUTIONS = [
-    [/x86_64-unknown-linux-gnu/, HOST_TRIPLE, "ASan on this machine's own triple (the Linux x86_64 target cannot run here)"]
-  ].freeze
+  SUBSTITUTIONS = [].freeze
 
   # The timing-sensitive test steps: what `--slow` runs. "workflow/job" => step-name patterns.
   SLOW_STEPS = {
