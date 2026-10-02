@@ -300,3 +300,20 @@ room, and the deviations:
 * **Bench.** `ts/snapshot_take_100kb` p50 0.063–0.066 ms (budget 2 ms) and `ts/recovery_restart_100kb` p50
   3.12–3.22 ms, p99 at most 9.6 ms (budget 50 ms), headless Chromium, wasm-main, five runs on a loaded host
   (`bench/RESULTS.md`, "Web recovery"); `examples/playground/web/bench/recovery.spec.ts` fails a run over its budget.
+
+## Amendment (2026-10-02, ADR-059): decision 3.4.5 is superseded; the core re-issues query handles
+
+Decision 3.4.5 (item 5 of the sequence on a trap: query handles "are **re-created**: generated query handles record their
+constructor call, and the runtime re-runs it and moves the wrapper (and its mirror registration) to the new handle") is
+superseded by [ADR-059](ADR-059-transient-handles-across-restore.md). The web gets the one mechanism every restore path has
+now, in the core: a snapshot keeps a recreation record for each query handle, the restore re-issues the handle **on its own
+value**, and the core builds it when the host observes it again, which step 4 of the sequence already does for every observed
+handle. The host-side replay is removed: the generated `recreate` option and the `args` constructor parameter of query
+handles, `UndraCore._recreatable`, `_rebindObject`, `CrashRecovery.track` and the re-creation loop of `#reattach`. So
+`UndraObject.handle` never changes, the consequence below that says "Re-created query handles change their `handle` value"
+no longer holds, the observer's own polling interval comes back (the old replay lost it), and the sequence has one step
+fewer (`onCoreRestarted` is step 5). What is lost, decision 3.5, changes by one clause: a query handle in the snapshot is no
+longer lost, a query handle created after the last kept snapshot is stale (as a store created then is lost), and a query
+without `persist` shows its loading state once and is fetched again by the new instance, as the same item already said of
+cache entries that were not persisted. Contract scenario S22 step 4 is reworded to match (the query handle after the
+restart **is** the handle before it). The text above is left as written.
