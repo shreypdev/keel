@@ -436,3 +436,12 @@ In flight: `testkit` (complete; sonnet review + cross), `ports` (complete; opus 
 
 Matrix at checkpoint 18: Rust 2,940 · TS 1,264 · Kotlin 682 · Swift 581 · RN 65 · contracts 65/65.
 In flight: `ports` (review resuming: B1 size fix, sub-reviews, matrix), `docs-v1x` (cookbook + sample).
+
+### Checkpoint 19 (2026-10-02) — the cookbook and the sample
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **H1+H2 docs-v1x**: `site/docs/cookbook/` (auth, pagination, forms, upload, real-time, offline-first, from KMP, from UniFFI; code filled from the crate by `build-cookbook.mjs`), `examples/cookbook` (seven recipe modules, 35 tests + 9 behind `realtime`; 15 platform snippets compiled with `swift build`/`kotlinc -Werror`/`tsc --strict`), `examples/fieldbook` (field notes with photos: sign-in with refresh, local-first notes, a derived view, Fs photos, every change a queued idempotent mutation, a build 1→2 migration, state kept across dev-reload, presence behind `presence`; web + iOS + Android shells, previews on the testing kit; 18 core tests, 13 web) | `61f9da0` | fable check (structure matches the docs pages; 375 px clean; 37 pages link-clean; 342/350 words). Open: flip `realtime`/`presence` features and remove `site/data/pending.json`'s entry when ports lands; Fieldbook on `Kv` until the Db port lands; the two migration pages need the H4 fact-check |
+
+Matrix at checkpoint 19: Rust 2,993 · TS 1,264 + 32 · Kotlin 682 · Swift 581 · RN 65 · contracts 65/65.
+In flight: `ports` (review resuming).
