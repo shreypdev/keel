@@ -82,15 +82,73 @@ pub fn record1k() -> Record1k {
 // Dispatch fixtures
 // ---------------------------------------------------------------------------------------------
 
+/// A child object: what the object rows hand out and take back (ADR-040).
+pub struct Dock {
+    slots: u32,
+}
+
+#[undra::api]
+impl Dock {
+    pub fn slots(&self) -> u32 {
+        self.slots
+    }
+}
+
+/// What the callback rows call (ADR-041): one fire-and-forget method and one `async` one.
+#[undra::error]
+#[derive(Clone, Debug, PartialEq)]
+pub enum PingError {
+    #[error("the host is gone")]
+    Gone,
+}
+
+impl From<undra::runtime::PortError> for PingError {
+    fn from(_: undra::runtime::PortError) -> Self {
+        PingError::Gone
+    }
+}
+
+#[undra::callback]
+pub trait Pinger {
+    fn ping(&self, n: u32);
+    async fn echo(&self, n: u32) -> Result<u32, PingError>;
+}
+
 /// An object with the smallest interesting methods: the floor of a handle method call.
 pub struct Calculator {
     base: i64,
+    dock: Arc<Dock>,
 }
 
 #[undra::api]
 impl Calculator {
     pub fn new(base: i64) -> Self {
-        Calculator { base }
+        Calculator {
+            base,
+            dock: Arc::new(Dock { slots: 4 }),
+        }
+    }
+
+    /// A new child every call: the first issue of a handle (ADR-040).
+    pub fn fresh_dock(&self) -> Arc<Dock> {
+        Arc::new(Dock { slots: self.base as u32 })
+    }
+
+    /// The same child every call: the handle the host already holds, one more reference.
+    pub fn held_dock(&self) -> Arc<Dock> {
+        Arc::clone(&self.dock)
+    }
+
+    /// A child taken as a parameter: resolved before the method runs.
+    pub fn dock_slots(&self, dock: &Dock) -> u32 {
+        dock.slots
+    }
+
+    /// Takes a host callback and calls it once: the core half of a callback round trip is
+    /// measured on the proxy directly (`boundary/callback/*`); this keeps the dispatcher path
+    /// (decode, intern, pending proxy) in the schema.
+    pub fn ping_it(&self, pinger: Arc<dyn Pinger>) {
+        pinger.ping(1);
     }
 
     /// Sync, primitive arguments and return: the blueprint's "handle method call" row.

@@ -25,13 +25,16 @@ use undra::wire::{Bytes, Decode, Encode, Handle, KeyedPatch, Reader, Timestamp, 
 use undra_bench::workload::{Bench, Workload, plain, with_reset};
 
 use super::fixtures::{self, Item, Shape};
-use super::host::{Core, CountingHost, call_ok, construct, method_call, runtime};
+use super::host::{
+    Core, CountingHost, call_ok, construct, method_call, runtime, runtime_with,
+};
 
 /// Every operation the budgets test gates: one per wire type (the round trip), plus dispatch,
 /// signals, snapshot and the per-operation rows of the harsh-conditions scenarios (`stress`).
 pub fn all() -> Vec<Workload> {
     let mut all = wire();
     all.extend(dispatch());
+    all.extend(boundary());
     all.extend(signals());
     all.extend(snapshot());
     all.extend(super::stress::workloads());
@@ -43,6 +46,7 @@ pub fn group(name: &str) -> Vec<Workload> {
     match name {
         "wire" => wire(),
         "dispatch" => dispatch(),
+        "boundary" => boundary(),
         "signals" => signals(),
         "snapshot" => snapshot(),
         "stress" => super::stress::workloads(),
@@ -298,6 +302,52 @@ pub fn dispatch() -> Vec<Workload> {
                 black_box(rt.call_sync(black_box(&payload)));
             })
         }),
+        // ADR-040: an object handed to the host. `return_object` issues a handle that did not
+        // exist (a new entry, one reference); the release that gives it back runs outside the
+        // clock. `return_interned_object` returns the object the host already holds: the same
+        // handle, one more reference (released outside the clock too).
+        Workload::new("dispatch/call_sync/return_object", || {
+            let (rt, _host) = runtime();
+            let calc = construct(&rt, "Calculator", &enc(&7_i64));
+            let payload = method_call(calc, "Calculator", "fresh_dock", 2, &[]);
+            let handle = Handle::decode_exact(&reply_body(&call_ok(&rt, &payload))).unwrap();
+            assert!(rt.objects().host_refs_of(handle).is_some());
+            rt.release(handle.0);
+            let last = std::rc::Rc::new(std::cell::Cell::new(0_u64));
+            let (rt_run, rt_reset) = (rt.clone(), rt);
+            let (last_run, last_reset) = (last.clone(), last);
+            with_reset(
+                move || {
+                    let reply = rt_run.call_sync(black_box(&payload));
+                    last_run.set(u64::from_le_bytes(reply[5..13].try_into().unwrap()));
+                },
+                move || rt_reset.release(last_reset.replace(0)),
+            )
+        }),
+        Workload::new("dispatch/call_sync/return_interned_object", || {
+            let (rt, _host) = runtime();
+            let calc = construct(&rt, "Calculator", &enc(&7_i64));
+            let payload = method_call(calc, "Calculator", "held_dock", 2, &[]);
+            let held = Handle::decode_exact(&reply_body(&call_ok(&rt, &payload))).unwrap();
+            let rt_reset = rt.clone();
+            with_reset(
+                move || {
+                    black_box(rt.call_sync(black_box(&payload)));
+                },
+                move || rt_reset.release(held.0),
+            )
+        }),
+        Workload::new("dispatch/call_sync/object_param", || {
+            let (rt, _host) = runtime();
+            let calc = construct(&rt, "Calculator", &enc(&7_i64));
+            let held = method_call(calc, "Calculator", "held_dock", 2, &[]);
+            let dock = Handle::decode_exact(&reply_body(&call_ok(&rt, &held))).unwrap();
+            let payload = method_call(calc, "Calculator", "dock_slots", 3, &enc(&dock));
+            call_ok(&rt, &payload);
+            plain(move || {
+                black_box(rt.call_sync(black_box(&payload)));
+            })
+        }),
         Workload::new("dispatch/call_async/ready_add", || {
             let (rt, host) = runtime();
             let calc = construct(&rt, "Calculator", &enc(&7_i64));
@@ -318,6 +368,98 @@ pub fn dispatch() -> Vec<Workload> {
             })
         }),
     ]
+}
+
+/// The body of a `Reply` payload (`call_id u32, status u8, body`).
+fn reply_body(reply: &[u8]) -> Vec<u8> {
+    reply[5..].to_vec()
+}
+
+// ---------------------------------------------------------------------------------------------
+// boundary: calls from the core into the host (ADR-041)
+// ---------------------------------------------------------------------------------------------
+
+/// A host that answers port calls the way a platform's synchronous adapter does: it counts them
+/// and, for an `echo`, replies at once with the number it was given.
+#[derive(Default)]
+struct PingHost {
+    calls: AtomicU64,
+}
+
+impl undra::runtime::Host for PingHost {
+    fn reply(&self, _: u32, _: &[u8]) {}
+    fn change_set(&self, _: &[u8]) {}
+    fn stream_item(&self, _: u32, _: &[u8]) {}
+    fn port_call(&self, _port: u32, method: u32, id: u32, args: &[u8]) -> undra::runtime::PortCallOutcome {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        if method == ids::port_method_id("Pinger", "echo") {
+            // `instance u64, n u32` -> the `Ok` body is `n`.
+            let mut reply = Vec::with_capacity(9 + 4);
+            reply.extend_from_slice(&id.to_le_bytes());
+            reply.push(0);
+            reply.extend_from_slice(&args[8..12]);
+            return undra::runtime::PortCallOutcome::Sync(reply);
+        }
+        undra::runtime::PortCallOutcome::Sync(Vec::new())
+    }
+    fn log(&self, _: u8, _: &str, _: &str) {}
+}
+
+/// What calling a host callback instance costs the core: the proxy a dispatcher makes for an
+/// instance handle, called as Rust code calls it. The round trip is the core's half only: the host
+/// here answers at once, so there is no wait and no thread hop.
+pub fn boundary() -> Vec<Workload> {
+    vec![
+        // The primitive every port call is made of: a fire-and-forget call with no proxy.
+        Workload::new("boundary/port_call/notify", || {
+            let host = Arc::new(PingHost::default());
+            let rt = runtime_with(host.clone(), 0);
+            let port = ids::port_id("Pinger");
+            let method = ids::port_method_id("Pinger", "ping");
+            let args = [enc(&1_u64), enc(&7_u32)].concat();
+            rt.port_notify(port, method, args.clone());
+            assert_eq!(host.calls.load(Ordering::Relaxed), 1);
+            plain(move || {
+                rt.port_notify(black_box(port), black_box(method), black_box(args.clone()));
+            })
+        }),
+        // The same through the generated proxy of a callback interface: the instance handle, the
+        // weak context, the writer.
+        Workload::new("boundary/callback/notify", || {
+            let host = Arc::new(PingHost::default());
+            let rt = runtime_with(host.clone(), 0);
+            let pinger = rt.callback::<dyn fixtures::Pinger>(1);
+            pinger.ping(7);
+            assert_eq!(host.calls.load(Ordering::Relaxed), 1);
+            plain(move || {
+                // The runtime is shut down when `rt` drops: it must outlive the loop.
+                black_box(&rt);
+                black_box(&pinger).ping(black_box(7));
+            })
+        }),
+        // An `async` callback method answered at once: encode, port call, the reply, decode.
+        Workload::new("boundary/callback/async_roundtrip", || {
+            let host = Arc::new(PingHost::default());
+            let rt = runtime_with(host.clone(), 0);
+            let pinger = rt.callback::<dyn fixtures::Pinger>(1);
+            let answer = poll_ready(pinger.echo(7));
+            assert_eq!(answer, Ok(7));
+            plain(move || {
+                black_box(&rt);
+                black_box(poll_ready(black_box(&pinger).echo(black_box(7))).ok());
+            })
+        }),
+    ]
+}
+
+/// Polls a future that is already complete.
+fn poll_ready<F: std::future::Future>(future: F) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    match future.as_mut().poll(&mut cx) {
+        std::task::Poll::Ready(value) => value,
+        std::task::Poll::Pending => panic!("the host answers at once, so the call is ready"),
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

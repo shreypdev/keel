@@ -500,6 +500,31 @@ the same run (ADR-039's floor: half of it). Over 1.24 million operations the hos
 of the core's rows field for field, 896,219 view patches were applied of 896,219 delivered, and the core rebuilt the
 index once (the observe).
 
+### 6. Objects and callbacks cross at the price of a call (ADR-040, ADR-041)
+
+An object passed to the core is one `u64` in the call and one table lookup in the dispatch; an object handed to the host
+is a table entry (or one more reference on the entry the host already holds) and the same `u64` in the reply. A
+callback method is a port call with the instance first in its arguments. None of it is allowed to cost more than a
+call plus the thing it does, and the gate rows say what that is (the budgets test's own timings, best of three p50s on a
+shared host at load; `with_reset` rows are timed per iteration with the release that gives the reference back outside
+the clock, so their resolution is the 41.7 ns tick of the macOS timer):
+
+| Row | p50 | What it is | Budget (CI) |
+|---|---|---|---|
+| `dispatch/call_sync/add` (the yardstick) | 49.4 ns | a call with two integers | 250 ns |
+| `dispatch/call_sync/object_param` | 48.7 ns | `Calculator.dock_slots(&Dock)`: the handle resolved and downcast | 250 ns; ratio to `add` at most 2.0 (1.03 measured) |
+| `dispatch/call_sync/return_object` | 84.0 ns | a method returns an object the host does not hold: a new entry, one host reference | 420 ns |
+| `dispatch/call_sync/return_interned_object` | 84.0 ns | the object the host already holds: the same handle, one more reference | 420 ns |
+| `boundary/port_call/notify` | 24.3 ns | a fire-and-forget port call (the floor of any callback method that answers nothing) | 250 ns |
+| `boundary/callback/notify` | 43.2 ns | the same through a `CallbackHandle` (the instance first, the weak proxy upgraded) | 250 ns |
+| `boundary/callback/async_roundtrip` | 182.7 ns | an `async` callback method: the call, the host's `port_reply`, the task woken and resumed (one thread, the host drives) | 920 ns |
+
+Returning an object costs about one extra call's worth over the bare call (the table insert and the reference count
+under the table's lock); passing one costs nothing measurable over the integer it replaces. Both gates sit far below
+anything a UI sees. What a platform adds (a wrapper object, the identity map's lookup, the registry's entry) is measured
+on the platform, in the contract scenarios' `adopt` and `lend` timings recorded in the piece's decision record, not
+here.
+
 ## Full tables
 
 ### Wire: encode, decode and round trip per type

@@ -40,3 +40,7 @@ harness = false
 [[bench]]
 name = "stress"
 harness = false
+
+[[bench]]
+name = "boundary"
+harness = false
