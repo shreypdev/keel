@@ -2967,6 +2967,8 @@ Landed in the day after v1.0, each behind an ADR and an adversarial review.
 - The web bundle under its budget (ADR-052)The hello-world core ships at 102.7 KB gzipped against a 120 KB budget, measured and gated in CI; the number on this site comes from the record.
 - State-preserving reload (ADR-053)undra dev snapshots the old core and restores into the rebuilt one; the dev bar says whether the state was kept, and why not when it was not.
 - Derived keyed lists (ADR-039)A filtered, sorted view over a 10,000-row list costs what changed: one row edit is 158 bytes on the wire where it was 353 KB.
+- Devtools (ADR-054)A page served by undra dev: live stores, a change-set timeline with time travel, port and query logs, counters; behind a per-run token.
+- Persisted-state migrations and typed storage (ADR-037, ADR-049)A changed schema still restores what the last version stored; storage ports fail with typed errors on every platform; a crashed web core restarts from its last snapshot.
 
 Now
 
@@ -2980,7 +2982,6 @@ In flight for the v1.x releases.
 - A runtime ends when its owner lets go (ADR-034)Tasks hold a WeakCtx; off-core writes are refused in every build (ADR-035); a panicking computed poisons only itself; stream errors are typed on the wire (ADR-036).
 - Real Android adaptersKv, SecureStore, Fs, Http, Connectivity and Lifecycle backed by the platform, installed with one call.
 - React Native (ADR-038)@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI.
-- Persisted-state migrations (ADR-037)A schema that changes shape still loads what the last version stored.
 
 Next
 
@@ -2990,7 +2991,6 @@ planned
 
 Planned for the releases after v1.0. The order may change with what the benchmarks show.
 
-- DevtoolsA page served by undra dev: store state, a change-set timeline with time travel, port and query logs, perf counters.
 - Db and WebSocket portsSQL over SQLite on every platform with the same deterministic fake; bidirectional backpressured streams.
 - Objects as parameters, host callbacks, generics and Decimal (ADR-040 to 042)The boundary types a production app reaches for, each with a schema description and generated code that reads as native.
 - A testing kit for appsPreviews against an in-memory core; port traffic recorded once and replayed in tests.
