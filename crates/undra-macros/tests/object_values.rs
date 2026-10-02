@@ -693,7 +693,7 @@ pub struct Desk;
 
 #[k::api]
 impl Desk {
-    pub fn new() -> Self {
+    pub fn new(_ctx: Ctx) -> Self {
         Desk
     }
 
@@ -717,10 +717,10 @@ fn an_async_object_return_that_finishes_as_the_runtime_shuts_down_is_answered_ca
     use undra::wire::payload::{CallTarget, ReplyStatus};
 
     let t = TestRuntime::new();
-    SHUTTING
-        .set(Arc::clone(t.runtime()))
-        .ok()
-        .expect("one test sets it");
+    assert!(
+        SHUTTING.set(Arc::clone(t.runtime())).is_ok(),
+        "one test sets it"
+    );
     let desk = t.call_sync(
         CallTarget::Constructor {
             type_id: ids::type_id("Desk"),
