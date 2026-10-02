@@ -297,3 +297,5 @@ export function standardPorts(adapters: Partial<Adapters>): Map<number, PortImpl
 }
 
 export { type EventSink, emitConnectivity, emitLifecycle, startEventSources } from "./events.js";
+
+export { PortIds };

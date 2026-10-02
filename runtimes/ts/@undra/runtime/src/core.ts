@@ -2,7 +2,6 @@ import { lightAdapters } from "./adapters/browser-events.js";
 import { UNNAMED_NAMESPACE, checkNamespace } from "./adapters/names.js";
 import { defaultPorts } from "./adapters/default-ports.js";
 import { startEventSources } from "./adapters/events.js";
-import { TIMER_PORT } from "./adapters/port-literals.js";
 import { WEB_CRYPTO_REQUIRED, consoleLog, hasCryptoRandom } from "./adapters/system.js";
 import type { Adapters, AdapterOverrides, UndraBackgroundReport, UndraBackgroundStats, UndraPanicReport } from "./adapters/types.js";
 import {
@@ -90,9 +89,6 @@ export interface UndraStats {
 
 /** How long the runtime lets the core drain its background work when a page goes to the background (ADR-046 decision 3.4), in ms. */
 const PAGE_BACKGROUND_MS = 1000;
-
-/** The `Log` target of the messages `undra dev` addresses to the developer (ADR-053); see `AttachOptions.onDevNotice`. */
-const DEV_NOTICE_TARGET = "undra::dev";
 
 /** Why a core is `closed`: the app closed it, its schema is not the bindings', the dev server lost its session (ADR-051), or the connection failed for good. */
 export type ConnectionClosedReason = "requested" | "schemaMismatch" | "sessionLost" | "failed";
@@ -599,6 +595,7 @@ export class UndraCore {
     const core = new UndraCore(channel, options, adapters);
     // A core that answers later resolves `observe` when the initial change-set was applied: the mirror's waiters.
     if (!transport.synchronous) core.mirror._w = framing!.mirrorWaiters(core.mirror);
+    core._ext = framing?.extension;
     try {
       await core._start();
     } catch (error) {
@@ -623,8 +620,8 @@ export class UndraCore {
   private readonly _handles = new Set<Handle>();
   /** The signals the app observes, per handle: what a reconnect observes again. */
   private readonly _observed = new Map<Handle, Set<number>>();
-  /** References given back while the connection was down, one per reference: released in the core once it is back. */
-  private readonly _releasedWhileDown: Handle[] = [];
+  /** @internal What a core that is not in this thread adds (`transport/framed.ts`): reconnects, its ports, the dev notice. */
+  _ext: import("./transport/framed.js").CoreExtension | undefined;
   /** @internal How many times crash recovery restarted the core: a wrapper's finalizer compares it with the count at its birth. */
   _era = 0;
   private readonly _connection = new Signal<ConnectionState>({ kind: "connecting" });
@@ -800,7 +797,17 @@ export class UndraCore {
   _streams: StreamSupport | undefined;
   /** @internal For the stream support: the pending map, the transport, a fresh call id, the request encoder. */
   get _internals() {
-    return { pending: this._pending, transport: this._transport, callId: () => this._allocCallId(), encode: encodeTarget, closedMessage: this._closedMessage };
+    return {
+      pending: this._pending,
+      transport: this._transport,
+      callId: () => this._allocCallId(),
+      encode: encodeTarget,
+      closedMessage: this._closedMessage,
+      observed: this._observed,
+      failInFlight: (error: Error) => this._failInFlight(error),
+      setConnection: (state: ConnectionState) => this._setConnection(state),
+      log: (level: number, target: string, message: string) => this._log(level, target, message),
+    };
   }
 
   /**
@@ -859,11 +866,8 @@ export class UndraCore {
    */
   _giveBack(handle: Handle): void {
     if (this._closed) return;
-    if (this._connection.peek().kind === "reconnecting") {
-      // The core keeps the object for us (ADR-051); it is released when the connection is back.
-      this._releasedWhileDown.push(handle);
-      return;
-    }
+    // While a `remote` core reconnects it keeps the object for us (ADR-051); the extension releases it when the connection is back.
+    if (this._ext?.held(this, handle)) return;
     try {
       this._transport.release(handle);
     } catch (error) {
@@ -946,7 +950,7 @@ export class UndraCore {
    */
   report(error: unknown, operation: string): void {
     const unhandled = new UndraUnhandledError(operation, UndraCallError.asCallError(error), error);
-    if (this._isConnectionDown(unhandled.error)) {
+    if (this._ext?.down(this, unhandled.error)) {
       this._log(3, "undra::runtime", `${unhandled.message} (the connection to the core is down: see UndraCore.connection)`);
       return;
     }
@@ -966,17 +970,6 @@ export class UndraCore {
     } finally {
       this._reporting = false;
     }
-  }
-
-  /**
-   * Whether `error` is the connection of a `remote` core being down, which {@link UndraCore.connection} already reports:
-   * the core is `reconnecting`, or `closed` for a reason other than the app's own `close()`. A wasm core that trapped is
-   * not a connection, and a core the app closed is a programming error: both are still reported.
-   */
-  private _isConnectionDown(error: UndraCallError): boolean {
-    if (error.kind !== "unavailable" || this._transport.mode !== "remote") return false;
-    const state = this._connection.peek();
-    return state.kind === "reconnecting" || (state.kind === "closed" && state.reason !== "requested");
   }
 
   /** Live counters of this core; see {@link UndraStats}. */
@@ -1093,16 +1086,8 @@ export class UndraCore {
 
   private async _start(): Promise<void> {
     const reporterLoaded = this._loadPanics();
-    // In `wasm-worker` the core's Clock, Rng and timers are the worker's (ADR-049): explicit adapters for them are said not to reach it.
-    const given = (["clock", "rng", "timer"] as const).filter((name) => this._options.adapters?.[name] != null);
-    if (given.length > 0 && this._transport.mode === "wasm-worker") {
-      this._log(3, "undra::worker", `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`);
-    }
-    // What a native core is served by ports built from a module that loads on demand (`adapters/ports.js`): its `Diagnostics` port, to which
-    // it reports each panic it contained (ADR-046 decision 4.2), and the Timer port of an explicit adapter. Fetched before the transport
-    // starts, so that they are registered before the first message after the Hello can reach them. A wasm core needs neither: it traps.
-    const ports = this._transport.mode.startsWith("wasm") ? undefined : await import("./adapters/ports.js");
-    ports?.serveDiagnostics(this, this._ports, this._options.onPanic, this._adapters.log);
+    // What only a core that is not in this thread needs before and after its Hello (`transport/framed.ts`).
+    const started = await this._ext?.starting(this, this._options, this._adapters, this._ports);
     const hello = await this._transport.start(this._handler);
     if (hello.schemaHash !== this._options.expectedSchemaHash) {
       throw new UndraSchemaMismatchError(this._options.expectedSchemaHash, hello.schemaHash);
@@ -1111,19 +1096,7 @@ export class UndraCore {
     await reporterLoaded;
     this.hello = hello;
     this._setConnection({ kind: "connected" });
-    if (ports !== undefined && this._transport.mode === "remote" && this._options.adapters?.timer) {
-      // A native core normally times itself; an explicit Timer adapter is a request to serve its Timer port.
-      this._ports.set(
-        TIMER_PORT,
-        ports.timerPort(this._options.adapters.timer, (timerId) => {
-          try {
-            this.timerFired(timerId);
-          } catch (error) {
-            this._reportError("timer", error);
-          }
-        }),
-      );
-    }
+    started?.();
     this._stopEvents = startEventSources(
       this,
       this._adapters,
@@ -1237,39 +1210,6 @@ export class UndraCore {
     const report = (this._panics as PanicReporter).trapped(this._lastPanicRecord, trap);
     this._lastPanicRecord = null;
     return report;
-  }
-
-  /** The connection dropped and the transport reconnects: what was in flight is lost, the core stays open. */
-  private _reconnecting(attempt: number, error: Error): void {
-    if (this._closed) return;
-    if (attempt === 1) {
-      this._failInFlight(
-        new UndraTransportError("closed", `the connection to the core was lost (${error.message}); reconnecting`, { cause: error }),
-      );
-    }
-    this._setConnection({ kind: "reconnecting", attempt, error });
-  }
-
-  /**
-   * The connection is back: release what was released meanwhile and observe what the app observes
-   * again. The core answers each `Observe` with the current values, so every mirror converges.
-   */
-  private _reconnected(hello: HelloPayload): void {
-    if (this._closed) return;
-    this.hello = hello;
-    try {
-      for (const handle of this._releasedWhileDown) this._transport.release(handle);
-      this._releasedWhileDown.length = 0;
-      for (const [handle, signals] of this._observed) {
-        for (const signalId of signals) this._transport.observe(handle, signalId, true);
-      }
-    } catch (error) {
-      // The connection dropped again already: not connected after all. The transport reports the loss and the
-      // next reconnect replays.
-      this._reportError("reconnect", error);
-      return;
-    }
-    this._setConnection({ kind: "connected" });
   }
 
   private _setConnection(state: ConnectionState): void {
@@ -1419,16 +1359,16 @@ export class UndraCore {
       // The panic's own record, logged by the core before it traps: what the panic report says (ADR-046).
       if (level >= 5 && target === "undra::panic") this._lastPanicRecord = message;
       this._log(level, target, message);
-      if (target === DEV_NOTICE_TARGET && this._transport.mode === "remote") this._devNotice(message);
+      this._ext?.logged(this, this._options, target, message);
     },
     closed: (error) => {
       this._lost(error);
     },
     reconnecting: (attempt, error) => {
-      this._reconnecting(attempt, error);
+      this._ext?.reconnecting(this, attempt, error);
     },
     reconnected: (hello) => {
-      this._reconnected(hello);
+      this._ext?.reconnected(this, hello);
     },
     holdsObjects: () => this._handles.size > 0,
     ports: () => this._ports,
@@ -1495,15 +1435,6 @@ export class UndraCore {
       this._transport.portReply(reply);
     } catch (error) {
       this._reportError("port reply", error);
-    }
-  }
-
-  /** Hands a dev server's message to `onDevNotice` (only a `remote` core gets here: see the `log` handler). */
-  private _devNotice(message: string): void {
-    try {
-      this._options.onDevNotice?.(message);
-    } catch (error) {
-      this._reportError("onDevNotice", error);
     }
   }
 
