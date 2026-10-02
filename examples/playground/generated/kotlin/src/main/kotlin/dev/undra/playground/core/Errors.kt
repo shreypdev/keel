@@ -9,10 +9,15 @@ import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.WireException
 
+/** Why a lab call failed. */
 sealed class LabError(message: String) : UndraException(message) {
+    /** Nothing was given. */
     data object Empty : LabError("nothing was given")
+    /** The text is longer than `max` characters. */
     data class TooLong(val max: UInt) : LabError("longer than ${max} characters")
+    /** The text is not a number. */
     data class NotANumber(val value: String) : LabError("`${value}` is not a number")
+    /** A failure chosen by the caller. */
     data class Rejected(val code: Int, val reason: String) : LabError("rejected with code ${code}: ${reason}")
 
     companion object : UndraCodec<LabError> {
@@ -48,7 +53,9 @@ sealed class LabError(message: String) : UndraException(message) {
     }
 }
 
+/** Why an operation on a list was refused. */
 sealed class ListError(message: String) : UndraException(message) {
+    /** A position is not in the list. */
     data class OutOfRange(val index: UInt, val len: UInt) : ListError("position ${index} is outside a list of ${len} items")
 
     companion object : UndraCodec<ListError> {
@@ -72,10 +79,15 @@ sealed class ListError(message: String) : UndraException(message) {
     }
 }
 
+/** Why a request to the server failed. */
 sealed class RemoteError(message: String) : UndraException(message) {
+    /** [`configure_remote`] was not called. */
     data object NotConfigured : RemoteError("the remote server is not configured")
+    /** The `Http` port failed: no network, a timeout, a bad URL, or a cancelled request. */
     data class Http(override val cause: HttpError) : RemoteError("network: ${cause.message}")
+    /** The server answered with a status that is not a success. */
     data class Status(val code: UShort) : RemoteError("the server answered ${code}")
+    /** The server's answer is not the JSON this core expects. */
     data class BadBody(val value: String) : RemoteError("the response is not what was expected: ${value}")
 
     companion object : UndraCodec<RemoteError> {
@@ -110,8 +122,11 @@ sealed class RemoteError(message: String) : UndraException(message) {
     }
 }
 
+/** What a reporter's `confirm` can fail with. */
 sealed class ReportError(message: String) : UndraException(message) {
+    /** The user answered no. */
     data object Declined : ReportError("the user declined")
+    /** The app's reporter is not there or failed. */
     data class Unavailable(val value: String) : ReportError("the reporter is not available: ${value}")
 
     companion object : UndraCodec<ReportError> {
@@ -136,7 +151,9 @@ sealed class ReportError(message: String) : UndraException(message) {
     }
 }
 
+/** Why `start` refused to start. */
 sealed class StressError(message: String) : UndraException(message) {
+    /** The rate is zero or above the fastest generator there is (1,000,000 updates a second). */
     data class RateOutOfRange(val rate: UInt, val max: UInt) : StressError("${rate} updates per second is outside 1..=${max}")
 
     companion object : UndraCodec<StressError> {
@@ -160,7 +177,9 @@ sealed class StressError(message: String) : UndraException(message) {
     }
 }
 
+/** Why an item could not be added. */
 sealed class TodoError(message: String) : UndraException(message) {
+    /** The title is empty once spaces are trimmed. */
     data object EmptyTitle : TodoError("the title cannot be empty")
 
     companion object : UndraCodec<TodoError> {
@@ -180,7 +199,9 @@ sealed class TodoError(message: String) : UndraException(message) {
     }
 }
 
+/** What can go wrong opening a shelf. */
 sealed class WorkshopError(message: String) : UndraException(message) {
+    /** The name is empty. */
     data object NoName : WorkshopError("a shelf needs a name")
 
     companion object : UndraCodec<WorkshopError> {

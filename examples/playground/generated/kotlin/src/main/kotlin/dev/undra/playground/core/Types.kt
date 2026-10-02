@@ -13,13 +13,24 @@ import dev.undra.runtime.wire.WireException
 import java.util.UUID
 import kotlin.time.Duration
 
+/**
+ * A record that nests the other kinds: lists, options, maps, enums with data and a map with
+ * integer keys.
+ */
 data class Composite(
+    /** A name. */
     val name: String,
+    /** Several strings. */
     val tags: List<String>,
+    /** Maybe a figure. */
     val figure: Figure?,
+    /** Figures, in order. */
     val history: List<Figure>,
+    /** A map keyed by string. */
     val scores: Map<String, Int>,
+    /** A map keyed by integer. */
     val names: Map<UInt, String>,
+    /** Maybe a number. */
     val limit: UInt?,
 ) : UndraRecord {
     companion object : UndraCodec<Composite> {
@@ -45,9 +56,13 @@ data class Composite(
     }
 }
 
+/** One row of a list, identified by `id`. */
 data class Item(
+    /** Identity of the row; lists are patched by it, never by position. */
     val id: UInt,
+    /** The text of the row. */
     val label: String,
+    /** How many times the row was updated. */
     val version: UInt,
 ) : UndraRecord {
     companion object : UndraCodec<Item> {
@@ -65,22 +80,39 @@ data class Item(
     }
 }
 
+/** One value of every primitive the wire has, so a single call covers them all. */
 data class Primitives(
+    /** A boolean. */
     val flag: Boolean,
+    /** An `i8`. */
     val tiny: Byte,
+    /** An `i16`. */
     val small: Short,
+    /** An `i32`. */
     val int: Int,
+    /** An `i64`: a `bigint` in TypeScript. */
     val long: Long,
+    /** A `u8`. */
     val byte: UByte,
+    /** A `u16`. */
     val word: UShort,
+    /** A `u32`. */
     val dword: UInt,
+    /** A `u64`: a `bigint` in TypeScript. */
     val qword: ULong,
+    /** An `f32`. */
     val single: Float,
+    /** An `f64`. */
     val double: Double,
+    /** A string, UTF-8 on the wire. */
     val text: String,
+    /** Raw bytes. */
     val blob: ByteArray,
+    /** A span of time, whole nanoseconds on the wire. */
     val span: Duration,
+    /** A moment, milliseconds since the Unix epoch on the wire. */
     val at: Timestamp,
+    /** A UUID, sixteen bytes on the wire. */
     val id: UUID,
 ) : UndraRecord {
     override fun equals(other: Any?): Boolean {
@@ -150,10 +182,15 @@ data class Primitives(
     }
 }
 
+/** What a [`Probe`] has seen. */
 data class ProbeCounters(
+    /** Calls that started running in the core. */
     val started: UInt,
+    /** Calls that ran to the end. */
     val completed: UInt,
+    /** Calls the core dropped before they ended, because the platform cancelled them. */
     val cancelled: UInt,
+    /** Items the core produced for streams (whether or not the platform has read them yet). */
     val produced: UInt,
 ) : UndraRecord {
     companion object : UndraCodec<ProbeCounters> {
@@ -173,7 +210,9 @@ data class ProbeCounters(
     }
 }
 
+/** Where the server is: what an app supplies once, at start-up. */
 data class RemoteConfig(
+    /** The server's address without a trailing slash, such as `https://api.example.com`. */
     val baseUrl: String,
 ) : UndraRecord {
     companion object : UndraCodec<RemoteConfig> {
@@ -185,9 +224,16 @@ data class RemoteConfig(
     }
 }
 
+/** One to-do item on the server. */
 data class RemoteTodo(
+    /**
+     * The server's identity of the item. An item that is only shown optimistically, and that the
+     * server has not answered for yet, has an identity counting down from `u32::MAX`.
+     */
     val id: UInt,
+    /** What has to be done. */
     val title: String,
+    /** Whether it is finished. */
     val done: Boolean,
 ) : UndraRecord {
     companion object : UndraCodec<RemoteTodo> {
@@ -205,13 +251,24 @@ data class RemoteTodo(
     }
 }
 
+/** What the query client's persistence did so far: [`storage_status`]. */
 data class StorageStatus(
+    /** Mutations waiting in the offline queue. */
     val pending: UInt,
+    /** The dead letters, as `"<mutation>: <reason>"`. */
     val deadLetters: List<String>,
+    /**
+     * Whether the stored offline queue has been read (`false` while the store cannot be read:
+     * the queue is then neither replayed nor written).
+     */
     val queueReadable: Boolean,
+    /** Writes to the `Kv` store that failed. */
     val writeFailed: ULong,
+    /** Persisted cache entries dropped because they could not be migrated. */
     val dropped: ULong,
+    /** Cache entries and queued mutations an older build wrote that were migrated. */
     val migrated: ULong,
+    /** Queued mutations moved to the dead-letter queue. */
     val deadLettered: ULong,
 ) : UndraRecord {
     companion object : UndraCodec<StorageStatus> {
@@ -237,9 +294,13 @@ data class StorageStatus(
     }
 }
 
+/** One item of the to-do list. */
 data class Todo(
+    /** Identity of the item; the list is updated by key, so the UI diffs by it. */
     val id: UUID,
+    /** What has to be done. */
     val title: String,
+    /** Whether it is finished. */
     val done: Boolean,
 ) : UndraRecord {
     companion object : UndraCodec<Todo> {
@@ -257,10 +318,15 @@ data class Todo(
     }
 }
 
+/** A shape: an enum with named fields, a tuple variant and a unit variant. */
 sealed interface Figure : UndraEnum {
+    /** A circle. */
     data class Circle(val radius: Double) : Figure
+    /** A rectangle. */
     data class Rect(val width: Double, val height: Double) : Figure
+    /** A shape that is only a name. */
     data class Label(val value: String) : Figure
+    /** No shape at all. */
     data object Empty : Figure
 
     companion object : UndraCodec<Figure> {
@@ -296,9 +362,13 @@ sealed interface Figure : UndraEnum {
     }
 }
 
+/** Which items the list shows. */
 enum class Filter(val index: UShort) : UndraEnum {
+    /** Every item. */
     ALL(0u),
+    /** Items that are not finished. */
     ACTIVE(1u),
+    /** Items that are finished. */
     DONE(2u);
 
     companion object : UndraCodec<Filter> {
@@ -316,8 +386,11 @@ enum class Filter(val index: UShort) : UndraEnum {
     }
 }
 
+/** Whether the count is even or odd: a value derived from `count` in the core. */
 enum class Parity(val index: UShort) : UndraEnum {
+    /** The count is divisible by two. */
     EVEN(0u),
+    /** The count is not divisible by two. */
     ODD(1u);
 
     companion object : UndraCodec<Parity> {
@@ -334,8 +407,11 @@ enum class Parity(val index: UShort) : UndraEnum {
     }
 }
 
+/** Which signal `burst` and `start` write. */
 enum class StressMode(val index: UShort) : UndraEnum {
+    /** `value` + 1 per transaction: a firehose the platforms apply once per frame. */
     FIREHOSE(0u),
+    /** `progress` + 1 per transaction: a `no_coalesce` signal the platforms apply step by step. */
     PROGRESS(1u);
 
     companion object : UndraCodec<StressMode> {

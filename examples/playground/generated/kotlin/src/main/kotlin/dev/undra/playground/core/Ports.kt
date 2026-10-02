@@ -7,7 +7,13 @@ import dev.undra.runtime.UndraPort
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.encodeToByteArray
 
+/**
+ * The app's own synchronous port (ADR-049 decision 2): how the platform says hello in the
+ * user's language. In the TypeScript `wasm-worker` mode a synchronous port is answered in the
+ * worker, so the web app registers it in `worker.ports`.
+ */
 interface Locale : UndraPort {
+    /** "Hello" in the user's language. */
     fun hello(): String
 }
 

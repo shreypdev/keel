@@ -22,6 +22,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
+ * exercise the boundary.
+ */
 class Bench internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _rows: MutableStateFlow<List<Item>> = signal(emptyList())
     val rows: StateFlow<List<Item>> = _rows.asStateFlow()
@@ -282,7 +286,10 @@ class Bench internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
     private val _s127: MutableStateFlow<UInt> = signal(0u)
     val s127: StateFlow<UInt> = _s127.asStateFlow()
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * Adds two numbers: the cheapest call there is, for the handle-call row.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun benchAdd(a: UInt, b: UInt): UInt {
         val w = UndraWriter()
         w.writeU32(a)
@@ -299,7 +306,11 @@ class Bench internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
         }
     }
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * Returns `data` unchanged: a payload of `data.len()` bytes crosses the boundary
+     * twice.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun benchEchoBytes(data: ByteArray): ByteArray {
         val w = UndraWriter()
         w.writeBytes(data)
@@ -315,7 +326,12 @@ class Bench internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Inserts one new row so that it ends at position `i` (a position past the end
+     * appends): one keyed `Insert` on a list of about 10,000 rows. The list grows by
+     * one row per call; `bench_list_reset` starts over.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun benchListInsert(i: UInt) {
         try {
             val w = UndraWriter()
@@ -330,7 +346,11 @@ class Bench internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Puts the list back to its [`ROWS`] starting rows and writes zero to every counter,
+     * in one transaction: one change-set with the list and all [`SIGNALS`] counters.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun benchListReset() {
         try {
             this.core.callSync(
@@ -343,7 +363,15 @@ class Bench internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Updates `n` rows of the list, **one transaction each**: `n` change-sets, each a
+     * keyed patch of a single `Update` (the row's `version` goes up by one), the way a
+     * socket or a sensor feed that writes a row at a time reaches the platform. The rows
+     * are spread over the list (consecutive updates are far apart) and the same
+     * positions come out for the same list length, so a run is repeatable. This is what
+     * the device benchmarks drain (ADR-031: 100,000 patches a second is 1,667 a frame).
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun benchListUpdateBurst(n: UInt) {
         try {
             val w = UndraWriter()
@@ -358,7 +386,11 @@ class Bench internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Adds one to the first `k` counters (at most [`SIGNALS`]) inside one transaction:
+     * `k` dirty signals, one change-set.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun benchTouchSignals(k: UInt) {
         try {
             val w = UndraWriter()
@@ -1301,10 +1333,16 @@ class Bench internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
     }
 
     companion object {
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A store with every counter at zero and [`ROWS`] rows numbered from 1.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Bench = create(ctx)
 
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A store with every counter at zero and [`ROWS`] rows numbered from 1.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Bench {
             val handle = ctx.constructObject(UndraIds.Objects.Bench.TYPE_ID, UndraIds.Objects.Bench.NEW, ByteArray(0))
             return ctx.adopt(handle, ::Bench)
@@ -1312,6 +1350,7 @@ class Bench internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
     }
 }
 
+/** A list of [`LIST_LEN`] items with operations that change one item at a time. */
 class BigList internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _items: MutableStateFlow<List<Item>> = signal(emptyList())
     val items: StateFlow<List<Item>> = _items.asStateFlow()
@@ -1320,6 +1359,8 @@ class BigList internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     val count: StateFlow<UInt> = _count.asStateFlow()
 
     /**
+     * Inserts a new row with `label` so that it ends at `index` (`index == len` appends), and
+     * returns its identity. One keyed `Insert`.
      * @throws ListError
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
@@ -1340,6 +1381,7 @@ class BigList internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     }
 
     /**
+     * Moves the row at `from` so that it ends at `to`. One keyed `Move`.
      * @throws ListError
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
@@ -1359,6 +1401,7 @@ class BigList internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     }
 
     /**
+     * Removes the row at `index`. One keyed `Remove`.
      * @throws ListError
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
@@ -1376,7 +1419,12 @@ class BigList internal constructor(core: UndraCore, handle: Long) : UndraStore(c
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Replaces the list with a fresh one of [`LIST_LEN`] items. The platform receives the keyed
+     * patch that turns the old list into the new one (a full value if they have little in
+     * common).
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun reset() {
         try {
             this.core.callSync(
@@ -1390,6 +1438,7 @@ class BigList internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     }
 
     /**
+     * Changes the label of the row at `index` and bumps its version. One keyed `Update`.
      * @throws ListError
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
@@ -1447,10 +1496,16 @@ class BigList internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     }
 
     companion object {
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A list of [`LIST_LEN`] items numbered from 1.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): BigList = create(ctx)
 
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A list of [`LIST_LEN`] items numbered from 1.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): BigList {
             val handle = ctx.constructObject(UndraIds.Objects.BigList.TYPE_ID, UndraIds.Objects.BigList.NEW, ByteArray(0))
             return ctx.adopt(handle, ::BigList)
@@ -1458,6 +1513,7 @@ class BigList internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     }
 }
 
+/** A counter with a change tally and a computed parity. */
 class Counter internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _count: MutableStateFlow<Int> = signal(0)
     val count: StateFlow<Int> = _count.asStateFlow()
@@ -1467,7 +1523,12 @@ class Counter internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     /** Computed by the core; read-only. */
     val parity: StateFlow<Parity> = _parity.asStateFlow()
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Adds `amount` (which may be negative) and counts the change: one transaction, so one
+     * change-set for `count`, `changes` and `parity` together. The count saturates instead of
+     * overflowing.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun add(amount: Int) {
         try {
             val w = UndraWriter()
@@ -1482,7 +1543,10 @@ class Counter internal constructor(core: UndraCore, handle: Long) : UndraStore(c
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Subtracts one.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun decrement() {
         try {
             this.core.callSync(
@@ -1495,7 +1559,10 @@ class Counter internal constructor(core: UndraCore, handle: Long) : UndraStore(c
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Adds one.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun increment() {
         try {
             this.core.callSync(
@@ -1508,7 +1575,10 @@ class Counter internal constructor(core: UndraCore, handle: Long) : UndraStore(c
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Sets the count back to zero and forgets the changes, in one transaction.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun reset() {
         try {
             this.core.callSync(
@@ -1553,10 +1623,16 @@ class Counter internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     }
 
     companion object {
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A counter at zero with no changes made.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Counter = create(ctx)
 
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A counter at zero with no changes made.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Counter {
             val handle = ctx.constructObject(UndraIds.Objects.Counter.TYPE_ID, UndraIds.Objects.Counter.NEW, ByteArray(0))
             return ctx.adopt(handle, ::Counter)
@@ -1564,6 +1640,13 @@ class Counter internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     }
 }
 
+/**
+ * The `Connectivity` and `Lifecycle` reports as the core received them: the last of each and how
+ * many there were since the core started. Every report moves the signals in one transaction, and
+ * every signal is `no_coalesce`: a platform's mirror applies each report, even several that arrive
+ * in one frame (or while the app is in the background, where React Native on Android pauses the
+ * timers that drain it), so a UI or a check sees `background` even when `active` follows at once.
+ */
 class Device internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle, noCoalesce = setOf(0u, 1u, 2u, 3u, 4u)) {
     private val _online: MutableStateFlow<Boolean> = signal(false)
     val online: StateFlow<Boolean> = _online.asStateFlow()
@@ -1622,10 +1705,16 @@ class Device internal constructor(core: UndraCore, handle: Long) : UndraStore(co
     }
 
     companion object {
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * The store, showing every report received so far and following the next ones.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Device = create(ctx)
 
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * The store, showing every report received so far and following the next ones.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Device {
             val handle = ctx.constructObject(UndraIds.Objects.Device.TYPE_ID, UndraIds.Objects.Device.NEW, ByteArray(0))
             return ctx.adopt(handle, ::Device)
@@ -1633,11 +1722,15 @@ class Device internal constructor(core: UndraCore, handle: Long) : UndraStore(co
     }
 }
 
+/** A store whose one signal build B changes incompatibly. */
 class Legacy internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _score: MutableStateFlow<Int> = signal(0)
     val score: StateFlow<Int> = _score.asStateFlow()
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * `score=..`.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun describe(): String {
         try {
             val body = this.core.callSync(
@@ -1669,7 +1762,10 @@ class Legacy internal constructor(core: UndraCore, handle: Long) : UndraStore(co
     }
 
     companion object {
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A score of `score`.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(score: Int, ctx: UndraCore = UndraPlaygroundCore.core): Legacy {
             val w = UndraWriter()
             w.writeI32(score)
@@ -1679,13 +1775,17 @@ class Legacy internal constructor(core: UndraCore, handle: Long) : UndraStore(co
     }
 }
 
+/** A user profile: build A's signals are `name`, then `visits`. */
 class Profile internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _name: MutableStateFlow<String> = signal("")
     val name: StateFlow<String> = _name.asStateFlow()
     private val _visits: MutableStateFlow<UInt> = signal(0u)
     val visits: StateFlow<UInt> = _visits.asStateFlow()
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * `name=..;visits=..`: what both builds can be compared by.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun describe(): String {
         try {
             val body = this.core.callSync(
@@ -1699,7 +1799,10 @@ class Profile internal constructor(core: UndraCore, handle: Long) : UndraStore(c
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Counts one visit.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun visit() {
         try {
             this.core.callSync(
@@ -1737,7 +1840,10 @@ class Profile internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     }
 
     companion object {
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A profile called `name`, never visited.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(name: String, ctx: UndraCore = UndraPlaygroundCore.core): Profile {
             val w = UndraWriter()
             w.writeStr(name)
@@ -1747,13 +1853,17 @@ class Profile internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     }
 }
 
+/** A shelf: a child store of the [`Workshop`], with a label and a count of the items on it. */
 class Shelf internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _label: MutableStateFlow<String> = signal("")
     val label: StateFlow<String> = _label.asStateFlow()
     private val _items: MutableStateFlow<UInt> = signal(0u)
     val items: StateFlow<UInt> = _items.asStateFlow()
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Takes every item off the shelf.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun clear() {
         try {
             this.core.callSync(
@@ -1766,7 +1876,10 @@ class Shelf internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Puts `count` more items on the shelf.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun stock(count: UInt) {
         try {
             val w = UndraWriter()
@@ -1806,10 +1919,18 @@ class Shelf internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
     }
 
     companion object {
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * An empty shelf with no label. A platform gets shelves from [`Workshop::shelf`], not from
+         * here, so that one name is one shelf.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Shelf = create(ctx)
 
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * An empty shelf with no label. A platform gets shelves from [`Workshop::shelf`], not from
+         * here, so that one name is one shelf.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Shelf {
             val handle = ctx.constructObject(UndraIds.Objects.Shelf.TYPE_ID, UndraIds.Objects.Shelf.NEW, ByteArray(0))
             return ctx.adopt(handle, ::Shelf)
@@ -1817,6 +1938,10 @@ class Shelf internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
     }
 }
 
+/**
+ * A store that commits many transactions, for the coalesced-delivery scenarios and the
+ * playground's stress screen.
+ */
 class Stress internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle, noCoalesce = setOf(1u)) {
     private val _value: MutableStateFlow<ULong> = signal(0uL)
     val value: StateFlow<ULong> = _value.asStateFlow()
@@ -1827,7 +1952,11 @@ class Stress internal constructor(core: UndraCore, handle: Long) : UndraStore(co
     private val _running: MutableStateFlow<Boolean> = signal(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Commits `transactions` transactions now, each one write of the signal `mode` names: one
+     * change-set per transaction, the way data that arrives in the core on its own does.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun burst(mode: StressMode, transactions: UInt) {
         try {
             val w = UndraWriter()
@@ -1844,6 +1973,10 @@ class Stress internal constructor(core: UndraCore, handle: Long) : UndraStore(co
     }
 
     /**
+     * Starts generating updates of the signal the mode names, at the given number a second,
+     * each its own transaction, until `stop`. Called while a generator runs, it retunes that
+     * generator (new mode, new rate) instead of starting a second one. Fails, starting
+     * nothing, when the rate is zero or above 1,000,000.
      * @throws StressError
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
@@ -1862,7 +1995,11 @@ class Stress internal constructor(core: UndraCore, handle: Long) : UndraStore(co
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Stops the generator: no update is committed after this returns. `generated` keeps its
+     * count. Does nothing when no generator runs.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun stop() {
         try {
             this.core.callSync(
@@ -1914,10 +2051,16 @@ class Stress internal constructor(core: UndraCore, handle: Long) : UndraStore(co
     }
 
     companion object {
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A store with every signal at its start: zeros, and no generator running.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Stress = create(ctx)
 
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A store with every signal at its start: zeros, and no generator running.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Stress {
             val handle = ctx.constructObject(UndraIds.Objects.Stress.TYPE_ID, UndraIds.Objects.Stress.NEW, ByteArray(0))
             return ctx.adopt(handle, ::Stress)
@@ -1925,6 +2068,7 @@ class Stress internal constructor(core: UndraCore, handle: Long) : UndraStore(co
     }
 }
 
+/** The to-do list: what the UI observes (`todos`, `filter`, `visible`, `remaining`) and calls. */
 class Todos internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _todos: MutableStateFlow<List<Todo>> = signal(emptyList())
     val todos: StateFlow<List<Todo>> = _todos.asStateFlow()
@@ -1938,6 +2082,7 @@ class Todos internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
     val remaining: StateFlow<UInt> = _remaining.asStateFlow()
 
     /**
+     * Adds an item at the end of the list.
      * @throws TodoError
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      * @throws CancellationException if the calling coroutine is cancelled.
@@ -1957,7 +2102,10 @@ class Todos internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Removes every finished item.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun clearDone() {
         try {
             this.core.callSync(
@@ -1970,7 +2118,13 @@ class Todos internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Appends `count` items titled `Item 1`, `Item 2`, .. with every fourth one finished, in one
+     * transaction (a demo and test helper: the big-list screen of the docs, contract scenario S19).
+     * A bulk load is a raw write, so `todos` and `visible` are sent as full values this once; the
+     * writes after it are patches again.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun fill(count: UInt) {
         try {
             val w = UndraWriter()
@@ -1985,7 +2139,10 @@ class Todos internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Removes the item with `id`; unknown ids are ignored.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun remove(id: UUID) {
         try {
             val w = UndraWriter()
@@ -2000,7 +2157,10 @@ class Todos internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Chooses which items `visible` holds.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun setFilter(filter: Filter) {
         try {
             val w = UndraWriter()
@@ -2015,7 +2175,10 @@ class Todos internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Flips the `done` flag of the item with `id`; unknown ids are ignored.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun toggle(id: UUID) {
         try {
             val w = UndraWriter()
@@ -2091,10 +2254,16 @@ class Todos internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
     }
 
     companion object {
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * An empty list showing every item.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Todos = create(ctx)
 
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * An empty list showing every item.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Todos {
             val handle = ctx.constructObject(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW, ByteArray(0))
             return ctx.adopt(handle, ::Todos)
@@ -2102,13 +2271,23 @@ class Todos internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
     }
 }
 
+/**
+ * A workshop that owns shelves and tells subscribers what happens in it.
+ *
+ * The state a restore cannot rebuild is empty after one: the shelves and subscribers of the old
+ * workshop are gone with it (ADR-040 decision 8), and `shelf` makes them again.
+ */
 class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _jobs: MutableStateFlow<UInt> = signal(0u)
     val jobs: StateFlow<UInt> = _jobs.asStateFlow()
     private val _notes: MutableStateFlow<UInt> = signal(0u)
     val notes: StateFlow<UInt> = _notes.asStateFlow()
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * Counts a note (a signal commit, which reaches the platform first) and tells every
+     * subscribed reporter `line`: the platform sees the new count before it hears the note.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun announce(line: String): UInt {
         val w = UndraWriter()
         w.writeStr(line)
@@ -2124,7 +2303,11 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Reports `steps` times in a row without waiting: a burst, of which the app that is slow to
+     * react gets only the newest `progress` (the others are coalesced), but every `note`.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun burst(steps: UInt, reporter: Reporter) {
         val reporterInstance = this.core.callbacks.lend(reporter)
         try {
@@ -2142,7 +2325,10 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
         }
     }
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * The label of `shelf`, or `none` for no shelf at all.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun describe(shelf: Shelf?): String {
         this.core.requireOwn(shelf)
         val w = UndraWriter()
@@ -2160,7 +2346,10 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
         }
     }
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * The shelf called `name`, if there is one.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun find(name: String): Shelf? {
         val w = UndraWriter()
         w.writeStr(name)
@@ -2176,7 +2365,11 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Moves every item of `from` onto `onto`, in one transaction (a method that takes two
+     * stores).
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun merge(from: Shelf, onto: Shelf) {
         try {
             this.core.requireOwn(from)
@@ -2197,6 +2390,8 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
     }
 
     /**
+     * Opens a shelf after `delay_ms` milliseconds (a call a platform can cancel while it
+     * waits: then no shelf was handed out and nothing is owed).
      * @throws WorkshopError
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      * @throws CancellationException if the calling coroutine is cancelled.
@@ -2218,6 +2413,9 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
     }
 
     /**
+     * Runs a job of `steps` steps, reporting to the app: one progress report and one note per
+     * step, then a question whose answer is the result (`steps` if the app says go on, else
+     * `Declined`). The job counts as run whatever the answer.
      * @throws ReportError
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      * @throws CancellationException if the calling coroutine is cancelled.
@@ -2240,7 +2438,11 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
         }
     }
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * The shelf called `name`, made on first use: the same shelf every time, so a platform that
+     * asks twice gets one object (and one reference to give back, not two).
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun shelf(name: String): Shelf {
         val w = UndraWriter()
         w.writeStr(name)
@@ -2256,7 +2458,10 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
         }
     }
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * Every shelf, in name order.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun shelves(): List<Shelf> {
         try {
             val body = this.core.callSync(
@@ -2270,7 +2475,10 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
         }
     }
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * How many items there are on the shelves given.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun total(shelves: List<Shelf>): UInt {
         this.core.requireOwn(shelves)
         val w = UndraWriter()
@@ -2288,7 +2496,10 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
         }
     }
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * Keeps `reporter` until the returned subscription is closed; [`Workshop::announce`] tells it.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun watch(reporter: Reporter): Watch {
         val reporterInstance = this.core.callbacks.lend(reporter)
         try {
@@ -2306,7 +2517,10 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
         }
     }
 
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * How many reporters are subscribed.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun watching(): UInt {
         try {
             val body = this.core.callSync(
@@ -2345,10 +2559,16 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
     }
 
     companion object {
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * An empty workshop.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Workshop = create(ctx)
 
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * An empty workshop.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Workshop {
             val handle = ctx.constructObject(UndraIds.Objects.Workshop.TYPE_ID, UndraIds.Objects.Workshop.NEW, ByteArray(0))
             return ctx.adopt(handle, ::Workshop)

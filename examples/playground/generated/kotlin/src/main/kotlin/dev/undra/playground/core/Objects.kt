@@ -19,7 +19,10 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
 class Probe internal constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * What the probe has seen so far.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun counters(): ProbeCounters {
         try {
             val body = this.core.callSync(
@@ -34,6 +37,7 @@ class Probe internal constructor(core: UndraCore, handle: Long) : UndraObject(co
     }
 
     /**
+     * Waits forever. The only way it ends is cancellation, which the `cancelled` counter shows.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      * @throws CancellationException if the calling coroutine is cancelled.
      */
@@ -50,7 +54,10 @@ class Probe internal constructor(core: UndraCore, handle: Long) : UndraObject(co
         }
     }
 
-    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+    /**
+     * Sets every counter back to zero.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun reset() {
         try {
             this.core.callSync(
@@ -63,7 +70,12 @@ class Probe internal constructor(core: UndraCore, handle: Long) : UndraObject(co
         }
     }
 
-    /** Collecting throws UndraCallError; cancelling the collector ends it quietly. */
+    /**
+     * A stream of the numbers `0..count`, produced one per poll. The runtime sends an item only
+     * against credit the platform granted and polls at most one item ahead of it, so `produced`
+     * stays within one of what the platform has asked for, however large `count` is.
+     * Collecting throws UndraCallError; cancelling the collector ends it quietly.
+     */
     fun ticks(count: UInt): Flow<UInt> {
         val w = UndraWriter()
         w.writeU32(count)
@@ -79,7 +91,12 @@ class Probe internal constructor(core: UndraCore, handle: Long) : UndraObject(co
             }
     }
 
-    /** Collecting throws LabError or UndraCallError; cancelling the collector ends it quietly. */
+    /**
+     * The numbers `0..count` like `ticks`, except that it ends with the error `Rejected` (with
+     * `code`) where the number `fail_at` would come, when `fail_at < count`: a stream that ends
+     * with its typed error part-way (ADR-036). The items before it arrive first.
+     * Collecting throws LabError or UndraCallError; cancelling the collector ends it quietly.
+     */
     fun ticksThenFail(count: UInt, failAt: UInt, code: Int): Flow<UInt> {
         val w = UndraWriter()
         w.writeU32(count)
@@ -98,6 +115,7 @@ class Probe internal constructor(core: UndraCore, handle: Long) : UndraObject(co
     }
 
     /**
+     * Waits `ms` milliseconds and returns it. Cancelled before that, it counts as cancelled.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      * @throws CancellationException if the calling coroutine is cancelled.
      */
@@ -117,10 +135,16 @@ class Probe internal constructor(core: UndraCore, handle: Long) : UndraObject(co
     }
 
     companion object {
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A probe with every counter at zero.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Probe = create(ctx)
 
-        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        /**
+         * A probe with every counter at zero.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Probe {
             val handle = ctx.constructObject(UndraIds.Objects.Probe.TYPE_ID, UndraIds.Objects.Probe.NEW, ByteArray(0))
             return ctx.adopt(handle, ::Probe)
@@ -129,7 +153,10 @@ class Probe internal constructor(core: UndraCore, handle: Long) : UndraObject(co
 }
 
 class Watch internal constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+    /**
+     * The subscription's number, in the order they were made.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun id(): UInt {
         try {
             val body = this.core.callSync(
@@ -144,7 +171,10 @@ class Watch internal constructor(core: UndraCore, handle: Long) : UndraObject(co
     }
 }
 
-/** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+/**
+ * Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
 fun add(a: Int, b: Int, ctx: UndraCore = UndraPlaygroundCore.core): Int {
     val w = UndraWriter()
     w.writeI32(a)
@@ -162,6 +192,8 @@ fun add(a: Int, b: Int, ctx: UndraCore = UndraPlaygroundCore.core): Int {
 }
 
 /**
+ * Adds two numbers after `delay_ms` milliseconds: an asynchronous call that waits on the `Timer`
+ * port.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
@@ -188,6 +220,7 @@ suspend fun addLater(
 }
 
 /**
+ * The area of a circle or a rectangle. A label and an empty figure have none.
  * @throws LabError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
@@ -206,7 +239,12 @@ fun area(figure: Figure, ctx: UndraCore = UndraPlaygroundCore.core): Double {
     }
 }
 
-/** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+/**
+ * Tells the core where the server is. Call it once at start-up, before anything observes
+ * [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
+ * stale).
+ * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+ */
 fun configureRemote(config: RemoteConfig, ctx: UndraCore = UndraPlaygroundCore.core) {
     try {
         val w = UndraWriter()
@@ -222,6 +260,13 @@ fun configureRemote(config: RemoteConfig, ctx: UndraCore = UndraPlaygroundCore.c
 }
 
 /**
+ * Adds an item to `list` the way a UI wants it: the list shows it at once (an optimistic placeholder), the
+ * server is asked, and the placeholder is taken back if the server refuses. On success the cached
+ * list is refetched, so the placeholder gives way to the server's item.
+ *
+ * While the device is offline the request is queued (the mutation is idempotent) and the call
+ * keeps waiting; the placeholder stays visible until the network returns and the request is
+ * replayed.
  * @throws RemoteError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -246,7 +291,10 @@ suspend fun createRemoteTodo(
     }
 }
 
-/** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+/**
+ * Returns `value` unchanged.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
 fun echoComposite(value: Composite, ctx: UndraCore = UndraPlaygroundCore.core): Composite {
     val w = UndraWriter()
     Composite.encode(w, value)
@@ -262,7 +310,10 @@ fun echoComposite(value: Composite, ctx: UndraCore = UndraPlaygroundCore.core): 
     }
 }
 
-/** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+/**
+ * Returns `value` unchanged.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
 fun echoFigure(value: Figure, ctx: UndraCore = UndraPlaygroundCore.core): Figure {
     val w = UndraWriter()
     Figure.encode(w, value)
@@ -278,7 +329,10 @@ fun echoFigure(value: Figure, ctx: UndraCore = UndraPlaygroundCore.core): Figure
     }
 }
 
-/** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+/**
+ * Returns `value` unchanged.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
 fun echoPrimitives(value: Primitives, ctx: UndraCore = UndraPlaygroundCore.core): Primitives {
     val w = UndraWriter()
     Primitives.encode(w, value)
@@ -294,7 +348,11 @@ fun echoPrimitives(value: Primitives, ctx: UndraCore = UndraPlaygroundCore.core)
     }
 }
 
-/** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+/**
+ * Panics with `reason`. The boundary turns the panic into a reply (status 2), never into a
+ * crash, on the platforms that can unwind (R6).
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
 fun explode(reason: String, ctx: UndraCore = UndraPlaygroundCore.core): UInt {
     val w = UndraWriter()
     w.writeStr(reason)
@@ -311,6 +369,7 @@ fun explode(reason: String, ctx: UndraCore = UndraPlaygroundCore.core): UInt {
 }
 
 /**
+ * Panics with `reason` after `delay_ms` milliseconds, inside an asynchronous call.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
@@ -335,6 +394,8 @@ suspend fun explodeLater(
 }
 
 /**
+ * Fails with `LabError::Rejected { code, .. }` after `delay_ms` milliseconds: an asynchronous
+ * call with a typed error.
  * @throws LabError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -356,6 +417,7 @@ suspend fun failLater(delayMs: UInt, code: Int, ctx: UndraCore = UndraPlayground
 }
 
 /**
+ * Deletes the file or directory `path` of the `Fs` port.
  * @throws FsError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -375,6 +437,7 @@ suspend fun fileDelete(path: String, ctx: UndraCore = UndraPlaygroundCore.core) 
 }
 
 /**
+ * The names in the directory `dir` of the `Fs` port, sorted.
  * @throws FsError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -395,6 +458,7 @@ suspend fun fileList(dir: String, ctx: UndraCore = UndraPlaygroundCore.core): Li
 }
 
 /**
+ * The contents of the file `path` of the `Fs` port.
  * @throws FsError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -415,6 +479,7 @@ suspend fun fileRead(path: String, ctx: UndraCore = UndraPlaygroundCore.core): B
 }
 
 /**
+ * Writes `data` to the file `path` of the `Fs` port, creating its directories.
  * @throws FsError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -434,7 +499,10 @@ suspend fun fileWrite(path: String, data: ByteArray, ctx: UndraCore = UndraPlayg
     }
 }
 
-/** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+/**
+ * A greeting.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
 fun greet(name: String, ctx: UndraCore = UndraPlaygroundCore.core): String {
     val w = UndraWriter()
     w.writeStr(name)
@@ -451,6 +519,8 @@ fun greet(name: String, ctx: UndraCore = UndraPlaygroundCore.core): String {
 }
 
 /**
+ * `GET url` through the `Http` port, with an optional timeout in milliseconds. Any status is a
+ * response; only a failure to get one is an [`HttpError`].
  * @throws HttpError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -476,6 +546,7 @@ suspend fun httpGet(
 }
 
 /**
+ * The value the `Kv` port has under `key`, if any.
  * @throws StorageError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -496,6 +567,7 @@ suspend fun kvGet(key: String, ctx: UndraCore = UndraPlaygroundCore.core): ByteA
 }
 
 /**
+ * The keys of the `Kv` port that start with `prefix`, in ascending order.
  * @throws StorageError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -516,6 +588,7 @@ suspend fun kvKeys(prefix: String, ctx: UndraCore = UndraPlaygroundCore.core): L
 }
 
 /**
+ * Stores `value` under `key` in the `Kv` port.
  * @throws StorageError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -536,6 +609,7 @@ suspend fun kvPut(key: String, value: ByteArray, ctx: UndraCore = UndraPlaygroun
 }
 
 /**
+ * Removes `key` from the `Kv` port; a missing key is not an error.
  * @throws StorageError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -554,7 +628,10 @@ suspend fun kvRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core) {
     }
 }
 
-/** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+/**
+ * Greets `name` in the user's language, through the [`Locale`] port.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
 fun localizedGreeting(name: String, ctx: UndraCore = UndraPlaygroundCore.core): String {
     val w = UndraWriter()
     w.writeStr(name)
@@ -571,6 +648,7 @@ fun localizedGreeting(name: String, ctx: UndraCore = UndraPlaygroundCore.core): 
 }
 
 /**
+ * Reads an unsigned number of at most nine digits.
  * @throws LabError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
@@ -589,7 +667,10 @@ fun parseCount(text: String, ctx: UndraCore = UndraPlaygroundCore.core): UInt {
     }
 }
 
-/** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
+/**
+ * Does nothing and returns nothing: a call with neither arguments nor a result.
+ * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+ */
 fun ping(ctx: UndraCore = UndraPlaygroundCore.core) {
     try {
         ctx.callSync(
@@ -603,6 +684,7 @@ fun ping(ctx: UndraCore = UndraPlaygroundCore.core) {
 }
 
 /**
+ * The value the `SecureStore` port has under `key`, if any.
  * @throws StorageError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -623,6 +705,7 @@ suspend fun secretGet(key: String, ctx: UndraCore = UndraPlaygroundCore.core): B
 }
 
 /**
+ * The keys of the `SecureStore` port that start with `prefix`, in ascending order.
  * @throws StorageError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -643,6 +726,7 @@ suspend fun secretKeys(prefix: String, ctx: UndraCore = UndraPlaygroundCore.core
 }
 
 /**
+ * Stores `value` under `key` in the `SecureStore` port (the Keychain, the Android Keystore).
  * @throws StorageError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -663,6 +747,7 @@ suspend fun secretPut(key: String, value: ByteArray, ctx: UndraCore = UndraPlayg
 }
 
 /**
+ * Removes `key` from the `SecureStore` port; a missing key is not an error.
  * @throws StorageError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -682,6 +767,8 @@ suspend fun secretRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core)
 }
 
 /**
+ * Marks an item of `list` finished or not, showing the change at once and taking it back if the server
+ * refuses.
  * @throws RemoteError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
@@ -708,7 +795,11 @@ suspend fun setRemoteDone(
     }
 }
 
-/** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+/**
+ * What the query client's persistence did: the offline queue, its dead letters and the
+ * persistence counters.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
 fun storageStatus(ctx: UndraCore = UndraPlaygroundCore.core): StorageStatus {
     try {
         val body = ctx.callSync(
@@ -722,7 +813,10 @@ fun storageStatus(ctx: UndraCore = UndraPlaygroundCore.core): StorageStatus {
     }
 }
 
-/** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+/**
+ * The name and version of the core.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
 fun version(ctx: UndraCore = UndraPlaygroundCore.core): String {
     try {
         val body = ctx.callSync(
