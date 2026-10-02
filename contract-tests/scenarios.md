@@ -1,12 +1,12 @@
 # Contract scenarios
 
-This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): thirty-three
-scenarios against the **real playground core** (`examples/playground/core`, the same Rust crate the
-apps run), through the real boundary. S01 to S20 and S23 to S33 run on every platform; S21 and S22 are about
+This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): thirty-four
+scenarios (S01 to S33 and S35; S34 is not assigned) against the **real playground core** (`examples/playground/core`, the same Rust crate the
+apps run), through the real boundary. S01 to S20, S23 to S33 and S35 run on every platform; S21 and S22 are about
 the web host (worker mode and crash recovery, ADR-049) and run on TypeScript only. S23 to S25 are the opt-in
 ports of ADR-047 and ADR-048; S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's; S29 and S30 are ADR-046's
-(panic reports and background runs); S31 is ADR-042's (newtypes, generic instantiations, leaf types) and S32 and
-S33 are ADR-043's (paged queries and lazy lists, polling):
+(panic reports and background runs); S31 is ADR-042's (newtypes, generic instantiations, leaf types), S32 and
+S33 are ADR-043's (paged queries and lazy lists, polling) and S35 is ADR-059's (query handles across a restore):
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
@@ -15,9 +15,10 @@ S33 are ADR-043's (paged queries and lazy lists, polling):
 | Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI table of the real core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S23 to S33, plus
-S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 95
-cells: 31 on Swift, 31 on Kotlin, 33 on TypeScript.
+`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20, S23 to S33 and S35, plus
+S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 98
+cells: 32 on Swift, 32 on Kotlin, 34 on TypeScript. The React Native column (`runtimes/rn`, the TypeScript scenarios
+over its model of the native module) runs S35 too.
 
 ## The harness (the same on every platform)
 
@@ -50,19 +51,20 @@ everything a UI would use and the runtime's own API (`UndraCore`) for what bindi
   /lists/L/todos` (body `{"title":..}`, answer 201 with the created object) and `PATCH
   /lists/L/todos/ID` (body `{"done":..}`, answer 200 with the object). `Idempotency-Key` is sent on
   POST.
-* **Two builds** (S14 steps 7 to 9, S15 steps 11 to 14; ADR-037). The runner also builds the
+* **Two builds** (S14 steps 7 to 9, S15 steps 11 to 14, S35 step 10; ADR-037, ADR-059). The runner also builds the
   playground core a second time, as **build B**: `UNDRA_PLAYGROUND_V2=1 undra build ...` (the core's
   `build.rs` turns it into `cfg(playground_v2)`; see `examples/playground/core/src/updates.rs` for what
   changes), and keeps that artefact apart from build A's. Build B has no generated bindings: the runner
   loads it with the hash the core reports (`undra_schema_hash`) and drives it through the raw API with
   the ids it knows (`Profile.new` / `Profile.describe` / `Legacy.new`, the mutation ids of `save_note` and
   `tag_note`, the function `storage_status`, whose `StorageStatus` record has the same layout in both
-  builds). TypeScript loads build B in the same process; Swift and Kotlin load one core per process, so
+  builds; for S35 the query handle types and their method ids, `configure_remote`, `Library`'s `books`).
+  TypeScript loads build B in the same process; Swift and Kotlin load one core per process, so
   they run the build-B steps in a **second process** (Swift: the same test bundle relaunched with build
   B's library in place of build A's; Kotlin: a second JVM with build B's library), handing over the `Kv`
-  contents and the snapshots in a file. The build-B process prints only `SCENARIO S14 FAIL ...` /
-  `SCENARIO S15 FAIL ...` lines (never `PASS`), so `check.sh`, which reads the last line of an id, fails
-  the scenario if build B fails and keeps build A's `PASS` otherwise.
+  contents, the snapshots and the handles in a file. The build-B process prints only `SCENARIO S14 FAIL ...` /
+  `SCENARIO S15 FAIL ...` / `SCENARIO S35 FAIL ...` lines (never `PASS`), so `check.sh`, which reads the last line
+  of an id, fails the scenario if build B fails and keeps build A's `PASS` otherwise.
 * **Waiting.** Anything asynchronous is awaited with a **5 second timeout** (polling every 10 ms or
   using the runtime's own wait), never with a bare sleep, except where a scenario says "for 200 ms
   nothing happens".
@@ -361,8 +363,9 @@ queue, S20 step 4; the client reads it again after a backoff of about a second).
    leaves every store as it was (TypeScript and Swift: `UndraRestoreError`, whose code is the core's, 5 for
    a malformed snapshot; the core is not closed and the next call works).
 7. A handle released **before** the snapshot is not resurrected.
-8. Stats: `live_handles` after the restore equals the count of surviving stores (the restore creates
-   no extra handles).
+8. Stats: `live_handles` after the restore equals the count of surviving stores, plus the query handles
+   that were live (a restore re-issues none that the snapshot does not name, and creates no handle of its
+   own; S35 is the scenario about those).
 9. A call in flight across a restore. `Probe` = new; start `probe.hang()`; wait until
    `counters().started == 1`; take a snapshot; `restore` it. The probe is not a store, so the restore
    invalidates it and cancels its call: `hang()` fails as **cancelled by the core** (Swift
@@ -591,10 +594,11 @@ playground's `Locale` port (`hello()` answers `"Hola"`).
    `restoredFromAgeMs` under a few seconds, `rejectedCalls >= 1` and the stale objects; `onError` received an
    `UndraCoreRestarted` with the same.
 4. The same `Counter` wrapper shows `count == 5` (restored, same handle) and `add(1)` makes it 6; the
-   `remote_todos("s22")` handle was re-created (its wrapper still shows the item and, after the runner calls
-   `configure_remote` again, since configuration is core state outside stores and is lost with the instance
-   that trapped, `invalidate()` refetches through it); the `Probe` (not a store) is stale and fails with a typed
-   refusal.
+   `remote_todos("s22")` handle is **the handle it was before the trap** (the snapshot kept what it is made
+   of and the core re-issued it, ADR-059; the runtime runs no code of its own for it): its wrapper still shows
+   the item and, after the runner calls `configure_remote` again, since configuration is core state outside
+   stores and is lost with the instance that trapped, `invalidate()` refetches through it; the `Probe` (not a
+   store) is stale and fails with a typed refusal.
 5. Three more `explode` calls within the minute: the third restart is the last; the fourth trap leaves the core
    dead: `onClose` reports the trap, `onCoreRestarted` was called 3 times in all, and calls fail as unavailable
    (`closed`).
@@ -932,6 +936,48 @@ transport the runner loads, TypeScript counts `Kind.Call` payloads whose first b
    returns to the query's own second.
 6. **The last observer stops it.** After the handle is closed `ticker_fetches()` does not move for 2.5 s.
 
+### S35 query handles across a restore (ADR-059)
+
+A query handle is a view of the query cache, so a snapshot keeps what it is made of (the query's parameters
+and the polling interval its observer set for itself) instead of a store's values, and a restore re-issues the
+handle under the **same value**: the app's wrapper keeps working with no code of its own, after a time travel,
+an app's own `core.restore`, a dev reload and a web crash restart. The object behind a re-issued handle is built
+when the host first uses it. Steps 1 to 9 restore into the runtime that holds the handles, through the generated
+bindings; step 10 restores into a **fresh runtime** (build B, "Two builds"; the query `roster` of
+`examples/playground/core/src/updates.rs` changes its parameter from `u32` to `String`, `remote_todos` and `ticker`
+do not change) through the raw API with the ids it knows. The server serves `GET /lists/s35/todos`.
+
+1. **Opening.** `live_handles` is read first. `remote_todos("s35")` shows the server's one item (milk);
+   `TickerQueryHandle()` is observed and has ticked; `FeedQueryHandle(evenOnly: false)` has two pages (100 rows);
+   `Library()` has read `books[0]`; `RosterQueryHandle(7)` is observed (the handle whose query build B changes);
+   a `Counter` has `add(5)`; a `Probe` exists.
+2. **The snapshot, a change and a restore.** `snapshot`; `Counter.add(10)`; the server now answers two items
+   (milk and dog); `restore(snapshot)`.
+3. **Same wrappers, nothing blinked.** The counter shows 5; the remote handle's wrapper is the same object with
+   the same handle value; the entries the mirror applied to the remote and feed wrappers during the restore are
+   none (the runner records them: `data` never became absent and nothing was sent for the handle); the GET count
+   did not move; the feed still has 100 rows; `live_handles` is what it was before the restore.
+4. **`refetch` is accepted** on the same remote wrapper: the GET count grows by 1 and `data` is the two items.
+5. **Polling continues.** The ticker advances within 2.5 s with no call from the runner (the core's timer was
+   not touched).
+6. **Pages still load.** `fetchNextPage()` on the same feed wrapper gives 150 rows; `Library.books[0]` is readable
+   again (the restore rebuilt the store and its page servers, and a page call through the new server succeeds).
+7. **What is not re-creatable stays stale.** The `Probe` is refused (status 5 / `Refused`), as in S15 step 9.
+8. **Idempotent.** `restore(snapshot)` again changes nothing more: the checks of step 3 hold (the remote wrapper
+   shows the two items it was last given, the feed 150 rows, `live_handles` unchanged, nothing applied to the
+   remote and feed wrappers).
+9. **Closing** the wrappers returns `live_handles` to its value before step 1.
+10. **A fresh runtime** (TypeScript: a second core of build B in the process; Swift and Kotlin: the build-B
+    process, the snapshot and the handles of step 1 handed over in a file). The runner reads `live_handles`,
+    then `restore(snapshot)` succeeds. `live_handles` has grown by the stores of the snapshot (`Counter`,
+    `Library` and its two page servers) and the three query handles build B honours: 7 (the handle of `roster` is
+    not counted). No GET was made yet. After `configure_remote` (core state outside stores, as S22 says),
+    `observe(remote handle)` is answered with `status = fetching` and `data` absent, and then the data; `refetch`
+    on it is status 0 and makes one more GET; the ticker's handle delivers ticks (it is observed again like any
+    handle after a reload); `Library`'s `books` (observed again) pages through the server its op 0 names (the
+    reply says 10,000 rows); the handle of `roster` answers `refetch` with status 5, and the Log port received a
+    WARN that names it (`Handle(index=<i>, gen=<g>)`, "is not re-issued", "the types it was made from changed").
+
 ## Platform notes
 
 * TypeScript: S03 runs only in `wasm-main` mode (the only one with `callSync`); S17 step 6 is the only
@@ -955,8 +1001,13 @@ transport the runner loads, TypeScript counts `Kind.Call` payloads whose first b
   signals crate. Only TypeScript's mirror is public; Kotlin and Swift apply change-set by change-set.
 * Timing constants (50 ms delays, 200 ms quiet windows) are chosen for a loaded CI machine; do not
   shrink them.
-* S14 steps 7 to 9 and S15 steps 11 to 14 need build B (see "Two builds"). TypeScript loads both wasm
+* S14 steps 7 to 9, S15 steps 11 to 14 and S35 step 10 need build B (see "Two builds"). TypeScript loads both wasm
   modules in one process; Swift and Kotlin run build B's steps in a second process after the main run.
+* S35 steps 3 and 8 record what the platform's mirror applied to a wrapper during the restore (TypeScript: the
+  wrapper's `_apply` through `tapEntries`; Kotlin and Swift: the signal's own change counts or a collector on
+  `data`); the ticker is not asserted there (it polls). Its step 5 uses the real Timer port, as S33 does. A
+  restore reads no clock and starts no fetch (R12): a GET count that moves during steps 3, 8 or 10 before the
+  runner observes is a failure.
 * S20 step 4 differs by platform: a fresh TypeScript core can be loaded with a `Kv` whose queue reads fail, so
   the TypeScript column walks the whole "unreadable, then readable on `Active`" path; Swift and Kotlin load one
   core per process, so their harness fails the first read of the queue at load and S20 checks what that did.
