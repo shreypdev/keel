@@ -150,7 +150,7 @@ this series, against 312 and 159 now: inside the 1,600 and 800 budgets).
 
 ## Consequences
 
-* The hello page's first chunk grew by **1,504 bytes gzipped** (7.7%) over the same tree without the call-path levers
+* The hello page's first chunk grew by **1,510 bytes gzipped** (7.7%) over the same tree without the call-path levers
   (ADR-052's amendment has the commit-by-commit sizes); the gate is restated there.
 * A generated binding sees no change. A custom transport sees none either: `sendCall` and `callSyncParts` are optional,
   `UndraCore` uses them only where they exist (`WasmMainTransport`; the recovery wrapper, the worker, remote and native

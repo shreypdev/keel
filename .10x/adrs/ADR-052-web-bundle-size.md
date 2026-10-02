@@ -362,7 +362,7 @@ with the dispatcher a raw port call on it runs through (`fakes::install` and the
 ## Amendment (2026-10-02, `ts-size-e4`): the JavaScript gate counts what the page loads up front, and the cut
 
 Decision 2 above set the JavaScript runtime's budget at 26,000 bytes, with a follow-up (`ts-runtime-size`) aiming at
-16 KB. That piece landed together with E4, the binding call path (ADR-056), as `ts-size-e4`. It reached **21,153
+16 KB. That piece landed together with E4, the binding call path (ADR-056), as `ts-size-e4`. It reached **21,159
 bytes gzipped, 21.2 KB**, not 16 KB; the gate is restated at 21,500 (below), and this section says what was measured,
 what was cut, what was not, and why the number stops here.
 
@@ -425,9 +425,10 @@ Up-front gzipped bytes of the hello template, measured at each commit (`scripts/
 | `e69c1a8` | `NetKind` and `AppState` live with the host events: a module two chunks import is emitted whole in the first one, so `types.ts` (every adapter error class) rode along for two unit-enum lists | 19,890 | -591 |
 | `8444262` | the framed transports' wire code (`Kind` apart from the envelope codec, `wire/session.ts` for `Hello`, `Log` and `PortCall`) leaves the first chunk, for the same reason | 19,649 | -241 |
 | | *tried and dropped:* one helper for `UndraReader`'s numeric reads (gzip already folds repeated code) | -19 | |
-| `b1aa0e5`..`9fdaf86` | the E4 call-path levers (ADR-056): byte-wise integers, the call payload in one allocation, the direct call, the small-reply copy, **no `#private` on the call path's classes** (+798: property names are not mangled), a shared scratch `DataView`, `sendCall` / `callSyncParts` | 21,153 | +1,504 |
+| `b1aa0e5`..`9fdaf86` | the E4 call-path levers (ADR-056): byte-wise integers (+150), the call payload in one allocation (+208), the direct call (+127), the small-reply copy (+16), **no `#private` on the call path's classes** (+798: property names are not mangled), a shared scratch `DataView` (+42), `sendCall` / `callSyncParts` (+163) | 21,153 | +1,504 |
+| `dc502f9` | the record after the merge of main and the base object's renamed private flag | **21,159** | +6 |
 
-The up-front chunk went from 24,335 to **21,153** (-3,182, -13%); with the call path's speed it cost 1,504 bytes
+The up-front chunk went from 24,335 to **21,159** (-3,176, -13%); the call path's speed cost 1,510 bytes of it
 (7.7%). The levers the brief named and what happened to them: tree-shakeable module shape (the lazy modules above are
 what that gained; every top-level registration was already pure or absent, `sideEffects: false` holds), lazy imports
 (remote, default ports, framed wire code; the worker transport already was; recovery is the app's own import), the
@@ -451,8 +452,10 @@ blueprint is out of reach for the same reason.
 
 ### The gate
 
-Decision 2 is restated: **`[size."web/hello-runtime-js"]` is 21,500 bytes** (the budget; record 21,153, ceiling
-min(21,500, floor(21,153 x 1.05)) = 21,500), the tolerance stays 5%, and the gate is the up-front chunk. The record line
-carries `lazy_gzipped` (22,170: the remote transport, the worker transport, the default ports, the framed wire code, the
-Worker script) so that growth in what loads on demand is visible in review, though ungated. The README's number is
+Decision 2 is restated: **`[size."web/hello-runtime-js"]` is 21,500 bytes** (the budget; record 21,159, ceiling
+min(21,500, floor(21,159 x 1.05)) = 21,500), the tolerance stays 5%, and the gate is the up-front chunk. The record line
+carries `lazy_gzipped` (22,159: the remote transport, the worker transport, the default ports, the framed wire code, the
+Worker script) so that growth in what loads on demand is visible in review, though ungated. The wasm line of the record was refreshed by the same
+`--record` run (116,575 -> 116,966 bytes gzipped, 117.0 KB: `main` had drifted by 391 bytes since the last record, with no wasm
+change in this piece; still within the 120,000 budget and 5% of itself). The README's number is
 generated from the record as before. A run still fails when the runtime's `node_modules` are missing.

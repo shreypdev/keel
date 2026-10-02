@@ -691,22 +691,24 @@ measured = 1.43
 # links the standard ports' Rust dispatchers by use (ADR-052 note): 116,731; 116,800 with devtools' inspector seam.
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 116575
+measured_gzip_bytes = 116966
 tolerance = 0.05
 
-# What a hello-world app ships of the JavaScript runtime: `@undra/runtime` as the template's
+# What a hello-world app loads up front of the JavaScript runtime: `@undra/runtime` as the template's
 # web/src/undra.ts imports it, tree-shaken and minified by the Vite of the runtime's lockfile
-# (scripts/web-size-runtime.mjs); the generated bindings, the app's loader and the lazily loaded
-# worker script are not in it. The blueprint's 8 KB predates the transports, reconnect, coalescing
-# and worker mode: ADR-052's decision 2 (2026-10-01) restated it at 24 KB, and after the merge with
-# the parity failure model (its error channel added the bytes) at 26 KB; the follow-up piece
-# `ts-runtime-size` targets 16 KB. Gated like the wasm. Re-recorded by persistence-v2 (ADR-049: typed storage
-# errors, worker protocol 3, the snapshot layout-2 codec; crash recovery is `crashRecovery()`, which only an app
-# that imports it ships): 24,841 -> 25,906; after main's ABI table and the review's worker refusal, 25,984
-# (16 bytes under the budget: the next change to the hello runtime pays for itself, or `ts-runtime-size` lands).
+# (scripts/web-size-runtime.mjs): the one chunk of the runtime modules the entry reaches by static imports. The
+# generated bindings, the app's loader, the Worker script and the modules only a dynamic import() reaches (the
+# wasm-worker and remote transports, the Http/Kv/SecureStore/Fs ports, the framed transports' wire code) are not in
+# it; the record reports the latter as `lazy_gzipped`. The blueprint's 8 KB predates the transports, reconnect,
+# coalescing and worker mode: ADR-052's decision 2 (2026-10-01) restated it at 24 KB, then 26 KB, for the chunk that
+# had every runtime module in it; the amendment of 2026-10-02 (`ts-size-e4`) counts what is loaded up front (25,996
+# -> 24,335 by that change of what is measured alone) and cuts it to 21,159: the remote transport, the default
+# ports and the framed transports' wire code load on demand (-4,686), the call path's levers (ADR-056) cost 1,510.
+# The 16 KB the first restatement aimed at is not reached: what is left is the runtime itself (the amendment says
+# what). Gated like the wasm.
 [size."web/hello-runtime-js"]
-budget_gzip_bytes = 26000
-measured_gzip_bytes = 25996
+budget_gzip_bytes = 21500
+measured_gzip_bytes = 21159
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------
