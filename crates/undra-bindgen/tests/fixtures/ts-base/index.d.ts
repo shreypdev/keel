@@ -33,7 +33,9 @@ export interface LoadOptions {
 }
 
 /** Addition (ADR-057): a part of the runtime a core loads up front; `streams` is the one a schema with a stream needs. */
-export interface UndraFeature {}
+export interface UndraFeature {
+  readonly name: string;
+}
 
 /** Addition (ADR-057): the stream support, which the generated entry of a schema with a stream passes in `features`. */
 export declare const streams: UndraFeature;

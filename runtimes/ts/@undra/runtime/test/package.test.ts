@@ -16,7 +16,7 @@ const pkg = JSON.parse(readFileSync(new URL("package.json", root), "utf8")) as {
 
 describe("package exports", () => {
   it("lists the subpaths of SPEC section 13 that exist", () => {
-    expect(Object.keys(pkg.exports).sort()).toEqual([".", "./db", "./db-worker", "./package.json", "./react", "./realtime", "./solid", "./svelte", "./vite", "./vue", "./wire", "./worker"]);
+    expect(Object.keys(pkg.exports).sort()).toEqual([".", "./db", "./db-worker", "./mangle-cache.json", "./package.json", "./react", "./realtime", "./solid", "./svelte", "./vite", "./vue", "./wire", "./worker"]);
   });
 
   it("points every subpath at the compiled form of a source file that exists, in both flavours (ADR-057 D2)", () => {
@@ -30,6 +30,10 @@ describe("package exports", () => {
       expect(Object.keys(target), subpath).toEqual(["types", "development", "react-native", "default"]);
       expect(target, subpath).toEqual({ types: `${dist}.d.ts`, development: `${dev}.js`, "react-native": `${dev}.js`, default: `${dist}.js` });
     }
+  });
+
+  it("ships the production build's rename table: the names a tool that needs an internal asks for (ADR-057)", () => {
+    expect(pkg.exports["./mangle-cache.json"]).toBe("./dist/mangle-cache.json");
   });
 
   it("declares the UI frameworks and wa-sqlite as optional peers and has no runtime dependency", () => {

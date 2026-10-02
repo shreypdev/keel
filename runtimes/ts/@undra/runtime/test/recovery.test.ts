@@ -46,6 +46,7 @@ import {
 } from "../src/wire/index.js";
 import { FakeCoreTransport, SCHEMA } from "./support/fake-core.js";
 import { captureLog, deferred, macrotask, microtasks, track } from "./support/harness.js";
+import { internalValue, method } from "./support/internals.js";
 import { args } from "./support/port-calls.js";
 import { CounterStore, u32 } from "./support/store.js";
 import { STUB, compileStub } from "./support/stub-core.js";
@@ -170,6 +171,10 @@ async function recovering(options: { recovery?: false | Parameters<typeof crashR
   );
   return { fake, core, log, panics, restarts, errors, closed, issue };
 }
+
+/** The core's internals the recovery tests drive (`@internal`: the production build renames them, `support/internals.ts`). */
+const giveBack = (core: UndraCore, handle: bigint): void => method<[bigint], void>(core, "_giveBack")(handle);
+const eraOf = (core: UndraCore): number => internalValue<number>(core, "_era");
 
 const until = async (what: string, probe: () => boolean): Promise<void> => {
   for (let i = 0; i < 200; i++) {
@@ -429,10 +434,10 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     await expect(t.core.call(FREE, ECHO, u32(1))).rejects.toMatchObject({ reason: "restarted" });
     // ... and what happens while the core restarts: a reply carried the live handle again (adopt gives the extra
     // reference back), a superseded wrapper's finalizer did the same, and another handle's wrappers released twice.
-    t.core._giveBack(live);
-    t.core._giveBack(live);
-    t.core._giveBack(other);
-    t.core._giveBack(other);
+    giveBack(t.core, live);
+    giveBack(t.core, live);
+    giveBack(t.core, other);
+    giveBack(t.core, other);
     expect(t.fake.released, "held back while the core restarts").toEqual([]);
     gate.resolve({
       hello: { undraVersion: "x", schemaHash: SCHEMA, platform: "p", mode: "m" },
@@ -456,16 +461,16 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     t.fake.store(handle, new Map([[0, u32(1)]]));
     const wrapper = adopt(t.core, handle, CounterStore);
     await t.core.observe(handle, ALL_SIGNALS, true);
-    const born = t.core._era;
+    const born = eraOf(t.core);
     t.fake.trap();
     await until("the restart", () => t.restarts.length === 1);
-    expect(t.core._era).toBe(born + 1);
+    expect(eraOf(t.core)).toBe(born + 1);
     // The finalizer of a wrapper made before the restart runs now: a live wrapper holds the handle, whose count the
     // restored core took from the snapshot.
     collected(t.core, handle, born);
     expect(t.fake.released, "the pre-restart finalizer leaks rather than frees the live wrapper").toEqual([]);
     // A wrapper made after the restart gives back normally.
-    collected(t.core, handle, t.core._era);
+    collected(t.core, handle, eraOf(t.core));
     expect(t.fake.released).toEqual([handle]);
     // Nothing wraps a handle: a full release whatever the epoch.
     t.fake.released.length = 0;

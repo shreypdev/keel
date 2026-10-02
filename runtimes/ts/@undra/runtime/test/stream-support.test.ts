@@ -6,6 +6,7 @@ import { type UndraFeature, streams } from "../src/stream-support.js";
 import { CallTarget, codecs, decodeValue } from "../src/wire/index.js";
 import { FakeCoreTransport, SCHEMA, type StreamScript } from "./support/fake-core.js";
 import { captureLog, deferred, macrotask, track } from "./support/harness.js";
+import { internal } from "./support/internals.js";
 import { u32 } from "./support/store.js";
 
 /*
@@ -83,12 +84,13 @@ describe("features: [streams]", () => {
   });
 
   it("may be given twice, and with other features, without opening anything twice", async () => {
-    const other: UndraFeature = { _install: vi.fn() };
+    const install = vi.fn();
+    const other = { name: "other", [internal("_install")]: install } as unknown as UndraFeature;
     const { fake, core } = await boot(UndraCore, [streams, other, streams]);
     fake.stream(TICKS, items(5));
     expect(await collect(core.stream(FREE, TICKS, none))).toEqual([5]);
     expect(fake.calls).toHaveLength(1);
-    expect(other._install).toHaveBeenCalledTimes(1);
+    expect(install).toHaveBeenCalledTimes(1);
   });
 });
 

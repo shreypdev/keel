@@ -19,6 +19,8 @@ import { msg } from "./messages.js";
  * `AttachOptions.features`. Generated entries do it themselves; `streams` is the one that exists today.
  */
 export interface UndraFeature {
+  /** What the feature is called (`"streams"`). */
+  readonly name: string;
   /** Called once by the core that is given the feature, before it starts. @internal */
   _install(core: UndraCore): void;
 }
@@ -141,6 +143,7 @@ const support: StreamSupport = {
  * (`features: [streams]`).
  */
 export const streams: UndraFeature = {
+  name: "streams",
   _install(core) {
     core._streams = support;
   },

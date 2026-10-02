@@ -5,7 +5,7 @@
 //              `development` and `react-native` export conditions resolve (Vite's dev server, Vitest, webpack in development mode,
 //              Metro).
 //   dist       the production build: the same files with `messages.js` replaced by src/messages.prod.ts (a message says its code, its
-//              values and a link instead of a sentence) and, once the rename pass runs, private properties shortened. It is what the
+//              values and a link instead of a sentence) and every private property shortened (scripts/mangle.mjs). It is what the
 //              `default` condition resolves (a production build of an app, esbuild, Rollup, plain Node), and where the `types`
 //              condition points: the declarations of the two flavours are the same.
 //
@@ -16,6 +16,7 @@ import { copyFileSync, cpSync, existsSync, readFileSync, readdirSync, rmSync, st
 import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { mangleDist } from "./mangle.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
@@ -57,5 +58,10 @@ writeFileSync(join(DIST, "messages.js.map"), JSON.stringify(prodMap));
 for (const dir of [DIST, DEV]) for (const extra of ["messages.prod.js", "messages.prod.js.map", "messages.prod.d.ts", "messages.prod.d.ts.map"]) rmSync(join(dir, extra), { force: true });
 // The development build keeps its own messages.js; both flavours share one declaration of it (the two modules have the same exports and types).
 copyFileSync(join(DEV, "messages.d.ts"), join(DIST, "messages.d.ts"));
+
+// 4. The production build's private properties are renamed (`_pending` -> `_c`), through one cache for the whole package, which ships next
+// to the code (`dist/mangle-cache.json`) so that a tool that needs an internal can say its production name.
+const mangled = mangleDist(DIST, { skip: (rel) => rel === "dev" || rel === "vite.js" });
+console.log(`build: ${Object.keys(mangled.cache).length} private properties renamed in ${mangled.files} modules; left alone (someone else's): ${mangled.foreign.join(", ")}`);
 
 console.log(`build: dist (production) and dist/dev (development) written, ${walk(DIST).filter((f) => f.endsWith(".js") && !f.startsWith("dev")).length} modules each`);
