@@ -461,7 +461,8 @@ final class DbReviewTests: XCTestCase {
     }
 
     /// 2a: an outer statement during a transaction fails `busy` at the busy timeout (not much
-    /// earlier, not much later), and the transaction's own statements are not blocked meanwhile.
+    /// earlier, not much later), and the transaction goes on meanwhile (that its statements are not
+    /// queued behind the waiting one is the next test's, by order).
     func testAnOuterStatementIsBusyAtTheDeadlineAndTheTransactionKeepsGoing() async throws {
         let db = binding(busyTimeoutMs: 400)
         let id = try await db.open(name: "deadline", migrations: notesMigrations).db
@@ -475,11 +476,8 @@ final class DbReviewTests: XCTestCase {
             return (result, DispatchTime.now().uptimeNanoseconds)
         }
         try await Task.sleep(nanoseconds: 20_000_000)
-        var slowest: UInt64 = 0
         for index in 0 ..< 20 {
-            let before = DispatchTime.now().uptimeNanoseconds
             _ = try await db.execute(tx, "INSERT INTO notes (title) VALUES (?)", [.text("in tx \(index)")])
-            slowest = max(slowest, DispatchTime.now().uptimeNanoseconds - before)
             try await Task.sleep(nanoseconds: 5_000_000)
         }
         let (result, ended) = await outer.value
@@ -492,12 +490,43 @@ final class DbReviewTests: XCTestCase {
         // the timeout's own length that was started beside the statement, which a slow machine ends as late as it ends the binding's.
         let late = (Double(ended) - Double(await reference.value)) / 1e6
         XCTAssertLessThan(late, 200, "busy came \(late) ms after a sleep of the timeout's length started beside the statement")
-        // Blocked by the waiting statement, one of them takes what is left of its 400 ms; 200 is far from both that
-        // and a statement that a busy machine held up.
-        XCTAssertLessThan(Double(slowest) / 1e6, 200, "a transaction statement was blocked by the waiting one")
         try await db.finish(tx, commit: true)
         let rows = try await db.query(id, "SELECT COUNT(*) FROM notes", [])
         XCTAssertEqual(rows.rows, [[.integer(20)]], "the outer statement never ran")
+    }
+
+    /// 2a: the transaction's own statements are not queued behind an outer statement that waits for
+    /// the transaction. Shown by order, with a busy timeout that never elapses here (60 s, a hang
+    /// detector): the outer statement is still waiting after each of them, on any machine. Queued
+    /// behind it, the first would wait for it and it for the transaction, until its timeout. (The
+    /// test above bounded the slowest of them by 200 ms of wall clock, which a machine that stalled
+    /// that long failed; the TypeScript runtime's test of the same claim is by order too.)
+    func testTheTransactionsOwnStatementsAreNotQueuedBehindAWaitingOuterStatement() async throws {
+        let db = binding(busyTimeoutMs: 60_000)
+        let id = try await db.open(name: "queue", migrations: notesMigrations).db
+        let tx = try await db.begin(id)
+        let started = Locked(false)
+        let settled = Locked(false)
+        let outer = Task { () async -> Result<DbExecuted, DbError> in
+            started.withLock { $0 = true }
+            let result = await capture { () async throws(DbError) -> DbExecuted in
+                try await db.execute(id, "INSERT INTO notes (title) VALUES ('outer')", [])
+            }
+            settled.withLock { $0 = true }
+            return result
+        }
+        // The outer statement's task registers it as a waiter as soon as it runs, without suspending first. Waited for, so that
+        // the statements below come after it (a task that had not run would make them prove nothing, never fail).
+        await eventually("the outer statement's task to run") { started.withLock { $0 } }
+        for index in 0 ..< 5 {
+            _ = try await db.execute(tx, "INSERT INTO notes (title) VALUES (?)", [.text("in tx \(index)")])
+            XCTAssertFalse(settled.withLock { $0 }, "statement \(index) of the transaction waited for the outer statement")
+        }
+        try await db.finish(tx, commit: true)
+        let executed = try await outer.value.get()
+        XCTAssertEqual(executed.lastInsertId, 6, "the outer statement ran once the transaction ended")
+        let rows = try await db.query(id, "SELECT COUNT(*) FROM notes", [])
+        XCTAssertEqual(rows.rows, [[.integer(6)]])
     }
 
     /// 2b: a transaction left open when the core shuts down (the binding detaches) is rolled back
