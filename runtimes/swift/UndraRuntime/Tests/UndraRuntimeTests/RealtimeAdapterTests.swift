@@ -134,8 +134,9 @@ final class RealtimeServer: @unchecked Sendable {
             }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
-        XCTFail("the server never saw the expected state of \(path)", file: file, line: line)
-        return try await last(path)
+        let seen = try await last(path)
+        XCTFail("the server never saw the expected state of \(path); the newest connection it has there: \(String(describing: seen))", file: file, line: line)
+        return seen
     }
 
     struct ServerError: Error, CustomStringConvertible {

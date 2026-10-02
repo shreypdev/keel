@@ -159,9 +159,24 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
         }
         let closeCode = URLSessionWebSocketTask.CloseCode(rawValue: Int(code)) ?? .normalClosure
         task.cancel(with: closeCode, reason: reason.isEmpty ? nil : Data(reason.utf8))
-        // Lets the close frame go out, then releases the delegate.
+        // `cancel(with:)` only starts the closing handshake: the close frame is written later, and the
+        // peer answers it later still. The session is kept until the delegate has had its last word (the
+        // peer's close frame, or the end of the task), so that invalidating it never races the frame out
+        // of the socket; a peer that answers neither is waited for `Self.closeGrace`, not for ever.
+        for _ in 0 ..< Self.closeGrace.polls {
+            let settled = state.withLock { (current: inout State) -> Bool in
+                return current.peerClose != nil || current.completed
+            }
+            if settled {
+                break
+            }
+            try? await Task.sleep(nanoseconds: Self.closeGrace.pollNanoseconds)
+        }
         session.finishTasksAndInvalidate()
     }
+
+    /// How long ``close(code:reason:)`` waits for the closing handshake to end: 1 s, in polls of 2 ms.
+    private static let closeGrace = (polls: 500, pollNanoseconds: UInt64(2_000_000))
 
     // MARK: Receiving
 

@@ -150,6 +150,22 @@ final class RealtimeReviewTests: XCTestCase {
         XCTAssertEqual(left?.clientClosed, true)
     }
 
+    /// The median of how long the timer that ends a burst (`burstGap`, on the queue the inbox arms it on) takes to fire.
+    private func medianTimerLatencyMilliseconds() async -> Double {
+        var samples: [Double] = []
+        for _ in 0 ..< 21 {
+            let started = DispatchTime.now().uptimeNanoseconds
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + burstGap) {
+                    continuation.resume()
+                }
+            }
+            samples.append(Double(DispatchTime.now().uptimeNanoseconds - started) / 1e6)
+        }
+        samples.sort()
+        return samples[10]
+    }
+
     /// 1c: one lone message is answered within about the burst gap of its arrival, whether the
     /// pull was waiting or came after it.
     func testALoneMessageIsAnsweredWithinAFewMillisecondsOfItsArrival() async throws {
@@ -181,8 +197,14 @@ final class RealtimeReviewTests: XCTestCase {
         }
         waited.sort()
         late.sort()
-        XCTAssertLessThan(waited[20], 10, "median latency of a lone message")
-        XCTAssertLessThan(late[20], 10, "median latency of a pull that finds one message")
+        // The binding answers a lone message when `burstGap` (2 ms) has passed without another one, which is a
+        // timer of the platform: it fired after about 3 ms on a laptop and after 10.1 ms (the median of the failed
+        // run) on a hosted macOS runner. The budget is that timer plus 5 ms, so that what is measured is the
+        // binding's own delay (a lone message held for the 8 ms burst cap, or for a linger, is over it wherever
+        // the timer is not itself that slow) and not the machine's clock.
+        let timer = await medianTimerLatencyMilliseconds()
+        XCTAssertLessThan(waited[20], timer + 5, "median latency of a lone message (the platform's \(timer) ms timer plus 5)")
+        XCTAssertLessThan(late[20], timer + 5, "median latency of a pull that finds one message (the platform's \(timer) ms timer plus 5)")
         XCTAssertLessThan(waited[39], 100, "a lone message waited 100 ms or more")
         XCTAssertLessThan(late[39], 100, "a pull that found one message waited 100 ms or more")
     }
