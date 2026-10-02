@@ -785,7 +785,7 @@ An object travels as a parameter or a return, and nowhere else.
 
 ## After a restore
 
-An object a method returned is not part of a saved snapshot: after a restore (a web worker crash, `undra dev` reloading the core) its handle is stale, and calling the method again returns it. Constructed stores restore as before. What a store keeps in a private field is whatever its `restore` hook rebuilds.
+An object a method returned is not part of a saved snapshot: after a restore (a web worker crash, `undra dev` reloading the core) its handle is stale, and calling the method again returns it. Constructed stores restore as before, and so do query handles: the snapshot keeps what a handle is made of and the core builds it again when the app first uses it (ADR-059). What a store keeps in a private field is whatever its `restore` hook rebuilds.
 
 ## Good to know
 
@@ -1369,7 +1369,7 @@ const core = await UndraCore.load({
 | --- | --- |
 | Calls and streams in flight | fail with `UndraCallError.Unavailable`, reason `restarted`; they may or may not have run and are never retried for you |
 | Stores | keep their handles and show the snapshot's values |
-| Query handles | are created again behind the same objects, and refetch |
+| Query handles | keep their handle and their wrapper (the core re-issues them from the snapshot, and builds each one again when the recovery observes it), then fetch again; one created after the last snapshot goes stale |
 | Other objects | go stale: calls on them are refused |
 | Store writes after the last snapshot, running tasks and timers, configuration a call set | lost; re-apply configuration in `onCoreRestarted` |
 
@@ -3749,7 +3749,7 @@ Source: https://shreypdev.github.io/undra/reference/swift.html
 
 # Swift reference
 
-Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xcaec1b9d8ea1f199`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x437ce0973ce54a88`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3799,7 +3799,7 @@ A protocol for each `#[undra::callback]` trait, which your app implements so the
 
 A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
-`FeedQueryHandle` `RemoteTodosQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
+`FeedQueryHandle` `RemoteTodosQueryHandle` `RosterQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
 
 ## Wire ids
 
@@ -3815,7 +3815,7 @@ Source: https://shreypdev.github.io/undra/reference/kotlin.html
 
 # Kotlin reference
 
-Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xcaec1b9d8ea1f199`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x437ce0973ce54a88`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3865,7 +3865,7 @@ An interface for each `#[undra::callback]` trait, which your app implements so t
 
 A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
-`FeedQueryHandle` `RemoteTodosQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
+`FeedQueryHandle` `RemoteTodosQueryHandle` `RosterQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
 
 ## Wire ids
 
@@ -3881,7 +3881,7 @@ Source: https://shreypdev.github.io/undra/reference/typescript.html
 
 # TypeScript reference
 
-Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xcaec1b9d8ea1f199`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x437ce0973ce54a88`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3935,7 +3935,7 @@ An interface for each `#[undra::callback]` trait, which your app implements so t
 
 A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
-`FeedQueryHandle` `RemoteTodosQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
+`FeedQueryHandle` `RemoteTodosQueryHandle` `RosterQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
 
 ## Wire ids
 
@@ -4012,6 +4012,7 @@ Landed in the two days after v1.0; the record of each piece is in the repository
 - Several cores in one app (ADR-044)Each core is a self-contained image with one namespaced entry point, so two Undra libraries share a process without sharing anything, storage included.
 - iOS 15 and 16 (ADR-045)A lower deployment target generates ObservableObject stores and the iOS 17 output is unchanged; the mode is proven by compilation and a runtime probe on iOS 26.5, not yet on an iOS 15 or 16 runtime.
 - The web call path (ADR-056)A generated TypeScript call went from 3.2–3.5 µs to 0.47–0.68 µs in headless Chromium, and React Native's mirror work at 100,000 updates a second from about 22 ms to about 5 ms a frame on the iPhone simulator.
+- Query handles across a reload (ADR-059)A query handle survives an undra dev reload, a devtools time travel, a web crash restart and an app's own restore, on the same handle and with no app code: the snapshot keeps what it is made of and the core builds it again when the app first uses it. A query without persist shows loading once after a reload.
 
 Now
 
@@ -4024,7 +4025,6 @@ Built and merged, with these still open; each is a known limit that the default-
 - Rows from physical devicesThe device benchmarks run on the iPhone simulator, the Android emulator and headless Chromium, and are labelled so; rows from real phones are owed, and no device target is claimed as met.
 - The JavaScript runtime at 16 KBWhat a hello-world page loads up front sits exactly at its gate, and the design's 16 KB target is not reachable without removing behaviour, so the next growth makes room or restates the budget.
 - Generic functions and objectsA generic record or enum crosses as one named type per instantiation; generic objects, stores, functions and methods do not cross yet.
-- Query handles across a dev reloadundra dev keeps the stores across a rebuild but not query handles, which need a decision record of their own.
 - Android module tests in CIThe undra-compose and android-adapters tests pass locally and on the emulator but do not run in CI yet.
 
 Next
@@ -4090,7 +4090,7 @@ The catalogue's matrix lists 36 things a team needs. On 1 October Undra was mark
 | What can crossrows 21 to 23 | Swift sees [an Objective-C header, or Swift export (Alpha)](https://kotlinlang.org/docs/native-swift-export.html), which erases generics. | [Objects and foreign traits](https://mozilla.github.io/uniffi-rs/latest/types/interfaces.html) cross; its documentation describes no [generic types](https://raw.githubusercontent.com/mozilla/uniffi-rs/main/docs/manual/src/types/builtin_types.md) of your own. | [flutter_rust_bridge](https://raw.githubusercontent.com/fzyzcjy/flutter_rust_bridge/master/README.md) takes arbitrary types and closures; React Native [native modules](https://reactnative.dev/docs/turbo-native-modules-introduction) need a spec and code per platform. | **Solved:** records, enums and errors become native sum types, no Objective-C; objects cross as parameters and returns; the core calls host callbacks; newtypes stay typed. **Partly:** generics, one named type per instantiation, and no generic functions or objects. [Objects](https://shreypdev.github.io/undra/docs/objects.html), [callbacks](https://shreypdev.github.io/undra/docs/callbacks.html), [types](https://shreypdev.github.io/undra/docs/types.html), [ADR-040](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-040-objects-as-parameters-and-returns.md) to [042](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-042-newtypes-generic-instantiations-and-leaf-types.md). |
 | Data layerrows 7 to 10 | Libraries: [Room](https://developer.android.com/kotlin/multiplatform), [SQLDelight](https://raw.githubusercontent.com/sqldelight/sqldelight/master/README.md) (compile-time migration checks), [Store](https://raw.githubusercontent.com/MobileNativeFoundation/Store/main/README.md). | Its documentation [describes no](https://raw.githubusercontent.com/mozilla/uniffi-rs/main/README.md) cache, mutation, offline or persistence layer. | Libraries: [TanStack Query](https://tanstack.com/query/latest/docs/framework/react/guides/network-mode), [drift](https://pub.dev/packages/drift) (with migrations). | **Solved:** cache, dedup, retry, optimistic rollback, an offline queue that survives a restart, migrating persisted state, infinite queries, lazy lists, polling. **Not yet:** optimistic placeholders after a restart. [Queries](https://shreypdev.github.io/undra/docs/queries.html), [paging](https://shreypdev.github.io/undra/docs/paging.html), [ADR-037](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-037-persisted-state-migrations.md), [043](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-043-paged-queries-lazy-lists-and-polling.md). |
 | Storage, sockets, servicesrows 11, 12, 14 | Ktor, DataStore, Room, SQLDelight; many of Google's [Jetpack libraries](https://developer.android.com/kotlin/multiplatform) are KMP-ready. | Its documentation describes no adapters; SQL and sockets are Rust crates you bring. | React Native has [WebSocket](https://reactnative.dev/docs/network) and [expo-sqlite](https://docs.expo.dev/versions/latest/sdk/sqlite/); Flutter has [drift](https://pub.dev/packages/drift) and [web_socket_channel](https://pub.dev/packages/web_socket_channel). | **Solved:** default adapters for HTTP, storage, files and connectivity on iOS, Android, web and React Native; opt-in WebSocket, SSE and SQL ports. **Not yet:** the web database serves one tab per origin. [Ports](https://shreypdev.github.io/undra/docs/ports.html), [database](https://shreypdev.github.io/undra/docs/db.html), [real time](https://shreypdev.github.io/undra/docs/realtime.html). |
-| Dev loop and toolingrows 15, 16 | [Compose Hot Reload needs a desktop JVM target](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html); JetBrains' 2025 roadmap calls [build speed](https://blog.jetbrains.com/kotlin/2025/08/kmp-roadmap-aug-2025/) "a common Kotlin/Native concern". | Each change rebuilds the library and the app; its documentation describes no dev server or devtools. | Both ship DevTools. Flutter [hot reload skips native code](https://docs.flutter.dev/tools/hot-reload); React Native [Fast Refresh can fall back to a full reload](https://reactnative.dev/docs/fast-refresh). | **Solved:** `undra dev` reconnects and keeps state across a rebuild; devtools with time travel; Gradle, Xcode and Vite run `undra build`. **Not yet:** query handles across a reload. [ADR-051](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-051-dev-client-reconnect-and-session-resume.md), [053](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-053-state-preserving-reload.md), [054](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-054-devtools.md). |
+| Dev loop and toolingrows 15, 16 | [Compose Hot Reload needs a desktop JVM target](https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html); JetBrains' 2025 roadmap calls [build speed](https://blog.jetbrains.com/kotlin/2025/08/kmp-roadmap-aug-2025/) "a common Kotlin/Native concern". | Each change rebuilds the library and the app; its documentation describes no dev server or devtools. | Both ship DevTools. Flutter [hot reload skips native code](https://docs.flutter.dev/tools/hot-reload); React Native [Fast Refresh can fall back to a full reload](https://reactnative.dev/docs/fast-refresh). | **Solved:** `undra dev` reconnects and keeps state across a rebuild, query handles included; devtools with time travel; Gradle, Xcode and Vite run `undra build`. [ADR-051](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-051-dev-client-reconnect-and-session-resume.md), [053](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-053-state-preserving-reload.md), [054](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-054-devtools.md), [059](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-059-transient-handles-across-restore.md). |
 | Testing and previewsrows 18, 19 | [kotlinx-coroutines-test](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-test/) gives virtual time in multiplatform tests. | Its documentation describes no fakes for platform I/O; you build the doubles. | Flutter's [widget previewer](https://docs.flutter.dev/tools/widget-previewer) supports no `dart:ffi` or native plugins. | **Solved:** `PreviewCore` runs your real core with fakes and a manual clock on Swift, Kotlin and TypeScript; a recorded session replays in tests. [Testing](https://shreypdev.github.io/undra/docs/testing.html), [ADR-055](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-055-testkit.md). |
 | Compatibility and floorsrows 20, 24, 30 | Kotlin/Native targets [iOS 15.0 and later](https://kotlinlang.org/docs/native-target-support.html). Several KMP frameworks in one app [duplicate dependencies](https://kotlinlang.org/docs/multiplatform/multiplatform-project-configuration.html). | As we read its [Swift template](https://raw.githubusercontent.com/mozilla/uniffi-rs/main/uniffi_bindgen/src/bindings/swift/templates/wrapper.swift), a library and bindings that disagree stop the process. | React Native [iOS 15.1](https://github.com/react-native-community/discussions-and-proposals/discussions/812), Flutter [iOS 15](https://docs.flutter.dev/reference/supported-platforms). Flutter [does not support several Flutter libraries](https://docs.flutter.dev/add-to-app) in one app. | **Solved:** schema-hash gate at load; iOS 15 and 16 via `ObservableObject`; several cores side by side. **Caveat:** the iOS 15 and 16 mode has not run on an iOS 15 or 16 runtime. [Hash](https://shreypdev.github.io/undra/blog/reads-never-cross-the-boundary/#schema-hash), [iOS 15 and 16](https://shreypdev.github.io/undra/docs/cookbook/ios-15-16.html), [cores](https://shreypdev.github.io/undra/docs/several-cores.html). |
 | Platforms and UI frameworksrows 25 to 29, 36 | [Kotlin/Wasm is Beta](https://kotlinlang.org/docs/wasm-overview.html). Compose Multiplatform shares UI; [desktop is Stable](https://kotlinlang.org/docs/multiplatform/faq.html). | Python and Ruby are first-party; web comes [from a third-party generator](https://raw.githubusercontent.com/mozilla/uniffi-rs/main/README.md). | Flutter [paints one UI on six platforms](https://docs.flutter.dev/reference/supported-platforms), [not suited to text-rich static sites](https://docs.flutter.dev/platform-integration/web/faq). React Native: [web, Windows and macOS out of tree](https://reactnative.dev/docs/out-of-tree-platforms). | **Solved:** web (wasm core; React, Vue, Svelte, Solid hooks) and React Native. **Not yet:** Flutter and Dart. **Partly:** desktop, and reuse on a server. **By decision:** no shared UI. [TypeScript](https://shreypdev.github.io/undra/docs/api-typescript.html), [React Native](https://github.com/shreypdev/undra/blob/main/docs/REACT_NATIVE.md). |
@@ -4126,7 +4126,7 @@ A native panic is caught at the boundary and arrives as `panicked`, and the app'
 
 ### The dev loop
 
-Edit Rust, save, and the app on a simulator, an emulator or a page reconnects by itself, with exponential backoff from 250 ms to 5 s, and observes its stores again ([ADR-051](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-051-dev-client-reconnect-and-session-resume.md)). The core's state is snapshotted in memory before the rebuild and restored into the new core before it listens, so the app returns to the screen it was on, and the dev bar says "Reloaded, state kept" or why not ([ADR-053](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-053-state-preserving-reload.md)).
+Edit Rust, save, and the app on a simulator, an emulator or a page reconnects by itself, with exponential backoff from 250 ms to 5 s, and observes its stores again ([ADR-051](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-051-dev-client-reconnect-and-session-resume.md)). The core's state is snapshotted in memory before the rebuild and restored into the new core before it listens, so the app returns to the screen it was on, and the dev bar says "Reloaded, state kept" or why not ([ADR-053](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-053-state-preserving-reload.md)). A screen that shows a query is carried too: its query handle comes back on the same handle and fetches with the code that was just rebuilt, with no code in the app ([ADR-059](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-059-transient-handles-across-restore.md)).
 
 The number: the playground's 204 KiB snapshot restores in 1.6 ms inside `undra dev`, which runs a debug build of the core (189 µs in a release build), and 74 ms pass from suspending the old core to the new one listening ([the piece's record](https://github.com/shreypdev/undra/blob/main/.10x/decisions/sde/dev-reload.md)). A page served by `undra dev` shows every store's live value and a timeline of every change-set, and a scrubber restores the core to an earlier step while the app follows ([ADR-054](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-054-devtools.md), [docs/DEV_LOOP.md](https://github.com/shreypdev/undra/blob/main/docs/DEV_LOOP.md)). It sits behind a per-run token.
 
@@ -4158,7 +4158,7 @@ Plainly, in the order a team would meet it: the matrix's open and partial rows, 
 
 - A queued write's optimistic placeholder and its `invalidates` targets do not survive a restart: the write replays, and the screen refetches only the mutation's own key.
 - The web database serves one tab per origin, and a migration that contains its own `COMMIT` is open.
-- `undra dev` carries the stores across a reload but not query handles, which need a decision record of their own.
+- After an `undra dev` reload a query without `persist` shows loading once, because a snapshot carries no query data, and an object that is neither a store nor a query handle is not carried over.
 - The binding call path is over its targets: about 300 ns on the iOS simulator against 60 ns, and 0.32 to 0.44 µs for the runtime's synchronous call in Chromium against 80 ns.
 - iOS background tasks do not run in the simulator, so the iOS background handler is tested with fakes and has not run under the OS scheduler here.
 - Every number here is from a host, a simulator, an emulator or Chromium. The iOS 15 and 16 mode is proven by compilation and a runtime probe on iOS 26.5, not on an older runtime.

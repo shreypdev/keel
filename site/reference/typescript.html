@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>TypeScript reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xcaec1b9d8ea1f199</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x437ce0973ce54a88</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="entry">Entry point<a class="anchor" href="#entry" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The package entry: it re-exports every file below.</p>
@@ -2055,8 +2055,8 @@ export const ReporterCallback: CallbackInterface&lt;Reporter&gt;;
 </details>
 <h2 id="queries">Queries<a class="anchor" href="#queries" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.</p>
-<p class="ref-names"><code>FeedQueryHandle</code> <code>RemoteTodosQueryHandle</code> <code>TickerQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code> <code>saveNote</code> <code>tagNote</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>189 lines</span></summary>
+<p class="ref-names"><code>FeedQueryHandle</code> <code>RemoteTodosQueryHandle</code> <code>RosterQueryHandle</code> <code>TickerQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code> <code>saveNote</code> <code>tagNote</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>232 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/queries.ts" rel="noopener">queries.ts</a></span></div><pre><code data-lang="ts">/**
  * Observes the `feed` query (cache key `feed/{even_only}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
@@ -2132,6 +2132,49 @@ export class RemoteTodosQueryHandle extends UndraStore {
     list: string,
     core: UndraCore = UndraPlaygroundCore.core,
   ): Promise&lt;RemoteTodosQueryHandle&gt;;
+
+  /**
+   * Fetches again now, even if the data is fresh.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  refetch(): Promise&lt;void&gt;;
+
+  /**
+   * Marks the cached entry stale; it refetches while observed.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  invalidate(): Promise&lt;void&gt;;
+
+  /**
+   * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+   * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+   * An interval below 1 second or above 7 days is clamped to that range.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  setPollInterval(ms: Duration | null): Promise&lt;void&gt;;
+}
+
+/**
+ * Observes the `roster` query (cache key `roster:{team}`).
+ * Constructing it registers an observer and fetches when the data is stale or missing.
+ */
+export class RosterQueryHandle extends UndraStore {
+  /** The latest successful result, if any. */
+  readonly data: Signal&lt;string[] | null&gt;;
+  /** Where the query is in its fetch lifecycle. */
+  readonly status: Signal&lt;QueryStatus&gt;;
+  /** The error of the latest failed fetch, cleared by the next success. */
+  readonly error: Signal&lt;RemoteError | null&gt;;
+  /** Whether a fetch is in flight (also true while refetching stale data). */
+  readonly fetching: Signal&lt;boolean&gt;;
+  /** When `data` was last updated. */
+  readonly updatedAt: Signal&lt;Timestamp | null&gt;;
+
+  /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
+  static create(
+    team: number,
+    core: UndraCore = UndraPlaygroundCore.core,
+  ): Promise&lt;RosterQueryHandle&gt;;
 
   /**
    * Fetches again now, even if the data is fresh.
@@ -2251,13 +2294,13 @@ export function tagNote(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>247 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>255 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/ids.ts" rel="noopener">ids.ts</a></span></div><pre><code data-lang="ts">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
  * hash and the namespace of the core these bindings belong to.
  */
 export const UndraIds = {
-  schemaHash: 0xcaec1b9d8ea1f199n,
+  schemaHash: 0x437ce0973ce54a88n,
   namespace: "playground_core",
   Objects: {
     Live: {
@@ -2411,6 +2454,13 @@ export const UndraIds = {
       invalidate: 0x44cec2fa,
       setPollInterval: 0xe327e53b,
     },
+    RosterQueryHandle: {
+      typeId: 0xaa41fecc,
+      new: 0xaa41fecc,
+      refetch: 0x21d1b9e2,
+      invalidate: 0x44cec2fa,
+      setPollInterval: 0xe327e53b,
+    },
     TickerQueryHandle: {
       typeId: 0x38de4411,
       new: 0x38de4411,
@@ -2484,6 +2534,7 @@ export const UndraIds = {
     patchRemoteTodo: 0x77fe653e,
     postRemoteTodo: 0x5c84eed2,
     remoteTodos: 0x2a794167,
+    roster: 0xaa41fecc,
     saveNote: 0xaef633c6,
     tagNote: 0xb9224861,
     ticker: 0x38de4411,
