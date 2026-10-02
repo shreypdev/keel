@@ -125,10 +125,9 @@ impl Project {
     }
 }
 
-/// A copy of the playground (its core and `undra.toml`) in a scratch directory, with the core
-/// depending on this repository's crates by path, so a test can edit the core's sources and run
-/// `undra dev` on it without touching the checkout.
-pub fn playground_copy(tag: &str) -> Project {
+/// Writes a copy of the playground (its core and `undra.toml`) at `root`, with the core depending
+/// on this repository's crates by path.
+fn write_playground(root: &Path, own_workspace: bool) {
     fn copy_dir(from: &Path, to: &Path) {
         std::fs::create_dir_all(to).unwrap();
         for entry in std::fs::read_dir(from).unwrap() {
@@ -142,8 +141,6 @@ pub fn playground_copy(tag: &str) -> Project {
         }
     }
     let repo = repo_root();
-    let dir = TempDir::new(tag);
-    let root = dir.path().join("playground");
     copy_dir(
         &repo.join("examples/playground/core/src"),
         &root.join("core/src"),
@@ -152,8 +149,10 @@ pub fn playground_copy(tag: &str) -> Project {
         root.join("core/Cargo.toml"),
         format!(
             "[package]\nname = \"playground-core\"\nversion = \"0.1.0\"\nedition = \"2024\"\nrust-version = \"1.85\"\npublish = false\n\n\
-[dependencies]\nundra = {{ path = \"{}\" }}\nserde = {{ version = \"1\", features = [\"derive\"] }}\nserde_json = \"1\"\n",
-            repo.join("crates/undra").display()
+[dependencies]\nundra = {{ path = \"{}\" }}\nserde = {{ version = \"1\", features = [\"derive\"] }}\nserde_json = \"1\"\n{}",
+            repo.join("crates/undra").display(),
+            // Below this repository's `target/`, the copy would be taken for a member of its workspace.
+            if own_workspace { "\n[workspace]\n" } else { "" }
         ),
     )
     .unwrap();
@@ -167,7 +166,62 @@ pub fn playground_copy(tag: &str) -> Project {
     )
     .unwrap();
     let _ = std::fs::copy(repo.join("Cargo.lock"), root.join("Cargo.lock"));
+}
+
+/// A copy of the playground (its core and `undra.toml`) in a scratch directory, with the core
+/// depending on this repository's crates by path, so a test can edit the core's sources and run
+/// `undra dev` on it without touching the checkout.
+pub fn playground_copy(tag: &str) -> Project {
+    let dir = TempDir::new(tag);
+    let root = dir.path().join("playground");
+    write_playground(&root, false);
     Project { dir, root }
+}
+
+/// A project at a stable place: a copy of the playground below `target/` of this repository, made
+/// fresh by [`playground_at`] and kept after the test, so the next run finds the core's
+/// dependencies already compiled. Its path is below the home directory, which is what a release
+/// build remaps to `~` in the paths it embeds.
+pub struct StableProject {
+    /// The project root.
+    pub root: PathBuf,
+}
+
+impl StableProject {
+    /// `undra -C <root> <args>`.
+    pub fn undra(&self) -> Command {
+        let mut cmd = undra();
+        cmd.arg("-C").arg(&self.root);
+        cmd
+    }
+}
+
+/// The playground copy named `name` below `target/undra-cli-projects/`, written anew.
+pub fn playground_at(name: &str) -> StableProject {
+    let root = repo_root().join("target/undra-cli-projects").join(name);
+    let _ = std::fs::remove_dir_all(&root);
+    write_playground(&root, true);
+    StableProject { root }
+}
+
+/// Whether a test that needs a toolchain must fail instead of skipping when it is missing:
+/// `UNDRA_REQUIRE_TOOLCHAINS=1`, as in the other platform tests and CI.
+pub fn toolchains_required() -> bool {
+    flag("UNDRA_REQUIRE_TOOLCHAINS")
+}
+
+/// `true` when the test should stop because `present` is false: it says why, and fails
+/// when toolchains are required (`UNDRA_REQUIRE_TOOLCHAINS=1`).
+pub fn skip_unless(present: bool, what: &str) -> bool {
+    if present {
+        return false;
+    }
+    assert!(
+        !toolchains_required(),
+        "UNDRA_REQUIRE_TOOLCHAINS=1 and {what}"
+    );
+    eprintln!("skipped: {what}");
+    true
 }
 
 /// Whether the Rust standard library for `triple` is installed.
