@@ -714,7 +714,8 @@ Every step goes through the **generated** classes: `Workshop.create()` / `Worksh
    is the same wrapper, `w.find("zz")` is `nil`/`null`; `w.shelves()` lists it once; a store returned twice is
    mirrored once: `shelf.stock(2)` delivers exactly one change-set (`items == 2`), not two.
 3. **A child is passed back as a parameter.** `w.shelf("b").stock(3)`; `w.merge(from: a, onto: b)` moves the two
-   items (`a.items == 0`, `b.items == 5`, one change-set each, delivered in one transaction); `w.total([a, b])
+   items (`a.items == 0`, `b.items == 5`: `merge` is one `txn` over two stores, so two change-sets, one per store, that
+   one drain applies before `merge` returns); `w.total([a, b])
    == 5`; `w.describe(a) == "a"` and `w.describe(nil) == "none"`. A parameter is borrowed: `host_refs` is
    unchanged by these calls.
 4. **Closing releases exactly one reference.** `w.shelf("c")` twice (one wrapper, one reference); `close()` the
@@ -754,7 +755,9 @@ with the stores' state as seen at each call. `UndraCore.callbacks` (the registry
    first, ADR-041 decision 6). Nothing ran inside the core's callback: the runner's `note` calls back into the
    core (`w.announce` from inside `note` is allowed: it is queued, never `E_REENTRANT`).
 2. **An async callback returns a value and throws its typed error.** `await w.run(3, rep)` with `rep.confirm`
-   answering `true` returns `3` (the progress reports `1/3` to `3/3` and three notes arrived, in order);
+   answering `true` returns `3` (the notes `step 1 of 3` to `step 3 of 3` arrive in order, and the progress
+   reports arrive in order and end at `3/3`: `progress` is `coalesce`, so a drain that ran late delivers fewer
+   than three);
    with `confirm` answering `false` the call fails with `ReportError.Declined`; with `confirm` throwing
    `ReportError.Unavailable("x")` the call fails with that error (`status 1`).
 3. **Any other throw is reported, not propagated.** `confirm` throws something that is not a `ReportError`
@@ -815,6 +818,13 @@ with the stores' state as seen at each call. `UndraCore.callbacks` (the registry
 * S20 step 4 differs by platform: a fresh TypeScript core can be loaded with a `Kv` whose queue reads fail, so
   the TypeScript column walks the whole "unreadable, then readable on `Active`" path; Swift and Kotlin load one
   core per process, so their harness fails the first read of the queue at load and S20 checks what that did.
+* S28 step 3 (a throw that is not the method's own error) cannot be written against Swift's generated protocols
+  as the runner is: with typed throws (the default, ADR-032) `confirm` can only throw `ReportError` and `note`
+  cannot throw, so Swift's column prints a `NOTE` line for the step and the runtime's own tests
+  (`ObjectsCallbacksTests`) cover the mapping (status 2, `onError`, operation `Reporter.confirm`).
+* S27 step 7 depends on the garbage collector on Kotlin and TypeScript (`System.gc()` and a bounded wait; the
+  `FinalizationRegistry`, which needs Node's `--expose-gc`, else the runner `close()`s and says so): a GC that
+  does not run in time is a FAIL on Kotlin and a `close()` on TypeScript, never a SKIP.
 * S21 and S22 are TypeScript-only: worker mode and crash recovery are web features (ADR-049; a native core
   contains a panic without trapping, SPEC 5.6). `check.sh` does not expect them from Swift or Kotlin.
 * S23 and S24 start `contract-tests/servers/realtime-server.mjs` with Node (every runner's machine has Node:
