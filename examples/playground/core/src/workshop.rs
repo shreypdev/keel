@@ -44,6 +44,9 @@ pub enum WorkshopError {
     NoName,
 }
 
+/// The subscribed reporters, by subscription number.
+type Watchers = Mutex<Vec<(u32, Arc<dyn Reporter>)>>;
+
 /// What the app implements to hear from the core.
 #[undra::callback]
 pub trait Reporter {
@@ -87,11 +90,17 @@ impl Shelf {
     }
 }
 
+impl Default for Shelf {
+    fn default() -> Self {
+        Shelf::new()
+    }
+}
+
 /// A subscription: while a platform holds it, the reporter given to [`Workshop::watch`] is told
 /// what [`Workshop::announce`] says. Closing it (or letting it go) stops that.
 pub struct Watch {
     id: u32,
-    watchers: Weak<Mutex<Vec<(u32, Arc<dyn Reporter>)>>>,
+    watchers: Weak<Watchers>,
 }
 
 #[undra::api]
@@ -126,7 +135,7 @@ pub struct Workshop {
     /// How many notes were announced.
     notes: Signal<u32>,
     shelves: Mutex<BTreeMap<String, Arc<Shelf>>>,
-    watchers: Arc<Mutex<Vec<(u32, Arc<dyn Reporter>)>>>,
+    watchers: Arc<Watchers>,
     next_watch: Mutex<u32>,
     ctx: WeakCtx,
 }
