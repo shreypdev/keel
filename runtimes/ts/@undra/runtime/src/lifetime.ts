@@ -21,11 +21,20 @@ export function isUndraClass<S extends UndraObject>(source: UndraClass<S> | (() 
 }
 
 /**
+ * How many owners (`openUndra` lives) hold each object. One wrapper per handle (ADR-040 decision 7) means two creations
+ * that the core answers with one handle (a singleton constructor, `Arc<Self>`: StrictMode's second effect, or two
+ * components that ask for the same one) reach two owners as the *same* wrapper; the first to end must not close it under
+ * the other.
+ */
+const owners = new WeakMap<UndraObject, number>();
+
+/**
  * The life of one object for a framework adapter: creates it, hands it to
  * `onReady`, and returns the function that ends it. Ending closes the object
  * now, or as soon as its creation finishes, and silences both callbacks, so
  * an effect that re-runs or a component that unmounts while `create` is still
- * pending neither leaks a handle nor reports to something that is gone.
+ * pending neither leaks a handle nor reports to something that is gone. An object
+ * that another life holds too (the same wrapper) is closed when the last one ends.
  *
  * @internal Used by the adapters in `react`, `vue` and `solid`.
  */
@@ -42,10 +51,16 @@ export function openUndra<S extends UndraObject>(
   }).then(
     (created) => {
       if (ended) {
-        created.close();
+        // Its life ended before it arrived. A life that began meanwhile may be handed the same wrapper in this very
+        // turn (StrictMode's second effect against a transport that answers inside the call), so whether anyone holds
+        // it is looked at on the next one.
+        setTimeout(() => {
+          if ((owners.get(created) ?? 0) === 0) created.close();
+        }, 0);
         return;
       }
       object = created;
+      owners.set(created, (owners.get(created) ?? 0) + 1);
       onReady(created);
     },
     (error: unknown) => {
@@ -54,8 +69,16 @@ export function openUndra<S extends UndraObject>(
   );
   return () => {
     ended = true;
-    object?.close();
+    const held = object;
     object = undefined;
+    if (held === undefined) return;
+    const left = (owners.get(held) ?? 1) - 1;
+    if (left > 0) {
+      owners.set(held, left);
+      return;
+    }
+    owners.delete(held);
+    held.close();
   };
 }
 

@@ -8,7 +8,7 @@ import type { UndraClass } from "../src/lifetime.js";
 import { useUndra, useSignal } from "../src/react.js";
 import { Signal } from "../src/signal.js";
 import { FakeCoreTransport, SCHEMA } from "./support/fake-core.js";
-import { deferred, track } from "./support/harness.js";
+import { deferred, macrotask, track } from "./support/harness.js";
 import { CounterStore, str, u32, vecU32 } from "./support/store.js";
 
 /*
@@ -263,6 +263,8 @@ describe("useUndra", () => {
     const view = await render(createElement(StrictMode, null, createElement(Counting, { type: Counter })));
     expect(created.length).toBeGreaterThanOrEqual(2);
     expect(view.container.textContent).toBe("count 1");
+    await macrotask(); // the first store is closed one turn after it arrived (see `openUndra`)
+    await macrotask();
     const open = created.filter((store) => !store.closed);
     expect(open).toHaveLength(1);
     expect(fake.released).toHaveLength(created.length - 1);

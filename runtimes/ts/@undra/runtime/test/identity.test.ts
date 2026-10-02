@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { UndraCallError } from "../src/call-error.js";
 import { UndraCore } from "../src/core.js";
 import { adopt, adoptList, adoptObject, adoptOptional, requireOwn } from "../src/identity.js";
+import { openUndra } from "../src/lifetime.js";
 import { UndraObject } from "../src/object.js";
 import { ALL_SIGNALS, codecs, encodeValue } from "../src/wire/index.js";
 import { FakeCoreTransport, SCHEMA } from "./support/fake-core.js";
@@ -43,6 +44,27 @@ describe("adopt", () => {
     thing.close();
     thing.close();
     expect(fake.released, "the wrapper releases the one reference it owns, once").toEqual([0x10n, 0x10n, 0x10n]);
+  });
+
+  it("under StrictMode's effect, cleanup, effect an interned object (a singleton constructor) reaches the second effect open", async () => {
+    // What `useUndra` does for a generated `create()` of an `Arc<Self>` constructor: the core answers both calls with
+    // the same handle, so the second `adopt` can find the first wrapper still open, and the first effect's cleanup
+    // closes whatever its creation returned.
+    const { fake, core } = await setup();
+    const create = async (): Promise<Thing> => {
+      await Promise.resolve(); // the core's answer
+      return adopt(core, 0x50n, Thing);
+    };
+    const ready: Thing[] = [];
+    openUndra(create, (thing) => ready.push(thing), () => {})(); // effect, then its cleanup
+    const end = openUndra(create, (thing) => ready.push(thing), () => {}); // the effect again
+    await macrotask();
+    expect(ready).toHaveLength(1);
+    const [kept] = ready as [Thing];
+    expect(kept.closed, "the component that kept it must not hold a closed object").toBe(false);
+    end();
+    expect(kept.closed).toBe(true);
+    expect(fake.released.filter((h) => h === 0x50n), "each reference the core issued went back once").toHaveLength(2);
   });
 
   it("keeps the cores apart: the same handle number in two cores is two objects", async () => {

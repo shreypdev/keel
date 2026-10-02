@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { UndraObject } from "../src/object.js";
 import { isUndraClass, openUndra, rethrowLater } from "../src/lifetime.js";
-import { deferred, microtasks } from "./support/harness.js";
+import { deferred, macrotask, microtasks } from "./support/harness.js";
 
 /** The part of an `UndraObject` that `openUndra` touches. */
 function fakeObject(): UndraObject & { closes: number } {
@@ -35,10 +35,38 @@ describe("openUndra", () => {
     const end = openUndra(() => gate.promise, onReady, onError);
     end();
     gate.resolve(object);
-    await microtasks();
+    await macrotask();
+    await macrotask(); // the close waits one turn, to see whether another life was handed the same object
     expect(object.closes).toBe(1);
     expect(onReady).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("an object two lives hold (one wrapper for one handle) is closed when the last of them ends, not the first", async () => {
+    const shared = fakeObject();
+    const a = openUndra(async () => shared, vi.fn(), vi.fn());
+    const b = openUndra(async () => shared, vi.fn(), vi.fn());
+    await microtasks();
+    a();
+    expect(shared.closes, "the second life still holds it").toBe(0);
+    a();
+    expect(shared.closes, "ending twice does not count twice").toBe(0);
+    b();
+    expect(shared.closes).toBe(1);
+  });
+
+  it("an object that arrives after its life ended is not closed if another life was handed it meanwhile", async () => {
+    const shared = fakeObject();
+    const gate = deferred<UndraObject>();
+    const first = openUndra(() => gate.promise, vi.fn(), vi.fn());
+    first(); // StrictMode: effect, cleanup, effect
+    const second = openUndra(() => gate.promise, vi.fn(), vi.fn());
+    gate.resolve(shared);
+    await macrotask();
+    await macrotask();
+    expect(shared.closes, "the second life holds it").toBe(0);
+    second();
+    expect(shared.closes).toBe(1);
   });
 
   it("reports a creation that fails, unless it was ended", async () => {
