@@ -75,12 +75,14 @@ public final class Mirror: @unchecked Sendable {
     }
 
     /// One parsed change-set entry. `value` shares the storage of the change-set's payload until a
-    /// compaction copies it.
+    /// compaction copies it. An entry with an `invocation` is a host callback call queued with the
+    /// change-sets (ADR-041): it is applied in its place and never folded.
     struct Entry {
         var handle: UInt64
         var signal: UInt32
         var op: ChangeOp
         var value: ArraySlice<UInt8>
+        var invocation: MirrorInvocation? = nil
 
         var key: Key {
             return Key(handle: handle, signal: signal)
@@ -137,6 +139,7 @@ public final class Mirror: @unchecked Sendable {
         var compactions = 0
         var resyncs = 0
         var droppedEntries = 0
+        var callbacksDelivered = 0
 
         init(maxPendingEntries: Int, maxPendingBytes: Int) {
             compactAtEntries = maxPendingEntries
@@ -222,7 +225,8 @@ public final class Mirror: @unchecked Sendable {
                 resyncs: current.resyncs,
                 pendingEntries: current.queue.count,
                 pendingBytes: current.queueBytes,
-                droppedEntries: current.droppedEntries
+                droppedEntries: current.droppedEntries,
+                callbacksDelivered: current.callbacksDelivered
             )
         }
     }
@@ -323,6 +327,36 @@ public final class Mirror: @unchecked Sendable {
                 return (false, unmergeable)
             }
             if current.frameRequested {
+                return (false, unmergeable)
+            }
+            current.frameRequested = true
+            return (true, unmergeable)
+        }
+        Mirror.logUnmergeable(outcome.unmergeable)
+        if outcome.requestFrame {
+            requestFrame()
+        }
+    }
+
+    /// Queues a host callback invocation behind everything queued so far (ADR-041 decision 6): the
+    /// drain runs it in that place, so the implementation sees the stores as they were when the core
+    /// called it. Safe from any thread, including a core callback; it never calls into the core.
+    func enqueue(_ invocation: MirrorInvocation) {
+        let onMainThread = Thread.isMainThread
+        let maxEntries = maxPendingEntries
+        let maxBytes = maxPendingBytes
+        let outcome = state.withLock { (current: inout State) -> (requestFrame: Bool, unmergeable: [Key]) in
+            current.queue.append(Entry(handle: 0, signal: 0, op: .fullValue, value: [], invocation: invocation))
+            current.queueBytes += Mirror.entryOverhead + invocation.bytes
+            var unmergeable: [Key] = []
+            if current.queue.count > current.compactAtEntries || current.queueBytes > current.compactAtBytes {
+                unmergeable = Mirror.compact(&current, maxEntries: maxEntries, maxBytes: maxBytes)
+            }
+            if onMainThread && current.flushing {
+                current.moreRounds = true
+                return (false, unmergeable)
+            }
+            if (onMainThread && current.mainThreadCalls > 0) || current.frameRequested {
                 return (false, unmergeable)
             }
             current.frameRequested = true
@@ -533,6 +567,14 @@ public final class Mirror: @unchecked Sendable {
         }
         var applied = 0
         var dropped = 0
+        var delivered = 0
+        defer {
+            if delivered > 0 {
+                state.withLock { (current: inout State) -> Void in
+                    current.callbacksDelivered += delivered
+                }
+            }
+        }
         for unit in folded.units {
             switch unit {
             case .slot(let at):
@@ -552,6 +594,12 @@ public final class Mirror: @unchecked Sendable {
                     applied += 1
                 }
             case .single(let entry):
+                if let invocation = entry.invocation {
+                    if invocation.deliver() {
+                        delivered += 1
+                    }
+                    continue
+                }
                 guard let registration = round.registrations[entry.handle] else {
                     dropped += 1
                     continue
@@ -703,7 +751,21 @@ public final class Mirror: @unchecked Sendable {
         var index: [Key: Int] = [:]
         var lastHandle: UInt64?
         var lastNoCoalesce: Set<UInt32> = []
-        for entry in entries {
+        // A coalescing callback method keeps only its newest pending invocation per instance.
+        var newest: [MirrorInvocation.CoalesceKey: Int] = [:]
+        for (position, entry) in entries.enumerated() {
+            if let key = entry.invocation?.coalesce {
+                newest[key] = position
+            }
+        }
+        for (position, entry) in entries.enumerated() {
+            if let invocation = entry.invocation {
+                if let key = invocation.coalesce, newest[key] != position {
+                    continue
+                }
+                folded.units.append(.single(entry))
+                continue
+            }
             let key = entry.key
             if !folded.waiting.isEmpty, folded.waiting.contains(key) {
                 // Relative to a list this host never had: wait for a full value.
@@ -753,7 +815,17 @@ public final class Mirror: @unchecked Sendable {
         var queue: [Entry] = []
         queue.reserveCapacity(folded.slots.count)
         var bytes = 0
-        for slot in folded.slots {
+        for unit in folded.units {
+            let slot: Slot
+            switch unit {
+            case .single(let entry):
+                // A callback invocation: kept, in its place.
+                queue.append(entry)
+                bytes += entryOverhead + (entry.invocation?.bytes ?? entry.value.count)
+                continue
+            case .slot(let at):
+                slot = folded.slots[at]
+            }
             if folded.waiting.contains(slot.key) || slot.oversized {
                 current.awaiting[slot.key] = true
                 current.resyncDue = true

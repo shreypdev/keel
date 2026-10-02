@@ -86,16 +86,17 @@ final class TypedValueTests: XCTestCase {
     // MARK: UndraHandle
 
     func testHandleFields() {
-        let handle = UndraHandle(rawValue: 4_294_967_297)
+        // 24 bits of slot, 40 bits of generation (ADR-040).
+        let handle = UndraHandle(rawValue: 0x0100_0001)
         XCTAssertEqual(handle.index, 1)
         XCTAssertEqual(handle.generation, 1)
         XCTAssertFalse(handle.isNull)
-        assertCodec(handle, hex: "0100000001000000")
+        assertCodec(handle, hex: "0100000100000000")
 
-        let built = UndraHandle(index: 0xDEAD_BEEF, generation: 0x0000_00FF)
-        XCTAssertEqual(built.rawValue, 0x0000_00FF_DEAD_BEEF)
-        XCTAssertEqual(built.index, 0xDEAD_BEEF)
-        XCTAssertEqual(built.generation, 0xFF)
+        let built = UndraHandle(index: 0x00AB_CDEF, generation: 0xFF_0000_00FF)
+        XCTAssertEqual(built.rawValue, 0xFF00_0000_FFAB_CDEF)
+        XCTAssertEqual(built.index, 0x00AB_CDEF)
+        XCTAssertEqual(built.generation, 0xFF_0000_00FF)
         assertRoundTrip(built)
     }
 
@@ -113,8 +114,10 @@ final class TypedValueTests: XCTestCase {
 
     func testHandleExtremesAndHashing() {
         let maximum = UndraHandle(rawValue: UInt64.max)
-        XCTAssertEqual(maximum.index, UInt32.max)
-        XCTAssertEqual(maximum.generation, UInt32.max)
+        // 24 bits of slot, 40 of generation (ADR-040).
+        XCTAssertEqual(maximum.index, (1 << 24) - 1)
+        XCTAssertEqual(maximum.generation, (1 << 40) - 1)
+        XCTAssertEqual(UndraHandle(index: 1, generation: 1).rawValue, 0x0100_0001)
         assertRoundTrip(maximum)
         XCTAssertEqual(Set([UndraHandle.null, maximum, UndraHandle.null]).count, 2)
     }
