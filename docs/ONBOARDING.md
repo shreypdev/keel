@@ -270,6 +270,32 @@ every native harness (C, Swift, JNI) runs against the fixture core
 (`crates/undra-ffi/tests/fixture`, namespace `undra_fixture`), which exports its table and, with
 the `jni` feature it always builds with on native targets, `JNI_OnLoad`.
 
+### Before you push a branch: `scripts/ci-local.sh`
+
+CI is a list of jobs on hosted runners; a branch that goes there to find out what is red costs a push per failure, and each
+push is slow. `scripts/ci-local.sh` runs every step of the **CI, Bench, Two cores and Site** workflows on this machine, in a
+clone of what you committed (CI sees nothing else), reading the steps from `.github/workflows/*.yml` themselves, so the two
+cannot drift apart. It checks (and never installs) the pinned Rust and its targets, Node 24 and JDK 17, sets what the workflows
+set (`UNDRA_BENCH_SCALE`, `RUSTFLAGS`, ...), and prints a summary; every step it cannot run (runner provisioning: apt, sudo,
+SDK installs; the Android emulator, which is on hold) is listed with the reason, and the end of the output names what only a
+hosted runner can still tell you (Linux behaviour, macOS 15's own frameworks).
+
+```bash
+scripts/ci-local.sh                  # all jobs, in a clone of HEAD, incremental (a cache-restored run); --cold for a new clone
+scripts/ci-local.sh --slow           # the slow-runner pass (below)
+scripts/ci-local.sh --only ci/ts,ci/contracts     # some jobs (<workflow>/<job id>, or the id alone); --skip, --list, -v
+scripts/ci-local.sh --here --only ci/ts           # quick, in this checkout (dirty trees allowed: not a proof)
+```
+
+The slow-runner pass is what finds the failures that only a slower machine shows: the timing-sensitive suites (the Rust
+workspace, the TypeScript runtime, the Swift and Kotlin runtimes, the contract grid, the React Native model) run three rounds
+under `taskpolicy -b` (macOS background QoS: efficiency cores, lowest priority) with 16 CPU burners (`yes`, started and killed
+by the script, your own processes only), four test threads (`RUST_TEST_THREADS=4`: a hosted runner has four vCPUs) and four
+build jobs. A test that fails only there depends on the machine's speed: fix it at its cause (pace by the consumer, scale a
+budget by `UNDRA_BENCH_SCALE`, a deadline that covers a slow machine and reports the elapsed time, wait on the condition and
+not on a fixed sleep), never by loosening an assertion about behaviour. It needs `ruby` (macOS ships it); logs of every step
+are kept (`--logs DIR`).
+
 ## 3. Run the reference app
 
 ```bash

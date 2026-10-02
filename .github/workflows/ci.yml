@@ -50,6 +50,8 @@ jobs:
         run: node --test scripts/bench-device-report.test.mjs
       - name: wt.sh merge's CI check (its parsing of `gh run list`, against fixtures)
         run: bash scripts/wt-ci-check.test.sh
+      - name: wt.sh merge and clean (the push, the verification and the deletions, against scratch repositories)
+        run: bash scripts/wt-cleanup.test.sh
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test

@@ -2,16 +2,24 @@
 # Worktree helper for parallel work on Undra (humans and agents).
 #
 #   scripts/wt.sh new <slug>      create <repo-parent>/.work/<slug> on branch wt/<slug> from main
-#   scripts/wt.sh merge <slug> [--no-ci]
-#                                 from the main checkout: fast-forward main to wt/<slug>, keep the branch. Refuses unless
-#                                 the branch contains main and CI (CI, Bench, Two cores, and Site when the branch touches
-#                                 its paths) is green on the branch's exact head: push it first (`git push origin wt/<slug>`).
-#                                 --no-ci skips the CI check, loudly: for commits that only change state files
+#   scripts/wt.sh merge <slug> [--no-ci] [--no-push] [--also <branch>]...
+#                                 from the main checkout: fast-forward main to wt/<slug>. Refuses unless the branch contains
+#                                 main and CI (CI, Bench, Two cores, and Site when the branch touches its paths) is green on
+#                                 the branch's exact head: push it first (`git push origin wt/<slug>`). Then it pushes main,
+#                                 verifies that origin/main contains the head, and leaves nothing behind: the remote branch,
+#                                 the local branch, the worktree with its build output, the ci-local.sh clone, and the piece's
+#                                 helper branches (proto/<slug>, wt/<slug>-*, and each --also <branch>) when they are merged;
+#                                 anything not merged is kept and named, with why. It ends by listing worktrees and wt/* branches.
+#                                 --no-ci skips the CI check, loudly: for commits that only change state files.
+#                                 --no-push merges locally only and deletes nothing: push main, then run `clean`.
 #   scripts/wt.sh rm <slug>       remove the worktree AND delete wt/<slug> if fully merged
-#   scripts/wt.sh clean           remove every .work worktree whose branch is fully merged, and prune
-#   scripts/wt.sh list            show worktrees and how far each branch is from main
+#   scripts/wt.sh clean           the same sweep for every wt/* branch (local and on origin) already merged into origin/main:
+#                                 its worktree, build output, branches, ci-local clone. Branches with commits of their own
+#                                 that main lacks, worktrees with uncommitted changes and new, empty pieces are kept, with why
+#   scripts/wt.sh list           show worktrees and how far each branch is from main
 #
-# The full workflow (briefs, review, who merges) is docs/AGENT_WORKFLOW.md.
+# The full workflow (briefs, review, who merges) is docs/AGENT_WORKFLOW.md. Scratch repositories for the tests:
+# UNDRA_WT_REMOTE names the remote (default origin).
 set -euo pipefail
 
 MAIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,6 +28,122 @@ cmd="${1:-}"
 
 die() { echo "wt.sh: $*" >&2; exit 2; }
 need_slug() { [ -n "${2:-}" ] || die "usage: wt.sh $1 <slug>"; }
+
+REMOTE="${UNDRA_WT_REMOTE:-origin}"
+CI_LOCAL_BASE="${UNDRA_CI_LOCAL_DIR:-${TMPDIR:-/tmp}/undra-ci-local}"
+
+# The path of the worktree that has branch $1 checked out, if any.
+worktree_of() {
+  git worktree list --porcelain | awk -v b="refs/heads/$1" '/^worktree /{p=substr($0,10)} /^branch /{if($2==b)print p}'
+}
+
+# Is the remote reachable? (a failed `git ls-remote` is not "no such branch")
+remote_reachable() { git ls-remote --heads "$REMOTE" >/dev/null 2>&1; }
+
+# Does the remote have branch $1? 0 yes, 1 no (2 unreachable is folded into no: callers check remote_reachable first).
+remote_has() { git ls-remote --exit-code --heads "$REMOTE" "$1" >/dev/null 2>&1; }
+
+# The local branches wt/* and the remote ones, each name once.
+piece_branches() {
+  { git for-each-ref --format='%(refname:short)' 'refs/heads/wt/*'
+    git ls-remote --heads "$REMOTE" 'wt/*' 2>/dev/null | sed 's#.*refs/heads/##'
+  } | sort -u
+}
+
+# A piece branch that was only just created (wt.sh new) has no commits of its own and is trivially "merged": keep it.
+is_new_empty_piece() {
+  local first count
+  git show-ref --verify --quiet "refs/heads/$1" || return 1
+  count="$(git reflog show --format=%gs "refs/heads/$1" 2>/dev/null | grep -c . || true)"
+  first="$(git reflog show --format=%gs "refs/heads/$1" 2>/dev/null | tail -n 1)"
+  [ "$count" = 1 ] && case "$first" in "branch: Created from"*) return 0 ;; esac
+  return 1
+}
+
+# Delete branch $1 (its worktree with the build output, its remote branch, the local branch, the ci-local clone) only when
+# every commit of it is in origin/main. Prints what it removed and what it kept, and why. Returns 0 when nothing is left.
+sweep_branch() {
+  local b="$1" tip wt left=0 ahead_note="" slug_dir
+  if git show-ref --verify --quiet "refs/heads/$b"; then
+    tip="$(git rev-parse "refs/heads/$b")"
+  elif remote_has "$b"; then
+    git fetch -q "$REMOTE" "refs/heads/$b" 2>/dev/null || { echo "  kept    $b: could not fetch it from $REMOTE to check it"; return 1; }
+    tip="$(git rev-parse FETCH_HEAD)"
+  else
+    return 0
+  fi
+  if ! git merge-base --is-ancestor "$tip" "refs/remotes/$REMOTE/main" 2>/dev/null; then
+    if git merge-base --is-ancestor "$tip" main 2>/dev/null; then
+      echo "  kept    $b: merged into the local main only; $REMOTE/main does not contain it yet (push main first)"
+    else
+      ahead_note="$(git rev-list --count "refs/remotes/$REMOTE/main..$tip" 2>/dev/null || echo '?')"
+      echo "  kept    $b: NOT merged ($ahead_note commit(s) that $REMOTE/main lacks)"
+    fi
+    return 1
+  fi
+  wt="$(worktree_of "$b")"
+  if [ -n "$wt" ]; then
+    if [ "$wt" = "$MAIN" ]; then
+      echo "  kept    $b: it is checked out in the main checkout"; return 1
+    fi
+    if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+      echo "  kept    $b: its worktree $wt has uncommitted changes"; return 1
+    fi
+    if git worktree remove --force "$wt" 2>/dev/null || { rm -rf "$wt" && git worktree prune; }; then
+      echo "  removed worktree $wt (with its build output)"
+    else
+      echo "  kept    $b: could not remove its worktree $wt"; return 1
+    fi
+  fi
+  if remote_has "$b"; then
+    if git push -q "$REMOTE" --delete "$b" 2>/dev/null; then
+      echo "  removed $REMOTE/$b"
+    else
+      remote_has "$b" && { echo "  kept    $REMOTE/$b: the delete was refused"; left=1; }
+    fi
+  fi
+  if git show-ref --verify --quiet "refs/heads/$b"; then
+    # Ancestry in origin/main was verified above, so -d's own check against the local main (which may lag) is not the test.
+    git branch -q -D "$b" && echo "  removed branch $b"
+  fi
+  git update-ref -d "refs/remotes/$REMOTE/$b" 2>/dev/null || true
+  slug_dir="$CI_LOCAL_BASE/$(printf '%s' "$b" | tr '/ ' '--')"
+  if [ -d "$slug_dir" ]; then rm -rf "$slug_dir" && echo "  removed ci-local clone $slug_dir"; fi
+  return "$left"
+}
+
+# The helper branches of piece $1 (proto/<slug>, wt/<slug>-* sub-pieces, local or remote) and the extra names after it.
+helper_branches() {
+  local slug="$1" extra
+  shift
+  {
+    echo "proto/$slug"
+    git for-each-ref --format='%(refname:short)' "refs/heads/wt/$slug-*"
+    git ls-remote --heads "$REMOTE" "wt/$slug-*" 2>/dev/null | sed 's#.*refs/heads/##'
+    for extra in "$@"; do echo "$extra"; done
+  } | sort -u
+}
+
+# What is left: worktrees and wt/* branches, local and remote.
+show_state() {
+  echo "worktrees:"; git worktree list | sed 's/^/  /'
+  echo "local wt/* branches:"
+  local local_b; local_b="$(git for-each-ref --format='%(refname:short)' 'refs/heads/wt/*')"
+  if [ -n "$local_b" ]; then printf '%s\n' "$local_b" | sed 's/^/  /'; else echo "  (none)"; fi
+  echo "remote wt/* branches ($REMOTE):"
+  if remote_reachable; then
+    local remote_b; remote_b="$(git ls-remote --heads "$REMOTE" 'wt/*' | sed 's#.*refs/heads/#  #')"
+    if [ -n "$remote_b" ]; then printf '%s\n' "$remote_b"; else echo "  (none)"; fi
+  else
+    echo "  ($REMOTE is not reachable)"
+  fi
+}
+
+# Brings origin/main up to date; dies when it cannot (nothing may be deleted on a guess).
+fetch_remote_main() {
+  git fetch -q "$REMOTE" "+refs/heads/main:refs/remotes/$REMOTE/main" 2>/dev/null \
+    || die "cannot fetch $REMOTE/main: nothing was deleted (a branch is removed only once $REMOTE/main is known to contain it)"
+}
 
 # CI is green on wt/<slug> at <head sha>: the newest run of every required workflow for exactly that commit is a success.
 # The parsing is scripts/wt-ci-check.sh (tested against fixtures by scripts/wt-ci-check.test.sh).
@@ -62,12 +186,17 @@ case "$cmd" in
     echo "$WORK/$slug"
     ;;
   merge)
-    need_slug merge "${2:-}"; slug="$2"; no_ci=0
-    case "${3:-}" in
-      "") ;;
-      --no-ci) no_ci=1 ;;
-      *) die "usage: wt.sh merge <slug> [--no-ci]" ;;
-    esac
+    need_slug merge "${2:-}"; slug="$2"; shift 2
+    no_ci=0; no_push=0; also=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --no-ci) no_ci=1 ;;
+        --no-push) no_push=1 ;;
+        --also) [ -n "${2:-}" ] || die "--also needs a branch name"; also+=("$2"); shift ;;
+        *) die "usage: wt.sh merge <slug> [--no-ci] [--no-push] [--also <branch>]..." ;;
+      esac
+      shift
+    done
     cd "$MAIN"
     [ "$(git branch --show-current)" = "main" ] || die "run merge from the main checkout on main"
     [ -z "$(git -C "$WORK/$slug" status --porcelain 2>/dev/null)" ] \
@@ -81,7 +210,32 @@ case "$cmd" in
       ci_green "$slug" "$head"
     fi
     git merge --ff-only "wt/$slug"
-    echo "merged wt/$slug (fast-forward to ${head:0:12}) — now run the full test matrix, then: scripts/wt.sh rm $slug"
+    echo "wt.sh: merged wt/$slug (fast-forward to ${head:0:12})"
+    if [ "$no_push" = 1 ]; then
+      echo "wt.sh: --no-push: main is merged locally and NOT pushed; nothing was deleted."
+      echo "       After \`git push $REMOTE main\`, run: scripts/wt.sh clean   (it removes this piece and every other merged one)"
+      exit 0
+    fi
+    echo "wt.sh: pushing main to $REMOTE"
+    git push -q "$REMOTE" main \
+      || die "main is merged locally but the push to $REMOTE failed; nothing was deleted. Fix the push, then run scripts/wt.sh clean"
+    # (a) verify: the branch is in main, and the pushed main contains the head.
+    git merge-base --is-ancestor "wt/$slug" main || die "wt/$slug is not an ancestor of main after the merge: nothing was deleted"
+    fetch_remote_main
+    git merge-base --is-ancestor "$head" "refs/remotes/$REMOTE/main" \
+      || die "$REMOTE/main does not contain ${head:0:12} after the push: nothing was deleted"
+    echo "wt.sh: verified: wt/$slug (${head:0:12}) is in main and in $REMOTE/main"
+    # (b) the piece itself, (c) its helper branches, merged ones only.
+    echo "wt.sh: cleaning up:"
+    kept=0
+    sweep_branch "wt/$slug" || kept=1
+    while IFS= read -r h; do
+      [ -n "$h" ] || continue
+      sweep_branch "$h" || kept=1
+    done < <(helper_branches "$slug" ${also[@]+"${also[@]}"})
+    # (d) what is left.
+    show_state
+    if [ "$kept" = 1 ]; then echo "wt.sh: done, but something above was kept: read the 'kept' lines."; else echo "wt.sh: done: nothing of $slug is left."; fi
     ;;
   rm)
     need_slug rm "${2:-}"; slug="$2"
@@ -97,23 +251,22 @@ case "$cmd" in
   clean)
     cd "$MAIN"
     git worktree prune
-    removed=0
-    for path in "$WORK"/*/; do
-      [ -d "$path" ] || continue
-      slug="$(basename "$path")"
-      branch="wt/$slug"
-      git show-ref --verify --quiet "refs/heads/$branch" || continue
-      if [ "$(git rev-list --count main.."$branch")" = "0" ] \
-         && [ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ]; then
-        git worktree remove --force "$path" && git branch -d "$branch" \
-          && echo "cleaned: $slug" && removed=$((removed + 1))
-      else
-        echo "kept: $slug (unmerged commits or uncommitted changes)"
+    fetch_remote_main
+    removed=0; kept=0
+    echo "wt.sh: sweeping the wt/* branches merged into $REMOTE/main:"
+    while IFS= read -r b; do
+      [ -n "$b" ] || continue
+      if is_new_empty_piece "$b"; then
+        echo "  kept    $b: a new piece with no commits of its own yet"; kept=$((kept + 1)); continue
       fi
-    done
-    git worktree prune
+      if sweep_branch "$b"; then removed=$((removed + 1)); else kept=$((kept + 1)); fi
+    done < <(piece_branches)
+    # Worktrees under .work whose branch is not a wt/* branch (detached, or a branch of another name) are not ours to judge.
+    git worktree list --porcelain | awk -v w="$WORK/" '/^worktree /{p=substr($0,10)} /^branch /{b=$2} /^$/{if(index(p,w)==1 && b !~ /^refs\/heads\/wt\//) print p " (" (b==""?"detached":b) ")"; b=""}' \
+      | sed 's/^/  left alone: worktree /; s/$/: not on a wt\/* branch/'
     rmdir "$WORK" 2>/dev/null && echo "removed empty $WORK" || true
-    echo "clean done ($removed removed)"
+    echo "wt.sh: clean done ($removed piece(s) removed, $kept kept)"
+    show_state
     ;;
   list)
     cd "$MAIN"
@@ -123,6 +276,6 @@ case "$cmd" in
     done
     ;;
   *)
-    die "usage: wt.sh new|merge|rm|clean|list [<slug>] (merge takes --no-ci)"
+    die "usage: wt.sh new|merge|rm|clean|list [<slug>] (merge takes --no-ci, --no-push, --also <branch>)"
     ;;
 esac

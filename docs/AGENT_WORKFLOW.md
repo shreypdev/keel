@@ -46,7 +46,11 @@ an issue). A good brief names, in this order:
    briefs.
 
 Inside the worktree: small `type(scope): summary` commits as you go; never leave
-`TODO`/`unimplemented!()`; end with `git status` clean. Do not merge, rebase onto, or
+`TODO`/`unimplemented!()`; end with `git status` clean. **Run `scripts/ci-local.sh` before pushing a branch**: every
+step of CI, Bench, Two cores and Site, in a clone of your commit, read from the workflow files (docs/ONBOARDING.md,
+"Before you push a branch"); and `scripts/ci-local.sh --slow` when the piece adds or touches a test that waits, times or
+races (it runs the timing-sensitive suites throttled, so the failures a slower runner would show are found here, once,
+not one push at a time). Do not merge, rebase onto, or
 push `main` from a worktree — the integrator merges. Pushing the piece's own `wt/<slug>` branch (which starts its CI
 run, section 4) is the integrator's too, unless the brief says the author does it. Do not edit `.10x/status.md` or
 `.10x/handoff.md` from a worktree (guaranteed conflicts); record your piece in
@@ -91,7 +95,7 @@ From the primary checkout, on `main`:
 
 ```bash
 git push origin wt/my-piece     # then wait for its runs: gh run list --branch wt/my-piece
-scripts/wt.sh merge my-piece    # fast-forward; refuses unless CI is green on the head
+scripts/wt.sh merge my-piece    # refuses unless CI is green on the head; fast-forward, push, verify, clean up (section 5)
 ```
 
 Then the integrator runs the **full matrix**, not just the touched crate:
@@ -119,22 +123,34 @@ Two rules of merge hygiene, both learned the hard way:
 After the matrix is green: update `.10x/status.md` (what landed, new totals, debts) and
 `.10x/handoff.md`, commit `state(<piece>): …`.
 
-### 5. Clean up — immediately after merge
+### 5. Clean up — `merge` does it, and nothing is left lying around
+
+`scripts/wt.sh merge <slug>` does not stop at the fast-forward. After the CI gate and the merge it
+
+1. **pushes `main`** (`--no-push` merges locally and deletes nothing) and **verifies**: `wt/<slug>` is an ancestor of
+   `main`, and, after `git fetch`, `origin/main` contains the head. If either fails it stops and deletes nothing;
+2. **deletes the piece**: the remote branch (`git push origin --delete wt/<slug>`), the local branch, the worktree *with its
+   build output* (`.work/<slug>`, `target/` and all), and the `scripts/ci-local.sh` clone of the branch;
+3. **deletes the piece's helper branches**, local and remote: `proto/<slug>`, every `wt/<slug>-*` sub-piece, and each branch
+   named with `--also <branch>`, **only when every commit of it is in `origin/main`**. Anything else is *kept*, and the
+   output says which and why (`NOT merged (3 commit(s) that origin/main lacks)`, `its worktree has uncommitted changes`,
+   `merged into the local main only`). A branch is never force-deleted on a guess;
+4. **prints the final state**: `git worktree list`, the remaining `wt/*` branches local and on `origin`.
 
 ```bash
-scripts/wt.sh rm my-piece     # removes the worktree; deletes wt/my-piece only if fully merged
+scripts/wt.sh merge my-piece                      # gate, fast-forward, push, verify, clean up, list
+scripts/wt.sh merge my-piece --also spike/probe   # a helper branch with another name, swept if merged
 ```
 
-or, periodically, sweep everything merged:
+`scripts/wt.sh clean` is the same sweep for **every** `wt/*` branch, local or on `origin`, that is already merged into
+`origin/main`: its worktree and build output, its branches, its `ci-local` clone. It keeps, and names, a branch with commits
+`origin/main` lacks, a worktree with uncommitted changes, a worktree not on a `wt/*` branch, and a piece that was only just
+created and has no commits of its own. Run it after a `--no-push` merge (once `main` is pushed), and whenever worktrees pile up:
+stale ones hold gigabytes of `target/` each. `scripts/wt.sh rm <slug>` removes one worktree and its local branch when
+fully merged. `scripts/wt-cleanup.test.sh` (a CI step) runs all of this against scratch repositories.
 
-```bash
-scripts/wt.sh clean           # removes every merged+clean .work worktree, deletes its branch, prunes
-```
-
-`rm` and `clean` refuse to delete a branch with unmerged commits, so they are safe to
-run at any time. A worktree must never outlive its merge by more than the cleanup that
-follows the green matrix: stale worktrees hold gigabytes of `target/` and stale branches
-invite double-merges.
+A worktree must never outlive its merge: the full matrix of section 4 runs from the primary checkout, so the worktree is
+not needed for it.
 
 ## Parallelism rules
 
