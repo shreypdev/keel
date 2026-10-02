@@ -75,9 +75,22 @@ public final class UndraCore: @unchecked Sendable {
     /// main actor, merged, once per display frame. `register(handle) { signal, op, reader in ... }`.
     public let mirror: Mirror
 
-    /// The connection state, for SwiftUI: an `@Observable` object updated on the main actor (ADR-051).
-    /// ``connectionState`` is the same news for any thread.
-    public let connection: UndraConnection
+    /// The connection state, for SwiftUI on iOS 17 / macOS 14 and later: an `@Observable` object updated on
+    /// the main actor (ADR-051). ``connectionState`` is the same news for any thread. Below iOS 17 use
+    /// ``connectionObject``.
+    @available(iOS 17, macOS 14, *)
+    public var connection: UndraConnection {
+        // Made by `init` whenever the OS has it; the fallback is unreachable.
+        return existingConnection ?? UndraConnection()
+    }
+
+    /// The connection state, for SwiftUI on every iOS and macOS version: an `ObservableObject` with a
+    /// `@Published` state, updated on the main actor (ADR-045). The same news as ``connection``.
+    public let connectionObject: UndraConnectionObject
+
+    /// The `@Observable` twin of ``connectionObject``, made by `init` where the OS has it (iOS 17 / macOS 14).
+    /// It needs iOS 17, so it cannot be a stored property of its own type.
+    private let observation: Guarded<(any Sendable)?>
 
     let transport: any UndraTransport
     private let state: Guarded<State>
@@ -112,14 +125,22 @@ public final class UndraCore: @unchecked Sendable {
         if isShutDown {
             initial.connection = .closed(.requested)
         }
-        let observable = UndraConnection()
-        self.connection = observable
+        let observable = UndraConnectionObject()
+        self.connectionObject = observable
+        var twin: (any Sendable)?
+        if #available(iOS 17, macOS 14, *) {
+            twin = UndraConnection()
+        }
+        self.observation = Guarded<(any Sendable)?>(twin)
         self.state = Guarded<State>(initial)
         if isShutDown {
             // The placeholder `shared` returns: its observable says so too, not `.connecting`.
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 MainActor.assumeIsolated {
                     observable.state = .closed(.requested)
+                    if #available(iOS 17, macOS 14, *), let twin = self?.existingConnection {
+                        twin.state = .closed(.requested)
+                    }
                 }
             }
         }
@@ -364,11 +385,22 @@ public final class UndraCore: @unchecked Sendable {
             }
         }
         onConnectionChange?(next)
-        let observable = connection
-        DispatchQueue.main.async {
+        let observable = connectionObject
+        DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 observable.state = next
+                if #available(iOS 17, macOS 14, *), let twin = self?.existingConnection {
+                    twin.state = next
+                }
             }
+        }
+    }
+
+    /// ``connection`` if something has asked for it yet.
+    @available(iOS 17, macOS 14, *)
+    private var existingConnection: UndraConnection? {
+        return observation.withLock { (slot: inout (any Sendable)?) -> UndraConnection? in
+            return slot as? UndraConnection
         }
     }
 
