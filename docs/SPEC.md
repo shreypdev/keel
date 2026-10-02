@@ -980,7 +980,7 @@ The core hands the host one change-set per transaction per store, in commit orde
 
 * **Queue.** Each change-set's entry table is parsed once, on the thread that received it; a malformed change-set is dropped whole and reported. The queue holds the parsed entries in arrival order.
 * **Drain.** A *drain* applies the queue on the main thread. It folds the entries per key `(handle, signal_id)`, in arrival order, without decoding a value:
-  * a full value (`op 0`) or a lazy invalidation (`op 2`) supersedes everything queued earlier for the key;
+  * a full value (`op 0`) supersedes everything queued earlier for the key; a lazy invalidation (`op 2`, ADR-043) supersedes only the earlier invalidations of its signal, never the full value, because an op-2 value is just the new length and version and the op 0 names the page server (ADR-043 amendment, 2026-10-02: a drain that folded `[Full(handle), Inv, Inv]` delivers `[Full(handle), Inv(last)]`, `[Inv, Full]` delivers `[Full]`);
   * keyed patches (`op 1`) that follow each other for the key are concatenated into one patch: `count` = the sum of their counts, ops = each patch's op bytes in arrival order. §3.8 applies ops sequentially, each index relative to the list the previous op left, so the concatenation is the same change; a single patch is passed as it is. A patch too short to hold its count cannot be merged: the key is dropped and resynchronised as below.
 
   A derived list's patches (ADR-039) are merged the same way: each is relative to what the host had after the store's previous change-set.
