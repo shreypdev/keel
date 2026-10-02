@@ -50,7 +50,8 @@
 //! * **Generic data types** (ADR-042): `#[undra::api(generic)]` on a struct or enum with type parameters
 //!   is a template that registers nothing; `#[undra::api] pub type TodoPage = Page<Todo>;` registers the
 //!   instantiation `TodoPage`. Signatures spell the alias; `Page<Todo>` is E0002.
-//! * `Lazy<T>` (a lazily paged list) is rejected with E0001 in v1, like in `undra-bindgen`.
+//! * `Lazy<T>` (a list the platforms page through, ADR-043) is a store field and nothing else: anywhere
+//!   else, and inside a `Signal`, `Computed` or `DerivedList`, it is E0001.
 //! * `#[undra::error]` derives `Debug` unless the enum already does.
 //! * `async fn`s of a port trait become methods returning boxed futures (`async fn` in traits
 //!   is not dyn compatible); `#[undra::port]` on `impl Trait for Type` blocks rewrites them back

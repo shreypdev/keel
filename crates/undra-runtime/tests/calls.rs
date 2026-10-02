@@ -604,16 +604,81 @@ fn lazy_pages_are_served_by_the_runtime() {
     let reply = reply_of(t.runtime(), &page_call(lazy, 1, 2, 2));
     let body = expect_ok(&reply);
     let mut r = Reader::new(body);
-    assert_eq!((r.read_u32().unwrap(), r.read_u32().unwrap()), (5, 2));
+    // version, total, count: the list was changed five times (one push per item).
+    assert_eq!(
+        (
+            r.read_u64().unwrap(),
+            r.read_u32().unwrap(),
+            r.read_u32().unwrap()
+        ),
+        (5, 5, 2)
+    );
     assert_eq!((r.read_i32().unwrap(), r.read_i32().unwrap()), (10, 20));
     r.finish().unwrap();
 
-    // Past the end: total but no items.
+    // Past the end: the version and the total, no items.
     let reply = reply_of(t.runtime(), &page_call(lazy, 9, 3, 3));
-    assert_eq!(expect_ok(&reply), [5, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(
+        expect_ok(&reply),
+        [5, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0]
+    );
     // Through call() as well.
     assert_eq!(t.runtime().call(&page_call(lazy, 0, 1, 4)), 0);
-    assert_eq!(t.take_replies()[0].body[..8], [5, 0, 0, 0, 1, 0, 0, 0]);
+    assert_eq!(t.take_replies()[0].body[8..16], [5, 0, 0, 0, 1, 0, 0, 0]);
+}
+
+#[test]
+fn a_hostile_limit_is_cut_to_the_cap_and_an_offset_past_the_end_is_empty() {
+    use undra_runtime::MAX_PAGE_ITEMS;
+    let t = TestRuntime::new();
+    let n = MAX_PAGE_ITEMS + 25;
+    let lazy = Handle(decode_body::<u64>(&t.call_sync(
+        function_target(MAKE_LAZY),
+        1,
+        &enc(&n),
+    )));
+    let reply = reply_of(t.runtime(), &page_call(lazy, 0, u32::MAX, 2));
+    let body = expect_ok(&reply);
+    let mut r = Reader::new(body);
+    let (_, total, count) = (
+        r.read_u64().unwrap(),
+        r.read_u32().unwrap(),
+        r.read_u32().unwrap(),
+    );
+    assert_eq!(
+        (total, count),
+        (n, MAX_PAGE_ITEMS),
+        "the reply holds at most the cap"
+    );
+    assert_eq!(body.len(), 16 + 4 * MAX_PAGE_ITEMS as usize);
+    for offset in [n, n + 1, u32::MAX] {
+        let reply = reply_of(t.runtime(), &page_call(lazy, offset, u32::MAX, 3));
+        assert_eq!(&expect_ok(&reply)[12..16], [0, 0, 0, 0], "offset {offset}");
+    }
+}
+
+#[test]
+fn a_released_or_foreign_lazy_handle_is_a_typed_bad_request() {
+    let a = TestRuntime::new();
+    let b = TestRuntime::new();
+    let lazy = Handle(decode_body::<u64>(&a.call_sync(
+        function_target(MAKE_LAZY),
+        1,
+        &enc(&3_u32),
+    )));
+    // Another runtime never issued it.
+    let reply = reply_of(b.runtime(), &page_call(lazy, 0, 1, 2));
+    assert_eq!(reply.status, ReplyStatus::BadRequest);
+    // The host gives its reference back; the handle is stale for good.
+    a.runtime().release(lazy.0);
+    let reply = reply_of(a.runtime(), &page_call(lazy, 0, 1, 3));
+    assert_eq!(reply.status, ReplyStatus::BadRequest);
+    assert!(reason_of(&reply).contains("stale"), "{}", reason_of(&reply));
+    // The null handle and a made-up one.
+    for raw in [0_u64, 0xdead_0000_beef] {
+        let reply = reply_of(a.runtime(), &page_call(Handle(raw), 0, 1, 4));
+        assert_eq!(reply.status, ReplyStatus::BadRequest, "{raw:#x}");
+    }
 }
 
 #[test]
@@ -622,7 +687,11 @@ fn a_lazy_page_of_a_non_lazy_handle_is_status_5() {
     let handle = new_counter(&t, 0, "");
     let reply = reply_of(t.runtime(), &page_call(handle, 0, 1, 2));
     assert_eq!(reply.status, ReplyStatus::BadRequest);
-    assert!(reason_of(&reply).contains("not a"), "{}", reason_of(&reply));
+    assert!(
+        reason_of(&reply).contains("not a lazy list"),
+        "{}",
+        reason_of(&reply)
+    );
 }
 
 // ----- logging ----------------------------------------------------------------------------

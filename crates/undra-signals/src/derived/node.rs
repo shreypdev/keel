@@ -61,6 +61,14 @@ pub(crate) trait DerivedNode<U>: Send + Sync {
     fn forget(&self);
     /// The node's identity (its address).
     fn id(&self) -> usize;
+    /// The view's length and version after a drain: the version increases whenever the view may
+    /// have changed (what `Lazy::over` tells the host, ADR-043).
+    fn view_stamp(&self) -> (usize, u64);
+    /// Calls `f` with the view rows of rank `offset..offset + limit` (clamped to the view), in view
+    /// order, evaluated from the source rows the index selects: O(log n + limit log n), never a
+    /// materialisation. Returns the view's length, its version and how many rows `f` saw, all
+    /// read in the same drain.
+    fn page(&self, offset: usize, limit: usize, f: &mut dyn FnMut(&U)) -> (usize, u64, usize);
 }
 
 /// The node of one derived list over a `Signal<Vec<S>>`, producing `U`s sorted by `K` (`()`
@@ -109,10 +117,20 @@ struct State<U, K> {
     out: Out<U>,
     /// The materialised view, until it changes.
     cache: Option<Arc<Vec<U>>>,
+    /// Increases whenever the view may have changed: every time the cache is dropped.
+    version: u64,
     /// What the host has, replayed from every full value and patch sent (debug builds check every
     /// patch against the view with it).
     #[cfg(debug_assertions)]
     shadow: Option<Vec<U>>,
+}
+
+impl<U, K> State<U, K> {
+    /// The view may have changed: the materialised copy is dropped and the version moves on.
+    fn changed(&mut self) {
+        self.cache = None;
+        self.version += 1;
+    }
 }
 
 /// The derived ops waiting for the next commit, kept only while the host observes the list.
@@ -234,6 +252,7 @@ where
                     ops: Vec::new(),
                 },
                 cache: None,
+                version: 0,
                 #[cfg(debug_assertions)]
                 shadow: None,
             }),
@@ -275,7 +294,7 @@ where
             // The last section that ran closures unwound: nothing it left can be trusted.
             state.needs_rebuild = true;
             state.out.go_stale();
-            state.cache = None;
+            state.changed();
         }
         state.in_flight = true;
         let current = self.drain(&mut state, need_snapshot);
@@ -379,7 +398,7 @@ where
         }
         self.tap.recycle(ops);
         if produced > 0 {
-            st.cache = None;
+            st.changed();
         }
     }
 
@@ -494,6 +513,7 @@ where
             spare_params: params,
             out,
             cache,
+            version,
             ..
         } = st;
         debug_assert_eq!(
@@ -541,6 +561,7 @@ where
         }
         if changed {
             *cache = None;
+            *version += 1;
         }
     }
 
@@ -564,7 +585,7 @@ where
         st.index.rebuild(keys);
         st.needs_rebuild = false;
         st.out.go_stale();
-        st.cache = None;
+        st.changed();
         Stats::bump(&self.stats.rebuilds, 1);
     }
 
@@ -651,6 +672,60 @@ where
             w.clear();
             self.reference(st, current).encode(w);
         }
+    }
+
+    /// The rows of rank `offset..offset + limit` of the view (clamped), each handed to `f` as the
+    /// pipeline evaluates it from the source row the index selects (a pipeline without a `map`
+    /// hands over the source's own row, no clone). Returns the view's length, its version and the
+    /// number of rows `f` saw.
+    fn page_in(
+        &self,
+        st: &mut State<U, K>,
+        current: &Arc<Vec<S>>,
+        offset: usize,
+        limit: usize,
+        f: &mut dyn FnMut(&U),
+    ) -> (usize, u64, usize) {
+        let total = st.index.view_len();
+        let start = offset.min(total);
+        let end = start.saturating_add(limit).min(total);
+        let mut seen = 0_usize;
+        let mut pure = true;
+        {
+            let State { index, params, .. } = &*st;
+            index.for_each_view_source_in(start, end, |at| {
+                if !pure {
+                    return;
+                }
+                match self.evaluate(params, Cow::Borrowed(&current[at])) {
+                    Some((_, value)) => {
+                        f(&value);
+                        seen += 1;
+                    }
+                    None => pure = false,
+                }
+            });
+        }
+        if pure {
+            return (total, st.version, seen);
+        }
+        // The index says the row passes and the pipeline now says it does not: a closure that is
+        // not a pure function of its arguments. Hand over the rest of the page from the pipeline's
+        // own answer (best effort: the rows already handed over came from the index) and rebuild
+        // at the next drain.
+        debug_assert!(
+            pure,
+            "{}",
+            purity_message("gave a different answer for a row that did not change")
+        );
+        st.needs_rebuild = true;
+        st.out.go_stale();
+        let view = self.reference(st, current);
+        for row in view.iter().skip(start + seen).take((end - start) - seen) {
+            f(row);
+            seen += 1;
+        }
+        (view.len(), st.version, seen)
     }
 
     /// Materialises with the snapshot a drain just took, or takes one.
@@ -857,6 +932,19 @@ where
 
     fn id(&self) -> usize {
         self.addr()
+    }
+
+    fn view_stamp(&self) -> (usize, u64) {
+        self.drained(false, |_, st, _| (st.index.view_len(), st.version))
+    }
+
+    fn page(&self, offset: usize, limit: usize, f: &mut dyn FnMut(&U)) -> (usize, u64, usize) {
+        // The index and the source rows must be one instant: a drain that takes the snapshot
+        // reads them under the source's read lock.
+        self.drained(true, |node, st, current| {
+            let current = node.snapshot_in(st, current);
+            node.page_in(st, &current, offset, limit, f)
+        })
     }
 }
 

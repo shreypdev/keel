@@ -1178,11 +1178,17 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
         ("Lazy", 1) => Err(unsupported(
             ty,
             format!(
-                "`{}` is not available in v1: lazy lists cannot be mirrored yet",
-                ty_string(ty)
+                "`{}` can only be the type of a store field, not of {}",
+                ty_string(ty),
+                match pos {
+                    Pos::Field => "a record or enum field",
+                    Pos::Signal => "a signal value",
+                    Pos::Return | Pos::PortReturn | Pos::QueryReturn => "a return type",
+                    Pos::Param | Pos::PortParam | Pos::QueryParam => "a parameter",
+                }
             ),
-            "a `Lazy<T>` is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17)",
-            "use a `Vec<T>`, or a method that takes an offset and a limit and returns one page",
+            "a `Lazy<T>` is a list the core owns and the platforms page through by handle: it is not a value, so it cannot be a parameter, a return type, a record or enum field, or the value of a signal",
+            "write it as a field of a `#[undra::store]` struct (`books: Lazy<Book>`); to give a caller a list, return a `Vec<T>`, or take an offset and a limit and return one page",
         )),
         ("Signal" | "Computed" | "Effect", _) => Err(unsupported(
             ty,

@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use undra::meta::ids;
-use undra::runtime::testing::{call_payload, drive_from_this_thread};
+use undra::runtime::testing::{call_payload, decode_reply, drive_from_this_thread};
 use undra::runtime::{Runtime, RuntimeConfig};
 use undra::signals::{ALL_SIGNALS, ChangeSink, Computed, Signal, StoreCell, txn, with_sink};
 use undra::wire::payload::{CallTarget, ChangeSetRef};
@@ -30,12 +30,13 @@ use super::fixtures::{self, Item, Shape};
 use super::host::{Core, CountingHost, call_ok, construct, method_call, runtime, runtime_with};
 
 /// Every operation the budgets test gates: one per wire type (the round trip), plus dispatch,
-/// signals, snapshot and the per-operation rows of the harsh-conditions scenarios (`stress`).
+/// signals, lazy lists, snapshot and the per-operation rows of the harsh-conditions scenarios (`stress`).
 pub fn all() -> Vec<Workload> {
     let mut all = wire();
     all.extend(dispatch());
     all.extend(boundary());
     all.extend(signals());
+    all.extend(lazy());
     all.extend(snapshot());
     all.extend(super::stress::workloads());
     all.extend(super::ports::ports());
@@ -43,13 +44,14 @@ pub fn all() -> Vec<Workload> {
     all
 }
 
-/// The operations of one group (`wire`, `dispatch`, `signals`, `snapshot`, `stress`, `ports`, `db`).
+/// The operations of one group (`wire`, `dispatch`, `signals`, `lazy`, `snapshot`, `stress`, `ports`, `db`).
 pub fn group(name: &str) -> Vec<Workload> {
     match name {
         "wire" => wire(),
         "dispatch" => dispatch(),
         "boundary" => boundary(),
         "signals" => signals(),
+        "lazy" => lazy(),
         "snapshot" => snapshot(),
         "stress" => super::stress::workloads(),
         "ports" => super::ports::ports(),
@@ -551,6 +553,143 @@ pub fn signals() -> Vec<Workload> {
             computed_recompute_chain_10,
         ),
     ]
+}
+
+// ---------------------------------------------------------------------------------------------
+// lazy lists (ADR-043)
+// ---------------------------------------------------------------------------------------------
+
+/// Lazy lists the host pages through: a window of 50 rows out of a list of 100,000, the change
+/// that tells the host to ask again (12 bytes whatever the list holds), and a window of a filtered,
+/// sorted view of a 100,000-row list (`Lazy::over`, through the derived index).
+pub fn lazy() -> Vec<Workload> {
+    vec![
+        Workload::new("lazy/page_50_of_100k", || lazy_page(100_000, false)),
+        Workload::new("lazy/page_50_of_10k", || lazy_page(10_000, false)),
+        Workload::new("lazy/view_page_50_of_100k", || lazy_page(100_000, true)),
+        Workload::new("lazy/invalidate", || lazy_invalidate(100_000)),
+        Workload::new("lazy/invalidate_10k", || lazy_invalidate(10_000)),
+    ]
+}
+
+/// The signals of `fixtures::Shelf`.
+const SHELF_BOOKS: u32 = 0;
+const SHELF_OPEN: u32 = 2;
+
+/// Observes `signal` of `shelf` and returns its page server's handle and the stamp it was sent at.
+fn shelf_server(
+    rt: &Runtime,
+    host: &InspectingHost,
+    shelf: Handle,
+    signal: u32,
+) -> (Handle, undra::wire::payload::LazyValue) {
+    use undra::wire::payload::{ChangeOp, LazyValue};
+    host.keeping(true);
+    rt.observe(shelf.0, signal, true);
+    host.keeping(false);
+    let entries = host.last_entries();
+    assert_eq!(entries.len(), 1, "one entry for the one signal observed");
+    let (id, op, value) = &entries[0];
+    assert_eq!((*id, *op), (signal, ChangeOp::Full), "op 0 on observe");
+    assert_eq!(
+        value.len(),
+        20,
+        "a LazyValue: handle u64, len u32, version u64"
+    );
+    let value = LazyValue::decode(&mut Reader::new(value)).expect("a LazyValue");
+    (value.handle, value)
+}
+
+/// One page call for 50 rows from the middle of a list of `rows` (of the view with `view`):
+/// dispatch, the page server's lookup, the encoding of the 50 rows, the reply. The rows are
+/// checked before anything is timed.
+fn lazy_page(rows: u32, view: bool) -> Box<dyn Bench> {
+    use undra::wire::payload::LazyPage;
+    let host = Arc::new(InspectingHost::default());
+    let rt = super::host::runtime_with(host.clone(), 0);
+    let shelf = construct(&rt, "Shelf", &[]);
+    call_ok(&rt, &method_call(shelf, "Shelf", "seed", 2, &enc(&rows)));
+    let signal = if view { SHELF_OPEN } else { SHELF_BOOKS };
+    let (server, stamp) = shelf_server(&rt, &host, shelf, signal);
+    let shown = if view { rows / 4 * 3 } else { rows };
+    assert_eq!(stamp.len, shown, "the length the host is told");
+    let offset = shown / 2;
+    let page = call_payload(
+        CallTarget::LazyPage {
+            handle: server,
+            offset,
+            limit: 50,
+        },
+        3,
+        &[],
+    );
+
+    // What a page is: the header, then 50 rows that decode as the rows of the list.
+    let reply = decode_reply(&rt.call_sync(&page));
+    assert_eq!(reply.status, undra::wire::payload::ReplyStatus::Ok);
+    let mut r = Reader::new(&reply.body);
+    let header = LazyPage::decode(&mut r).expect("a page header");
+    assert_eq!((header.total, header.count), (shown, 50));
+    assert_eq!(
+        header.version, stamp.version,
+        "read at the version it was announced at"
+    );
+    let items: Vec<Item> = (0..50)
+        .map(|_| Item::decode(&mut r).expect("a row"))
+        .collect();
+    r.finish().expect("exactly 50 rows");
+    let expected = if view {
+        // The view: the rows not done, by title.
+        let mut open: Vec<Item> = fixtures::views_rows(rows)
+            .into_iter()
+            .filter(|row| !row.done)
+            .collect();
+        open.sort_by(|a, b| a.title.cmp(&b.title));
+        open
+    } else {
+        fixtures::views_rows(rows)
+    };
+    assert_eq!(items, expected[offset as usize..offset as usize + 50]);
+
+    plain(move || {
+        black_box(rt.call_sync_with(black_box(&page), |reply| black_box(reply.len())));
+    })
+}
+
+/// A change to a list of `rows` rows the host pages: one method call that `update_at`s a row of an
+/// observed `Lazy<Item>`, and the commit, which sends 12 bytes however long the list is. The
+/// change-set is checked (one entry, op 2, 12 bytes, the new length and version) before it is
+/// timed.
+fn lazy_invalidate(rows: u32) -> Box<dyn Bench> {
+    use undra::wire::payload::{ChangeOp, LazyInvalidated};
+    let host = Arc::new(InspectingHost::default());
+    let rt = super::host::runtime_with(host.clone(), 0);
+    let shelf = construct(&rt, "Shelf", &[]);
+    call_ok(&rt, &method_call(shelf, "Shelf", "seed", 2, &enc(&rows)));
+    let (_, stamp) = shelf_server(&rt, &host, shelf, SHELF_BOOKS);
+    let toggle = method_call(shelf, "Shelf", "toggle", 3, &enc(&(rows / 2)));
+
+    host.keeping(true);
+    call_ok(&rt, &toggle);
+    host.keeping(false);
+    let entries = host.last_entries();
+    assert_eq!(entries.len(), 1, "only the list changed");
+    let (id, op, value) = &entries[0];
+    assert_eq!((*id, *op), (SHELF_BOOKS, ChangeOp::LazyInvalidated));
+    assert_eq!(
+        value.len(),
+        12,
+        "an invalidation is 12 bytes, whatever the list holds"
+    );
+    let invalidated = LazyInvalidated::decode(&mut Reader::new(value)).expect("a LazyInvalidated");
+    assert_eq!(
+        (invalidated.len, invalidated.version),
+        (stamp.len, stamp.version + 1)
+    );
+
+    plain(move || {
+        black_box(rt.call_sync(black_box(&toggle)));
+    })
 }
 
 /// One write to a signal of a published store (owner recorded, handle set) and its implicit

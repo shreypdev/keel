@@ -78,7 +78,7 @@ pub enum TypeRef {
     Option(Box<TypeRef>),
     Vec(Box<TypeRef>),
     Map(Box<TypeRef>, Box<TypeRef>),
-    Lazy(Box<TypeRef>),                    // lazy list handle, item type
+    Lazy(Box<TypeRef>),                    // a list the host pages through, item type: only as a store signal (ADR-043)
     Named(String),                          // record, enum, error (by TypeName); an object only as the return type of its own constructors
     Object(String),                         // an object crossing as a parameter or a return (ADR-040): a handle on the wire
     Callback(String),                       // a host callback interface passed in as a parameter (ADR-041): an instance handle chosen by the host
@@ -135,6 +135,8 @@ pub struct StoreDef { pub signals: Vec<SignalDef> }
 pub struct SignalDef { pub name: String, pub signal_id: u32, pub ty: TypeRef, pub computed: bool, pub key: Option<String> /* #[undra(key = "id")] */, pub no_coalesce: bool /* #[undra(no_coalesce)]; serialized only when true (ADR-031) */, pub default: bool /* #[undra(default)] on a Signal<T>; serialized only when true (ADR-037) */ }
 // `computed: true` with a `key` (and `ty: Vec<T>`) is a derived keyed list (`DerivedList<T>`, ADR-039): read-only on
 // the platforms, delivered as keyed patches (§3.8). No other field describes it, so no existing schema or hash changed.
+// `ty: Lazy(T)` is a `Lazy<T>` (ADR-043): not computed, the host pages it (§3.3) and is told its length and version (§3.5); `key` is optional and
+// names the field that identifies a row for the platform, `default` fills an empty list; a snapshot carries it as the `Vec<T>` of its items (§5.9).
 
 pub struct FunctionDef { pub name: String, pub method_id: u32, pub params: Vec<ParamDef>, pub returns: TypeRef, pub is_async: bool, pub takes_ctx: bool, pub docs: String }
 
@@ -200,7 +202,7 @@ Little-endian throughout. No alignment, no padding. All lengths are `u32`. Encod
 | `Result<T,E>` | `u8` 0 = Ok + `T`, 1 = Err + `E` |
 | Handle (object) | `u64`, never `0`: a parameter or return of type `Object` is a handle, `Option<Object>` is `Option<u64>`, `Vec<Object>` is `Vec<u64>`; a decoder that reads `0` where an object is expected fails (`BadRequest` in the core, `malformed` on a platform) |
 | Callback instance | `u64` chosen by the host (non-zero, per-core counter, never reused): the only wire form of a `Callback` parameter, `Option<Callback>` is `Option<u64>` |
-| `Lazy<T>` | `u64` handle of a lazy-list object |
+| `Lazy<T>` | the value of a `Lazy<T>` signal is `handle u64, len u32, version u64` (20 bytes; ADR-043): the page server's handle, the number of items and the version of the list they were read at. The items never cross as a value: the host pages them (§3.3). A snapshot carries a `Lazy<T>` as the `Vec<T>` of its items (§5.9) |
 | `Signal<T>` | never encoded as a value; appears only in change-sets |
 
 Records with `#[undra(default)]` fields: the wire layout still contains the field; `default` affects construction ergonomics in generated code and the migration of persisted data (a field added with `default` bumps the schema hash like any other change). **Live** peers with different schema hashes still refuse each other at attach (R7, §16, `UndraSchemaMismatch`). **Persisted** state evolves across builds (ADR-037): snapshots (§5.9), cached query results and queued mutations (§9) record the fingerprint of their types (§2.5) and are migrated by name on load (§5.9 lists the structural rules), by an app's `#[undra::migrate]` hook, or refused with a typed outcome; nothing is reinterpreted with the wrong types.
@@ -253,6 +255,8 @@ args       encoded params in declaration order
 For target 2 the layout is `target u8, type_id u32, method_id u32, call_id u32, args` (no handle field). For target 0 the handle field is present and written as 0; decoders ignore its value.
 For target 3: `target u8, handle u64, offset u32, limit u32, call_id u32`.
 
+**The page reply (target 3, ADR-043).** `handle` is the page server a `Lazy<T>` signal's value named (§3.1): a transient entry of the runtime's object table, registered when the store enters it and removed with the store (never in a snapshot; the host cannot release it). The reply body is `version u64, total u32, count u32`, then `count` items each encoded as the item type: the `version` and `total` the page was read at, atomically with the items. An `offset` at or past `total` gives `count = 0`; `count` is at most `limit`, and `limit` is cut to 4,096 items. A stale, foreign or non-lazy `handle` is status 5. A host that holds a newer version than a reply's drops the reply and asks again.
+
 ### 3.4 Reply payload
 
 ```
@@ -273,7 +277,9 @@ txn_id     u64
 count      u32
 entries    count × { handle u64, signal_id u32, op u8, len u32, value bytes }
 ```
-`op`: 0 = full value (`value` is the signal's `T` encoded), 1 = keyed patch (§3.8), 2 = lazy list invalidated (value empty; the host re-pages). `len` lets a host skip an entry it cannot decode.
+`op`: 0 = full value (`value` is the signal's `T` encoded; for a `Lazy<T>` signal it is the 20-byte `handle u64, len u32, version u64` of §3.1), 1 = keyed patch (§3.8), 2 = lazy list invalidated (ADR-043: `value` is `len u32, version u64`, 12 bytes: the new length and version; the host keeps showing the rows it has and re-pages its window). `len` lets a host skip an entry it cannot decode.
+
+Any change to a `Lazy<T>` marks its slot dirty and an observed slot's commit sends op 2, **12 bytes whatever changed** (one entry per commit, however many writes the transaction made; none when the host already knows the length and version); op 2 supersedes earlier entries of its signal in a drain (§11.1). Observing the signal sends op 0 with the page server's handle.
 
 Ordering guarantee: change-sets are delivered in commit order; a change-set is never split. For one store this holds whichever thread commits: the change-sets of a store reach the sink one at a time, in claim order, with strictly increasing `txn_id`s (§16.1, ADR-020).
 
@@ -350,7 +356,7 @@ On an enum. Requires `#[error("…")]` per variant (thiserror-style; `{0}`/`{fie
 
 ### 4.3 `#[undra::store]`
 
-On a struct. Fields of type `Signal<T>`, `Computed<T>` and `DerivedList<T>` are signals (in declaration order); other fields are private state (a `WeakCtx`, config; a `Ctx` field works but keeps the runtime alive until shutdown, ADR-034). `Lazy<T>` is reserved: it is rejected in v1 (E0001, "lazy lists are not available in v1"), as `undra-bindgen` rejects it. Generates `impl StoreObject for Type` (`cell`, `restore`), a `StoreRestorer` registration and the store part of the object meta (the struct must also have a `#[undra::api(store)] impl` block with at least one constructor; §16.3 has the details, including the hidden `CellSlot` field). Attributes: `#[undra(key = "id")]` on `Signal<Vec<T>>` enables keyed patches, and is **required** on a `DerivedList<T>` (E0008; a derived list is described as `Vec<T>`, `computed: true` with that key, attached with `attach_derived`, left out of snapshots and of the restore hook's parameters, ADR-039); a key on a `Computed<T>` stays E0008, which points at `DerivedList<T>`; `#[undra(no_coalesce)]` forces every commit of this signal to be delivered, and is recorded in its `SignalDef` so the platform mirrors apply every one of them (§11). `#[undra::store(restore = "Self::assemble")]` names the function that rebuilds the store from its plain signals on restore; it is required when the store has a `Computed` or `DerivedList` field (E0013). `#[undra(default)]` on a `Signal<T>` (ADR-037; recorded as `SignalDef.default`, it requires `T: Default`; on a `Computed<T>` it is E0008) makes a restore of a snapshot that lacks the signal fill it with `T::default()` instead of failing.
+On a struct. Fields of type `Signal<T>`, `Computed<T>` and `DerivedList<T>` are signals (in declaration order); other fields are private state (a `WeakCtx`, config; a `Ctx` field works but keeps the runtime alive until shutdown, ADR-034). `Lazy<T>` (ADR-043) is a signal too: a list the platforms page through instead of mirroring (§3.3), recorded as `Lazy(T)`, not computed, persisted as the `Vec<T>` of its items (so it restores like a plain signal and takes `#[undra(default)]`), attached with `attach_lazy`; `#[undra(key = "id")]` is optional and names the field that identifies its rows. It is legal only as a store field: anywhere else, and inside a `Signal`, `Computed` or `DerivedList`, it is E0001 (the message says where it may stand). `Lazy::over(&derived)` makes a read-only view of a `DerivedList<T>` that pages through its index; it is derived data, so a snapshot holds an empty list for it and the restore hook rebuilds it. Generates `impl StoreObject for Type` (`cell`, `restore`), a `StoreRestorer` registration and the store part of the object meta (the struct must also have a `#[undra::api(store)] impl` block with at least one constructor; §16.3 has the details, including the hidden `CellSlot` field). Attributes: `#[undra(key = "id")]` on `Signal<Vec<T>>` enables keyed patches, and is **required** on a `DerivedList<T>` (E0008; a derived list is described as `Vec<T>`, `computed: true` with that key, attached with `attach_derived`, left out of snapshots and of the restore hook's parameters, ADR-039); a key on a `Computed<T>` stays E0008, which points at `DerivedList<T>`; `#[undra(no_coalesce)]` forces every commit of this signal to be delivered, and is recorded in its `SignalDef` so the platform mirrors apply every one of them (§11). `#[undra::store(restore = "Self::assemble")]` names the function that rebuilds the store from its plain signals on restore; it is required when the store has a `Computed` or `DerivedList` field (E0013). `#[undra(default)]` on a `Signal<T>` (ADR-037; recorded as `SignalDef.default`, it requires `T: Default`; on a `Computed<T>` it is E0008) makes a restore of a snapshot that lacks the signal fill it with `T::default()` instead of failing.
 
 ### 4.4 `#[undra::port]`
 

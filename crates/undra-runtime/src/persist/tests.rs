@@ -532,6 +532,82 @@ fn widening_and_wrapping_rules() {
 }
 
 #[test]
+fn a_lazy_signal_is_persisted_as_the_vec_of_its_items() {
+    let s = base_schema();
+    let lazy = TypeRef::lazy(named("Todo"));
+    let list = TypeRef::vec(named("Todo"));
+    let mut w = Writer::new();
+    w.write_len(2);
+    w.write_raw(&todo_bytes([1; 16], "a", true, &["x"]));
+    w.write_raw(&todo_bytes([2; 16], "b", false, &[]));
+    let bytes = w.into_vec();
+
+    // Decoded and encoded as the list it is stored as.
+    let closure = s.closure(&lazy);
+    assert!(
+        closure.record("Todo").is_some(),
+        "the closure of a Lazy reaches its item"
+    );
+    let value = decode_dyn(&bytes, &lazy, &closure).unwrap();
+    let DynValue::List(items) = &value else {
+        panic!("{value:?}");
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(encode_dyn(&value, &lazy, &closure).unwrap(), bytes);
+    assert_eq!(decode_dyn(&bytes, &list, &closure).unwrap(), value);
+
+    // Lazy <-> Vec <-> Lazy, with and without a change of the items: the bytes follow the items.
+    for (from, to) in [(&lazy, &lazy), (&list, &lazy), (&lazy, &list)] {
+        assert_eq!(
+            structural(&bytes, &s, from, &s, to).unwrap(),
+            bytes,
+            "{from} -> {to}"
+        );
+        let decoded = decode_dyn(&bytes, from, &s.closure(from)).unwrap();
+        let tree = migrate_value(
+            &decoded,
+            from,
+            &s.closure(from),
+            to,
+            &s.closure(to),
+            &NoHooks,
+        );
+        assert_eq!(tree.unwrap(), bytes, "{from} -> {to} (decoded)");
+    }
+    let wide = |t: TypeRef| TypeRef::lazy(t);
+    let ints = vec![1_i16, -2].encode_to_vec();
+    assert_eq!(
+        structural(&ints, &s, &wide(TypeRef::I16), &s, &wide(TypeRef::I64)).unwrap(),
+        vec![1_i64, -2].encode_to_vec()
+    );
+    assert_eq!(
+        structural(
+            &ints,
+            &s,
+            &TypeRef::vec(TypeRef::I16),
+            &s,
+            &wide(TypeRef::I32)
+        )
+        .unwrap(),
+        vec![1_i32, -2].encode_to_vec()
+    );
+    // A list is not a lazy list of something else.
+    assert!(structural(&ints, &s, &wide(TypeRef::I16), &s, &wide(TypeRef::String)).is_err());
+    assert!(structural(&ints, &s, &wide(TypeRef::I16), &s, &TypeRef::I16).is_err());
+
+    // Hostile bytes: an impossible count, a cut item, trailing bytes. Typed errors, no panic.
+    let huge = [0xff, 0xff, 0xff, 0x7f];
+    assert!(decode_dyn(&huge, &lazy, &closure).is_err());
+    assert!(structural(&huge, &s, &lazy, &s, &lazy).is_err());
+    assert!(decode_dyn(&bytes[..bytes.len() - 1], &lazy, &closure).is_err());
+    assert!(structural(&bytes[..bytes.len() - 1], &s, &lazy, &s, &lazy).is_err());
+    let mut extra = bytes.clone();
+    extra.push(0);
+    assert!(decode_dyn(&extra, &lazy, &closure).is_err());
+    assert!(structural(&extra, &s, &lazy, &s, &lazy).is_err());
+}
+
+#[test]
 fn narrowings_and_type_changes_are_refused() {
     let s = Schema::new("t");
     for (from, to) in [

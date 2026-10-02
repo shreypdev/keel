@@ -322,7 +322,8 @@ impl From<WireError> for MigrateError {
 ///
 /// A [`MigrateError`] for bytes that do not decode as `ty`, a named type the closure does not
 /// describe, nesting deeper than [`MAX_DEPTH`], and types that are never persisted values
-/// (`Unit`, `Lazy`, `Result`, `Stream`).
+/// (`Unit`, `Result`, `Stream`, `Object`, `Callback`). A `Lazy<T>` signal decodes as the list of
+/// its items, the `Vec<T>` it is persisted as (ADR-043).
 ///
 /// ```
 /// use undra_meta::{Schema, TypeRef};
@@ -382,13 +383,9 @@ fn min_len(ty: &TypeRef) -> usize {
         | TypeRef::String
         | TypeRef::Bytes
         | TypeRef::Vec(_)
+        | TypeRef::Lazy(_)
         | TypeRef::Map(..) => 4,
-        TypeRef::I64
-        | TypeRef::U64
-        | TypeRef::F64
-        | TypeRef::Duration
-        | TypeRef::Timestamp
-        | TypeRef::Lazy(_) => 8,
+        TypeRef::I64 | TypeRef::U64 | TypeRef::F64 | TypeRef::Duration | TypeRef::Timestamp => 8,
         TypeRef::Uuid => 16,
         TypeRef::Decimal => 17,
         TypeRef::Unit
@@ -454,7 +451,8 @@ fn decode_from(
                 }
             }
         }
-        TypeRef::Vec(item) => {
+        // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4).
+        TypeRef::Vec(item) | TypeRef::Lazy(item) => {
             let count = r.read_count(min_len(item))?;
             let mut items = Vec::with_capacity(count.min(1024));
             for i in 0..count {
@@ -508,7 +506,6 @@ fn decode_from(
             }
         }
         TypeRef::Unit
-        | TypeRef::Lazy(_)
         | TypeRef::Result(..)
         | TypeRef::Stream(_)
         | TypeRef::Object(_)
@@ -708,7 +705,7 @@ fn put_value(
             w.write_u8(1);
             put_value(w, other, inner, closure, depth + 1)?;
         }
-        (TypeRef::Vec(item), DynValue::List(items)) => {
+        (TypeRef::Vec(item) | TypeRef::Lazy(item), DynValue::List(items)) => {
             w.write_len(len_u32(items.len())?);
             for (i, v) in items.iter().enumerate() {
                 put_value(w, v, item, closure, depth + 1)
@@ -1022,7 +1019,12 @@ impl Converter<'_> {
                 w.write_u8(1);
                 self.convert(w, value, old_ty, new_inner, depth + 1, hook_here)?;
             }
-            (TypeRef::Vec(old_item), TypeRef::Vec(new_item)) => {
+            // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4), so
+            // `Lazy<T>` and `Vec<T>` convert as lists do.
+            (
+                TypeRef::Vec(old_item) | TypeRef::Lazy(old_item),
+                TypeRef::Vec(new_item) | TypeRef::Lazy(new_item),
+            ) => {
                 let DynValue::List(items) = value else {
                     return Err(refuse());
                 };

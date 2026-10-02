@@ -1,11 +1,13 @@
 //! The derived slot of a [`StoreCell`](crate::StoreCell) (ADR-039 section 5): a computed that
-//! ships keyed patches.
+//! ships keyed patches. A lazy list (ADR-043) is a slot of the same kind: evaluated by the core,
+//! isolated like a computed when its pipeline panics, announced instead of sent.
 
 use std::sync::Arc;
 
 use undra_wire::Writer;
 
 use super::node::DerivedNode;
+use crate::lazy::LazyCell;
 
 /// What a derived slot produced for one commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,6 +18,8 @@ pub(crate) enum Emitted {
     Full,
     /// The view did not change since the host's copy: no entry.
     Nothing,
+    /// A lazy list changed: the bytes are a `LazyInvalidated` (`ChangeOp::LazyInvalidated`, ADR-043).
+    Invalidated,
 }
 
 /// A derived list as a store slot sees it.
@@ -29,6 +33,15 @@ pub(crate) trait DerivedSlot: Send + Sync {
     fn resync(&self, w: &mut Writer);
     /// Stops keeping derived ops (unobserved, or a delivery was abandoned); the index stays.
     fn forget(&self);
+    /// Whether a snapshot carries the slot: a derived list is rebuilt on restore, a lazy list
+    /// (ADR-043) is store state.
+    fn persisted(&self) -> bool {
+        false
+    }
+    /// The slot as a lazy list, when it is one.
+    fn lazy(&self) -> Option<&LazyCell> {
+        None
+    }
 }
 
 /// A derived list attached to a store, with the key function of its rows.

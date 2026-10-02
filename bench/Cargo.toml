@@ -35,6 +35,10 @@ name = "signals"
 harness = false
 
 [[bench]]
+name = "lazy"
+harness = false
+
+[[bench]]
 name = "snapshot"
 harness = false
 

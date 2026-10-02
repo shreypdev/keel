@@ -173,8 +173,10 @@ don't block) is documented on `Host`.
 2. Take the core lock (or refuse: section 4).
 3. Route: `Function` looks the `FunctionMeta` up by `method_id`; `Method` resolves the handle
    to an object, takes its `type_id` and looks the `ObjectMeta` up; `Constructor` looks the
-   `ObjectMeta` up by `type_id`; `LazyPage` is answered by the runtime itself from a
-   `LazyList` (no dispatcher). The tables are built once from `undra_meta::registrations()`.
+   `ObjectMeta` up by `type_id`; `LazyPage` is answered by the runtime itself, by a built-in
+   dispatcher under the same panic guard, from the page server (a `LazySource`: a store's
+   `Lazy<T>` signal, or a `LazyList`) its handle names (ADR-043; no generated dispatcher). The
+   tables are built once from `undra_meta::registrations()`.
    A lookup that misses (unknown function id, unknown constructor type, or a method on an
    object whose type has no `ObjectMeta`) falls through to the `DispatchLayer`s, in
    registration order, until one answers something other than `Unknown`; none answering

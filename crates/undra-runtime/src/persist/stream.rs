@@ -79,7 +79,12 @@ impl<'a> Streamer<'a> {
                 w.write_u8(1);
                 self.convert(r, w, old_ty, new_inner, depth + 1, hook_here)?;
             }
-            (TypeRef::Vec(old_item), TypeRef::Vec(new_item)) => {
+            // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4), so
+            // `Lazy<T>` and `Vec<T>` convert as lists do.
+            (
+                TypeRef::Vec(old_item) | TypeRef::Lazy(old_item),
+                TypeRef::Vec(new_item) | TypeRef::Lazy(new_item),
+            ) => {
                 let count = r.read_count(1)?;
                 w.write_len(len_u32(count)?);
                 for i in 0..count {
@@ -367,7 +372,8 @@ pub(super) fn skip(
                 }
             }
         }
-        TypeRef::Vec(item) => {
+        // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4).
+        TypeRef::Vec(item) | TypeRef::Lazy(item) => {
             let count = r.read_count(1)?;
             for _ in 0..count {
                 skip(r, item, closure, depth + 1)?;
@@ -406,7 +412,6 @@ pub(super) fn skip(
             }
         }
         TypeRef::Unit
-        | TypeRef::Lazy(_)
         | TypeRef::Result(..)
         | TypeRef::Stream(_)
         | TypeRef::Object(_)
