@@ -358,3 +358,101 @@ and `Runtime::bind_dyn_port_with(port_id, imp, &undra_ports::KV_DISPATCHER)` bin
 with the dispatcher a raw port call on it runs through (`fakes::install` and the dev runner's native `Clock`,
 `Rng`, `Log` do). The typed accessors (`undra_ports::kv(&ctx)`) never needed a dispatcher. App ports are unchanged
 (their dispatchers are submitted as before). Measured: 116,677 bytes gzipped (−3,511).
+
+## Amendment (2026-10-02, `ts-size-e4`): the JavaScript gate counts what the page loads up front, and the cut
+
+Decision 2 above set the JavaScript runtime's budget at 26,000 bytes, with a follow-up (`ts-runtime-size`) aiming at
+16 KB. That piece landed together with E4, the binding call path (ADR-056), as `ts-size-e4`. It reached **21,153
+bytes gzipped, 21.2 KB**, not 16 KB; the gate is restated at 21,500 (below), and this section says what was measured,
+what was cut, what was not, and why the number stops here.
+
+### What the gate measures
+
+`scripts/web-size-runtime.mjs` put every runtime module in one chunk (a `codeSplitting` group matching the runtime's
+directory), including the modules that only a dynamic `import()` reaches. `UndraCore.load` imports the `wasm-worker`
+transport that way, so the transport rode in the measured chunk although a `wasm-main` page never loads it. The group
+now takes Rolldown's `$initial` modules only (reachable from the page's entry by static imports); a runtime module only a
+dynamic import reaches is a chunk of its own, loaded when an app asks for that mode, and the record reports the sum of
+those chunks as `lazy_gzipped` instead of gating it. Both numbers, on the same tree (`1801951`, Vite 8.3.1 / Rolldown
+1.2.11, hello template, zlib level 9):
+
+| | bytes | gzip -9 |
+|---|---|---|
+| the gate as it was: one chunk, the `wasm-worker` transport folded in | 83,958 | **25,996** |
+| the same tree, the chunk the page loads up front | 77,348 | **24,335** |
+| the `wasm-worker` transport on its own, loaded in that mode only | | 2,614 |
+| the Worker script (`worker-*.js`), the other thing that mode loads | | 11,886 |
+
+The difference is the measurement (-1,661), not a saving; every line below starts from the up-front 24,335.
+`UNDRA_SIZE_MODULES=1` makes the script print each module's rendered bytes per chunk (`=exports` adds the exports each
+keeps), `UNDRA_SIZE_TARGET=es2020` builds for another target. The gated build is the pinned Vite's default (native
+`#private` fields); an app on Vite 6's default target (es2020) ships 21,615 of the same code, 462 more, and the Undra
+Vite plugin builds such an app for `es2022` anyway (ADR-056).
+
+### Where the bytes were
+
+esbuild's per-input minified bytes (`--metafile`, es2022) on the same tree, the share of the up-front gzipped size
+estimated in proportion (gzip is not additive; the lever table below is what each change measured), 25,931 gzipped for
+esbuild's chunking, which also loads the remote transport:
+
+| Module | min. bytes | ~gz | |
+|---|---|---|---|
+| `core.ts` (`UndraCore`) | 12,649 | 4,180 | |
+| `mirror.ts` | 7,193 | 2,377 | |
+| `transport/wasm-main.ts` | 6,924 | 2,288 | |
+| `transport/remote.ts` | 5,216 | 1,724 | the mode is a runtime string: bundled by every page |
+| `wire/payloads.ts` | 4,183 | 1,382 | includes `decodeHello`, `decodeLog`, `decodePortCall` only the framed transports read |
+| `wire/writer.ts`, `reader.ts`, `codec.ts` | 3,779 / 2,813 / 3,120 | 1,249 / 930 / 1,031 | |
+| `call-error.ts`, `errors.ts`, `wire/errors.ts` | 2,878 / 1,944 / 1,386 | 951 / 642 / 458 | the public error classes and messages |
+| the four default ports: `adapters/{ports, types, secure, fs, codecs, kv, http, idb}.ts` | 11,894 | ~3,900 | built by `browserAdapters()` for ports a hello core never calls |
+| `adapters/browser.ts`, `system.ts`, `ids.ts` | 1,132 / 903 / 561 | 374 / 298 / 185 | |
+| `wire/types.ts`, `envelope.ts`, `stream.ts`, `port-dispatch.ts`, `object.ts`, `signal.ts` | 1,688 / 1,590 / 1,602 / 883 / 875 / 743 | 558 / 525 / 529 / 292 / 289 / 246 | |
+
+Two things this shows. About a quarter of the first chunk was code a `wasm-main` page with a hello core never runs (the
+remote transport, the four default ports with their codecs, error types and browser adapters, the framed transports'
+wire code). And the rest is the runtime itself: `UndraCore`, the mirror, the in-process transport, the wire and the
+error classes.
+
+### The levers, each its own commit
+
+Up-front gzipped bytes of the hello template, measured at each commit (`scripts/web-size-runtime.mjs`):
+
+| Commit | Lever | gzip -9 | Δ |
+|---|---|---|---|
+| `feaba72` | the gate counts the up-front chunk (baseline) | 24,335 | |
+| `67835f5` | **the remote transport** is a dynamic import (`UndraCore.load` fetches it for mode `remote`) | 22,795 | -1,540 |
+| `14eddde` | **the four default ports load on their first call**: `UndraCore` starts from `lightAdapters()` (timer, console, `Connectivity`, `Lifecycle`) and registers Http, Kv, SecureStore and Fs as lazy ports (`adapters/default-ports.ts`); the first call loads `adapters/standard.js` (the port builders, their codecs and error types, the browser adapters). All four are asynchronous ports: a call that waits for the module is an ordinary asynchronous port call, and a failed load is tried again by the next call | 20,481 | -2,314 |
+| `e69c1a8` | `NetKind` and `AppState` live with the host events: a module two chunks import is emitted whole in the first one, so `types.ts` (every adapter error class) rode along for two unit-enum lists | 19,890 | -591 |
+| `8444262` | the framed transports' wire code (`Kind` apart from the envelope codec, `wire/session.ts` for `Hello`, `Log` and `PortCall`) leaves the first chunk, for the same reason | 19,649 | -241 |
+| | *tried and dropped:* one helper for `UndraReader`'s numeric reads (gzip already folds repeated code) | -19 | |
+| `b1aa0e5`..`9fdaf86` | the E4 call-path levers (ADR-056): byte-wise integers, the call payload in one allocation, the direct call, the small-reply copy, **no `#private` on the call path's classes** (+798: property names are not mangled), a shared scratch `DataView`, `sendCall` / `callSyncParts` | 21,153 | +1,504 |
+
+The up-front chunk went from 24,335 to **21,153** (-3,182, -13%); with the call path's speed it cost 1,504 bytes
+(7.7%). The levers the brief named and what happened to them: tree-shakeable module shape (the lazy modules above are
+what that gained; every top-level registration was already pure or absent, `sideEffects: false` holds), lazy imports
+(remote, default ports, framed wire code; the worker transport already was; recovery is the app's own import), the
+error hierarchy (public classes and messages, kept: R8), `const enum`-free numeric tags (`Kind`, `CallTarget`,
+`ReplyStatus` are public enums; turning them into objects changes their types, so no), class hierarchies (the errors
+are the public API, SPEC 17), dedupe of the wire codecs (the one measured gave -19).
+
+### Why it stops at 21 KB
+
+What a `wasm-main` hello page runs: `UndraCore` (call routing, the error channel, observe and release, snapshot and
+restore, the connection signal), the mirror (ADR-031's coalescing and compaction), the in-process transport (the wasm
+host and its imports), the wire (writer, reader, the codecs, the payloads the host sends and the change-set it reads),
+the error classes, `Signal`, `StreamCall`, the port dispatch and the host events. Each of them is behaviour the
+constitution or the SPEC requires, and none is reached only by a mode or a port. Attributed after the levers (esbuild
+per-input minified bytes, the up-front closure): `core.ts` 16,100, `mirror.ts` 8,618, `wasm-main.ts` 7,973, `writer.ts`
+4,050, `payloads.ts` 3,634, `reader.ts` 3,343, `codec.ts` 3,072, `call-error.ts` 2,876, `errors.ts` 1,942, `stream.ts`
+1,853. Strings are 9 KB of the 61 KB minified, almost all of them the messages R8 wants. Getting to 16 KB would mean
+removing behaviour (a mirror without compaction, no worker or remote mode in the first chunk of an app that picks one,
+no snapshot API) or a different public surface, and that is a decision for a later ADR, not for a size piece. The 8 KB of the
+blueprint is out of reach for the same reason.
+
+### The gate
+
+Decision 2 is restated: **`[size."web/hello-runtime-js"]` is 21,500 bytes** (the budget; record 21,153, ceiling
+min(21,500, floor(21,153 x 1.05)) = 21,500), the tolerance stays 5%, and the gate is the up-front chunk. The record line
+carries `lazy_gzipped` (22,170: the remote transport, the worker transport, the default ports, the framed wire code, the
+Worker script) so that growth in what loads on demand is visible in review, though ungated. The README's number is
+generated from the record as before. A run still fails when the runtime's `node_modules` are missing.

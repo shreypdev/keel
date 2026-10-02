@@ -247,17 +247,24 @@ the C++ module drives.)
 
 ## Limits
 
-* **High-rate updates do not fit a frame on React Native today.** At 100,000 keyed-patch updates a
-  second (1,667 per 60 Hz frame) the mirror needs 13 to 16 ms of every 16.7 ms frame on the iPhone 17
-  Pro simulator (parsing the change-sets as they arrive, 7.8 to 9.4 ms, plus the frame's drain, 5.3 to
-  6.4 ms; more on the Android emulator), against 0.3 to 0.5 ms on V8: nothing is left for React. At
-  10,000 a second the work scales down to roughly a tenth (scaled from those rows, not measured on
-  its own; the 10,000-a-second firehose was measured to drain once per frame). The cost is `@undra/runtime`'s JavaScript under Hermes,
-  not the boundary; it is open work for that package (Amendment D, E4), and until it lands, keep
-  core-driven update rates near 10,000 a second or below on React Native (ADR-038, "Measurements").
-* Per-call cost is the same JavaScript: a synchronous call is about 0.2 us through JSI and the core,
-  about 6 us through `UndraCore.callSync` (4 us of it building the payload), and 15 to 20 us as an
-  awaited generated method on the iOS simulator.
+* **High-rate updates fit a frame, with room, on the simulator.** At 100,000 keyed-patch updates a
+  second (1,667 per 60 Hz frame) the mirror needs about 5 ms of every 16.7 ms frame on the iPhone 17
+  Pro simulator, Release build, Hermes (parsing the change-sets as they arrive, 2.4 to 2.6 ms, plus
+  the frame's drain, 2.6 to 2.8 ms), where the runtime before ADR-056 needed 22 ms on the same host
+  and load (13.1 and 12.9 ms of parsing, 8.9 and 8.6 ms of drain, measured alternately in two runs
+  each at a host load of about 30): it did not fit; now about a third of the frame goes to it
+  and the rest is React's. The cost was `@undra/runtime`'s JavaScript under Hermes, not the boundary:
+  the `#private` fields Babel lowers to helper calls on every access, a `DataView` made for every
+  reader and writer, an allocation per call and per change-set. What this is not: a phone (the
+  simulator runs on an M5 Pro, a phone is slower, and the figure scales with it),
+  or the Android emulator, which was not measured again (it needed more than the simulator before).
+  Keep core-driven update rates to what your frame has left after your own rendering; 100,000 a second
+  is no longer the number that breaks it.
+* Per-call cost is the same JavaScript: a synchronous call is about 0.2 to 0.35 us through JSI and the
+  core, about 1.7 us through `UndraCore.callSync` (before: 9.7 us at the same load; 1.5 us of it is
+  building the payload, before: 6 to 6.7 us), and about 7.7 us as an awaited generated method on the iOS
+  simulator (before: 24.6 to 25.3 us); a 1 KB round trip through `callSync` is 3.4 to 3.7 us (before: 15.5).
+  The native transport answers through its inbox, so the web's direct call does not apply to it.
 * One running `UndraCore` per core namespace per process (ADR-044; ADR-038 decision 11 applies per
   namespace). Several cores, of several namespaces, run side by side, and share the native default
   ports' storage (one `Kv` directory, one `Fs` root, one Keychain service per app). A Swift or Kotlin
