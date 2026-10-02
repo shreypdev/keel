@@ -252,15 +252,19 @@ class PortsV2BindingTests : Suite() {
         // which two of them arrived as far apart as the quiet period was not a burst (or a trickle): it is repeated, and the assertions are made on one that was.
 
         case("WebSocket: a burst is answered as one reply") {
-            // A burst whose messages are all inside the quiet period of the one before and inside the 8 ms cap of the first comes back whole. A pull that is not
-            // scheduled for 2 ms after it saw a message answers with what it had (its quiet period is measured from when it last looked), which is the machine
-            // and not the binding, so the case asks for one trial in forty that came back whole: a binding that splits a burst does it every time.
+            // A burst whose messages are all inside the quiet period of the one before and inside the 8 ms cap of the first comes back whole. A trial whose
+            // messages did not reach the binding that close together (its pump's own times) was not a burst and is repeated. On one that was, the binding can
+            // still answer early when its pull is held up between reading the clock and reading the buffer (it measures the quiet period from when it last
+            // looked), which those times cannot see; so the case asks that most bursts come back whole, of up to ten: measured, 297 to 300 of 300 do, idle or
+            // under eight burners, where a quiet period of 1 ms brings back 8 of 200 whole and one of 0 none. (Asking for one of forty let the 1 ms mutant pass.)
             val notBursts = ArrayList<Double>()
             val split = ArrayList<Int>()
+            var whole = 0
             for (trial in 0 until 40) {
+                if (whole + split.size == 10) break
                 val ws = ScriptedWebSocket()
                 val port = WebSocketPortAdapter(ws)
-                val whole = blocking {
+                blocking {
                     val conn = port.connect("ws://a.test", emptyList(), emptyList()).conn
                     // Six messages a millisecond apart: every gap is inside the 2 ms of quiet, and the last is 5 ms after the first, inside the 8 ms cap.
                     val inbound = ws.connections[0].inbound
@@ -276,16 +280,16 @@ class PortsV2BindingTests : Suite() {
                         widest >= QUIET_NANOS -> notBursts.add(widest / 1e6)
                         first.size == 6 -> {
                             assertEq((0 until 6).map { WsMessage.Text("$it") }, first)
-                            return@blocking true
+                            whole++
                         }
                         else -> split.add(first.size)
                     }
-                    false
                 }
-                if (whole) return@case
             }
+            val bursts = whole + split.size
             val widest = notBursts.maxOrNull()?.let { " (two messages up to %.1f ms apart)".format(it) }.orEmpty()
-            fail("no trial of 40 came back whole: ${split.size} were split into replies of $split, ${notBursts.size} were not bursts$widest")
+            assertTrue(bursts > 0, "no trial of 40 was a burst: ${notBursts.size} were not$widest")
+            assertTrue(whole * 2 > bursts, "$whole of $bursts bursts came back whole; the others were split into first replies of $split")
         }
 
         case("WebSocket: a lone message is answered within a few milliseconds of the quiet period, not held for the cap or a linger") {
@@ -297,6 +301,9 @@ class PortsV2BindingTests : Suite() {
             val port = WebSocketPortAdapter(ws)
             val waited = ArrayList<Double>()
             val buffered = ArrayList<Double>()
+            // And not before the quiet period, in every round: the binding cannot know a message is alone until 2 ms passed without another, and a slow
+            // machine only makes that later (the TypeScript runtime's clock-driven test asserts the same: nothing at 1 ms, the answer at 2).
+            var soonest = Long.MAX_VALUE
             blocking {
                 val conn = port.connect("ws://a.test", emptyList(), emptyList()).conn
                 val inbound = ws.connections[0].inbound
@@ -305,20 +312,25 @@ class PortsV2BindingTests : Suite() {
                     val pull = async { port.receive(conn, 16u) to System.nanoTime() }
                     delay(5)
                     val reference = async(start = CoroutineStart.UNDISPATCHED) { delay(2); System.nanoTime() }
+                    val pushed = System.nanoTime()
                     inbound.push(WsMessage.Text("w$round"))
                     val (got, at) = pull.await()
                     assertEq(text("w$round"), got)
                     waited.add((at - reference.await()) / 1e6)
+                    soonest = minOf(soonest, at - pushed)
                     // The message is there before the pull.
                     inbound.push(WsMessage.Text("b$round"))
                     eventually("the read-ahead took it") { inbound.taken == 2 * (round + 1) }
                     val late = async(start = CoroutineStart.UNDISPATCHED) { delay(2); System.nanoTime() }
+                    val pulled = System.nanoTime()
                     val early = port.receive(conn, 16u)
                     val answered = System.nanoTime()
                     assertEq(text("b$round"), early)
                     buffered.add((answered - late.await()) / 1e6)
+                    soonest = minOf(soonest, answered - pulled)
                 }
             }
+            assertTrue(soonest >= QUIET_NANOS, "a lone message was answered ${soonest / 1e6} ms after it arrived or was asked for: before 2 ms of quiet")
             waited.sort()
             buffered.sort()
             assertTrue(waited[10] < 5, "a lone message was answered ${waited[10]} ms (the median of 20) after a quiet-period timer armed as it arrived")
@@ -348,8 +360,10 @@ class PortsV2BindingTests : Suite() {
                     val widest = widestGapUntil(inbound.takenAt.toList(), at, 20_000)
                     if (widest >= QUIET_NANOS) return@blocking widest / 1e6
                     assertTrue(part.size > 1, "the trickle was one burst: ${part.size}")
-                    // The cap answers on the first look 8 ms after the pull's first message: about 17 messages at one per 0.5 ms, counted where the binding
-                    // answered and so the same on any machine. (A pull held until the trickle stops is answered by its max, 1,000.)
+                    // The cap answers on the first look 8 ms after the pull's first message: about 17 messages at one per 0.5 ms (17 to 20 in 400 trials, idle
+                    // and under eight burners). The pump runs on its own thread and the pull on this event loop, so a stall of this thread alone of more than
+                    // about 24 ms around the cap would let the pump add more than 64 (a stall of the whole process shows as a gap above, and the trial is
+                    // repeated). A pull held until the trickle stops is answered by its max, 1,000.
                     assertTrue(part.size <= 64, "a trickle held the pull for ${part.size} messages")
                     null
                 }
@@ -843,9 +857,16 @@ class PortsV2BindingTests : Suite() {
                 val tx = port.begin(id)
                 assertEq(2u, tx, "transactions share the counter of databases")
                 port.execute(tx, "INSERT INTO t VALUES (1)", emptyList())
+                // Not long after the timeout either, as on Swift and TypeScript: a timer of the timeout's own length, armed on this event loop as the
+                // statement arms its own, and the Busy less than half the timeout after it. A slow machine fires both late; only a wait of the code's
+                // making (a deadline of 1.5 times the timeout or more) puts the Busy that far behind it.
+                val reference = async(start = CoroutineStart.UNDISPATCHED) { delay(200); System.nanoTime() }
                 val started = System.nanoTime()
                 expectError(DbError.Busy) { port.execute(id, "INSERT INTO t VALUES (2)", emptyList()) }
-                assertTrue((System.nanoTime() - started) / 1_000_000 >= 180, "it waited for the busy timeout")
+                val busyAt = System.nanoTime()
+                assertTrue((busyAt - started) / 1_000_000 >= 180, "it waited for the busy timeout")
+                val late = (busyAt - reference.await()) / 1e6
+                assertTrue(late < 100, "Busy came $late ms after a timer of the busy timeout's length armed beside the statement")
                 expectError(DbError.Busy) { port.begin(id) }
                 port.commit(tx)
                 expectError(DbError.Unavailable("transaction 2 is over")) { port.execute(tx, "SELECT 1", emptyList()) }
