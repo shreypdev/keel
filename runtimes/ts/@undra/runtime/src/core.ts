@@ -973,15 +973,16 @@ export class UndraCore {
 
   /**
    * Gets ready to report a trap of a wasm core (ADR-046 decision 4.4) when the app wants reports: loads the code that builds
-   * them (a page without `onPanic` or `recovery` never fetches it) and hashes the module for `imageId`, both in the background,
-   * so that they are there when a trap needs them.
+   * them (a page without `onPanic` or `recovery` never fetches it) and, for an app with `onPanic`, hashes the module for
+   * `imageId`, both in the background, so that they are there when a trap needs them.
    */
   #loadPanics(): void {
     if (!this.#transport.mode.startsWith("wasm") || (this.#options.onPanic === undefined && this.#panics === null)) return;
     const ready = (panics: PanicSupport): void => {
       this.#panics = panics;
       const source = this.#load?.wasm;
-      if (source !== undefined) {
+      // Only for an app that asked for reports: the SHA-256 is the `imageId` of what it receives.
+      if (source !== undefined && this.#options.onPanic !== undefined) {
         panics.wasmImageId(source).then(
           (id) => {
             this.#imageId = id;

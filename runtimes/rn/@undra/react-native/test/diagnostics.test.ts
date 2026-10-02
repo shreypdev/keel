@@ -71,13 +71,14 @@ afterEach(() => {
 });
 
 describe("a panic report of the native core", () => {
-  test("reaches onPanic once, whole, from a core thread; the core is not answered twice", async () => {
+  test("reaches onPanic once, whole, from a core thread, and is not answered (call id 0)", async () => {
     const seen: UndraPanicReport[] = [];
     const { core, native } = await attach({ onPanic: (r) => seen.push(r) });
     opened.push(core);
     native.queue(RecordKind.PortCall, panicRecord(report(1)), "core");
     await flush();
     expect(seen).toEqual([report(1)]);
+    expect(native.portReplies, "nothing waits for an answer to the core's own report: none is sent").toEqual([]);
     expect(typeof seen[0]?.schemaHash).toBe("bigint");
     expect(seen[0]?.frames[0]).toEqual({ address: 0x1f2cn, symbol: "undra_core::lab::explode", file: "lab.rs", line: 42 });
   });

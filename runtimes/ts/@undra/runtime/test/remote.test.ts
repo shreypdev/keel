@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type ConnectionState,
+  PanicReportCodec,
+  PortIds,
+  type UndraPanicReport,
   UndraCallError,
   UndraCore,
   UndraReplyError,
@@ -19,10 +22,14 @@ import {
   Kind,
   ReplyStatus,
   StreamFlag,
+  PortStatus,
   decodeCall,
   decodeObserve,
+  decodePortReply,
   decodeRelease,
   encodeLog,
+  encodePortCall,
+  encodeValue,
   encodeStreamItem,
   encodeReply,
 } from "../src/wire/index.js";
@@ -718,6 +725,61 @@ async function observedStore(core: UndraCore, server: FakeServer, handle: bigint
   await vi.advanceTimersByTimeAsync(200);
   return created;
 }
+
+describe("panic reports of a native core served over a socket (ADR-046)", () => {
+  const diagnostics = PortIds.Diagnostics;
+  const panic = (n: number): UndraPanicReport => ({
+    message: `kaboom ${n}`,
+    location: "core/src/lab.rs:42:9",
+    operation: "explode",
+    thread: "undra-core",
+    frames: [],
+    namespace: "playground_core",
+    coreVersion: "1.0.0",
+    schemaHash: SCHEMA,
+    imageId: "",
+  });
+  const call = (portCallId: number, report: UndraPanicReport) =>
+    encodePortCall({ portId: diagnostics.portId, methodId: diagnostics.panicked, portCallId, args: encodeValue(PanicReportCodec, report) });
+
+  it("reach onPanic once each, in order, and a fire-and-forget call (id 0) is not answered", async () => {
+    const server = new FakeServer();
+    const seen: string[] = [];
+    await loaded(server, { onPanic: (r) => seen.push(r.message) });
+    server.current.deliver(Kind.PortCall, call(0, panic(1)));
+    server.current.deliver(Kind.PortCall, call(0, panic(2)));
+    expect(seen).toEqual(["kaboom 1", "kaboom 2"]);
+    expect(server.current.sent(Kind.PortReply), "nothing waits for an answer to the core's own report").toEqual([]);
+  });
+
+  it("a call that does wait for its answer (a non-zero id) gets an empty ok reply", async () => {
+    const server = new FakeServer();
+    const seen: string[] = [];
+    await loaded(server, { onPanic: (r) => seen.push(r.message) });
+    server.current.deliver(Kind.PortCall, call(7, panic(3)));
+    expect(seen).toEqual(["kaboom 3"]);
+    const replies = server.current.sent(Kind.PortReply).map((e) => decodePortReply(e.payload));
+    expect(replies).toEqual([{ portCallId: 7, status: PortStatus.Ok, body: new Uint8Array(0) }]);
+  });
+
+  it("a handler that throws is reported to onError and changes nothing", async () => {
+    const server = new FakeServer();
+    const errors: unknown[] = [];
+    const seen: string[] = [];
+    const { core } = await loaded(server, {
+      onPanic: (r) => {
+        seen.push(r.message);
+        throw new Error("the reporter is down");
+      },
+      onError: (e) => errors.push(e),
+    });
+    server.current.deliver(Kind.PortCall, call(0, panic(1)));
+    server.current.deliver(Kind.PortCall, call(0, panic(2)));
+    expect(seen).toEqual(["kaboom 1", "kaboom 2"]);
+    expect(errors).toHaveLength(2);
+    expect(core.closed).toBe(false);
+  });
+});
 
 describe("dev notices from `undra dev` (ADR-053)", () => {
   const notice = (message: string, target = "undra::dev") => encodeLog({ level: 2, target, message });

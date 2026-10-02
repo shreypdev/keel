@@ -336,6 +336,7 @@ describe("UndraCore and the panic report of a trap (over the stub core, a real w
     const event = restarted[0] as UndraCoreRestarted;
     expect(event.report.frames.length).toBeGreaterThan(0);
     expect(event.report.message).toBe("RuntimeError: unreachable");
+    expect(event.report.imageId, "the module is hashed only for an app that has onPanic").toBe("");
     expect((event.error as UndraCallError.Panicked).backtrace).toMatch(/wasm-function\[\d+\] \(0x[0-9a-f]+\)|\(0x[0-9a-f]+\)/);
   });
 });

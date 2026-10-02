@@ -418,6 +418,8 @@ export class NativeTransport implements Transport {
     const methodId = view.getUint32(4, true);
     const portCallId = view.getUint32(8, true);
     const outcome = handler.portCall({ portId, methodId, portCallId, args: payload.subarray(12) });
+    // Port call id 0 is the core's own fire-and-forget call (a panic report to `Diagnostics`, ADR-046): nothing waits for an answer.
+    if (portCallId === 0) return;
     switch (outcome.kind) {
       case "sync":
         this.#portReply(outcome.reply);
