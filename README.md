@@ -59,10 +59,11 @@ The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.
 a change that takes it over 120 KB or more than 5% over its record
 ([`bench/results/web-size.jsonl`](bench/results/web-size.jsonl), [ADR-052](.10x/adrs/ADR-052-web-bundle-size.md)).
 The JavaScript runtime the page loads up front with it is gated the same way:
-<!--measured:web-runtime-js-->22.1 KB<!--/measured--> gzipped against a 22.1 KB budget (the
-blueprint's 8 KB predates the transports, reconnect, coalescing, worker mode and the typed error
-channel; the transports and the default ports load when an app asks for them, and are not in it).
-A 16 KB target is still open: it is not reachable without removing behaviour. The Android size is
+<!--measured:web-runtime-js-->15.7 KB<!--/measured--> gzipped against a 16 KB budget, for the production
+build of `@undra/runtime` as an app installs it (what only a feature or a mode needs, such as streams, the worker and
+remote transports and the default ports, loads when the app asks for it and is not in it; messages are an error code
+with a link, and the readable sentences ship in the development build,
+[ADR-057](.10x/adrs/ADR-057-js-runtime-16kb.md)). The Android size is
 a measurement of the same kind ([`bench/results/android-size.jsonl`](bench/results/android-size.jsonl)).
 Sustained-load results (a firehose, keyed churn, fan-out, a 60-second soak) are under
 [Harsh conditions](bench/RESULTS.md#harsh-conditions).
@@ -227,7 +228,6 @@ Added since, each with its page:
 Open, with the work done around it (the same list as the [roadmap](https://shreypdev.github.io/undra/roadmap/)):
 
 * Benchmark rows from physical phones; today's device rows are a simulator, an emulator and headless Chromium.
-* The JavaScript runtime at 16 KB (it sits at its 22.1 KB gate).
 * Generic functions and objects across the boundary (a generic record or enum crosses as one named type per
   instantiation).
 * Query handles across an `undra dev` reload (stores survive; query handles need a decision record).

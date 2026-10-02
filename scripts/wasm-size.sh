@@ -8,7 +8,7 @@
 #                                    [size."..."] table in bench/budgets.toml (commit both; the
 #                                    budgets test checks they agree). CI never records.
 #
-# Two artefacts, each gated by its `[size."<artifact>"]` table of bench/budgets.toml: at most
+# Four artefacts, each gated by its `[size."<artifact>"]` table of bench/budgets.toml: at most
 # `budget_gzip_bytes`, and at most `tolerance` over `measured_gzip_bytes` (the record), whichever is
 # lower. The ceiling comes from the committed record, never from the build being measured.
 #
@@ -18,12 +18,20 @@
 #   alone. It refuses to measure without wasm-opt (`brew install binaryen`, or binaryen's release
 #   tarball; CI pins version_133): an unoptimised module is not what ships.
 # * web/hello-runtime-js: what a hello-world app loads up front of the JavaScript runtime
-#   (`@undra/runtime` tree-shaken and minified by the Vite of its own lockfile,
-#   scripts/web-size-runtime.mjs): the one chunk of the runtime modules the app's entry reaches by
-#   static imports. What only a dynamic import() reaches (the wasm-worker and remote transports) is
-#   fetched on demand and reported next to the number as `lazy_gzipped`, not gated with it. It
-#   needs the TypeScript runtime's node_modules (`npm ci` in runtimes/ts/@undra/runtime) and
+#   (`@undra/runtime` as an installed app resolves it, the package's production build, tree-shaken and
+#   minified by the Vite of its own lockfile, scripts/web-size-runtime.mjs): the one chunk of the runtime
+#   modules the app's entry reaches by static imports. What only a dynamic import() reaches (the
+#   wasm-worker and remote transports, the stream support, the standard ports, ..) is fetched on demand
+#   and reported next to the number as `lazy_gzipped`, not gated with it; Vite's preload helper is a chunk
+#   of its own, reported as `bundler_gzipped` (ADR-057, D6). The runtime modules that hold code in the chunk
+#   are in the record (`modules`), and a run whose list differs from the committed one fails and names them.
+#   It needs the TypeScript runtime's node_modules (`npm ci` in runtimes/ts/@undra/runtime) and
 #   refuses to pass without them, like the wasm without wasm-opt.
+# * web/hello-runtime-js-with-helper: the same page with Vite's preload helper where Vite puts it, in that
+#   chunk: the other reading of the number, gated beside it so the target holds either way.
+# * web/all-features-runtime-js: the page that uses everything (scripts/web-size-all-features.ts: the
+#   playground's bindings with recovery, a panic handler, stats, snapshot, restore and a background run):
+#   its first chunk plus every chunk of the runtime it loads on demand, the Worker script excepted.
 #
 # Compression is zlib's deflate at level 9 through Python, the same bytes on every machine (GNU gzip
 # and Node's zlib differ by up to 1%; Apple's `gzip -9 -n` agrees with zlib).
@@ -115,7 +123,7 @@ WASM_OPT_VERSION="$("$WASM_OPT" --version | awk '{print $NF}' | tr -d '()')"
 
 python3 - "$ROOT/bench/budgets.toml" "$WASM" "$RAW" "$WORK/js" "$JS_JSON" "$JS_WHY" "$OUT_DIR/web-size.jsonl" \
   "$RECORD" "$COMMIT" "$RUSTC" "$WASM_OPT_VERSION" <<'PY'
-import datetime, gzip, json, math, re, sys
+import datetime, gzip, json, math, os, re, sys
 
 (budgets_path, wasm, raw, js_dir, js_json, js_why, out, record, commit, rustc, wasm_opt) = sys.argv[1:12]
 record = record == "1"
@@ -172,23 +180,55 @@ results = [(wasm_line, ok, table)]
 
 js_table = size_table(text, "web/hello-runtime-js")
 js_line = {"artifact": "web/hello-runtime-js", "budget": int(js_table["budget_gzip_bytes"]),
-      "what": "@undra/runtime as the hello app's src/undra.ts imports it, Vite production build of the runtime's lockfile; the chunk loaded up front (static imports only: the on-demand transports and the worker script are lazy_gzipped)",
+      "what": "@undra/runtime as the hello app's src/undra.ts imports it, as an installed app resolves it (the package's production build), Vite production build of the runtime's lockfile; the chunk loaded up front (static imports only: the on-demand chunks and the worker script are lazy_gzipped, Vite's preload helper is bundler_gzipped)",
       "gzip": "zlib deflate level 9", "commit": commit, "date": today}
+extra_lines = []
 if js_json:
     chunks = json.loads(js_json)
-    js_line["bytes"], js_line["gzipped"] = gz(f"{js_dir}/{chunks['runtime']}")
+    at = lambda rel: os.path.join(js_dir, rel)
+    js_line["bytes"], js_line["gzipped"] = gz(at(chunks["runtime"]))
     js_ceiling, js_ok, _ = gate("web/hello-runtime-js", js_line["gzipped"])
     js_line["ceiling"] = js_ceiling
     js_line["tolerance"] = js_table.get("tolerance")
-    js_line["bindings_gzipped"] = gz(f"{js_dir}/{chunks['bindings']}")[1]
-    js_line["app_gzipped"] = gz(f"{js_dir}/{chunks['app']}")[1]
-    js_line["lazy_gzipped"] = sum(gz(f"{js_dir}/{f}")[1] for f in chunks["lazy"])
+    js_line["bindings_gzipped"] = gz(at(chunks["bindings"]))[1]
+    js_line["app_gzipped"] = gz(at(chunks["app"]))[1]
+    js_line["lazy_gzipped"] = sum(gz(at(f))[1] for f in chunks["lazy"])
+    js_line["bundler_gzipped"] = gz(at(chunks["bundler"]))[1]
+    js_line["modules"] = chunks["modules"]
     results.append((js_line, js_ok, js_table))
+
+    # The same page with Vite's preload helper in the first chunk: the other reading of the number (ADR-057, decision 6).
+    inside_table = size_table(text, "web/hello-runtime-js-with-helper")
+    inside = {"artifact": "web/hello-runtime-js-with-helper", "budget": int(inside_table["budget_gzip_bytes"]),
+              "what": "web/hello-runtime-js with Vite's preload helper left in the first chunk, where Vite puts it: the chunk the page loads up front if the helper is counted as the runtime's",
+              "gzip": "zlib deflate level 9", "commit": commit, "date": today}
+    inside["bytes"], inside["gzipped"] = gz(at(chunks["inside"]))
+    inside["ceiling"] = gate("web/hello-runtime-js-with-helper", inside["gzipped"])[0]
+    inside["tolerance"] = inside_table.get("tolerance")
+    results.append((inside, inside["gzipped"] <= inside["ceiling"], inside_table))
+    extra_lines.append(inside)
+
+    # The page that uses everything: its first chunk and every chunk of the runtime it loads on demand (the Worker script, which only the
+    # wasm-worker mode fetches, and the bundler's own chunks are not the page's runtime).
+    every_table = size_table(text, "web/all-features-runtime-js")
+    every = {"artifact": "web/all-features-runtime-js", "budget": int(every_table["budget_gzip_bytes"]),
+             "what": "the playground's bindings with crash recovery, a panic handler, stats, snapshot, restore and a background run in wasm-main mode (scripts/web-size-all-features.ts): the first chunk of the runtime plus every chunk it loads on demand except the Worker script; a plan may move bytes out of the first chunk, not make this page load more",
+             "gzip": "zlib deflate level 9", "commit": commit, "date": today}
+    first_bytes, first_gz = gz(at(chunks["allFeatures"]["runtime"]))
+    on_demand = [gz(at(f)) for f in chunks["allFeatures"]["lazy"]]
+    every["bytes"] = first_bytes + sum(b for b, _ in on_demand)
+    every["gzipped"] = first_gz + sum(g for _, g in on_demand)
+    every["first_gzipped"] = first_gz
+    every["on_demand_gzipped"] = sum(g for _, g in on_demand)
+    every["ceiling"] = gate("web/all-features-runtime-js", every["gzipped"])[0]
+    every["tolerance"] = every_table.get("tolerance")
+    results.append((every, every["gzipped"] <= every["ceiling"], every_table))
+    extra_lines.append(every)
 else:
     js_line["bytes"] = js_line["gzipped"] = None
     js_line["error"] = js_why or "not measured"
 
-lines = [wasm_line, js_line]
+lines = [wasm_line, js_line] + extra_lines
 for line in lines:
     print(json.dumps(line, separators=(",", ":")))
 
@@ -199,11 +239,31 @@ for line, passed, tbl in results:
     name, size, ceil = line["artifact"], line["gzipped"], line["ceiling"]
     if name != "web/hello-wasm":
         print(f"{name}: {line['bytes']:,} bytes, {size:,} gzipped ({kb(size)})", file=sys.stderr)
+        if "bundler_gzipped" in line:
+            print(f"  beside it: Vite's preload helper {line['bundler_gzipped']:,} gzipped, on-demand chunks and the Worker script {line['lazy_gzipped']:,}", file=sys.stderr)
+        if "on_demand_gzipped" in line:
+            print(f"  of which the first chunk {line['first_gzipped']:,} and the chunks it loads on demand {line['on_demand_gzipped']:,}", file=sys.stderr)
     rec, tol = (size if record else tbl.get("measured_gzip_bytes")), tbl.get("tolerance")
     print(f"  gate: <= {ceil:,} (budget {line['budget']:,}" + (f", record {int(rec):,} + {tol:.0%}" if rec and tol is not None else "") + f"): {'ok' if passed else 'OVER'}", file=sys.stderr)
     if not passed:
         over = "the budget" if size > line["budget"] else f"{tol:.0%} over the record"
         failed.append(f"{name} is {size - ceil:,} bytes over its gate ({over})")
+
+# The runtime modules of the first chunk, against the committed record: a module that moves in or out (a re-export can bring one in
+# without any import of it, ADR-057) fails the run and is named, so it is a decision in review and not a surprise in the size.
+record_path = os.path.join(os.path.dirname(budgets_path), "results", "web-size.jsonl")
+if js_json and not record and os.path.exists(record_path):
+    for committed in open(record_path):
+        committed = committed.strip()
+        if not committed:
+            continue
+        entry = json.loads(committed)
+        if entry.get("artifact") == "web/hello-runtime-js" and "modules" in entry:
+            now, was = set(js_line["modules"]), set(entry["modules"])
+            if now != was:
+                failed.append("web/hello-runtime-js: the runtime modules in the first chunk changed: "
+                              + ", ".join([f"+ {m}" for m in sorted(now - was)] + [f"- {m}" for m in sorted(was - now)])
+                              + " (a module moved into or out of the page's first chunk; if intended, re-record in the same commit)")
 
 # The JSON behind the numbers: always for a gate run (CI uploads it, pass or fail); for --record
 # only when everything was measured and within its budget, so a failed run never rewrites the record.

@@ -56,7 +56,7 @@ if (!existsSync(join(project, "generated", "ts", "package.json"))) {
 // ----- the gate's build, with source maps ----------------------------------------------------------------------------
 const built = JSON.parse(
   execFileSync(process.execPath, [join(ROOT, "scripts", "web-size-runtime.mjs"), project, runtimeDir, out], {
-    env: { ...process.env, UNDRA_SIZE_SOURCEMAP: "1" },
+    env: { ...process.env, UNDRA_SIZE_SOURCEMAP: "1", UNDRA_SIZE_EXTRA: "0" },
     stdio: ["ignore", "pipe", "inherit"],
   }).toString(),
 );
