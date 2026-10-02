@@ -104,6 +104,86 @@ constructor that some method returns is legal (no public constructor is generate
 S27 (objects cross) and S28 (host callbacks), `contract-tests/scenarios.md`, on Swift, Kotlin and TypeScript, against the
 playground core's `Workshop` / `Shelf` / `Watch` / `Reporter` (`examples/playground/core/src/workshop.rs`).
 
+## Platform shapes that differ from the draft contract above
+
+The three runtimes were built by three implementers from the contract; where they differ from it, the code is right and
+SPEC 17 says so:
+
+* **TypeScript's helpers are free functions** that take the core first (`adopt(core, handle, type)`, `adoptObject(core,
+  body, type)`, `requireOwn(core, object)`, `callbacks(core)`, `lend(core, impl, callback)`, `giveBack(core, instance)`,
+  `lending(core, send, signal)`), not methods of `UndraCore`: `UndraCore` is the main entry's class, and a hello-world bundle
+  that uses none of it must not ship it (ADR-052). Swift and Kotlin have them as methods. A TypeScript callback interface
+  registers its port with the core the first time an instance is lent (the generated entry does not), and `lending` gives
+  the references back when the call was refused or never sent but leaves them with the core when the caller aborts after
+  the send; the registry drops its entries when the connection is lost or the core closes.
+* **Kotlin**: `X(ctx)` is a companion `operator fun invoke` calling `X.create(ctx)` (a Kotlin constructor cannot return an
+  existing wrapper, and constructors must go through `adopt`); the wrapper's own constructor is `internal`; generated
+  code calls the runtime's `reachabilityFence` (the JDK's exists from API 28, the playground's minimum is 26); a stream
+  that takes objects or callbacks fences and lends once per collection inside its `flow {}`, because a stream is sent when
+  it is collected. `GoldenFullTests`' reflection calls `Companion.create`.
+* **Swift**: a `new` constructor is a convenience initialiser and cannot return an existing object, so an `Arc<Self>`
+  constructor that returns an interned object while its wrapper is alive gives a second wrapper that owns its own
+  reference (the count is right, `===` does not hold; `UndraObject.init` registers itself so later returns of the handle
+  find it); named constructors go through `adopt`. Generated callback protocols refine `Sendable`. The entry registers the
+  callback ports after the core starts and before `load` returns. A stream method with object or callback parameters
+  cannot throw, so it has no `requireOwn` and no give-back on refusal. A weak wrapper's async method called directly
+  after its target is gone cannot return under typed throws (there is no `E` value to throw); the core never calls it in
+  that state (the runtime resolves the target first and answers unavailable), and with `swift_typed_throws = false` it
+  throws `.unavailable(.closed)`.
+* **Delivery detail all three share**: a callback invocation is also a fold barrier in the mirror's queue (change-sets
+  that arrive after a call are not folded into ones before it), so a listener never sees a newer store value than the one
+  at the time of the call. Background-delivered async methods start in call order; their first steps on a cooperative
+  pool are not strictly ordered.
+
 ## Deviations, numbers, counts
 
-(filled in at the end)
+(Deviations from the two ADRs are in each ADR's "Implementation notes"; the ones below are the piece's.)
+
+**Deviations from the brief and the ADRs (summary).**
+
+1. Constructors keep `Named(Self)` in the schema (no hash moves). 2. The ledger is an RAII `IssueScope`. 3. Foreign handles
+are refused on the host (`requireOwn` -> `UndraCallError.refused`), a gap the ADR text left (it said "fails as stale").
+4. `MethodDef.coalesce` and `PortDef.background` are schema fields written only when true. 5. E0071 also rejects `__` names
+and a coalesced async method. 6. The scenario numbers are S27 and S28 (S21..S25 were taken). 7. The docs are two guides
+(`objects.html`, `callbacks.html`), not cookbook recipes. 8. The platform differences listed above. 9. S27 step 3 asserts two
+change-sets (one per shelf; `transactions` counts change-sets), S28 step 2 asserts the last progress report is `3/3` and
+reports increase (`progress` is `coalesce`), and Swift's column cannot write S28 step 3 against typed-throws protocols (the
+runtime tests cover the mapping; the column prints a NOTE). 10. The Kotlin callback registry's `giveBackIfRefused` and
+TypeScript's `lending` are how generated code gives references back on a refused call; the ADR only said "the generated host
+code gives its references back itself".
+
+**Known limits (not fixed here).**
+
+* Kotlin: a caller's coroutine cancelled at the very moment a successful reply carrying an object arrives drops that reply,
+  and its one reference stays with the core until the core closes (fixing it needs a "reply dropped" hook on
+  `UndraCore.call`, an API change).
+* TypeScript: after a crash-recovery restart (a wasm trap) the callback registry's entries are not dropped; the runtime has
+  no restart hook for it yet.
+* A callback over `undra dev` (remote) has unit tests (a dropped connection clears the registry) but no end-to-end WebSocket
+  test; the remote path is the same `onPortCall` code.
+* The playground web app's Stress tab fails its Playwright smoke ("Stress.stop failed: stale handle" on leaving the tab)
+  with this branch's TS runtime and also with the pre-change one on this branch's core, so it comes from the core's
+  changes (the wider handle), not the TypeScript work; recorded, not diagnosed.
+
+**Numbers.**
+
+* Bench rows (`bench/RESULTS.md`, finding 6; budgets in `bench/budgets.toml`): `dispatch/call_sync/object_param` 48.7 ns
+  (the `add` row 49.4 ns: ratio gate `object_param_vs_bare_call` max 2.0, measured 1.0), `return_object` 84.0 ns,
+  `return_interned_object` 84.0 ns (ADR-040's target: within 2x of `add`: 1.7x), `boundary/port_call/notify` 24.3 ns,
+  `boundary/callback/notify` 43.2 ns, `boundary/callback/async_roundtrip` 182.7 ns. Host side (each runtime's own suite,
+  release or JIT'd, one machine): Swift `adopt` 489 ns/op for a first adoption and 141 ns/op for one that finds a live wrapper
+  (and releases the extra reference); Kotlin 15.5 to 22.5 ns/op (live wrapper), 190 to 204 ns/op (a new wrapper and its
+  close); TypeScript 671 to 891 ns/op (a new wrapper), about 220 ns/op for the identity lookup alone and 1.0 to 1.3 us/op with its
+  `Release` through the in-process fake transport.
+* **Size** (`scripts/wasm-size.sh`): `web/hello-wasm` 118,929 gzipped (gate 120,000: ok; no wasm change, the build only
+  grew by what the playground-independent hello template links). `web/hello-runtime-js` **26,313 gzipped against a gate of
+  26,000 (record 25,996): 317 bytes of growth, 313 over**. About 97 bytes are the mirror's callback entries (the `Mirror`
+  class always ships) and about 220 are `adopt` in every constructor, the late-finalizer handling, `_giveBack` / `_held` /
+  `hostRefs` and the dispatch change; hello does not include `callbacks.ts`, `adoptObject` or `requireOwn`. Two trims gave
+  nothing measurable. **Proposal**: raise `budget_gzip_bytes` of `web/hello-runtime-js` to 26,500 and re-record at 26,313 in
+  the integrator's commit (`scripts/wasm-size.sh --record`), or let ts-size-e4 land first and re-measure; the budget is not
+  changed on this branch.
+
+**Counts.** (see the report that merged this piece; the matrix was run once at the end)
+
+COUNTS_PLACEHOLDER
