@@ -21,11 +21,70 @@ jobs:
           node --version
           swift --version
           uname -a
-      - name: The failing tests alone, with the adapter's and the server's timelines
+      - name: Close with a receive pending, by how long after the receive was registered
         continue-on-error: true
-        working-directory: runtimes/swift/UndraRuntime
         run: |
-          for t in testEchoTextAndBinaryAndAClientClose testAConnectionTheCoreLetsGoIsClosedGoingAway; do
-            echo "######## $t"
-            swift test --filter URLSessionWebSocketAdapterTests/$t 2>&1 | grep -E "WSDBG|SRVDBG|error:|Executed 1 test" | cut -c1-300 | sort -s -k2,2n | head -150
-          done
+          node contract-tests/servers/realtime-server.mjs --port 0 > "$RUNNER_TEMP/server.out" 2>&1 &
+          sleep 2
+          PORT="$(grep READY "$RUNNER_TEMP/server.out" | cut -d' ' -f2)"
+          cat > "$RUNNER_TEMP/main.swift" <<'SWIFT'
+          import Foundation
+
+          final class Delegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+              var opened: CheckedContinuation<Void, Never>?
+              func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol p: String?) { opened?.resume(); opened = nil }
+          }
+
+          func record(_ port: String) async -> String {
+              var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/stats")!)
+              req.cachePolicy = .reloadIgnoringLocalCacheData
+              guard let (d, _) = try? await URLSession.shared.data(for: req),
+                    let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                    let cs = j["connections"] as? [[String: Any]],
+                    let last = cs.last(where: { ($0["path"] as? String) == "/ws/echo" }) else { return "?" }
+              return last["closeCode"] is NSNull || last["closeCode"] == nil ? "NO-FRAME(clientClosed=\(last["clientClosed"] ?? "?"))" : "frame \(last["closeCode"]!)"
+          }
+
+          /// receive: "none" | "handler" (registered at once) | "async" (a Task)
+          func trial(_ port: String, receive: String, delayMs: Int, echo: Bool, nonConcurrentQueue: Bool, ping: Bool = false) async -> String {
+              let d = Delegate()
+              let queue = OperationQueue()
+              if nonConcurrentQueue { queue.maxConcurrentOperationCount = 1 }
+              let session = URLSession(configuration: .default, delegate: d, delegateQueue: queue)
+              var request = URLRequest(url: URL(string: "ws://127.0.0.1:\(port)/ws/echo")!)
+              request.timeoutInterval = 60
+              let task = session.webSocketTask(with: request)
+              task.maximumMessageSize = 16 * 1024 * 1024
+              await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in d.opened = c; task.resume() }
+              if echo { try? await task.send(.string("hello")); _ = try? await task.receive() }
+              switch receive {
+              case "handler": task.receive { _ in }
+              case "async": Task { _ = try? await task.receive() }
+              default: break
+              }
+              if ping { await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in task.sendPing { _ in c.resume() } } }
+              if delayMs > 0 { try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000) }
+              task.cancel(with: .normalClosure, reason: Data("done".utf8))
+              session.finishTasksAndInvalidate()
+              try? await Task.sleep(nanoseconds: 600_000_000)
+              return await record(port)
+          }
+
+          let port = CommandLine.arguments[1]
+          for queueSerial in [false, true] {
+              for receive in ["none", "handler", "async"] {
+                  for delay in [0, 1, 5, 20, 100] {
+                      var out: [String] = []
+                      for _ in 0..<3 { out.append(await trial(port, receive: receive, delayMs: delay, echo: false, nonConcurrentQueue: queueSerial)) }
+                      print("serialQueue=\(queueSerial) receive=\(receive) cancel after \(delay)ms: " + out.joined(separator: " | "))
+                  }
+              }
+          }
+          for receive in ["none", "handler"] {
+              var out: [String] = []
+              for _ in 0..<5 { out.append(await trial(port, receive: receive, delayMs: 0, echo: false, nonConcurrentQueue: true, ping: true)) }
+              print("PING-PONG FIRST, then cancel at once, receive=\(receive): " + out.joined(separator: " | "))
+          }
+          SWIFT
+          swiftc -swift-version 5 -o "$RUNNER_TEMP/diag" "$RUNNER_TEMP/main.swift"
+          "$RUNNER_TEMP/diag" "$PORT"
