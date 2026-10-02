@@ -44,6 +44,8 @@ public final class UndraCore: @unchecked Sendable {
         var portAdapters: [UInt32: String] = [:]
         var adapters: [any UndraAdapter] = []
         var liveObjects = 0
+        /// Page calls (target 3) sent so far (``UndraStats/hostPageCalls``).
+        var pageCalls = 0
         var isShutDown = false
         var schemaHash: UInt64 = 0
         /// What the connection is doing (``UndraCore/connectionState``).
@@ -454,7 +456,7 @@ public final class UndraCore: @unchecked Sendable {
     /// Counters from the core (when reachable) and from this runtime.
     public func stats() -> UndraStats {
         var stats = UndraStats(json: transport.statsJSON() ?? "")
-        let host = state.withLock { (current: inout State) -> (live: Int, calls: Int, streams: Int, ports: Int) in
+        let host = state.withLock { (current: inout State) -> (live: Int, calls: Int, streams: Int, ports: Int, pages: Int) in
             var calls = 0
             var streams = 0
             for entry in current.pending.values {
@@ -467,11 +469,12 @@ public final class UndraCore: @unchecked Sendable {
                     break
                 }
             }
-            return (live: current.liveObjects, calls: calls, streams: streams, ports: current.ports.count)
+            return (live: current.liveObjects, calls: calls, streams: streams, ports: current.ports.count, pages: current.pageCalls)
         }
         stats.hostLiveHandles = host.live
         stats.hostPendingCalls = host.calls
         stats.hostOpenStreams = host.streams
+        stats.hostPageCalls = host.pages
         stats.hostRegisteredPorts = host.ports
         stats.hostMirroredStores = mirror.registeredCount
         stats.mirror = mirror.stats()
@@ -501,6 +504,7 @@ public final class UndraCore: @unchecked Sendable {
     /// given back here; any other outcome means the core owns them (ADR-041).
     public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8], lending: [UInt64?] = []) throws -> [UInt8] {
         UndraCore.checkMethod(target, method)
+        notePageCall(target)
         let lent = LentInstances(lending, to: callbacks)
         // Read-your-writes: on the main thread the call's change-sets are applied before it returns.
         return try lent.givingBackIfRefused {
@@ -535,9 +539,20 @@ public final class UndraCore: @unchecked Sendable {
     /// `lending` lists the callback instances the arguments carry, as for ``callSync(_:method:args:lending:)``.
     public func call(_ target: CallTarget, method: UInt32, args: [UInt8], lending: [UInt64?] = []) async throws -> [UInt8] {
         UndraCore.checkMethod(target, method)
+        notePageCall(target)
         let lent = LentInstances(lending, to: callbacks)
         return try await lent.givingBackIfRefused {
             try await send(target, args: args, lent: lent)
+        }
+    }
+
+    /// Counts a page call for ``UndraStats/hostPageCalls``.
+    private func notePageCall(_ target: CallTarget) {
+        guard case .lazyListPage = target else {
+            return
+        }
+        state.withLock { (current: inout State) -> Void in
+            current.pageCalls += 1
         }
     }
 
