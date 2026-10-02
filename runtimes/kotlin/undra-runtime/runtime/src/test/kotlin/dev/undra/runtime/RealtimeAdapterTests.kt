@@ -18,8 +18,19 @@ import dev.undra.runtime.testing.Suite
 import dev.undra.runtime.testing.assertEq
 import dev.undra.runtime.testing.assertTrue
 import dev.undra.runtime.testing.fail
+import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.SocketTimeoutException
+import java.security.MessageDigest
+import java.util.Base64
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Test
@@ -279,6 +290,54 @@ class RealtimeAdapterTests : Suite() {
             eventually("the server saw 1001", timeoutMs = 2_000) { server.last("/ws/stall").closeCode == 1001 }
         }
 
+        case("WebSocket: a connect cancelled while the handshake is in flight leaves no connection behind") {
+            ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { listener ->
+                val answer = CountDownLatch(1)
+                // true once the client goes away (EOF or a close frame) after the server completed the handshake
+                val left = CompletableFuture<Boolean>()
+                thread(isDaemon = true, name = "ws-cancel-test") {
+                    try {
+                        listener.accept().use { socket ->
+                            val input = socket.getInputStream()
+                            val head = StringBuilder()
+                            while (!head.endsWith("\r\n\r\n")) {
+                                val b = input.read()
+                                if (b < 0) throw java.io.IOException("the client left during the handshake")
+                                head.append(b.toChar())
+                            }
+                            val key = head.lines().first { it.startsWith("Sec-WebSocket-Key:", ignoreCase = true) }.substringAfter(':').trim()
+                            val accept = Base64.getEncoder().encodeToString(
+                                MessageDigest.getInstance("SHA-1").digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").toByteArray()),
+                            )
+                            answer.await()
+                            socket.getOutputStream().apply {
+                                write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: $accept\r\n\r\n".toByteArray())
+                                flush()
+                            }
+                            socket.soTimeout = 3_000
+                            val first = try {
+                                input.read()
+                            } catch (e: SocketTimeoutException) {
+                                -2
+                            }
+                            left.complete(first == -1 || first == 0x88)
+                        }
+                    } catch (e: Exception) {
+                        left.complete(true)
+                    }
+                }
+                runBlocking {
+                    val adapter = ClientWebSocketAdapter(connectTimeoutMillis = 5_000)
+                    val connecting = launch(Dispatchers.Default) { adapter.connect("ws://127.0.0.1:${listener.localPort}/", emptyList(), emptyList()) }
+                    delay(300) // the upgrade request is out; the server holds its answer
+                    connecting.cancel()
+                    answer.countDown()
+                    connecting.join()
+                }
+                assertTrue(left.get(10, TimeUnit.SECONDS), "the server saw the client of the cancelled connect leave")
+            }
+        }
+
         case("WebSocket: an unreachable server is Network; headers and subprotocols the client cannot send are Refused") {
             val server = server()
             val closedPort = ServerSocket(0).use { it.localPort }
@@ -289,6 +348,18 @@ class RealtimeAdapterTests : Suite() {
                 assertEq(null, failsWith<WsError.Refused> { port.connect("${server.ws}/ws/echo", emptyList(), listOf(Header("X", "a\r\nInjected: 1"))) }.status)
                 assertEq(null, failsWith<WsError.Refused> { port.connect("${server.ws}/ws/echo", listOf("bad protocol"), emptyList()) }.status)
                 assertEq(null, failsWith<WsError.Refused> { port.connect("ws://", emptyList(), emptyList()) }.status)
+            }
+        }
+
+        case("WebSocket and SSE: a host name that does not resolve is Network; SSE answered 401 is Refused(401)") {
+            val server = server()
+            within {
+                failsWith<WsError.Network> { ws().connect("ws://nonexistent.invalid/", emptyList(), emptyList()) }
+                for (adapter in listOf<SseAdapter>(JdkHttpSseAdapter(), UrlConnectionSseAdapter())) {
+                    val port = SsePortAdapter(adapter)
+                    failsWith<SseError.Network> { port.open("http://nonexistent.invalid/", emptyList(), null) }
+                    assertEq(401.toUShort(), failsWith<SseError.Refused> { port.open("${server.http}/sse/status?code=401", emptyList(), null) }.status)
+                }
             }
         }
 

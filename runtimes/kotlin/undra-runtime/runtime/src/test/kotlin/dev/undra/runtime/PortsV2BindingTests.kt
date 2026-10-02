@@ -1,5 +1,7 @@
 package dev.undra.runtime
 
+import dev.undra.runtime.adapters.DbAdapter
+import dev.undra.runtime.adapters.DbConnection
 import dev.undra.runtime.adapters.DbConstraint
 import dev.undra.runtime.adapters.DbError
 import dev.undra.runtime.adapters.DbExecuted
@@ -21,19 +23,37 @@ import dev.undra.runtime.support.FakeTransport
 import dev.undra.runtime.support.ScriptedDb
 import dev.undra.runtime.support.ScriptedSse
 import dev.undra.runtime.support.ScriptedWebSocket
+import dev.undra.runtime.adapters.dbPort
+import dev.undra.runtime.adapters.ssePort
+import dev.undra.runtime.adapters.webSocketPort
+import dev.undra.runtime.support.LogCapture
 import dev.undra.runtime.support.attach
 import dev.undra.runtime.support.eventually
+import dev.undra.runtime.support.handledBy
+import dev.undra.runtime.support.portMethods
 import dev.undra.runtime.testing.Suite
 import dev.undra.runtime.testing.assertEq
 import dev.undra.runtime.testing.assertTrue
 import dev.undra.runtime.testing.fail
 import dev.undra.runtime.wire.Codecs
+import dev.undra.runtime.wire.Payloads.PortReply
+import dev.undra.runtime.wire.Payloads.PortStatus
 import dev.undra.runtime.wire.UndraCodec
+import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.decodeAll
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.logging.Level
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Test
 
@@ -74,6 +94,22 @@ private fun <E : Throwable> portCall(impl: PortImpl, method: UInt, errors: Undra
 private fun text(vararg values: String): List<WsMessage> = values.map { WsMessage.Text(it) }
 
 private fun event(data: String, id: String? = null): SseEvent = SseEvent(id, "message", data, null)
+
+/** Calls [methodId] of [portId] through [t]'s core, as the core would, and returns the `PortReply` the host answered with. */
+private fun answer(t: FakeTransport, portId: UInt, methodId: UInt, args: ByteArray): PortReply {
+    val callId = nextPortCallId.getAndIncrement().toUInt()
+    assertEq(PortOutcome.Async, t.portCall(portId, methodId, callId, args), "the opt-in ports are async")
+    var found: ByteArray? = null
+    eventually("the reply to port call $callId") {
+        found = t.portReplyBytes.firstOrNull { UndraReader(it).readU32() == callId }
+        found != null
+    }
+    return PortReply.decode(found!!)
+}
+
+private val nextPortCallId = AtomicInteger(1)
+
+private fun args(fill: UndraWriter.() -> Unit): ByteArray = UndraWriter().also(fill).toByteArray()
 
 /** The bindings of the opt-in ports (ADR-047, ADR-048) over scripted adapters: ids, the pull, ends, transactions. */
 class PortsV2BindingTests : Suite() {
@@ -302,6 +338,25 @@ class PortsV2BindingTests : Suite() {
             assertEq(0, port.openConnections)
         }
 
+        case("WebSocket: a connect in flight when the core detaches is closed going away once it opens") {
+            val ws = ScriptedWebSocket()
+            val handshake = CompletableDeferred<Unit>()
+            ws.connectGate = handshake
+            val port = WebSocketPortAdapter(ws)
+            val impl = port.portImpl()
+            val opened = blocking {
+                val opening = async { port.connect("ws://late.test", emptyList(), emptyList()) }
+                while (ws.connectsStarted.get() == 0) delay(1)
+                // The core closes while the handshake is in flight: the detach cannot see the connection yet.
+                impl.detach!!.invoke()
+                handshake.complete(Unit)
+                opening.await()
+            }
+            eventually("the late connection closed going away") { ws.connections.single().closes.toList() == listOf(1001 to "") }
+            assertEq(0, port.openConnections)
+            blocking { assertEq(emptyList<WsMessage>(), port.receive(opened.conn, 16u)) }
+        }
+
         case("WebSocket: a core that closes detaches its ports, and a registration that replaces one detaches it") {
             val ws = ScriptedWebSocket()
             val port = WebSocketPortAdapter(ws)
@@ -318,6 +373,59 @@ class PortsV2BindingTests : Suite() {
             core2.registerPort(StandardPorts.WebSocket.PORT_ID, WebSocketPortAdapter(ScriptedWebSocket()).portImpl())
             eventually("the replaced binding closed its connection") { second.connections[0].closes.toList() == listOf(1001 to "") }
             core2.close()
+        }
+
+        case("through the port registry: typed errors are status 1, a raw WsError, SseError or DbError from its own port too; others are status 2") {
+            // The bindings answer their typed errors as UndraPortExceptions.
+            val t = FakeTransport()
+            attach(
+                t,
+                adapters = mapOf(
+                    StandardPorts.WebSocket.PORT_ID to webSocketPort(ScriptedWebSocket()),
+                    StandardPorts.Sse.PORT_ID to ssePort(ScriptedSse()),
+                    StandardPorts.Db.PORT_ID to dbPort(ScriptedDb()),
+                ),
+            ).use {
+                val receive = answer(t, StandardPorts.WebSocket.PORT_ID, StandardPorts.WebSocket.RECEIVE, args { writeU32(7u); writeU32(16u) })
+                assertEq(PortStatus.ERROR, receive.status)
+                assertEq(WsError.Network("no WebSocket connection 7"), WsError.decodeAll(receive.body))
+                val next = answer(t, StandardPorts.Sse.PORT_ID, StandardPorts.Sse.NEXT, args { writeU32(9u); writeU32(16u) })
+                assertEq(PortStatus.ERROR, next.status)
+                assertEq(SseError.Network("no event stream 9"), SseError.decodeAll(next.body))
+                val query = answer(t, StandardPorts.Db.PORT_ID, StandardPorts.Db.QUERY, args { writeU32(99u); writeStr("SELECT 1"); Codecs.vec(DbValue).encode(this, emptyList()) })
+                assertEq(PortStatus.ERROR, query.status)
+                assertEq(DbError.Unavailable("no open database or transaction 99"), DbError.decodeAll(query.body))
+                // Arguments that do not decode are a bug, not the port's error: unavailable.
+                assertEq(PortStatus.UNAVAILABLE, answer(t, StandardPorts.WebSocket.PORT_ID, StandardPorts.WebSocket.RECEIVE, args { writeU32(7u) }).status)
+            }
+
+            // A hand-written implementation that throws the port's own error type is answered like Kv's StorageError (ADR-049).
+            val raw = FakeTransport()
+            LogCapture("dev.undra.runtime").use { log ->
+                attach(
+                    raw,
+                    adapters = mapOf(
+                        StandardPorts.WebSocket.PORT_ID to PortImpl(false, portMethods(StandardPorts.WebSocket.SEND handledBy { _: ByteArray -> throw WsError.Closed(1000u, "x") }, StandardPorts.WebSocket.CLOSE handledBy { _: ByteArray -> throw DbError.Busy })),
+                        StandardPorts.Sse.PORT_ID to PortImpl(false, portMethods(StandardPorts.Sse.NEXT handledBy { _: ByteArray -> throw SseError.Ended })),
+                        StandardPorts.Db.PORT_ID to PortImpl(false, portMethods(StandardPorts.Db.QUERY handledBy { _: ByteArray -> throw DbError.Busy })),
+                    ),
+                ).use {
+                    val send = answer(raw, StandardPorts.WebSocket.PORT_ID, StandardPorts.WebSocket.SEND, ByteArray(0))
+                    assertEq(PortStatus.ERROR, send.status, "WsError from WebSocket")
+                    assertEq(WsError.Closed(1000u, "x"), WsError.decodeAll(send.body))
+                    val next = answer(raw, StandardPorts.Sse.PORT_ID, StandardPorts.Sse.NEXT, ByteArray(0))
+                    assertEq(PortStatus.ERROR, next.status, "SseError from Sse")
+                    assertEq(SseError.Ended, SseError.decodeAll(next.body))
+                    val query = answer(raw, StandardPorts.Db.PORT_ID, StandardPorts.Db.QUERY, ByteArray(0))
+                    assertEq(PortStatus.ERROR, query.status, "DbError from Db")
+                    assertEq(DbError.Busy, DbError.decodeAll(query.body))
+                    // Another port's error type would not decode as this port's error in the core.
+                    assertEq(PortStatus.UNAVAILABLE, answer(raw, StandardPorts.WebSocket.PORT_ID, StandardPorts.WebSocket.CLOSE, ByteArray(0)).status, "DbError from WebSocket")
+                    eventually("one ERROR record") { log.records.count { it.level == Level.SEVERE } == 1 }
+                    val message = log.records.single { it.level == Level.SEVERE }.message
+                    assertTrue(message.contains("the WebSocket.close port method"), message)
+                }
+            }
         }
 
         case("WebSocket: the port methods decode their arguments and answer typed errors as the port's error body") {
@@ -425,6 +533,24 @@ class PortsV2BindingTests : Suite() {
             port.portImpl().detach!!.invoke()
             eventually("both closed") { sse.streams.all { it.closed == 1 } }
             assertEq(0, port.openStreams)
+        }
+
+        case("Sse: an open in flight when the core detaches is closed once it opens") {
+            val sse = ScriptedSse()
+            val request = CompletableDeferred<Unit>()
+            sse.openGate = request
+            val port = SsePortAdapter(sse)
+            val impl = port.portImpl()
+            val id = blocking {
+                val opening = async { port.open("http://late.test", emptyList(), null) }
+                while (sse.opensStarted.get() == 0) delay(1)
+                impl.detach!!.invoke()
+                request.complete(Unit)
+                opening.await()
+            }
+            eventually("the late stream closed") { sse.streams.single().closed == 1 }
+            assertEq(0, port.openStreams)
+            blocking { assertEq(emptyList<SseEvent>(), port.next(id, 16u)) }
         }
 
         case("Sse: the port methods speak bytes") {
@@ -643,6 +769,56 @@ class PortsV2BindingTests : Suite() {
             port.portImpl().detach!!.invoke()
             eventually("both closed") { db.opened.all { it.closed } && port.openDatabases == 0 }
             assertTrue(db.calls.any { it.db == "a" && it.sql == "ROLLBACK" })
+        }
+
+        case("Db: an open in flight when the core detaches is closed once it opens") {
+            val db = ScriptedDb()
+            val file = CompletableDeferred<Unit>()
+            db.openGate = file
+            val port = DbPortAdapter(db)
+            val impl = port.portImpl()
+            val opened = blocking {
+                val opening = async { port.open("late", emptyList()) }
+                while (db.opensStarted.get() == 0) delay(1)
+                impl.detach!!.invoke()
+                file.complete(Unit)
+                opening.await()
+            }
+            eventually("the late database closed") { db.opened.single().closed && port.openDatabases == 0 }
+            blocking {
+                expectError(DbError.Unavailable("no open database or transaction ${opened.db}")) { port.query(opened.db, "SELECT 1", emptyList()) }
+            }
+        }
+
+        case("Db: an open cancelled while it prepares the database closes the connection it opened") {
+            // Like the real adapters, this connection closes on a thread of its own: a close attempted from the cancelled
+            // caller without care would not run at all, and the file would stay open.
+            val closed = AtomicBoolean(false)
+            val preparing = CompletableDeferred<Unit>()
+            val adapter = object : DbAdapter {
+                override suspend fun open(name: String): DbConnection = object : DbConnection {
+                    override suspend fun execute(sql: String, params: List<DbValue>): DbExecuted = DbExecuted(0uL, 0L)
+
+                    override suspend fun query(sql: String, params: List<DbValue>): DbRows {
+                        preparing.complete(Unit)
+                        awaitCancellation()
+                    }
+
+                    override suspend fun executeScript(sql: String) = Unit
+
+                    override suspend fun close() {
+                        withContext(Dispatchers.Default) { closed.set(true) }
+                    }
+                }
+            }
+            val port = DbPortAdapter(adapter)
+            blocking {
+                val opening = launch { port.open("x", emptyList()) }
+                preparing.await()
+                opening.cancelAndJoin()
+            }
+            assertTrue(closed.get(), "the connection of the cancelled open was closed")
+            assertEq(0, port.openDatabases)
         }
 
         case("Db: the port methods speak bytes") {

@@ -11,12 +11,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -104,6 +106,9 @@ public class DbPortAdapter(
     private val closedDatabases: MutableSet<UInt> = ConcurrentHashMap.newKeySet()
     private val endedTransactions: MutableSet<UInt> = ConcurrentHashMap.newKeySet()
 
+    /** How many times [close] ran: an open that was in flight across one is closed as that [close] would have closed it. */
+    private val closings = AtomicInteger(0)
+
     private class Database(val id: UInt, val connection: DbConnection) {
         /** The serial queue: kotlinx's mutex is fair, so operations run in arrival order. */
         val queue = Mutex()
@@ -123,6 +128,7 @@ public class DbPortAdapter(
     public suspend fun open(name: String, migrations: List<DbMigration>): DbOpened {
         validateName(name)
         validateMigrations(migrations)
+        val closingsBefore = closings.get()
         val connection = try {
             adapter.open(name)
         } catch (e: DbError) {
@@ -135,7 +141,8 @@ public class DbPortAdapter(
         val version = try {
             prepare(connection, name, migrations)
         } catch (e: Throwable) {
-            closeQuietly(connection)
+            // Also when the caller was cancelled (the core went away): the file must not stay open.
+            withContext(NonCancellable) { closeQuietly(connection) }
             throw when (e) {
                 is DbError, is CancellationException -> e
                 is Exception -> DbError.Sql(describe(e))
@@ -143,7 +150,10 @@ public class DbPortAdapter(
             }
         }
         val id = ids.getAndIncrement().toUInt()
-        databases[id] = Database(id, connection)
+        val database = Database(id, connection)
+        databases[id] = database
+        // A close() (the core went away) that ran while this opened could not see it: it goes too.
+        if (closings.get() != closingsBefore) scope.launch { closeDatabase(database) }
         return DbOpened(id, version)
     }
 
@@ -283,8 +293,12 @@ public class DbPortAdapter(
     /** How many databases are open (a database closing is counted until its connection is closed). */
     public val openDatabases: Int get() = databases.size
 
-    /** Closes every open database (rolling back running transactions), without waiting. The core does this when it closes ([PortImpl.detach]). */
+    /**
+     * Closes every open database (rolling back running transactions), without waiting, and so every database whose `open` is
+     * in flight once it opens. The core does this when it closes ([PortImpl.detach]).
+     */
     override fun close() {
+        closings.incrementAndGet()
         for (database in databases.values) scope.launch { closeDatabase(database) }
     }
 

@@ -87,6 +87,9 @@ public class WebSocketPortAdapter(private val adapter: WebSocketAdapter) : AutoC
     /** Connections the core closed: only how, so that later calls answer as the port says (`[]`, `Closed`, `Ok`). */
     private val closed = ConcurrentHashMap<UInt, WsError.Closed>()
 
+    /** How many times [close] ran: a connect that was in flight across one is closed as that [close] would have closed it. */
+    private val closings = AtomicInteger(0)
+
     private class Line(val id: UInt, val connection: WebSocketConnection, val inbound: PulledStream<WsMessage>)
 
     /**
@@ -98,6 +101,7 @@ public class WebSocketPortAdapter(private val adapter: WebSocketAdapter) : AutoC
         if (!(url.startsWith("ws://", ignoreCase = true) || url.startsWith("wss://", ignoreCase = true))) {
             throw WsError.Refused(null, "invalid URL: $url")
         }
+        val closingsBefore = closings.get()
         val connection = try {
             adapter.connect(url, protocols, headers)
         } catch (e: WsError) {
@@ -116,8 +120,11 @@ public class WebSocketPortAdapter(private val adapter: WebSocketAdapter) : AutoC
             busy = { WsError.Protocol("a receive is already pending on connection $id") },
             readAhead = connection as? ReadAheadSource,
         )
-        lines[id] = Line(id, connection, inbound)
+        val line = Line(id, connection, inbound)
+        lines[id] = line
         inbound.start()
+        // A close() (the core went away) that ran while the adapter connected could not see this connection: it goes too.
+        if (closings.get() != closingsBefore && markClosed(line, GOING_AWAY, "")) scope.launch { closeQuietly(line, GOING_AWAY, "") }
         return WsOpened(id, connection.protocol)
     }
 
@@ -184,10 +191,11 @@ public class WebSocketPortAdapter(private val adapter: WebSocketAdapter) : AutoC
     public val openConnections: Int get() = lines.size
 
     /**
-     * Closes every open connection with 1001 (going away), without waiting for the handshakes. The binding stays usable.
-     * The core does this when it closes ([PortImpl.detach]).
+     * Closes every open connection with 1001 (going away), without waiting for the handshakes, and so every connection whose
+     * `connect` is in flight once it opens. The binding stays usable. The core does this when it closes ([PortImpl.detach]).
      */
     override fun close() {
+        closings.incrementAndGet()
         for (line in lines.values) {
             if (markClosed(line, GOING_AWAY, "")) scope.launch { closeQuietly(line, GOING_AWAY, "") }
         }

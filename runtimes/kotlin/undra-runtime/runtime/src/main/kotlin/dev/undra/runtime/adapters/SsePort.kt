@@ -68,6 +68,9 @@ public class SsePortAdapter(private val adapter: SseAdapter) : AutoCloseable {
     /** Streams the core closed. */
     private val closed: MutableSet<UInt> = ConcurrentHashMap.newKeySet()
 
+    /** How many times [close] ran: an open that was in flight across one is closed as that [close] would have closed it. */
+    private val closings = AtomicInteger(0)
+
     private class Feed(val id: UInt, val stream: SseStream, val inbound: PulledStream<SseEvent>)
 
     /**
@@ -79,6 +82,7 @@ public class SsePortAdapter(private val adapter: SseAdapter) : AutoCloseable {
         if (!(url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true))) {
             throw SseError.Refused(null, "invalid URL: $url")
         }
+        val closingsBefore = closings.get()
         val stream = try {
             adapter.open(url, headers, lastEventId)
         } catch (e: SseError) {
@@ -97,8 +101,11 @@ public class SsePortAdapter(private val adapter: SseAdapter) : AutoCloseable {
             busy = { SseError.Protocol("a next is already pending on stream $id") },
             readAhead = stream as? ReadAheadSource,
         )
-        streams[id] = Feed(id, stream, inbound)
+        val feed = Feed(id, stream, inbound)
+        streams[id] = feed
         inbound.start()
+        // A close() (the core went away) that ran while the adapter opened could not see this stream: it goes too.
+        if (closings.get() != closingsBefore && markClosed(feed)) scope.launch { closeQuietly(feed) }
         return id
     }
 
@@ -143,8 +150,12 @@ public class SsePortAdapter(private val adapter: SseAdapter) : AutoCloseable {
     /** How many streams are open (not closed by the core). */
     public val openStreams: Int get() = streams.size
 
-    /** Closes every open stream, without waiting. The binding stays usable. The core does this when it closes ([PortImpl.detach]). */
+    /**
+     * Closes every open stream, without waiting, and so every stream whose `open` is in flight once it opens. The binding
+     * stays usable. The core does this when it closes ([PortImpl.detach]).
+     */
     override fun close() {
+        closings.incrementAndGet()
         for (feed in streams.values) {
             if (markClosed(feed)) scope.launch { closeQuietly(feed) }
         }

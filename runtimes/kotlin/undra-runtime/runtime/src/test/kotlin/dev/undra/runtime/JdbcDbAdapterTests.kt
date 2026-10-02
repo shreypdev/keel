@@ -167,6 +167,53 @@ class JdbcDbAdapterTests : Suite() {
             }
         }
 
+        case("values travel only as parameters: an injection attempt is stored as text; ? and ; in literals, comments and quoted names are neither") {
+            withDb { port, _ ->
+                val db = port.open(":memory:", emptyList()).db
+                port.execute(db, "CREATE TABLE t (v TEXT)", emptyList())
+                val attack = "'; DROP TABLE t; --"
+                port.execute(db, "INSERT INTO t (v) VALUES (?)", listOf(DbValue.Text(attack)))
+                assertEq(listOf(listOf<DbValue>(DbValue.Text(attack))), port.query(db, "SELECT v FROM t WHERE v = ?", listOf(DbValue.Text(attack))).rows)
+                val tricky = "SELECT '?;' AS \"a;?\", [b;?] FROM (SELECT ? AS [b;?]) /* ; ? */ WHERE ?2 = ?2 -- ; ?"
+                assertEq(listOf(listOf<DbValue>(DbValue.Text("?;"), DbValue.Integer(5))), port.query(db, tricky, listOf(DbValue.Integer(5), DbValue.Integer(6))).rows)
+                assertEq(DbError.Sql("the statement has 2 parameters, 1 were given"), dbFails<DbError.Sql> { port.query(db, "SELECT #a, ?", listOf(DbValue.Integer(1))) })
+                assertEq(listOf(listOf<DbValue>(DbValue.Integer(1))), port.query(db, "SELECT COUNT(*) FROM t", emptyList()).rows, "the table is still there")
+            }
+        }
+
+        case("text with U+0000, blobs with NUL bytes, an empty blob apart from NULL and a row over 2 MB round-trip") {
+            withDb { port, _ ->
+                val db = port.open(":memory:", emptyList()).db
+                port.execute(db, "CREATE TABLE r (v)", emptyList())
+                val big = ByteArray(2 * 1024 * 1024 + 17) { (it % 251).toByte() }
+                val values = listOf(DbValue.Text("a\u0000b"), DbValue.Blob(byteArrayOf(0, 0, 1, 0)), DbValue.Blob(ByteArray(0)), DbValue.Null, DbValue.Blob(big))
+                for (v in values) port.execute(db, "INSERT INTO r (v) VALUES (?)", listOf(v))
+                assertEq(values, port.query(db, "SELECT v FROM r ORDER BY rowid", emptyList()).rows.map { it.single() })
+            }
+        }
+
+        case("a transaction left open when the core detaches is rolled back: a fresh adapter on the file begins at once and sees none of it") {
+            withDb { port, dir ->
+                val db = port.open("left", NOTES).db
+                port.execute(db, "INSERT INTO notes (title) VALUES ('committed')", emptyList())
+                val tx = port.begin(db)
+                port.execute(tx, "INSERT INTO notes (title) VALUES ('never committed')", emptyList())
+                port.portImpl().detach!!.invoke()
+                eventually("the detached database is closed") { port.openDatabases == 0 }
+                // A short busy timeout: a connection still holding the write lock would make BEGIN IMMEDIATE Busy.
+                val fresh = DbPortAdapter(JdbcDbAdapter(dir.path), busyTimeoutMillis = 100)
+                try {
+                    val again = fresh.open("left", NOTES).db
+                    val tx2 = fresh.begin(again)
+                    assertEq(listOf(listOf<DbValue>(DbValue.Text("committed"))), fresh.query(tx2, "SELECT title FROM notes", emptyList()).rows)
+                    fresh.rollback(tx2)
+                } finally {
+                    fresh.close()
+                    eventually("the fresh databases are closed") { fresh.openDatabases == 0 }
+                }
+            }
+        }
+
         case("ids after close are Unavailable; transactions commit and roll back") {
             withDb { port, _ ->
                 val db = port.open("t", NOTES).db

@@ -116,6 +116,22 @@ class PortsV2TextTests : Suite() {
             assertEq(0, SqlText.parameterCount("SELECT '?', \"?\", [?] -- ?\n /* :a */"))
             assertEq(1, SqlText.parameterCount("SELECT * FROM t WHERE a = ? AND b = 'x:y'"))
         }
+
+        case("SQL: every variable form SQLite's tokenizer knows counts as it does (`#name`, `::` and `(...)` after any prefix)") {
+            // The counts the SQLite of sqlite-jdbc reports (sqlite3_bind_parameter_count) for each statement; Android, which
+            // has no such call, relies on these. A form counted short would bind the values to the wrong parameters there.
+            assertEq(1, SqlText.parameterCount("SELECT #a"))
+            assertEq(2, SqlText.parameterCount("SELECT #a, #a, :a"))
+            assertEq(2, SqlText.parameterCount("SELECT ?, #b"))
+            assertEq(1, SqlText.parameterCount("SELECT :a::b"))
+            assertEq(1, SqlText.parameterCount("SELECT @a::b, @a::b"))
+            assertEq(2, SqlText.parameterCount("SELECT :a(1), :a(2)"))
+            assertEq(1, SqlText.parameterCount("SELECT \$x(y), \$x(y)"))
+            assertEq(1, SqlText.parameterCount("SELECT :\$"))
+            assertEq(1, SqlText.parameterCount("SELECT @a\$"))
+            assertEq(2, SqlText.parameterCount("SELECT ?1, :1"))
+            assertEq(listOf("SELECT :a(;)", "SELECT 2"), SqlText.statements("SELECT :a(;); SELECT 2"))
+        }
     }
 
     @Test

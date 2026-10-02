@@ -1,9 +1,12 @@
 package dev.undra.runtime
 
+import dev.undra.runtime.adapters.DbError
 import dev.undra.runtime.adapters.FsError
 import dev.undra.runtime.adapters.HttpError
+import dev.undra.runtime.adapters.SseError
 import dev.undra.runtime.adapters.StandardPorts
 import dev.undra.runtime.adapters.StorageError
+import dev.undra.runtime.adapters.WsError
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.Payloads.PortStatus
 import dev.undra.runtime.wire.encodeToByteArray
@@ -30,7 +33,8 @@ import kotlinx.coroutines.launch
  *
  * A typed failure answers with status `ERROR` (1) and the encoded error: an [UndraPortException] with its body, and,
  * thrown as itself by a method of the standard port it belongs to, a [StorageError] (`Kv`, `SecureStore`; ADR-049), an
- * [FsError] (`Fs`) or an [HttpError] (`Http`). Any other exception is a bug in the port implementation: it is logged at
+ * [FsError] (`Fs`), an [HttpError] (`Http`), or, for the opt-in ports, a [WsError] (`WebSocket`), an [SseError] (`Sse`)
+ * or a [DbError] (`Db`). Any other exception is a bug in the port implementation: it is logged at
  * error level, naming the port and the method, handed to [failed] (which passes it to `LoadOptions.onError`) and
  * answered `UNAVAILABLE` (2), so the core sees a `PortError::Unavailable` rather than a hung call.
  */
@@ -139,7 +143,8 @@ internal class PortRegistry(
         UndraLog.error(
             "${describe(portId, methodId)} failed with ${error.javaClass.name}, which is not the port's typed error, so the core " +
                 "is answered unavailable (port status 2). A port implementation reports a failure as an UndraPortException with " +
-                "its error type (a standard port: StorageError for Kv and SecureStore, FsError for Fs, HttpError for Http)",
+                "its error type (a standard port: StorageError for Kv and SecureStore, FsError for Fs, HttpError for Http, WsError for " +
+                "WebSocket, SseError for Sse, DbError for Db)",
             error,
         )
         failed(error, operationName(portId, methodId))
@@ -175,6 +180,20 @@ internal class PortRegistry(
             StandardPorts.Fs.DELETE to "Fs.delete",
             StandardPorts.Fs.LIST to "Fs.list",
             StandardPorts.Timer.SET to "Timer.set",
+            StandardPorts.WebSocket.CONNECT to "WebSocket.connect",
+            StandardPorts.WebSocket.SEND to "WebSocket.send",
+            StandardPorts.WebSocket.RECEIVE to "WebSocket.receive",
+            StandardPorts.WebSocket.CLOSE to "WebSocket.close",
+            StandardPorts.Sse.OPEN to "Sse.open",
+            StandardPorts.Sse.NEXT to "Sse.next",
+            StandardPorts.Sse.CLOSE to "Sse.close",
+            StandardPorts.Db.OPEN to "Db.open",
+            StandardPorts.Db.EXECUTE to "Db.execute",
+            StandardPorts.Db.QUERY to "Db.query",
+            StandardPorts.Db.BEGIN to "Db.begin",
+            StandardPorts.Db.COMMIT to "Db.commit",
+            StandardPorts.Db.ROLLBACK to "Db.rollback",
+            StandardPorts.Db.CLOSE to "Db.close",
         )
 
         /** The operation a failed port is reported as to `onError`: `port 0x1234abcd method 0x5678cdef` (docs/ERRORS.md). */
@@ -195,6 +214,9 @@ internal class PortRegistry(
             StandardPorts.SecureStore.PORT_ID -> "SecureStore"
             StandardPorts.Fs.PORT_ID -> "Fs"
             StandardPorts.Timer.PORT_ID -> "Timer"
+            StandardPorts.WebSocket.PORT_ID -> "WebSocket"
+            StandardPorts.Sse.PORT_ID -> "Sse"
+            StandardPorts.Db.PORT_ID -> "Db"
             else -> null
         }
 
@@ -209,6 +231,9 @@ internal class PortRegistry(
                 StorageError.encodeToByteArray(error)
             error is FsError && portId == StandardPorts.Fs.PORT_ID -> FsError.encodeToByteArray(error)
             error is HttpError && portId == StandardPorts.Http.PORT_ID -> HttpError.encodeToByteArray(error)
+            error is WsError && portId == StandardPorts.WebSocket.PORT_ID -> WsError.encodeToByteArray(error)
+            error is SseError && portId == StandardPorts.Sse.PORT_ID -> SseError.encodeToByteArray(error)
+            error is DbError && portId == StandardPorts.Db.PORT_ID -> DbError.encodeToByteArray(error)
             else -> null
         }
 

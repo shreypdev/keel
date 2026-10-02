@@ -15,6 +15,7 @@ import dev.undra.runtime.adapters.WsMessage
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -85,6 +86,13 @@ class ScriptedWebSocket : WebSocketAdapter {
     @Volatile
     var failConnect: Throwable? = null
 
+    /** When set, every connect waits for it before it answers (a handshake in flight). */
+    @Volatile
+    var connectGate: CompletableDeferred<Unit>? = null
+
+    /** How many connects began (before the gate). */
+    val connectsStarted = AtomicInteger(0)
+
     inner class Conn(val url: String, val protocols: List<String>, val headers: List<Header>) : WebSocketConnection {
         val inbound = ScriptedInbound<WsMessage>()
         val sent = CopyOnWriteArrayList<WsMessage>()
@@ -108,6 +116,8 @@ class ScriptedWebSocket : WebSocketAdapter {
     }
 
     override suspend fun connect(url: String, protocols: List<String>, headers: List<Header>): WebSocketConnection {
+        connectsStarted.incrementAndGet()
+        connectGate?.await()
         failConnect?.let { throw it }
         return Conn(url, protocols, headers).also { connections.add(it) }
     }
@@ -119,6 +129,13 @@ class ScriptedSse : SseAdapter {
 
     @Volatile
     var failOpen: Throwable? = null
+
+    /** When set, every open waits for it before it answers (a request in flight). */
+    @Volatile
+    var openGate: CompletableDeferred<Unit>? = null
+
+    /** How many opens began (before the gate). */
+    val opensStarted = AtomicInteger(0)
 
     inner class Stream(val url: String, val headers: List<Header>, val lastEventId: String?) : SseStream {
         val inbound = ScriptedInbound<SseEvent>()
@@ -135,6 +152,8 @@ class ScriptedSse : SseAdapter {
     }
 
     override suspend fun open(url: String, headers: List<Header>, lastEventId: String?): SseStream {
+        opensStarted.incrementAndGet()
+        openGate?.await()
         failOpen?.let { throw it }
         return Stream(url, headers, lastEventId).also { streams.add(it) }
     }
@@ -160,6 +179,13 @@ class ScriptedDb : DbAdapter {
 
     @Volatile
     var failOpen: Throwable? = null
+
+    /** When set, every open waits for it before it answers (a file being opened). */
+    @Volatile
+    var openGate: CompletableDeferred<Unit>? = null
+
+    /** How many opens began (before the gate). */
+    val opensStarted = AtomicInteger(0)
 
     /** Statements (and scripts) whose SQL contains [fragment] fail with [error]. */
     fun failOn(fragment: String, error: Throwable) {
@@ -212,6 +238,8 @@ class ScriptedDb : DbAdapter {
     }
 
     override suspend fun open(name: String): DbConnection {
+        opensStarted.incrementAndGet()
+        openGate?.await()
         failOpen?.let { throw it }
         return Conn(name).also { opened.add(it) }
     }

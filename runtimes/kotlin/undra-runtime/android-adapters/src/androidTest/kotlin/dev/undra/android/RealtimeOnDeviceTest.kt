@@ -63,6 +63,102 @@ class RealtimeOnDeviceTest {
         }
     }
 
+    /** The `written` count of the newest connection to [path]. */
+    private fun written(path: String): Int = Regex("\"written\":(\\d+)").find(lastConnection(path))!!.groupValues[1].toInt()
+
+    @Test
+    fun typed_ends_on_the_device() = run {
+        val ws = WebSocketPortAdapter(ClientWebSocketAdapter(connectTimeoutMillis = 5_000))
+        try {
+            ws.connect("ws://nonexistent.invalid/", emptyList(), emptyList())
+            fail("expected Network")
+        } catch (e: WsError.Network) {
+            // the name does not resolve
+        }
+        val dropped = ws.connect("ws://$host:$port/ws/drop", emptyList(), emptyList()).conn
+        assertEquals(listOf<WsMessage>(WsMessage.Text("hello")), ws.receive(dropped, 16u))
+        try {
+            ws.receive(dropped, 16u)
+            fail("expected Network")
+        } catch (e: WsError.Network) {
+            // dropped without a close frame
+        }
+        val bad = ws.connect("ws://$host:$port/ws/bad-utf8", emptyList(), emptyList()).conn
+        try {
+            ws.receive(bad, 16u)
+            fail("expected Protocol")
+        } catch (e: WsError.Protocol) {
+            assertTrue(e.reason, e.reason.contains("UTF-8"))
+        }
+        val normal = ws.connect("ws://$host:$port/ws/close?code=1000&reason=", emptyList(), emptyList()).conn
+        assertEquals(listOf<WsMessage>(WsMessage.Text("hello")), ws.receive(normal, 16u))
+        try {
+            ws.receive(normal, 16u)
+            fail("expected Closed")
+        } catch (e: WsError.Closed) {
+            assertEquals(WsError.Closed(1000u, ""), e)
+        }
+        ws.close()
+
+        val sse = SsePortAdapter(UrlConnectionSseAdapter())
+        try {
+            sse.open("http://nonexistent.invalid/", emptyList(), null)
+            fail("expected Network")
+        } catch (e: SseError.Network) {
+            // the name does not resolve
+        }
+        try {
+            sse.open("http://$host:$port/sse/status?code=401", emptyList(), null)
+            fail("expected Refused")
+        } catch (e: SseError.Refused) {
+            assertEquals(401.toUShort(), e.status)
+        }
+        val feed = sse.open("http://$host:$port/sse/feed", emptyList(), null)
+        val events = ArrayList<SseEvent>()
+        try {
+            while (true) events.addAll(sse.next(feed, 16u))
+        } catch (e: SseError.Ended) {
+            // the body ended
+        }
+        assertEquals(SseEvent("1", "message", "one", 1500u), events.first())
+        assertEquals(4, events.size)
+        sse.close()
+    }
+
+    @Test
+    fun a_stalled_reader_stalls_the_server_then_everything_arrives_in_order() = run {
+        val n = 500
+        val ws = WebSocketPortAdapter(ClientWebSocketAdapter(connectTimeoutMillis = 5_000))
+        val conn = ws.connect("ws://$host:$port/ws/flood?n=$n&size=65536", emptyList(), emptyList()).conn
+        delay(1_500)
+        val wsWritten = written("/ws/flood")
+        assertTrue("the server wrote $wsWritten of $n while nobody read", wsWritten < n / 2)
+        val messages = ArrayList<WsMessage>()
+        while (messages.size < n) messages.addAll(ws.receive(conn, 16u))
+        assertEquals((0 until n).map { "$it" }, messages.map { (it as WsMessage.Text).value.trimEnd('.') })
+        try {
+            ws.receive(conn, 16u)
+            fail("expected the server's close")
+        } catch (e: WsError.Closed) {
+            assertEquals(WsError.Closed(1000u, "end"), e)
+        }
+        ws.close()
+
+        val sse = SsePortAdapter(UrlConnectionSseAdapter())
+        val stream = sse.open("http://$host:$port/sse/flood?n=$n&size=65536", emptyList(), null)
+        delay(1_500)
+        val sseWritten = written("/sse/flood")
+        assertTrue("the server wrote $sseWritten of $n while nobody read", sseWritten < n / 2)
+        val events = ArrayList<SseEvent>()
+        try {
+            while (true) events.addAll(sse.next(stream, 16u))
+        } catch (e: SseError.Ended) {
+            // the body ended
+        }
+        assertEquals((0 until n).map { "$it" }, events.map { it.id })
+        sse.close()
+    }
+
     @Test
     fun websocket_echo_headers_subprotocol_and_typed_ends() = run {
         val ws = WebSocketPortAdapter(ClientWebSocketAdapter(connectTimeoutMillis = 5_000))

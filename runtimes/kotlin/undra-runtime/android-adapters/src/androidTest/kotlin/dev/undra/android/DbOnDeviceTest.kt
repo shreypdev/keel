@@ -214,6 +214,62 @@ class DbOnDeviceTest {
     }
 
     @Test
+    fun values_travel_only_as_parameters_and_the_tokenizer_counts_as_sqlite_does() = run {
+        val db = port.open(":memory:", emptyList()).db
+        port.execute(db, "CREATE TABLE t (v TEXT)", emptyList())
+        val attack = "'; DROP TABLE t; --"
+        port.execute(db, "INSERT INTO t (v) VALUES (?)", listOf(DbValue.Text(attack)))
+        assertEquals(listOf(listOf<DbValue>(DbValue.Text(attack))), port.query(db, "SELECT v FROM t WHERE v = ?", listOf(DbValue.Text(attack))).rows)
+        // `?` and `;` inside a string, a quoted name, a bracketed name and comments are neither parameters nor statement ends.
+        val tricky = "SELECT '?;' AS \"a;?\", [b;?] FROM (SELECT ? AS [b;?]) /* ; ? */ WHERE ?2 = ?2 -- ; ?"
+        assertEquals(listOf(listOf<DbValue>(DbValue.Text("?;"), DbValue.Integer(5))), port.query(db, tricky, listOf(DbValue.Integer(5), DbValue.Integer(6))).rows)
+        assertEquals(listOf(listOf<DbValue>(DbValue.Integer(7), DbValue.Integer(7))), port.query(db, "SELECT :a, :a", listOf(DbValue.Integer(7))).rows)
+        assertEquals(DbError.Sql("the statement has 1 parameters, 2 were given"), fails<DbError.Sql> { port.query(db, "SELECT :a, :a", listOf(DbValue.Integer(7), DbValue.Integer(8))) })
+        // `#name` is a parameter to SQLite too: counted short, the value would bind to it and `?` would run as NULL.
+        assertEquals(DbError.Sql("the statement has 2 parameters, 1 were given"), fails<DbError.Sql> { port.query(db, "SELECT #a, ?", listOf(DbValue.Integer(1))) })
+        assertEquals(listOf(listOf<DbValue>(DbValue.Integer(1))), port.query(db, "SELECT COUNT(*) FROM t", emptyList()).rows)
+    }
+
+    @Test
+    fun nul_text_nul_blobs_an_empty_blob_and_a_row_over_the_cursor_window() = run {
+        val db = port.open(":memory:", emptyList()).db
+        port.execute(db, "CREATE TABLE r (v)", emptyList())
+        val values = listOf(DbValue.Text("a\u0000b"), DbValue.Blob(byteArrayOf(0, 0, 1, 0)), DbValue.Blob(ByteArray(0)), DbValue.Null)
+        for (v in values) port.execute(db, "INSERT INTO r (v) VALUES (?)", listOf(v))
+        assertEquals(values, port.query(db, "SELECT v FROM r ORDER BY rowid", emptyList()).rows.map { it.single() })
+        // A row larger than the cursor window (about 2 MB) is stored, and reading it back is a typed error, never a crash.
+        val big = ByteArray(2 * 1024 * 1024 + 17) { (it % 251).toByte() }
+        port.execute(db, "INSERT INTO r (v) VALUES (?)", listOf(DbValue.Blob(big)))
+        val tooBig = fails<DbError> { port.query(db, "SELECT v FROM r WHERE length(v) > 1000000", emptyList()) }
+        assertTrue("$tooBig", tooBig is DbError.Sql || tooBig is DbError.Full)
+        assertEquals(listOf(listOf<DbValue>(DbValue.Integer(big.size.toLong()))), port.query(db, "SELECT length(v) FROM r WHERE length(v) > 1000000", emptyList()).rows)
+    }
+
+    @Test
+    fun a_transaction_left_open_when_the_port_detaches_is_rolled_back() = run {
+        val db = port.open("left", NOTES).db
+        port.execute(db, "INSERT INTO notes (title) VALUES ('committed')", emptyList())
+        val tx = port.begin(db)
+        port.execute(tx, "INSERT INTO notes (title) VALUES ('never committed')", emptyList())
+        port.portImpl().detach!!.invoke()
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while (port.openDatabases != 0) {
+            if (System.nanoTime() > deadline) fail("the detached database was not closed")
+            delay(10)
+        }
+        // A short busy timeout: a connection still holding the write lock would make BEGIN IMMEDIATE Busy.
+        val fresh = DbPortAdapter(AndroidDbAdapter(dir), busyTimeoutMillis = 100)
+        try {
+            val again = fresh.open("left", NOTES).db
+            val tx2 = fresh.begin(again)
+            assertEquals(listOf(listOf<DbValue>(DbValue.Text("committed"))), fresh.query(tx2, "SELECT title FROM notes", emptyList()).rows)
+            fresh.rollback(tx2)
+        } finally {
+            fresh.close()
+        }
+    }
+
+    @Test
     fun android_messages_map_by_their_code_suffix_then_by_class() {
         assertEquals(DbError.Constraint(DbConstraint.UNIQUE, "UNIQUE constraint failed: t.id"), androidDbError(SQLiteConstraintException("UNIQUE constraint failed: t.id (code 2067 SQLITE_CONSTRAINT_UNIQUE[2067])")))
         assertEquals(DbError.Constraint(DbConstraint.UNIQUE, "UNIQUE constraint failed: t.id"), androidDbError(SQLiteConstraintException("UNIQUE constraint failed: t.id (code 1555)")))

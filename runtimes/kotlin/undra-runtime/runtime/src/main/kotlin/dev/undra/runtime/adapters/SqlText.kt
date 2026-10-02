@@ -137,11 +137,23 @@ public object SqlText {
                     parameters?.invoke(sql.substring(start, i))
                     emit(Token(Kind.OTHER, start, i))
                 }
-                (c == ':' || c == '@' || c == '$') && i + 1 < n && isWordChar(sql[i + 1]) && sql[i + 1] != '$' -> {
+                (c == ':' || c == '@' || c == '$' || c == '#') && i + 1 < n && isWordChar(sql[i + 1]) -> {
+                    // SQLite's variable token, whatever the prefix: name characters, `::` inside the name, and a final
+                    // `(...)` (Tcl's array syntax) that runs to the next `)` or white space.
                     val start = i
                     i++
-                    while (i < n && (isWordChar(sql[i]) || (c == '$' && sql[i] == ':' && i + 1 < n && sql[i + 1] == ':'))) {
-                        i += if (sql[i] == ':') 2 else 1
+                    while (i < n) {
+                        when {
+                            isWordChar(sql[i]) -> i++
+                            sql[i] == ':' && i + 1 < n && sql[i + 1] == ':' -> i += 2
+                            sql[i] == '(' -> {
+                                i++
+                                while (i < n && !sql[i].isWhitespace() && sql[i] != ')') i++
+                                if (i < n && sql[i] == ')') i++
+                                break
+                            }
+                            else -> break
+                        }
                     }
                     parameters?.invoke(sql.substring(start, i))
                     emit(Token(Kind.OTHER, start, i))

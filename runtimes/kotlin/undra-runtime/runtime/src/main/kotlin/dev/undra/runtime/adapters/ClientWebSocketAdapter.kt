@@ -8,9 +8,11 @@ import java.io.IOException
 import java.net.URI
 import java.net.URISyntaxException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import javax.net.ssl.SSLSocketFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -65,6 +67,8 @@ public class ClientWebSocketAdapter(
             WebSocketClient.checkHeader(header.name, header.value)?.let { throw WsError.Refused(null, it) }
         }
         val connection = ClientWebSocketConnection()
+        // The blocking handshake does not notice a cancelled caller; what it opened anyway is dropped below.
+        val opened = AtomicReference<WebSocketClient?>(null)
         val client = try {
             withContext(Dispatchers.IO) {
                 runInterruptible {
@@ -78,9 +82,13 @@ public class ClientWebSocketAdapter(
                         protocols = protocols,
                         headers = headers.map { it.name to it.value },
                         readGate = connection,
-                    )
+                    ).also { opened.set(it) }
                 }
             }
+        } catch (e: CancellationException) {
+            // Nobody will read or close a connection whose connect was cancelled (the core went away mid-handshake).
+            connection.abandon(opened.get())
+            throw e
         } catch (e: WebSocketUpgradeException) {
             throw WsError.Refused(if (e.status in 0..65535) e.status.toUShort() else null, describe(e))
         } catch (e: WebSocketHandshakeException) {
@@ -202,6 +210,14 @@ private class ClientWebSocketConnection : WebSocketConnection, WebSocketClient.L
         // ADR-047 §4: a sender that awaits its sends cannot outrun the network.
         while (c.bufferedAmount > MAX_OUTBOUND_BYTES && c.isOpen) delay(SEND_POLL_MILLIS)
         if (!c.isOpen) end?.let { throw it }
+    }
+
+    /** Drops a connection nobody will use (its connect was cancelled): the reader stops waiting and the socket goes. */
+    fun abandon(opened: WebSocketClient?) {
+        stopping = true
+        gate.withLock { roomChanged.signalAll() }
+        inbox.close()
+        opened?.abort()
     }
 
     override suspend fun close(code: Int, reason: String) {
