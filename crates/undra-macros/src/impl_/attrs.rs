@@ -10,7 +10,7 @@ use syn::spanned::Spanned;
 use syn::visit_mut::{self, VisitMut};
 use syn::{Attribute, Expr, ExprLit, Lit, LitStr, Meta};
 
-use super::diag::{Diag, Errors, code};
+use super::diag::{Diag, Errors, MESSAGE_PREFIX, code};
 use super::paths::Root;
 
 /// What the `#[undra(..)]` attributes on one node said.
@@ -569,6 +569,17 @@ pub(crate) fn generic_lists(meta: &ParseNestedMeta<'_>) -> syn::Result<Vec<Gener
             types: types.into_iter().collect(),
         });
         Ok(())
+    })
+    // What `syn` rejects (an empty list of lists, a stray token) says nothing about the rule.
+    .map_err(|error| {
+        if error
+            .to_string()
+            .starts_with(&format!("{MESSAGE_PREFIX}[undra::"))
+        {
+            error
+        } else {
+            malformed(error.span())
+        }
     })?;
     if lists.is_empty() {
         return Err(malformed(meta.path.span()));

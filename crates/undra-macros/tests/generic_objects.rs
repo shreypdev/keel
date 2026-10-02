@@ -887,3 +887,77 @@ fn a_generic_application_in_a_generic_signature_is_named_by_its_alias() {
         .sync_ok();
     assert_eq!(u32::decode_exact(&reply).unwrap(), 1);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Callbacks, bounds in a `where` clause and the author's own bounds on the struct
+// ---------------------------------------------------------------------------------------------
+
+/// Tells the host a row arrived.
+#[k::callback]
+pub trait Arrivals {
+    fn arrived(&self, id: u32);
+}
+
+pub struct Inbox<T>
+where
+    T: Row,
+{
+    rows: Mutex<Vec<T>>,
+    listeners: Mutex<Vec<Arc<dyn Arrivals>>>,
+}
+
+/// An inbox that tells its listeners.
+#[k::api(generic)]
+impl<T> Inbox<T>
+where
+    T: Row,
+{
+    pub fn new() -> Self {
+        Inbox {
+            rows: Mutex::new(Vec::new()),
+            listeners: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Asks to be told about every row that arrives.
+    pub fn listen(&self, listener: Arc<dyn Arrivals>) {
+        self.listeners.lock().unwrap().push(listener);
+    }
+
+    /// A row arrives.
+    pub fn deliver(&self, row: T) {
+        for listener in self.listeners.lock().unwrap().iter() {
+            listener.arrived(row.id());
+        }
+        self.rows.lock().unwrap().push(row);
+    }
+}
+
+#[k::api]
+pub type TodoInbox = Inbox<Todo>;
+
+#[test]
+fn a_callback_parameter_and_a_where_clause_are_the_authors_to_write() {
+    let schema = schema();
+    let inbox = schema
+        .objects
+        .iter()
+        .find(|o| o.name == "TodoInbox")
+        .unwrap();
+    let listen = inbox.methods.iter().find(|m| m.name == "listen").unwrap();
+    assert_eq!(
+        listen.params[0].ty,
+        TypeRef::Callback("Arrivals".to_owned())
+    );
+    assert_eq!(
+        inbox
+            .methods
+            .iter()
+            .find(|m| m.name == "deliver")
+            .unwrap()
+            .params[0]
+            .ty,
+        named("Todo")
+    );
+    schema.validate().unwrap();
+}

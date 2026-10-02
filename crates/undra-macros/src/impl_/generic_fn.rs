@@ -422,3 +422,266 @@ pub(crate) fn check_parameter_use(sig: &Signature, param: &syn::Ident, errors: &
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::has;
+
+    fn signature(src: &str) -> Signature {
+        syn::parse_str::<syn::ItemFn>(src).expect("a function").sig
+    }
+
+    fn lists(src: &str) -> Vec<GenericList> {
+        // `generic(T = [..])` as the attribute argument of `#[undra::api]`.
+        let mut found = Vec::new();
+        let parser = syn::meta::parser(|meta| {
+            found.extend(super::super::attrs::generic_lists(&meta).map_err(|e| e)?);
+            Ok(())
+        });
+        syn::parse::Parser::parse_str(parser, src).expect("a list");
+        found
+    }
+
+    fn planned(function: &str, attr: &str) -> Result<Plan, String> {
+        let mut errors = Errors::new();
+        let plan = plan(
+            &signature(function),
+            GenericOn::Function,
+            &lists(attr),
+            &mut errors,
+        );
+        match (plan, errors.into_error()) {
+            (Some(plan), None) => Ok(plan),
+            (_, Some(error)) => Err(error
+                .into_iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")),
+            (None, None) => Err("no plan and no error".to_owned()),
+        }
+    }
+
+    #[test]
+    fn each_listed_type_is_one_instantiation_named_after_its_last_segment() {
+        let plan = planned(
+            "fn newest<T: Row>(rows: Vec<T>) -> Option<T> { None }",
+            "generic(T = [Todo, crate::model::Note, r#Type])",
+        )
+        .unwrap();
+        assert_eq!(plan.param, "T");
+        assert_eq!(plan.fn_name, "newest");
+        let names: Vec<&str> = plan.instances.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["newest<Todo>", "newest<Note>", "newest<Type>"]);
+        assert_eq!(plan.instances[1].suffix, "newest_of_Note");
+        assert_eq!(plan.instances[1].arg_name, "Note");
+        // The call is made on the type as the author wrote it.
+        assert!(has(
+            &plan.instances[1].turbofish.to_string(),
+            ":: < crate :: model :: Note >"
+        ));
+    }
+
+    #[test]
+    fn every_refusal_of_the_list_is_e0072_with_its_fix() {
+        for (function, attr, text) in [
+            (
+                "fn f<T>() {}",
+                "generic(U = [Todo])",
+                "which has no type parameter `U`",
+            ),
+            ("fn f() {}", "generic(T = [Todo])", "`f` declares none"),
+            (
+                "fn f<T>() {}",
+                "generic(T = [])",
+                "the list of `T` on `f` is empty",
+            ),
+            (
+                "fn f<T>() {}",
+                "generic(T = [Todo, Todo])",
+                "`Todo` is listed twice",
+            ),
+            (
+                "fn f<T>() {}",
+                "generic(T = [Vec<Todo>])",
+                "`Vec<Todo>` cannot be listed",
+            ),
+            (
+                "fn f<T>() {}",
+                "generic(T = [u32])",
+                "`u32` cannot be listed",
+            ),
+            (
+                "fn f<T>() {}",
+                "generic(T = [String])",
+                "`String` cannot be listed",
+            ),
+            (
+                "fn f<T>() {}",
+                "generic(T = [&Todo])",
+                "`&Todo` cannot be listed",
+            ),
+            (
+                "fn f<T>() {}",
+                "generic(T = [Uuid])",
+                "`Uuid` cannot be listed",
+            ),
+            (
+                "fn f<A, B>() {}",
+                "generic(A = [Todo], B = [Tag])",
+                "has two type parameters, `A` and `B`",
+            ),
+            (
+                "fn f<A, B, C>() {}",
+                "generic(A = [Todo])",
+                "has three type parameters, `A`, `B`, and `C`",
+            ),
+            (
+                "fn f<T>() {}",
+                "generic(T = [Todo], T = [Note])",
+                "has two lists",
+            ),
+        ] {
+            let message = planned(function, attr).expect_err(attr);
+            assert!(message.contains("error[undra::E0072]"), "{attr}: {message}");
+            assert!(message.contains(text), "{attr}: {message}");
+        }
+        // Lifetimes and const parameters are what they are everywhere else.
+        let message = planned("fn f<'a, T>() {}", "generic(T = [Todo])").unwrap_err();
+        assert!(message.contains("E0003"), "{message}");
+        let message = planned("fn f<T, const N: usize>() {}", "generic(T = [Todo])").unwrap_err();
+        assert!(
+            message.contains("E0002") && message.contains("const generic `N`"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_list_is_e0008_where_the_attribute_is_read() {
+        for src in [
+            "generic",
+            "generic()",
+            "generic(T)",
+            "generic(T = Todo)",
+            "generic(T = [Todo,, Note])",
+        ] {
+            let mut error = None;
+            let parser = syn::meta::parser(|meta| {
+                if let Err(e) = super::super::attrs::generic_lists(&meta) {
+                    error = Some(e);
+                }
+                Ok(())
+            });
+            let _ = syn::parse::Parser::parse_str(parser, src);
+            let message = error.map(|e| e.to_string()).unwrap_or_default();
+            // `generic` alone is a flag, not a list: it never reaches the reader.
+            if src == "generic" {
+                continue;
+            }
+            assert!(message.contains("error[undra::E0008]"), "{src}: {message}");
+            assert!(
+                message.contains("generic(T = [Todo, Note])"),
+                "{src}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_parameter_is_inferred_when_a_parameter_of_the_function_mentions_it() {
+        let t: syn::Ident = syn::parse_quote!(T);
+        assert!(inferred(&signature("fn f<T>(rows: Vec<T>) {}"), &t));
+        assert!(inferred(
+            &signature("fn f<T>(a: u8, b: HashMap<String, Option<T>>) {}"),
+            &t
+        ));
+        // `ctx` is not a parameter of the schema, and the return type does not count.
+        assert!(!inferred(&signature("fn f<T>(ctx: &Ctx) -> T {}"), &t));
+        assert!(!inferred(
+            &signature("fn f<T>(count: u32) -> Vec<T> {}"),
+            &t
+        ));
+        // Another type that happens to start with the letter is not the parameter.
+        assert!(!inferred(&signature("fn f<T>(x: Tail) -> T {}"), &t));
+    }
+
+    #[test]
+    fn the_substitution_replaces_the_parameter_in_type_positions_only_and_groups_it() {
+        let t: syn::Ident = syn::parse_quote!(T);
+        let ty: Type = syn::parse_quote!(Todo);
+        let concrete = concrete_signature(
+            &signature(
+                "fn f<T: Row>(ctx: &Ctx, rows: Vec<T>, t: u32) -> Option<T> where T: Clone {}",
+            ),
+            &t,
+            &ty,
+        );
+        assert!(concrete.generics.params.is_empty());
+        assert!(concrete.generics.where_clause.is_none());
+        let shown = quote::quote!(#concrete).to_string();
+        // The argument is a `None`-delimited group, which prints as the bare type.
+        assert!(has(&shown, "rows : Vec < Todo >"), "{shown}");
+        assert!(has(&shown, "-> Option < Todo >"), "{shown}");
+        assert!(has(&shown, "t : u32"), "{shown}");
+        let Some(syn::FnArg::Typed(rows)) = concrete.inputs.iter().nth(1) else {
+            panic!("rows is the second parameter");
+        };
+        let Type::Path(path) = &*rows.ty else {
+            panic!("a path")
+        };
+        let syn::PathArguments::AngleBracketed(args) = &path.path.segments[0].arguments else {
+            panic!("angle brackets")
+        };
+        assert!(
+            matches!(
+                args.args.first(),
+                Some(syn::GenericArgument::Type(Type::Group(_)))
+            ),
+            "the argument is grouped so the checks of an instantiation can find it"
+        );
+    }
+
+    #[test]
+    fn an_associated_type_of_the_parameter_is_e0001() {
+        let mut errors = Errors::new();
+        let t: syn::Ident = syn::parse_quote!(T);
+        check_parameter_use(
+            &signature("fn f<T: Row>(x: T::Id) -> Vec<T::Item> {}"),
+            &t,
+            &mut errors,
+        );
+        let messages: Vec<String> = errors
+            .into_error()
+            .expect("two errors")
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect();
+        assert_eq!(messages.len(), 2);
+        assert!(
+            messages[0].contains("`T::Id` cannot cross the boundary"),
+            "{messages:?}"
+        );
+        assert!(messages[1].contains("`T::Item`"), "{messages:?}");
+    }
+
+    #[test]
+    fn the_label_is_a_static_that_names_the_function_and_the_type() {
+        let label = Label {
+            of: "newest".to_owned(),
+            param: "T".to_owned(),
+            arg: "Todo".to_owned(),
+            inferred: true,
+        };
+        let meta = quote::quote!(::undra::meta);
+        let out = Label::meta(Some(&label), &meta).to_string();
+        for needle in [
+            "Option :: Some (& :: undra :: meta :: GenericOfMeta",
+            "of : \"newest\"",
+            "param : \"T\"",
+            "ty : :: undra :: meta :: TypeRefMeta :: Named (\"Todo\")",
+            "inferred : true",
+        ] {
+            assert!(out.contains(needle), "{needle}: {out}");
+        }
+        assert!(Label::meta(None, &meta).to_string().contains("None"));
+    }
+}

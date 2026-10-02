@@ -512,3 +512,208 @@ pub(crate) fn expand_compose_store(input: TokenStream) -> TokenStream {
     };
     object_template(&info, quote!(#definition #block))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::has;
+
+    fn header(src: &str) -> Result<Header, String> {
+        let item: ItemImpl = syn::parse_str(src).expect("an impl block");
+        let mut errors = Errors::new();
+        let found = check_header(&item, &mut errors);
+        match (found, errors.into_error()) {
+            (Some(header), None) => Ok(header),
+            (_, Some(error)) => Err(error
+                .into_iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")),
+            (None, None) => Err("not a named type".to_owned()),
+        }
+    }
+
+    #[test]
+    fn the_parameters_are_in_the_order_the_self_type_applies_them() {
+        let found = header("impl<T: Row> Selection<T> {}").unwrap();
+        assert_eq!(found.name, "Selection");
+        assert_eq!(found.params, ["T"]);
+        // The block may declare them in another order, and under other names than the struct's.
+        let found = header("impl<V, K> Cache<K, V> where K: Clone {}").unwrap();
+        assert_eq!(found.params, ["K", "V"]);
+        let found = header("impl<R: Row> crate::model::Board<R> {}").unwrap();
+        assert_eq!(found.name, "Board");
+    }
+
+    #[test]
+    fn a_header_that_is_not_the_type_with_its_own_parameters_is_e0074() {
+        for (src, shown) in [
+            ("impl<T> Cache<Vec<T>> {}", "`Cache<Vec<T>>`"),
+            ("impl<T> Cache<T, Todo> {}", "`Cache<T, Todo>`"),
+            ("impl<A, B> Pair<A, A> {}", "`Pair<A, A>`"),
+            ("impl<T, U> Cache<T> {}", "`Cache<T>`"),
+            ("impl<T> Cache {}", "`Cache`"),
+        ] {
+            let message = header(src).unwrap_err();
+            assert!(message.contains("error[undra::E0074]"), "{src}: {message}");
+            assert!(message.contains(shown), "{src}: {message}");
+            assert!(message.contains("each exactly once"), "{src}: {message}");
+        }
+        let message = header("impl<T> Cache<T, T> {}").unwrap_err();
+        assert!(message.contains("E0074"), "{message}");
+    }
+
+    #[test]
+    fn a_block_without_a_type_parameter_is_e0008_and_a_lifetime_e0003() {
+        let message = header("impl Cache {}").unwrap_err();
+        assert!(
+            message.contains(
+                "error[undra::E0008]: `generic` on `Cache`, which has no type parameters"
+            ),
+            "{message}"
+        );
+        let message = header("impl<'a, T> Cache<T> {}").unwrap_err();
+        assert!(message.contains("E0003"), "{message}");
+    }
+
+    #[test]
+    fn the_definition_has_the_alias_for_the_self_type_and_a_placeholder_for_each_parameter() {
+        let item: ItemImpl = syn::parse_str(
+            "impl<T: Row> Selection<T> {
+                /// Ticks a row.
+                pub fn toggle(&self, row: T) {}
+                pub fn peers(&self) -> Vec<Arc<Selection<T>>> { Vec::new() }
+                fn private(&self) {}
+                pub const NOT_A_METHOD: u8 = 1;
+            }",
+        )
+        .unwrap();
+        let found = header("impl<T: Row> Selection<T> {}").unwrap();
+        let out = impl_definition(&item, &found).to_string();
+        assert!(has(&out, "impl __UNDRA_ALIAS {"), "{out}");
+        assert!(
+            has(&out, "pub fn toggle (& self , row : __UNDRA_PARAM_0) { }"),
+            "{out}"
+        );
+        // The type applied to its own parameters is the alias; only public functions are there.
+        assert!(has(&out, "Vec < Arc < __UNDRA_ALIAS > >"), "{out}");
+        assert!(!has(&out, "private"), "{out}");
+        assert!(!has(&out, "NOT_A_METHOD"), "{out}");
+        assert!(out.contains("Ticks a row."), "{out}");
+
+        let item: ItemStruct = syn::parse_str(
+            "struct Cache<K, V> { #[undra(key = \"id\")] rows: Signal<Vec<K>>, v: V }",
+        )
+        .unwrap();
+        let out = struct_definition(&item, &["K".to_owned(), "V".to_owned()]).to_string();
+        assert!(
+            has(
+                &out,
+                "struct __UNDRA_ALIAS { # [undra (key = \"id\")] rows : Signal < Vec < __UNDRA_PARAM_0 > > , v : __UNDRA_PARAM_1 }"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_method_with_type_parameters_of_its_own_is_e0074() {
+        let sig: syn::Signature = syn::parse_str("fn convert<U: Default>(&self) -> U").unwrap();
+        let mut errors = Errors::new();
+        method_generics_refused(&sig, "Cache", &mut errors, None);
+        let message = errors.into_error().unwrap().to_string();
+        assert!(
+            message.contains(
+                "generic parameter `U` on `convert`, a method of the generic object `Cache`"
+            ),
+            "{message}"
+        );
+        // A list is reported on the list, once, and not also for the parameter.
+        let list: syn::Ident = syn::parse_quote!(U);
+        let mut errors = Errors::new();
+        method_generics_refused(&sig, "Cache", &mut errors, Some(&list));
+        let all: Vec<String> = errors
+            .into_error()
+            .unwrap()
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect();
+        assert_eq!(all.len(), 1);
+        assert!(all[0].contains("`generic(..)` on `convert`"), "{all:?}");
+        // No parameters, no list: nothing to say.
+        let sig: syn::Signature = syn::parse_str("fn plain(&self)").unwrap();
+        let mut errors = Errors::new();
+        method_generics_refused(&sig, "Cache", &mut errors, None);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn the_template_is_a_macro_over_the_alias_the_docs_and_each_type_argument() {
+        let info = TemplateInfo {
+            kind: "object",
+            name: "Cache",
+            params: &["K".to_owned(), "V".to_owned()],
+            docs: "Keeps rows.",
+            impl_docs: "",
+            restore: "",
+            root: "::undra",
+        };
+        let out = object_template(
+            &info,
+            quote!(impl __UNDRA_ALIAS { pub fn put(&self, k: __UNDRA_PARAM_0, v: __UNDRA_PARAM_1) {} }),
+        )
+        .to_string();
+        assert!(has(&out, "macro_rules! __undra_template_Cache"), "{out}");
+        assert!(
+            has(
+                &out,
+                "($__alias : ident , $__docs : literal , $__undra_p0 : ty , $__undra_p1 : ty)"
+            ),
+            "{out}"
+        );
+        assert!(
+            has(
+                &out,
+                "impl $__alias { pub fn put (& self , k : $__undra_p0 , v : $__undra_p1) { } }"
+            ),
+            "{out}"
+        );
+        assert!(
+            has(
+                &out,
+                "type __UndraInstanceArgs = ($__undra_p0 , $__undra_p1 ,) ;"
+            ),
+            "{out}"
+        );
+        assert!(has(&out, "kind = \"object\""), "{out}");
+        assert!(
+            has(&out, "pub use __undra_template_Cache as Cache ;"),
+            "{out}"
+        );
+        // The wrong number of arguments is the branded E0002.
+        assert!(
+            out.contains("`Cache` takes 2 type arguments (`K`, `V`)"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_template_that_failed_leaves_a_stub_so_its_aliases_add_nothing() {
+        let out = stub_template("Cache").to_string();
+        assert!(
+            has(
+                &out,
+                "macro_rules! __undra_template_Cache { ($($__rest : tt) *) => { } ; }"
+            ),
+            "{out}"
+        );
+        assert!(
+            has(&out, "pub use __undra_template_Cache as Cache ;"),
+            "{out}"
+        );
+        let out = stub_compose("Selection").to_string();
+        assert!(
+            out.contains("_undra_error_E0011_Selection_is_not_a_generic_store"),
+            "{out}"
+        );
+    }
+}

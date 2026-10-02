@@ -621,10 +621,26 @@ fn rehome(tokens: TokenStream) -> TokenStream {
 /// (`struct Alias { fields }`, then the block): the ordinary object and store expansions on
 /// concrete tokens, under the alias's name, without the items themselves.
 fn instantiate_object(items: Vec<syn::Item>) -> syn::Result<TokenStream> {
+    instantiate_object_in(
+        items,
+        &std::env::var("CARGO_CRATE_NAME").unwrap_or_default(),
+    )
+}
+
+/// [`instantiate_object`] for the crate called `here`, for the tests of `src/tests`.
+#[cfg(test)]
+pub(crate) fn instantiate_object_in_for_tests(
+    items: Vec<syn::Item>,
+    here: &str,
+) -> syn::Result<TokenStream> {
+    instantiate_object_in(items, here)
+}
+
+/// [`instantiate_object`] for the crate called `here` (empty: not known, nothing is compared).
+fn instantiate_object_in(items: Vec<syn::Item>, here: &str) -> syn::Result<TokenStream> {
     use super::object::{ImplMode, ObjectInstance};
     use super::store::StoreMode;
 
-    let here = std::env::var("CARGO_CRATE_NAME").unwrap_or_default();
     // The type arguments come last, as a type alias of a tuple (see `object_template`).
     let mut items = items;
     let arguments = match items.pop() {
@@ -685,7 +701,7 @@ fn instantiate_object(items: Vec<syn::Item>) -> syn::Result<TokenStream> {
             &alias,
             &config.template,
             &config.crate_name,
-            &here,
+            here,
         ));
     }
     let docs = if config.alias_docs.is_empty() {
