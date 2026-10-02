@@ -569,6 +569,8 @@ export class UndraCore {
   private readonly _observed = new Map<Handle, Set<number>>();
   /** References given back while the connection was down, one per reference: released in the core once it is back. */
   private readonly _releasedWhileDown: Handle[] = [];
+  /** @internal How many times crash recovery restarted the core: a wrapper's finalizer compares it with the count at its birth. */
+  _restarts = 0;
   private readonly _connection = new Signal<ConnectionState>({ kind: "connecting" });
   /** The header of the call being sent, reused: an in-process transport copies it before it returns (`Transport.sendCall`). */
   private readonly _head = new Uint8Array(HEAD_LEN);

@@ -1,6 +1,7 @@
 import { UndraCallError, UndraUnhandledError } from "./call-error.js";
 import type { UndraCore } from "./core.js";
 import { UndraRestoreError, UndraTransportError } from "./errors.js";
+import { wrapperOf } from "./identity.js";
 import { type RecreateCall, type UndraStore, _rebindObject } from "./object.js";
 import { type UndraPanicReport, isTrap } from "./panic.js";
 import type { PortImpl } from "./port.js";
@@ -474,8 +475,8 @@ class Recovering implements Transport {
   /** The core's handler, and what the transport is given instead (see `start`). */
   #handler: TransportHandler | null = null;
   #wrapped: TransportHandler | null = null;
-  /** The handles released while the core restarted: released once it is back. */
-  readonly #releasedWhileDown = new Set<Handle>();
+  /** The releases sent while the core restarted, per handle (a give-back or a wrapper's own): sent once it is back. */
+  readonly #releasedWhileDown = new Map<Handle, number>();
   /** When the restarts within the budget's window happened (`Date.now`). */
   #times: number[] = [];
   /** Counts recoveries: a re-attach that a newer trap overtook stops. */
@@ -589,7 +590,8 @@ class Recovering implements Transport {
     } else if (this.#restarting) {
       if (kind !== Kind.Release) throw restarting();
       // The core keeps the object meanwhile; it is released once the core is back.
-      this.#releasedWhileDown.add(decodeRelease(payload).handle);
+      const handle = decodeRelease(payload).handle;
+      this.#releasedWhileDown.set(handle, (this.#releasedWhileDown.get(handle) ?? 0) + 1);
       return;
     }
     this.#guard(() => {
@@ -634,7 +636,7 @@ class Recovering implements Transport {
   #floor(): number {
     const host = this.#host;
     let floor = this.#floorUsed;
-    for (const set of [host.handles, host.observed.keys(), this.#recreatable.keys(), this.#releasedWhileDown]) {
+    for (const set of [host.handles, host.observed.keys(), this.#recreatable.keys(), this.#releasedWhileDown.keys()]) {
       for (const handle of set) floor = Math.max(floor, handleGeneration(handle));
     }
     this.#floorUsed = floor;
@@ -753,10 +755,19 @@ class Recovering implements Transport {
       host.handles.delete(handle);
       host.observed.delete(handle);
     }
-    for (const handle of [...this.#releasedWhileDown]) {
-      this.#releasedWhileDown.delete(handle);
-      core.release(handle);
+    // What was released meanwhile goes to the restored core as the references it was: each one a bare release (what
+    // `core.release` did locally, unregistering and forgetting, ran when the wrapper closed). A handle an open wrapper
+    // holds now is one whose queued releases were give-backs of extra references (a superseded wrapper's finalizer, a
+    // reply that carried the handle again): the restored core counts what the snapshot held, which may not include
+    // them, and sending them could release the live wrapper's only reference, so they are dropped (a leaked reference
+    // until the core closes, at worst).
+    for (const [handle, count] of this.#releasedWhileDown) {
+      const live = wrapperOf(core, handle);
+      if (live !== undefined && !live.closed) continue;
+      for (let i = 0; i < count; i++) core._giveBack(handle);
     }
+    this.#releasedWhileDown.clear();
+    core._restarts++;
     const observing: Array<Promise<void>> = [];
     for (const [handle, signals] of [...host.observed]) {
       if (recreated.has(handle)) continue;

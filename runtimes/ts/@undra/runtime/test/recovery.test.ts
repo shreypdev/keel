@@ -11,6 +11,7 @@ import { dbPort, nodeSqliteDb } from "../src/db.js";
 import { type WebSocketAdapter, webSocketPort } from "../src/realtime.js";
 import { UndraCore } from "../src/core.js";
 import { UndraTransportError } from "../src/errors.js";
+import { adopt, collected } from "../src/identity.js";
 import { UndraStore } from "../src/object.js";
 import type { PortImpl } from "../src/port.js";
 import {
@@ -429,6 +430,69 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     await until("the restart", () => t.restarts.length === 1);
     expect(t.fake.released).toEqual([handle]);
     await expect(t.core.call(FREE, ECHO, u32(1))).resolves.toEqual(u32(1));
+  });
+
+  it("replays the releases sent while the core restarted as the references they were: a give-back of a live wrapper's handle is dropped, not sent as a full release", async () => {
+    const t = await recovering();
+    const gate = deferred<RestartResult>();
+    t.fake.outcomes.push(() => gate.promise);
+    // A live wrapper of a store (one wrapper per handle, observed) ...
+    const live = makeHandle(61, 1);
+    t.fake.store(live, new Map([[0, u32(5)]]));
+    const wrapper = adopt(t.core, live, CounterStore);
+    await t.core.observe(live, ALL_SIGNALS, true);
+    expect(wrapper.count.peek()).toBe(5);
+    // ... a handle two wrappers closed or gave back ...
+    const other = makeHandle(62, 1);
+    t.fake.store(other, new Map([[0, u32(1)]]));
+    t.fake.trap();
+    await macrotask();
+    await expect(t.core.call(FREE, ECHO, u32(1))).rejects.toMatchObject({ reason: "restarted" });
+    // ... and what happens while the core restarts: a reply carried the live handle again (adopt gives the extra
+    // reference back), a superseded wrapper's finalizer did the same, and another handle's wrappers released twice.
+    t.core._giveBack(live);
+    t.core._giveBack(live);
+    t.core._giveBack(other);
+    t.core._giveBack(other);
+    expect(t.fake.released, "held back while the core restarts").toEqual([]);
+    gate.resolve({
+      hello: { undraVersion: "x", schemaHash: SCHEMA, platform: "p", mode: "m" },
+      restoredFromAgeMs: 10,
+      storeHandles: [live, other],
+    });
+    await until("the restart", () => t.restarts.length === 1);
+    // The live wrapper's handle was not released (the restored core counts what the snapshot held, which may not
+    // include those extra references), and its routing and observation survive; the other handle's two went out.
+    expect(t.fake.released).toEqual([other, other]);
+    expect(wrapper.closed).toBe(false);
+    expect(t.core.mirror.has(live)).toBe(true);
+    t.fake.setSignal(live, 0, u32(6));
+    await until("the live wrapper's change", () => wrapper.count.peek() === 6);
+    expect(t.fake.observed.filter((o) => o.handle === live && o.on).length, "observed again after the restart").toBeGreaterThan(1);
+  });
+
+  it("a wrapper from before a restart does not give back a reference a newer wrapper of its handle may own", async () => {
+    const t = await recovering();
+    const handle = makeHandle(63, 1);
+    t.fake.store(handle, new Map([[0, u32(1)]]));
+    const wrapper = adopt(t.core, handle, CounterStore);
+    await t.core.observe(handle, ALL_SIGNALS, true);
+    const born = t.core._restarts;
+    t.fake.trap();
+    await until("the restart", () => t.restarts.length === 1);
+    expect(t.core._restarts).toBe(born + 1);
+    // The finalizer of a wrapper made before the restart runs now: a live wrapper holds the handle, whose count the
+    // restored core took from the snapshot.
+    collected(t.core, handle, born);
+    expect(t.fake.released, "the pre-restart finalizer leaks rather than frees the live wrapper").toEqual([]);
+    // A wrapper made after the restart gives back normally.
+    collected(t.core, handle, t.core._restarts);
+    expect(t.fake.released).toEqual([handle]);
+    // Nothing wraps a handle: a full release whatever the epoch.
+    t.fake.released.length = 0;
+    collected(t.core, 999n, born);
+    expect(t.fake.released).toEqual([999n]);
+    expect(wrapper.closed).toBe(false);
   });
 
   it("past maxRestarts within perMs the core stays dead and onClose reports the trap; the window slides", async () => {

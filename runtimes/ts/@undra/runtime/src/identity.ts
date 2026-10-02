@@ -34,8 +34,12 @@ interface Observing {
 /** The first observation of each store a reply made, so that the same store adopted again waits for its values too. */
 const observed = new WeakMap<UndraObject, Promise<void>>();
 
-/** The live wrapper of `handle` in `core`, if there is one (closed or not). */
-function wrapperOf(core: UndraCore, handle: Handle): UndraObject | undefined {
+/**
+ * The wrapper of `handle` in `core`, if there is one (closed or not).
+ *
+ * @internal Crash recovery asks it before it replays a release.
+ */
+export function wrapperOf(core: UndraCore, handle: Handle): UndraObject | undefined {
   return tables.get(core)?.get(handle)?.deref();
 }
 
@@ -138,11 +142,14 @@ export function requireOwn(core: UndraCore, object: UndraObject): Handle {
 
 /**
  * Releases the reference of a wrapper that was garbage-collected without `close()`: its handle too (mirror, observed
- * signals), unless a newer wrapper adopted the handle meanwhile, which keeps them.
+ * signals), unless a newer wrapper adopted the handle meanwhile, which keeps them. `epoch` is the number of restarts
+ * (crash recovery) the core had made when the wrapper was made: a newer wrapper of the handle keeps what a wrapper from
+ * before a restart owned, because the restored core may not count that reference at all, and giving it back could
+ * release the newer wrapper's only one (a leak until the core closes is the lesser harm).
  *
  * @internal The finalizer of `UndraObject`.
  */
-export function collected(core: UndraCore, handle: Handle): void {
+export function collected(core: UndraCore, handle: Handle, epoch: number): void {
   if (wrapperOf(core, handle) === undefined) core.release(handle);
-  else core._giveBack(handle);
+  else if (epoch === core._restarts) core._giveBack(handle);
 }
