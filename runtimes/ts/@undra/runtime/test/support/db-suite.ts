@@ -154,20 +154,25 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       ok(await api.execute(db, "CREATE TABLE x (v INTEGER)"));
       const tx = ok(await api.begin(db));
       const started = Date.now();
-      // A timer for five times the timeout, armed beside the outer statement's own: what a slow machine does to the one it does to the other, and timers
-      // that are all overdue run in the order of their deadlines, so a Busy that is not answered before this one fires is late by the code's doing.
+      // When the outer statement settled, and whether a guard timer for one and a half times the timeout had fired by then. Both are taken as it
+      // settles, not after the transaction's statements below, which a slow machine can make take longer than either bound.
       let guardFired = false;
+      let settled: { waited: number; late: boolean } | undefined;
+      const outside = api.execute(db, "INSERT INTO x VALUES (0)").then((outcome) => {
+        settled = { waited: Date.now() - started, late: guardFired };
+        return outcome;
+      });
+      // The guard is armed after the call, which armed the statement's own timer of the busy timeout synchronously: its deadline is the later one on
+      // the same clock. Overdue timers fire in the order of their deadlines, with the microtasks of each run before the next, so on any machine the
+      // Busy that the statement's timer produces settles before the guard fires; one that settles after it is late by the code's doing.
       const guard = setTimeout(() => {
         guardFired = true;
-      }, 5 * 200);
-      const outside = api.execute(db, "INSERT INTO x VALUES (0)");
+      }, 1.5 * 200);
       for (let i = 1n; i <= 5n; i++) ok(await api.execute(tx, "INSERT INTO x VALUES (?)", cells(i)));
       expect(err(await outside)).toEqual(new DbError.Busy());
-      const waited = Date.now() - started;
-      const late = guardFired;
       clearTimeout(guard);
-      expect(waited, "not before the timeout").toBeGreaterThanOrEqual(190);
-      expect(late, "and not long after it: Busy came before a timer armed for five times the timeout beside the statement").toBe(false);
+      expect(settled?.waited, "not before the timeout").toBeGreaterThanOrEqual(190);
+      expect(settled?.late, "and not long after it: Busy came before a timer for one and a half times the timeout, armed after the statement's").toBe(false);
       ok(await api.commit(tx));
       expect(ok(await api.query(db, "SELECT v FROM x ORDER BY v")).rows, "the outer insert never ran").toEqual([1n, 2n, 3n, 4n, 5n].map((v) => cells(v)));
     });
