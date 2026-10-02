@@ -50,6 +50,10 @@ const SECTIONS = [
     swift: "A protocol for each port the core declares, and an adapter that registers your implementation.",
     kotlin: "An interface for each port the core declares, and an adapter that registers your implementation.",
     ts: "An interface for each port the core declares, and an adapter that registers your implementation." } },
+  { id: "callbacks", title: "Callbacks", stem: "callbacks", blurb: {
+    swift: "A protocol for each <code>#[undra::callback]</code> trait, which your app implements so the core can call it, and a weak wrapper to hand over instead of the object itself.",
+    kotlin: "An interface for each <code>#[undra::callback]</code> trait, which your app implements so the core can call it, with <code>weak(target)</code> to hand over instead of the object itself.",
+    ts: "An interface for each <code>#[undra::callback]</code> trait, which your app implements so the core can call it, with <code>weak&lt;Name&gt;(target)</code> to hand over instead of the object itself." } },
   { id: "queries", title: "Queries", stem: "queries", blurb: {
     swift: "A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.",
     kotlin: "A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.",

@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Kotlin reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in Kotlin for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xb5b7b1dc29182a9d</code>). <a href="../docs/api-kotlin.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Kotlin for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xe4c001b130237f02</code>). <a href="../docs/api-kotlin.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="core">The core<a class="anchor" href="#core" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another. The internal <code>UndraCoreNative</code> holds the natives the core's library registers over JNI.</p>
@@ -349,8 +349,8 @@ enum class QueryStatus(val index: UShort) : UndraEnum {
 </details>
 <h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A sealed class for each <code>#[undra::error]</code>, one subclass per variant.</p>
-<p class="ref-names"><code>LabError</code> <code>ListError</code> <code>RemoteError</code> <code>StressError</code> <code>TodoError</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>51 lines</span></summary>
+<p class="ref-names"><code>LabError</code> <code>ListError</code> <code>RemoteError</code> <code>ReportError</code> <code>StressError</code> <code>TodoError</code> <code>WorkshopError</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>69 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Errors.kt" rel="noopener">Errors.kt</a></span></div><pre><code data-lang="kotlin">/** Why a lab call failed. */
 sealed class LabError(message: String) : UndraException(message) {
     /** Nothing was given. */
@@ -387,6 +387,16 @@ sealed class RemoteError(message: String) : UndraException(message) {
     companion object : UndraCodec&lt;RemoteError&gt; { … }
 }
 
+/** What a reporter's `confirm` can fail with. */
+sealed class ReportError(message: String) : UndraException(message) {
+    /** The user answered no. */
+    data object Declined : ReportError("the user declined")
+    /** The app's reporter is not there or failed. */
+    data class Unavailable(val value: String) : ReportError("the reporter is not available: ${value}")
+
+    companion object : UndraCodec&lt;ReportError&gt; { … }
+}
+
 /** Why `start` refused to start. */
 sealed class StressError(message: String) : UndraException(message) {
     /** The rate is zero or above the fastest generator there is (1,000,000 updates a second). */
@@ -402,19 +412,21 @@ sealed class TodoError(message: String) : UndraException(message) {
 
     companion object : UndraCodec&lt;TodoError&gt; { … }
 }
+
+/** What can go wrong opening a shelf. */
+sealed class WorkshopError(message: String) : UndraException(message) {
+    /** The name is empty. */
+    data object NoName : WorkshopError("a shelf needs a name")
+
+    companion object : UndraCodec&lt;WorkshopError&gt; { … }
+}
 </code></pre></div>
 </details>
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
-<p class="ref-names"><code>Live</code> <code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>dbCells</code> <code>dbMigrate</code> <code>dbRun</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>localizedGreeting</code> <code>parseCount</code> <code>ping</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>sseFollow</code> <code>storageStatus</code> <code>version</code> <code>wsEcho</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>446 lines</span></summary>
-<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Objects.kt" rel="noopener">Objects.kt</a></span></div><pre><code data-lang="kotlin">class Live private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
-    /**
-     * No connection yet.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
-
+<p class="ref-names"><code>Live</code> <code>Probe</code> <code>Watch</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>dbCells</code> <code>dbMigrate</code> <code>dbRun</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>localizedGreeting</code> <code>parseCount</code> <code>ping</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>sseFollow</code> <code>storageStatus</code> <code>version</code> <code>wsEcho</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>454 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Objects.kt" rel="noopener">Objects.kt</a></span></div><pre><code data-lang="kotlin">class Live internal constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /**
      * Forgets the connection without closing it: the port closes it going away (1001).
      * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
@@ -468,17 +480,17 @@ sealed class TodoError(message: String) : UndraException(message) {
          * No connection yet.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Live
+
+        /**
+         * No connection yet.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Live
     }
 }
 
-class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
-    /**
-     * A probe with every counter at zero.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
-
+class Probe internal constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /**
      * What the probe has seen so far.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
@@ -526,8 +538,22 @@ class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(cor
          * A probe with every counter at zero.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Probe
+
+        /**
+         * A probe with every counter at zero.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Probe
     }
+}
+
+class Watch internal constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
+    /**
+     * The subscription's number, in the order they were made.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun id(): UInt
 }
 
 /**
@@ -858,23 +884,17 @@ suspend fun wsEcho(
 </details>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each <code>#[undra::store]</code>: its signals as <code>StateFlow</code>, then its methods.</p>
-<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Legacy</code> <code>Notes</code> <code>Profile</code> <code>Stress</code> <code>Todos</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>451 lines</span></summary>
+<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Legacy</code> <code>Notes</code> <code>Profile</code> <code>Shelf</code> <code>Stress</code> <code>Todos</code> <code>Workshop</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>593 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Stores.kt" rel="noopener">Stores.kt</a></span></div><pre><code data-lang="kotlin">/**
  * The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
  * exercise the boundary.
  */
-class Bench private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Bench internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     val rows: StateFlow&lt;List&lt;Item&gt;&gt;
     val s000: StateFlow&lt;UInt&gt;
     // … 126 more with the same shape …
     val s127: StateFlow&lt;UInt&gt;
-
-    /**
-     * A store with every counter at zero and [`ROWS`] rows numbered from 1.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * Adds two numbers: the cheapest call there is, for the handle-call row.
@@ -927,21 +947,21 @@ class Bench private constructor(core: UndraCore, handle: Long) : UndraStore(core
          * A store with every counter at zero and [`ROWS`] rows numbered from 1.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Bench
+
+        /**
+         * A store with every counter at zero and [`ROWS`] rows numbered from 1.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Bench
     }
 }
 
 /** A list of [`LIST_LEN`] items with operations that change one item at a time. */
-class BigList private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class BigList internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     val items: StateFlow&lt;List&lt;Item&gt;&gt;
     /** Computed by the core; read-only. */
     val count: StateFlow&lt;UInt&gt;
-
-    /**
-     * A list of [`LIST_LEN`] items numbered from 1.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * Inserts a new row with `label` so that it ends at `index` (`index == len` appends), and
@@ -985,22 +1005,22 @@ class BigList private constructor(core: UndraCore, handle: Long) : UndraStore(co
          * A list of [`LIST_LEN`] items numbered from 1.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): BigList
+
+        /**
+         * A list of [`LIST_LEN`] items numbered from 1.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): BigList
     }
 }
 
 /** A counter with a change tally and a computed parity. */
-class Counter private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Counter internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     val count: StateFlow&lt;Int&gt;
     val changes: StateFlow&lt;UInt&gt;
     /** Computed by the core; read-only. */
     val parity: StateFlow&lt;Parity&gt;
-
-    /**
-     * A counter at zero with no changes made.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * Adds `amount` (which may be negative) and counts the change: one transaction, so one
@@ -1033,6 +1053,12 @@ class Counter private constructor(core: UndraCore, handle: Long) : UndraStore(co
          * A counter at zero with no changes made.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Counter
+
+        /**
+         * A counter at zero with no changes made.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Counter
     }
 }
@@ -1044,20 +1070,20 @@ class Counter private constructor(core: UndraCore, handle: Long) : UndraStore(co
  * in one frame (or while the app is in the background, where React Native on Android pauses the
  * timers that drain it), so a UI or a check sees `background` even when `active` follows at once.
  */
-class Device private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle, noCoalesce = setOf(0u, 1u, 2u, 3u, 4u)) {
+class Device internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle, noCoalesce = setOf(0u, 1u, 2u, 3u, 4u)) {
     val online: StateFlow&lt;Boolean&gt;
     val netKind: StateFlow&lt;NetKind&gt;
     val appState: StateFlow&lt;AppState&gt;
     val connectivityReports: StateFlow&lt;UInt&gt;
     val lifecycleReports: StateFlow&lt;UInt&gt;
 
-    /**
-     * The store, showing every report received so far and following the next ones.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
-
     companion object {
+        /**
+         * The store, showing every report received so far and following the next ones.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Device
+
         /**
          * The store, showing every report received so far and following the next ones.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
@@ -1067,7 +1093,7 @@ class Device private constructor(core: UndraCore, handle: Long) : UndraStore(cor
 }
 
 /** A store whose one signal build B changes incompatibly. */
-class Legacy private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Legacy internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     val score: StateFlow&lt;Int&gt;
 
     /**
@@ -1086,15 +1112,9 @@ class Legacy private constructor(core: UndraCore, handle: Long) : UndraStore(cor
 }
 
 /** The notes of one database, mirrored: `notes` changes only after the database did. */
-class Notes private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Notes internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     val notes: StateFlow&lt;List&lt;Note&gt;&gt;
     val version: StateFlow&lt;UInt&gt;
-
-    /**
-     * No database open yet: call [`open`](Notes::open).
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * Adds a note at the end.
@@ -1168,12 +1188,18 @@ class Notes private constructor(core: UndraCore, handle: Long) : UndraStore(core
          * No database open yet: call [`open`](Notes::open).
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Notes
+
+        /**
+         * No database open yet: call [`open`](Notes::open).
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Notes
     }
 }
 
 /** A user profile: build A's signals are `name`, then `visits`. */
-class Profile private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Profile internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     val name: StateFlow&lt;String&gt;
     val visits: StateFlow&lt;UInt&gt;
 
@@ -1198,21 +1224,49 @@ class Profile private constructor(core: UndraCore, handle: Long) : UndraStore(co
     }
 }
 
+/** A shelf: a child store of the [`Workshop`], with a label and a count of the items on it. */
+class Shelf internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+    val label: StateFlow&lt;String&gt;
+    val items: StateFlow&lt;UInt&gt;
+
+    /**
+     * Takes every item off the shelf.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun clear()
+
+    /**
+     * Puts `count` more items on the shelf.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun stock(count: UInt)
+
+    companion object {
+        /**
+         * An empty shelf with no label. A platform gets shelves from [`Workshop::shelf`], not from
+         * here, so that one name is one shelf.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Shelf
+
+        /**
+         * An empty shelf with no label. A platform gets shelves from [`Workshop::shelf`], not from
+         * here, so that one name is one shelf.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Shelf
+    }
+}
+
 /**
  * A store that commits many transactions, for the coalesced-delivery scenarios and the
  * playground's stress screen.
  */
-class Stress private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle, noCoalesce = setOf(1u)) {
+class Stress internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle, noCoalesce = setOf(1u)) {
     val value: StateFlow&lt;ULong&gt;
     val progress: StateFlow&lt;UInt&gt;
     val generated: StateFlow&lt;ULong&gt;
     val running: StateFlow&lt;Boolean&gt;
-
-    /**
-     * A store with every signal at its start: zeros, and no generator running.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * Commits `transactions` transactions now, each one write of the signal `mode` names: one
@@ -1243,24 +1297,24 @@ class Stress private constructor(core: UndraCore, handle: Long) : UndraStore(cor
          * A store with every signal at its start: zeros, and no generator running.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Stress
+
+        /**
+         * A store with every signal at its start: zeros, and no generator running.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Stress
     }
 }
 
 /** The to-do list: what the UI observes (`todos`, `filter`, `visible`, `remaining`) and calls. */
-class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Todos internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     val todos: StateFlow&lt;List&lt;Todo&gt;&gt;
     val filter: StateFlow&lt;Filter&gt;
     /** Derived by the core from another list; read-only. Changes arrive as keyed patches. */
     val visible: StateFlow&lt;List&lt;Todo&gt;&gt;
     /** Computed by the core; read-only. */
     val remaining: StateFlow&lt;UInt&gt;
-
-    /**
-     * An empty list showing every item.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * Adds an item at the end of the list.
@@ -1308,7 +1362,121 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
          * An empty list showing every item.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Todos
+
+        /**
+         * An empty list showing every item.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Todos
+    }
+}
+
+/**
+ * A workshop that owns shelves and tells subscribers what happens in it.
+ *
+ * The state a restore cannot rebuild is empty after one: the shelves and subscribers of the old
+ * workshop are gone with it (ADR-040 decision 8), and `shelf` makes them again.
+ */
+class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+    val jobs: StateFlow&lt;UInt&gt;
+    val notes: StateFlow&lt;UInt&gt;
+
+    /**
+     * Counts a note (a signal commit, which reaches the platform first) and tells every
+     * subscribed reporter `line`: the platform sees the new count before it hears the note.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun announce(line: String): UInt
+
+    /**
+     * Reports `steps` times in a row without waiting: a burst, of which the app that is slow to
+     * react gets only the newest `progress` (the others are coalesced), but every `note`.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun burst(steps: UInt, reporter: Reporter)
+
+    /**
+     * The label of `shelf`, or `none` for no shelf at all.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun describe(shelf: Shelf?): String
+
+    /**
+     * The shelf called `name`, if there is one.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun find(name: String): Shelf?
+
+    /**
+     * Moves every item of `from` onto `onto`, in one transaction (a method that takes two
+     * stores).
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun merge(from: Shelf, onto: Shelf)
+
+    /**
+     * Opens a shelf after `delay_ms` milliseconds (a call a platform can cancel while it
+     * waits: then no shelf was handed out and nothing is owed).
+     * @throws WorkshopError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
+     */
+    suspend fun open(name: String, delayMs: UInt): Shelf
+
+    /**
+     * Runs a job of `steps` steps, reporting to the app: one progress report and one note per
+     * step, then a question whose answer is the result (`steps` if the app says go on, else
+     * `Declined`). The job counts as run whatever the answer.
+     * @throws ReportError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
+     */
+    suspend fun run(steps: UInt, reporter: Reporter): UInt
+
+    /**
+     * The shelf called `name`, made on first use: the same shelf every time, so a platform that
+     * asks twice gets one object (and one reference to give back, not two).
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun shelf(name: String): Shelf
+
+    /**
+     * Every shelf, in name order.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun shelves(): List&lt;Shelf&gt;
+
+    /**
+     * How many items there are on the shelves given.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun total(shelves: List&lt;Shelf&gt;): UInt
+
+    /**
+     * Keeps `reporter` until the returned subscription is closed; [`Workshop::announce`] tells it.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun watch(reporter: Reporter): Watch
+
+    /**
+     * How many reporters are subscribed.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun watching(): UInt
+
+    companion object {
+        /**
+         * An empty workshop.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Workshop
+
+        /**
+         * An empty workshop.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Workshop
     }
 }
 </code></pre></div>
@@ -1331,6 +1499,47 @@ interface Locale : UndraPort {
 fun localePortImpl(impl: Locale): PortImpl
 </code></pre></div>
 </details>
+<h2 id="callbacks">Callbacks<a class="anchor" href="#callbacks" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">An interface for each <code>#[undra::callback]</code> trait, which your app implements so the core can call it, with <code>weak(target)</code> to hand over instead of the object itself.</p>
+<p class="ref-names"><code>Reporter</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>35 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Callbacks.kt" rel="noopener">Callbacks.kt</a></span></div><pre><code data-lang="kotlin">/**
+ * What the app implements to hear from the core.
+ *
+ * The app implements it and passes it to the core, which keeps it until it lets go of it.
+ * The core calls it on the main thread, in order with the stores' changes: a method sees
+ * the stores as they were when the core called it.
+ * [weak] wraps an implementation without keeping it alive.
+ */
+interface Reporter {
+    /**
+     * Asks whether to go on; the app may answer later, or not at all.
+     * @throws ReportError to answer the core with an error; anything else it throws is
+     *   reported (`LoadOptions.onError`) and the core is answered unavailable.
+     */
+    suspend fun confirm(question: String): Boolean
+
+    /** A line to show. */
+    fun note(line: String)
+
+    /**
+     * How far a job is: `done` of `total`. Only the newest report of a burst matters, so the
+     * platforms deliver just that one to a listener that has fallen behind.
+     */
+    fun progress(done: UInt, total: UInt)
+
+    companion object {
+        /**
+         * Forwards to [target] while something else keeps it alive, and holds it only weakly: once it
+         * is collected, the methods that return nothing do nothing and the `suspend` ones answer the
+         * core unavailable. For an implementation that holds, directly or not, the object it is passed
+         * to (a view model that owns the store it listens to), which would otherwise keep itself alive.
+         */
+        fun weak(target: Reporter): Reporter
+    }
+}
+</code></pre></div>
+</details>
 <h2 id="queries">Queries<a class="anchor" href="#queries" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.</p>
 <p class="ref-names"><code>RemoteTodosQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code> <code>saveNote</code> <code>tagNote</code></p>
@@ -1339,7 +1548,7 @@ fun localePortImpl(impl: Locale): PortImpl
  * Observes the `remote_todos` query (cache key `remote-todos:{list}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
  */
-class RemoteTodosQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class RemoteTodosQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     /** The latest successful result, if any. */
     val data: StateFlow&lt;List&lt;RemoteTodo&gt;?&gt;
     /** Where the query is in its fetch lifecycle. */
@@ -1421,13 +1630,13 @@ suspend fun tagNote(list: String, id: UInt, ctx: UndraCore = UndraPlaygroundCore
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>162 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>199 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Ids.kt" rel="noopener">Ids.kt</a></span></div><pre><code data-lang="kotlin">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
  * hash and the namespace of the core these bindings belong to.
  */
 object UndraIds {
-    const val SCHEMA_HASH: ULong = 0xb5b7b1dc29182a9duL
+    const val SCHEMA_HASH: ULong = 0xe4c001b130237f02uL
     const val NAMESPACE: String = "playground_core"
 
     object Objects {
@@ -1450,6 +1659,10 @@ object UndraIds {
             const val TICKS: UInt = 0x9ea5858du
             const val TICKS_THEN_FAIL: UInt = 0xa48a6ac2u
             const val WAIT: UInt = 0x6bab3fb8u
+        }
+        object Watch {
+            const val TYPE_ID: UInt = 0xec266ec8u
+            const val ID: UInt = 0x2075bd1fu
         }
         object Bench {
             const val TYPE_ID: UInt = 0x346ad459u
@@ -1505,6 +1718,12 @@ object UndraIds {
             const val DESCRIBE: UInt = 0xa05219a9u
             const val VISIT: UInt = 0xa008fdabu
         }
+        object Shelf {
+            const val TYPE_ID: UInt = 0xb01959e3u
+            const val NEW: UInt = 0x4e9d4957u
+            const val CLEAR: UInt = 0x8cb02b88u
+            const val STOCK: UInt = 0xbd0e77fbu
+        }
         object Stress {
             const val TYPE_ID: UInt = 0xafa58985u
             const val NEW: UInt = 0x6799185du
@@ -1521,6 +1740,22 @@ object UndraIds {
             const val REMOVE: UInt = 0xa977479cu
             const val SET_FILTER: UInt = 0x07781993u
             const val TOGGLE: UInt = 0x1cc45d38u
+        }
+        object Workshop {
+            const val TYPE_ID: UInt = 0xe22bcc2cu
+            const val NEW: UInt = 0x3dd69650u
+            const val ANNOUNCE: UInt = 0xed2adfb5u
+            const val BURST: UInt = 0x7d3f02b4u
+            const val DESCRIBE: UInt = 0xcec7da2fu
+            const val FIND: UInt = 0x84e1ab01u
+            const val MERGE: UInt = 0x9d9f7396u
+            const val OPEN: UInt = 0xa5283b26u
+            const val RUN: UInt = 0x5208d85fu
+            const val SHELF: UInt = 0xfaed29c6u
+            const val SHELVES: UInt = 0x952fdfeeu
+            const val TOTAL: UInt = 0xce8e1708u
+            const val WATCH: UInt = 0x19e462e5u
+            const val WATCHING: UInt = 0x76b9e49bu
         }
         object RemoteTodosQueryHandle {
             const val TYPE_ID: UInt = 0x2a794167u
@@ -1576,6 +1811,17 @@ object UndraIds {
         }
     }
 
+    object Callbacks {
+        object Reporter {
+            const val PORT_ID: UInt = 0x10e8b455u
+            const val CONFIRM: UInt = 0x1ea2905au
+            const val NOTE: UInt = 0x8720eafeu
+            const val PROGRESS: UInt = 0x3a77cbcdu
+            const val RELEASE_INSTANCE: UInt = 0x47e657b5u
+            const val CANCEL_CALL: UInt = 0x9a8ca032u
+        }
+    }
+
     object Queries {
         const val PATCH_REMOTE_TODO: UInt = 0x77fe653eu
         const val POST_REMOTE_TODO: UInt = 0x5c84eed2u
@@ -1591,7 +1837,7 @@ object UndraIds {
   </main>
   <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p>
 <!-- reference-toc:start -->
-<ul><li><a href="#core">The core</a></li><li><a href="#types">Types</a></li><li><a href="#errors">Errors</a></li><li><a href="#objects">Objects</a></li><li><a href="#stores">Stores</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries">Queries</a></li><li><a href="#ids">Wire ids</a></li></ul>
+<ul><li><a href="#core">The core</a></li><li><a href="#types">Types</a></li><li><a href="#errors">Errors</a></li><li><a href="#objects">Objects</a></li><li><a href="#stores">Stores</a></li><li><a href="#ports">Ports</a></li><li><a href="#callbacks">Callbacks</a></li><li><a href="#queries">Queries</a></li><li><a href="#ids">Wire ids</a></li></ul>
 <!-- reference-toc:end -->
 </aside>
 </div>

@@ -3437,7 +3437,7 @@ Source: https://shreypdev.github.io/undra/reference/swift.html
 
 # Swift reference
 
-Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb5b7b1dc29182a9d`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xe4c001b130237f02`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3457,25 +3457,31 @@ A struct for each record, an enum for each enum, with the wire codec beside it.
 
 An enum for each `#[undra::error]`, conforming to `Error`.
 
-`LabError` `ListError` `RemoteError` `StressError` `TodoError`
+`LabError` `ListError` `RemoteError` `ReportError` `StressError` `TodoError` `WorkshopError`
 
 ## Objects
 
 A class for each object, and a function for each free Rust function.
 
-`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
+`Live` `Probe` `Watch` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
 
 ## Stores
 
 An `@Observable` class for each `#[undra::store]`: its signals, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
 
 ## Ports
 
 A protocol for each port the core declares, and an adapter that registers your implementation.
 
 `Locale` `localePortImpl`
+
+## Callbacks
+
+A protocol for each `#[undra::callback]` trait, which your app implements so the core can call it, and a weak wrapper to hand over instead of the object itself.
+
+`Reporter` `WeakReporter`
 
 ## Queries
 
@@ -3497,7 +3503,7 @@ Source: https://shreypdev.github.io/undra/reference/kotlin.html
 
 # Kotlin reference
 
-Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb5b7b1dc29182a9d`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xe4c001b130237f02`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3517,25 +3523,31 @@ A data class for each record, an enum or sealed interface for each enum, each wi
 
 A sealed class for each `#[undra::error]`, one subclass per variant.
 
-`LabError` `ListError` `RemoteError` `StressError` `TodoError`
+`LabError` `ListError` `RemoteError` `ReportError` `StressError` `TodoError` `WorkshopError`
 
 ## Objects
 
 A class for each object, and a function for each free Rust function.
 
-`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
+`Live` `Probe` `Watch` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `StateFlow`, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
 
 ## Ports
 
 An interface for each port the core declares, and an adapter that registers your implementation.
 
 `Locale` `localePortImpl`
+
+## Callbacks
+
+An interface for each `#[undra::callback]` trait, which your app implements so the core can call it, with `weak(target)` to hand over instead of the object itself.
+
+`Reporter`
 
 ## Queries
 
@@ -3557,7 +3569,7 @@ Source: https://shreypdev.github.io/undra/reference/typescript.html
 
 # TypeScript reference
 
-Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb5b7b1dc29182a9d`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xe4c001b130237f02`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3581,25 +3593,31 @@ An interface for each record, a union for each enum, each with a codec.
 
 An abstract class for each `#[undra::error]`, one subclass per variant.
 
-`LabErrorKind` `LabError` `ListErrorKind` `ListError` `RemoteErrorKind` `RemoteError` `StressErrorKind` `StressError` `TodoErrorKind` `TodoError`
+`LabErrorKind` `LabError` `ListErrorKind` `ListError` `RemoteErrorKind` `RemoteError` `ReportErrorKind` `ReportError` `StressErrorKind` `StressError` `TodoErrorKind` `TodoError` `WorkshopErrorKind` `WorkshopError`
 
 ## Objects
 
 A class for each object, and an async function for each free Rust function.
 
-`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
+`Live` `Probe` `Watch` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `Signal`, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
 
 ## Ports
 
 An interface for each port the core declares, and an adapter that registers your implementation.
 
 `Locale` `localePortImpl`
+
+## Callbacks
+
+An interface for each `#[undra::callback]` trait, which your app implements so the core can call it, with `weak<Name>(target)` to hand over instead of the object itself.
+
+`Reporter` `weakReporter`
 
 ## Queries
 
