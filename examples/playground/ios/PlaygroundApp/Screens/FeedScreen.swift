@@ -4,7 +4,7 @@ import SwiftUI
 /// An infinite query (`FeedQueryHandle`, ADR-043): the core fetches the feed a page of 50 rows at a time, and `data` grows by that
 /// page (the store applies a keyed patch of 50 inserts, SwiftUI sees 50 new rows). Each row asks `loadMore(ifNeededFor:)` when it
 /// appears, which fetches the next page once the row is within five of the end; the footer shows `fetchingNextPage`; pulling the
-/// list down is `refetch()`, which finds only the rows that changed ("Touch" makes the even rows change). "Even rows" is another
+/// list down is `refetch()`, which finds only the rows that changed ("Touch" in the toolbar makes the even rows change). "Even rows" is another
 /// parameter of the query, so another cache entry with its own pages.
 struct FeedScreen: View {
     let all: FeedQueryHandle
@@ -26,18 +26,9 @@ struct FeedScreen: View {
                     }
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("feed-filter")
-                    LabeledContent("Rows loaded") {
-                        Text("\(feed.data.count)").accessibilityIdentifier("feed-count")
-                    }
                     LabeledContent("Status") {
                         Text(statusName).accessibilityIdentifier("feed-status")
                     }
-                    Button("Touch the even rows (revision \(revision + 1))") {
-                        revision += 1
-                        touchFeed(revision: revision)
-                        feed.refetch()
-                    }
-                    .accessibilityIdentifier("feed-touch")
                 }
                 Section("Feed") {
                     ForEach(feed.data) { item in
@@ -51,6 +42,21 @@ struct FeedScreen: View {
             .refreshable { feed.refetch() }
             .navigationTitle("Feed")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Touch") {
+                        revision += 1
+                        touchFeed(revision: revision)
+                        feed.refetch()
+                    }
+                    .accessibilityIdentifier("feed-touch")
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("\(feed.data.count) rows")
+                        .font(.headline)
+                        .accessibilityIdentifier("feed-count")
+                }
+            }
         }
     }
 

@@ -258,8 +258,10 @@ final class PlaygroundTourTests: XCTestCase {
         app.buttons["library-remove"].tap()
         wait(for: app.staticTexts["library-count"], toRead: "10,000 books")
 
-        // The second section is a lazy view of the even rows of a small list; dropping a source row drops its row.
+        // The second list is a lazy view of the even rows of a small list; dropping a source row drops its row.
+        app.segmentedControls["library-filter"].buttons["Even rows of the source"].tap()
         wait(for: app.staticTexts["library-evens-count"], toRead: "10 even rows of the source")
+        wait(for: element("library-even-0", in: app), toContain: "Item 2")
         app.buttons["library-drop-source"].tap()
         app.buttons["library-drop-source"].tap()
         wait(for: app.staticTexts["library-evens-count"], toRead: "9 even rows of the source")
@@ -270,29 +272,31 @@ final class PlaygroundTourTests: XCTestCase {
 
     func testFeed() {
         let app = launch(tab: "feed")
-        wait(for: app.staticTexts["feed-count"], toRead: "50")
-        wait(for: app.staticTexts["feed-status"], toRead: "Success")
+        wait(for: app.staticTexts["feed-count"], toRead: "50 rows")
+        wait(for: app.staticTexts["feed-status"], toEndWith: "Success")
         wait(for: element("feed-row-1", in: app), "the first row")
 
         // Scrolling to the end makes the rows near it ask for the next page, which arrives as 50 more rows.
         let list = app.collectionViews["feed-list"].exists ? app.collectionViews["feed-list"] : app.tables["feed-list"]
         let deadline = Date().addingTimeInterval(30)
-        while app.staticTexts["feed-count"].label != "100", Date() < deadline {
+        while app.staticTexts["feed-count"].label != "100 rows", Date() < deadline {
             list.swipeUp(velocity: .fast)
         }
-        wait(for: app.staticTexts["feed-count"], toRead: "100")
+        wait(for: app.staticTexts["feed-count"], toRead: "100 rows")
         keepScreenshot(named: "feed-tour")
 
         // A refetch finds only what changed: the even rows now show revision 1, and the list is as long as before.
-        list.swipeDown(velocity: .fast)
         app.buttons["feed-touch"].tap()
-        wait(for: app.staticTexts["feed-status"], toRead: "Success")
-        wait(for: app.staticTexts["feed-count"], toRead: "100")
+        let top = Date().addingTimeInterval(20)
+        while !element("feed-row-2", in: app).exists, Date() < top {
+            list.swipeDown(velocity: .fast)
+        }
+        wait(for: app.staticTexts["feed-count"], toRead: "100 rows")
         wait(for: element("feed-row-2", in: app), toContain: "v1")
 
         // The even rows are another parameter of the query: another entry with its own first page.
         app.segmentedControls["feed-filter"].buttons["Even rows"].tap()
-        wait(for: app.staticTexts["feed-count"], toRead: "50")
+        wait(for: app.staticTexts["feed-count"], toRead: "50 rows")
         wait(for: element("feed-row-100", in: app).exists ? element("feed-row-100", in: app) : element("feed-row-2", in: app), "an even row")
     }
 
@@ -325,7 +329,7 @@ final class PlaygroundTourTests: XCTestCase {
         flip(app.switches["ticker-failing"])
         let gone = NSPredicate(format: "exists == false")
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: element("ticker-error", in: app))], timeout: 5), .completed)
-        wait(for: app.staticTexts["ticker-status"], toRead: "Success")
+        wait(for: app.staticTexts["ticker-status"], toEndWith: "Success")
     }
 
     private func wait(for expectation: XCTNSPredicateExpectation, timeout: TimeInterval) {
@@ -336,9 +340,18 @@ final class PlaygroundTourTests: XCTestCase {
 
     func testTabBarSwitchesScreens() {
         let app = launch(tab: "todos")
-        for (id, marker) in [("counter", "counter-value"), ("biglist", "biglist-count"), ("remote", "remote-status"), ("notes", "notes-count"), ("todos", "remaining")] {
+        // The first four tabs are in the tab bar...
+        for (id, marker) in [("counter", "counter-value"), ("biglist", "biglist-count"), ("remote", "remote-status"), ("todos", "remaining")] {
             app.tabBars.buttons["tab-\(id)"].tap()
             wait(for: app.staticTexts[marker], "the \(id) screen")
+        }
+        // ...and the others are behind "More" (a tab bar has room for five).
+        for (title, marker) in [("Notes", "notes-count"), ("Library", "library-count"), ("Feed", "feed-count"), ("Ticker", "ticker-value")] {
+            app.tabBars.buttons["More"].tap()
+            let row = app.tables.cells.staticTexts[title].exists ? app.tables.cells.staticTexts[title] : app.staticTexts[title]
+            wait(for: row, "the \(title) row of More")
+            row.tap()
+            wait(for: app.staticTexts[marker], "the \(title) screen")
         }
     }
 }

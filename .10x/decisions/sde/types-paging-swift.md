@@ -128,3 +128,42 @@ length/version, and a restored handle followed by an invalidation pages the new 
 
 Counts after the addendum: `swift test` 792 tests, 0 failures (782 + 10); `scripts/ios-floor.sh runtime` builds for the iOS 15.0
 simulator and macOS 12.
+
+## Addendum: S32, S33, the page-call counter and the playground screens
+
+* **`UndraStats.hostPageCalls`** (`Core/UndraCore.swift`, `Core/UndraStats.swift`): `UndraCore.call` and `callSync` count every target-3
+  call. S32 counts page calls with it instead of wrapping the transport the runner loads: `UndraTransport` and `UndraInbound` are
+  `package` types, so a transport wrapper cannot live in the contract-tests package, and the count is the same (every page call of a
+  list crosses `UndraCore`). Tested in `LazyListTests.testEveryPageCallIsCountedInTheStats`.
+* **S32 (`contract-tests/swift/.../S32_PagedLists.swift`).** Steps 1 to 6 through the generated `Library`, `FeedQueryHandle` and a
+  `RawStore` for the shapes (the 20-byte `LazyValue`, the 12-byte op 2, the keyed patch of 50 inserts under 5 KB, the refetch's updates).
+  "Frame held" (step 4) calls `core.callSync` from a background thread while the main actor is blocked in `DispatchGroup.wait()`, so the
+  mirror's frame cannot run between the three `add_rows(1)` calls; `core.mirror.flush()` then delivers one op-2 entry. "A second
+  `Library()` whose `add_rows(1)` runs before its first drain" is a library made, and changed, inside `RawStore.onEntry` (that is, inside
+  a mirror drain, where a nested `observe` and `callSync` are applied by the drain's next round), so one drain folds `[Full(handle), Inv]`.
+  Step 2's "reading any row of those pages afterwards makes none" is read as "of the page that holds row 120": a row of page 1 reads
+  page 0 as its prefetch, as the contract's "one page of prefetch on each side" says (the TypeScript `get` does the same). The list's
+  version is compared with a page reply read through `UndraCore.callSync(.lazyListPage ...)` (`testEngine.version`, internal, reached with
+  `@testable`).
+* **S33 (`S33_Polling.swift`)**: real time, `UndraLifecycle(core:)` and `core.emitConnectivity`; the gap between ticks is measured between
+  the instants the handle's `data` changed (polled every 5 ms). The scenario assumes it is the first user of the ticker in the process.
+* **The playground app** (`examples/playground/ios`): `LibraryScreen`, `FeedScreen`, `TickerScreen`, tabs `library`, `feed`, `ticker`
+  (`-tab`), accessibility ids and UI tests (`testLibrary`, `testFeed`, `testTicker`), `smoke.sh` launches them too.
+* **Finding: SwiftUI's `List` builds every row of a `ForEach`.** The first Library screen was a `List` (as ADR-043's sketch has it) and
+  stayed on placeholders: on iOS 26.5 `List` evaluated the row closure and `body` of every one of the 10,000 rows in one pass (1,000 rows
+  per log line, in order), so one pass read ~176 pages; the flush keeps the 24 most recently touched, each arrival bumped `revision`, which
+  re-evaluated all 8,800 readers, which asked again: 4,297 page installs in two minutes and the visible rows never filled. A `LazyVStack`
+  (as the 10k list screen already uses) builds only the rows near the screen: 3 page calls, rows shown at once. No engine change can
+  make an eager reader's working set fit a 24-page cache, so the doc comments and the README now say to use a lazy container for a big
+  list, and the Library screen uses one. ADR-043's sketch (`List(0..<library.books.count, id: \.self)`) should say the same.
+
+Checks of that round: `swift test` 794 tests, 0 failures; `contract-tests/swift/run.sh` and `run.sh --floor`: 29 `SCENARIO ... PASS` lines each
+(S01-S20, S23-S28, S31-S33; the one failing test of each run is `TestKitTests.testT4ARecordedSessionPlaysUnderTheGeneratedStore`, whose
+fixtures `testkit/fixtures/session-todos.json` and `ports-remote-todos.json` still record the schema hash 0xe4c001b130237f02);
+`scripts/ios-floor.sh runtime apps sample golden` pass (iOS 15.0 simulator and macOS 12 runtime, the playground's and Fieldbook's iOS 15
+bindings, `examples/ios15-sample` with MinimumOSVersion 15.0, the generated Swift of every golden case in ObservableObject mode for
+iOS 15 and 16); the playground app builds for the iPhone Air simulator (iOS 26.5) and its nine `PlaygroundTourTests` pass, the three
+new ones included (`testLibrary`, `testFeed`, `testTicker`; `testTabBarSwitchesScreens` now goes through "More" for the tabs past the
+fourth, which it already had to do for Notes). `smoke.sh` itself cannot save its screenshots here (`simctl io screenshot` into
+`examples/playground/.proof` is refused in this sandbox), so the three launch screenshots and the tour ones were taken to a scratch
+directory and copied into `.proof`.

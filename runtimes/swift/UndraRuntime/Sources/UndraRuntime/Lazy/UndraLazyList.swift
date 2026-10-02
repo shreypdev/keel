@@ -20,10 +20,20 @@ import Observation
 /// whatever read `count` or `list[index]` is told, so a SwiftUI view that reads them updates.
 ///
 /// ```swift
-/// List(0..<library.books.count, id: \.self) { index in
-///     if let book = library.books[index] { BookRow(book) } else { BookRow.placeholder }
+/// ScrollView {
+///     LazyVStack {
+///         ForEach(0..<library.books.count, id: \.self) { index in
+///             BookRow(books: library.books, index: index)   // reads books[index] in its own body
+///         }
+///     }
 /// }
 /// ```
+///
+/// Put the rows in a lazy container (`LazyVStack`, `LazyVGrid`) and read `list[index]` in the row's own `body`, so that only the
+/// rows near the screen are built and only their pages are read, and a row is updated when its own page arrives. A SwiftUI `List`
+/// builds the rows of a `ForEach` up front (every row, on iOS 26: the playground's Library screen measured it), so a list of ten
+/// thousand rows would read every page, and the cache (``maxCachedPages``) cannot hold them all: it keeps loading and dropping
+/// pages. For a small list, or a `List` over rows that fit the cache, `List` is fine.
 ///
 /// The list keeps at most ``maxCachedPages`` pages (least recently read first out). When the core changes the list it sends the
 /// new length and version; the rows already cached stay on screen, stale, while the pages read since the previous change are asked
@@ -174,12 +184,19 @@ extension UndraLazyList: @preconcurrency RandomAccessCollection {
 /// struct BookList: View {
 ///     @ObservedObject var books: UndraLazyListObject<Book>   // library.books
 ///     var body: some View {
-///         List(0..<books.count, id: \.self) { index in
-///             if let book = books[index] { BookRow(book) } else { BookRow.placeholder }
+///         ScrollView {
+///             LazyVStack {
+///                 ForEach(0..<books.count, id: \.self) { index in
+///                     if let book = books[index] { BookRow(book) } else { BookRow.placeholder }
+///                 }
+///             }
 ///         }
 ///     }
 /// }
 /// ```
+///
+/// An `ObservableObject` re-renders every view that observes it when it changes, so a list this big belongs in a lazy container
+/// (`LazyVStack`), not in a `List`, which builds all of its rows (see ``UndraLazyList``).
 @MainActor
 public final class UndraLazyListObject<Item: UndraCodec & Sendable>: ObservableObject {
     /// The number of rows: the length the core last announced (the signal's value, or the newest invalidation).

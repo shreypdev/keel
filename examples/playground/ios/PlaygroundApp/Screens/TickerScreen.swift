@@ -16,9 +16,12 @@ struct TickerScreen: View {
         NavigationStack {
             List {
                 Section("Ticker") {
-                    LabeledContent("Counter") {
+                    HStack {
+                        Text("Counter")
+                        Spacer()
                         Text(ticker?.data.map { "\($0)" } ?? "none yet")
                             .font(.title2.monospacedDigit())
+                            .foregroundStyle(.secondary)
                             .accessibilityIdentifier("ticker-value")
                     }
                     LabeledContent("Status") {
