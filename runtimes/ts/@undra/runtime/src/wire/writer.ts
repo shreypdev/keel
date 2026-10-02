@@ -387,8 +387,9 @@ export class UndraWriter {
    * allocates a fresh buffer), so the returned bytes are never overwritten.
    *
    * The view's `byteLength` is exact, but its underlying `ArrayBuffer` may be
-   * larger: pass the view itself, not `view.buffer`, to anything that takes
-   * bytes, and `slice()` it if it will be retained for long.
+   * larger (it is not for a result of at most 64 bytes, which is a copy in a
+   * buffer of its own length): pass the view itself, not `view.buffer`, to
+   * anything that takes bytes, and `slice()` it if it will be retained for long.
    */
   finish(): Uint8Array {
     // A small result is copied out exactly: `subarray` would give the 64-byte on-heap buffer a backing store of its own.
