@@ -194,6 +194,63 @@ impl Snapshot {
         }
     }
 
+    /// How many records an encoded snapshot holds, as `(stores, recreation records)` (ADR-059),
+    /// read off the record headers without copying a value: what a caller that only counts reads
+    /// instead of [`decode`](Snapshot::decode) (the dev runner, on up to 16 MiB at every reload). A
+    /// record is a recreation record by the rule of [`StoreSnapshot::recreation`]. It checks the
+    /// framing only (a cut or overlong payload is an error); `decode` is what validates a snapshot.
+    ///
+    /// ```
+    /// use undra_wire::payload::{RECREATION_FIELD, Snapshot, SnapshotType, StoreSnapshot};
+    /// use undra_wire::{Handle, Writer};
+    ///
+    /// let snapshot = Snapshot {
+    ///     generation_floor: 1,
+    ///     schema_hash: 7,
+    ///     types: vec![SnapshotType { type_id: 9, fingerprint: 0 }],
+    ///     description: String::new(),
+    ///     stores: vec![StoreSnapshot {
+    ///         handle: Handle::new(1, 1),
+    ///         type_id: 9,
+    ///         signals: vec![(RECREATION_FIELD, vec![1, 0])],
+    ///     }],
+    /// };
+    /// let mut w = Writer::new();
+    /// snapshot.encode(&mut w);
+    /// assert_eq!(Snapshot::count_records(w.as_slice()), Ok((0, 1)));
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// The [`WireError`] of the first field that does not fit, or trailing bytes.
+    pub fn count_records(bytes: &[u8]) -> Result<(usize, usize), WireError> {
+        let mut r = Reader::new(bytes);
+        let count = r.read_count(STORE_MIN_LEN)?;
+        r.read_u64()?; // generation_floor
+        r.read_u64()?; // schema_hash
+        let type_count = r.read_count(TYPE_LEN)?;
+        r.read_raw(type_count * TYPE_LEN)?;
+        r.read_bytes()?; // description
+        let (mut stores, mut recreations) = (0, 0);
+        for _ in 0..count {
+            r.read_u64()?; // handle
+            r.read_u32()?; // type_id
+            let signals = r.read_count(SIGNAL_MIN_LEN)?;
+            let mut only_the_reserved_field = signals == 1;
+            for _ in 0..signals {
+                only_the_reserved_field &= r.read_u32()? == RECREATION_FIELD;
+                r.read_bytes()?;
+            }
+            if only_the_reserved_field {
+                recreations += 1;
+            } else {
+                stores += 1;
+            }
+        }
+        r.finish()?;
+        Ok((stores, recreations))
+    }
+
     /// Reads a payload. Fails on a store whose type is not listed, on a type listed twice, and on
     /// a description that is not UTF-8.
     pub fn decode(r: &mut Reader<'_>) -> Result<Self, WireError> {
@@ -537,6 +594,44 @@ mod tests {
             Some(&[][..]),
             "an empty record is still one"
         );
+    }
+
+    /// What `count_records` answers is what decoding and `recreation` tell apart, without copying a
+    /// value; a cut payload is an error, never a short count.
+    #[test]
+    fn count_records_reads_the_kinds_off_the_record_headers() {
+        let mut snap = sample();
+        snap.types.push(SnapshotType {
+            type_id: 9,
+            fingerprint: 0x33,
+        });
+        snap.stores.push(StoreSnapshot {
+            handle: Handle::new(3, 2),
+            type_id: 9,
+            signals: vec![(RECREATION_FIELD, vec![1, 0, 7])],
+        });
+        // A store that also has a field under the reserved id is a store.
+        snap.stores.push(StoreSnapshot {
+            handle: Handle::new(4, 2),
+            type_id: 9,
+            signals: vec![(RECREATION_FIELD, vec![]), (0, vec![1])],
+        });
+        let b = encode(&snap);
+        let decoded = Snapshot::decode(&mut Reader::new(&b)).unwrap();
+        let queries = decoded
+            .stores
+            .iter()
+            .filter(|s| s.recreation().is_some())
+            .count();
+        assert_eq!(
+            Snapshot::count_records(&b),
+            Ok((decoded.stores.len() - queries, queries))
+        );
+        assert_eq!(Snapshot::count_records(&b), Ok((3, 1)));
+        assert_eq!(Snapshot::count_records(&encode(&sample())), Ok((2, 0)));
+        for len in 0..b.len() {
+            assert!(Snapshot::count_records(&b[..len]).is_err(), "cut at {len}");
+        }
     }
 
     #[test]

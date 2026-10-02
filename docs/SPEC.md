@@ -1486,7 +1486,7 @@ pub struct Reviver {                                 // ADR-059: what builds re-
     pub check: fn(&Runtime, u32, &[u8]) -> Result<(), String>,   // checks a record without building anything and without calling a port (restore phase 1, under the panic guard)
     pub revive: fn(&Runtime, u32, &[u8]) -> Result<Arc<dyn AnyObject>, String>,   // builds the object at first use (§5.9): the core lock is held and the runtime is current, as in a dispatched call; under the panic guard
 }
-// undra_wire::payload: `StoreSnapshot { handle, type_id, signals }` with `StoreSnapshot::recreation(&self) -> Option<&[u8]>` (Some exactly when the record has the one field `RECREATION_FIELD = 0xFFFF_FFFE`, §1.1, §5.9) and the same Encode/Decode as a store's record
+// undra_wire::payload: `StoreSnapshot { handle, type_id, signals }` with `StoreSnapshot::recreation(&self) -> Option<&[u8]>` (Some exactly when the record has the one field `RECREATION_FIELD = 0xFFFF_FFFE`, §1.1, §5.9) and the same Encode/Decode as a store's record; `Snapshot::count_records(bytes) -> Result<(stores, recreation records), WireError>` counts the two kinds off the record headers without copying a value
 pub trait Port: Send + Sync + 'static { const PORT_ID: u32; const NAME: &'static str; const KIND: undra_meta::PortKind; }   // implemented for `dyn Trait`
 pub struct PortDispatcher {                          // submitted by #[undra::port], one per port trait: how a Rust binding answers an encoded call. The standard request/reply ports' are not submitted but are statics (`undra_ports::KV_DISPATCHER`, ...) that a binding passes to `bind_dyn_port_with` (`fakes::install` does), so a core that binds no Rust implementation of one does not link them (ADR-052)
     pub port_id: u32,

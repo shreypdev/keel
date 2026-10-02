@@ -383,11 +383,9 @@ fn take_snapshot(server: &Server, runtime: &Runtime) {
         say(&format!("snapshot failed too-large {}", bytes.len()));
         return;
     }
-    // Counted by decoding: the snapshot's leading word counts its recreation records too.
-    let (stores, queries) = Snapshot::decode(&mut Reader::new(&bytes)).map_or((0, 0), |snapshot| {
-        let (stores, queries) = handles_of(&snapshot);
-        (stores.len(), queries.len())
-    });
+    // Counted off the record headers (the leading word counts the recreation records too), without
+    // decoding up to 16 MiB of values a second time.
+    let (stores, queries) = Snapshot::count_records(&bytes).unwrap_or((0, 0));
     let (token, handles) = match &suspended.session {
         Some(session) => (session.token.as_str(), handles_text(&session.handles)),
         None => ("-", "-".to_owned()),
