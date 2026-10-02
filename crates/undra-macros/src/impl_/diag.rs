@@ -41,7 +41,7 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0001 | unsupported type in a public position |
 /// | E0002 | generic parameter |
 /// | E0003 | lifetime in a public signature |
-/// | E0004 | trait object, `dyn`, `impl Trait` |
+/// | E0004 | a trait object, `dyn` or `impl Trait` that is not a callback parameter, or a callback where one may not stand (ADR-041) |
 /// | E0005 | `Result` / `Stream` outside return position |
 /// | E0006 | map key type not allowed |
 /// | E0007 | unsupported item shape or placement of an Undra attribute (addition) |
@@ -67,10 +67,10 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0061 | the name written is not the declared name of the type, or the type is not declared with `#[undra::api]` (addition) |
 /// | E0062 | a port call could not be answered and its method has no error channel: a runtime message (addition) |
 /// | E0063 | nested `Option<Option<T>>` (addition) |
-/// | E0064 | an object (`#[undra::api] impl`) used where a value is expected, or a value used as an object, or an object where objects may not stand (ADR-040; addition) |
+/// | E0064 | an object (`#[undra::api] impl`) used where a value is expected, or a value used as an object, or an object where objects may not stand (ADR-040) |
 /// | E0065 | a signal of a store written off its owning runtime's core (ADR-035): a runtime message |
 /// | E0066 | a `#[undra::migrate]` hook with a wrong target or shape (ADR-037; addition) |
-/// | E0071 | a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041; addition) |
+/// | E0071 | a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041) |
 pub(crate) mod code {
     pub(crate) const E0001: &str = "E0001";
     pub(crate) const E0002: &str = "E0002";
