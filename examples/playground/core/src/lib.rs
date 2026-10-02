@@ -68,7 +68,8 @@ pub use ledger::{
 pub use live::{Live, SseFollow, sse_follow, ws_echo};
 pub use notes::{DbCells, Note, Notes, db_cells, db_migrate, db_run};
 pub use paging::{
-    LIBRARY_LEN, Library, PAGE, TickError, feed, set_ticker_failing, ticker, ticker_fetches, touch_feed,
+    LIBRARY_LEN, Library, PAGE, TickError, feed, set_ticker_failing, ticker, ticker_fetches,
+    touch_feed,
 };
 pub use remote::{
     RemoteConfig, RemoteError, RemoteTodo, configure_remote, create_remote_todo, patch_remote_todo,

@@ -1,13 +1,17 @@
-//! What a platform can call: a query handle's constructor, its `refetch` and `invalidate`, and
-//! every mutation as a function.
+//! What a platform can call: a query handle's constructor, its methods (`refetch`, `invalidate`,
+//! `set_poll_interval` and, on an infinite query's handle, `fetch_next_page`), and every mutation
+//! as a function.
 //!
 //! `undra-bindgen` synthesizes, for each query `todos` with parameters `(page)`:
 //!
 //! * a `TodosQueryHandle` object whose type id and constructor method id are both the query id
 //!   (`fnv1a32("query.todos")`), the constructor taking the query's parameters in order and
 //!   answering the object's `u64` handle;
-//! * two sync methods on that object, `refetch()` (`fnv1a32("query.refetch")`) and
-//!   `invalidate()` (`fnv1a32("query.invalidate")`), the same ids on every handle type;
+//! * sync methods on that object, `refetch()` (`fnv1a32("query.refetch")`), `invalidate()`
+//!   (`fnv1a32("query.invalidate")`) and `set_poll_interval(Option<Duration>)`
+//!   ([`SET_POLL_INTERVAL_METHOD_ID`](undra_meta::ids::SET_POLL_INTERVAL_METHOD_ID)), the same ids
+//!   on every handle type, and on the handle of an `infinite` query `fetch_next_page()`
+//!   ([`FETCH_NEXT_PAGE_METHOD_ID`](undra_meta::ids::FETCH_NEXT_PAGE_METHOD_ID), no arguments);
 //!
 //! and for each mutation an async free function whose method id is the mutation id
 //! (`fnv1a32("mutation.add_todo")`), taking the input parameters in order and answering the
@@ -24,7 +28,7 @@ use core::any::Any;
 
 use undra_meta::{DispatchCall, DispatchOutcome, ids};
 use undra_runtime::{DispatchResult, Runtime};
-use undra_wire::Encode;
+use undra_wire::{Decode, Encode};
 
 use crate::client::QueryClient;
 use crate::erased::{MutationVTable, QueryVTable, registered_mutation, registered_query};
@@ -36,6 +40,14 @@ pub const REFETCH_METHOD_ID: u32 = ids::fnv1a32("query.refetch");
 
 /// The method id of `invalidate()` on every query handle: `fnv1a32("query.invalidate")`.
 pub const INVALIDATE_METHOD_ID: u32 = ids::fnv1a32("query.invalidate");
+
+/// The method id of `set_poll_interval(Option<Duration>)` on every query handle:
+/// `fnv1a32("QueryHandle.set_poll_interval")` (ADR-043).
+pub const SET_POLL_INTERVAL_METHOD_ID: u32 = ids::SET_POLL_INTERVAL_METHOD_ID;
+
+/// The method id of `fetch_next_page()` on the handle of an infinite query:
+/// `fnv1a32("QueryHandle.fetch_next_page")` (ADR-043).
+pub const FETCH_NEXT_PAGE_METHOD_ID: u32 = ids::FETCH_NEXT_PAGE_METHOD_ID;
 
 pub(crate) fn dispatch(rt: &dyn Any, call: DispatchCall<'_>) -> DispatchOutcome {
     let Some(rt) = rt.downcast_ref::<Runtime>() else {
@@ -85,7 +97,7 @@ fn construct(rt: &Runtime, vt: &'static QueryVTable, call: DispatchCall<'_>) -> 
     DispatchResult::Sync(Ok(handle.encode_to_vec()))
 }
 
-/// `refetch()` and `invalidate()` on a handle.
+/// A method of a handle: `refetch`, `invalidate`, `set_poll_interval` and `fetch_next_page`.
 fn handle_method(rt: &Runtime, call: DispatchCall<'_>) -> DispatchResult {
     let object = match rt.object::<HandleObjectInner>(call.handle) {
         Ok(object) => object,
@@ -94,6 +106,22 @@ fn handle_method(rt: &Runtime, call: DispatchCall<'_>) -> DispatchResult {
     match call.method_id {
         REFETCH_METHOD_ID => object.ops.refetch(),
         INVALIDATE_METHOD_ID => object.ops.invalidate(),
+        ids::SET_POLL_INTERVAL_METHOD_ID => {
+            match Option::<core::time::Duration>::decode_exact(call.args) {
+                Ok(interval) => object.ops.set_poll_interval(interval),
+                Err(e) => {
+                    return DispatchResult::BadRequest(format!(
+                        "bad arguments for `set_poll_interval` (an optional duration): {e}"
+                    ));
+                }
+            }
+        }
+        // Only an infinite query's handle has one.
+        ids::FETCH_NEXT_PAGE_METHOD_ID => {
+            if !object.ops.fetch_next_page() {
+                return DispatchResult::Unknown;
+            }
+        }
         _ => return DispatchResult::Unknown,
     }
     DispatchResult::Sync(Ok(Vec::new()))

@@ -52,8 +52,15 @@ fn main() {
 Everything runs on the core loop and through the standard ports, so a test controls the network
 (`FakeHttp`), storage (`MemKv`), time (`FakeClock`, `fakes.advance`) and connectivity
 (`ScriptedConnectivity`) and gets the same behaviour every run. The platforms see a query as a
-`<Name>QueryHandle` store (constructor, `refetch()`, `invalidate()`, five signals) and a mutation
-as an async function; both are served through the runtime's dispatch, see `dispatch`.
+`<Name>QueryHandle` store (constructor, `refetch()`, `invalidate()`, `set_poll_interval()`, five
+signals) and a mutation as an async function; both are served through the runtime's dispatch, see
+`dispatch`.
+
+A query that says `interval = "30s"` polls while it is observed and the app is in front, counting
+from the end of each fetch. A query that says `infinite, item_key = "id"` and takes a
+`#[undra(cursor)]` parameter returns `undra::query::Page<T, C>` and is a list loaded a page at a
+time: the platforms see one keyed list that grows (`fetchNextPage()`, `hasNextPage`), and a next
+page crosses the boundary as the appended rows alone. Both are in the crate documentation.
 
 See the crate documentation for the model (keys, entries, staleness, triggers, garbage
 collection), `MutationBuilder` for mutations and the offline queue, and `docs/SPEC.md` section 9

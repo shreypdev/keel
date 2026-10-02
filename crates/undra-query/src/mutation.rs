@@ -58,7 +58,7 @@ use std::sync::Arc;
 use undra_runtime::Ctx;
 use undra_wire::Encode;
 
-use crate::defs::{BoxFuture, MutationDef, QueryDef};
+use crate::defs::{BoxFuture, InfiniteQueryDef, MutationDef, QueryDef};
 use crate::erased::{Erased, Failure, mutation_vtable, query_vtable};
 use crate::key::{Invalidate, QueryKey};
 use crate::queue::{is_network_error, scoped};
@@ -124,6 +124,30 @@ impl CacheView<'_> {
             Some(&mut *self.undo),
         );
         true
+    }
+}
+
+impl CacheView<'_> {
+    /// Changes the rows of the infinite query `Q` with these parameters in place (ADR-043): `f`
+    /// edits the flattened list of every row loaded, inside the optimistic transaction, so an
+    /// observer sees the edit at once and a failed mutation rolls it back like any other write
+    /// of the entry (by write stamp, see [`MutationBuilder::optimistic`]). Returns `false` (and
+    /// does nothing) if the entry has no rows yet.
+    ///
+    /// The platform receives the edit as the minimal keyed patch of what changed: a closure over
+    /// a `&mut Vec` cannot be recorded operation by operation (ADR-027), so the commit compares the
+    /// list by key. The pages keep their sizes (the last one takes the difference), their cursors
+    /// and their number; the next fetch of the entry puts the server's answer in their place, so a
+    /// mutation should invalidate the entry it edits.
+    ///
+    /// ```ignore
+    /// cache.update_items::<FeedQuery>((filter,), |posts| posts.insert(0, placeholder));
+    /// ```
+    pub fn update_items<Q>(&mut self, params: Q::Params, f: impl FnOnce(&mut Vec<Q::Item>)) -> bool
+    where
+        Q: InfiniteQueryDef,
+    {
+        self.update::<Q>(params, f)
     }
 }
 

@@ -55,10 +55,22 @@ impl Library {
 
     // Used by `new` and, through `restore = ".."`, to rebuild the store from a snapshot: the view is
     // derived data, so the empty list a snapshot holds for it is ignored and it is built again.
-    fn assemble(_ctx: Ctx, books: Lazy<Item>, source: Signal<Vec<Item>>, _view: Lazy<Item>) -> Self {
-        let evens = Lazy::over(&source.derive().filter(|item: &Item| item.id % 2 == 0).build());
+    fn assemble(
+        _ctx: Ctx,
+        books: Lazy<Item>,
+        source: Signal<Vec<Item>>,
+        _view: Lazy<Item>,
+    ) -> Self {
+        let evens = Lazy::over(
+            &source
+                .derive()
+                .filter(|item: &Item| item.id % 2 == 0)
+                .build(),
+        );
         let next = books
-            .with_range(.., |rows| rows.iter().map(|item| item.id).max().unwrap_or(0))
+            .with_range(.., |rows| {
+                rows.iter().map(|item| item.id).max().unwrap_or(0)
+            })
             .max(source.with(|rows| rows.iter().map(|item| item.id).max().unwrap_or(0)));
         Self {
             next_id: AtomicU32::new(next.saturating_add(1)),

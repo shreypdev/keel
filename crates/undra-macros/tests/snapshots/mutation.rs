@@ -23,12 +23,14 @@ macro_rules! _undra_error_E0007_a_mutation_is_a_free_function_move_it_out_of_the
         ::undra::meta::TypeRefMeta::String }], returns :
         ::undra::meta::TypeRefMeta::Result(& ::undra::meta::TypeRefMeta::Named("Todo"), &
         ::undra::meta::TypeRefMeta::Named("HttpError")), stale_ms :
-        ::core::option::Option::None, persist : false, idempotent : true, };
-        ::undra::meta::inventory::submit! { ::undra::meta::Registration::Query(&
-        __UNDRA_META_AddTodoMutation) } ::undra::meta::inventory::submit! {
-        ::undra::query::MutationRegistration::of:: < AddTodoMutation > () }
-        ::undra::meta::inventory::submit! { ::undra::query::__private::HYDRATE }
-        ::undra::meta::inventory::submit! { ::undra::query::__private::LAYER }
+        ::core::option::Option::None, persist : false, idempotent : true, interval_ms :
+        ::core::option::Option::None, poll_in_background : false, infinite :
+        ::core::option::Option::None, }; ::undra::meta::inventory::submit! {
+        ::undra::meta::Registration::Query(& __UNDRA_META_AddTodoMutation) }
+        ::undra::meta::inventory::submit! { ::undra::query::MutationRegistration::of:: <
+        AddTodoMutation > () } ::undra::meta::inventory::submit! {
+        ::undra::query::__private::HYDRATE } ::undra::meta::inventory::submit! {
+        ::undra::query::__private::LAYER }
     };
 }
 _undra_error_E0007_a_mutation_is_a_free_function_move_it_out_of_the_impl_block!();

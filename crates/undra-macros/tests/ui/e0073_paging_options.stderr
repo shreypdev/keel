@@ -1,0 +1,44 @@
+error: error[undra::E0073]: the infinite query `no_item_key` has no `item_key`
+         = note: the handle shows the pages as one list keyed by a field of its rows: keyed patches (a next page arrives as the appended rows) and row identity need it
+         = help: add `item_key = "id"`, naming the field of the row type that identifies a row
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+ --> tests/ui/e0073_paging_options.rs:9:26
+  |
+9 | #[k::query(key = "feed", infinite)]
+  |                          ^^^^^^^^
+
+error: error[undra::E0073]: `item_key` on `not_infinite`, which is not `infinite`
+         = note: paging options describe the pages of an infinite query; an ordinary query has one result
+         = help: add `infinite` to the query, or remove `item_key`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_paging_options.rs:17:38
+   |
+17 | #[k::query(key = "todos", item_key = "id", refetch_pages = 2)]
+   |                                      ^^^^
+
+error: error[undra::E0073]: `refetch_pages` on `not_infinite`, which is not `infinite`
+         = note: paging options describe the pages of an infinite query; an ordinary query has one result
+         = help: add `infinite` to the query, or remove `refetch_pages`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_paging_options.rs:17:44
+   |
+17 | #[k::query(key = "todos", item_key = "id", refetch_pages = 2)]
+   |                                            ^^^^^^^^^^^^^
+
+error: error[undra::E0073]: `persist_pages` on `no_persist`, which does not `persist`
+         = note: `persist_pages` says how many of the first pages a persisted entry stores; without `persist` nothing is stored
+         = help: add `persist` to the query, or remove `persist_pages`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_paging_options.rs:22:54
+   |
+22 | #[k::query(key = "saved", infinite, item_key = "id", persist_pages = 2)]
+   |                                                      ^^^^^^^^^^^^^
+
+error: error[undra::E0040]: `refetch_pages` must be a whole number of at least 1
+         = note: it counts pages, and a list has its first page at least
+         = help: write `refetch_pages = 3`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0040
+  --> tests/ui/e0073_paging_options.rs:30:69
+   |
+30 | #[k::query(key = "zero", infinite, item_key = "id", refetch_pages = 0)]
+   |                                                                     ^

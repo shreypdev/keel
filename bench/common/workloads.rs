@@ -39,12 +39,13 @@ pub fn all() -> Vec<Workload> {
     all.extend(lazy());
     all.extend(snapshot());
     all.extend(super::stress::workloads());
+    all.extend(super::query_rows::rows_group());
     all.extend(super::ports::ports());
     all.extend(super::ports::db());
     all
 }
 
-/// The operations of one group (`wire`, `dispatch`, `signals`, `lazy`, `snapshot`, `stress`, `ports`, `db`).
+/// The operations of one group (`wire`, `dispatch`, `signals`, `lazy`, `snapshot`, `stress`, `query`, `ports`, `db`).
 pub fn group(name: &str) -> Vec<Workload> {
     match name {
         "wire" => wire(),
@@ -54,6 +55,7 @@ pub fn group(name: &str) -> Vec<Workload> {
         "lazy" => lazy(),
         "snapshot" => snapshot(),
         "stress" => super::stress::workloads(),
+        "query" => super::query_rows::rows_group(),
         "ports" => super::ports::ports(),
         "db" => super::ports::db(),
         other => panic!("no benchmark group `{other}`"),
@@ -115,7 +117,9 @@ fn wire_types(halves: bool) -> Vec<Workload> {
         ])
     });
     // ADR-042: a money amount at the largest scale the wire holds (16 bytes of mantissa, 1 of scale).
-    add_wire(out, halves, "decimal", || Decimal::new(-1_999_999_999_999_999_999_i128, 38));
+    add_wire(out, halves, "decimal", || {
+        Decimal::new(-1_999_999_999_999_999_999_i128, 38)
+    });
     add_wire(out, halves, "record5", fixtures::record5);
     add_wire(out, halves, "record1k", || {
         let record = fixtures::record1k();
