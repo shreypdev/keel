@@ -460,7 +460,14 @@ public final class UndraCallbacks: @unchecked Sendable {
             }
             return nil
         }
-        running?.cancel()
+        // Not here: `Task.cancel()` runs the task's cancellation handlers (`withTaskCancellationHandler`'s
+        // `onCancel`, app code) on the thread that cancels, and this is the core's port callback, which may hold
+        // the core lock (SPEC 6, host contract 2 and 4). Kotlin cancels from another thread for the same reason.
+        if let running {
+            DispatchQueue.global().async {
+                running.cancel()
+            }
+        }
     }
 
     /// Whether `key` is still waiting to start; a cancelled call is not.

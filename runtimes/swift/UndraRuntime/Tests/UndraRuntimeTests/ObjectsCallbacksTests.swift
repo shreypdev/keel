@@ -176,6 +176,50 @@ final class Recorder: Listener {
     }
 }
 
+/// Where a cancellation handler ran: whether on the thread of the core's port callback (the test calls `callPort`
+/// from the main thread).
+final class InsidePortCallback: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen: [Bool] = []
+
+    func record() {
+        let onCallbackThread = Thread.isMainThread
+        lock.withLock { seen.append(onCallbackThread) }
+    }
+
+    var observations: [Bool] {
+        return lock.withLock { seen }
+    }
+}
+
+/// An `ask` that waits for its cancellation with a cancellation handler (app code `Task.cancel()` runs).
+@MainActor
+final class CancelProbe: Listener {
+    let flag: InsidePortCallback
+    var started = 0
+
+    init(flag: InsidePortCallback) {
+        self.flag = flag
+    }
+
+    func progress(done: UInt32) {}
+
+    func note(line: String) {}
+
+    func ask(question: String) async throws(AskError) -> Bool {
+        started += 1
+        let flag = self.flag
+        await withTaskCancellationHandler {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+        } onCancel: {
+            flag.record()
+        }
+        return false
+    }
+}
+
 final class SinkRecorder: Sink, @unchecked Sendable {
     private let lock = NSLock()
     private var values: [UInt32] = []
@@ -565,6 +609,19 @@ final class CallbackTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(20))
         XCTAssertTrue(transport.portReplies.isEmpty, "a late answer is not sent")
         XCTAssertTrue(reports.operations.isEmpty)
+    }
+
+    func testACancelNeverRunsTheImplementationsCancellationHandlerInsideTheCoresCallback() async {
+        let flag = InsidePortCallback()
+        let probe = CancelProbe(flag: flag)
+        let instance = core.callbacks.lend(probe)
+        _ = call(ListenerIds.ask, id: 7, args(instance) { $0.writeString("running") })
+        frames.fire()
+        await waitFor("the call to start") { probe.started == 1 }
+        XCTAssertTrue(Thread.isMainThread, "the port callback below runs on this thread")
+        XCTAssertEqual(call(ListenerIds.cancelCall, args(instance) { $0.writeU32(7) }), .async)
+        await waitFor("the cancellation handler") { !flag.observations.isEmpty }
+        XCTAssertEqual(flag.observations, [false], "app code (onCancel) ran inside the core's port callback")
     }
 
     func testAWeakWrapperForwardsWhileItsTargetLivesAndThenAnswersUnavailable() async {
