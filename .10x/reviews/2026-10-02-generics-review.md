@@ -120,3 +120,14 @@ pushed head's CI, Bench, Two cores and Site runs are in the integrator's hand-ba
 ## Open items
 
 L2's lift (dispatch generated at the template), L4, L5's writer, L6, L7, L8. None blocks the merge.
+
+## Follow-ups (2026-10-02, `wt/generics-followups`)
+
+The open lows that were defects are closed; L2, L4 and L5 stay as documented limits (`.10x/status.md`).
+Record: `.10x/decisions/sde/generics-followups.md`.
+
+| # | Closed by | How |
+|---|---|---|
+| L6 | `1da4919` | The E0070 rule constant spells its type arguments without loss: letters and digits as written, every other character `_` and a code (`_` is `__`, `<` is `_L`, `:` is `_C`, ..., anything else `_U<hex>_`), the arguments joined by `_A`. `Cache<A_B, C>` / `Cache<A, B_C>`, `Vec<Todo>` / `VecTodo`, `crate::model::Todo` / `cratemodelTodo` and `A_B` / `A, B` were one constant each before (the test also keeps `A, BC` / `AB, C` apart); the new unit test fails on the old key and passes now. `Todo` still reads as `Todo`, so no trybuild golden moved. SPEC 4.3 says so. |
+| L7 | `2691d73` | `Selection::assemble` raises the draft counter above every draft the restored selection holds (`fetch_max`), as `Todos::assemble` continues its identities above the snapshot's. Test: a selection holding a draft a million serials ahead (as an earlier run of the core would leave it), snapshot, restore, `draft<Todo>` through the dispatcher: the new draft is above it (it was not before). No schema change: the playground's and two-cores' bindings are up to date. |
+| L8 | `e853565` | Not a regression of ADR-058: on `1e8f33c` (main before it) the same test passes, and the same build is 16 bytes **smaller** with symbols on x86_64 (56 on the host dylib); on this branch it was 0 on arm64 and +16 on x86_64. `llvm-readelf` shows why: both libraries have the same 26 sections of the same sizes but `.text` (±16 bytes: LLVM lays code out slightly differently with `debug = "line-tables-only"`), `.relro_padding` (no file bytes) and `.shstrtab` (rewritten by `llvm-strip`, 5 bytes smaller). The test now claims what must hold: the same sections in the same order (no `.debug_*`, `.symtab`, `.strtab`), every non-code section the same size, the code and unwind tables within a thousandth (two orders above that noise, two below a change in what is compiled); and the unstripped twin must fail the comparison. |
