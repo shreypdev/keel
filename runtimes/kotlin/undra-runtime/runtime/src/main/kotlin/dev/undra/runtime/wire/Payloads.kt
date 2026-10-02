@@ -769,6 +769,76 @@ public object Payloads {
         }
     }
 
+    // ---- lazy lists (ADR-043 decision 3.2) -------------------------------------------------------------
+
+    /**
+     * The value of a `Lazy<T>` signal (change-set op 0 [ChangeOp.FULL] of that signal, and a restore's re-send):
+     * `handle u64, len u32, version u64`.
+     *
+     * @property handle the page server: the object a [CallTarget.LazyListPage] call is addressed to. It is
+     *   transient: a restore sends a new one.
+     * @property len the number of items.
+     * @property version the version of the list [len] was read at; it increases with every change.
+     */
+    public data class LazyValue(val handle: Handle, val len: UInt, val version: ULong) : Payload {
+        override fun encode(w: UndraWriter) {
+            w.writeI64(handle.raw)
+            w.writeU32(len)
+            w.writeU64(version)
+        }
+
+        public companion object {
+            /** Reads a lazy value from [r]; it does not require the reader to be exhausted. */
+            public fun decode(r: UndraReader): LazyValue = LazyValue(Handle(r.readI64()), r.readU32(), r.readU64())
+
+            /** Decodes a whole lazy value. */
+            public fun decode(bytes: ByteArray): LazyValue = decodeWhole(bytes) { decode(it) }
+        }
+    }
+
+    /**
+     * The value of a change-set entry with op [ChangeOp.INVALIDATED] (op 2): `len u32, version u64`. A host
+     * knows the new length and version without a round trip and re-pages its window.
+     *
+     * @property len the new number of items.
+     * @property version the new version.
+     */
+    public data class LazyInvalidated(val len: UInt, val version: ULong) : Payload {
+        override fun encode(w: UndraWriter) {
+            w.writeU32(len)
+            w.writeU64(version)
+        }
+
+        public companion object {
+            /** Reads a lazy invalidation from [r]; it does not require the reader to be exhausted. */
+            public fun decode(r: UndraReader): LazyInvalidated = LazyInvalidated(r.readU32(), r.readU64())
+
+            /** Decodes a whole lazy invalidation. */
+            public fun decode(bytes: ByteArray): LazyInvalidated = decodeWhole(bytes) { decode(it) }
+        }
+    }
+
+    /**
+     * The header of the reply to a [CallTarget.LazyListPage] call: `version u64, total u32, count u32`, followed
+     * by [count] items, each encoded as the list's item type.
+     *
+     * @property version the version of the list the page was read at.
+     * @property total the number of items the list had.
+     * @property count how many items follow.
+     */
+    public data class LazyPageHeader(val version: ULong, val total: UInt, val count: UInt) : Payload {
+        override fun encode(w: UndraWriter) {
+            w.writeU64(version)
+            w.writeU32(total)
+            w.writeU32(count)
+        }
+
+        public companion object {
+            /** Reads a page header from [r]; the items are left for the caller to read. */
+            public fun decode(r: UndraReader): LazyPageHeader = LazyPageHeader(r.readU64(), r.readU32(), r.readU32())
+        }
+    }
+
     /**
      * host to core (envelope kind EVENT): `port_id u32, method_id u32, payload`. A fire-and-forget
      * call into an event port (`#[undra::port(event)]`).

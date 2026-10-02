@@ -8,6 +8,9 @@ import { type Kind, decodeEnvelope, encodeEnvelope } from "../src/wire/envelope.
 import {
   type CallPayload,
   type ChangeEntry,
+  type LazyInvalidated,
+  type LazyPage,
+  type LazyValue,
   type PatchOp,
   type ReplyPayload,
   type SnapshotPayload,
@@ -19,12 +22,18 @@ import {
   StreamFlag,
   decodeCall,
   decodeChangeSet,
+  decodeLazyInvalidated,
+  decodeLazyPage,
+  decodeLazyValue,
   decodePatch,
   decodeReply,
   decodeSnapshot,
   decodeStreamItem,
   encodeCall,
   encodeChangeSet,
+  encodeLazyInvalidated,
+  encodeLazyPage,
+  encodeLazyValue,
   encodePatch,
   encodeReply,
   encodeSnapshot,
@@ -419,12 +428,43 @@ function decimalCase(v: Vector & { error?: string }): Case {
   return codecCase(decimalCodec as Codec<unknown>, value);
 }
 
+// -- the lazy-list payloads (ADR-043) ------------------------------------------
+
+function lazyValueCase(v: Vector): Case {
+  const json = v.value as { handle: number; len: number; version: number };
+  const value: LazyValue = { handle: BigInt(json.handle), len: json.len, version: BigInt(json.version) };
+  return {
+    encode: () => encodeLazyValue(value),
+    check: (bytes) => expect(decodeLazyValue(bytes)).toEqual(value),
+    reencode: (bytes) => encodeLazyValue(decodeLazyValue(bytes)),
+  };
+}
+
+function lazyInvalidatedCase(v: Vector): Case {
+  const json = v.value as { len: number; version: number };
+  const value: LazyInvalidated = { len: json.len, version: BigInt(json.version) };
+  return {
+    encode: () => encodeLazyInvalidated(value),
+    check: (bytes) => expect(decodeLazyInvalidated(bytes)).toEqual(value),
+    reencode: (bytes) => encodeLazyInvalidated(decodeLazyInvalidated(bytes)),
+  };
+}
+
+function lazyPageCase(v: Vector): Case {
+  const json = v.value as { version: number; total: number; items: number[] };
+  const page: LazyPage<number> = { version: BigInt(json.version), total: json.total, items: json.items };
+  return {
+    encode: () => encodeLazyPage(codecs.i32, page),
+    check: (bytes) => expect(decodeLazyPage(codecs.i32, bytes)).toEqual(page),
+    reencode: (bytes) => encodeLazyPage(codecs.i32, decodeLazyPage(codecs.i32, bytes)),
+  };
+}
+
 function caseFor(v: Vector): Case | undefined {
   if (v.type === "decimal") return decimalCase(v);
-  // The lazy-list payloads are checked by the lazy-list suite.
-  if (v.type === "lazy value" || v.type === "lazy invalidated" || v.type === "lazy page (item i32)") {
-    return { encode: () => fromHex(v.hex), check: () => {}, reencode: (b) => b };
-  }
+  if (v.type === "lazy value") return lazyValueCase(v);
+  if (v.type === "lazy invalidated") return lazyInvalidatedCase(v);
+  if (v.type === "lazy page (item i32)") return lazyPageCase(v);
   for (const [pattern, codec] of SCHEMA_CODECS) {
     if (pattern.test(v.type)) return codecCase(codec, v.value);
   }
