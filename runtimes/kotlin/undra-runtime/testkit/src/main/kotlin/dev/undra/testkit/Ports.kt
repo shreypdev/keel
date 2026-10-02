@@ -104,7 +104,7 @@ public enum class ArgsPolicy {
 
 private class Expected(val method: UInt, val args: ByteArray, var reply: Pair<PortStatusName, ByteArray>?)
 
-private val SYNC_PORTS = setOf(portId("Clock"), portId("Rng"), portId("Log"), portId("Timer"))
+private val SYNC_PORTS = setOf(portId("Clock"), portId("Rng"), portId("Log"), portId("Timer"), portId("Diagnostics"))
 
 private fun label(port: UInt, method: UInt): String = standardName(port, method) ?: "port $port method $method"
 
