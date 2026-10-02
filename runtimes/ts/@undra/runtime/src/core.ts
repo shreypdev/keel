@@ -180,7 +180,7 @@ export interface AttachOptions {
    * What to do when a web page goes to the background (ADR-046 decision 3.4, within the page's life only). The runtime reports
    * `Lifecycle.Background` when the page is hidden, left (`pagehide`) or frozen; the core then flushes its debounced persistence
    * at once, and if `stats().background.pending > 0` the runtime runs `runInBackground(1000)` without waiting for it (a failure
-   * goes to `onError`). `false` turns the background run off (the Lifecycle report stays). Default on. Not for a core that is not in a page.
+   * goes to `onError`). `false` turns the background run off (the Lifecycle report stays). Default on. Not for a core that is not in a page. Only the page's own life: Background Sync in a service worker would need the core to run inside the worker, and is a follow-up.
    */
   readonly backgroundRun?: boolean;
   /**
