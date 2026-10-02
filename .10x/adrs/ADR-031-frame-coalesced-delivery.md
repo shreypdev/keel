@@ -224,3 +224,14 @@ runtimes, so read-your-writes holds for sync calls as well as replies; (c) decis
 (`no_coalesce` through the schema) lands in the same piece as a separable commit with
 regenerated goldens; (d) contract scenario S18 is mandatory (R4); (e) SPEC §11/§17 and a
 "high-frequency data" docs page land with the code.
+
+## Amendment (2026-10-02, ADR-043): a lazy invalidation never supersedes the full value
+
+The fold rule said "a full value or a lazy invalidation supersedes everything queued earlier for its signal". With `Lazy<T>` (ADR-043) the full
+value (op 0) names the page server (`handle, len, version`) and the invalidation (op 2) is only `len, version`, so a drain that held `[Full(handle),
+Inv]` folded to the invalidation alone and the host never learned the handle (observing and changing before the frame; a restore's new handle). The rule is
+now: **a full value supersedes everything queued before it; a lazy invalidation supersedes only the earlier invalidations of its signal**. Delivery order is
+preserved (`[Full, Inv, Inv]` delivers `[Full, Inv(last)]`; `[Inv, Full]` delivers `[Full]`; a signal waiting for a full value drops an invalidation like a
+patch). The Swift, Kotlin and TypeScript mirrors and their model tests implement it (TypeScript: +36 gzipped bytes in the up-front chunk); ordinary
+signals and keyed patches are unchanged.
+
