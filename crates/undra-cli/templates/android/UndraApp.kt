@@ -15,6 +15,7 @@ import dev.undra.runtime.MirrorOptions
 import dev.undra.runtime.Mode
 import dev.undra.runtime.UndraException
 import dev.undra.runtime.UndraSchemaMismatchException
+import dev.undra.runtime.adapters.UndraPanicReport
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,8 +41,26 @@ import kotlinx.coroutines.flow.StateFlow
  * is doing and [devNotice] what the dev server said about the reload. When the state could not be carried (a schema
  * change, a state over the limit) the old core's objects are gone: the runtime reports `Closed(SESSION_LOST)`, this
  * class loads the new core and bumps [epoch], and the activity starts over on it.
+ *
+ * **When the core panics** the call that panicked fails (`UndraCallError.Panicked`) and the core keeps working; [onPanic]
+ * also hears one structured report per panic (message, `file:line:column`, the operation, stack frames) on the main thread:
+ * log it, and forward it to your crash reporter there (ADR-046). Release builds keep line tables, so the frames symbolicate with
+ * the files `undra build --release` writes next to the app (`build/symbols`).
+ *
+ * **Background drains** (opt-in, ADR-046): the offline queue can be replayed while the app is in the background. Add
+ * `implementation("dev.undra:android-work:@@KOTLIN_RUNTIME_VERSION@@")` to `app/build.gradle.kts`, then uncomment the two lines
+ * marked `android-work` below: [UndraWork.configure] says how a process WorkManager starts on its own loads the core, and
+ * `onBackgroundWorkPending` asks WorkManager for a window, with a network constraint, when the app goes to the background
+ * with work pending.
  */
 class UndraApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        // android-work (opt-in): how a process that WorkManager starts without an activity loads the core. `start` is idempotent:
+        // it loads the in-process core the first time and does nothing after, so the loader also serves a warm process.
+        // UndraWork.configure(loader = { context -> (context.applicationContext as UndraApp).start(null); @@CORE_ENTRY@@.core })
+    }
+
     /** The dev server this process uses, or `null` for the in-process core. */
     var devUrl: String? = null
         private set
@@ -102,11 +121,17 @@ class UndraApp : Application() {
                     remoteTimeout = 5.seconds,
                     onConnectionChange = ::onConnection,
                     onDevNotice = ::onDevNotice,
+                    onPanic = ::onPanic,
                 ),
             )
             // A core the dev server replaced is gone: stop reporting to it before the new one gets its own ports.
             platform?.close()
-            platform = AndroidPlatformDefaults.install(core, this)
+            platform = AndroidPlatformDefaults.install(
+                core,
+                this,
+                // android-work (opt-in): ask WorkManager for a background window when the app goes to the background with work pending.
+                // onBackgroundWorkPending = { UndraWork.schedule(this) },
+            )
             _failure.value = null
             true
         } catch (e: UndraSchemaMismatchException) {
@@ -117,6 +142,17 @@ class UndraApp : Application() {
             _failure.value = if (url == null) "The core did not load: ${e.message}" else "Cannot reach the dev server at $url: ${e.message}"
             false
         }
+    }
+
+    /**
+     * Heard on the main thread: one report for every panic the core contained (ADR-046). It carries the message, the location
+     * (`file:line:column`), the operation that was running, the stack frames and the identity of the core and its image. Log it
+     * and hand it to the crash reporter: with Firebase Crashlytics that is
+     * `FirebaseCrashlytics.getInstance().recordException(RuntimeException(report.summary))`, with Sentry
+     * `Sentry.captureException(RuntimeException(report.summary))`. Without an `onPanic` the runtime logs each report at error level.
+     */
+    private fun onPanic(report: UndraPanicReport) {
+        Log.e(TAG, "the core panicked: ${report.summary} on ${report.thread} (${report.namespace} ${report.coreVersion}, image ${report.imageId.ifEmpty { "unknown" }})")
     }
 
     /** Heard on a thread of the runtime's: every change of the core's connection. */
