@@ -457,3 +457,17 @@ export class RemoteTransport implements Transport {
     }
   }
 }
+
+/** PROTOTYPE (ADR-057 lever d9): the remote transport of `UndraCore.load`'s options. */
+export function remoteTransport(options: import("../core.js").LoadOptions): RemoteTransport {
+  if (options.url === undefined) throw new UndraError("options", "mode 'remote' needs the `url` option");
+  return new RemoteTransport({
+    url: options.url,
+    expectedSchemaHash: options.expectedSchemaHash,
+    ...(options.platform !== undefined && { platform: options.platform }),
+    ...(options.devtools !== undefined && { devtools: options.devtools }),
+    ...(options.webSocket !== undefined && { webSocket: options.webSocket }),
+    ...(options.handshakeTimeoutMs !== undefined && { handshakeTimeoutMs: options.handshakeTimeoutMs }),
+    ...(options.reconnect !== undefined && { reconnect: options.reconnect }),
+  });
+}

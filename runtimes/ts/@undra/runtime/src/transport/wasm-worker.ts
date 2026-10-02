@@ -1,3 +1,4 @@
+import { WEB_CRYPTO_REQUIRED, hasCryptoRandom } from "../adapters/system.js";
 import { UndraError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
 import { isTrap } from "../panic.js";
 import { errorMessage, hostPlatform } from "../platform.js";
@@ -512,4 +513,23 @@ export class WasmWorkerTransport implements Transport {
       this.#post(Kind.PortReply, encodePortReply({ portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));
     }
   }
+}
+
+/** PROTOTYPE (ADR-057 lever d9): the worker transport of `UndraCore.load`'s options (the checks and the option mapping live with the mode). */
+export function workerTransport(options: import("../core.js").LoadOptions, recovery: WasmWorkerOptions["recovery"]): WasmWorkerTransport {
+  if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-worker' needs the `wasm` option");
+  if (!hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
+  const worker = options.worker;
+  const { create, ports } = (typeof worker === "object" && !("postMessage" in worker) ? worker : { create: worker }) as import("../core.js").WorkerModeOptions;
+  return new WasmWorkerTransport({
+    wasm: options.wasm,
+    expectedSchemaHash: options.expectedSchemaHash,
+    ...(create && { worker: create }),
+    ...(ports !== undefined && { ports }),
+    ...(recovery && { recovery }),
+    ...(options.platform !== undefined && { platform: options.platform }),
+    ...(options.devtools !== undefined && { devtools: options.devtools }),
+    ...(options.logLevel !== undefined && { logLevel: options.logLevel }),
+    ...(options.handshakeTimeoutMs !== undefined && { startTimeoutMs: options.handshakeTimeoutMs }),
+  });
 }

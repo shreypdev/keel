@@ -26,7 +26,7 @@ import { Signal } from "./signal.js";
 import type { StreamSupport } from "./stream-support.js";
 import type { ReconnectOptions, WebSocketFactory } from "./transport/remote.js";
 import type { Channel, PortOutcome, Transport, TransportHandler } from "./transport/transport.js";
-import { WasmHost, type WasmSource } from "./transport/wasm-main.js";
+import { WasmHost, type WasmMainOptions, type WasmSource } from "./transport/wasm-main.js";
 import type { WorkerLike } from "./transport/wasm-worker.js";
 import {
   ALL_SIGNALS,
@@ -514,65 +514,23 @@ export class UndraCore {
     // The worker keeps the snapshots of a core in `wasm-worker` mode: it is told the policy (data, not code).
     const recovery = options.recovery?.options;
     let transport: Transport;
-    switch (options.mode) {
-      case "wasm-main": {
-        if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-main' needs the `wasm` option");
-        // The core's only random source is the `random` import: refuse before instantiating rather than let its
-        // `Rng` fail at the first idempotency key (ADR-049). An app that supplies its own `rng` adapter has one.
-        if (options.adapters?.rng == null && !hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
-        transport = new WasmHost({
-          wasm: options.wasm,
-          expectedSchemaHash: options.expectedSchemaHash,
-          ...(options.platform !== undefined && { platform: options.platform }),
-          ...(options.devtools !== undefined && { devtools: options.devtools }),
-          ...(options.logLevel !== undefined && { logLevel: options.logLevel }),
-          ...(adapters.clock && { clock: adapters.clock }),
-          ...(adapters.rng && { rng: adapters.rng }),
-          ...(adapters.timer && { timer: adapters.timer }),
-          onError: (error) => {
-            adapters.log?.log(4, "undra::runtime", `import failed: ${errorMessage(error)}`);
-          },
-        }) as unknown as Transport;
-        break;
-      }
-      case "wasm-worker": {
-        if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-worker' needs the `wasm` option");
-        // Checked here, before the worker is spawned; the worker reads its own `crypto` (ADR-049).
-        if (!hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
-        const { WasmWorkerTransport } = await import("./transport/wasm-worker.js");
-        // A Worker (anything with `postMessage`) or a function creating one is `{ create }` in short.
-        const worker = options.worker;
-        const { create, ports } = (typeof worker === "object" && !("postMessage" in worker) ? worker : { create: worker }) as WorkerModeOptions;
-        transport = new WasmWorkerTransport({
-          wasm: options.wasm,
-          expectedSchemaHash: options.expectedSchemaHash,
-          ...(create && { worker: create }),
-          ...(ports !== undefined && { ports }),
-          ...(recovery && { recovery }),
-          ...(options.platform !== undefined && { platform: options.platform }),
-          ...(options.devtools !== undefined && { devtools: options.devtools }),
-          ...(options.logLevel !== undefined && { logLevel: options.logLevel }),
-          ...(options.handshakeTimeoutMs !== undefined && { startTimeoutMs: options.handshakeTimeoutMs }),
-        });
-        break;
-      }
-      case "remote": {
-        if (options.url === undefined) throw new UndraError("options", "mode 'remote' needs the `url` option");
-        // Fetched when an app asks for this mode (a development page served by `undra dev`, a native core over a socket), not by every page.
-        const { RemoteTransport } = await import("./transport/remote.js");
-        transport = new RemoteTransport({
-          url: options.url,
-          expectedSchemaHash: options.expectedSchemaHash,
-          ...(options.platform !== undefined && { platform: options.platform }),
-          ...(options.devtools !== undefined && { devtools: options.devtools }),
-          ...(options.webSocket !== undefined && { webSocket: options.webSocket }),
-          ...(options.handshakeTimeoutMs !== undefined && { handshakeTimeoutMs: options.handshakeTimeoutMs }),
-          ...(options.reconnect !== undefined && { reconnect: options.reconnect }),
-        });
-        break;
-      }
-      default:
-        throw new UndraError("options", `unknown mode '${String((options as { mode: unknown }).mode)}'`);
+    const mode = options.mode;
+    if (mode === "wasm-main") {
+      if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-main' needs the `wasm` option");
+      // The core's only random source is the `random` import: refuse before instantiating rather than let its
+      // `Rng` fail at the first idempotency key (ADR-049). An app that supplies its own `rng` adapter has one.
+      if (options.adapters?.rng == null && !hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
+      transport = new WasmHost(options as WasmMainOptions, adapters, (error) => {
+        adapters.log?.log(4, "undra::runtime", `import failed: ${errorMessage(error)}`);
+      }) as unknown as Transport;
+    } else if (mode === "wasm-worker") {
+      // Fetched when an app asks for this mode; the module checks its own options.
+      transport = (await import("./transport/wasm-worker.js")).workerTransport(options, recovery);
+    } else if (mode === "remote") {
+      // Fetched when an app asks for this mode (a development page served by `undra dev`, a native core over a socket), not by every page.
+      transport = (await import("./transport/remote.js")).remoteTransport(options);
+    } else {
+      throw new UndraError("options", `unknown mode '${String(mode)}'`);
     }
     return UndraCore._attach(transport, options, adapters);
   }

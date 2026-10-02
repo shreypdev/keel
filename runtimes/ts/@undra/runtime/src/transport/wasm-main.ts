@@ -178,6 +178,7 @@ export class WasmHost implements Channel {
   readonly _options: WasmMainOptions;
   private readonly _clock: ClockAdapter;
   private _rng: RngAdapter | null;
+  private readonly _onError: ((error: unknown) => void) | undefined;
   private readonly _timer: TimerAdapter;
   private _handler: TransportHandler | null = null;
   private _instance: WebAssembly.Instance | null = null;
@@ -195,12 +196,17 @@ export class WasmHost implements Channel {
   /** @internal */
   _module: WebAssembly.Module | null = null;
 
-  /** @param options See {@link WasmMainOptions}. */
-  constructor(options: WasmMainOptions) {
+  /**
+   * @param options See {@link WasmMainOptions}.
+   * @param adapters Clock, Rng and Timer adapters that replace the ones in `options` (what `UndraCore.load` passes).
+   * @param onError Replaces `options.onError`.
+   */
+  constructor(options: WasmMainOptions, adapters: { readonly clock?: ClockAdapter; readonly rng?: RngAdapter; readonly timer?: TimerAdapter } = options, onError = options.onError) {
     this._options = options;
-    this._clock = options.clock ?? systemClock();
-    this._timer = options.timer ?? setTimeoutTimer();
-    this._rng = options.rng ?? null;
+    this._clock = adapters.clock ?? systemClock();
+    this._timer = adapters.timer ?? setTimeoutTimer();
+    this._rng = adapters.rng ?? null;
+    this._onError = onError;
   }
 
   /** The instantiated module (after `start`); for devtools and tests. */
@@ -425,7 +431,7 @@ export class WasmHost implements Channel {
   }
 
   private _report(error: unknown): void {
-    this._options.onError?.(error);
+    this._onError?.(error);
   }
 
   // ----- the `undra` import object ----------------------------------------------------
