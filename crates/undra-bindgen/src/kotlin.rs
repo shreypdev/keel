@@ -1771,12 +1771,14 @@ impl<'a> Ctx<'a> {
                         w.line("try {");
                         w.indented(|w| {
                             let args = self.encode_call_args(w, c.params, &writer, &lent);
+                            let items = naming::avoid("items", &taken_refs);
                             w.call(
-                                format!("emitAll({inner_core}.stream"),
+                                format!("val {items} = {inner_core}.stream"),
                                 &[inner_target.clone(), id.clone(), args],
-                                ")",
+                                "",
                                 true,
                             );
+                            w.line(format!("emitAll({items})"));
                         });
                         w.line(format!("}} catch ({failure}: UndraException) {{"));
                         w.indented(|w| {
