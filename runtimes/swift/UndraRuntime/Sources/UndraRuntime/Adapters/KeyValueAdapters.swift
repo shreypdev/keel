@@ -6,7 +6,9 @@
 //   delete(key: String) -> Result<(), StorageError>
 //   list(prefix: String) -> Result<Vec<String>, StorageError>
 //
-// Kv keeps one file per key in Application Support; SecureStore keeps one Keychain item per key.
+// Kv keeps one file per key in Application Support (`undra/<namespace>/kv`); SecureStore keeps one
+// Keychain item per key (service `<namespace>.dev.undra.securestore`): the defaults are per core
+// namespace (ADR-044 amendment A, `StorageLocations`).
 // A backend failure answers port status 1 with the encoded `StorageError` (an `UndraPortError`),
 // never "unavailable": the platform failure is mapped as ADR-049's table says.
 //
@@ -218,26 +220,36 @@ enum StorageFailure {
 /// `list` can recover keys of any length and a hash collision can never return another key's
 /// value. Writes are atomic.
 ///
+/// The default adapter keeps its files in `<Application Support>/<bundle id>/undra/<namespace>/kv`,
+/// the namespace being the core's it is registered with (ADR-044 amendment A): two cores of one app
+/// never see each other's keys. ``init(directory:)`` keeps them in a directory of the app's choice
+/// instead, whatever the core.
+///
 /// Failures are typed (``StorageError``, ADR-049): a full disk is `.full`, a file that data
 /// protection keeps unreadable until the first unlock is `.locked`, an entry file whose header
 /// does not decode is `.corrupt` (its key keeps it until it is overwritten or deleted), anything
 /// else is `.io` with the platform's message.
 public struct KvAdapter: UndraAdapter {
-    private let backend: any KeyValueBackend
+    /// The backend for the core with the namespace given.
+    private let backendFor: @Sendable (String) -> any KeyValueBackend
 
-    /// Creates the adapter over `<Application Support>/<bundle id>/Undra/kv`.
+    /// Creates the adapter over `<Application Support>/<bundle id>/undra/<namespace>/kv`, the
+    /// namespace being that of the core it is registered with.
     public init() {
-        self.backend = FileKeyValueBackend(directory: KvAdapter.defaultDirectory(named: "kv"))
+        self.backendFor = { namespace in
+            FileKeyValueBackend(directory: KvAdapter.defaultDirectory(namespace: namespace, named: "kv"))
+        }
     }
 
-    /// Creates the adapter over `directory` (created on first write).
+    /// Creates the adapter over `directory` (created on first write), for every core it serves.
     public init(directory: URL) {
-        self.backend = FileKeyValueBackend(directory: directory)
+        let backend = FileKeyValueBackend(directory: directory)
+        self.backendFor = { _ in backend }
     }
 
     /// Creates the adapter over a custom backend. Tests use in-memory and failing ones.
     init(backend: any KeyValueBackend) {
-        self.backend = backend
+        self.backendFor = { _ in backend }
     }
 
     /// `fnv1a32("port.Kv")`.
@@ -245,20 +257,19 @@ public struct KvAdapter: UndraAdapter {
         return StandardPorts.Kv.portId
     }
 
-    /// The asynchronous `Kv` method table over the files.
+    /// The asynchronous `Kv` method table over the files of `core`'s namespace.
     public func makePortImpl(core: UndraCore) -> PortImpl? {
-        return KeyValuePort.makeImpl(ids: .kv, backend: backend)
+        return KeyValuePort.makeImpl(ids: .kv, backend: backend(forNamespace: core.namespace))
     }
 
-    /// `<Application Support>/<bundle id>/Undra/<name>`.
-    static func defaultDirectory(named name: String) -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        let bundle = Bundle.main.bundleIdentifier ?? "app"
-        return base
-            .appendingPathComponent(bundle, isDirectory: true)
-            .appendingPathComponent("Undra", isDirectory: true)
-            .appendingPathComponent(name, isDirectory: true)
+    /// The storage for the core with `namespace`.
+    func backend(forNamespace namespace: String) -> any KeyValueBackend {
+        return backendFor(namespace)
+    }
+
+    /// `<Application Support>/<bundle id>/undra/<namespace>/<name>`.
+    static func defaultDirectory(namespace: String, named name: String) -> URL {
+        return StorageLocations.directory(namespace: namespace, store: name)
     }
 }
 
@@ -490,8 +501,12 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
 // MARK: - SecureStore
 
 /// `SecureStore` over the Keychain: one generic-password item per key (service
-/// `dev.undra.securestore`, account = key), readable after the first unlock and never migrated to
-/// another device.
+/// `<namespace>.dev.undra.securestore`, account = key), readable after the first unlock and never
+/// migrated to another device.
+///
+/// The default service carries the namespace of the core the adapter is registered with (ADR-044
+/// amendment A), so two cores of one app never read each other's secrets; ``init(service:)`` uses
+/// the service the app names, whatever the core.
 ///
 /// Failures are typed (``StorageError``, ADR-049): `errSecInteractionNotAllowed` (the Keychain
 /// before the first unlock) and `errSecAuthFailed` are `.locked`, an item that is not data or does
@@ -499,16 +514,24 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
 /// `errSecMissingEntitlement`) is `.unavailable`, `errSecDiskFull` is `.full`, and anything else
 /// is `.io` with the Security framework's message and the `OSStatus`.
 public struct SecureStoreAdapter: UndraAdapter {
-    private let backend: any KeyValueBackend
+    /// The backend for the core with the namespace given.
+    private let backendFor: @Sendable (String) -> any KeyValueBackend
 
-    /// Creates the adapter over the Keychain, in `service`.
-    public init(service: String = "dev.undra.securestore") {
-        self.backend = KeychainBackend(service: service)
+    /// Creates the adapter over the Keychain, in the service `<namespace>.dev.undra.securestore` of
+    /// the core it is registered with, or in `service` when one is given.
+    public init(service: String? = nil) {
+        if let service = service {
+            self.backendFor = { _ in KeychainBackend(service: service) }
+        } else {
+            self.backendFor = { namespace in
+                KeychainBackend(service: StorageLocations.keychainService(namespace: namespace))
+            }
+        }
     }
 
     /// Creates the adapter over a custom backend. Tests use in-memory and failing ones.
     init(backend: any KeyValueBackend) {
-        self.backend = backend
+        self.backendFor = { _ in backend }
     }
 
     /// `fnv1a32("port.SecureStore")`.
@@ -516,9 +539,14 @@ public struct SecureStoreAdapter: UndraAdapter {
         return StandardPorts.SecureStore.portId
     }
 
-    /// The asynchronous `SecureStore` method table over the Keychain.
+    /// The asynchronous `SecureStore` method table over the Keychain items of `core`'s namespace.
     public func makePortImpl(core: UndraCore) -> PortImpl? {
-        return KeyValuePort.makeImpl(ids: .secureStore, backend: backend)
+        return KeyValuePort.makeImpl(ids: .secureStore, backend: backend(forNamespace: core.namespace))
+    }
+
+    /// The storage for the core with `namespace`.
+    func backend(forNamespace namespace: String) -> any KeyValueBackend {
+        return backendFor(namespace)
     }
 }
 

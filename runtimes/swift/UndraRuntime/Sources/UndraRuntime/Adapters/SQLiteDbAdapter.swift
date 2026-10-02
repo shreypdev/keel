@@ -7,9 +7,10 @@ import SQLite3
 /// `Db` on the SQLite library every Apple platform ships (`import SQLite3`).
 ///
 /// Each database is a file `<directory>/<name>.sqlite`, the directory being
-/// `Application Support/<bundle id>/Undra/db` (next to the `Kv` adapter's directories) unless one
-/// is given (the directories are created);
-/// `":memory:"` is a private in-memory database. Every connection runs on a serial
+/// `Application Support/<bundle id>/undra/<namespace>/db` (next to the `Kv` adapter's directories,
+/// the namespace being that of the core the adapter is registered with: ADR-044 amendment A, so two
+/// cores of one app never share a database file) unless one is given (the directories are
+/// created); `":memory:"` is a private in-memory database. Every connection runs on a serial
 /// `DispatchQueue` of its own, so the core's thread never waits for the disk.
 ///
 /// `execute` and `query` prepare exactly one statement (trailing SQL other than whitespace and
@@ -21,29 +22,39 @@ import SQLite3
 ///
 /// It is also the `Db` adapter of ``Adapters/platformDefault`` (served by the binding of
 /// ``DbPortAdapter`` with the 5-second busy timeout).
-public final class SQLiteDbAdapter: DbAdapter, UndraAdapter, @unchecked Sendable {
-    /// The directory the database files are in.
-    public let directory: URL
+public final class SQLiteDbAdapter: NamespaceScopedDb, UndraAdapter, @unchecked Sendable {
+    /// The directory the database files are in; `nil` for the default adapter, whose directory is
+    /// that of the namespace of each core it serves (``defaultDirectory(namespace:)``).
+    public let directory: URL?
     private let bindings = BindingSet<DbBinding>()
 
-    /// Keeps the databases in `Application Support/<bundle id>/Undra/db`.
+    /// Keeps the databases in `Application Support/<bundle id>/undra/<namespace>/db`, the namespace
+    /// being that of the core the adapter is registered with.
     public convenience init() {
-        self.init(directory: SQLiteDbAdapter.defaultDirectory)
+        self.init(optionalDirectory: nil)
     }
 
-    /// Keeps the databases in `directory` (created when the first database is opened).
-    public init(directory: URL) {
-        self.directory = directory
+    /// Keeps the databases in `directory` (created when the first database is opened), for every
+    /// core it serves.
+    public convenience init(directory: URL) {
+        self.init(optionalDirectory: directory)
     }
 
-    /// `<Application Support>/<bundle id>/Undra/db`: the `Kv` adapter's root, so two apps on a Mac
-    /// never share a database.
-    public static var defaultDirectory: URL {
-        return KvAdapter.defaultDirectory(named: "db")
+    private init(optionalDirectory: URL?) {
+        self.directory = optionalDirectory
     }
 
-    /// The file of database `name`.
-    public func fileURL(forDatabase name: String) -> URL {
+    /// `<Application Support>/<bundle id>/undra/<namespace>/db`: next to the `Kv` adapter's
+    /// directory of the same namespace, so two apps on a Mac never share a database, nor two cores
+    /// of one app.
+    public static func defaultDirectory(namespace: String) -> URL {
+        return KvAdapter.defaultDirectory(namespace: namespace, named: "db")
+    }
+
+    /// The file of database `name` of the core with the namespace given (the default adapter's
+    /// directory for it, or the one this adapter was given).
+    public func fileURL(forDatabase name: String, namespace: String = UndraCore.unnamedNamespace) -> URL {
+        let directory = self.directory ?? SQLiteDbAdapter.defaultDirectory(namespace: namespace)
         return directory.appendingPathComponent("\(name).sqlite", isDirectory: false)
     }
 
@@ -54,6 +65,7 @@ public final class SQLiteDbAdapter: DbAdapter, UndraAdapter, @unchecked Sendable
         if name == memoryDatabaseName {
             path = memoryDatabaseName
         } else {
+            let directory = self.directory ?? SQLiteDbAdapter.defaultDirectory(namespace: UndraCore.unnamedNamespace)
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             } catch {
@@ -73,7 +85,16 @@ public final class SQLiteDbAdapter: DbAdapter, UndraAdapter, @unchecked Sendable
     }
 
     public func makePortImpl(core: UndraCore) -> PortImpl? {
-        return bindings.add(DbBinding(adapter: self, busyTimeoutMs: DbPortAdapter.defaultBusyTimeoutMs)).portImpl()
+        let served = scoped(toNamespace: core.namespace)
+        return bindings.add(DbBinding(adapter: served, busyTimeoutMs: DbPortAdapter.defaultBusyTimeoutMs)).portImpl()
+    }
+
+    /// This adapter when it has a directory, else one over the default directory of `namespace`.
+    func scoped(toNamespace namespace: String) -> any DbAdapter {
+        if directory != nil {
+            return self
+        }
+        return SQLiteDbAdapter(directory: SQLiteDbAdapter.defaultDirectory(namespace: namespace))
     }
 
     public func detach() {

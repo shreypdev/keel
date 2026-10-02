@@ -11,6 +11,10 @@ import Foundation
 /// missing parent directories and is atomic. `list` returns the entry names of one directory,
 /// sorted; a name that is a directory has no trailing slash.
 ///
+/// The default adapter's root is `<Application Support>/<bundle id>/undra/<namespace>/fs`, the
+/// namespace being the core's it is registered with (ADR-044 amendment A): two cores of one app
+/// never share files. ``init(root:)`` confines the core to a directory of the app's choice instead.
+///
 /// Failures are `FsError`s (port status 1): a missing path is `.notFound`, a permission error, a
 /// link or a path outside the root is `.denied`, a full disk or quota (`ENOSPC`, `EDQUOT`,
 /// `NSFileWriteOutOfSpaceError`) is `.full` (ADR-049), anything else is `.io` with the platform's
@@ -26,22 +30,25 @@ public struct FsAdapter: UndraAdapter {
         _ mode: mode_t
     ) throws -> Void
 
-    private let root: URL
+    /// The root for the core with the namespace given.
+    private let rootFor: @Sendable (String) -> URL
     private let writeAtomically: AtomicWriter
 
-    /// Creates the adapter over `<Application Support>/<bundle id>/Undra/fs`.
+    /// Creates the adapter over `<Application Support>/<bundle id>/undra/<namespace>/fs`, the
+    /// namespace being that of the core it is registered with.
     public init() {
-        self.init(root: KvAdapter.defaultDirectory(named: "fs"))
+        self.rootFor = { namespace in KvAdapter.defaultDirectory(namespace: namespace, named: "fs") }
+        self.writeAtomically = FsAdapter.posixWriter
     }
 
-    /// Creates the adapter over `root` (created on first write).
+    /// Creates the adapter over `root` (created on first write), for every core it serves.
     public init(root: URL) {
         self.init(root: root, writeAtomically: FsAdapter.posixWriter)
     }
 
     /// Creates the adapter over `root`, sealing written files with `writeAtomically`.
     init(root: URL, writeAtomically: @escaping AtomicWriter) {
-        self.root = root
+        self.rootFor = { _ in root }
         self.writeAtomically = writeAtomically
     }
 
@@ -55,9 +62,9 @@ public struct FsAdapter: UndraAdapter {
         return StandardPorts.Fs.portId
     }
 
-    /// The asynchronous `Fs` method table over the root directory.
+    /// The asynchronous `Fs` method table over the root directory of `core`'s namespace.
     public func makePortImpl(core: UndraCore) -> PortImpl? {
-        let root = self.root
+        let root = rootFor(core.namespace)
         let writeAtomically = self.writeAtomically
         return .async([
             StandardPorts.Fs.read: { args in

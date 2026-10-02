@@ -26,6 +26,14 @@ public protocol DbAdapter: Sendable {
     func open(name: String) async throws(DbError) -> any DbConnection
 }
 
+/// A ``DbAdapter`` whose default location depends on the core it serves (``SQLiteDbAdapter``): the
+/// ``DbPortAdapter`` asks it for the adapter of the namespace of the core it is registered with
+/// (ADR-044 amendment A). An adapter with a location of its own answers itself.
+protocol NamespaceScopedDb: DbAdapter {
+    /// The adapter that serves the core with `namespace`.
+    func scoped(toNamespace namespace: String) -> any DbAdapter
+}
+
 /// One open database connection, as an adapter provides it. Every method runs on the adapter's
 /// own thread for that database (the binding never calls two at once), and every failure is
 /// typed by SQLite's result code, never by its message.
@@ -85,7 +93,8 @@ public final class DbPortAdapter: UndraAdapter, @unchecked Sendable {
     }
 
     public func makePortImpl(core: UndraCore) -> PortImpl? {
-        return bindings.add(DbBinding(adapter: adapter, busyTimeoutMs: busyTimeoutMs)).portImpl()
+        let served = (adapter as? any NamespaceScopedDb)?.scoped(toNamespace: core.namespace) ?? adapter
+        return bindings.add(DbBinding(adapter: served, busyTimeoutMs: busyTimeoutMs)).portImpl()
     }
 
     public func detach() {

@@ -79,6 +79,18 @@ public final class UndraCore: @unchecked Sendable {
     /// ``connectionState`` is the same news for any thread.
     public let connection: UndraConnection
 
+    /// The namespace of the core this is the attachment to (`[core] namespace` of its undra.toml,
+    /// `UndraIds.namespace`): the one the generated entry loaded it under, else the in-process
+    /// table's. The default `Kv`, `Fs`, `SecureStore` and `Db` adapters keep their data under it
+    /// (ADR-044, amendment A), so two cores of one app never share a store. A core attached
+    /// without either (a test's scripted transport, a remote core loaded without its entry) has the
+    /// namespace ``unnamedNamespace``.
+    public let namespace: String
+
+    /// The namespace of a core that was attached without one: `_`, which no real namespace is (a
+    /// namespace starts with a lowercase letter), so it never collides with a core's.
+    public static let unnamedNamespace = "_"
+
     let transport: any UndraTransport
     private let state: Guarded<State>
     private let blockingTimeout: Double
@@ -100,9 +112,11 @@ public final class UndraCore: @unchecked Sendable {
         maxPendingBytes: Int = Mirror.defaultMaxPendingBytes,
         frameScheduler: (any FrameScheduler)? = nil,
         onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil,
-        onDevNotice: (@Sendable (String) -> Void)? = nil
+        onDevNotice: (@Sendable (String) -> Void)? = nil,
+        namespace: String? = nil
     ) {
         self.transport = transport
+        self.namespace = namespace ?? UndraCore.unnamedNamespace
         self.mirror = Mirror(maxPendingEntries: maxPendingEntries, maxPendingBytes: maxPendingBytes, scheduler: frameScheduler)
         self.blockingTimeout = blockingCallTimeout
         self.onError = onError
@@ -231,7 +245,8 @@ public final class UndraCore: @unchecked Sendable {
             maxPendingBytes: options.maxPendingBytes,
             frameScheduler: frameScheduler,
             onConnectionChange: options.onConnectionChange,
-            onDevNotice: options.onDevNotice
+            onDevNotice: options.onDevNotice,
+            namespace: options.namespace ?? (transport as? InprocTransport)?.namespace
         )
         options.onConnectionChange?(.connecting)
         let startOptions = TransportStartOptions(
