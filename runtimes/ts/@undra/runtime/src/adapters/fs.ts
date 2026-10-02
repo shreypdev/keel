@@ -1,12 +1,16 @@
+import { storePath } from "./names.js";
 import { type FsAdapter, FsError, fsErrorFrom } from "./types.js";
 
 /** Options of {@link opfsFs}. */
 export interface OpfsFsOptions {
   /**
-   * The directory to serve, or a function that opens it. Default: the origin
-   * private file system root, `navigator.storage.getDirectory()`.
+   * The directory to serve, or a function that opens it. Default: the directory
+   * `undra/<namespace>/fs` of the origin private file system
+   * (`navigator.storage.getDirectory()`), created on first use (SPEC 8, ADR-044 amendment A).
    */
   readonly root?: FileSystemDirectoryHandle | (() => Promise<FileSystemDirectoryHandle>);
+  /** The namespace of the core the default directory is made for. Default `"_"`; ignored when `root` is given. */
+  readonly namespace?: string | undefined;
 }
 
 /** Splits an adapter path into safe segments; `..` is refused so that a path cannot leave the root. */
@@ -33,6 +37,8 @@ export const NEEDS_OPFS = "needs the origin private file system";
  * anything else `Io`.
  */
 export function opfsFs(options: OpfsFsOptions = {}): FsAdapter {
+  // The default directory, `undra/<namespace>/fs`, named now so that a namespace that is not one is refused here, typed.
+  const defaultPath = options.root === undefined ? storePath(options.namespace, "fs").split("/") : [];
   let root: Promise<FileSystemDirectoryHandle> | null = null;
   const openRoot = (): Promise<FileSystemDirectoryHandle> => {
     if (root === null) {
@@ -44,7 +50,11 @@ export function opfsFs(options: OpfsFsOptions = {}): FsAdapter {
         if (storage === undefined || typeof storage.getDirectory !== "function") {
           root = Promise.reject(new FsError.Unavailable(NEEDS_OPFS));
         } else {
-          root = storage.getDirectory();
+          root = storage.getDirectory().then(async (origin) => {
+            let dir = origin;
+            for (const part of defaultPath) dir = await dir.getDirectoryHandle(part, { create: true });
+            return dir;
+          });
         }
       }
       root.catch(() => {

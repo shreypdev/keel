@@ -99,6 +99,19 @@ public final class UndraCore: @unchecked Sendable {
     /// One wrapper per handle (ADR-040): see ``adopt(_:_:)``.
     let identities = ObjectIdentityMap()
 
+    /// The namespace of the core this is the attachment to (`[core] namespace` of its undra.toml,
+    /// `UndraIds.namespace`): the one the generated entry loaded it under, else the in-process
+    /// table's. The default `Kv`, `Fs`, `SecureStore` and `Db` adapters keep their data under it
+    /// (ADR-044, amendment A), so two cores of one app never share a store. A core attached
+    /// without either (a test's scripted transport, a remote core loaded without its entry) has the
+    /// namespace ``unnamedNamespace``.
+    public let namespace: String
+
+    /// The namespace of a core that was attached without one: `_`, which no real namespace is (a
+    /// namespace starts with a lowercase letter), so it never collides with a core's. Two cores attached without a
+    /// namespace share the stores of `_`; a generated entry always sets one.
+    public static let unnamedNamespace = "_"
+
     let transport: any UndraTransport
     private let state: Guarded<State>
     private let blockingTimeout: Double
@@ -120,9 +133,11 @@ public final class UndraCore: @unchecked Sendable {
         maxPendingBytes: Int = Mirror.defaultMaxPendingBytes,
         frameScheduler: (any FrameScheduler)? = nil,
         onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil,
-        onDevNotice: (@Sendable (String) -> Void)? = nil
+        onDevNotice: (@Sendable (String) -> Void)? = nil,
+        namespace: String? = nil
     ) {
         self.transport = transport
+        self.namespace = namespace ?? UndraCore.unnamedNamespace
         self.mirror = Mirror(maxPendingEntries: maxPendingEntries, maxPendingBytes: maxPendingBytes, scheduler: frameScheduler)
         self.blockingTimeout = blockingCallTimeout
         self.onError = onError
@@ -175,8 +190,9 @@ public final class UndraCore: @unchecked Sendable {
     ///
     /// - Throws: `UndraSchemaMismatchError` if the core's schema hash is not
     ///   `options.expectedSchemaHash`; `UndraLoadError` if the options lack the table or the hash,
-    ///   the table is of another ABI version or unusable, the core is already loaded, or it cannot
-    ///   be reached or initialised.
+    ///   the table is of another ABI version or unusable, the namespace (``LoadOptions/namespace``, or
+    ///   the table's) is not a core namespace (`.invalidNamespace`: it names the default stores'
+    ///   directories), the core is already loaded, or it cannot be reached or initialised.
     ///
     /// A remote core is reached with a blocking handshake, so call this once at startup, not on
     /// a hot path.
@@ -185,6 +201,7 @@ public final class UndraCore: @unchecked Sendable {
         if options.expectedSchemaHash == nil {
             throw UndraLoadError.missingSchemaHash
         }
+        try CoreNamespace.require(options.namespace)
         let transport: any UndraTransport
         switch options.mode {
         case .inproc:
@@ -257,6 +274,10 @@ public final class UndraCore: @unchecked Sendable {
         guard let expectedSchemaHash = options.expectedSchemaHash else {
             throw UndraLoadError.missingSchemaHash
         }
+        // The namespace names the default stores' directories (ADR-044 amendment A): the entry's, else the table's,
+        // checked before the core is started or its namespace claimed.
+        let namespace = options.namespace ?? (transport as? InprocTransport)?.namespace
+        try CoreNamespace.require(namespace)
         let core = UndraCore(
             transport: transport,
             blockingCallTimeout: options.blockingCallTimeout,
@@ -265,7 +286,8 @@ public final class UndraCore: @unchecked Sendable {
             maxPendingBytes: options.maxPendingBytes,
             frameScheduler: frameScheduler,
             onConnectionChange: options.onConnectionChange,
-            onDevNotice: options.onDevNotice
+            onDevNotice: options.onDevNotice,
+            namespace: namespace
         )
         options.onConnectionChange?(.connecting)
         let startOptions = TransportStartOptions(

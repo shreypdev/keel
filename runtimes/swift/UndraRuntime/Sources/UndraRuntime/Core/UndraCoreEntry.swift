@@ -86,6 +86,9 @@ public final class UndraCoreEntry: Sendable {
             throw UndraLoadError.alreadyLoaded
         }
         var resolved = options
+        if resolved.namespace == nil {
+            resolved.namespace = namespace
+        }
         if resolved.expectedSchemaHash == nil {
             resolved.expectedSchemaHash = schemaHash
         }

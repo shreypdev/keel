@@ -1,0 +1,9 @@
+{
+  "name": "two-cores-node",
+  "private": true,
+  "description": "The two-core test app on Node (ADR-044). Its only dependency is the IndexedDB stand-in that gives Node's two cores a default Kv to write to.",
+  "type": "module",
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5"
+  }
+}

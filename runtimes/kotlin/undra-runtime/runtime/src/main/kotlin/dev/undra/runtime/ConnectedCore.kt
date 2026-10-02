@@ -58,6 +58,7 @@ internal class ConnectedCore(
     private val onConnectionChange: ((ConnectionState) -> Unit)? = null,
     private val onError: ((UndraUnhandledError) -> Unit)? = null,
     private val onDevNotice: ((String) -> Unit)? = null,
+    override val namespace: String = UNNAMED_NAMESPACE,
 ) : UndraCore(), TransportEvents {
 
     private sealed interface Pending {
@@ -122,7 +123,7 @@ internal class ConnectedCore(
     /** Registers the ports of [options]: the defaults for what is missing, then the explicit adapters. */
     fun installPorts(options: LoadOptions) {
         if (options.defaultAdapters) {
-            for ((id, impl) in JvmAdapters.defaults(this::timerFired)) ports.register(id, impl)
+            for ((id, impl) in JvmAdapters.defaults(namespace, this::timerFired)) ports.register(id, impl)
         }
         for ((id, impl) in options.adapters) ports.register(id, impl)
     }

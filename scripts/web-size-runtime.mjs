@@ -3,12 +3,24 @@
 // (ADR-052). The entry is the app's own loader, `web/src/undra.ts` of an `undra init` project: it
 // imports `@undra/runtime` and the generated bindings exactly as the app does. Vite (the one pinned
 // by the TypeScript runtime's lockfile) builds it for production: tree-shaken, minified, the runtime
-// and the bindings each in a chunk of their own so their sizes can be read apart. The worker script
-// of the `wasm-worker` mode is a separate asset that only that mode loads.
+// and the bindings each in a chunk of their own so their sizes can be read apart.
+//
+// What is measured is what the page loads **up front**: the runtime modules the entry reaches by static
+// imports (Rolldown's `$initial` tag), in one chunk. A runtime module only a dynamic `import()` reaches (the
+// `wasm-worker` and `remote` transports, which `UndraCore.load` fetches when the app asks for that mode) is a
+// chunk of its own, loaded on demand, and is reported next to the number (`lazy`), not in it (ADR-052,
+// amendment of ts-size-e4). The `wasm-worker` mode's Worker script is likewise a separate asset.
 //
 //   node scripts/web-size-runtime.mjs <project-dir> <runtime-dir> <out-dir>
+//   UNDRA_SIZE_MODULES=1 node scripts/web-size-runtime.mjs ...   also print, on stderr, the unminified
+//                                                                bytes each source module contributes
+//                                                                to each chunk (what grew: ADR-052, section 5);
+//                                                                `=exports` adds the exports each one keeps
+//   UNDRA_SIZE_TARGET=es2020 node scripts/web-size-runtime.mjs ...   build for that target instead of the pinned
+//                                                                Vite's default (Vite 6's default lowers `#private`)
 //
-// Prints one JSON object: { runtime, bindings, app } with each chunk's path (relative to out-dir).
+// Prints one JSON object: { runtime, bindings, app, lazy } with each chunk's path (relative to out-dir);
+// `lazy` lists the other JavaScript chunks (loaded on demand).
 // Exit 3 when the runtime's node_modules are not installed (`npm ci` in <runtime-dir>).
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -27,8 +39,27 @@ if (!existsSync(viteEntry)) {
 const vite = await import(pathToFileURL(viteEntry).href);
 const bindings = JSON.parse(readFileSync(join(project, "generated", "ts", "package.json"), "utf8")).name;
 
+/** Collects each module's rendered (unminified) size per chunk, for `UNDRA_SIZE_MODULES=1`. */
+const moduleReport = {
+  name: "undra-size-modules",
+  generateBundle(_options, bundle) {
+    if (!process.env.UNDRA_SIZE_MODULES) return;
+    for (const chunk of Object.values(bundle)) {
+      if (chunk.type !== "chunk") continue;
+      console.error(`chunk ${chunk.fileName} (${chunk.code.length} bytes minified)`);
+      const rows = Object.entries(chunk.modules)
+        .map(([id, m]) => [m.renderedLength, id.replace(/^.*[\\/](?=runtimes[\\/]|generated[\\/]|web[\\/])/, ""), m.renderedExports ?? []])
+        .sort((a, b) => b[0] - a[0]);
+      for (const [length, id, exports] of rows) {
+        if (length > 0) console.error(`  ${String(length).padStart(7)}  ${id}${process.env.UNDRA_SIZE_MODULES === "exports" ? `  [${exports.join(" ")}]` : ""}`);
+      }
+    }
+  },
+};
+
 await vite.build({
   configFile: false,
+  plugins: [moduleReport],
   root: join(project, "web"),
   logLevel: "error",
   mode: "production",
@@ -43,13 +74,17 @@ await vite.build({
     emptyOutDir: true,
     assetsInlineLimit: 0,
     minify: true,
+    // The pinned Vite's own default target (ES2022-capable browsers) unless asked: UNDRA_SIZE_TARGET=es2020 is
+    // what an app on Vite 6's default ships (`#private` fields become WeakMap helpers).
+    ...(process.env.UNDRA_SIZE_TARGET ? { target: process.env.UNDRA_SIZE_TARGET } : {}),
     rollupOptions: {
       input: join(project, "web", "src", "undra.ts"),
       preserveEntrySignatures: "exports-only",
       output: {
         codeSplitting: {
           groups: [
-            { name: "undra-runtime", test: /runtimes[\\/]ts[\\/]@undra[\\/]runtime[\\/]/ },
+            // `$initial`: only the modules the page loads up front; the ones behind a dynamic import() stay in chunks of their own.
+            { name: "undra-runtime", test: /runtimes[\\/]ts[\\/]@undra[\\/]runtime[\\/]/, tags: ["$initial"] },
             { name: "bindings", test: /generated[\\/]ts[\\/]/ },
           ],
         },
@@ -65,10 +100,11 @@ const find = (prefix, not) => {
   if (hits.length !== 1) throw new Error(`expected one ${prefix}*.js chunk, found ${JSON.stringify(hits)}`);
   return join("assets", hits[0]);
 };
-console.log(
-  JSON.stringify({
-    runtime: find("undra-runtime-"),
-    bindings: find("bindings-"),
-    app: find("undra-", "undra-runtime-"),
-  }),
-);
+const runtimeChunk = find("undra-runtime-");
+const bindingsChunk = find("bindings-");
+const appChunk = find("undra-", "undra-runtime-");
+const lazy = assets
+  .filter((f) => f.endsWith(".js"))
+  .map((f) => join("assets", f))
+  .filter((f) => ![runtimeChunk, bindingsChunk, appChunk].includes(f));
+console.log(JSON.stringify({ runtime: runtimeChunk, bindings: bindingsChunk, app: appChunk, lazy }));

@@ -6,6 +6,9 @@ import dev.undra.runtime.wire.UndraWriter
 import java.io.File
 import kotlinx.coroutines.runBlocking
 
+/** The namespace of the cores the tests use: what the default stores are kept under (ADR-044 amendment A). */
+const val TEST_NAMESPACE: String = "ns_test"
+
 /** Whether the tests run on an Android runtime (instrumented) rather than a desktop JVM (unit tests). */
 val isAndroidRuntime: Boolean = "Dalvik" == System.getProperty("java.vm.name")
 
@@ -13,7 +16,7 @@ val isAndroidRuntime: Boolean = "Dalvik" == System.getProperty("java.vm.name")
  * An [UndraCore] that records what the adapters tell it: the ports they register and the events they send.
  * (`UndraCore` is open with a protected constructor so that tests can do this.)
  */
-class RecordingCore : UndraCore() {
+class RecordingCore(override val namespace: String = TEST_NAMESPACE) : UndraCore() {
     /** A host-to-core event of an event port. */
     class Event(val portId: UInt, val methodId: UInt, val payload: ByteArray)
 

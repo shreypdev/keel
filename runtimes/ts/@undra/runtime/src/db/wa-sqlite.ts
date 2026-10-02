@@ -13,7 +13,8 @@ export interface WaSqliteDbOptions {
 
 /**
  * The browser's Db adapter (ADR-048 §7): SQLite (wa-sqlite, MIT, an optional peer dependency) in a
- * dedicated worker over the origin private file system (`AccessHandlePoolVFS`, `undra/db/`), no
+ * dedicated worker over the origin private file system (`AccessHandlePoolVFS`, `undra/<namespace>/db/`, the namespace being
+ * that of the core the port is registered with: two cores of one page never share a database, ADR-044 amendment A), no
  * COOP/COEP needed. Every call crosses to the worker by `postMessage`; integers stay `bigint`, errors
  * stay typed by SQLite's result code. The web has no WAL: register it as
  * `dbPort(waSqliteDb(), { wal: false })`.

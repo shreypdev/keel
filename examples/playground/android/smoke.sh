@@ -4,7 +4,7 @@
 # Notes tab survives a killed process (SQLite through the `Db` port), then the Remote tab's offline story is driven through
 # uiautomator:
 #
-#   1. fetch      the `inbox` list is fetched and persisted to Kv (files/undra/kv)
+#   1. fetch      the `inbox` list is fetched and persisted to Kv (files/undra/playground_core/kv: per core namespace)
 #   2. toggle     the Offline switch goes on; an added item is queued by the core (the request fails with a network error)
 #   3. kill       the app process is killed with the queue unsent
 #   4. airplane   REAL airplane mode goes on; the app is relaunched: the persisted query shows the cached list (and the
@@ -119,7 +119,9 @@ item_replayed() { rows_are 4 && ui has-text "Queued while offline"; }
 device_offline() { ! adb_ shell dumpsys connectivity | grep -q "Active default network: [0-9]"; }
 screenshot() { adb_ exec-out screencap -p > "$PROOF/android-adapters-$1.png"; echo "screenshot .proof/android-adapters-$1.png"; }
 launch() { adb_ shell am force-stop "$APP"; adb_ logcat -c; run adb_ shell am start -W -n "$ACTIVITY" --es tab "$1"; }
-kv_files() { adb_ shell run-as "$APP" ls files/undra/kv 2>/dev/null | wc -l | tr -d ' '; }
+# The default Kv is per core namespace (ADR-044 amendment A): the playground's core is `playground_core`.
+KV_DIR="files/undra/playground_core/kv"
+kv_files() { adb_ shell run-as "$APP" ls "$KV_DIR" 2>/dev/null | wc -l | tr -d ' '; }
 # The app's own records: the demo server's request log (tag UndraDemoServer) and the adapters' (tag Undra).
 logcat_app() { adb_ logcat -d -v brief 2>/dev/null | grep -E '^[VDIWEF]/(UndraDemoServer|Undra) *\(' || true; }
 show_log() { logcat_app | grep -E "$1" | head -"${2:-6}" || true; }
@@ -181,7 +183,9 @@ run adb_ shell am force-stop "$APP"
 launch notes
 wait_for 20 "the note came back from SQLite after the restart" note_kept || failed=1
 echo "database files (run-as $APP ls databases): $(adb_ shell run-as "$APP" ls databases 2>/dev/null | tr '\n' ' ')"
-adb_ shell run-as "$APP" ls databases 2>/dev/null | grep -q "undra-playground.sqlite" || { echo "no undra-playground.sqlite"; failed=1; }
+# Per core namespace (ADR-044 amendment A): undra-<namespace>-<database>.sqlite, the core being playground_core.
+DB_FILE="undra-playground_core-playground.sqlite"
+adb_ shell run-as "$APP" ls databases 2>/dev/null | grep -qF "$DB_FILE" || { echo "no $DB_FILE"; failed=1; }
 screenshot notes-restarted
 
 # ---- 3. the offline story on the Remote tab -----------------------------------------------------------------------
@@ -194,7 +198,7 @@ fetched_at="$(ui text remote-updated || true)"
 echo "remote-updated: $fetched_at"
 sleep 1 # the persisted copy is written 250 ms after the fetch
 screenshot remote-fetched
-echo "files in the Kv directory (run-as $APP ls files/undra/kv): $(kv_files)"
+echo "files in the Kv directory (run-as $APP ls $KV_DIR): $(kv_files)"
 
 step "1. the Offline switch simulates losing the network; add an item"
 tap remote-offline
@@ -247,7 +251,7 @@ crashes="$(adb_ logcat -d 2>/dev/null | grep -c -E "FATAL EXCEPTION|Fatal signal
 echo "crash markers: $crashes"
 [ "$crashes" = "0" ] || failed=1
 step "files the app keeps (run-as)"
-adb_ shell run-as "$APP" ls -l files/undra/kv 2>/dev/null || true
+adb_ shell run-as "$APP" ls -l "$KV_DIR" 2>/dev/null || true
 
 echo
 if [ "$failed" = 0 ]; then echo "SMOKE PASSED"; else echo "SMOKE FAILED"; exit 1; fi

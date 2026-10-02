@@ -53,7 +53,7 @@ export abstract class UndraObject {
    * (ADR-049): code that keeps the raw handle instead of the object goes stale then.
    */
   readonly handle: Handle;
-  #closed = false;
+  private _undraClosed = false;
 
   /** @param core The core that issued `handle`. @param handle A live handle the caller owns and hands over. */
   protected constructor(core: UndraCore, handle: Handle) {
@@ -64,13 +64,13 @@ export abstract class UndraObject {
 
   /** Whether `close()` has been called. */
   get closed(): boolean {
-    return this.#closed;
+    return this._undraClosed;
   }
 
   /** Releases the handle. Later calls on the object fail in the core with a stale handle. Idempotent. */
   close(): void {
-    if (this.#closed) return;
-    this.#closed = true;
+    if (this._undraClosed) return;
+    this._undraClosed = true;
     leaks?.unregister(this);
     this.core.release(this.handle);
   }

@@ -12,4 +12,7 @@ UNDRA="${UNDRA:-$REPO/target/debug/undra}"
 [ -x "$UNDRA" ] || (cd "$REPO" && cargo build -p undra-cli)
 for ns in a b; do "$UNDRA" build -C "$HERE/../$ns" --platform web; done
 cd "$HERE"
+# The default Kv of the web is IndexedDB, which Node has not: fake-indexeddb stands in for it, so that each core's
+# default store can be written to and the names it is kept under checked.
+[ -d node_modules/fake-indexeddb ] || npm ci --no-audit --no-fund
 exec node --experimental-transform-types --no-warnings --import ./register.mjs main.ts

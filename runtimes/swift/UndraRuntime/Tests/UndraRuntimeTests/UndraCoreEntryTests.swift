@@ -45,9 +45,17 @@ final class UndraCoreEntryTests: XCTestCase {
         let core = try entry.load(.inproc(adapters: Adapters.none))
         XCTAssertEqual(lookups.value, 1, "the table is looked up by an in-process load")
         XCTAssertEqual(core.schemaHash, coreHash)
+        XCTAssertEqual(core.namespace, "fake_core", "the entry's namespace is the core's: the default stores are kept under it (ADR-044 amendment A)")
         XCTAssertEqual(FakeCore.calls, ["init"])
         XCTAssertTrue(entry.core === core)
         XCTAssertTrue(UndraCore.current === core)
+    }
+
+    func testAnInProcessLoadWithoutAnEntryTakesTheTablesNamespace() throws {
+        let table = FakeCoreTable(namespace: "fake_direct", schemaHash: coreHash)
+        let core = try UndraCore.load(.inproc(api: table.pointer, adapters: Adapters.none, expectedSchemaHash: coreHash))
+        addTeardownBlock { core.shutdown() }
+        XCTAssertEqual(core.namespace, "fake_direct")
     }
 
     func testWhatTheOptionsSayWins() throws {

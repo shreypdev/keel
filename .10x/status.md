@@ -464,3 +464,13 @@ In flight: `objects-callbacks` (ADR-040/041), `ios-floor` (ADR-045), `prod-ops` 
 
 Matrix at checkpoint 21: Rust 3,078 · TS 1,432 + 32 · Kotlin 753 + 30 · Swift 674 · RN 87 · contracts 74/74.
 In flight: `ns-storage` (review), `objects-callbacks`, `prod-ops`, `ts-size-e4`.
+
+### Checkpoint 22 (2026-10-02) — the web call path, per-namespace storage
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **ts-size-e4** (ADR-056 + an ADR-052 amendment): the JS gate measures the chunk loaded up front (lazy chunks reported); the remote transport and the four default ports load on first use; the call path allocates nothing on the hot path (byte-level writer/reader, one-allocation call payload, a direct call that returns a settled promise, a shared scratch `DataView`, optional `Transport.sendCall`/`callSyncParts`), the Vite plugin defaults `build.target` to es2022; web budgets as tests (`[web."id"]` rows read by the device bench and a runtime test) | `ab7c6b3` | sonnet review `.10x/reviews/2026-10-02-ts-size-e4-review.md`: sound with fixes (M1 a throw after a sync answer rejected the call, M2 an explicit Timer adapter on a remote core registered too late, M3 flaky RN waits); ordering under 46 cases + a mutant; a 12,000-payload differential wire fuzz against main; Chromium: handle call 3.2 µs → 0.47 µs, callSync 3.6 → 0.3 µs, 100-signal change-set 88 → 17 µs, frame 4.0 → 1.1 ms; Hermes mirror work per frame at 100k patches/s 22 → 5 ms; hello JS 25,996 → 21,173 (gate 21,500; a hello app that calls Kv loads 25,318 over its life); 16 KB not reachable without removing required behaviour (recorded) |
+| **ns-storage** (ADR-044 Amendment A as built): every default store under `…/undra/<ns>/…` (Apple `Undra/<ns>/`), Keychain/Keystore items prefixed, browser names `undra.<ns>.*`, the namespace from the generated entry at load and validated on every host before it becomes a path; two cores write to distinct places on iOS, Android, JVM and Node | `1625dfe` | sonnet review `.10x/reviews/2026-10-02-ns-storage-review.md`: F1 an unvalidated namespace path component on every host (fixed), F2 the bindgen TS fixtures (fixed); JS 21,336 of 21,500 after crossing ts-size-e4; TS 1,580 · Swift 686 · Kotlin 756 · adapters 147 instrumented · RN 88 · contracts 74/74 |
+
+Matrix at checkpoint 22: Rust 3,079 · TS 1,580 + 32 · Kotlin 756 + 30 · Swift 686 · RN 88 · contracts 74/74.
+In flight: `objects-callbacks` (ADR-040/041, final matrix), `prod-ops` (ADR-046, final matrix); drafted: `default-choice-post` (fact-check pending).

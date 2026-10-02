@@ -39,15 +39,10 @@ export interface HttpResponse {
   readonly body: Uint8Array;
 }
 
-/** `NetKind`, a unit enum; the wire index is the position in this list. */
-export const NET_KINDS = ["wifi", "cellular", "wired", "unknown", "none"] as const;
-/** The kind of network the device is on. */
-export type NetKind = (typeof NET_KINDS)[number];
-
-/** `AppState`, a unit enum; the wire index is the position in this list. */
-export const APP_STATES = ["active", "inactive", "background"] as const;
-/** Whether the app is in the foreground. */
-export type AppState = (typeof APP_STATES)[number];
+// `NetKind` and `AppState` are defined with the host events that use them (`./events.ts`): this module is only
+// loaded with the default ports, while a page starts the event sources with its core (ADR-052).
+import type { AppState, NetKind } from "./events.js";
+export { APP_STATES, type AppState, NET_KINDS, type NetKind } from "./events.js";
 
 // ---------------------------------------------------------------------------
 // The opt-in ports' records and enums (ADR-047 WebSocket and Sse, ADR-048 Db)

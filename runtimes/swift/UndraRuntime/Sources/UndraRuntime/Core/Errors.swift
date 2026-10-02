@@ -174,6 +174,11 @@ public enum UndraLoadError: Error, Sendable, Equatable {
     case missingSchemaHash
     /// The table's `init` returned a non-zero code.
     case coreInitFailed(code: UInt32)
+    /// The core's namespace (``LoadOptions/namespace``, or the in-process table's) is not one: the default
+    /// stores are kept in a directory of that name, so it is a lowercase letter followed by lowercase
+    /// letters, digits and `_`, at most 32 bytes, as `undra.toml` has it (`..`, `a/b` and an empty
+    /// string are refused). The payload says what is wrong. Nothing was started.
+    case invalidNamespace(String)
     /// The remote URL is not a valid `ws://` or `wss://` URL.
     case invalidURL(String)
     /// The WebSocket could not be opened or broke during the handshake.
@@ -199,6 +204,8 @@ extension UndraLoadError: CustomStringConvertible {
             return "LoadOptions has no expectedSchemaHash: load the core through its generated entry, Undra<Namespace>.load()"
         case .coreInitFailed(let code):
             return "the Undra core's init failed with code \(code)"
+        case .invalidNamespace(let reason):
+            return "not an Undra core namespace: \(reason)"
         case .invalidURL(let url):
             return "not a valid ws:// or wss:// URL: \(url)"
         case .connectionFailed(let reason):
