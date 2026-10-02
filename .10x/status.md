@@ -492,3 +492,12 @@ In flight: `prod-ops` (ADR-046, opus review), `types-paging` (ADR-042/043), `obj
 
 Matrix at checkpoint 24: Rust 3,229 · TS 1,681 + 37 · Kotlin 810 + 32 · Swift 772 · RN 104 · contracts 86/86 (S01–S30).
 In flight: `types-paging` (ADR-042/043), `objects-followups` (O1–O8); drafted: `default-choice-post`.
+
+### Checkpoint 25 (2026-10-02) — newtypes, generics, Decimal; paged and lazy lists; polling
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **types-paging** (ADR-042 + ADR-043 Accepted): newtypes cross transparently with native wrappers (Swift struct, Kotlin value class, TS branded type), `#[undra::api(generic)]` instantiations (E0070), `Decimal` as a 16-byte i128 mantissa + scale ≤ 38, leaf features (`uuid`, `chrono`, `time`, `rust_decimal`, `bytes`) with a CI job; infinite queries (`fetch_next_page`, `has_next_page`), `Lazy<T>` lists with a transient page server and `Lazy::over(&derived)` (Swift `UndraLazyList` + pre-17 twin, Kotlin `UndraLazyList` + `undra-compose`, TS `useLazyList`), polling with pause on Background/offline; the playground's Ledger, Library (10,000 lazy rows), Feed and Ticker screens; S31–S33; ADR-031 amended (a lazy invalidation supersedes only earlier invalidations of its signal) with model tests in all three mirrors | `686a983` | opus review `.10x/reviews/2026-10-02-types-paging-review.md`: sound with fixes; H1 Kotlin/Swift saturated any mantissa over 127 bits to i128::MAX (off by 38 orders), M1 page sizes over 4,096 broke the list on every platform, M2 the TS mirror applied an invalidation while waiting for a full value; mutants of the amendment fail in each mirror; Rust 3,518 · Swift 862 · Kotlin 880 · TS 1,847 · RN 109 · contracts **95/95** (S01–S33); hello wasm 116,480, JS 22,068 of 22,100; hash `0xaa836fffb918e598`. Open: L2–L6 (refused page reporting differs, retry limits differ, poll resume timing, `undra-compose` tests not in CI, `rust_decimal` scale 28) |
+
+Matrix at checkpoint 25: Rust 3,518 · TS 1,847 + 37 · Kotlin 880 + 32 · Swift 862 · RN 109 · contracts 95/95.
+Every ADR from 029 to 056 is implemented and merged. In flight: `objects-followups` (review + the path-independent size gate); drafted: `default-choice-post`.
