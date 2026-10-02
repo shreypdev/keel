@@ -152,6 +152,49 @@ class LifecycleOnDeviceTest {
     }
 
     @Test
+    fun going_home_with_background_work_pending_asks_the_app_for_a_window_once() {
+        val core = RecordingCore()
+        core.backgroundPending = 2
+        val asked = java.util.concurrent.atomic.AtomicInteger()
+        val adapter = AndroidLifecycleAdapter(context, settleMs = 100)
+        try {
+            adapter.attach(core, onBackgroundWorkPending = { asked.incrementAndGet() })
+            ActivityScenario.launch(TestActivity::class.java).use {
+                core.awaitEvents { events -> events.any { decode(it) == AppState.ACTIVE } }
+                assertEquals("the state the adapter starts in is not a move to the background", 0, asked.get())
+                goHome()
+                core.awaitEvents { list -> list.lastOrNull()?.let(::decode) == AppState.BACKGROUND }
+                val deadline = System.nanoTime() + 5_000_000_000L
+                while (asked.get() == 0 && System.nanoTime() < deadline) Thread.sleep(20)
+                assertEquals("asked for a window when the app went to the background with work pending", 1, asked.get())
+                comeBack().finish()
+            }
+        } finally {
+            adapter.close()
+        }
+    }
+
+    @Test
+    fun going_home_with_nothing_pending_asks_for_nothing() {
+        val core = RecordingCore() // backgroundPending is 0
+        val asked = java.util.concurrent.atomic.AtomicInteger()
+        val adapter = AndroidLifecycleAdapter(context, settleMs = 100)
+        try {
+            adapter.attach(core, onBackgroundWorkPending = { asked.incrementAndGet() })
+            ActivityScenario.launch(TestActivity::class.java).use {
+                core.awaitEvents { events -> events.any { decode(it) == AppState.ACTIVE } }
+                goHome()
+                core.awaitEvents { list -> list.lastOrNull()?.let(::decode) == AppState.BACKGROUND }
+                Thread.sleep(300)
+                assertEquals(0, asked.get())
+                comeBack().finish()
+            }
+        } finally {
+            adapter.close()
+        }
+    }
+
+    @Test
     fun close_unregisters_the_callbacks_and_stops_reports() {
         val r = Recorded(context, settleMs = 100)
         r.adapter.close()

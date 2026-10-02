@@ -1,6 +1,8 @@
 package dev.undra.android
 
+import dev.undra.runtime.BackgroundStats
 import dev.undra.runtime.PortImpl
+import dev.undra.runtime.UndraStats
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.wire.UndraWriter
 import java.io.File
@@ -30,6 +32,12 @@ class RecordingCore : UndraCore() {
 
     /** The timers the core was told came due. */
     val timers: List<UInt> get() = synchronized(lock) { firedTimers.toList() }
+
+    /** What `stats().background.pending` answers: the work a background window would drain (ADR-046). */
+    @Volatile
+    var backgroundPending: Int = 0
+
+    override fun stats(): UndraStats = UndraStats(0, background = BackgroundStats(3, backgroundPending, 0L, 0L, 0L, 0L))
 
     override fun registerPort(portId: UInt, impl: PortImpl) {
         synchronized(lock) { registeredPorts[portId] = impl }

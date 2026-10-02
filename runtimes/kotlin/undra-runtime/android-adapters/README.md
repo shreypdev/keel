@@ -59,7 +59,7 @@ a typed error, never a crash), and the query layer's persistence and offline que
 | `SecureStore` | `AndroidSecureStoreAdapter` | `AndroidKeyStore` AES-256-GCM, files under `noBackupFilesDir/undra/secure` | The key never leaves the Keystore (hardware-backed where available). Values are sealed as `format, iv, ciphertext+tag` with the key name as authenticated data (the web adapter's layout). Not backed up (a ciphertext could not be opened on another device). A failing Keystore or a damaged file is a typed `StorageError` (below), never "missing". |
 | `Fs` | `AndroidFsAdapter` | files under `filesDir/undra/fs` | Confined to its root: `..` and symbolic links out are `Denied`. `write` creates directories and is atomic; `delete` removes a directory with its contents (like Swift and the web), never the root, and removes a symbolic link without following it. A NUL byte in a path is `Io`; a full disk or quota is `FsError.Full`. |
 | `Connectivity` | `AndroidConnectivityAdapter` | `ConnectivityManager.registerDefaultNetworkCallback` | Reports the current state at once, then every change (Wi-Fi to cellular, loss, return). Online = the default network provides internet (`NET_CAPABILITY_INTERNET`), like `NWPath.satisfied`; kind = Wi-Fi, cellular, wired, unknown or none. Reports come from a handler thread, never the main thread. |
-| `Lifecycle` | `AndroidLifecycleAdapter` | `Application.ActivityLifecycleCallbacks` | `Active` (an activity resumed), `Inactive` (visible, no focus), `Background` (none started), on the main thread. A move to a less active state is reported after 700 ms if it lasted, so a rotation or one activity giving way to another is not a trip to the background. There is no "terminate" event: `AppState` has none and Android ends a process without notice; the queue and the cache are persisted as they change. `Active` makes the core refetch stale queries (SPEC section 9). |
+| `Lifecycle` | `AndroidLifecycleAdapter` | `Application.ActivityLifecycleCallbacks` | `Active` (an activity resumed), `Inactive` (visible, no focus), `Background` (none started), on the main thread. A move to a less active state is reported after 700 ms if it lasted, so a rotation or one activity giving way to another is not a trip to the background. There is no "terminate" event: `AppState` has none and Android ends a process without notice; the queue and the cache are persisted as they change. `Active` makes the core refetch stale queries (SPEC section 9); `Background` makes it write what it was debouncing at once and say whether a background window has work to drain (ADR-046, below). Reported by default: `install(..., reportLifecycle = false)` leaves the port to the app. |
 | `Log` | `AndroidLogAdapter` | `android.util.Log` | The record's target is the tag; levels trace..fatal map to verbose..assert (fatal is written with `Log.println`, never `Log.wtf`). Unlike `java.util.logging`, which the runtime's default adapter uses, it keeps trace and debug records. |
 | `Clock`, `Rng`, `Timer` | the runtime's own (`ClockAdapter`, `RngAdapter`, `TimerAdapter`) | `System`, `SecureRandom`, a scheduled executor | Plain JVM; `install` registers them too, so one call covers all ten. |
 
@@ -87,8 +87,26 @@ the runtime logs it at error level, naming the port method, passes it to `LoadOp
 
 **Why no `androidx` dependency.** `androidx.security:security-crypto` (`EncryptedFile`) is deprecated and pulls in a large
 cryptography library for what is about eighty lines of `javax.crypto` and `AndroidKeyStore` here. `ProcessLifecycleOwner`
-(`lifecycle-process`) would add AndroidX to every app for a dozen lines of activity counting. OkHttp would be a second
+(`lifecycle-process`) would add AndroidX to every app for a dozen lines of activity counting (ADR-046's default Lifecycle reporting is
+this adapter). OkHttp would be a second
 HTTP stack next to the platform's; `HttpURLConnection` on Android *is* OkHttp.
+
+## Background work (ADR-046)
+
+Reporting `Background` is also the moment to ask the OS for a window. `AndroidLifecycleAdapter.attach(core, onBackgroundWorkPending)` (and
+`install(core, context, onBackgroundWorkPending = ...)`) reads `core.stats().background.pending` right after it reports the move to the
+background, and calls the callback on the main thread when it is above zero: queued offline mutations, stale persisted queries or
+unflushed persistence are waiting. The callback is where the optional [`android-work`](../android-work/README.md) module's
+`UndraWork.schedule(context)` goes; this module has no WorkManager dependency, which is why it is a callback and not a call. It is
+not called for the state the adapter starts in (a process WorkManager started in the background did not "go" there).
+
+```kotlin
+AndroidPlatformDefaults.install(core, app, onBackgroundWorkPending = { UndraWork.schedule(app) })
+```
+
+Lifecycle is reported by activity counting (`Application.ActivityLifecycleCallbacks`, with the 700 ms settling `ProcessLifecycleOwner`
+itself uses), not by `ProcessLifecycleOwner`: that needs `androidx.lifecycle:lifecycle-process` in every app for the same dozen lines,
+and has no `Inactive`. ADR-046 and the gap audit's PO-9 ask for Lifecycle to be reported by default; it is.
 
 ## Permissions
 

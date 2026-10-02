@@ -70,7 +70,7 @@ public class AndroidPlatform internal constructor(
  * | `SecureStore` | [AndroidSecureStoreAdapter] | AES-256-GCM under an Android Keystore key, files under `noBackupFilesDir` |
  * | `Fs` | [AndroidFsAdapter] | `filesDir`, confined to its root |
  * | `Connectivity` | [AndroidConnectivityAdapter] | `ConnectivityManager.registerDefaultNetworkCallback` |
- * | `Lifecycle` | [AndroidLifecycleAdapter] | `Application.ActivityLifecycleCallbacks` |
+ * | `Lifecycle` | [AndroidLifecycleAdapter] | `Application.ActivityLifecycleCallbacks` (`reportLifecycle = false` opts out) |
  * | `Log` | [AndroidLogAdapter] | `android.util.Log` |
  * | `Clock`, `Rng`, `Timer` | the runtime's own | `System`, `SecureRandom`, a scheduled executor |
  *
@@ -99,6 +99,13 @@ public object AndroidPlatformDefaults {
      * @param http the `Http` adapter, to change its timeouts or size limit.
      * @param requireValidatedNetwork whether a network must pass Android's own reachability check to count as online;
      *   see [AndroidConnectivityAdapter].
+     * @param reportLifecycle whether the app's activities are reported to the core as `Lifecycle.changed` (ADR-046: on by default, so
+     *   the core refetches on `Active` and flushes persistence on `Background` without the app forwarding anything). `false` leaves
+     *   the `Lifecycle` port to the app (`LifecycleEvents`); [AndroidPlatform.lifecycle] is then an adapter that is not started.
+     * @param onBackgroundWorkPending called on the main thread when the app moved to the background and the core has background work
+     *   to drain (`stats().background.pending > 0`); ask the OS for a window here, with the `android-work` module:
+     *   `onBackgroundWorkPending = { UndraWork.schedule(app) }`. Ignored when [reportLifecycle] is `false`; see
+     *   [AndroidLifecycleAdapter.attach].
      * @return the adapters, and a handle that stops the event sources.
      */
     public fun install(
@@ -106,6 +113,8 @@ public object AndroidPlatformDefaults {
         context: Context,
         http: AndroidHttpAdapter = AndroidHttpAdapter(),
         requireValidatedNetwork: Boolean = false,
+        reportLifecycle: Boolean = true,
+        onBackgroundWorkPending: (() -> Unit)? = null,
     ): AndroidPlatform {
         val app = context.applicationContext
         val kv = AndroidKvAdapter(app)
@@ -130,8 +139,12 @@ public object AndroidPlatformDefaults {
         core.registerPort(StandardPorts.Log.PORT_ID, log.portImpl())
         core.registerPort(StandardPorts.Timer.PORT_ID, timer.portImpl())
         connectivity.attach(core)
-        lifecycle.attach(core)
-        Log.i(TAG, "AndroidPlatformDefaults: registered Kv, SecureStore, Fs, Http, Clock, Rng, Log and Timer; reporting Connectivity and Lifecycle")
+        if (reportLifecycle) lifecycle.attach(core, onBackgroundWorkPending)
+        Log.i(
+            TAG,
+            "AndroidPlatformDefaults: registered Kv, SecureStore, Fs, Http, Clock, Rng, Log and Timer; reporting Connectivity" +
+                if (reportLifecycle) " and Lifecycle" else " (Lifecycle is left to the app)",
+        )
         return platform
     }
 }
