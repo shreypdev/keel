@@ -175,8 +175,8 @@ code gives its references back itself".
   (and releases the extra reference); Kotlin 15.5 to 22.5 ns/op (live wrapper), 190 to 204 ns/op (a new wrapper and its
   close); TypeScript 671 to 891 ns/op (a new wrapper), about 220 ns/op for the identity lookup alone and 1.0 to 1.3 us/op with its
   `Release` through the in-process fake transport.
-* **Size** (`scripts/wasm-size.sh`): `web/hello-wasm` 118,929 gzipped (gate 120,000: ok; no wasm change, the build only
-  grew by what the playground-independent hello template links). `web/hello-runtime-js` **26,313 gzipped against a gate of
+* **Size** (`scripts/wasm-size.sh`): `web/hello-wasm` 118,929 gzipped on the merged branch (gate 120,000: ok; the committed
+  record is 116,575; the TypeScript implementer measured 118,793 before and after the TypeScript work, which does not touch the module). `web/hello-runtime-js` **26,313 gzipped against a gate of
   26,000 (record 25,996): 317 bytes of growth, 313 over**. About 97 bytes are the mirror's callback entries (the `Mirror`
   class always ships) and about 220 are `adopt` in every constructor, the late-finalizer handling, `_giveBack` / `_held` /
   `hostRefs` and the dispatch change; hello does not include `callbacks.ts`, `adoptObject` or `requireOwn`. Two trims gave
