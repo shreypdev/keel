@@ -1,0 +1,834 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-newtypes",
+  "records": [
+    {
+      "name": "UserId",
+      "type_id": 1084015935,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "uuid"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "A user's id."
+    },
+    {
+      "name": "TodoId",
+      "type_id": 4266300936,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "A todo's id."
+    },
+    {
+      "name": "OrderNo",
+      "type_id": 521374588,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "u64"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true
+    },
+    {
+      "name": "Meters",
+      "type_id": 910262627,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "f64"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "A length: it has an order."
+    },
+    {
+      "name": "Timeout",
+      "type_id": 2195291688,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "duration"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true
+    },
+    {
+      "name": "Created",
+      "type_id": 165548891,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "timestamp"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true
+    },
+    {
+      "name": "Flag",
+      "type_id": 1041691895,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "bool"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "A bool has no order."
+    },
+    {
+      "name": "Blob",
+      "type_id": 3399239626,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "bytes"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true
+    },
+    {
+      "name": "Tags",
+      "type_id": 1992138944,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false
+        }
+      ],
+      "transparent": true
+    },
+    {
+      "name": "Nickname",
+      "type_id": 3801025005,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false
+        }
+      ],
+      "transparent": true
+    },
+    {
+      "name": "Level",
+      "type_id": 1096112509,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "named",
+            "of": "Priority"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true
+    },
+    {
+      "name": "Wrapped",
+      "type_id": 3712836782,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "named",
+            "of": "Todo"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "A newtype of a record."
+    },
+    {
+      "name": "Owner",
+      "type_id": 2602745460,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "named",
+            "of": "UserId"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "A newtype of a newtype."
+    },
+    {
+      "name": "Boss",
+      "type_id": 946449708,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "named",
+            "of": "Owner"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "Two levels down."
+    },
+    {
+      "name": "Maybe",
+      "type_id": 3006842955,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "UserId"
+            }
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "A newtype of an option of a newtype."
+    },
+    {
+      "name": "Ratings",
+      "type_id": 560808633,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "map",
+            "of": [
+              {
+                "kind": "named",
+                "of": "UserId"
+              },
+              {
+                "kind": "named",
+                "of": "Meters"
+              }
+            ]
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "A newtype of a map with a newtype key."
+    },
+    {
+      "name": "Todo",
+      "type_id": 2995082141,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "named",
+            "of": "TodoId"
+          },
+          "default": false
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "owner",
+          "ty": {
+            "kind": "named",
+            "of": "UserId"
+          },
+          "default": false
+        },
+        {
+          "name": "due",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "Created"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "level",
+          "ty": {
+            "kind": "named",
+            "of": "Level"
+          },
+          "default": false
+        }
+      ],
+      "docs": "A todo with a newtype as its key."
+    },
+    {
+      "name": "Account",
+      "type_id": 1509466876,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "named",
+            "of": "UserId"
+          },
+          "default": false
+        },
+        {
+          "name": "nickname",
+          "ty": {
+            "kind": "named",
+            "of": "Nickname"
+          },
+          "default": false
+        },
+        {
+          "name": "tags",
+          "ty": {
+            "kind": "named",
+            "of": "Tags"
+          },
+          "default": false
+        },
+        {
+          "name": "boss",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "Boss"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "friends",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "UserId"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "scores",
+          "ty": {
+            "kind": "map",
+            "of": [
+              {
+                "kind": "named",
+                "of": "UserId"
+              },
+              {
+                "kind": "named",
+                "of": "Meters"
+              }
+            ]
+          },
+          "default": false
+        },
+        {
+          "name": "by_order",
+          "ty": {
+            "kind": "map",
+            "of": [
+              {
+                "kind": "named",
+                "of": "OrderNo"
+              },
+              {
+                "kind": "named",
+                "of": "UserId"
+              }
+            ]
+          },
+          "default": false
+        },
+        {
+          "name": "timeout",
+          "ty": {
+            "kind": "named",
+            "of": "Timeout"
+          },
+          "default": false
+        },
+        {
+          "name": "blob",
+          "ty": {
+            "kind": "named",
+            "of": "Blob"
+          },
+          "default": false
+        },
+        {
+          "name": "flag",
+          "ty": {
+            "kind": "named",
+            "of": "Flag"
+          },
+          "default": false
+        },
+        {
+          "name": "maybe",
+          "ty": {
+            "kind": "named",
+            "of": "Maybe"
+          },
+          "default": false
+        }
+      ],
+      "docs": "Newtypes inside a record, in containers and as map keys."
+    }
+  ],
+  "enums": [
+    {
+      "name": "Priority",
+      "type_id": 3868041001,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Low",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "High",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ]
+    },
+    {
+      "name": "BoardError",
+      "type_id": 464853939,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "NotFound",
+          "index": 0,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "named",
+                "of": "TodoId"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "todo {0:?} not found"
+        },
+        {
+          "name": "Taken",
+          "index": 1,
+          "fields": [
+            {
+              "name": "owner",
+              "ty": {
+                "kind": "named",
+                "of": "UserId"
+              },
+              "default": false
+            }
+          ],
+          "tuple": false,
+          "message": "taken by {owner:?}"
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "name": "Board",
+      "type_id": 3247379403,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 2304278079,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Board"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "assign",
+          "method_id": 3225957846,
+          "params": [
+            {
+              "name": "todo",
+              "ty": {
+                "kind": "named",
+                "of": "TodoId"
+              }
+            },
+            {
+              "name": "owner",
+              "ty": {
+                "kind": "named",
+                "of": "UserId"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "Todo"
+              },
+              {
+                "kind": "named",
+                "of": "BoardError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Gives `todo` to `owner`."
+        },
+        {
+          "name": "owner_of",
+          "method_id": 802989490,
+          "params": [
+            {
+              "name": "todo",
+              "ty": {
+                "kind": "named",
+                "of": "TodoId"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "UserId"
+            }
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "distance",
+          "method_id": 884568504,
+          "params": [
+            {
+              "name": "from",
+              "ty": {
+                "kind": "named",
+                "of": "Meters"
+              }
+            },
+            {
+              "name": "to",
+              "ty": {
+                "kind": "named",
+                "of": "Meters"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "named",
+            "of": "Meters"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "changes",
+          "method_id": 2190282488,
+          "params": [],
+          "returns": {
+            "kind": "stream",
+            "of": {
+              "kind": "named",
+              "of": "TodoId"
+            }
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "The ids of the todos as they change."
+        },
+        {
+          "name": "listen",
+          "method_id": 1252343096,
+          "params": [
+            {
+              "name": "listener",
+              "ty": {
+                "kind": "callback",
+                "of": "Listener"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Tells `listener` about every assignment."
+        }
+      ],
+      "store": {
+        "signals": [
+          {
+            "name": "todos",
+            "signal_id": 0,
+            "ty": {
+              "kind": "vec",
+              "of": {
+                "kind": "named",
+                "of": "Todo"
+              }
+            },
+            "computed": false,
+            "key": "id"
+          },
+          {
+            "name": "owner",
+            "signal_id": 1,
+            "ty": {
+              "kind": "named",
+              "of": "UserId"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "accounts",
+            "signal_id": 2,
+            "ty": {
+              "kind": "map",
+              "of": [
+                {
+                  "kind": "named",
+                  "of": "UserId"
+                },
+                {
+                  "kind": "named",
+                  "of": "Account"
+                }
+              ]
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "limit",
+            "signal_id": 3,
+            "ty": {
+              "kind": "named",
+              "of": "Timeout"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "blob",
+            "signal_id": 4,
+            "ty": {
+              "kind": "named",
+              "of": "Blob"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "nickname",
+            "signal_id": 5,
+            "ty": {
+              "kind": "named",
+              "of": "Nickname"
+            },
+            "computed": false,
+            "key": null
+          }
+        ]
+      },
+      "docs": "A board of todos."
+    }
+  ],
+  "functions": [
+    {
+      "name": "make_id",
+      "method_id": 743454497,
+      "params": [
+        {
+          "name": "after",
+          "ty": {
+            "kind": "named",
+            "of": "OrderNo"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "named",
+        "of": "OrderNo"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "docs": "Makes the next order number."
+    },
+    {
+      "name": "lookup",
+      "method_id": 1195549543,
+      "params": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "named",
+            "of": "UserId"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "named",
+            "of": "Account"
+          },
+          {
+            "kind": "named",
+            "of": "BoardError"
+          }
+        ]
+      },
+      "is_async": true,
+      "takes_ctx": false,
+      "docs": "Finds an account by id."
+    }
+  ],
+  "ports": [
+    {
+      "name": "Directory",
+      "port_id": 3579266747,
+      "kind": "async",
+      "methods": [
+        {
+          "name": "find",
+          "method_id": 3242364789,
+          "params": [
+            {
+              "name": "nickname",
+              "ty": {
+                "kind": "named",
+                "of": "Nickname"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "UserId"
+              },
+              {
+                "kind": "named",
+                "of": "BoardError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "The user called `nickname`."
+        }
+      ],
+      "docs": "Looks users up on the host."
+    },
+    {
+      "name": "Listener",
+      "port_id": 3232347744,
+      "kind": "callback",
+      "methods": [
+        {
+          "name": "assigned",
+          "method_id": 3839249029,
+          "params": [
+            {
+              "name": "todo",
+              "ty": {
+                "kind": "named",
+                "of": "TodoId"
+              }
+            },
+            {
+              "name": "owner",
+              "ty": {
+                "kind": "named",
+                "of": "UserId"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "A todo changed hands."
+        }
+      ],
+      "docs": "Hears about the board."
+    }
+  ],
+  "queries": []
+}

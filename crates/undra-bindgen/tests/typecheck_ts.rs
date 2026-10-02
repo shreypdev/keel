@@ -66,7 +66,13 @@ ts_cases!(
     queries,
     full,
     stdlib,
-    recursive
+    recursive,
+    newtypes,
+    generics,
+    decimal,
+    polling,
+    infinite,
+    lazy
 );
 
 #[test]

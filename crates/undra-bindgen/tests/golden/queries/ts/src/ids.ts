@@ -13,18 +13,21 @@ export const UndraIds = {
       new: 0x2bb5eff3,
       refetch: 0x21d1b9e2,
       invalidate: 0x44cec2fa,
+      setPollInterval: 0xe327e53b,
     },
     TodoCountQueryHandle: {
       typeId: 0xcb26daa7,
       new: 0xcb26daa7,
       refetch: 0x21d1b9e2,
       invalidate: 0x44cec2fa,
+      setPollInterval: 0xe327e53b,
     },
     TodosQueryHandle: {
       typeId: 0x54209c7c,
       new: 0x54209c7c,
       refetch: 0x21d1b9e2,
       invalidate: 0x44cec2fa,
+      setPollInterval: 0xe327e53b,
     },
   },
   Functions: {

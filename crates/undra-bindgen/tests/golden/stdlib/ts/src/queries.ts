@@ -3,6 +3,7 @@
 import {
   CallTarget,
   ChangeOp,
+  type Duration,
   type HttpError,
   HttpErrorCodec,
   type HttpRequest,
@@ -101,6 +102,25 @@ export class LatestResponseQueryHandle extends UndraStore {
     }
   }
 
+  /**
+   * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+   * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  async setPollInterval(ms: Duration | null): Promise<void> {
+    try {
+      const w = new UndraWriter();
+      optionDuration.encode(w, ms);
+      await this.core.call(
+        { target: CallTarget.ObjectMethod, handle: this.handle },
+        UndraIds.Objects.LatestResponseQueryHandle.setPollInterval,
+        w.finish(),
+      );
+    } catch (error) {
+      this.core.report(error, "LatestResponseQueryHandle.setPollInterval");
+    }
+  }
+
   protected override _apply(signalId: number, op: ChangeOp, value: Uint8Array): void {
     try {
       switch (signalId) {
@@ -164,6 +184,7 @@ export async function retry(
   }
 }
 
+const optionDuration = codecs.option(codecs.duration);
 const optionHttpResponse = codecs.option(HttpResponseCodec);
 const optionHttpError = codecs.option(HttpErrorCodec);
 const optionTimestamp = codecs.option(codecs.timestamp);

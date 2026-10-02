@@ -41,6 +41,7 @@ const RESERVED_TYPE_NAMES: &[&str] = &[
     "Codable",
     "Data",
     "Date",
+    "Decimal",
     "Dictionary",
     "Double",
     "Duration",
@@ -67,10 +68,12 @@ const RESERVED_TYPE_NAMES: &[&str] = &[
     "Void",
     // Kotlin standard library and coroutines.
     "Any",
+    "BigDecimal",
     "Boolean",
     "Byte",
     "ByteArray",
     "Flow",
+    "InfiniteQuery",
     "Int",
     "List",
     "Long",
@@ -102,6 +105,7 @@ const RESERVED_TYPE_NAMES: &[&str] = &[
     "Codec",
     "Codecs",
     "Handle",
+    "LazyList",
     "UndraBytes",
     "UndraCodec",
     "UndraCore",
@@ -110,6 +114,8 @@ const RESERVED_TYPE_NAMES: &[&str] = &[
     "UndraException",
     "UndraHandle",
     "UndraIds",
+    "UndraLazyList",
+    "UndraLazyListObject",
     "UndraObject",
     "UndraPort",
     "UndraPortError",
@@ -920,31 +926,24 @@ impl<'a> Checker<'a> {
             );
             for g in &store.signals {
                 let gat = format!("{at}, signal {}", g.name);
-                if matches!(g.ty, TypeRef::Lazy(_)) {
+                // A `Lazy<T>` signal is a runtime list the platform pages through (ADR-043); what
+                // is checked is its item, like the item of a `Vec<T>`.
+                self.check_value_type(&g.ty, &gat);
+                if matches!(g.ty, TypeRef::Unit) {
                     self.errors.push(BindgenError::Unsupported {
                         at: gat.clone(),
-                        what: "a Lazy<T> signal".to_owned(),
-                        why: "a lazy list needs a runtime API that SPEC section 17 does not define yet, so no platform could observe it".to_owned(),
-                        help: "expose the items as a `Vec<T>` signal, or as a method that takes an offset and a limit".to_owned(),
+                        what: "a signal of type ()".to_owned(),
+                        why: "a signal holds a value the platform shows, and `()` has none"
+                            .to_owned(),
+                        help: "give the signal a value type, or remove it".to_owned(),
                     });
-                } else {
-                    self.check_value_type(&g.ty, &gat);
-                    if matches!(g.ty, TypeRef::Unit) {
-                        self.errors.push(BindgenError::Unsupported {
-                            at: gat.clone(),
-                            what: "a signal of type ()".to_owned(),
-                            why: "a signal holds a value the platform shows, and `()` has none"
-                                .to_owned(),
-                            help: "give the signal a value type, or remove it".to_owned(),
-                        });
-                    }
                 }
-                if g.key.is_some() && !matches!(g.ty, TypeRef::Vec(_)) {
+                if g.key.is_some() && !matches!(g.ty, TypeRef::Vec(_) | TypeRef::Lazy(_)) {
                     self.errors.push(BindgenError::Unsupported {
                         at: gat,
-                        what: "a keyed signal that is not a Vec<T>".to_owned(),
+                        what: "a keyed signal that is not a Vec<T> or a Lazy<T>".to_owned(),
                         why: "a key identifies an item of a list across updates, so only a list can have one".to_owned(),
-                        help: "put `#[undra(key = ..)]` on a `Signal<Vec<T>>` only, or remove it".to_owned(),
+                        help: "put `#[undra(key = ..)]` on a `Signal<Vec<T>>` or a `Lazy<T>` only, or remove it".to_owned(),
                     });
                 }
             }
@@ -1073,7 +1072,7 @@ impl<'a> Checker<'a> {
                     help: "use a mutation for a call that only has effects, or return the data the platform needs".to_owned(),
                 });
             }
-            if matches!(ok, TypeRef::Option(_)) {
+            if matches!(ok, TypeRef::Option(_)) || self.is_newtype_of_option(ok) {
                 self.errors.push(BindgenError::Unsupported {
                     at,
                     what: "a query that returns an Option".to_owned(),
@@ -1178,6 +1177,29 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Whether `ty` is a newtype (ADR-042), however deeply nested, whose innermost type is an
+    /// `Option`.
+    fn is_newtype_of_option(&self, ty: &TypeRef) -> bool {
+        let mut ty = ty;
+        for _ in 0..16 {
+            let TypeRef::Named(name) = ty else {
+                return false;
+            };
+            match self
+                .schema
+                .records
+                .iter()
+                .find(|r| r.transparent && &r.name == name)
+                .and_then(|r| r.fields.first())
+            {
+                Some(field) if matches!(field.ty, TypeRef::Option(_)) => return true,
+                Some(field) => ty = &field.ty,
+                None => return false,
+            }
+        }
+        false
+    }
+
     /// A type in a value position (field, parameter, item): no `()` anywhere,
     /// no nested `Option`, no object handles.
     fn check_value_type(&mut self, ty: &TypeRef, at: &str) {
@@ -1206,6 +1228,17 @@ impl<'a> Checker<'a> {
                         what: format!("the nested option `{ty}`"),
                         why: "Kotlin and TypeScript cannot tell `Some(None)` from `None`".to_owned(),
                         help: "wrap the inner option in a record or an enum that names the two cases".to_owned(),
+                    });
+                } else if self.is_newtype_of_option(inner) {
+                    // A newtype is its inner type on the wire and a wrapper on the platforms, but
+                    // TypeScript brands only what is there: a branded `T | null` cannot say
+                    // `null` apart from "absent", and Kotlin's `Name?` of a `Name(String?)`
+                    // reads as an option of an option.
+                    self.errors.push(BindgenError::Unsupported {
+                        at: at.to_owned(),
+                        what: format!("the option `{ty}` of a newtype that wraps an option"),
+                        why: "that is a nested option on the wire, and TypeScript cannot tell `Some(None)` from `None` there".to_owned(),
+                        help: "make the newtype wrap the value instead of an `Option`, or wrap the option in a record or an enum that names the two cases".to_owned(),
                     });
                 }
                 self.check_value_type(inner, at);

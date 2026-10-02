@@ -429,6 +429,10 @@ impl Types<'_> {
                 let Some(record) = self.model.record(name) else {
                     return Some(String::new());
                 };
+                // A newtype wraps its one value, unlabeled (`UserId(UUID(..))`).
+                if let (true, [only]) = (record.transparent, record.fields.as_slice()) {
+                    return Some(format!("{shown}({})", self.zero_in(&only.ty, state)?));
+                }
                 let mut args = Vec::new();
                 for f in &record.fields {
                     args.push(format!("{}: {}", id(&f.name), self.zero_in(&f.ty, state)?));
@@ -700,16 +704,101 @@ impl SwiftGen<'_> {
         })
     }
 
+    /// A newtype (ADR-042): a `RawRepresentable` struct around its one value, which crosses as
+    /// that value alone.
+    fn newtype(&self, w: &mut CodeWriter, r: &RecordDef, inner: &TypeRef) {
+        let t = self.types();
+        let ty = t.ty(inner);
+        let codable = t.codable(inner, &mut HashSet::from([r.name.clone()]));
+        let mut conformances = vec!["RawRepresentable", "UndraRecord", "Sendable", "Hashable"];
+        if codable {
+            conformances.push("Codable");
+        }
+        // `Comparable` only where the order of the inner type means something.
+        let ordered = self.model.is_ordered(inner);
+        if ordered {
+            conformances.push("Comparable");
+        }
+        doc(w, &r.docs, &[]);
+        w.block(
+            format!("public struct {}: {}", r.name, conformances.join(", ")),
+            |w| {
+                w.line("/// The wrapped value.");
+                w.line(format!("public var rawValue: {ty}"));
+                w.blank();
+                w.line("/// Wraps `rawValue`.");
+                w.block(format!("public init(rawValue: {ty})"), |w| {
+                    w.line("self.rawValue = rawValue");
+                });
+                w.blank();
+                w.line("/// Wraps `rawValue`.");
+                w.block(format!("public init(_ rawValue: {ty})"), |w| {
+                    w.line("self.rawValue = rawValue");
+                });
+                if codable {
+                    // A newtype is its value in every format: `Codable` says so.
+                    w.blank();
+                    w.block("public init(from decoder: any Decoder) throws", |w| {
+                        w.line(format!(
+                            "rawValue = try decoder.singleValueContainer().decode({}.self)",
+                            t.expr_ty(inner)
+                        ));
+                    });
+                    w.blank();
+                    w.block("public func encode(to encoder: any Encoder) throws", |w| {
+                        w.line("var container = encoder.singleValueContainer()");
+                        w.line("try container.encode(rawValue)");
+                    });
+                }
+                if ordered {
+                    w.blank();
+                    w.block(
+                        format!("public static func < (lhs: {0}, rhs: {0}) -> Bool", r.name),
+                        |w| {
+                            w.line("lhs.rawValue < rhs.rawValue");
+                        },
+                    );
+                }
+                w.blank();
+                w.block(
+                    format!(
+                        "public static func undraDecode(_ r: inout UndraReader) throws -> {}",
+                        r.name
+                    ),
+                    |w| {
+                        w.line(format!(
+                            "return try {}({})",
+                            r.name,
+                            t.read_expr(inner, "r")
+                        ));
+                    },
+                );
+                w.blank();
+                w.block("public func undraEncode(_ w: inout UndraWriter)", |w| {
+                    w.line(t.write_stmt(inner, "self.rawValue", "w"));
+                });
+            },
+        );
+    }
+
     fn record(&self, w: &mut CodeWriter, r: &RecordDef) {
+        if let (true, [only]) = (r.transparent, r.fields.as_slice()) {
+            self.newtype(w, r, &only.ty);
+            return;
+        }
         let t = self.types();
         let codable = r
             .fields
             .iter()
             .all(|f| t.codable(&f.ty, &mut HashSet::from([r.name.clone()])));
-        let conformances = if codable {
-            "UndraRecord, Sendable, Hashable, Codable"
-        } else {
-            "UndraRecord, Sendable, Hashable"
+        // The rows of an infinite query whose key is `id` plug into `List` and `ForEach` as they are
+        // (ADR-043); with another key a view passes `id: \.<key>`.
+        let identifiable = self.model.identifiable_items().contains(&r.name.as_str());
+        let conformances = match (codable, identifiable) {
+            (true, false) => "UndraRecord, Sendable, Hashable, Codable",
+            (true, true) => "UndraRecord, Sendable, Hashable, Codable, Identifiable",
+            (false, false) => "UndraRecord, Sendable, Hashable",
+            (false, true) => "UndraRecord, Sendable, Hashable, Identifiable",
         };
         // The names the storage of an indirect field must not take.
         let siblings: Vec<String> = r.fields.iter().map(|f| id(&f.name)).collect();
@@ -1121,8 +1210,12 @@ impl SwiftGen<'_> {
     /// The declaration parameters of `params`: labeled, except that a single
     /// record or enum parameter goes unlabeled, as in `setFilter(_ f: Filter)`.
     fn param_decls(&self, params: &[ParamDef]) -> Vec<String> {
+        self.declared(params, self.unlabeled(params))
+    }
+
+    /// The declaration parameters of `params`, all without an argument label when `unlabeled`.
+    fn declared(&self, params: &[ParamDef], unlabeled: bool) -> Vec<String> {
         let t = self.types();
-        let unlabeled = self.unlabeled(params);
         params
             .iter()
             .map(|p| {
@@ -1236,6 +1329,25 @@ impl SwiftGen<'_> {
                 if let Some(d) = self.model.signal_doc(o, g) {
                     doc(w, d, &[]);
                 }
+                if let TypeRef::Lazy(item) = &g.ty {
+                    // A lazy list is a runtime class the platform pages through (ADR-043), made
+                    // with the store and never replaced.
+                    if observable_object {
+                        // A nested `ObservableObject` does not publish through its owner.
+                        doc(
+                            w,
+                            "",
+                            &["Observe it directly (`@ObservedObject`): changes of the list do not publish through the store.".to_owned()],
+                        );
+                    }
+                    w.line(format!(
+                        "public let {}: {}<{}>",
+                        stored_id(&g.name),
+                        self.lazy_list_type(),
+                        t.ty(item)
+                    ));
+                    continue;
+                }
                 w.line(format!(
                     "{}public private(set) var {}: {} = {}",
                     if observable_object { "@Published " } else { "" },
@@ -1250,6 +1362,16 @@ impl SwiftGen<'_> {
             // The `no_coalesce` signals: the mirror applies every entry of them (ADR-031).
             let no_coalesce = model::no_coalesce_ids(o);
             w.block("init(adopting handle: UndraHandle, core: UndraCore)", |w| {
+                // The lazy lists are made before `super.init`, which needs every property set.
+                for g in &signals {
+                    if matches!(g.ty, TypeRef::Lazy(_)) {
+                        w.line(format!(
+                            "self.{} = {}(core: core)",
+                            stored_id(&g.name),
+                            self.lazy_list_type()
+                        ));
+                    }
+                }
                 if no_coalesce.is_empty() {
                     w.line("super.init(core: core, handle: handle)");
                 } else {
@@ -1270,14 +1392,23 @@ impl SwiftGen<'_> {
             for m in &o.methods {
                 w.blank();
                 let ids = format!("UndraIds.Objects.{}", o.name);
+                let mut callable = Callable::from_method(m);
+                // `setPollInterval(_ interval: Duration?)`: the one argument of a query handle's
+                // poll interval reads without a label, like `setFilter(_:)` (ADR-043).
+                callable.unlabeled = m.method_id == model::QUERY_SET_POLL_INTERVAL_ID
+                    && self.model.is_query_handle(&o.name);
                 self.callable(
                     w,
-                    &Callable::from_method(m),
+                    &callable,
                     &Site::Method {
                         id: format!("{ids}.{}", id(&m.name)),
                         owner: o.name.clone(),
                     },
                 );
+            }
+            if let Some(infinite) = self.model.infinite(&o.name) {
+                w.blank();
+                self.load_more(w, &infinite);
             }
             if store {
                 w.blank();
@@ -1285,6 +1416,39 @@ impl SwiftGen<'_> {
             }
         });
         w.line("}");
+    }
+
+    /// The runtime class of a `Lazy<T>` signal: the `@Observable` list, or its `ObservableObject`
+    /// twin in the iOS 15 / 16 mode (ADR-043, ADR-045).
+    fn lazy_list_type(&self) -> &'static str {
+        if self.observable_object() {
+            "UndraLazyListObject"
+        } else {
+            "UndraLazyList"
+        }
+    }
+
+    /// `loadMore(ifNeededFor:threshold:)` of an infinite query's handle (ADR-043): fetches the next
+    /// page when a row near the end appears, once a next page exists and none is loading.
+    fn load_more(&self, w: &mut CodeWriter, infinite: &model::Infinite<'_>) {
+        let item = self.model.spelled(&infinite.item.name);
+        let key = id(infinite.key);
+        w.line("/// Fetches the next page when `item` is within `threshold` rows of the end of `data`.");
+        w.line("///");
+        w.line("/// Call it from each row's `onAppear`: it does nothing while a page is loading or when there is no");
+        w.line("/// next page.");
+        w.block(
+            format!("public func loadMore(ifNeededFor item: {item}, threshold: Int = 5)"),
+            |w| {
+                w.line("guard hasNextPage, !fetchingNextPage,");
+                w.line(format!(
+                    "      let index = data.lastIndex(where: {{ $0.{key} == item.{key} }}),"
+                ));
+                w.line("      index >= data.count - threshold");
+                w.line("else { return }");
+                w.line("fetchNextPage()");
+            },
+        );
     }
 
     fn constructor(&self, w: &mut CodeWriter, o: &ObjectDef, c: &MethodDef) {
@@ -1416,7 +1580,11 @@ impl SwiftGen<'_> {
                 plain_name.clone(),
             ),
         };
-        let mut params = self.param_decls(c.params);
+        let mut params = if c.unlabeled {
+            self.declared(c.params, true)
+        } else {
+            self.param_decls(c.params)
+        };
         if is_function {
             params.push(format!("{core}: UndraCore = {}", self.default_core()));
         }
@@ -1556,6 +1724,25 @@ impl SwiftGen<'_> {
                         for g in signals {
                             let prop = format!("self.{}", stored_id(&g.name));
                             w.line(format!("case {}:", g.signal_id));
+                            if matches!(g.ty, TypeRef::Lazy(_)) {
+                                // A lazy list takes the entry's reader itself (a `LazyValue`, a
+                                // `LazyInvalidated`) and checks that it is complete.
+                                w.indented(|w| {
+                                    switch_block(w, "op", |w| {
+                                        w.line("case .fullValue:");
+                                        w.indented(|w| {
+                                            w.line(format!("try {prop}.applyFull(&reader)"));
+                                        });
+                                        w.line("case .keyedPatch:");
+                                        w.indented(|w| w.line("break"));
+                                        w.line("case .lazyListInvalidated:");
+                                        w.indented(|w| {
+                                            w.line(format!("try {prop}.applyInvalidated(&reader)"));
+                                        });
+                                    });
+                                });
+                                continue;
+                            }
                             w.indented(|w| {
                                 switch_block(w, "op", |w| {
                                     w.line("case .fullValue:");
@@ -2004,6 +2191,8 @@ struct Callable<'a> {
     returns: &'a TypeRef,
     is_async: bool,
     docs: &'a str,
+    /// Whether the parameters are declared without argument labels.
+    unlabeled: bool,
 }
 
 impl<'a> Callable<'a> {
@@ -2014,6 +2203,7 @@ impl<'a> Callable<'a> {
             returns: &m.returns,
             is_async: m.is_async,
             docs: &m.docs,
+            unlabeled: false,
         }
     }
 
@@ -2024,6 +2214,7 @@ impl<'a> Callable<'a> {
             returns: &f.returns,
             is_async: f.is_async,
             docs: &f.docs,
+            unlabeled: false,
         }
     }
 }
