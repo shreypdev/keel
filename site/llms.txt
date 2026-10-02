@@ -48,6 +48,7 @@ Undra is open source (MIT OR Apache-2.0) and ships an `undra` CLI (`undra init`,
 
 ## Blog
 
+- [Why Undra is the default choice | Undra blog](https://shreypdev.github.io/undra/blog/why-undra-is-the-default-choice/): A sourced matrix of what KMP, UniFFI, Flutter and React Native stop you doing, what Undra solved and how, what it costs to adopt, and what is still open.
 - [Why Undra keeps your UI native | Undra blog](https://shreypdev.github.io/undra/blog/why-undra-keeps-your-ui-native/): Shared UI and shared logic are different bets. What Flutter, React Native and Compose Multiplatform trade, who should pick which, and where Undra stops.
 - [Undra vs UniFFI and Crux: Rust under a native app | Undra](https://shreypdev.github.io/undra/blog/undra-vs-uniffi-and-crux/): Three ways to put a Rust core under SwiftUI, Compose and React: UniFFI bindings, Crux's Elm-style core, and Undra's mirrored state. Dated and sourced.
 - [Undra vs Kotlin Multiplatform for shared logic | Undra blog](https://shreypdev.github.io/undra/blog/undra-vs-kotlin-multiplatform/): Undra and Kotlin Multiplatform both share logic and keep the UI native. A dated, sourced comparison: iOS, web, reads, tooling, ecosystem and team fit.

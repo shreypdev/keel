@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why Undra is the default choice | Undra blog</title>
+<meta name="description" content="A sourced matrix of what KMP, UniFFI, Flutter and React Native stop you doing, what Undra solved and how, what it costs to adopt, and what is still open.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/blog/why-undra-is-the-default-choice/">
+<meta property="og:title" content="Why Undra is the default choice | Undra blog">
+<meta property="og:description" content="A sourced matrix of what KMP, UniFFI, Flutter and React Native stop you doing, what Undra solved and how, what it costs to adopt, and what is still open.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://shreypdev.github.io/undra/blog/why-undra-is-the-default-choice/">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="article:published_time" content="2026-10-02">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Why Undra is the default choice | Undra blog">
+<meta name="twitter:description" content="A sourced matrix of what KMP, UniFFI, Flutter and React Native stop you doing, what Undra solved and how, what it costs to adopt, and what is still open.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Why Undra is the default choice",
+  "description": "A sourced matrix of what KMP, UniFFI, Flutter and React Native stop you doing, what Undra solved and how, what it costs to adopt, and what is still open.",
+  "datePublished": "2026-10-02",
+  "dateModified": "2026-10-02",
+  "inLanguage": "en",
+  "image": "https://shreypdev.github.io/undra/assets/og.png",
+  "author": {
+    "@type": "Organization",
+    "name": "Undra team"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Undra",
+    "url": "https://shreypdev.github.io/undra/"
+  },
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://shreypdev.github.io/undra/blog/why-undra-is-the-default-choice/"
+  }
+}</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../../assets/base.css"><link rel="stylesheet" href="../../assets/blog.css">
+</head>
+<body data-page="blog">
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../../docs/">Docs</a>
+      <a href="../../blog/" aria-current="page">Blog</a>
+      <a href="../../roadmap/">Roadmap</a>
+      <a href="../../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<main class="post" id="main"><article>
+  <header class="post-header">
+    <p class="eyebrow">Overview</p><h1>Why Undra is the default choice</h1><p class="lede">A team choosing how to share logic across iOS, Android and the web asks one question before any other: what will this stop me doing? We catalogued 68 limitations of Kotlin Multiplatform, UniFFI, Crux, React Native, Flutter, Capacitor and writing the logic three times, each dated and sourced where a source exists, and mapped every one to what Undra's repository does about it. This post is the result: what Undra solved and how, what it did not, and why a team can start from it by default.</p>
+    <p class="post-meta"><time datetime="2026-10-02">2 Oct 2026</time> · 14 min read · Undra team</p>
+  </header>
+  <nav class="toc" aria-label="On this page"><ol><li><a href="#the-matrix">The matrix</a></li><li><a href="#what-we-solved">What we solved, and how</a></li><li><a href="#what-it-costs">What it costs to adopt</a></li><li><a href="#still-open">What is still open</a></li><li><a href="#the-default">The default</a></li></ol></nav>
+<aside class="callout note"><p><strong>How to read this page.</strong> We build Undra, so the page leans our way. Statements about other tools are as of 1 October 2026 and link to the page they come from; where we are reading a page's silence, we write "its documentation describes no". Statements about Undra link to a decision record, a docs page, a review or a benchmark file. Timings are measured on an Apple M5 Pro host, on its iPhone simulator, its Android emulator or in headless Chromium; none is from a physical device. Each claim has a row in the <a href="https://github.com/shreypdev/undra/blob/main/site/blog/why-undra-is-the-default-choice/claims.md" rel="noopener">claims ledger</a>, and the 68 limitations are in the <a href="https://github.com/shreypdev/undra/blob/main/.10x/specs/2026-10-01-competitive-limitations.md" rel="noopener">catalogue</a>. If something is wrong or has moved, <a href="https://github.com/shreypdev/undra/issues" rel="noopener">open an issue</a> and we will correct the page with a dated note.</p></aside>
+<section id="the-matrix">
+<h2>The matrix</h2>
+<p>The catalogue's matrix lists 36 things a team needs. On 1 October Undra was marked as having 10 of them, part of 9 and none of 16, with one not applicable. Since then the pieces below have merged, each after an adversarial review. Counting again today: 22 solved, 7 partial, 6 open and 1 left out by decision. The count is ours, row by row in the ledger, and it is the part of this page we most want checked. The table groups the 36 rows into 12 classes. It leaves out Crux, which <a href="../undra-vs-uniffi-and-crux/">its own post</a> covers, and reads "Flutter / React Native" as those two with the logic written in the UI's language.</p>
+<table class="compare matrix"><thead><tr><th scope="col">Class</th><th scope="col">Kotlin Multiplatform</th><th scope="col">UniFFI</th><th scope="col">Flutter / React Native</th><th scope="col">Undra</th></tr></thead><tbody>
+<tr><th scope="row">State reaches the UI<small>rows 3 to 6</small></th>
+<td data-label="Kotlin Multiplatform">On iOS Swift <a href="https://kotlinlang.org/docs/native-objc-interop.html" rel="noopener">copies a Kotlin collection whole</a>; observing a <code>Flow</code> takes <a href="https://skie.touchlab.co/" rel="noopener">SKIE</a> or similar.</td>
+<td data-label="UniFFI">Its documentation describes no observable state; reading Rust state is <a href="https://raw.githubusercontent.com/mozilla/uniffi-rs/main/docs/manual/src/internals/lifting_and_lowering.md" rel="noopener">a call across the boundary</a>.</td>
+<td data-label="Flutter / React Native">No language boundary. React Native <a href="https://reactnative.dev/docs/performance" rel="noopener">runs logic on the JS thread</a>; a frame it misses is dropped.</td>
+<td data-label="Undra"><strong>Solved.</strong> Reads are local; a write crosses once; lists cross as O(change); delivery is merged per frame. <a href="../reads-never-cross-the-boundary/">Reads post</a>, <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-031-frame-coalesced-delivery.md" rel="noopener">ADR-031</a>, <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-039-derived-keyed-lists.md" rel="noopener">039</a>.</td></tr>
+<tr><th scope="row">Errors and crashes<small>rows 1, 2</small></th>
+<td data-label="Kotlin Multiplatform">Only <code>@Throws</code> exceptions become Swift errors; <a href="https://kotlinlang.org/docs/native-objc-interop.html" rel="noopener">others end the program</a>.</td>
+<td data-label="UniFFI">As we read its <a href="https://raw.githubusercontent.com/mozilla/uniffi-rs/main/uniffi_bindgen/src/bindings/swift/templates/Helpers.swift" rel="noopener">Swift template</a>, a Rust panic in a non-<code>Result</code> function stops the process.</td>
+<td data-label="Flutter / React Native">Flutter <a href="https://docs.flutter.dev/testing/errors" rel="noopener">swaps a failed widget for a gray background</a> in release. Native modules <a href="https://docs.flutter.dev/platform-integration/platform-channels" rel="noopener">send codes and messages</a>.</td>
+<td data-label="Undra"><strong>Solved.</strong> One closed <code>UndraCallError</code> set on every platform; panics are caught at the boundary; a trapped wasm core restarts from its snapshot. <a href="https://github.com/shreypdev/undra/blob/main/docs/ERRORS.md" rel="noopener">ERRORS.md</a>, <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-032-swift-error-channel.md" rel="noopener">ADR-032</a>, <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-049-storage-errors-worker-sync-ports-web-recovery.md" rel="noopener">049</a>.</td></tr>
+<tr><th scope="row">What can cross<small>rows 21 to 23</small></th>
+<td data-label="Kotlin Multiplatform">Swift sees <a href="https://kotlinlang.org/docs/native-swift-export.html" rel="noopener">an Objective-C header, or Swift export (Alpha)</a>, which erases generics.</td>
+<td data-label="UniFFI"><a href="https://mozilla.github.io/uniffi-rs/latest/types/interfaces.html" rel="noopener">Objects and foreign traits</a> cross; its <a href="https://raw.githubusercontent.com/mozilla/uniffi-rs/main/docs/manual/src/types/builtin_types.md" rel="noopener">documented types</a> list no generics.</td>
+<td data-label="Flutter / React Native"><a href="https://raw.githubusercontent.com/fzyzcjy/flutter_rust_bridge/master/README.md" rel="noopener">flutter_rust_bridge</a> takes arbitrary types and closures; React Native <a href="https://reactnative.dev/docs/turbo-native-modules-introduction" rel="noopener">native modules</a> need a spec and code per platform.</td>
+<td data-label="Undra"><strong>Solved:</strong> records, enums and errors become native sum types, no Objective-C. <strong>Not yet:</strong> objects, callbacks, generics, newtypes. <a href="../../docs/api-swift.html">Swift API</a>, <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-040-objects-as-parameters-and-returns.md" rel="noopener">ADR-040</a> to <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-042-newtypes-generic-instantiations-and-leaf-types.md" rel="noopener">042</a>.</td></tr>
+<tr><th scope="row">Data layer<small>rows 7 to 10</small></th>
+<td data-label="Kotlin Multiplatform">Libraries: <a href="https://developer.android.com/kotlin/multiplatform" rel="noopener">Room</a>, <a href="https://raw.githubusercontent.com/sqldelight/sqldelight/master/README.md" rel="noopener">SQLDelight</a> (compile-time migration checks), <a href="https://raw.githubusercontent.com/MobileNativeFoundation/Store/main/README.md" rel="noopener">Store</a>.</td>
+<td data-label="UniFFI">Its documentation <a href="https://raw.githubusercontent.com/mozilla/uniffi-rs/main/README.md" rel="noopener">describes no</a> cache, mutation, offline or persistence layer.</td>
+<td data-label="Flutter / React Native">Libraries: <a href="https://tanstack.com/query/latest/docs/framework/react/guides/network-mode" rel="noopener">TanStack Query</a>, <a href="https://pub.dev/packages/drift" rel="noopener">drift</a> (with migrations).</td>
+<td data-label="Undra"><strong>Solved:</strong> cache, dedup, retry, optimistic rollback, an offline queue that survives a restart, migrating persisted state. <strong>Not yet:</strong> optimistic placeholders after a restart, paged queries, polling. <a href="../../docs/queries.html">Queries</a>, <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-037-persisted-state-migrations.md" rel="noopener">ADR-037</a>, <a href="../../docs/cookbook/offline.html">offline-first</a>.</td></tr>
+<tr><th scope="row">Storage, sockets, services<small>rows 11, 12, 14</small></th>
+<td data-label="Kotlin Multiplatform">Ktor, DataStore, Room, SQLDelight; Google's <a href="https://developer.android.com/kotlin/multiplatform" rel="noopener">Jetpack libraries</a> are KMP-ready.</td>
+<td data-label="UniFFI">Its documentation describes no adapters; SQL and sockets are Rust crates you bring.</td>
+<td data-label="Flutter / React Native">React Native has <a href="https://reactnative.dev/docs/network" rel="noopener">WebSocket</a> and <a href="https://docs.expo.dev/versions/latest/sdk/sqlite/" rel="noopener">expo-sqlite</a>; Flutter has <a href="https://pub.dev/packages/drift" rel="noopener">drift</a> and <a href="https://pub.dev/packages/web_socket_channel" rel="noopener">web_socket_channel</a>.</td>
+<td data-label="Undra"><strong>Solved:</strong> default adapters for HTTP, storage, files and connectivity on iOS, Android, web and React Native; opt-in WebSocket, SSE and SQL ports. <strong>Not yet:</strong> the web database serves one tab per origin. <a href="../../docs/ports.html">Ports</a>, <a href="../../docs/db.html">database</a>, <a href="../../docs/realtime.html">real time</a>.</td></tr>
+<tr><th scope="row">Dev loop and tooling<small>rows 15, 16</small></th>
+<td data-label="Kotlin Multiplatform"><a href="https://kotlinlang.org/docs/multiplatform/compose-hot-reload.html" rel="noopener">Compose Hot Reload is desktop JVM only</a>; <a href="https://kotlinlang.org/docs/native-improving-compilation-time.html" rel="noopener">Kotlin/Native build speed</a> is a standing priority.</td>
+<td data-label="UniFFI">Each change rebuilds the library and the app; its documentation describes no dev server or devtools.</td>
+<td data-label="Flutter / React Native">Both ship DevTools. Flutter <a href="https://docs.flutter.dev/tools/hot-reload" rel="noopener">hot reload skips native code</a>; React Native <a href="https://reactnative.dev/docs/fast-refresh" rel="noopener">Fast Refresh can fall back to a full reload</a>.</td>
+<td data-label="Undra"><strong>Solved:</strong> <code>undra dev</code> reconnects and keeps state across a rebuild; devtools with time travel; Gradle, Xcode and Vite run <code>undra build</code>. <strong>Not yet:</strong> query handles across a reload. <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-051-dev-client-reconnect-and-session-resume.md" rel="noopener">ADR-051</a>, <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-053-state-preserving-reload.md" rel="noopener">053</a>, <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-054-devtools.md" rel="noopener">054</a>.</td></tr>
+<tr><th scope="row">Testing and previews<small>rows 18, 19</small></th>
+<td data-label="Kotlin Multiplatform"><a href="https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-test/" rel="noopener">kotlinx-coroutines-test</a> gives virtual time in multiplatform tests.</td>
+<td data-label="UniFFI">Its documentation describes no fakes for platform I/O; you build the doubles.</td>
+<td data-label="Flutter / React Native">Flutter's <a href="https://docs.flutter.dev/tools/widget-previewer" rel="noopener">widget previewer</a> supports no <code>dart:ffi</code> or native plugins.</td>
+<td data-label="Undra"><strong>Solved:</strong> <code>PreviewCore</code> runs your real core with fakes and a manual clock on Swift, Kotlin and TypeScript; a recorded session replays in tests. <a href="../../docs/testing.html">Testing</a>, <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-055-testkit.md" rel="noopener">ADR-055</a>.</td></tr>
+<tr><th scope="row">Compatibility and floors<small>rows 20, 24, 30</small></th>
+<td data-label="Kotlin Multiplatform"><a href="https://kotlinlang.org/docs/native-target-support.html" rel="noopener">iOS 15.0 default minimum</a>. Several KMP frameworks in one app <a href="https://kotlinlang.org/docs/multiplatform/multiplatform-project-configuration.html" rel="noopener">duplicate dependencies</a>.</td>
+<td data-label="UniFFI">As we read its <a href="https://raw.githubusercontent.com/mozilla/uniffi-rs/main/uniffi_bindgen/src/bindings/swift/templates/wrapper.swift" rel="noopener">Swift template</a>, a library and bindings that disagree stop the process.</td>
+<td data-label="Flutter / React Native">React Native <a href="https://github.com/react-native-community/discussions-and-proposals/discussions/812" rel="noopener">iOS 15.1</a>, Flutter <a href="https://docs.flutter.dev/reference/supported-platforms" rel="noopener">iOS 15</a>. Flutter <a href="https://docs.flutter.dev/add-to-app" rel="noopener">does not support several Flutter libraries</a> in one app.</td>
+<td data-label="Undra"><strong>Solved:</strong> schema-hash gate at load; iOS 15 and 16 via <code>ObservableObject</code>; several cores side by side. <strong>Caveat:</strong> the iOS 15 and 16 mode has not run on an iOS 15 or 16 runtime. <a href="../reads-never-cross-the-boundary/#schema-hash">Hash</a>, <a href="../../docs/cookbook/ios-15-16.html">iOS 15 and 16</a>, <a href="../../docs/several-cores.html">cores</a>.</td></tr>
+<tr><th scope="row">Platforms and UI frameworks<small>rows 25 to 29, 36</small></th>
+<td data-label="Kotlin Multiplatform"><a href="https://kotlinlang.org/docs/wasm-overview.html" rel="noopener">Kotlin/Wasm is Beta</a>. Compose Multiplatform shares UI; <a href="https://kotlinlang.org/docs/multiplatform/faq.html" rel="noopener">desktop is Stable</a>.</td>
+<td data-label="UniFFI">Python and Ruby are first-party; web comes <a href="https://raw.githubusercontent.com/mozilla/uniffi-rs/main/README.md" rel="noopener">from a third-party generator</a>.</td>
+<td data-label="Flutter / React Native">Flutter <a href="https://docs.flutter.dev/reference/supported-platforms" rel="noopener">paints one UI on six platforms</a>, <a href="https://docs.flutter.dev/platform-integration/web/faq" rel="noopener">not suited to text-rich static sites</a>. React Native: <a href="https://reactnative.dev/docs/out-of-tree-platforms" rel="noopener">web, Windows and macOS out of tree</a>.</td>
+<td data-label="Undra"><strong>Solved:</strong> web (wasm core; React, Vue, Svelte, Solid hooks) and React Native. <strong>Not yet:</strong> Flutter and Dart. <strong>Partly:</strong> desktop. <strong>By decision:</strong> no shared UI. <a href="../../docs/api-typescript.html">TypeScript</a>, <a href="https://github.com/shreypdev/undra/blob/main/docs/REACT_NATIVE.md" rel="noopener">React Native</a>.</td></tr>
+<tr><th scope="row">Adopting and building<small>rows 31, 32</small></th>
+<td data-label="Kotlin Multiplatform"><a href="https://kotlinlang.org/docs/multiplatform/multiplatform-ios-integration-overview.html" rel="noopener">Several ways into Xcode</a>; its IDE plugin applies a build-phase script by default.</td>
+<td data-label="UniFFI"><a href="https://raw.githubusercontent.com/mozilla/uniffi-rs/main/docs/manual/src/Motivation.md" rel="noopener">No end-to-end packaging</a>: no Rust for Android, no <code>.aar</code>.</td>
+<td data-label="Flutter / React Native">React Native <a href="https://reactnative.dev/docs/integration-with-existing-apps" rel="noopener">joins an iOS app through CocoaPods</a>; Flutter <a href="https://docs.flutter.dev/add-to-app" rel="noopener">add-to-app has limits</a>.</td>
+<td data-label="Undra"><strong>Solved:</strong> <code>undra build</code> runs inside Gradle, Xcode and Vite; SwiftPM on native iOS, no CocoaPods. <strong>Partly:</strong> <code>undra adopt</code> edits none of your project files. <a href="../../docs/cookbook/from-kmp.html">From KMP</a>, <a href="../../docs/cookbook/from-uniffi.html">from UniFFI</a>, <a href="../../docs/cli.html">CLI</a>.</td></tr>
+<tr><th scope="row">Running in production<small>rows 13, 17, 33, 34</small></th>
+<td data-label="Kotlin Multiplatform">Background work is platform code (<a href="https://developer.android.com/develop/background-work/background-tasks/persistent" rel="noopener">WorkManager is Android-only</a>). The <a href="https://kotlinlang.org/docs/multiplatform/multiplatform-plugin-releases.html" rel="noopener">IDE plugin</a> debugs across Swift and Kotlin.</td>
+<td data-label="UniFFI">Not assessed.</td>
+<td data-label="Flutter / React Native">React Native <a href="https://reactnative.dev/docs/headless-js-android" rel="noopener">Headless JS is Android-only</a>. Both debug in their own language with <a href="https://reactnative.dev/docs/react-native-devtools" rel="noopener">DevTools</a>.</td>
+<td data-label="Undra"><strong>Not yet:</strong> background execution, step-debugging into Rust, crash-symbol files; no physical-device measurements. <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-046-production-operations.md" rel="noopener">ADR-046</a>, <a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#device-numbers-ios-android-web" rel="noopener">device rows</a>.</td></tr>
+<tr><th scope="row">Ecosystem and track record<small>row 35</small></th>
+<td data-label="Kotlin Multiplatform">JetBrains builds it; <a href="https://developer.android.com/kotlin/multiplatform" rel="noopener">Google states support</a>.</td>
+<td data-label="UniFFI"><a href="https://raw.githubusercontent.com/mozilla/uniffi-rs/main/README.md" rel="noopener">Used extensively in Firefox</a>; its README says it is far from 1.0.</td>
+<td data-label="Flutter / React Native">Backed by Google, and by Meta and Expo.</td>
+<td data-label="Undra"><strong>Not yet, and a post cannot fix it.</strong> One team, no production users, nothing on a registry. <a href="../../roadmap/">Roadmap</a>.</td></tr>
+</tbody></table>
+</section>
+<section id="what-we-solved">
+<h2>What we solved, and how</h2>
+<p>Five classes carry most of the weight. Each gets one measured number and the file it came from.</p>
+<h3 id="boundary">The boundary</h3>
+<p>A boundary costs twice: once per crossing, and once for what a crossing carries. Undra's rule is that <a href="../reads-never-cross-the-boundary/">reads never cross</a> and a write crosses once per transaction, returning one change-set for each store it touched. <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-031-frame-coalesced-delivery.md" rel="noopener">ADR-031</a> adds the other half: the platform applies what has arrived once per frame, merged, with a bounded backlog.</p>
+<p>The number: a burst of 1,667 one-row updates to a 10,000-row list, which is 100,000 a second at 60 Hz, reaches the iOS app as one drain that costs the main thread 787 µs at the median. Applying each update on its own is estimated at 3.4 to 3.9 ms, 20 to 24 percent of a frame, from the measured cost of one (<a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#the-adr-031-drain-1667-one-update-keyed-patches-on-10000-rows-per-frame-100000-a-second-at-60-hz" rel="noopener">benchmark results</a>; iPhone 17 Pro simulator on an Apple M5 Pro, so not a device).</p>
+<p><a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-044-per-core-symbol-namespacing.md" rel="noopener">ADR-044</a> turned the C ABI into one function table per core, so two cores can share a process without sharing anything. The implementer's paired runs put the extra indirection at +0.6 ns on a 49.8 ns synchronous call; the <a href="https://github.com/shreypdev/undra/blob/main/.10x/reviews/2026-10-02-abi-table-review.md" rel="noopener">reviewer</a>, on a loaded machine, could neither confirm nor refute that and asked for a re-measure on a quiet one. What remains is the crossing itself: through the generated binding a call is about 300 ns on the iOS simulator and 3.2 to 3.5 µs in Chromium, against 44 ns for the core alone. That is open work, below.</p>
+<h3 id="state">State over the boundary</h3>
+<p>A filtered or sorted view of a big list used to cost the whole list. A <code>Computed&lt;Vec&lt;T&gt;&gt;</code> was recomputed at every commit and sent whole, so one edited row in a 10,000-row list shipped 352.6 KB and took 176.5 µs. A <code>DerivedList</code> (<a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-039-derived-keyed-lists.md" rel="noopener">ADR-039</a>) is kept from the source's recorded operations on two order-statistic trees and ships the change: 333 ns and 158 bytes for the same edit, and 375 ns and 158 bytes at 100,000 rows (<a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#5-a-computed-list-over-a-keyed-list-cost-the-list-again-a-derived-list-costs-the-change-adr-039" rel="noopener">finding 5</a>; core side, best of three medians).</p>
+<p>A contract scenario replays 60,000 seeded operations through the Swift, Kotlin and TypeScript runtimes and checks each view's hash after every change-set. What a platform still pays is its own list copy, once per drain: for a one-operation patch to a 100,000-row source, 47 µs in TypeScript and 7 µs in Kotlin. iOS 15 and 16 mode copies the list on every patch, 48 µs at 10,000 rows.</p>
+<h3 id="errors">The error channel</h3>
+<p>A call that fails does one of three things on every platform: it throws or rejects with the method's own error type, with the platform's cancellation, or with <code>UndraCallError</code>, a closed set of five cases (cancelled by the core, panicked, refused, unavailable, malformed). A command, which has no caller to throw to, reports through <code>onError</code>. No reply status, cancellation or lost connection reaches <code>fatalError</code>, an uncaught exception or an unhandled rejection (<a href="https://github.com/shreypdev/undra/blob/main/docs/ERRORS.md" rel="noopener">docs/ERRORS.md</a>, <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-032-swift-error-channel.md" rel="noopener">ADR-032</a>).</p>
+<p>A native panic is caught at the boundary and arrives as <code>panicked</code>; a computed that panics poisons only itself (<a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-019-signals-transactional-delivery.md" rel="noopener">ADR-019</a>); a stream's failure is a typed item on the wire (<a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-036-typed-stream-error-items.md" rel="noopener">ADR-036</a>); a write from a thread the runtime does not own is refused in every build (<a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-035-off-runtime-writes-are-typed-errors.md" rel="noopener">ADR-035</a>). A wasm core cannot unwind, so it traps; with <code>crashRecovery()</code> the runtime restarts the same module and restores the last snapshot (<a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-049-storage-errors-worker-sync-ports-web-recovery.md" rel="noopener">ADR-049</a>, <a href="../../docs/web.html">docs</a>). The number: 3.1 to 3.2 ms at the median from the trap to a running core, with a 100 KB state, over five runs in headless Chromium (<a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#web-recovery-typescript-adr-049" rel="noopener">benchmark results</a>). Recovery is opt-in, and a call in flight at the trap fails with <code>Unavailable</code>.</p>
+<h3 id="dev-loop">The dev loop</h3>
+<p>Edit Rust, save, and the app on the simulator, the phone or the page reconnects by itself, with exponential backoff from 250 ms to 5 s, and observes its stores again (<a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-051-dev-client-reconnect-and-session-resume.md" rel="noopener">ADR-051</a>). The core's state is snapshotted in memory before the rebuild and restored into the new core before it listens, so the app returns to the screen it was on, and the dev bar says "Reloaded, state kept" or why not (<a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-053-state-preserving-reload.md" rel="noopener">ADR-053</a>).</p>
+<p>The number: the playground's 204 KiB snapshot restores in 189 µs, and 74 ms pass from suspending the old core to the new one listening (<a href="https://github.com/shreypdev/undra/blob/main/.10x/decisions/sde/dev-reload.md" rel="noopener">the piece's record</a>; release core, in process). A page served by <code>undra dev</code> shows every store's live value and a timeline of every change-set, and a scrubber restores the core to an earlier step while the app follows (<a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-054-devtools.md" rel="noopener">ADR-054</a>, <a href="https://github.com/shreypdev/undra/blob/main/docs/DEV_LOOP.md" rel="noopener">docs/DEV_LOOP.md</a>). It sits behind a per-run token.</p>
+<h3 id="shipping">Shipping an update, and shipping the app</h3>
+<p>Persisted data records the structure it was written with, so a build that changed a type still reads what the last one stored: by name for free, through a <code>#[undra::migrate]</code> hook when a name changed, and never by discarding it silently (<a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-037-persisted-state-migrations.md" rel="noopener">ADR-037</a>, <a href="../../docs/updates.html">Shipping an update</a>). A queued write the new build cannot carry over becomes a dead letter the app can show. Storage ports fail with typed errors (full, locked, corrupt, unavailable, io) on every platform instead of raw throws (<a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-049-storage-errors-worker-sync-ports-web-recovery.md" rel="noopener">ADR-049</a>).</p>
+<p>The number: the hello-world web core is <!--measured:web-size-->116.6 KB<!--/measured--> gzipped against a 120 KB budget, and the JavaScript runtime, <!--measured:web-runtime-js-->26 KB<!--/measured--> gzipped, sits under a 26,000-byte gate; CI fails a change that exceeds either (<a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-052-web-bundle-size.md" rel="noopener">ADR-052</a>, <a href="https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl" rel="noopener">size record</a>). Opt-in pieces stay out of the hello world: the browser database adds about 299 KB gzipped, and only to an app that imports it.</p>
+</section>
+<section id="what-it-costs">
+<h2>What it costs to adopt</h2>
+<p>You do not move a domain on a Monday. The two migration guides describe three levels. <strong>L1, side by side:</strong> a few pure functions (from UniFFI, plain-data functions in a new crate beside yours) move first, and the rest of your stack stays. <strong>L2, one feature:</strong> one screen's state and requests become a store, a query and a mutation. <strong>L3, the whole domain:</strong> platform services become ports, and persistence and the offline queue move in (<a href="../../docs/cookbook/from-kmp.html">from Kotlin Multiplatform</a>, <a href="../../docs/cookbook/from-uniffi.html">from UniFFI</a>).</p>
+<p>The costs are real. The core is Rust, and for an Android-first team Rust is no longer the daily language. It is a second toolchain: Rust with the iOS, Android and wasm targets, Xcode, and the Android SDK and NDK; <code>undra doctor</code> runs 34 checks, each with its fix. Generated Swift defaults to iOS 17, and an app that supports 15 and 16 takes the <code>ObservableObject</code> shape and its extra list copy. An observed keyed list exists three times: in the core, in a baseline copy the core keeps to build patches against, and in each platform's mirror. And <code>undra adopt</code> writes a core and the steps but edits none of your project files.</p>
+</section>
+<section id="still-open">
+<h2>What is still open</h2>
+<p>Plainly, in the order a team would meet it: the matrix's open and partial rows, then what the matrix does not show.</p>
+<h3>Not built yet</h3>
+<ul><li><strong>Objects, callbacks, generics and newtypes.</strong> Objects cannot cross as parameters or return values, and host callbacks cannot be arguments; a UniFFI crate meets both on day one. <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-040-objects-as-parameters-and-returns.md" rel="noopener">ADR-040</a> to <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-042-newtypes-generic-instantiations-and-leaf-types.md" rel="noopener">042</a> propose the changes and none has shipped.</li><li><strong>Paged queries and polling.</strong> The <a href="../../docs/cookbook/pagination.html">pagination recipe</a> builds an infinite list on a keyed list, but there is no paged query type and no interval refetch. <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-043-paged-queries-lazy-lists-and-polling.md" rel="noopener">ADR-043</a> proposes both.</li><li><strong>Production operations.</strong> OS background execution, step-debugging from Swift or Kotlin into Rust, and crash-symbol files. <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-046-production-operations.md" rel="noopener">ADR-046</a> proposes them and the piece is in flight.</li><li><strong>Flutter and Dart.</strong> Not started; the plan was to decide after React Native, which has shipped.</li><li><strong>Desktop and Windows.</strong> The Kotlin runtime is plain JVM, but no desktop target ships, and the CLI does not support Windows.</li><li><strong>A server.</strong> The TypeScript runtime needs Node 20 or later; there is no guide to sharing a core with a server.</li><li><strong>Publishing.</strong> Nothing is on crates.io, Maven Central, npm or Homebrew yet; the install channels go live with the first tagged release.</li></ul>
+<h3>Built, with a known limit</h3>
+<ul><li>A queued write's optimistic placeholder and its <code>invalidates</code> targets do not survive a restart: the write replays, and the screen refetches only the mutation's own key.</li><li>The web database serves one tab per origin, and a migration that contains its own <code>COMMIT</code> is open.</li><li>The binding call path is over its targets: 3.2 to 3.9 µs through the generated TypeScript against 80 ns, about 300 ns on the iOS simulator against 60 ns. On React Native, 100,000 updates a second do not fit a frame, and the docs advise staying near 10,000 a second or below.</li><li>Every number here is from a host, a simulator, an emulator or Chromium. The iOS 15 and 16 mode is proven by compilation and a runtime probe on iOS 26.5, not on an older runtime.</li></ul>
+<h3>Where another tool is ahead, and stays ahead</h3>
+<ul><li><strong>Time and backing.</strong> KMP has JetBrains and Google's stated support; UniFFI ships in Firefox. Undra is one team's work with no production users.</li><li><strong>Android.</strong> Shared Kotlin is plain Kotlin there, with no boundary. Undra crosses JNI.</li><li><strong>Language.</strong> For an Android-first team Kotlin is the daily language, and in our judgement Rust is the adoption wall.</li><li><strong>Other hosts.</strong> UniFFI serves Python and Ruby. Undra serves three UIs, and React Native on top.</li><li><strong>Over-the-air logic.</strong> Expo's <a href="https://docs.expo.dev/eas-update/introduction/" rel="noopener">EAS Update</a> ships JavaScript without a new binary. A native Undra core ships with the app; a web core updates with the site.</li><li><strong>One UI.</strong> Undra does not share UI, by decision. For one codebase on every screen, look at Flutter, React Native or Compose Multiplatform.</li><li><strong>Writing it three times.</strong> It needs no new language or toolchain and keeps the best native tooling, with no boundary to debug across.</li></ul>
+</section>
+<section id="the-default">
+<h2>The default</h2>
+<p>Default is a claim about which question comes first, not about every team. If your logic is stateful (a cache, a queue, a session, lists that must agree across screens), your UI is native and your team can carry Rust, the open rows above are few enough to check against your own requirements in an afternoon. If one of the open rows is yours, use the tool that has it. If none is, start with L1: move one function, call it from Swift, Kotlin and TypeScript, and see what it costs you before you decide anything else.</p>
+<p>Next: <a href="../reads-never-cross-the-boundary/">why reads never cross the boundary</a>, <a href="../undra-vs-kotlin-multiplatform/">Undra vs Kotlin Multiplatform</a>, <a href="../undra-vs-uniffi-and-crux/">Undra vs UniFFI and Crux</a>, and <a href="../why-undra-keeps-your-ui-native/">why Undra keeps your UI native</a>.</p>
+</section>
+</article></main>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../../docs/cli.html">The CLI</a></li>
+          <li><a href="../../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../../blog/">Blog</a></li>
+          <li><a href="../../roadmap/">Roadmap</a></li>
+          <li><a href="../../playground/">Playground</a></li>
+          <li><a href="../../feed.xml">RSS feed</a></li>
+          <li><a href="../../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../../assets/site.js" defer></script></body></html>
