@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { PortIds, SseError, type SseEvent } from "@undra/runtime";
-import { fetchSse, ssePort } from "@undra/runtime/realtime";
+import { SseError, type SseEvent } from "@undra/runtime";
+import { OptInPortIds, fetchSse, ssePort } from "@undra/runtime/realtime";
 import { sseFollow } from "@playground/core";
 import { boot, bootWorker } from "../src/harness.js";
 import { lastOn, useRealtimeServer } from "../src/realtime-server.js";
@@ -31,7 +31,7 @@ async function failure(run: () => Promise<unknown>): Promise<unknown> {
 
 test("S24 server-sent events", async () => {
   const HTTP = server().url;
-  const { core } = await boot({ ports: { [PortIds.Sse.portId]: ssePort(fetchSse()) } });
+  const { core } = await boot({ ports: { [OptInPortIds.Sse.portId]: ssePort(fetchSse()) } });
 
   await step("1. the feed: four events, then the end; no Last-Event-ID was sent", async () => {
     expect(await sseFollow(`${HTTP}/sse/feed`, null, 10, core)).toEqual({ events: FEED, ended: true });
@@ -60,6 +60,6 @@ test("S24 server-sent events", async () => {
 });
 
 test("wasm-worker mode: the Sse port is served on the main thread (ADR-049 §2)", async () => {
-  const { core } = await bootWorker({ ports: { [PortIds.Sse.portId]: ssePort(fetchSse()) } });
+  const { core } = await bootWorker({ ports: { [OptInPortIds.Sse.portId]: ssePort(fetchSse()) } });
   expect(await sseFollow(`${server().url}/sse/feed`, null, 10, core)).toEqual({ events: FEED, ended: true });
 });

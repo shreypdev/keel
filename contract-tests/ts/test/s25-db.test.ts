@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { DbError, PortIds, type PortImpl, type UndraCore } from "@undra/runtime";
-import { type DbWorkerLike, type DbWorkerScope, dbPort, nodeSqliteDb, waSqliteDb } from "@undra/runtime/db";
+import { DbError, type PortImpl, type UndraCore } from "@undra/runtime";
+import { type DbWorkerLike, type DbWorkerScope, OptInPortIds, dbPort, nodeSqliteDb, waSqliteDb } from "@undra/runtime/db";
 import { startDbWorker } from "@undra/runtime/db-worker";
 import { Notes, dbCells, dbMigrate, dbRun } from "@playground/core";
 import { boot, bootWorker } from "../src/harness.js";
@@ -29,7 +29,7 @@ afterAll(() => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-const ports = (): Record<number, PortImpl> => ({ [PortIds.Db.portId]: dbPort(nodeSqliteDb({ directory })) });
+const ports = (): Record<number, PortImpl> => ({ [OptInPortIds.Db.portId]: dbPort(nodeSqliteDb({ directory })) });
 
 async function failure(run: () => Promise<unknown>): Promise<unknown> {
   try {
@@ -128,7 +128,7 @@ test("wa-sqlite (the browser's adapter, in-memory VFS, through its worker protoc
   port2.start();
   const stop = startDbWorker(port1 as unknown as DbWorkerScope, { storage: "memory" });
   try {
-    const { core } = await boot({ ports: { [PortIds.Db.portId]: dbPort(waSqliteDb({ worker: port2 as unknown as DbWorkerLike }), { wal: false }) } });
+    const { core } = await boot({ ports: { [OptInPortIds.Db.portId]: dbPort(waSqliteDb({ worker: port2 as unknown as DbWorkerLike }), { wal: false }) } });
     await s25(core);
   } finally {
     stop();

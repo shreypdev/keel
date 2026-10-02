@@ -1,22 +1,22 @@
 /*
  * `@undra/runtime/realtime`: the opt-in `WebSocket` and `Sse` ports of ADR-047, kept out of the
  * main entry so a hello-world bundle does not carry them (ADR-052). The records, the errors and
- * their codecs (`WsMessage`, `WsError`, `SseEvent`, ...) and `PortIds.WebSocket` / `PortIds.Sse`
- * are in the main entry; this entry has the bindings and the default adapters.
+ * their codecs (`WsMessage`, `WsError`, `SseEvent`, ...) are in the main entry; this entry has the
+ * bindings, the default adapters and `OptInPortIds`, the ids they are registered under.
  *
  * Register them before the first use, one line each:
  *
  * ```ts
- * import { PortIds, UndraCore } from "@undra/runtime";
- * import { browserWebSocket, fetchSse, ssePort, webSocketPort } from "@undra/runtime/realtime";
+ * import { UndraCore } from "@undra/runtime";
+ * import { OptInPortIds, browserWebSocket, fetchSse, ssePort, webSocketPort } from "@undra/runtime/realtime";
  *
  * await UndraCore.load({
  *   mode: "wasm-main",
  *   wasm,
  *   expectedSchemaHash: UndraIds.schemaHash,
  *   ports: {
- *     [PortIds.WebSocket.portId]: webSocketPort(browserWebSocket()),
- *     [PortIds.Sse.portId]: ssePort(fetchSse()),
+ *     [OptInPortIds.WebSocket.portId]: webSocketPort(browserWebSocket()),
+ *     [OptInPortIds.Sse.portId]: ssePort(fetchSse()),
  *   },
  * });
  * ```
@@ -24,6 +24,7 @@
  * In `wasm-worker` mode both ports run here, on the main thread, like every asynchronous port
  * (ADR-049 §2): the worker sends their calls across.
  */
+export { OptInPortIds } from "./adapters/opt-in-ids.js";
 export { webSocketPort, type WebSocketAdapter, type WebSocketConnection } from "./realtime/websocket.js";
 export {
   browserWebSocket,

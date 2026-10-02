@@ -376,11 +376,11 @@ export interface RecoveryHost {
   /** Builds the panic report of `trap` and hands it to `onPanic`. */
   panicked(trap: Error): UndraPanicReport;
   /**
-   * Lets every registered port release what the instance that trapped held through it (`PortImpl.dispose`: its
-   * WebSocket connections, its databases and their open transactions), which nobody would close or roll back
-   * otherwise; the ports then serve the new instance.
+   * The registered ports. Each one releases at a restart what the instance that trapped held through it
+   * (`PortImpl.dispose`: its WebSocket connections, its databases and their open transactions), which nobody would
+   * close or roll back otherwise; the ports then serve the new instance.
    */
-  releasePorts(): void;
+  readonly ports: ReadonlyMap<number, PortImpl>;
 }
 
 /**
@@ -686,7 +686,13 @@ class Recovering implements Transport {
       this.#times.push(Date.now());
       this.#trappedWhileRestarting = null;
       // What the instance that trapped held through the ports (connections, a transaction) goes with it.
-      host.releasePorts();
+      for (const impl of new Set(host.ports.values())) {
+        try {
+          impl.dispose?.();
+        } catch (error) {
+          host.core.report(error, "port dispose");
+        }
+      }
       try {
         result = await this.#restart(this.#floor());
         const late = this.#trappedWhileRestarting as UndraTransportError | null;

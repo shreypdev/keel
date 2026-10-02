@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HeaderCodec, WsOpenedCodec } from "../src/adapters/codecs.js";
-import { PortIds } from "../src/adapters/ids.js";
+import { OptInPortIds } from "../src/adapters/opt-in-ids.js";
 import { type Header, SseError, type SseEvent, WsError, type WsMessage } from "../src/adapters/types.js";
 import { UndraCore } from "../src/core.js";
 import { type SseAdapter, type SseStream, type WebSocketAdapter, type WebSocketConnection, ssePort, webSocketPort } from "../src/realtime.js";
@@ -267,16 +267,16 @@ describe("webSocketPort: the core goes away", () => {
         expectedSchemaHash: SCHEMA,
         shared: false,
         adapters: { log, http: null, timer: null, kv: null, secureStore: null, fs: null, connectivity: null, lifecycle: null },
-        ports: { [PortIds.WebSocket.portId]: webSocketPort(new ScriptedWebSocket()) },
+        ports: { [OptInPortIds.WebSocket.portId]: webSocketPort(new ScriptedWebSocket()) },
       }),
     );
     // Arguments that do not decode: a bug on the core's side, answered "unavailable" and reported under the port's name.
-    const reply = await fake.callPort(PortIds.WebSocket.portId, PortIds.WebSocket.receive, Uint8Array.of(1));
+    const reply = await fake.callPort(OptInPortIds.WebSocket.portId, OptInPortIds.WebSocket.receive, Uint8Array.of(1));
     expect(reply.status).toBe(PortStatus.Unavailable);
     expect(log.records.some((r) => r.level >= 4 && r.message.includes("WebSocket port 0x7388b95f"))).toBe(true);
   });
 
-  it("UndraCore.close disposes its ports, and registerPort disposes the port it replaces", async () => {
+  it("UndraCore.close disposes its ports; registerPort leaves the port it replaces to the app (ADR-052 keeps the main entry free of it)", async () => {
     const fake = new FakeCoreTransport({ mode: "remote" });
     const adapter = new ScriptedWebSocket();
     const port = webSocketPort(adapter);
@@ -285,12 +285,12 @@ describe("webSocketPort: the core goes away", () => {
         expectedSchemaHash: SCHEMA,
         shared: false,
         adapters: { log: captureLog(), http: null, timer: null, kv: null, secureStore: null, fs: null, connectivity: null, lifecycle: null },
-        ports: { [PortIds.WebSocket.portId]: port },
+        ports: { [OptInPortIds.WebSocket.portId]: port },
       }),
     );
     const opened = await fake.callPort(
-      PortIds.WebSocket.portId,
-      PortIds.WebSocket.connect,
+      OptInPortIds.WebSocket.portId,
+      OptInPortIds.WebSocket.connect,
       args((w) => {
         w.writeStr("ws://core.test/");
         stringList.encode(w, []);
@@ -299,14 +299,16 @@ describe("webSocketPort: the core goes away", () => {
     );
     expect(opened.status).toBe(PortStatus.Ok);
     expect(decodeValue(WsOpenedCodec, opened.body)).toEqual({ conn: 1, protocol: "" });
-    core.registerPort(PortIds.WebSocket.portId, port);
+    core.registerPort(OptInPortIds.WebSocket.portId, port);
     expect(adapter.connections[0]?.closes, "re-registering the same port keeps it").toEqual([]);
     const second = webSocketPort(adapter);
-    core.registerPort(PortIds.WebSocket.portId, second);
-    expect(adapter.connections[0]?.closes, "the replaced port closed its connection").toEqual([[1001, ""]]);
+    core.registerPort(OptInPortIds.WebSocket.portId, second);
+    expect(adapter.connections[0]?.closes, "the replaced port is the app's to dispose").toEqual([]);
+    port.dispose?.();
+    expect(adapter.connections[0]?.closes, "disposing it closes its connection").toEqual([[1001, ""]]);
     await fake.callPort(
-      PortIds.WebSocket.portId,
-      PortIds.WebSocket.connect,
+      OptInPortIds.WebSocket.portId,
+      OptInPortIds.WebSocket.connect,
       args((w) => {
         w.writeStr("ws://core.test/2");
         stringList.encode(w, []);

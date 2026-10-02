@@ -19,10 +19,10 @@ export interface WaSqliteDbOptions {
  * `dbPort(waSqliteDb(), { wal: false })`.
  *
  * ```ts
- * import { PortIds, UndraCore } from "@undra/runtime";
- * import { dbPort, waSqliteDb } from "@undra/runtime/db";
+ * import { UndraCore } from "@undra/runtime";
+ * import { OptInPortIds, dbPort, waSqliteDb } from "@undra/runtime/db";
  *
- * await UndraCore.load({ ..., ports: { [PortIds.Db.portId]: dbPort(waSqliteDb(), { wal: false }) } });
+ * await UndraCore.load({ ..., ports: { [OptInPortIds.Db.portId]: dbPort(waSqliteDb(), { wal: false }) } });
  * ```
  *
  * The worker starts on the first `open`. Where it cannot (no `Worker`, its script failed, no OPFS

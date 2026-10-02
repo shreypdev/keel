@@ -496,9 +496,7 @@ export class UndraCore {
             this.#hand(error);
           },
           panicked: (trap) => this.#panicReport(trap),
-          releasePorts: () => {
-            this.#disposePorts(this.#ports.values(), true);
-          },
+          ports: this.#ports,
         },
         options.onCoreRestarted,
       ) ?? transport;
@@ -698,9 +696,7 @@ export class UndraCore {
    */
   registerPort(portId: number, impl: PortImpl): void {
     this.#transport.portAdded?.(portId, impl);
-    const previous = this.#ports.get(portId);
     this.#ports.set(portId, impl);
-    if (previous !== undefined && previous !== impl) this.#disposePorts([previous]);
   }
 
   /**
@@ -875,23 +871,8 @@ export class UndraCore {
     this.#failInFlight(reason ?? new UndraTransportError("closed", "the core is closed"));
     this.#setConnection(reason === null || why === "requested" ? { kind: "closed", reason: why } : { kind: "closed", reason: why, error: reason });
     this.#transport.close();
-    this.#disposePorts(this.#ports.values());
-  }
-
-  /**
-   * Lets each port in `ports` that is no longer registered release what it holds (`PortImpl.dispose`), once each;
-   * with `registered`, the registered ones too (a restarted core: what the instance that trapped held is released).
-   */
-  #disposePorts(ports: Iterable<PortImpl>, registered = false): void {
-    const live = this.#closed || registered ? null : new Set(this.#ports.values());
-    for (const impl of new Set(ports)) {
-      if (impl.dispose === undefined || live?.has(impl)) continue;
-      try {
-        impl.dispose();
-      } catch (error) {
-        this.#reportError("port dispose", error);
-      }
-    }
+    // Ports that hold platform resources for the core (the opt-in bindings) release them; `dispose` must not throw.
+    for (const impl of this.#ports.values()) impl.dispose?.();
   }
 
   /** Fails every call, stream and `observe` that waits for the core with `failure`; returns how many calls and streams there were. */

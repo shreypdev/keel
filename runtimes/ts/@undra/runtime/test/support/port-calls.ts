@@ -1,5 +1,5 @@
 import { DbErrorCodec, DbExecutedCodec, DbMigrationCodec, DbOpenedCodec, DbRowsCodec, DbValueCodec, HeaderCodec, SseErrorCodec, SseEventCodec, WsErrorCodec, WsMessageCodec, WsOpenedCodec } from "../../src/adapters/codecs.js";
-import { PortIds } from "../../src/adapters/ids.js";
+import { OptInPortIds } from "../../src/adapters/opt-in-ids.js";
 import type { DbMigration, DbValue, Header, WsMessage } from "../../src/adapters/types.js";
 import { UndraPortError } from "../../src/errors.js";
 import type { PortImpl } from "../../src/port.js";
@@ -55,7 +55,7 @@ const valueList = codecs.vec(DbValueCodec);
 
 /** The `WebSocket` port's four methods, as the core calls them. */
 export function wsCalls(port: PortImpl) {
-  const ids = PortIds.WebSocket;
+  const ids = OptInPortIds.WebSocket;
   return {
     connect: (url: string, protocols: readonly string[] = [], headers: readonly Header[] = []) =>
       call(
@@ -108,7 +108,7 @@ export function wsCalls(port: PortImpl) {
 
 /** The `Sse` port's three methods, as the core calls them. */
 export function sseCalls(port: PortImpl) {
-  const ids = PortIds.Sse;
+  const ids = OptInPortIds.Sse;
   return {
     open: (url: string, headers: readonly Header[] = [], lastEventId: string | null = null) =>
       call(
@@ -146,7 +146,7 @@ export function sseCalls(port: PortImpl) {
 
 /** The `Db` port's seven methods, as the core calls them. */
 export function dbCalls(port: PortImpl) {
-  const ids = PortIds.Db;
+  const ids = OptInPortIds.Db;
   const statement = (db: number, sql: string, params: readonly DbValue[]) =>
     args((w) => {
       w.writeU32(db);

@@ -1,5 +1,5 @@
 import { DbErrorCodec, DbExecutedCodec, DbMigrationCodec, DbOpenedCodec, DbRowsCodec, DbValueCodec } from "../adapters/codecs.js";
-import { PortIds } from "../adapters/ids.js";
+import { OptInPortIds } from "../adapters/opt-in-ids.js";
 import { DbError, type DbExecuted, type DbMigration, type DbRows, type DbValue } from "../adapters/types.js";
 import { UndraPortError } from "../errors.js";
 import { errorMessage } from "../platform.js";
@@ -129,7 +129,7 @@ function firstInteger(rows: DbRows): number {
 
 /**
  * The core's `Db` port over `adapter` (ADR-048), for `LoadOptions.ports` or
- * `core.registerPort(PortIds.Db.portId, ...)`. One instance per core. The binding implements the
+ * `core.registerPort(OptInPortIds.Db.portId, ...)`. One instance per core. The binding implements the
  * ADR's semantics; the adapter only runs SQL.
  *
  * * Ids: databases and transactions share one counter from 1, never reused.
@@ -278,7 +278,7 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
     }
   };
 
-  const ids = PortIds.Db;
+  const ids = OptInPortIds.Db;
   return {
     name: "Db",
     sync: false,

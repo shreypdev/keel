@@ -161,10 +161,10 @@ export interface NodeSqliteDbOptions {
  * database (the binding's queue), so keep statements short or move heavy work to a worker.
  *
  * ```ts
- * import { PortIds, UndraCore } from "@undra/runtime";
- * import { dbPort, nodeSqliteDb } from "@undra/runtime/db";
+ * import { UndraCore } from "@undra/runtime";
+ * import { OptInPortIds, dbPort, nodeSqliteDb } from "@undra/runtime/db";
  *
- * await UndraCore.load({ ..., ports: { [PortIds.Db.portId]: dbPort(nodeSqliteDb({ directory: "./data" })) } });
+ * await UndraCore.load({ ..., ports: { [OptInPortIds.Db.portId]: dbPort(nodeSqliteDb({ directory: "./data" })) } });
  * ```
  */
 export function nodeSqliteDb(options: NodeSqliteDbOptions): DbAdapter {

@@ -228,11 +228,12 @@ export const StorageErrorCodec: Codec<StorageError> = {
 };
 
 // ---------------------------------------------------------------------------
-// The opt-in ports (ADR-047, ADR-048): WebSocket, Sse and Db
+// The opt-in ports (ADR-047, ADR-048): WebSocket, Sse and Db. The shared codecs are built inside pure
+// functions so a bundle that uses none of these keeps none of their arguments (ADR-052).
 // ---------------------------------------------------------------------------
 
-const optionU16 = /* @__PURE__ */ codecs.option(codecs.u16);
-const optionString = /* @__PURE__ */ codecs.option(codecs.string);
+const optionU16 = /* @__PURE__ */ (() => codecs.option(codecs.u16))();
+const optionString = /* @__PURE__ */ (() => codecs.option(codecs.string))();
 
 /** `WsOpened { conn: u32, protocol: String }`. */
 export const WsOpenedCodec: Codec<WsOpened> = {
@@ -457,7 +458,7 @@ export const DbExecutedCodec: Codec<DbExecuted> = {
   },
 };
 
-const strings = /* @__PURE__ */ codecs.vec(codecs.string);
+const strings = /* @__PURE__ */ (() => codecs.vec(codecs.string))();
 const rows = /* @__PURE__ */ codecs.vec(/* @__PURE__ */ codecs.vec(DbValueCodec));
 
 /** `DbRows { columns: Vec<String>, rows: Vec<Vec<DbValue>> }`. */

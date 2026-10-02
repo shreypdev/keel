@@ -1,5 +1,4 @@
 import {
-  PortIds,
   type PortImpl,
   type UndraCore,
   UndraCoreRestarted,
@@ -9,7 +8,7 @@ import {
   type UndraUnhandledError,
   emitConnectivity,
 } from "@undra/runtime";
-import { dbPort, waSqliteDb } from "@undra/runtime/db";
+import { OptInPortIds, dbPort, waSqliteDb } from "@undra/runtime/db";
 import { browserWebSocket, fetchSse, ssePort, webSocketPort } from "@undra/runtime/realtime";
 import { BigList, RemoteTodosQueryHandle, Todos, UndraPlaygroundCore, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
@@ -143,9 +142,9 @@ export async function startUndra(): Promise<Playground> {
  */
 function optInPorts(): Record<number, PortImpl> {
   return {
-    [PortIds.WebSocket.portId]: webSocketPort(browserWebSocket()),
-    [PortIds.Sse.portId]: ssePort(fetchSse()),
-    [PortIds.Db.portId]: dbPort(waSqliteDb(), { wal: false }),
+    [OptInPortIds.WebSocket.portId]: webSocketPort(browserWebSocket()),
+    [OptInPortIds.Sse.portId]: ssePort(fetchSse()),
+    [OptInPortIds.Db.portId]: dbPort(waSqliteDb(), { wal: false }),
   };
 }
 

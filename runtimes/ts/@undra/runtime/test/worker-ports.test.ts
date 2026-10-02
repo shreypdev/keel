@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PortIds } from "../src/adapters/ids.js";
+import { OptInPortIds } from "../src/adapters/opt-in-ids.js";
 import { UndraCore } from "../src/core.js";
 import { UndraError, UndraPortError, UndraReplyError, UndraSchemaMismatchError } from "../src/errors.js";
 import type { PortImpl } from "../src/port.js";
@@ -104,9 +105,9 @@ const CROSSING = [
   ["Fs", PortIds.Fs.portId],
   ["Timer", PortIds.Timer.portId],
   // The opt-in ports of ADR-047 and ADR-048 are asynchronous: their bindings run on the main thread (ADR-049 §2).
-  ["WebSocket", PortIds.WebSocket.portId],
-  ["Sse", PortIds.Sse.portId],
-  ["Db", PortIds.Db.portId],
+  ["WebSocket", OptInPortIds.WebSocket.portId],
+  ["Sse", OptInPortIds.Sse.portId],
+  ["Db", OptInPortIds.Db.portId],
 ] as const;
 
 describe("a host before protocol 3: the worker answers the built-in sync ports itself, every other port crosses", () => {
@@ -433,9 +434,9 @@ describe("over a real channel, with UndraCore on the main thread", () => {
     // Worker mode refuses a sync port on the main thread (ADR-049); every binding method answers with a promise,
     // its typed failures included (here: closing an id that was never opened).
     const unknownClose: Array<[string, PortImpl, number, Uint8Array]> = [
-      ["WebSocket", webSocketPort({ connect: () => Promise.reject(new Error("unused")) }), PortIds.WebSocket.close, Uint8Array.of(9, 0, 0, 0, 0xe8, 0x03, 0, 0, 0, 0)],
-      ["Sse", ssePort({ open: () => Promise.reject(new Error("unused")) }), PortIds.Sse.close, u32(9)],
-      ["Db", dbPort({ open: () => Promise.reject(new Error("unused")) }), PortIds.Db.close, u32(9)],
+      ["WebSocket", webSocketPort({ connect: () => Promise.reject(new Error("unused")) }), OptInPortIds.WebSocket.close, Uint8Array.of(9, 0, 0, 0, 0xe8, 0x03, 0, 0, 0, 0)],
+      ["Sse", ssePort({ open: () => Promise.reject(new Error("unused")) }), OptInPortIds.Sse.close, u32(9)],
+      ["Db", dbPort({ open: () => Promise.reject(new Error("unused")) }), OptInPortIds.Db.close, u32(9)],
     ];
     for (const [name, impl, method, args] of unknownClose) {
       expect(impl.sync, name).toBe(false);
@@ -449,9 +450,9 @@ describe("over a real channel, with UndraCore on the main thread", () => {
     // The stub core calls (portId, STUB.PORT_METHOD); each binding answers it with its own `close` of an id that was never
     // opened, so the reply is the binding's typed error (status 1), produced on the main thread.
     const cases: Array<[string, PortImpl, number, Uint8Array, number]> = [
-      ["WebSocket", webSocketPort({ connect: () => Promise.reject(new Error("unused")) }), PortIds.WebSocket.close, Uint8Array.of(9, 0, 0, 0, 0xe8, 0x03, 0, 0, 0, 0), PortIds.WebSocket.portId],
-      ["Sse", ssePort({ open: () => Promise.reject(new Error("unused")) }), PortIds.Sse.close, u32(9), PortIds.Sse.portId],
-      ["Db", dbPort({ open: () => Promise.reject(new Error("unused")) }), PortIds.Db.close, u32(9), PortIds.Db.portId],
+      ["WebSocket", webSocketPort({ connect: () => Promise.reject(new Error("unused")) }), OptInPortIds.WebSocket.close, Uint8Array.of(9, 0, 0, 0, 0xe8, 0x03, 0, 0, 0, 0), OptInPortIds.WebSocket.portId],
+      ["Sse", ssePort({ open: () => Promise.reject(new Error("unused")) }), OptInPortIds.Sse.close, u32(9), OptInPortIds.Sse.portId],
+      ["Db", dbPort({ open: () => Promise.reject(new Error("unused")) }), OptInPortIds.Db.close, u32(9), OptInPortIds.Db.portId],
     ];
     for (const [name, binding, method, args, portId] of cases) {
       const close = binding.methods[method] as (args: Uint8Array) => Uint8Array | Promise<Uint8Array>;

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DbErrorCodec, DbMigrationCodec, DbOpenedCodec, DbRowsCodec, DbValueCodec, HeaderCodec, WsOpenedCodec } from "../src/adapters/codecs.js";
-import { PortIds } from "../src/adapters/ids.js";
+import { OptInPortIds } from "../src/adapters/opt-in-ids.js";
 import type { WsMessage } from "../src/adapters/types.js";
 import { UndraCallError, UndraUnhandledError } from "../src/call-error.js";
 import { dbPort, nodeSqliteDb } from "../src/db.js";
@@ -592,7 +592,7 @@ describe("ports that hold platform resources across a restart (ADR-047, ADR-048)
         },
       }),
     };
-    const ws = PortIds.WebSocket;
+    const ws = OptInPortIds.WebSocket;
     const t = await recovering({ ports: { [ws.portId]: webSocketPort(adapter) } });
     const first = await t.fake.callPort(ws.portId, ws.connect, connectArgs("ws://old.test/"));
     expect(decodeValue(WsOpenedCodec, first.body).conn).toBe(1);
@@ -607,7 +607,7 @@ describe("ports that hold platform resources across a restart (ADR-047, ADR-048)
   it("a restart rolls back the transaction the instance that trapped left open: the new instance's begin is not Busy", async () => {
     const directory = mkdtempSync(join(tmpdir(), "undra-restart-db-"));
     try {
-      const db = PortIds.Db;
+      const db = OptInPortIds.Db;
       const t = await recovering({ ports: { [db.portId]: dbPort(nodeSqliteDb({ directory })) } });
       const opened = decodeValue(DbOpenedCodec, (await t.fake.callPort(db.portId, db.open, openArgs("app"))).body);
       const tx = decodeValue(codecs.u32, (await t.fake.callPort(db.portId, db.begin, args((w) => w.writeU32(opened.db)))).body);

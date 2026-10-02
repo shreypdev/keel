@@ -11,21 +11,19 @@ function snakeCase(name: string): string {
   return name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 }
 
-function port<const M extends readonly string[]>(name: string, methods: M) {
+/** The ids of port `name` and its `methods`. */
+export function port<const M extends readonly string[]>(name: string, methods: M) {
   const ids = { portId: fnv1a32(`port.${name}`) } as { portId: number } & { readonly [K in M[number]]: number };
   for (const m of methods) (ids as Record<string, number>)[m] = fnv1a32(`${name}.${snakeCase(m)}`);
   return Object.freeze(ids);
 }
 
 /**
- * Port and method ids of the ten standard ports and the three opt-in ones (`WebSocket`, `Sse`
- * and `Db`, ADR-047 and ADR-048; their bindings are in `@undra/runtime/realtime` and
- * `@undra/runtime/db`).
+ * Port and method ids of the ten standard ports. The three opt-in ones (`WebSocket`, `Sse` and
+ * `Db`, ADR-047 and ADR-048) are `OptInPortIds` of `@undra/runtime/realtime` and
+ * `@undra/runtime/db`, so the main entry carries none of them (ADR-052).
  */
 export const PortIds = Object.freeze({
-  WebSocket: port("WebSocket", ["connect", "send", "receive", "close"] as const),
-  Sse: port("Sse", ["open", "next", "close"] as const),
-  Db: port("Db", ["open", "execute", "query", "begin", "commit", "rollback", "close"] as const),
   Clock: port("Clock", ["nowMs", "monotonicNs"] as const),
   Rng: port("Rng", ["fill"] as const),
   Log: port("Log", ["log"] as const),

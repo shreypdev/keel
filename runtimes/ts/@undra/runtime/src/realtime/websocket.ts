@@ -1,5 +1,5 @@
 import { HeaderCodec, WsErrorCodec, WsMessageCodec, WsOpenedCodec } from "../adapters/codecs.js";
-import { PortIds } from "../adapters/ids.js";
+import { OptInPortIds } from "../adapters/opt-in-ids.js";
 import { type Header, WsError, type WsMessage } from "../adapters/types.js";
 import { UndraPortError } from "../errors.js";
 import { errorMessage } from "../platform.js";
@@ -13,10 +13,10 @@ import { Lines, readArgs } from "./lines.js";
  * the port and owns ids, the pull and the read-ahead.
  *
  * ```ts
- * import { PortIds, UndraCore } from "@undra/runtime";
- * import { browserWebSocket, webSocketPort } from "@undra/runtime/realtime";
+ * import { UndraCore } from "@undra/runtime";
+ * import { OptInPortIds, browserWebSocket, webSocketPort } from "@undra/runtime/realtime";
  *
- * await UndraCore.load({ ..., ports: { [PortIds.WebSocket.portId]: webSocketPort(browserWebSocket()) } });
+ * await UndraCore.load({ ..., ports: { [OptInPortIds.WebSocket.portId]: webSocketPort(browserWebSocket()) } });
  * ```
  */
 export interface WebSocketAdapter {
@@ -85,7 +85,7 @@ async function closeQuietly(connection: WebSocketConnection, code: number, reaso
 
 /**
  * The core's `WebSocket` port over `adapter` (ADR-047), for `LoadOptions.ports` or
- * `core.registerPort(PortIds.WebSocket.portId, ...)`. One instance per core.
+ * `core.registerPort(OptInPortIds.WebSocket.portId, ...)`. One instance per core.
  *
  * * `connect` refuses a URL that is not `ws://` or `wss://` (`Refused`, status `null`) before the
  *   adapter is asked; anything but a {@link WsError} the adapter throws is `Network(<its text>)`.
@@ -112,7 +112,7 @@ export function webSocketPort(adapter: WebSocketAdapter): PortImpl {
   });
   /** Bumped by `dispose`: a connect that was under way then is closed when it opens. */
   let epoch = 0;
-  const ids = PortIds.WebSocket;
+  const ids = OptInPortIds.WebSocket;
   return {
     name: "WebSocket",
     sync: false,

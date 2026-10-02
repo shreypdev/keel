@@ -1,5 +1,5 @@
 import { HeaderCodec, SseErrorCodec, SseEventCodec } from "../adapters/codecs.js";
-import { PortIds } from "../adapters/ids.js";
+import { OptInPortIds } from "../adapters/opt-in-ids.js";
 import { type Header, SseError, type SseEvent } from "../adapters/types.js";
 import { UndraPortError } from "../errors.js";
 import { errorMessage } from "../platform.js";
@@ -67,7 +67,7 @@ async function closeQuietly(stream: SseStream): Promise<void> {
 
 /**
  * The core's `Sse` port over `adapter` (ADR-047), for `LoadOptions.ports` or
- * `core.registerPort(PortIds.Sse.portId, ...)`. One instance per core. The same discipline as
+ * `core.registerPort(OptInPortIds.Sse.portId, ...)`. One instance per core. The same discipline as
  * {@link webSocketPort}: `open` refuses a URL that is not `http://` or `https://` (`Refused`, status
  * `null`); events are read ahead only up to the core's latest `max` (16 before the first `next`);
  * `next` answers up to `max` of them (a burst as one reply: 2 ms of quiet or 8 ms after its first
@@ -84,7 +84,7 @@ export function ssePort(adapter: SseAdapter): PortImpl {
   });
   /** Bumped by `dispose`: an open that was under way then is closed when it answers. */
   let epoch = 0;
-  const ids = PortIds.Sse;
+  const ids = OptInPortIds.Sse;
   return {
     name: "Sse",
     sync: false,

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { PortIds, WsError, type WsMessage } from "@undra/runtime";
-import { nodeWebSocket, webSocketPort } from "@undra/runtime/realtime";
+import { WsError, type WsMessage } from "@undra/runtime";
+import { OptInPortIds, nodeWebSocket, webSocketPort } from "@undra/runtime/realtime";
 import { Live, wsEcho } from "@playground/core";
 import { boot, bootWorker } from "../src/harness.js";
 import { lastOn, useRealtimeServer } from "../src/realtime-server.js";
@@ -39,7 +39,7 @@ async function closeSeen(path: string, timeoutMs = 5000): Promise<[number | null
 
 test("S23 WebSocket", async () => {
   const WS = server().wsUrl;
-  const { core } = await boot({ ports: { [PortIds.WebSocket.portId]: webSocketPort(nodeWebSocket()) } });
+  const { core } = await boot({ ports: { [OptInPortIds.WebSocket.portId]: webSocketPort(nodeWebSocket()) } });
 
   await step("1. echo: three messages come back in order; the client closed with (1000, done)", async () => {
     const sent: WsMessage[] = [text("a"), { kind: "binary", value: Uint8Array.of(1, 2, 3) }, text("é")];
@@ -96,7 +96,7 @@ test("S23 WebSocket", async () => {
 });
 
 test("wasm-worker mode: the WebSocket port is served on the main thread (ADR-049 §2)", async () => {
-  const { core } = await bootWorker({ ports: { [PortIds.WebSocket.portId]: webSocketPort(nodeWebSocket()) } });
+  const { core } = await bootWorker({ ports: { [OptInPortIds.WebSocket.portId]: webSocketPort(nodeWebSocket()) } });
   const sent: WsMessage[] = [text("from the worker"), { kind: "binary", value: Uint8Array.of(9) }];
   expect(await wsEcho(`${server().wsUrl}/ws/echo`, sent, core)).toEqual(sent);
 });

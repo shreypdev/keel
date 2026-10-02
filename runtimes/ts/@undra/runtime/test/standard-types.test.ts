@@ -13,7 +13,7 @@ import {
   WsMessageCodec,
   WsOpenedCodec,
 } from "../src/adapters/codecs.js";
-import { PortIds } from "../src/adapters/ids.js";
+import { OptInPortIds } from "../src/adapters/opt-in-ids.js";
 import { DB_CONSTRAINTS, DbError, type DbRows, type DbValue, SseError, type SseEvent, WsError, type WsMessage } from "../src/adapters/types.js";
 import { UndraError } from "../src/errors.js";
 import * as main from "../src/index.js";
@@ -214,9 +214,9 @@ describe("the main entry", () => {
   });
 
   it("pins the port and method ids of the brief (FNV-1a, SPEC 1.1)", () => {
-    expect(PortIds.WebSocket).toEqual({ portId: 0x7388b95f, connect: 0x83477638, send: 0x117b2158, receive: 0x8f31f08f, close: 0x60154b86 });
-    expect(PortIds.Sse).toEqual({ portId: 0x75d2ef19, open: 0xc0033c14, next: 0x4035cbed, close: 0x5bfe2c88 });
-    expect(PortIds.Db).toEqual({
+    expect(OptInPortIds.WebSocket).toEqual({ portId: 0x7388b95f, connect: 0x83477638, send: 0x117b2158, receive: 0x8f31f08f, close: 0x60154b86 });
+    expect(OptInPortIds.Sse).toEqual({ portId: 0x75d2ef19, open: 0xc0033c14, next: 0x4035cbed, close: 0x5bfe2c88 });
+    expect(OptInPortIds.Db).toEqual({
       portId: 0x559eda82,
       open: 0xee6f26db,
       execute: 0xffac2f0a,
