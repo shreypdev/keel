@@ -8,6 +8,7 @@ mod common;
 use std::io::Write;
 use std::net::TcpStream;
 use std::path::Path;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::Duration;
 
 use common::devserver::Dev;
@@ -19,6 +20,13 @@ use undra_wire::{Decode, Encode, Envelope, Handle, Kind, Reader, Writer};
 
 const BUILD: Duration = Duration::from_secs(600);
 
+/// How long [`Client::read`] waits for the server before it calls it silence.
+const PATIENCE: Duration = Duration::from_secs(30);
+
+/// How often the connection's thread comes up from the socket to see whether the test has
+/// something to send.
+const TICK: Duration = Duration::from_millis(10);
+
 /// What a read from the server produced.
 enum Got {
     Frame(Kind, Vec<u8>),
@@ -26,10 +34,70 @@ enum Got {
     Silence,
 }
 
+/// What the connection's thread found on the socket: a message, or the error that ended it.
+type Inbound = Result<Message, tungstenite::Error>;
+
+/// Services the socket of a [`Client`] for as long as the client lives, the way the reader of a
+/// platform runtime does: whatever the test sends goes out, and everything that comes in is queued
+/// for the test, **while the test is busy with something else**.
+///
+/// That is the point of the thread. The server drops a client that has not answered a Ping within
+/// three keepalive intervals (`ServerConfig::ping_interval`, 5 s: 15 s) as dead, without a Close
+/// frame, and a client answers a Ping only when it reads. A test that waits for a rebuild reads
+/// nothing for as long as the build takes, which under load is longer than 15 s: the server then
+/// dropped the client mid-test and the test saw a reset instead of the reload's Close (1001). Real
+/// clients never read in bursts, so the harness does not either.
+fn pump(mut ws: WebSocket<TcpStream>, outbound: &Receiver<Vec<u8>>, inbound: &Sender<Inbound>) {
+    loop {
+        loop {
+            match outbound.try_recv() {
+                Ok(bytes) => {
+                    if let Err(error) = ws.send(Message::Binary(bytes)) {
+                        let _ = inbound.send(Err(error));
+                        return;
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                // The client was dropped: closing the socket is how a test hangs up.
+                Err(TryRecvError::Disconnected) => return,
+            }
+        }
+        // Answers a Ping by itself (the Pong goes out on the next read), within `TICK`.
+        match ws.read() {
+            Ok(Message::Ping(_) | Message::Pong(_)) => {}
+            Ok(Message::Close(frame)) => {
+                // The echo of the server's Close, then the end of the connection.
+                let _ = ws.flush();
+                let _ = inbound.send(Ok(Message::Close(frame)));
+                return;
+            }
+            Ok(message) => {
+                if inbound.send(Ok(message)).is_err() {
+                    return;
+                }
+            }
+            Err(tungstenite::Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(error) => {
+                let _ = inbound.send(Err(error));
+                return;
+            }
+        }
+    }
+}
+
 /// A client of `undra dev` speaking the envelope by hand, with a session token as the platform
 /// runtimes send (ADR-051).
 struct Client {
-    ws: WebSocket<TcpStream>,
+    /// Envelopes for the connection's thread to send, in order.
+    outbound: Sender<Vec<u8>>,
+    /// What that thread read, in order; disconnected once the connection has ended.
+    inbound: Receiver<Inbound>,
+    /// How long [`Client::read`] waits.
+    patience: Duration,
     schema: u64,
     seq: u32,
     next_call: u32,
@@ -54,8 +122,18 @@ impl Client {
             if resume { "&undra_resume=1" } else { "" }
         );
         let (ws, _) = tungstenite::client(url.as_str(), tcp).expect("the WebSocket upgrade");
+        // The upgrade is done: a thread of its own services the socket from here on.
+        ws.get_ref().set_read_timeout(Some(TICK)).unwrap();
+        let (outbound, to_send) = mpsc::channel();
+        let (read, inbound) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("dev-reload-client".to_owned())
+            .spawn(move || pump(ws, &to_send, &read))
+            .expect("the connection's thread starts");
         let mut client = Client {
-            ws,
+            outbound,
+            inbound,
+            patience: PATIENCE,
             schema,
             seq: 0,
             next_call: 0,
@@ -90,13 +168,20 @@ impl Client {
         let mut w = Writer::new();
         Envelope::write(&mut w, kind, self.seq, self.schema, payload);
         self.seq += 1;
-        self.ws.send(Message::Binary(w.into_vec())).unwrap();
+        // A connection that has ended has no thread to take it; the next read says so.
+        let _ = self.outbound.send(w.into_vec());
     }
 
     /// The next envelope, a close or silence; Log records addressed to the developer are noted.
     fn read(&mut self) -> Got {
         loop {
-            match self.ws.read() {
+            let message = match self.inbound.recv_timeout(self.patience) {
+                Ok(message) => message,
+                Err(RecvTimeoutError::Timeout) => return Got::Silence,
+                // Nothing more will come: the connection ended (after its Close, if it had one).
+                Err(RecvTimeoutError::Disconnected) => return Got::Closed(None),
+            };
+            match message {
                 Ok(Message::Binary(bytes)) => {
                     let envelope = Envelope::parse(&bytes).unwrap();
                     if envelope.kind == Kind::ChangeSet {
@@ -119,22 +204,21 @@ impl Client {
                     return Got::Frame(envelope.kind, envelope.payload.to_vec());
                 }
                 Ok(Message::Close(frame)) => {
-                    let _ = self.ws.flush();
                     return Got::Closed(frame.map(|f| (u16::from(f.code), f.reason.into_owned())));
                 }
                 Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {}
                 Ok(Message::Text(_)) => panic!("a text message"),
-                Err(tungstenite::Error::Io(e))
-                    if matches!(
-                        e.kind(),
-                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                    ) =>
-                {
-                    return Got::Silence;
-                }
                 Err(_) => return Got::Closed(None),
             }
         }
+    }
+
+    /// [`read`](Client::read) with `wait` as the patience, for this read only.
+    fn read_within(&mut self, wait: Duration) -> Got {
+        let usual = std::mem::replace(&mut self.patience, wait);
+        let got = self.read();
+        self.patience = usual;
+        got
     }
 
     /// Reads until the server closes; returns the close code and reason.
@@ -280,16 +364,8 @@ impl Client {
             {
                 return;
             }
-            let _ = self
-                .ws
-                .get_ref()
-                .set_read_timeout(Some(Duration::from_millis(200)));
-            let _ = self.read();
+            let _ = self.read_within(Duration::from_millis(200));
         }
-        let _ = self
-            .ws
-            .get_ref()
-            .set_read_timeout(Some(Duration::from_secs(30)));
         panic!(
             "the count never became {expected}: {:?}",
             self.values.get(&(handle, COUNT))
@@ -298,12 +374,7 @@ impl Client {
 
     /// The `undra::dev` sentences that arrive within a short while.
     fn notices_after(&mut self, wait: Duration) -> Vec<String> {
-        let _ = self.ws.get_ref().set_read_timeout(Some(wait));
-        while let Got::Frame(..) = self.read() {}
-        let _ = self
-            .ws
-            .get_ref()
-            .set_read_timeout(Some(Duration::from_secs(30)));
+        while let Got::Frame(..) = self.read_within(wait) {}
         self.notices.clone()
     }
 }
