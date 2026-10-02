@@ -68,7 +68,7 @@ use syn::{Fields, ItemStruct};
 
 use super::attrs::{Site, take};
 use super::check::{Checks, on_unimplemented};
-use super::common::{check_generics, item_root};
+use super::common::{GenericOn, check_generics, item_root};
 use super::diag::{Diag, Errors, code};
 use super::naming::unraw;
 use super::paths::Root;
@@ -403,7 +403,12 @@ pub(crate) fn expand_store(
 ) -> syn::Result<TokenStream> {
     let mut errors = Errors::new();
     let root = item_root(&mut item.attrs, args_root, &mut errors);
-    check_generics(&item.generics, &item.ident.to_string(), &mut errors);
+    check_generics(
+        &item.generics,
+        &item.ident.to_string(),
+        GenericOn::Store,
+        &mut errors,
+    );
     let name = item.ident.clone();
     let name_str = unraw(&name);
     let struct_docs = super::attrs::docs(&item.attrs);

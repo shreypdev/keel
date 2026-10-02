@@ -117,6 +117,9 @@ enum Is {
     Object,
     /// The trait of an `Arc<dyn Trait>` callback parameter (ADR-041).
     Callback,
+    /// A type in the instantiation list of a generic function (ADR-058): a value type declared
+    /// with `#[undra::api]` under the name it is written with, and never an object.
+    Listed,
 }
 
 /// One named-type assertion.
@@ -124,6 +127,8 @@ struct Named {
     ty: Type,
     name: String,
     is: Is,
+    /// For [`Is::Listed`]: the type parameter and the function whose list the type is in.
+    listed_for: Option<(String, String)>,
 }
 
 /// What a set of checks is written for.
@@ -158,6 +163,10 @@ pub(crate) struct Checks {
     /// What `Self` stands for in the spelled types (records and enums may write `Vec<Self>`);
     /// the checks live outside the type, where `Self` does not exist.
     self_name: Option<syn::Ident>,
+    /// An instantiation of a generic function or method: its listed types are checked once, as
+    /// listed ([`Checks::listed`]), so the value check of each place the type was substituted
+    /// into would say the same thing again.
+    quiet_values: bool,
 }
 
 impl Checks {
@@ -190,6 +199,28 @@ impl Checks {
             self_name: Some(name.clone()),
             scope: Scope::Instance,
             ..Checks::default()
+        }
+    }
+
+    /// The checks of one instantiation of a generic function or method (ADR-058): as
+    /// [`Checks::for_instance`], with the listed type checked as listed.
+    pub(crate) fn for_listed_instance(name: &syn::Ident) -> Checks {
+        Checks {
+            quiet_values: true,
+            ..Checks::for_instance(name)
+        }
+    }
+
+    /// The type `ty` of a generic function's list for the parameter `param` of `function` must be
+    /// a value type declared with `#[undra::api]` under the name `name` (E0072, E0061).
+    pub(crate) fn listed(&mut self, ty: &Type, name: &str, param: &str, function: &str) {
+        if self.fresh(format!("listed:{}", ty_string(ty))) {
+            self.named.push(Named {
+                ty: self.resolved(ty),
+                name: name.to_owned(),
+                is: Is::Listed,
+                listed_for: Some((param.to_owned(), function.to_owned())),
+            });
         }
     }
 
@@ -423,7 +454,7 @@ impl Checks {
     }
 
     fn named(&mut self, ty: &Type, name: &str, is: Is) {
-        if !self.live() {
+        if !self.live() || (self.quiet_values && is == Is::Value) {
             return;
         }
         if self.fresh(format!("named:{}:{name}:{is:?}", ty_string(ty))) {
@@ -431,6 +462,7 @@ impl Checks {
                 ty: self.resolved(ty),
                 name: name.to_owned(),
                 is,
+                listed_for: None,
             });
         }
     }
@@ -636,6 +668,7 @@ impl Named {
         match self.is {
             Is::Object => return self.object_assertion(meta),
             Is::Callback => return self.callback_assertion(meta, runtime),
+            Is::Listed => return self.listed_assertion(meta),
             Is::Value | Is::Error => {}
         }
         let span = self.ty.span();
@@ -704,6 +737,58 @@ impl Named {
                     ::core::panic!(#mismatch);
                 }
                 #error_check
+            };
+        }
+    }
+
+    /// A type of a generic function's list: a value type declared under the name it is written
+    /// with (ADR-058).
+    fn listed_assertion(&self, meta: &TokenStream) -> TokenStream {
+        let span = self.ty.span();
+        let ty = &self.ty;
+        let name = &self.name;
+        let shown = ty_string(ty);
+        let (param, function) = self.listed_for.clone().unwrap_or_default();
+        let object = panic_text_plain(&Diag::new(
+            code::E0072,
+            format!("`{shown}` is an object and cannot be listed for `{param}` on `{function}`"),
+            format!(
+                "each instantiation is presented under the name of its type (`{function}({name}.self)` in Swift, `{function}({name}::class)` in Kotlin, `{function}(\"{name}\")` in TypeScript), so a listed type is a value type declared with `#[undra::api]`: a record, an enum, a newtype or a named instantiation; an object crosses by handle and has no such name"
+            ),
+            "list the record the platform needs, or name the object in the signature (`Arc<Mailbox>`) instead of making it a type parameter",
+        ));
+        let undeclared = panic_text_plain(&Diag::new(
+            code::E0061,
+            format!("`{name}` is not a type declared with `#[undra::api]`"),
+            "Undra describes a type to the platforms by the name it is written with, so a listed type is a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate",
+            format!(
+                "add `#[undra::api]` to `{name}`, or, if it is an alias, list the type it stands for"
+            ),
+        ));
+        let mismatch = panic_text_plain(&Diag::new(
+            code::E0061,
+            format!(
+                "`{name}` here is an alias or a renamed import of an Undra type that is declared under another name"
+            ),
+            format!(
+                "Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type {name} = Other` or `use path::Other as {name}` the platforms would be told `{name}` and receive the layout of `Other`"
+            ),
+            format!(
+                "list the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct {name}` if you mean a distinct type"
+            ),
+        ));
+        quote_spanned! {span=>
+            const _: () = {
+                if <#ty>::__UNDRA_IS_OBJECT {
+                    ::core::panic!(#object);
+                }
+                let __undra_id = <#ty>::UNDRA_TYPE_ID;
+                if __undra_id == 0 {
+                    ::core::panic!(#undeclared);
+                }
+                if __undra_id != #meta::ids::type_id(#name) {
+                    ::core::panic!(#mismatch);
+                }
             };
         }
     }
@@ -787,6 +872,11 @@ impl Named {
 /// The message of a const `panic!` (a format string: braces escaped).
 pub(crate) fn panic_text(diag: &Diag) -> String {
     diag.message().replace('{', "{{").replace('}', "}}")
+}
+
+/// [`panic_text`] without the name of the instantiation being expanded.
+fn panic_text_plain(diag: &Diag) -> String {
+    diag.plain_message().replace('{', "{{").replace('}', "}}")
 }
 
 /// `dyn Trait` for the trait of `dyn Trait + Send + Sync + 'static`: the auto-trait bounds

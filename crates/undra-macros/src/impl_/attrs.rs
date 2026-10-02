@@ -6,6 +6,7 @@
 
 use proc_macro2::TokenStream;
 use syn::meta::ParseNestedMeta;
+use syn::spanned::Spanned;
 use syn::visit_mut::{self, VisitMut};
 use syn::{Attribute, Expr, ExprLit, Lit, LitStr, Meta};
 
@@ -25,6 +26,19 @@ pub(crate) struct UndraAttr {
     pub(crate) no_coalesce: bool,
     /// `#[undra(coalesce)]` on a fire-and-forget method of a callback interface (ADR-041).
     pub(crate) coalesce: bool,
+    /// `#[undra(generic(T = [Todo, Note]))]` on a method with a type parameter (ADR-058): the
+    /// types it crosses the boundary for.
+    pub(crate) generic: Vec<GenericList>,
+}
+
+/// One `T = [Todo, Note]` of a `generic(..)` argument (ADR-058): a type parameter of a function or
+/// method and the types it is instantiated with, as written.
+#[derive(Clone, Debug)]
+pub(crate) struct GenericList {
+    /// The type parameter, `T`.
+    pub(crate) param: syn::Ident,
+    /// The listed types.
+    pub(crate) types: Vec<syn::Type>,
 }
 
 /// Which `#[undra(..)]` options are legal on a node.
@@ -37,6 +51,8 @@ pub(crate) struct Site {
     pub(crate) key: bool,
     pub(crate) no_coalesce: bool,
     pub(crate) coalesce: bool,
+    /// `generic(T = [..])`: a method with a type parameter lists the types it crosses for.
+    pub(crate) generic: bool,
     /// Whether the node is part of the schema: `#[cfg]` on it would make the schema differ
     /// between builds, so it is rejected (R1, R7).
     pub(crate) schema: bool,
@@ -51,6 +67,7 @@ impl Site {
         key: false,
         no_coalesce: false,
         coalesce: false,
+        generic: false,
         schema: false,
     };
     /// A field of a record or of an enum variant.
@@ -61,6 +78,7 @@ impl Site {
         key: false,
         no_coalesce: false,
         coalesce: false,
+        generic: false,
         schema: true,
     };
     /// A signal field of a store.
@@ -71,6 +89,7 @@ impl Site {
         key: true,
         no_coalesce: true,
         coalesce: false,
+        generic: false,
         schema: true,
     };
     /// A non-signal field of a store.
@@ -81,6 +100,7 @@ impl Site {
         key: false,
         no_coalesce: false,
         coalesce: false,
+        generic: false,
         schema: true,
     };
     /// A node that takes no `#[undra(..)]` options at all (variants, methods, parameters).
@@ -91,7 +111,14 @@ impl Site {
         key: false,
         no_coalesce: false,
         coalesce: false,
+        generic: false,
         schema: true,
+    };
+    /// A public method of an API impl block: `#[undra(generic(T = [..]))]` is legal (ADR-058).
+    pub(crate) const METHOD: Site = Site {
+        name: "a method",
+        generic: true,
+        ..Site::NOTHING
     };
     /// A method of a callback interface (`#[undra::callback]`): `#[undra(coalesce)]` is legal.
     pub(crate) const CALLBACK_METHOD: Site = Site {
@@ -101,6 +128,7 @@ impl Site {
         key: false,
         no_coalesce: false,
         coalesce: true,
+        generic: false,
         schema: true,
     };
     /// A private method of an API impl block: not part of the schema, so anything goes except
@@ -112,6 +140,7 @@ impl Site {
         key: false,
         no_coalesce: false,
         coalesce: false,
+        generic: false,
         schema: false,
     };
 }
@@ -244,7 +273,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
 /// The option names a description like "`crate = \"path\"`, and `store` on an impl block"
 /// mentions: the leading identifier of every backticked part.
 fn option_names(expected: &str) -> Vec<&str> {
-    expected
+    let mut names: Vec<&str> = expected
         .split('`')
         .skip(1)
         .step_by(2)
@@ -254,7 +283,16 @@ fn option_names(expected: &str) -> Vec<&str> {
                 .unwrap_or(part.len());
             (end > 0).then(|| &part[..end])
         })
-        .collect()
+        .collect();
+    // An option the description mentions twice (`generic` on a type, `generic(..)` on a function)
+    // is listed once.
+    let mut seen: Vec<&str> = Vec::new();
+    names.retain(|name| {
+        let fresh = !seen.contains(name);
+        seen.push(name);
+        fresh
+    });
+    names
 }
 
 /// The help of an unknown option or argument: the nearest name if there is one, else the list.
@@ -344,11 +382,18 @@ fn parse_one(attr: &Attribute, site: Site, out: &mut UndraAttr) -> syn::Result<(
                 out.coalesce = true;
                 Ok(())
             }
+            "generic" => {
+                if !site.generic {
+                    return Err(misplaced("generic"));
+                }
+                out.generic.extend(generic_lists(&meta)?);
+                Ok(())
+            }
             other => Err(Diag::new(
                 code::E0008,
                 format!("unknown option `{other}` in `#[undra(..)]`"),
-                "the options are `crate = \"path\"` (items), `default` (record fields), `key = \"field\"` and `no_coalesce` (store signal fields), and `coalesce` (fire-and-forget methods of a callback interface)",
-                unknown_help(other, &["crate", "default", "key", "no_coalesce", "coalesce"]),
+                "the options are `crate = \"path\"` (items), `default` (record fields), `key = \"field\"` and `no_coalesce` (store signal fields), `coalesce` (fire-and-forget methods of a callback interface) and `generic(T = [..])` (methods with a type parameter)",
+                unknown_help(other, &["crate", "default", "key", "no_coalesce", "coalesce", "generic"]),
             )
             .on(&meta.path)),
         }
@@ -368,6 +413,9 @@ fn option_home(option: &str) -> &'static str {
         "no_coalesce" => "move it to a signal field of a `#[undra::store]` struct, or remove it",
         "coalesce" => {
             "move it to a fire-and-forget method of a `#[undra::callback]` trait, or remove it"
+        }
+        "generic" => {
+            "move it to a method with a type parameter in an `#[undra::api]` impl block (a free function takes it in the macro's arguments: `#[undra::api(generic(T = [Todo, Note]))]`), or remove it"
         }
         _ => "remove the option, or move it to where it applies",
     }
@@ -389,6 +437,9 @@ fn option_hint(option: &str) -> &'static str {
         }
         "coalesce" => {
             "`coalesce` makes the host deliver only the newest pending call of a fire-and-forget callback method to each instance (progress reporting)"
+        }
+        "generic" => {
+            "`generic(T = [Todo, Note])` lists the types a method with a type parameter crosses the boundary for: each becomes a method of its own"
         }
         _ => "this option is not valid here",
     }
@@ -476,6 +527,53 @@ pub(crate) fn flag(
         .on(&meta.path));
     }
     Ok(())
+}
+
+/// Reads the argument of `generic(T = [Todo, Note])`, on a function (in the macro's arguments) or
+/// on a method (`#[undra(generic(..))]`): one `Param = [Type, ..]` per type parameter (ADR-058).
+///
+/// A malformed list is E0008 here; what a well-formed one may say (an empty list, a repeated
+/// type, a type that is not a named value type) is E0072, decided where the function is known.
+pub(crate) fn generic_lists(meta: &ParseNestedMeta<'_>) -> syn::Result<Vec<GenericList>> {
+    let malformed = |span: proc_macro2::Span| {
+        Diag::new(
+            code::E0008,
+            "`generic(..)` takes a list of types for each type parameter",
+            "the core must contain one function for every type the platforms may call a generic function with, and it cannot see its callers (they are on the platforms), so the types are listed where the function is declared",
+            "write `generic(T = [Todo, Note])`",
+        )
+        .at(span)
+    };
+    if !meta.input.peek(syn::token::Paren) {
+        return Err(malformed(meta.path.span()));
+    }
+    let mut lists = Vec::new();
+    meta.parse_nested_meta(|inner| {
+        let Some(param) = inner.path.get_ident().cloned() else {
+            return Err(malformed(inner.path.span()));
+        };
+        if !inner.input.peek(syn::Token![=]) {
+            return Err(malformed(param.span()));
+        }
+        let value = inner.value()?;
+        if !value.peek(syn::token::Bracket) {
+            return Err(malformed(value.span()));
+        }
+        let content;
+        syn::bracketed!(content in value);
+        let types = content
+            .parse_terminated(<syn::Type as syn::parse::Parse>::parse, syn::Token![,])
+            .map_err(|error| malformed(error.span()))?;
+        lists.push(GenericList {
+            param,
+            types: types.into_iter().collect(),
+        });
+        Ok(())
+    })?;
+    if lists.is_empty() {
+        return Err(malformed(meta.path.span()));
+    }
+    Ok(lists)
 }
 
 /// Reads a `crate = "path"` argument.

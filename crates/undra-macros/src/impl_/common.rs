@@ -8,20 +8,68 @@ use super::diag::{Diag, Errors, code};
 use super::paths::Root;
 use super::types::{KType, ty_string};
 
-/// What carries the generic parameters, for the help of E0002 (ADR-042 decision 2.4).
+/// What carries the generic parameters, for the text of E0002 (ADR-042 decision 2.4, ADR-058).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GenericOn {
     /// A struct or enum under `#[undra::api]` without `generic`: it may become a template.
     Data,
     /// A `#[undra::error]` enum: never generic.
     Error,
-    /// An object, store, function, method, port, callback, query or mutation: never generic.
-    Other,
     /// A struct or enum under `#[undra::api(generic)]`: type parameters are what it is for.
     Template,
+    /// A free function: it may list the types it crosses for (ADR-058).
+    Function,
+    /// A method of an object: it may list the types it crosses for (ADR-058).
+    Method,
+    /// A constructor: never generic.
+    Constructor,
+    /// The impl block of an object that is not marked `generic`.
+    ImplBlock,
+    /// A `#[undra::store]` struct without `generic`.
+    Store,
+    /// A query: never generic.
+    Query,
+    /// A mutation: never generic.
+    Mutation,
+    /// A `#[undra::port]` trait: never generic.
+    Port,
+    /// A `#[undra::callback]` trait: never generic.
+    Callback,
+    /// A method of a port or callback trait: never generic.
+    PortMethod,
 }
 
 impl GenericOn {
+    /// The first line: "generic parameter `T` on `newest` has no list of types".
+    fn what(self, param: &str, item: &str) -> String {
+        match self {
+            GenericOn::Data | GenericOn::Error | GenericOn::Template => {
+                format!("generic parameter `{param}` on `{item}`")
+            }
+            GenericOn::Function | GenericOn::Method => {
+                format!("generic parameter `{param}` on `{item}` has no list of types")
+            }
+            GenericOn::Constructor => {
+                format!("generic parameter `{param}` on the constructor `{item}`")
+            }
+            GenericOn::ImplBlock => {
+                format!("generic parameter `{param}` on the impl block of `{item}`")
+            }
+            GenericOn::Store => format!("generic parameter `{param}` on the store `{item}`"),
+            GenericOn::Query => format!("generic parameter `{param}` on the query `{item}`"),
+            GenericOn::Mutation => {
+                format!("generic parameter `{param}` on the mutation `{item}`")
+            }
+            GenericOn::Port => format!("generic parameter `{param}` on the port `{item}`"),
+            GenericOn::Callback => {
+                format!("generic parameter `{param}` on the callback `{item}`")
+            }
+            GenericOn::PortMethod => {
+                format!("generic parameter `{param}` on the port method `{item}`")
+            }
+        }
+    }
+
     fn why(self) -> &'static str {
         match self {
             GenericOn::Data => {
@@ -30,10 +78,25 @@ impl GenericOn {
             GenericOn::Error => {
                 "the schema describes concrete types, and the platforms throw an error by name"
             }
-            GenericOn::Other => {
-                "the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed"
-            }
             GenericOn::Template => "only type parameters are supported by a generic data type",
+            GenericOn::Function | GenericOn::Method => {
+                "the schema describes concrete functions and the platforms call them by id: a generic function crosses once for each type it is declared for, and its callers are on the platforms, where the core cannot see them"
+            }
+            GenericOn::Constructor => {
+                "a constructor returns the object, and the object has no such parameter: the platforms could not say which `create` they mean"
+            }
+            GenericOn::ImplBlock | GenericOn::Store => {
+                "the schema describes concrete objects: a generic object crosses once per instantiation, each under a name of its own, which the platforms generate a class for"
+            }
+            GenericOn::Query | GenericOn::Mutation => {
+                "a query is cached, persisted and invalidated under its name and key, and the schema describes one result type for it; a list of types would make several queries that share one name"
+            }
+            GenericOn::Port | GenericOn::Callback => {
+                "the platform implements the trait by its name, once per instance, and nothing names an instantiation it could implement"
+            }
+            GenericOn::PortMethod => {
+                "a port method is implemented once by the platform and called by id from the core, so its signature must be concrete"
+            }
         }
     }
 
@@ -45,18 +108,45 @@ impl GenericOn {
             GenericOn::Error => {
                 "remove the parameter and declare one concrete `#[undra::error]` enum per use"
             }
-            GenericOn::Other => {
-                "remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`)"
-            }
             GenericOn::Template => "remove the parameter",
+            GenericOn::Function => {
+                "list the types the platforms may use: `#[undra::api(generic(T = [Todo, Note]))]`; each becomes a function of its own, `newest<Todo>` and `newest<Note>`"
+            }
+            GenericOn::Method => {
+                "list the types the platforms may use: `#[undra(generic(T = [Todo, Note]))]` on the method; each becomes a method of its own, `pinned<Todo>` and `pinned<Note>`"
+            }
+            GenericOn::Constructor => {
+                "take a concrete type or an enum of the cases; make the object generic if the parameter belongs to it"
+            }
+            GenericOn::ImplBlock => {
+                "mark the block `#[undra::api(generic)]` (`#[undra::api(store, generic)]` for a store) and declare each instantiation: `#[undra::api] pub type TodoSelection = Selection<Todo>;`"
+            }
+            GenericOn::Store => {
+                "write `#[undra::store(generic)]`, mark its impl block `#[undra::api(store, generic)]` and declare each instantiation: `#[undra::api] pub type TodoSelection = Selection<Todo>;`"
+            }
+            GenericOn::Query | GenericOn::Mutation => {
+                "write one function per type (`todo_rows`, `note_rows`) and share the body in a generic Rust function they both call"
+            }
+            GenericOn::Port | GenericOn::Callback => {
+                "declare one trait per type (`TodoListener`), or pass a record or an enum that covers the cases"
+            }
+            GenericOn::PortMethod => {
+                "write the concrete types, or take a record or an enum that covers the cases"
+            }
         }
     }
 }
 
 /// E0002 / E0003 for every generic parameter of an item that is not a data type (an object, a
-/// store, a function, a method, a port, a callback, a query, a mutation).
-pub(crate) fn check_generics(generics: &syn::Generics, item: &str, errors: &mut Errors) {
-    check_generics_on(generics, item, GenericOn::Other, errors);
+/// store, a function, a method, a port, a callback, a query, a mutation), with the text of what
+/// it is.
+pub(crate) fn check_generics(
+    generics: &syn::Generics,
+    item: &str,
+    on: GenericOn,
+    errors: &mut Errors,
+) {
+    check_generics_on(generics, item, on, errors);
 }
 
 /// E0002 / E0003 for every generic parameter of an item, with the help of what it is.
@@ -97,7 +187,7 @@ pub(crate) fn check_generics_on(
             syn::GenericParam::Type(ty) => errors.push(
                 Diag::new(
                     code::E0002,
-                    format!("generic parameter `{}` on `{item}`", ty.ident),
+                    on.what(&ty.ident.to_string(), item),
                     on.why(),
                     on.help(),
                 )
@@ -237,7 +327,7 @@ mod tests {
     fn generics_are_diagnosed_by_kind() {
         let generics: syn::Generics = parse_quote!(<'a, T, const N: usize>);
         let mut errors = Errors::new();
-        check_generics(&generics, "Todo", &mut errors);
+        check_generics(&generics, "Todo", GenericOn::Data, &mut errors);
         let messages: Vec<String> = errors
             .into_error()
             .unwrap()
@@ -261,7 +351,9 @@ mod tests {
         };
         assert!(help(GenericOn::Data).contains("#[undra::api(generic)]"));
         assert!(help(GenericOn::Data).contains("pub type TodoPage = Page<Todo>;"));
-        assert!(help(GenericOn::Other).contains("only data types can be generic"));
+        assert!(help(GenericOn::Function).contains("#[undra::api(generic(T = [Todo, Note]))]"));
+        assert!(help(GenericOn::Method).contains("#[undra(generic(T = [Todo, Note]))]"));
+        assert!(help(GenericOn::ImplBlock).contains("#[undra::api(store, generic)]"));
         assert!(help(GenericOn::Error).contains("one concrete `#[undra::error]`"));
     }
 
@@ -292,7 +384,7 @@ mod tests {
     fn no_generics_no_errors() {
         let generics = syn::Generics::default();
         let mut errors = Errors::new();
-        check_generics(&generics, "Todo", &mut errors);
+        check_generics(&generics, "Todo", GenericOn::Data, &mut errors);
         assert!(errors.is_empty());
     }
 

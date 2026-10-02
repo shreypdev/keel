@@ -19,6 +19,7 @@ pub(crate) mod common;
 pub(crate) mod diag;
 pub(crate) mod error;
 pub(crate) mod generic;
+pub(crate) mod generic_fn;
 pub(crate) mod migrate;
 pub(crate) mod naming;
 pub(crate) mod object;
@@ -29,7 +30,7 @@ pub(crate) mod record;
 pub(crate) mod store;
 pub(crate) mod types;
 
-use attrs::{StripHelpers, flag, parse_args, root_arg};
+use attrs::{GenericList, StripHelpers, flag, generic_lists, parse_args, root_arg};
 use diag::{Diag, code};
 use paths::Root;
 use record::Mode;
@@ -166,10 +167,13 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
         let mut root: Option<Root> = None;
         let mut store: Option<proc_macro2::Span> = None;
         let mut generic: Option<proc_macro2::Span> = None;
+        // `generic(T = [Todo, Note])` on a function: the types it crosses the boundary for.
+        let mut lists: Vec<GenericList> = Vec::new();
+        let mut lists_span: Option<proc_macro2::Span> = None;
         parse_args(
             attr,
             "api",
-            "`crate = \"path\"`, `store` on an impl block of a `#[undra::store]` struct, and `generic` on a struct or an enum with type parameters",
+            "`crate = \"path\"`, `store` on an impl block of a `#[undra::store]` struct, `generic` on a struct, an enum or an impl block with type parameters, and `generic(T = [Todo, Note])` on a function with a type parameter",
             |meta| {
                 if meta.path.is_ident("crate") {
                     root = Some(root_arg(meta)?);
@@ -177,6 +181,10 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
                 } else if meta.path.is_ident("store") {
                     flag(meta, code::E0008, "store")?;
                     store = Some(syn::spanned::Spanned::span(&meta.path));
+                    Ok(true)
+                } else if meta.path.is_ident("generic") && meta.input.peek(syn::token::Paren) {
+                    lists.extend(generic_lists(meta)?);
+                    lists_span = Some(syn::spanned::Spanned::span(&meta.path));
                     Ok(true)
                 } else if meta.path.is_ident("generic") {
                     flag(meta, code::E0008, "generic")?;
@@ -193,10 +201,34 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
             return Err(Diag::new(
                 code::E0008,
                 "`generic` is only valid on a struct or an enum",
-                "`#[undra::api(generic)]` marks a data type with type parameters as the template of named instantiations; objects, functions, stores and ports are never generic",
-                "remove `generic`, or apply the attribute to a struct or an enum with a type parameter",
+                "`#[undra::api(generic)]` marks a data type with type parameters as the template of named instantiations; a function with a type parameter lists the types it crosses for instead",
+                "remove `generic`, apply the attribute to a struct or an enum with a type parameter, or list the types of a function: `generic(T = [Todo, Note])`",
             )
             .at(span));
+        }
+        if let Some(span) = lists_span.filter(|_| !matches!(item, syn::Item::Fn(_))) {
+            return Err(match &item {
+                syn::Item::Struct(_) | syn::Item::Enum(_) | syn::Item::Impl(_) => Diag::new(
+                    code::E0008,
+                    format!(
+                        "`generic(..)` with a list on `{}`",
+                        match &item {
+                            syn::Item::Struct(i) => i.ident.to_string(),
+                            syn::Item::Enum(i) => i.ident.to_string(),
+                            syn::Item::Impl(i) => ty_name(&i.self_ty),
+                            _ => String::new(),
+                        }
+                    ),
+                    "a list instantiates the type parameter of a function; a type is instantiated under a name, by an alias",
+                    "write `generic` alone and declare `#[undra::api] pub type TodoSelection = Selection<Todo>;`",
+                )
+                .at(span),
+                other => wrong_item(
+                    "api",
+                    "a struct, an enum, an `impl` block, a free `fn` or a type alias that names an instantiation of a generic",
+                    other,
+                ),
+            });
         }
         if let Some(span) = store.filter(|_| !matches!(item, syn::Item::Impl(_))) {
             return Err(Diag::new(
@@ -217,6 +249,9 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
             syn::Item::Struct(item) => record::expand_struct(root, item),
             syn::Item::Enum(item) => record::expand_enum(root, item, Mode::Api),
             syn::Item::Impl(item) => object::expand_impl(root, store.is_some(), item),
+            syn::Item::Fn(item) if !lists.is_empty() => {
+                object::expand_generic_fn(root, item, &lists)
+            }
             syn::Item::Fn(item) => object::expand_fn(root, item),
             syn::Item::Type(item) => generic::expand_alias(root, item),
             other => Err(wrong_item(
@@ -226,6 +261,18 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
             )),
         }
     })
+}
+
+/// The name of the type of an impl block, for a message.
+fn ty_name(ty: &syn::Type) -> String {
+    match ty {
+        syn::Type::Path(path) => path
+            .path
+            .segments
+            .last()
+            .map_or_else(String::new, |seg| seg.ident.to_string()),
+        other => types::ty_string(other),
+    }
 }
 
 /// `undra::__instantiate!`: what the hidden macro of a generic data type calls (ADR-042).

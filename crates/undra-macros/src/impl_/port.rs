@@ -51,7 +51,7 @@ use syn::{FnArg, ItemImpl, ItemTrait, Pat, ReturnType, TraitItem, Type};
 
 use super::attrs::{Site, docs, flag, parse_args, root_arg, take};
 use super::check::{Checks, on_unimplemented};
-use super::common::{check_generics, derived, item_root, param_meta, submit};
+use super::common::{GenericOn, check_generics, derived, item_root, param_meta, submit};
 use super::diag::{Diag, Errors, code};
 use super::naming::{fnv1a32, snake_case, unraw};
 use super::object::arg_local;
@@ -188,7 +188,7 @@ fn analyze_method(
     );
     let name = unraw(&method.sig.ident);
     reject_undra_macros(&method.attrs, accessor, &name, errors);
-    check_generics(&method.sig.generics, &name, errors);
+    check_generics(&method.sig.generics, &name, GenericOn::PortMethod, errors);
     let docs = docs(&method.attrs);
 
     match method.sig.receiver() {
@@ -424,7 +424,12 @@ pub(crate) fn expand_trait(
     let root = item_root(&mut item.attrs, args_root, &mut errors);
     let name = item.ident.clone();
     let name_str = unraw(&name);
-    check_generics(&item.generics, &name_str, &mut errors);
+    let generic_on = if requested == Requested::Callback {
+        GenericOn::Callback
+    } else {
+        GenericOn::Port
+    };
+    check_generics(&item.generics, &name_str, generic_on, &mut errors);
     let type_docs = docs(&item.attrs);
     let vis = item.vis.clone();
 
