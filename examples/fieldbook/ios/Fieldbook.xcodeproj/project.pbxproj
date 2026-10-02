@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		A0A0A0A0A0A0A0A000000001 /* FieldbookCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000010 /* FieldbookCore */; };
 		A0A0A0A0A0A0A0A000000002 /* UndraRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000011 /* UndraRuntime */; };
+		A0A0A0A0A0A0A0A000000004 /* UndraTestKit in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000012 /* UndraTestKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +39,7 @@
 			files = (
 				A0A0A0A0A0A0A0A000000001 /* FieldbookCore in Frameworks */,
 				A0A0A0A0A0A0A0A000000002 /* UndraRuntime in Frameworks */,
+				A0A0A0A0A0A0A0A000000004 /* UndraTestKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -92,6 +94,7 @@
 			packageProductDependencies = (
 				A0A0A0A0A0A0A0A000000010 /* FieldbookCore */,
 				A0A0A0A0A0A0A0A000000011 /* UndraRuntime */,
+				A0A0A0A0A0A0A0A000000012 /* UndraTestKit */,
 			);
 			productName = "Fieldbook";
 			productReference = A0A0A0A0A0A0A0A000000030 /* Fieldbook.app */;
@@ -338,6 +341,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A0A0A0A0A0A0A0A000000121 /* UndraRuntime package */;
 			productName = UndraRuntime;
+		};
+		A0A0A0A0A0A0A0A000000012 /* UndraTestKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A0A0A0A0A0A0A0A000000121 /* UndraRuntime package */;
+			productName = UndraTestKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

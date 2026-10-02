@@ -10,6 +10,8 @@ export default defineConfig({
     alias: {
       "@app/fieldbook-core": here("../generated/ts/src/index.ts"),
       "@undra/runtime": here("../../../runtimes/ts/@undra/runtime/src/index.ts"),
+      // The testing kit (docs/TESTING.md): PreviewCore runs the real core on deterministic fakes.
+      "@undra/testkit": here("../../../runtimes/ts/@undra/testkit/src/index.ts"),
     },
   },
   test: {

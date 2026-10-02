@@ -18,7 +18,8 @@
     "baseUrl": ".",
     "paths": {
       "@app/fieldbook-core": ["../generated/ts/src/index.ts"],
-      "@undra/runtime": ["../../../runtimes/ts/@undra/runtime/src/index.ts"]
+      "@undra/runtime": ["../../../runtimes/ts/@undra/runtime/src/index.ts"],
+      "@undra/testkit": ["../../../runtimes/ts/@undra/testkit/src/index.ts"]
     }
   },
   "include": ["src", "vitest.config.ts", "test-setup.ts"]

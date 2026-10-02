@@ -16,7 +16,13 @@ export default defineConfig({
       "@app/fieldbook-core": here("../generated/ts/src/index.ts"),
       // The Undra runtime, from the Undra checkout's sources.
       "@undra/runtime": here("../../../runtimes/ts/@undra/runtime/src/index.ts"),
+      // The testing kit (docs/TESTING.md), for the stories.
+      "@undra/testkit": here("../../../runtimes/ts/@undra/testkit/src/index.ts"),
     },
+  },
+  build: {
+    // Two pages: the app, and the stories (`stories.html`, a plain renderer of src/stories/*.stories.tsx).
+    rollupOptions: { input: { main: here("index.html"), stories: here("stories.html") } },
   },
   server: {
     // The wasm core (`undra build --platform web`) lives outside this directory.

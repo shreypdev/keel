@@ -44,9 +44,6 @@ function SignIn({ auth }: { readonly auth: Auth }) {
 
 function Notes({ app, user }: { readonly app: Fieldbook; readonly user: string }) {
   const { auth, notebook } = app;
-  const visible = useSignal(notebook.visible);
-  const tags = useSignal(notebook.tags);
-  const filter = useSignal(notebook.filter);
   const pending = useSignal(notebook.pending);
   const [offline, setOfflineState] = useState(app.server.offline);
   const [problem, setProblem] = useState<string | null>(null);
@@ -74,7 +71,22 @@ function Notes({ app, user }: { readonly app: Fieldbook; readonly user: string }
         </label>
       </p>
       {problem !== null && <p className="error" role="alert">{problem}</p>}
-      <NewNote notebook={notebook} onProblem={report} />
+      <NotebookView notebook={notebook} onProblem={report} />
+    </main>
+  );
+}
+
+/**
+ * The notebook itself: the form for a new note, the search box, the tag chips and the list. It takes the store
+ * alone, so the app and the stories (`stories/Notebook.stories.tsx`) draw the same thing.
+ */
+export function NotebookView({ notebook, onProblem }: { readonly notebook: Notebook; readonly onProblem: (e: unknown) => void }) {
+  const visible = useSignal(notebook.visible);
+  const tags = useSignal(notebook.tags);
+  const filter = useSignal(notebook.filter);
+  return (
+    <>
+      <NewNote notebook={notebook} onProblem={onProblem} />
       <input
         className="search"
         value={filter.query}
@@ -90,10 +102,10 @@ function Notes({ app, user }: { readonly app: Fieldbook; readonly user: string }
       </nav>
       <ul className="notes">
         {visible.map((note) => (
-          <NoteRow key={note.id} note={note} notebook={notebook} onProblem={report} />
+          <NoteRow key={note.id} note={note} notebook={notebook} onProblem={onProblem} />
         ))}
       </ul>
-    </main>
+    </>
   );
 }
 

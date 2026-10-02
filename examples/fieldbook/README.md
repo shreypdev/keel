@@ -53,6 +53,15 @@ then newest and follows the filter; a restore (what `undra dev` does on a rebuil
 ids; a build-1 note becomes a build-2 note. The web test runs the generated TypeScript bindings against the real core
 (compiled to wasm by `undra build --platform web`) and goes through the same offline scenario end to end.
 
+## Previews and stories
+
+The testing kit ([docs/TESTING.md](../../docs/TESTING.md)) runs the app's own core with deterministic fakes as its ports and a manual
+clock, so a screen in any state is a few lines. `ios/Fieldbook/Previews/NotebookPreviews.swift` has two SwiftUI `#Preview`s (three
+notes; no signal), `web/src/stories/Notebook.stories.tsx` the same two as stories (`npm run dev`, then `/stories.html`), and
+`web/src/preview.test.ts` drives the offline scenario with `PreviewCore`: the network, the clock and the idempotency key, exactly.
+Android's Compose previews are not included: Android Studio's preview pane cannot load a native core, so they would play a recording
+(`RecordedCore`), and the sample has not recorded one.
+
 ## Feature `presence`
 
 `cargo test -p fieldbook-core --features presence` runs presence over the opt-in `WebSocket` port (ADR-047; it needs an

@@ -1346,7 +1346,7 @@ Tick **offline** in the web app, write two notes, reload, untick it: the notes w
 
 - The web, iOS and Android apps build in CI (`vite build`, `xcodebuild`, `assembleDebug`); the screens are small on purpose.
 - Notes are stored in `Kv`. The `Db` port (SQLite) is the next step for a notebook that grows; it is an opt-in port.
-- Previews over the testing kit are not in the sample yet: it uses the Rust fakes and the real wasm core in its tests.
+- SwiftUI previews and the web stories run the real core on the [testing kit](https://shreypdev.github.io/undra/docs/testing.html)'s fakes, and so do the web tests, with a manual clock. Android's Compose previews are not in the sample: they play a recording, and none was made.
 
 Source: [`examples/fieldbook`](https://github.com/shreypdev/undra/tree/main/examples/fieldbook), with a README that says how to run each platform. [The cookbook](https://shreypdev.github.io/undra/docs/cookbook/) has the recipes it is made of.
 
