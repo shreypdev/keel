@@ -45,7 +45,7 @@ use undra_meta::{DispatchCall, DispatchOutcome};
 
 use crate::dispatch::DispatchResult;
 use crate::object::{AnyObject, UndraObject, erased};
-use crate::object_table::ObjectTable;
+use crate::object_table::{BadHandle, BadHandleReason, ObjectTable};
 use crate::runtime::Runtime;
 
 /// The shared state of a [`LazyList`].
@@ -165,6 +165,13 @@ pub(crate) fn lazy_page_dispatch(rt: &dyn Any, call: DispatchCall<'_>) -> Dispat
                 };
                 DispatchResult::Sync(Ok(page_reply(&*server.source, word(0), word(4))))
             }
+            Err(BadHandle {
+                reason: BadHandleReason::WrongType { found, .. },
+                ..
+            }) => DispatchResult::BadRequest(format!(
+                "handle {:#x} refers to a {found}, not a lazy list",
+                call.handle
+            )),
             Err(e) => DispatchResult::BadRequest(e.to_string()),
         },
         None => DispatchResult::Unknown,
