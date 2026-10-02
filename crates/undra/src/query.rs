@@ -13,11 +13,18 @@
 
 pub use undra_query::{
     BACKOFF_BASE_MS, BACKOFF_MAX_MS, BoxFuture, CACHE_KEY_PREFIX, CacheValue, CacheView, CtxQuery,
-    DEFAULT_GC_MS, INVALIDATE_METHOD_ID, Invalidate, JITTER_PERCENT, MutationBuilder, MutationDef,
-    MutationRegistration, MutationVTable, PERSIST_DEBOUNCE_MS, QUEUE_KEY, QueryClient, QueryDef,
-    QueryHandle, QueryRegistration, QueryStatus, QueryVTable, REFETCH_METHOD_ID, Settled,
-    backoff_ms, cache_key, idempotency_key,
+    DEFAULT_GC_MS, FETCH_NEXT_PAGE_METHOD_ID, INVALIDATE_METHOD_ID, InfiniteHandle,
+    InfiniteQueryDef, Invalidate, JITTER_PERCENT, MAX_POLL_INTERVAL_MS, MIN_POLL_INTERVAL_MS,
+    MutationBuilder, MutationDef, MutationRegistration, MutationVTable, PERSIST_DEBOUNCE_MS, Page,
+    QUEUE_KEY, QueryClient, QueryDef, QueryHandle, QueryRegistration, QueryStatus, QueryVTable,
+    REFETCH_METHOD_ID, SET_POLL_INTERVAL_METHOD_ID, Settled, backoff_ms, cache_key,
+    idempotency_key,
 };
+
+/// What `#[undra::query(infinite)]` names: the paging table of the query and the function that
+/// fetches its first page. Generated code names them; they are not a stable API.
+#[doc(hidden)]
+pub use undra_query::{PagedVTable, fetch_first_page, paged_vtable};
 
 /// What `#[undra::query]` and `#[undra::mutation]` submit besides their registration: the query
 /// runtime's init hook and dispatch layer, so a core links them only when it declares a query or

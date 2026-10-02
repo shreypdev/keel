@@ -833,7 +833,12 @@ impl Schema {
         if query.kind != crate::QueryKind::Query {
             return Some("is a mutation: only a query can be infinite".to_owned());
         }
-        let TypeRef::Vec(item) = &query.returns else {
+        // The list its handle shows, on the success side of the `Result` the macro records.
+        let list = match &query.returns {
+            TypeRef::Result(ok, _) => &**ok,
+            other => other,
+        };
+        let TypeRef::Vec(item) = list else {
             return Some("does not return `Vec<T>`, the list its handle shows".to_owned());
         };
         let TypeRef::Named(item) = &**item else {
@@ -2302,6 +2307,22 @@ mod tests {
     fn an_infinite_query_returns_a_list_of_records_with_the_item_key() {
         let good = infinite_query(TypeRef::vec(TypeRef::named("Post")), "id");
         assert_eq!(good.validate(), Ok(()));
+        // What `#[undra::query(infinite)]` records: the list on the success side of a `Result`.
+        let mut with_error = infinite_query(
+            TypeRef::result(
+                TypeRef::vec(TypeRef::named("Post")),
+                TypeRef::named("FeedError"),
+            ),
+            "id",
+        );
+        with_error.enums.push(EnumDef {
+            name: "FeedError".into(),
+            type_id: ids::type_id("FeedError"),
+            is_error: true,
+            variants: vec![],
+            docs: String::new(),
+        });
+        assert_eq!(with_error.validate(), Ok(()));
         for (returns, key, expect) in [
             (TypeRef::named("Post"), "id", "does not return `Vec<T>`"),
             (TypeRef::vec(TypeRef::U8), "id", "not a record"),
