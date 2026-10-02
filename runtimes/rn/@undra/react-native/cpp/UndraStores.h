@@ -83,6 +83,14 @@ enum class KvNaming : uint8_t {
 /// The file name of `key` under `naming`.
 std::string kvFileName(KvNaming naming, std::string_view key);
 
+/// The variants of the `Kv` and `SecureStore` ports' `StorageError` (docs/SPEC.md section 8,
+/// ADR-049), in wire order: `Unavailable(String)`, `Full`, `Locked`, `Corrupt(String)`, `Io(String)`.
+enum class StorageErrorKind : uint16_t { Unavailable = 0, Full = 1, Locked = 2, Corrupt = 3, Io = 4 };
+
+/// The `StorageError` of an `errno`: a full disk or quota is `Full`, `EPERM` (protected data before
+/// the device's first unlock) is `Locked`, anything else `Io` (the Swift adapter's mapping).
+StorageErrorKind storageErrorOf(int code) noexcept;
+
 /// A key-value store in a directory: one file per key, holding `u32 key length, key, value`.
 ///
 /// Writes go to a temporary file in the same directory that is `fsync`ed and renamed over the entry
@@ -95,21 +103,27 @@ class KvStore {
   KvStore(std::string directory, KvNaming naming);
 
   /// The value under `key` into `value` (`nullopt` when there is none). `false` with `error` set
-  /// when the store cannot answer (an unreadable or damaged entry).
-  bool get(const std::string &key, std::optional<std::vector<uint8_t>> &value, std::string &error) const;
+  /// when the store cannot answer (an unreadable or damaged entry). Every method that fails also
+  /// sets `*kind`, when given, to the failure's `StorageError` variant (a damaged entry is
+  /// `Corrupt`, a full disk `Full`).
+  bool get(const std::string &key, std::optional<std::vector<uint8_t>> &value, std::string &error,
+      StorageErrorKind *kind = nullptr) const;
   /// Stores `value` under `key`, replacing what was there.
-  bool set(const std::string &key, const uint8_t *value, std::size_t len, std::string &error) const;
+  bool set(const std::string &key, const uint8_t *value, std::size_t len, std::string &error,
+      StorageErrorKind *kind = nullptr) const;
   /// Removes `key`; a missing key is not an error.
-  bool remove(const std::string &key, std::string &error) const;
+  bool remove(const std::string &key, std::string &error, StorageErrorKind *kind = nullptr) const;
   /// The keys that start with `prefix`, sorted by byte order.
-  bool list(const std::string &prefix, std::vector<std::string> &keys, std::string &error) const;
+  bool list(const std::string &prefix, std::vector<std::string> &keys, std::string &error,
+      StorageErrorKind *kind = nullptr) const;
 
   const std::string &directory() const noexcept { return directory_; }
 
  private:
   std::string pathOf(const std::string &key) const;
   /// The key stored at `path`: `nullopt` when the file is missing or not an entry.
-  bool readKey(const std::string &path, std::optional<std::string> &key, std::string &error) const;
+  bool readKey(const std::string &path, std::optional<std::string> &key, std::string &error,
+      StorageErrorKind *kind) const;
 
   std::string directory_;
   KvNaming naming_;
@@ -118,12 +132,12 @@ class KvStore {
 // ----- Fs ---------------------------------------------------------------------------------------
 
 /// The variants of the `Fs` port's `FsError` (docs/SPEC.md section 8), in wire order.
-enum class FsErrorKind : uint16_t { NotFound = 0, Denied = 1, Io = 2 };
+enum class FsErrorKind : uint16_t { NotFound = 0, Denied = 1, Io = 2, Full = 3, Unavailable = 4 };
 
 /// Why an `Fs` operation failed.
 struct FsFailure {
   FsErrorKind kind;
-  /// The `Io` variant's text; empty for the others.
+  /// The `Io` and `Unavailable` variants' text; empty for the others.
   std::string message;
 };
 
