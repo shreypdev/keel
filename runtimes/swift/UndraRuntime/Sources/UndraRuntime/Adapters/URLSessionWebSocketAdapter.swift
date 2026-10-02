@@ -191,7 +191,35 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
             }
         }
         wsdbg("cancel(with: \(closeCode.rawValue)) now; task.state=\(task.state.rawValue) variant=\(variant)")
-        task.cancel(with: closeCode, reason: reason.isEmpty ? nil : Data(reason.utf8))
+        let data: Data? = reason.isEmpty ? nil : Data(reason.utf8)
+        if variant == "onqueue" {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                session.delegateQueue.addOperation {
+                    self.task.cancel(with: closeCode, reason: data)
+                    continuation.resume()
+                }
+            }
+        } else if variant == "inping" {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                task.sendPing { _ in
+                    self.task.cancel(with: closeCode, reason: data)
+                    continuation.resume()
+                }
+            }
+        } else if variant == "main" {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.main.async {
+                    self.task.cancel(with: closeCode, reason: data)
+                    continuation.resume()
+                }
+            }
+        } else if variant == "twice" {
+            task.cancel(with: closeCode, reason: data)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            task.cancel(with: closeCode, reason: data)
+        } else {
+            task.cancel(with: closeCode, reason: data)
+        }
         wsdbg("cancel(with:) returned; task.state=\(task.state.rawValue) closeCode=\(task.closeCode.rawValue)")
         if variant.contains("delayinv") {
             try? await Task.sleep(nanoseconds: 1_000_000_000)

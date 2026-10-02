@@ -27,7 +27,7 @@ jobs:
         working-directory: runtimes/swift/UndraRuntime
         run: |
           swift build --build-tests 2>&1 | tail -1
-          for v in base delayinv predelay ping pingdelayinv; do
+          for v in base onqueue inping main twice; do
             for t in testEchoTextAndBinaryAndAClientClose testAConnectionTheCoreLetsGoIsClosedGoingAway; do
               if UNDRA_WS_VARIANT=$v swift test --skip-build --filter URLSessionWebSocketAdapterTests/$t > "$RUNNER_TEMP/out.txt" 2>&1; then echo "VARIANT $v $t: PASS"; else echo "VARIANT $v $t: FAIL"; fi
             done
