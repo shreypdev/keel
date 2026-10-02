@@ -39,14 +39,8 @@ export class LatestResponseQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.LatestResponseQueryHandle.typeId,
-        methodId: UndraIds.Objects.LatestResponseQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
@@ -54,18 +48,17 @@ export class LatestResponseQueryHandle extends UndraStore {
   static async create(
     core: UndraCore = UndraGoldenStdlib.core,
   ): Promise<LatestResponseQueryHandle> {
-    const args = new Uint8Array(0);
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.LatestResponseQueryHandle.typeId,
         UndraIds.Objects.LatestResponseQueryHandle.new,
-        args,
+        new Uint8Array(0),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new LatestResponseQueryHandle(core, handle, args);
+    const store = new LatestResponseQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }

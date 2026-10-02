@@ -57,14 +57,8 @@ export class FeedQueryHandle extends UndraStore {
   /** Whether the fetch of the next page is in flight. */
   readonly fetchingNextPage: Signal<boolean> = new Signal<boolean>(false);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.FeedQueryHandle.typeId,
-        methodId: UndraIds.Objects.FeedQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [
       this.data,
       this.status,
@@ -83,18 +77,17 @@ export class FeedQueryHandle extends UndraStore {
   ): Promise<FeedQueryHandle> {
     const w = new UndraWriter();
     w.writeBool(evenOnly);
-    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.FeedQueryHandle.typeId,
         UndraIds.Objects.FeedQueryHandle.new,
-        args,
+        w.finish(),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new FeedQueryHandle(core, handle, args);
+    const store = new FeedQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }
@@ -249,14 +242,8 @@ export class RemoteTodosQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.RemoteTodosQueryHandle.typeId,
-        methodId: UndraIds.Objects.RemoteTodosQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
@@ -267,18 +254,17 @@ export class RemoteTodosQueryHandle extends UndraStore {
   ): Promise<RemoteTodosQueryHandle> {
     const w = new UndraWriter();
     w.writeStr(list);
-    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.RemoteTodosQueryHandle.typeId,
         UndraIds.Objects.RemoteTodosQueryHandle.new,
-        args,
+        w.finish(),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new RemoteTodosQueryHandle(core, handle, args);
+    const store = new RemoteTodosQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }
@@ -388,14 +374,8 @@ export class RosterQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.RosterQueryHandle.typeId,
-        methodId: UndraIds.Objects.RosterQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
@@ -406,18 +386,17 @@ export class RosterQueryHandle extends UndraStore {
   ): Promise<RosterQueryHandle> {
     const w = new UndraWriter();
     w.writeU32(team);
-    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.RosterQueryHandle.typeId,
         UndraIds.Objects.RosterQueryHandle.new,
-        args,
+        w.finish(),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new RosterQueryHandle(core, handle, args);
+    const store = new RosterQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }
@@ -527,31 +506,24 @@ export class TickerQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, {
-      recreate: {
-        typeId: UndraIds.Objects.TickerQueryHandle.typeId,
-        methodId: UndraIds.Objects.TickerQueryHandle.new,
-        args,
-      },
-    });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
   static async create(core: UndraCore = UndraPlaygroundB.core): Promise<TickerQueryHandle> {
-    const args = new Uint8Array(0);
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.TickerQueryHandle.typeId,
         UndraIds.Objects.TickerQueryHandle.new,
-        args,
+        new Uint8Array(0),
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new TickerQueryHandle(core, handle, args);
+    const store = new TickerQueryHandle(core, handle);
     await store._observeAll();
     return store;
   }
