@@ -32,22 +32,29 @@ impl Ctx<'_> {
     }
 
     /// The statement that writes the callback parameter `value` with `writer`, lent with `lend`
-    /// (the function `lending` passes its `send`).
+    /// (the function `lending` passes its `send`), or, without one (a stream's arguments), with
+    /// the runtime's `lend` to `core`.
     pub(super) fn write_callback(
         &mut self,
         callback: &CallbackUse<'_>,
         value: &str,
         writer: &str,
-        lend: &str,
+        lend: Option<&str>,
+        core: &str,
     ) -> String {
         let bridge = self.use_bridge(callback.name());
+        let lent = match lend {
+            Some(lend) => format!("{lend}({value}, {bridge})"),
+            None => {
+                self.rt_value("lend");
+                format!("lend({core}, {value}, {bridge})")
+            }
+        };
         match callback {
-            CallbackUse::One(_) => format!("{writer}.writeU64({lend}({value}, {bridge}));"),
+            CallbackUse::One(_) => format!("{writer}.writeU64({lent});"),
             CallbackUse::Optional(_) => {
                 let codec = self.handle_codec(true);
-                format!(
-                    "{codec}.encode({writer}, {value} === null ? null : {lend}({value}, {bridge}));"
-                )
+                format!("{codec}.encode({writer}, {value} === null ? null : {lent});")
             }
         }
     }

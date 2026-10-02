@@ -1724,14 +1724,7 @@ impl<'a> Ctx<'a> {
             let stmt = if let Some(object) = ObjectUse::of(&p.ty) {
                 self.write_object(&object, &value, writer, core)
             } else if let Some(callback) = CallbackUse::of(&p.ty) {
-                let lend = match lend {
-                    Some(lend) => lend.to_owned(),
-                    None => {
-                        self.rt_value("lend");
-                        format!("((impl, callback) => lend({core}, impl, callback))")
-                    }
-                };
-                self.write_callback(&callback, &value, writer, &lend)
+                self.write_callback(&callback, &value, writer, lend, core)
             } else {
                 self.write_stmt(&p.ty, &value, writer)
             };
