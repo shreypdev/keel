@@ -828,6 +828,8 @@ The core holds the callback until it lets go, so a listener you create inline li
 - **A subscription object.** Return something the app closes (`watch` above): closing it drops the core's hold.
 - **A weak wrapper.** Hand the core a wrapper that forwards while the target lives and does nothing after.
 
+A stream method takes a callback like any other method: the core holds it while the stream runs and lets it go when the stream ends or is dropped. The core never calls a weak wrapper whose target is gone (the question is answered unavailable); if your own code does in Swift, the method throws the error type's `Unavailable`, and an error type without one stops the app with a message.
+
 ## Testing
 
 In a Rust test pass an implementation written in Rust: `#[undra::port] impl Reporter for Recorder` records the calls, and an `async` method answers as you set it. See [Testing your app](https://shreypdev.github.io/undra/docs/testing.html).
@@ -3568,7 +3570,7 @@ Source: https://shreypdev.github.io/undra/reference/swift.html
 
 # Swift reference
 
-Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xcc36d9fa84455aef`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x25ca013a060a93ce`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3634,7 +3636,7 @@ Source: https://shreypdev.github.io/undra/reference/kotlin.html
 
 # Kotlin reference
 
-Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xcc36d9fa84455aef`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x25ca013a060a93ce`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3700,7 +3702,7 @@ Source: https://shreypdev.github.io/undra/reference/typescript.html
 
 # TypeScript reference
 
-Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xcc36d9fa84455aef`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x25ca013a060a93ce`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 

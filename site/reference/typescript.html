@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>TypeScript reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xcc36d9fa84455aef</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x25ca013a060a93ce</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="entry">Entry point<a class="anchor" href="#entry" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The package entry: it re-exports every file below.</p>
@@ -1116,7 +1116,7 @@ export function wsEcho(
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each <code>#[undra::store]</code>: its signals as <code>Signal</code>, then its methods.</p>
 <p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Legacy</code> <code>Notes</code> <code>Profile</code> <code>Shelf</code> <code>Stress</code> <code>Todos</code> <code>Workshop</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>516 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>530 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/stores.ts" rel="noopener">stores.ts</a></span></div><pre><code data-lang="ts">/**
  * The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
  * exercise the boundary.
@@ -1616,10 +1616,24 @@ export class Workshop extends UndraStore {
   shelves(): Promise&lt;Shelf[]&gt;;
 
   /**
+   * Reads how many items `shelf` holds, once per step for `steps` steps: a stream that takes an
+   * object, which the core holds (borrowed from the platform) while the stream runs.
+   * Iterating throws UndraCallError; leaving the loop early ends the stream quietly.
+   */
+  tally(shelf: Shelf, steps: number): AsyncIterable&lt;number&gt;;
+
+  /**
    * How many items there are on the shelves given.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
   total(shelves: Shelf[]): Promise&lt;number&gt;;
+
+  /**
+   * Walks `steps` steps, telling `reporter` a note at each one and yielding the step number: a
+   * stream that takes a callback, whose reference is the core's until the stream ends or is dropped.
+   * Iterating throws UndraCallError; leaving the loop early ends the stream quietly.
+   */
+  walk(steps: number, reporter: Reporter): AsyncIterable&lt;number&gt;;
 
   /**
    * Keeps `reporter` until the returned subscription is closed; [`Workshop::announce`] tells it.
@@ -1785,13 +1799,13 @@ export function tagNote(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>195 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>197 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/ids.ts" rel="noopener">ids.ts</a></span></div><pre><code data-lang="ts">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
  * hash and the namespace of the core these bindings belong to.
  */
 export const UndraIds = {
-  schemaHash: 0xcc36d9fa84455aefn,
+  schemaHash: 0x25ca013a060a93cen,
   namespace: "playground_core",
   Objects: {
     Live: {
@@ -1907,7 +1921,9 @@ export const UndraIds = {
       run: 0x5208d85f,
       shelf: 0xfaed29c6,
       shelves: 0x952fdfee,
+      tally: 0x56a6b8e4,
       total: 0xce8e1708,
+      walk: 0x0c0539af,
       watch: 0x19e462e5,
       watching: 0x76b9e49b,
     },

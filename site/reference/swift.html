@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Swift reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xcc36d9fa84455aef</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x25ca013a060a93ce</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="core">The core<a class="anchor" href="#core" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another.</p>
@@ -908,7 +908,7 @@ public func wsEcho(
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">An <code>@Observable</code> class for each <code>#[undra::store]</code>: its signals, then its methods.</p>
 <p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Legacy</code> <code>Notes</code> <code>Profile</code> <code>Shelf</code> <code>Stress</code> <code>Todos</code> <code>Workshop</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>372 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>382 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Stores.swift" rel="noopener">Stores.swift</a></span></div><pre><code data-lang="swift">/// The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
 /// exercise the boundary.
 @MainActor @Observable
@@ -1269,9 +1269,19 @@ public final class Workshop: UndraStore, @unchecked Sendable {
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public func shelves() throws -&gt; [Shelf]
 
+    /// Reads how many items `shelf` holds, once per step for `steps` steps: a stream that takes an
+    /// object, which the core holds (borrowed from the platform) while the stream runs.
+    /// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
+    public func tally(shelf: Shelf, steps: UInt32) -&gt; AsyncThrowingStream&lt;UInt32, Error&gt;
+
     /// How many items there are on the shelves given.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public func total(shelves: [Shelf]) throws -&gt; UInt32
+
+    /// Walks `steps` steps, telling `reporter` a note at each one and yielding the step number: a
+    /// stream that takes a callback, whose reference is the core's until the stream ends or is dropped.
+    /// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
+    public func walk(steps: UInt32, reporter: any Reporter) -&gt; AsyncThrowingStream&lt;UInt32, Error&gt;
 
     /// Keeps `reporter` until the returned subscription is closed; [`Workshop::announce`] tells it.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
@@ -1411,11 +1421,11 @@ public func tagNote(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>198 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>200 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift" rel="noopener">Ids.swift</a></span></div><pre><code data-lang="swift">/// Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
 /// hash and the namespace of the core these bindings belong to.
 public enum UndraIds {
-    public static let schemaHash: UInt64 = 0xcc36d9fa84455aef
+    public static let schemaHash: UInt64 = 0x25ca013a060a93ce
     public static let namespace = "playground_core"
 
     public enum Objects {
@@ -1532,7 +1542,9 @@ public enum UndraIds {
             public static let run: UInt32 = 0x5208d85f
             public static let shelf: UInt32 = 0xfaed29c6
             public static let shelves: UInt32 = 0x952fdfee
+            public static let tally: UInt32 = 0x56a6b8e4
             public static let total: UInt32 = 0xce8e1708
+            public static let walk: UInt32 = 0x0c0539af
             public static let watch: UInt32 = 0x19e462e5
             public static let watching: UInt32 = 0x76b9e49b
         }

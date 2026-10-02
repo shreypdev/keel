@@ -7,8 +7,9 @@ record has the cause, the fix and the test of each item, what was decided where 
 and the counts.
 
 One commit per item (`fix(streams)` O1, `fix(swift)` O2, `fix(restore)` O3, `fix(ts)` O4 and O7, `fix(dev)` O5,
-`fix(callbacks)` O6, `fix(bindgen)` O8), plus the chores `fmt`, the proxy key type, the re-blessed testkit recordings
-and the ADR notes. Every test below was run **before** the fix (or with the fix reverted in place) and fails there.
+`fix(callbacks)` O6, `fix(bindgen)` O8), plus the chores `fmt`, the proxy key type, the re-blessed testkit recordings,
+the ADR notes, the size trim (`perf(runtime)`: the web gate, below) and the abort-order fix of O7 that the contract grid found
+(`fix(ts)`). Every test below was run **before** the fix (or with the fix reverted in place) and fails there.
 
 ## O1 — streams that take objects or callbacks
 
@@ -87,10 +88,14 @@ first closes a later `adopt` makes a third; all work (each owns its reference).
 **Cause.** `cancel_calls_replaced_by_restore` checked a call's receiver only; an async free function or a stream that took
 a `&Store` kept running on the pre-restore store and answered status 0 (ADR-023's M3 hazard through ADR-040's parameters).
 
-**Fix.** `Runtime::object` records the handles a dispatcher resolves in a per-dispatch collector (a thread-local armed by
-`call_from`), the call table keeps them next to the receiver (`CallEntry.params`), and the restore applies the existing
-"replaced or invalidated" rule to each (a handle released before the restore and absent from the snapshot is left alone).
-No macro change (the dispatcher already resolves through `Runtime::object`).
+**Fix.** The generated dispatcher of an `async` method or a stream resolves its object parameters through
+`Runtime::param(call_id, handle)` (the `Runtime::object` of the other methods, which hand their parameters back before the
+call returns): it remembers the handles in one per-thread slot keyed by the call id, `spawn_call` / `open_stream` move them
+into the call table (`CallEntry.params`, inline, the first four; a fifth object parameter is not checked), and the restore
+applies the existing "replaced or invalidated" rule to the receiver and to each (a handle released before the restore and
+absent from the snapshot is left alone). The first shape of this (a collector armed by `call_from` around every dispatch)
+cost the hot path a thread-local arm and take per call and the web gate 230 bytes; this one touches only the methods that
+need it.
 
 **Tests** (`crates/undra/tests/e2e_todo.rs`, real macros through the `TestRuntime`): an async free function holding a store
 parameter across a restore is answered `Cancelled`, once, and the restored store serves the next call; a stream holding one
@@ -153,8 +158,11 @@ new core never releases until the client closes (dev only).
 `__undra_attach_all` fails; the unpublished value drops them (`__release`), yet the call answered status 5 ("refused: owns
 nothing") so the host gave its references back too: a double release.
 
-**Fix.** `DispatchResult::Failed(String)` (status 2, no unwinding, logged at ERROR; sync and async reply paths); the macro uses
-it for the failure after the body of a constructor that took callbacks, and keeps status 5 for one that took none.
+**Fix.** `DispatchResult::Failed(String)` (status 2, no unwinding: the runtime reports it through the panic path, reason as
+the message, no backtrace, so the Diagnostics port and the stats see it as a failed call; sync, async and stream paths); the
+macro uses it for the failure after the body of a constructor that took callbacks, and keeps status 5 for one that took none.
+A constructor's own reference is committed with `IssueScope::commit_constructed` (it is the client's one reference, counted by
+the transport, not recorded for the origin: O5).
 
 **Tests.** `undra-macros/tests/callbacks.rs` (`a_constructor_that_fails_after_making_its_proxies_is_not_a_refusal`: a store
 whose second construction cannot attach; fails with the old macro: "expected a failed call, got BadRequest"; the proxy is
@@ -170,6 +178,10 @@ were owned by nobody until the core closed.
 `resolve` becomes the orphan, its `reject` a no-op); `reclaim(core, shape)` (identity.ts) reads the reply's handles (one,
 optional, list) and gives each back. Generated code passes it for an `async` method that returns objects (`ts.rs`); calls
 without one behave as before. The same code serves the worker, remote and React Native transports.
+The entry is abandoned (deleted, or turned into the orphan) **before** the `Cancel` is sent: a transport that answers a cancel
+inside the send (`wasm-main`) must find the call already abandoned, or the caller sees the core's `CancelledByCore` instead of
+its abort reason. The first version of this fix sent the cancel first and broke contract S06, S27, S28 and S30 on TypeScript; the
+contract grid found it, and `core.test.ts` now has the transport that answers inside the send (with and without an orphan).
 
 **Tests.** `core.test.ts` (kept until the answer, given back for each shape, a cancelled answer gives nothing, a call without
 an orphan is unchanged: fails without the tombstone: `pendingCalls` 0 not 1) and the React Native `objects-callbacks.test.ts`
@@ -190,6 +202,26 @@ core's path never calls it: the runtime resolves the target first and answers un
 type without one) keeps `targetGone()`. A Swift **run check** of the golden (`fixtures/swift-run/callbacks.swift`, built with
 the real runtime) drops a weak wrapper's target and asks it a question.
 
+## The web size gate
+
+The hello-wasm gate is `min(120,000, record + 5%)` and `main` sits at 119,654 (its own path). The piece's net change in the
+module is about **+90 bytes of code after wasm-opt** (a stream of small things: `Failed` in the classification, the call
+entry's parameters, the call table's wider entry; the restore got smaller, the per-receiver iterator chain gone). The gzipped
+number moves with where the checkout lives (the panic locations embed it; ADR-052), by more than the change itself:
+
+| path | `main` `a4c7cb2` | this piece |
+|---|---|---|
+| sibling of the main checkout (a name as long as `keel`) | 119,611 | **119,856** (+245, 144 under the budget) |
+| `.work/objects-followups` (this worktree) | 119,928 | **120,031** (+103, 31 over the budget) |
+
+So the gate passes where the repository is checked out and fails by 31 bytes at the longer path of this worktree; the
+integrator's `--record` on `main` is the measurement that counts. The first version of the O3 change (a collector armed and
+taken around every dispatch) measured +230 bytes at the long path; the trim (commit `50f6743`, `perf(runtime)`) moved the cost to
+the methods that need it: object parameters of an `async` method or a stream go through `Runtime::param`, which records them
+in one per-thread slot (two `Cell`s: the call id they belong to and the handles), `spawn_call` / `open_stream` take them into
+the entry, a failed call is reported through the existing panic path. JavaScript: 22,044 of 22,100 (record 22,005).
+Neither budget was restated.
+
 ## What the review said and this piece did not do
 
 * O9 (the wasm budget) and O10 (the playground's tab bar) are not in the brief.
@@ -197,4 +229,21 @@ the real runtime) drops a weak wrapper's target and asks it a question.
 
 ## Counts
 
-(filled in at the end of the run)
+Run once on the merged tree (`main` `a4c7cb2` is an ancestor), the toolchains required (`UNDRA_REQUIRE_TOOLCHAINS=1`):
+
+| Suite | Result |
+|---|---|
+| `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p undra-ffi --target wasm32-unknown-unknown -- -D warnings`, `cargo doc --workspace --no-deps` | clean |
+| `cargo test --workspace` | 3,239 pass, 18 ignored. One failure on the first run, `undra-signals` `derived_delivery::concurrent_writers_and_a_re_observer_never_strand_an_op` ("update_at at index 13, but the list has 13"): a race inside that test (it picks an index from a length it read earlier), in a crate this piece does not touch; it passed on three reruns |
+| bench `budgets` (release) | 6 pass, 1 ignored |
+| wasm harness | 22 + 36 pass |
+| C / JNI / Swift-ABI harnesses | `c smoke`, `c lifetime`, `c two cores` ok / 16 pass / 6 pass |
+| Swift runtime (`swift test`) | 778 pass |
+| Kotlin runtime, Kotlin 2.4.20 and CI's 2.0.21 | 811 cases in 46 suites, 0 failed, 2 skipped; the testkit 32 in 5 suites; both compilers |
+| TypeScript runtime | 1,686 pass (61 files), `typecheck` clean |
+| React Native | 105 pass (9 files), `typecheck` clean, `cpp/test/run.sh` 30 checks |
+| Contract grid (`rm -rf contract-tests/swift/.build`, `run-all.sh`) | 86/86 (TypeScript 30, Kotlin 28, Swift 28). The first run found the O7 ordering bug above (TS S06/S27/S28/S30, now fixed with a test) and a Kotlin S30 timing step ("within 100 ms of Background") that passed on the rerun |
+| Interop (`crates/undra-transport/interop/run.sh`) | OK |
+| `undra bindgen --check --docs`: playground, two-cores a and b, cookbook, fieldbook; `--check`: ios15-sample | all up to date (the playground's hash is `0x25ca013a060a93ce`: it gained `Workshop::tally` and `walk`) |
+| `scripts/wasm-size.sh` | wasm 120,031 at this path (see the gate section: 119,856 at a `keel`-length path; `main` 119,928 / 119,611); JS 22,044 of 22,100 |
+| site `build-all.mjs`, `check-links.mjs --words` | clean; the reference pages and `llms-full.txt` regenerated; landing prose 342 of 350 words |

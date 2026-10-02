@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Kotlin reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in Kotlin for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xcc36d9fa84455aef</code>). <a href="../docs/api-kotlin.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Kotlin for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x25ca013a060a93ce</code>). <a href="../docs/api-kotlin.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="core">The core<a class="anchor" href="#core" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another. The internal <code>UndraCoreNative</code> holds the natives the core's library registers over JNI.</p>
@@ -892,7 +892,7 @@ suspend fun wsEcho(
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each <code>#[undra::store]</code>: its signals as <code>StateFlow</code>, then its methods.</p>
 <p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Legacy</code> <code>Notes</code> <code>Profile</code> <code>Shelf</code> <code>Stress</code> <code>Todos</code> <code>Workshop</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>593 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>625 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Stores.kt" rel="noopener">Stores.kt</a></span></div><pre><code data-lang="kotlin">/**
  * The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
  * exercise the boundary.
@@ -1114,6 +1114,15 @@ class Legacy internal constructor(core: UndraCore, handle: Long) : UndraStore(co
          * A score of `score`.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(
+            score: Int,
+            ctx: UndraCore = UndraPlaygroundCore.core,
+        ): Legacy
+
+        /**
+         * A score of `score`.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(score: Int, ctx: UndraCore = UndraPlaygroundCore.core): Legacy
     }
 }
@@ -1223,6 +1232,15 @@ class Profile internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     fun visit()
 
     companion object {
+        /**
+         * A profile called `name`, never visited.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        operator fun invoke(
+            name: String,
+            ctx: UndraCore = UndraPlaygroundCore.core,
+        ): Profile
+
         /**
          * A profile called `name`, never visited.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
@@ -1455,10 +1473,24 @@ class Workshop internal constructor(core: UndraCore, handle: Long) : UndraStore(
     fun shelves(): List&lt;Shelf&gt;
 
     /**
+     * Reads how many items `shelf` holds, once per step for `steps` steps: a stream that takes an
+     * object, which the core holds (borrowed from the platform) while the stream runs.
+     * Collecting throws UndraCallError; cancelling the collector ends it quietly.
+     */
+    fun tally(shelf: Shelf, steps: UInt): Flow&lt;UInt&gt;
+
+    /**
      * How many items there are on the shelves given.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
     fun total(shelves: List&lt;Shelf&gt;): UInt
+
+    /**
+     * Walks `steps` steps, telling `reporter` a note at each one and yielding the step number: a
+     * stream that takes a callback, whose reference is the core's until the stream ends or is dropped.
+     * Collecting throws UndraCallError; cancelling the collector ends it quietly.
+     */
+    fun walk(steps: UInt, reporter: Reporter): Flow&lt;UInt&gt;
 
     /**
      * Keeps `reporter` until the returned subscription is closed; [`Workshop::announce`] tells it.
@@ -1550,7 +1582,7 @@ interface Reporter {
 <h2 id="queries">Queries<a class="anchor" href="#queries" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.</p>
 <p class="ref-names"><code>RemoteTodosQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code> <code>saveNote</code> <code>tagNote</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>81 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>87 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Queries.kt" rel="noopener">Queries.kt</a></span></div><pre><code data-lang="kotlin">/**
  * Observes the `remote_todos` query (cache key `remote-todos:{list}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
@@ -1580,6 +1612,12 @@ class RemoteTodosQueryHandle internal constructor(core: UndraCore, handle: Long)
     fun invalidate()
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            list: String,
+            ctx: UndraCore = UndraPlaygroundCore.core,
+        ): RemoteTodosQueryHandle
+
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(
             list: String,
@@ -1637,13 +1675,13 @@ suspend fun tagNote(list: String, id: UInt, ctx: UndraCore = UndraPlaygroundCore
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>200 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>202 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Ids.kt" rel="noopener">Ids.kt</a></span></div><pre><code data-lang="kotlin">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
  * hash and the namespace of the core these bindings belong to.
  */
 object UndraIds {
-    const val SCHEMA_HASH: ULong = 0xcc36d9fa84455aefuL
+    const val SCHEMA_HASH: ULong = 0x25ca013a060a93ceuL
     const val NAMESPACE: String = "playground_core"
 
     object Objects {
@@ -1760,7 +1798,9 @@ object UndraIds {
             const val RUN: UInt = 0x5208d85fu
             const val SHELF: UInt = 0xfaed29c6u
             const val SHELVES: UInt = 0x952fdfeeu
+            const val TALLY: UInt = 0x56a6b8e4u
             const val TOTAL: UInt = 0xce8e1708u
+            const val WALK: UInt = 0x0c0539afu
             const val WATCH: UInt = 0x19e462e5u
             const val WATCHING: UInt = 0x76b9e49bu
         }
