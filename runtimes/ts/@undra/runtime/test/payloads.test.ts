@@ -48,7 +48,7 @@ import {
   type ReplyPayload,
   type StreamFailure,
   type StreamItemPayload,
-} from "../src/wire/payloads.js";
+} from "../src/wire/index.js";
 import { catchWireError, embedded, expectWireError, fromHex, toHex } from "./helpers.js";
 
 const i32 = (n: number): Uint8Array => encodeValue(codecs.i32, n);
