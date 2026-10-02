@@ -892,7 +892,7 @@ public object Payloads {
      * layout): layout 2 of SPEC 5.9 (ADR-037), all little-endian,
      *
      * ```text
-     * count u32, generation_floor u32,
+     * count u32, generation_floor u64,
      * schema_hash u64,
      * type_count u32, types × { type_id u32, fingerprint u64 },
      * description_len u32, description (UTF-8),
@@ -909,7 +909,7 @@ public object Payloads {
      * instead of decoding as something else. [encode] writes what it is given, valid or not.
      *
      * @property generationFloor the highest handle generation the core had issued when the snapshot
-     *   was taken. A restore resumes the core's generation counter above it, so no handle issued before
+     *   was taken (a `u64` since ADR-040: generations are 40 bits). A restore resumes the core's generation counter above it, so no handle issued before
      *   the snapshot (or between it and the restore) is issued again to another object (ADR-022). Opaque
      *   to the host: pass it back unchanged.
      * @property schemaHash the schema hash of the core that took the snapshot.
@@ -920,7 +920,7 @@ public object Payloads {
      * @property stores every snapshotted store.
      */
     public data class Snapshot(
-        val generationFloor: UInt,
+        val generationFloor: ULong,
         val schemaHash: ULong,
         val types: List<StoreType>,
         val description: String,
@@ -965,7 +965,7 @@ public object Payloads {
 
         override fun encode(w: UndraWriter) {
             w.writeLen(stores.size)
-            w.writeU32(generationFloor)
+            w.writeU64(generationFloor)
             w.writeU64(schemaHash)
             w.writeLen(types.size)
             for (t in types) {
@@ -1007,7 +1007,7 @@ public object Payloads {
              */
             public fun decode(r: UndraReader): Snapshot {
                 val storeCount = r.readLen(MIN_STORE_BYTES)
-                val generationFloor = r.readU32()
+                val generationFloor = r.readU64()
                 val schemaHash = r.readU64()
                 val typeCount = r.readLen(TYPE_BYTES)
                 val types = ArrayList<StoreType>(typeCount)

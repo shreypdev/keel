@@ -15,13 +15,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
 /** Adds numbers. */
-class Calculator private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0)),
-    )
-
+class Calculator internal constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
     fun add(a: Int, b: Int): Int {
         val w = UndraWriter()
@@ -91,9 +85,12 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): Calculator = create(ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Calculator {
             val handle = ctx.constructObject(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0))
-            return Calculator(ctx, handle)
+            return ctx.adopt(handle, ::Calculator)
         }
     }
 }

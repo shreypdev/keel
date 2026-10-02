@@ -19,24 +19,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /** The login screen's store: the session and whether a call is running. */
-class Auth private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Auth internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _session: MutableStateFlow<Session> = signal(Session.SignedOut)
     val session: StateFlow<Session> = _session.asStateFlow()
     private val _busy: MutableStateFlow<Boolean> = signal(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
-
-    init {
-        observeAll()
-    }
-
-    /**
-     * A store with nobody signed in. Call `resume` at launch.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraCookbook.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.Auth.TYPE_ID, UndraIds.Objects.Auth.NEW, ByteArray(0)),
-    )
 
     /**
      * Picks up a session the last run left in the secure store: asks the server who the token
@@ -129,15 +116,21 @@ class Auth private constructor(core: UndraCore, handle: Long) : UndraStore(core,
          * A store with nobody signed in. Call `resume` at launch.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraCookbook.core): Auth = create(ctx)
+
+        /**
+         * A store with nobody signed in. Call `resume` at launch.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraCookbook.core): Auth {
             val handle = ctx.constructObject(UndraIds.Objects.Auth.TYPE_ID, UndraIds.Objects.Auth.NEW, ByteArray(0))
-            return Auth(ctx, handle)
+            return ctx.adopt(handle, ::Auth)
         }
     }
 }
 
 /** The feed screen's store. */
-class Feed private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Feed internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _posts: MutableStateFlow<List<Post>> = signal(emptyList())
     val posts: StateFlow<List<Post>> = _posts.asStateFlow()
     private val _cursor: MutableStateFlow<String?> = signal(null)
@@ -151,19 +144,6 @@ class Feed private constructor(core: UndraCore, handle: Long) : UndraStore(core,
     private val _visible: MutableStateFlow<List<Post>> = signal(emptyList())
     /** Derived by the core from another list; read-only. Changes arrive as keyed patches. */
     val visible: StateFlow<List<Post>> = _visible.asStateFlow()
-
-    init {
-        observeAll()
-    }
-
-    /**
-     * An empty feed. The first `load_more` fetches the first page.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraCookbook.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.Feed.TYPE_ID, UndraIds.Objects.Feed.NEW, ByteArray(0)),
-    )
 
     /**
      * Fetches the next page and appends it. Returns how many rows were new. Does nothing (and
@@ -302,15 +282,21 @@ class Feed private constructor(core: UndraCore, handle: Long) : UndraStore(core,
          * An empty feed. The first `load_more` fetches the first page.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraCookbook.core): Feed = create(ctx)
+
+        /**
+         * An empty feed. The first `load_more` fetches the first page.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraCookbook.core): Feed {
             val handle = ctx.constructObject(UndraIds.Objects.Feed.TYPE_ID, UndraIds.Objects.Feed.NEW, ByteArray(0))
-            return Feed(ctx, handle)
+            return ctx.adopt(handle, ::Feed)
         }
     }
 }
 
 /** The sign-up form's store. */
-class SignUp private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class SignUp internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _email: MutableStateFlow<String> = signal("")
     val email: StateFlow<String> = _email.asStateFlow()
     private val _password: MutableStateFlow<String> = signal("")
@@ -327,19 +313,6 @@ class SignUp private constructor(core: UndraCore, handle: Long) : UndraStore(cor
     private val _valid: MutableStateFlow<Boolean> = signal(false)
     /** Computed by the core; read-only. */
     val valid: StateFlow<Boolean> = _valid.asStateFlow()
-
-    init {
-        observeAll()
-    }
-
-    /**
-     * An empty form with no problem shown yet.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraCookbook.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.SignUp.TYPE_ID, UndraIds.Objects.SignUp.NEW, ByteArray(0)),
-    )
 
     /**
      * The user left `field`: from now on its problems are shown.
@@ -497,30 +470,23 @@ class SignUp private constructor(core: UndraCore, handle: Long) : UndraStore(cor
          * An empty form with no problem shown yet.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraCookbook.core): SignUp = create(ctx)
+
+        /**
+         * An empty form with no problem shown yet.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraCookbook.core): SignUp {
             val handle = ctx.constructObject(UndraIds.Objects.SignUp.TYPE_ID, UndraIds.Objects.SignUp.NEW, ByteArray(0))
-            return SignUp(ctx, handle)
+            return ctx.adopt(handle, ::SignUp)
         }
     }
 }
 
 /** The uploads screen's store. */
-class Uploads private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Uploads internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _uploads: MutableStateFlow<List<Upload>> = signal(emptyList())
     val uploads: StateFlow<List<Upload>> = _uploads.asStateFlow()
-
-    init {
-        observeAll()
-    }
-
-    /**
-     * No uploads.
-     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
-     */
-    constructor(ctx: UndraCore = UndraCookbook.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.Uploads.TYPE_ID, UndraIds.Objects.Uploads.NEW, ByteArray(0)),
-    )
 
     /**
      * Continues a failed upload from the first part the server has not acknowledged.
@@ -601,9 +567,15 @@ class Uploads private constructor(core: UndraCore, handle: Long) : UndraStore(co
          * No uploads.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(ctx: UndraCore = UndraCookbook.core): Uploads = create(ctx)
+
+        /**
+         * No uploads.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(ctx: UndraCore = UndraCookbook.core): Uploads {
             val handle = ctx.constructObject(UndraIds.Objects.Uploads.TYPE_ID, UndraIds.Objects.Uploads.NEW, ByteArray(0))
-            return Uploads(ctx, handle)
+            return ctx.adopt(handle, ::Uploads)
         }
     }
 }

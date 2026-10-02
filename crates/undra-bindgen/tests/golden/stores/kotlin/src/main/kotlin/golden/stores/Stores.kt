@@ -25,13 +25,9 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
 /** A store with a single signal and a constructor argument. */
-class Clock private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle, noCoalesce = setOf(0u)) {
+class Clock internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle, noCoalesce = setOf(0u)) {
     private val _now: MutableStateFlow<Timestamp> = signal(Timestamp(0L))
     val now: StateFlow<Timestamp> = _now.asStateFlow()
-
-    init {
-        observeAll()
-    }
 
     override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader) {
         try {
@@ -56,13 +52,13 @@ class Clock private constructor(core: UndraCore, handle: Long) : UndraStore(core
             val w = UndraWriter()
             w.writeStr(zone)
             val handle = ctx.constructObject(UndraIds.Objects.Clock.TYPE_ID, UndraIds.Objects.Clock.NEW, w.toByteArray())
-            return Clock(ctx, handle)
+            return ctx.adopt(handle, ::Clock)
         }
     }
 }
 
 /** The todo list. */
-class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Todos internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _todos: MutableStateFlow<List<Todo>> = signal(emptyList())
     val todos: StateFlow<List<Todo>> = _todos.asStateFlow()
     private val _filter: MutableStateFlow<Filter> = signal(Filter.ALL)
@@ -95,16 +91,6 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
     val default: StateFlow<Boolean> = _default.asStateFlow()
     private val _uuid: MutableStateFlow<UUID> = signal(UUID(0L, 0L))
     val uuid: StateFlow<UUID> = _uuid.asStateFlow()
-
-    init {
-        observeAll()
-    }
-
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraGoldenStores.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW, ByteArray(0)),
-    )
 
     /**
      * Shows only the todos matching `f`.
@@ -314,9 +300,12 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(ctx: UndraCore = UndraGoldenStores.core): Todos = create(ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraGoldenStores.core): Todos {
             val handle = ctx.constructObject(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW, ByteArray(0))
-            return Todos(ctx, handle)
+            return ctx.adopt(handle, ::Todos)
         }
 
         /**
@@ -333,7 +322,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
                 throw UndraCallError.mapped(e, TodoError)
             }
             if (handle == 0L) throw UndraCallError.Malformed("the core returned the null handle for a constructor")
-            return Todos(ctx, handle)
+            return ctx.adopt(handle, ::Todos)
         }
     }
 }

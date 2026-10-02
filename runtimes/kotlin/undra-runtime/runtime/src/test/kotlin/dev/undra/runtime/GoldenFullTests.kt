@@ -50,7 +50,9 @@ class GoldenFullTests : Suite() {
         t.onCallSync = { call -> replyPayload(call.callId, ReplyStatus.OK, Codecs.handle.encodeToByteArray(0x100000002L)) }
         t.onCall = { call -> end(t, call) }
         attach(t).use { core ->
-            (calculator.getConstructor(UndraCore::class.java).newInstance(core) as AutoCloseable).use { calc ->
+            // `Calculator(core)`: the companion's factory, which makes the wrapper through `adopt` (ADR-040).
+            val companion = calculator.getField("Companion").get(null)
+            (companion.javaClass.getMethod("create", UndraCore::class.java).invoke(companion, core) as AutoCloseable).use { calc ->
                 val watch = calculator.getMethod("watch", priority)
                 val flow = watch.invoke(calc, priority.enumConstants!!.first()) as Flow<*>
                 return assertThrows<Throwable> { runBlocking { flow.toList() } }

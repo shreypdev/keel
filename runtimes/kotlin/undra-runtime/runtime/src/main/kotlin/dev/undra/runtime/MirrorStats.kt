@@ -15,6 +15,8 @@ import kotlin.time.Duration
  * @property pendingEntries entries waiting for the next drain.
  * @property pendingBytes bytes those entries hold (their values plus 17 bytes each).
  * @property droppedEntries entries dropped because no store was registered for their handle.
+ * @property callbacksDelivered calls of the core into the app's callback implementations (ADR-041) that a drain
+ *   ran, in order with the change-sets (a `coalesce` method's superseded calls are not counted).
  */
 public class MirrorStats(
     public val changeSetsReceived: Long,
@@ -26,11 +28,12 @@ public class MirrorStats(
     public val pendingEntries: Int,
     public val pendingBytes: Long,
     public val droppedEntries: Long,
+    public val callbacksDelivered: Long = 0L,
 ) {
     override fun toString(): String =
         "MirrorStats(changeSetsReceived=$changeSetsReceived, entriesReceived=$entriesReceived, entriesApplied=$entriesApplied, " +
             "drains=$drains, compactions=$compactions, resyncs=$resyncs, pendingEntries=$pendingEntries, " +
-            "pendingBytes=$pendingBytes, droppedEntries=$droppedEntries)"
+            "pendingBytes=$pendingBytes, droppedEntries=$droppedEntries, callbacksDelivered=$callbacksDelivered)"
 }
 
 /**
