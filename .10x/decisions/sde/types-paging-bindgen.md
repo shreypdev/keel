@@ -109,3 +109,20 @@ regenerating the committed bindings (it names no type that moved).
    generated `init` (a Combine sink) and an ADR-045 note.
 5. `docs/SPEC.md` (sections 10.x for the new shapes, 12) is not edited by this sub-piece.
 6. The E0006 message prints the type in the schema's compact form (`named:Meters`); it is `undra-meta`'s `Display`.
+
+## Checks run (worktree `wt/tp-bindgen`, after merging `wt/tp-swift`, `wt/tp-kotlin`, `wt/tp-ts`; env as in the preamble)
+
+* `cargo test -p undra-bindgen`: lib 26, diagnostics 2, generators 48, golden 21, run_ts 13, schema_hash 2, stdlib 16,
+  typecheck_kotlin 1 (brew Kotlin 2.4.20 and CI's 2.0.21, `-Werror`, plus the execution mains), typecheck_swift 4 (the host, and
+  the iOS 15.0 and 16.0 simulator triples, Swift 6 mode, plus the `recursive` and `newtypes` executables), typecheck_ts 21,
+  validate 31, doc tests 8: 193 passed, 0 failed.
+* `cargo test -p undra-cli`: 408 passed, 0 failed, 2 ignored; `cargo test -p undra-cli --test schema_docs -- --ignored`: 1 passed
+  (the library route and the dev runner's route write the same bindings).
+* `cargo clippy -p undra-bindgen -p undra-cli --all-targets -- -D warnings`: clean. `cargo fmt --check`: clean.
+  `RUSTDOCFLAGS="-D warnings" cargo doc -p undra-bindgen --no-deps`: clean.
+* `scripts/ios-floor.sh golden` and `scripts/ios-floor.sh apps` (the playground's and Fieldbook's bindings for an iOS 15 floor
+  build for the iOS 15.0 simulator): pass.
+* `undra bindgen -C <p> --check --docs` on the playground, Fieldbook, cookbook and two-cores a and b, and `--check` on
+  ios15-sample: up to date after the regeneration committed here.
+* `cargo test -p undra-ports --test schema --test opt_in`, `cargo test -p undra --test schema_diagnostics --test e2e_todo`:
+  pass. `cargo test -p undra-macros --test catalogue` fails twice on E0073 (open item 2).
