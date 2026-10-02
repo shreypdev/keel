@@ -184,6 +184,38 @@ code gives its references back itself".
   the integrator's commit (`scripts/wasm-size.sh --record`), or let ts-size-e4 land first and re-measure; the budget is not
   changed on this branch.
 
-**Counts.** (see the report that merged this piece; the matrix was run once at the end)
+**Counts.**
 
-COUNTS_PLACEHOLDER
+Run once at the end on the merged tree (after merging `main` at `8000d39`), macOS, Xcode 26, JDK 17:
+
+| Suite | Result |
+|---|---|
+| `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p undra-ffi --target wasm32-unknown-unknown -- -D warnings`, `cargo doc --workspace --no-deps` with `-D warnings` | clean |
+| `cargo test --workspace` | 3,129 pass (3 bindgen golden failures after the merge with ios-floor, re-blessed and green), 16 ignored; `dev_reload` passes (the flake was fixed on main) |
+| wasm ABI harness (`crates/undra-ffi/tests/wasm/run.sh`) | 22 + 32 pass |
+| C harness, Swift over the C table, JNI e2e | `c smoke`, `c lifetime`, `c two cores` ok; 6 pass; 16 pass |
+| Swift runtime (`swift test`) | 692 pass (was 581 before this piece) |
+| Kotlin runtime, `test-local.sh`, Kotlin 2.4.20 and 2.0.21 | 779 cases in 45 suites, 0 failed, 2 skipped (no native library); the testing kit's 30 cases pass, under both compilers |
+| TypeScript runtime: `tsc` and `npm test` | 1,463 pass in 48 files (was 1,264 before this piece); typecheck clean |
+| React Native: `npm test`, typecheck, `test:contract`, `cpp/test/run.sh` | 91 pass; clean; 20 pass + S17 skipped (S01 to S19, S27, S28); 33 host checks, every platform file compiles |
+| Contract scenarios, `bash contract-tests/run-all.sh` | **80/80** (28 scenarios: S01 to S20 and S23 to S28 on Swift, Kotlin and TypeScript, S21 and S22 on TypeScript); Kotlin's S25 needs `UNDRA_SQLITE_JDBC` |
+| `undra bindgen -C <project> --check --docs` | up to date for the playground, two-cores a and b, cookbook, fieldbook (and `--check` for ios15-sample) |
+| bindgen goldens | the new `object_graph` and `callbacks` cases on Swift, Kotlin and TypeScript (compiled and run by `typecheck_*`/`run_ts`), every older tree re-blessed once (the wrapper initialiser and the constructor's `adopt`) |
+| Interop (`crates/undra-transport/interop/run.sh`), `schema_retention` + `schema_docs` | ok |
+| Budgets (`cargo test -p undra-bench --test budgets --release`), `sync_alloc`, `commit_alloc`, `derived_alloc` | pass |
+| `scripts/wasm-size.sh` | `web/hello-wasm` ok (118,929 of 120,000); `web/hello-runtime-js` **over by 313 bytes** (see Numbers) |
+| Playground web: `npm test` (121 pass), `npm run build` | pass; the Playwright smoke of the Stress tab fails as before (see the limits) |
+| Playground Android `./gradlew assembleDebug` | pass (the Kotlin implementer also drove the Workshop tab on emulator-5554) |
+| Site: `node site/scripts/build-all.mjs`, `check-links.mjs --words` | clean; two new docs pages, the callbacks section of the reference pages, E0064/E0071/E0004 on the errors page |
+
+Not run: `xcodebuild` of the playground iOS app (no `PlaygroundCore.xcframework` was built here; every iOS source was
+type-checked with `swiftc` in Swift 6 mode against the iOS 17 simulator SDK) and the Playwright smoke on a device.
+
+**Process notes.** The TypeScript implementer's first contract run executed `npm ci` through a `node_modules` symlink and
+emptied `contract-tests/ts/node_modules` of the main checkout (restored from a copy of an install of the same lockfile). While
+this piece was being verified `runtimes/ts/@undra/runtime/node_modules` of the main checkout was found empty too (cause
+unknown, not an `npm ci` of this piece); this worktree now carries its own copy. `contract-tests/ts/run.sh` runs `npm ci`
+when `package-lock.json` is newer than `node_modules/.package-lock.json`, which follows a symlink: worktrees should link
+`node_modules` only when the lockfiles agree, or the script should refuse to install through a symlink.
+Main's `crates/undra-ffi/tests/c/smoke.c` asserted the layout-1 empty snapshot (8 bytes) while the core returns layout 2
+(65 bytes); it is fixed here along with the width change.
