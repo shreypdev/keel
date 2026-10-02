@@ -94,6 +94,8 @@ describe("what is renamed", () => {
   it("fails the build on a string that is exactly a renamed name: it would keep meaning the old one", () => {
     expect(() => mangleDist(modules({ "a.js": "export class A { _x = 1; get(o) { return o['_x']; } }\n" }))).toThrow(/a\.js says "_x" as a string/);
     expect(() => mangleDist(modules({ "a.js": "export class A { _x = 1; }\nexport const o = { '_x': 1 };\n" }))).toThrow(/says "_x" as a string/);
+    // A template literal without substitutions is a string too.
+    expect(() => mangleDist(modules({ "a.js": "export class A { _x = 1; get(o) { return o[`_x`]; } }\n" }))).toThrow(/a\.js says "_x" as a string/);
     // A string equal to a name that is not renamed (reserved, someone else's) is fine.
     expect(() => mangleDist(modules({ "a.js": "export class A { _set = 1; _x = 2; has(o) { return '_set' in o && '_initialize' in o; } }\n" }))).not.toThrow();
   });

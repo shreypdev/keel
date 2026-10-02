@@ -81,6 +81,12 @@ export function propertyOccurrences(file, source) {
       case "Literal":
         if (typeof node.value === "string" && PRIVATE.test(node.value)) strings.add(node.value);
         break;
+      case "TemplateLiteral": {
+        // `o[\`_x\`]` says a name as a string just as `o["_x"]` does.
+        const text = node.expressions.length === 0 ? node.quasis[0]?.value?.cooked : undefined;
+        if (typeof text === "string" && PRIVATE.test(text)) strings.add(text);
+        break;
+      }
       case "ExportNamedDeclaration":
         for (const specifier of node.specifiers ?? []) exportedNames.push(specifier.exported.name ?? specifier.exported.value);
         break;
