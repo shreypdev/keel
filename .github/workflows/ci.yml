@@ -42,6 +42,22 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # The cookbook (examples/cookbook) and Fieldbook (examples/fieldbook): their bindings are what the
+      # core generates, the TypeScript lines the cookbook pages show compile, and Fieldbook's web app runs
+      # its generated bindings against the real wasm core (npm test) and bundles (npm run build).
+      - name: Cookbook and Fieldbook bindings are current (undra bindgen --check)
+        run: |
+          cargo build -p undra-cli
+          target/debug/undra bindgen -C examples/cookbook --check --docs
+          target/debug/undra bindgen -C examples/fieldbook --check --docs
+      - name: Cookbook TypeScript lines compile (tsc --strict)
+        run: bash examples/cookbook/snippets/check.sh ts
+      - name: Fieldbook web (bindings over the real wasm core, then the bundle)
+        working-directory: examples/fieldbook/web
+        run: |
+          npm ci --no-audit --no-fund
+          PATH="$GITHUB_WORKSPACE/target/debug:$PATH" npm test
+          PATH="$GITHUB_WORKSPACE/target/debug:$PATH" npm run build
       # `cargo test --workspace` above skips the heavy halves of these (they run real builds); here they
       # must run. The web app's build through the Vite plugin needs the npm registry; `undra upgrade`
       # end to end builds the core from a local clone. Gradle runs in the android job, Xcode in macos.
@@ -61,7 +77,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: wasm32 build (core crates)
         run: |
-          for p in undra-meta undra-wire undra-signals undra-runtime undra-ports undra-query undra-ffi undra playground-core; do
+          for p in undra-meta undra-wire undra-signals undra-runtime undra-ports undra-query undra-ffi undra playground-core cookbook fieldbook-core; do
             cargo build -p $p --target wasm32-unknown-unknown
           done
 
@@ -162,6 +178,14 @@ jobs:
           cargo check -p undra-ffi --target aarch64-apple-ios-sim
       - name: Xcode builds the core in its Run Script phase (undra init's project; Debug, Release, Debug)
         run: UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test build_systems -- xcode --nocapture
+      - name: Cookbook Swift lines compile (Swift 6, over the generated bindings)
+        run: bash examples/cookbook/snippets/check.sh swift
+      - name: Fieldbook's iOS app builds (the Run Script phase builds the core)
+        run: |
+          rustup target add aarch64-apple-ios-sim
+          cargo build -p undra-cli
+          PATH="$GITHUB_WORKSPACE/target/debug:$PATH" xcodebuild -project examples/fieldbook/ios/Fieldbook.xcodeproj \
+            -scheme Fieldbook -destination 'generic/platform=iOS Simulator' build
 
   android:
     name: Android cross-build
@@ -190,6 +214,12 @@ jobs:
           "$sdkmanager" "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0" > /dev/null
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
           UNDRA_TEST_BUILD_SYSTEMS=1 cargo test -p undra-cli --test build_systems -- gradle --nocapture
+      - name: Fieldbook's Android app assembles (Gradle's undraBuild task builds the core)
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          cargo build -p undra-cli
+          cd examples/fieldbook/android
+          PATH="$GITHUB_WORKSPACE/target/debug:$PATH" ./gradlew :app:assembleDebug --console=plain
 
   ffi-miri:
     # macOS, not Linux: Miri's strict c-variadic check currently flags parking_lot_core's
@@ -264,6 +294,10 @@ jobs:
           # it from the kotlinc location the way test-local.sh does).
           UNDRA_KOTLIN_STDLIB: /home/runner/kotlin/kotlinc/lib/kotlin-stdlib.jar
         run: bash contract-tests/run-all.sh ts kotlin
+      - name: Cookbook Kotlin lines compile (kotlinc -Werror, over the generated bindings)
+        env:
+          UNDRA_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
+        run: bash examples/cookbook/snippets/check.sh kotlin
 
   contracts-swift:
     name: Contract scenarios (Swift)
