@@ -146,7 +146,16 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
             frame = .data(Data(bytes))
         }
         do {
-            try await task.send(frame)
+            // As `receive`: the caller's cancellation does not cancel the socket.
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                task.send(frame) { error in
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
         } catch {
             throw await failure(after: error)
         }
@@ -183,7 +192,13 @@ final class URLSessionWebSocketConnection: NSObject, WebSocketConnection, URLSes
         let message: URLSessionWebSocketTask.Message
         wsdbg("receive() starting")
         do {
-            message = try await task.receive()
+            // The completion-handler `receive`, in a continuation: the awaiting Swift task's cancellation (the binding
+            // cancels its pump when the core closes the connection) must not reach the socket; only `close` does.
+            message = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URLSessionWebSocketTask.Message, any Error>) in
+                task.receive { result in
+                    continuation.resume(with: result)
+                }
+            }
             wsdbg("receive() returned a message")
         } catch {
             wsdbg("receive() failed: \(error); isClosing=\(isClosing)")
