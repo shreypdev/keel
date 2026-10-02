@@ -109,3 +109,22 @@ divide by zero; an absurd one cannot fit the wire's `u32` `limit` and a reply th
 * No Swift benchmark row: the page call is the existing boundary and `lazy/page_50_of_100k` is the Rust half's; a cached read costs
   about 5 µs in a debug build (`testReadingCachedRowsIsCheap` has a 5 s budget for 100,000 reads).
 * Row identity across a re-page is by index (ADR-043's risk); keyed identity can follow.
+
+## Addendum: the mirror's lazy rule (ADR-031 amendment, requested by the integrator)
+
+A full value (op 0) supersedes everything queued before it for its signal; a lazy invalidation (op 2) supersedes only earlier lazy
+invalidations of the same signal, never the op 0 (which carries the page-server handle). `Core/Mirror.swift`: a fold `Slot` now holds
+`full`, `invalidated` and `patches`; `setFull` clears the other two, op 2 replaces `invalidated`. A drain applies a signal's last
+full value, then its merged patch, then its last invalidation (a signal is a keyed list or a lazy list, so in practice at most two
+applies); the compaction keeps the same three. The waiting rule (a signal whose patch could not be merged waits for a full value)
+now ends on op 0 only, in `fold`, `enqueue` and `markAwaiting`: an op 2 for a waiting signal is dropped like a patch (the full value
+that ends the wait supersedes it anyway). Tests (`CoalesceTests`, replacing `testALazyInvalidationSupersedesWhatCameBeforeIt`):
+`[Full, Inv]`, `[Full, Inv, Inv]`, `[Inv, Inv]`, `[Inv, Full]`, `[Inv, Full, Inv]`, `[Full, Full, Inv]`, a restore's new handle then an
+invalidation, a keyed signal beside a lazy one, mixed streams, `no_coalesce`, a compaction at a bound of 4 entries (the handle
+survives), a waiting signal, and a 60-seed property test (random drain and compaction points converge to the state of applying every
+entry in order); `LazyListObservationTests`: a drain folding `[Full(handle)]` + two invalidations ends with the handle and the newest
+length/version, and a restored handle followed by an invalidation pages the new server. The README's frame-coalescing bullet and the
+`Mirror` header comments say the same. `docs/SPEC.md` section 11 (line 973) is the integrator's.
+
+Counts after the addendum: `swift test` 792 tests, 0 failures (782 + 10); `scripts/ios-floor.sh runtime` builds for the iOS 15.0
+simulator and macOS 12.

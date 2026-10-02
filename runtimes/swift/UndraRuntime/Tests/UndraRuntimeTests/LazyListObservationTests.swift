@@ -244,6 +244,73 @@ final class LazyListObservationTests: XCTestCase {
         XCTAssertEqual(store.books[120], 1200)
     }
 
+    func testADrainThatDeliversTheValueAndAnInvalidationLeavesTheHandleAndTheNewerLength() throws {
+        // The mirror folds [Full(handle), Inv] of one frame into both entries (an invalidation never supersedes the value that
+        // carries the page server): the list ends with the handle AND the newer length and version.
+        let transport = FakeTransport()
+        let server = LazyServer(rows: 300)
+        server.install(on: transport)
+        let core = try makeCore(transport, frames: ManualFrameScheduler())
+        let turns = LazyTurns()
+        let store = LazyLibraryStore(core: core, handle: UndraHandle(index: 1, generation: 1), schedule: { turns.schedule($0) })
+        transport.deliverChangeSet(Wire.ChangeSet(txnId: 1, entries: [
+            Wire.ChangeEntry(handle: store.handle, signalId: 3, op: .fullValue, value: ArraySlice(server.value())),
+        ]))
+        server.mutate { $0.append(contentsOf: (300 ..< 350).map { Int32($0) }) }
+        transport.deliverChangeSet(Wire.ChangeSet(txnId: 2, entries: [
+            Wire.ChangeEntry(handle: store.handle, signalId: 3, op: .lazyListInvalidated, value: ArraySlice(server.invalidated())),
+        ]))
+        server.mutate { $0[0] = -1 }
+        transport.deliverChangeSet(Wire.ChangeSet(txnId: 3, entries: [
+            Wire.ChangeEntry(handle: store.handle, signalId: 3, op: .lazyListInvalidated, value: ArraySlice(server.invalidated())),
+        ]))
+        core.mirror.flush()                                   // one drain for all three
+        XCTAssertEqual(store.books.count, 350)
+        XCTAssertEqual(store.books.testEngine.handle, server.handle)
+        XCTAssertEqual(store.books.testEngine.version, 3)
+        XCTAssertNil(store.books[0])
+        turns.runUntilQuiet()
+        XCTAssertEqual(store.books[0], -1)
+        XCTAssertNil(store.books[349])
+        turns.runUntilQuiet()
+        XCTAssertEqual(store.books[349], 349, "rows past the old length are served by the page server the value named")
+        XCTAssertEqual(server.targets.map { $0 }, [UndraHandle](repeating: server.handle, count: server.targets.count))
+    }
+
+    func testARestoredHandleFollowedByAnInvalidationInOneDrainPagesTheNewServer() throws {
+        let transport = FakeTransport()
+        let server = LazyServer(rows: 200)
+        server.install(on: transport)
+        let core = try makeCore(transport, frames: ManualFrameScheduler())
+        let turns = LazyTurns()
+        let store = LazyLibraryStore(core: core, handle: UndraHandle(index: 1, generation: 1), schedule: { turns.schedule($0) })
+        transport.deliverChangeSet(Wire.ChangeSet(txnId: 1, entries: [
+            Wire.ChangeEntry(handle: store.handle, signalId: 3, op: .fullValue, value: ArraySlice(server.value())),
+        ]))
+        core.mirror.flush()
+        _ = store.books[0]
+        turns.runUntilQuiet()
+        XCTAssertEqual(store.books[0], 0)
+        // A restore: a new page server, then a change, folded into one drain.
+        let restored = UndraHandle(index: 9, generation: 4)
+        server.mutate { $0[0] = 77 }
+        transport.deliverChangeSet(Wire.ChangeSet(txnId: 2, entries: [
+            Wire.ChangeEntry(handle: store.handle, signalId: 3, op: .fullValue, value: ArraySlice(server.value(handle: restored))),
+        ]))
+        server.mutate { $0.append(5) }
+        transport.deliverChangeSet(Wire.ChangeSet(txnId: 3, entries: [
+            Wire.ChangeEntry(handle: store.handle, signalId: 3, op: .lazyListInvalidated, value: ArraySlice(server.invalidated())),
+        ]))
+        core.mirror.flush()
+        XCTAssertEqual(store.books.count, 201)
+        XCTAssertEqual(store.books.testEngine.handle, restored)
+        XCTAssertNil(store.books[0], "the old page server's rows are gone")
+        server.forgetCalls()
+        turns.runUntilQuiet()
+        XCTAssertEqual(store.books[0], 77)
+        XCTAssertEqual(Set(server.targets), [restored])
+    }
+
     func testAMalformedValueInAChangeSetIsReportedNotApplied() throws {
         let transport = FakeTransport()
         let errors = LazyErrors()
