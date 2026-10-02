@@ -242,12 +242,12 @@ impl fmt::Display for SchemaError {
                 format!("write `{name}` without `Arc` or `&`, or give it an `#[undra::api] impl` block if it is meant to be an object"),
             ),
             SchemaError::MisplacedObject { ty, at } => (
-                format!("`{ty}` at {at}: an object is only allowed as a method or function parameter or return, alone or as `Option` or `Vec` of one"),
+                format!("`{}` at {at}: an object is only allowed as a method or function parameter or return, alone or as `Option` or `Vec` of one", rust_spelling(ty)),
                 "a record field, a signal, a map, a stream item, a port, a query or a mutation holds values: they are copied, compared, hashed and persisted, and none of that can carry a reference to an object".to_owned(),
                 "return a record with the data you need, or put the child behind a method of the parent".to_owned(),
             ),
             SchemaError::MisplacedCallback { ty, at } => (
-                format!("`{ty}` at {at}: a callback interface is only allowed as a parameter of a method, constructor or function, alone or as `Option`"),
+                format!("`{}` at {at}: a callback interface is only allowed as a parameter of a method, constructor or function, alone or as `Option`", rust_spelling(ty)),
                 "a callback is an instance the host passes in for the core to call back; it has no value to copy, compare or store, and the core never hands one out".to_owned(),
                 "take the callback as a parameter, or pass a record or an id where a value is needed".to_owned(),
             ),
@@ -695,6 +695,22 @@ impl Schema {
         } else {
             Err(checker.errors)
         }
+    }
+}
+
+/// A type as the Rust that declared it spells it, for the messages about objects and callbacks:
+/// `object:Child` is `Arc<Child>`, `vec<object:Child>` is `Vec<Arc<Child>>`.
+fn rust_spelling(ty: &TypeRef) -> String {
+    match ty {
+        TypeRef::Object(name) => format!("Arc<{name}>"),
+        TypeRef::Callback(name) => format!("Arc<dyn {name}>"),
+        TypeRef::Option(inner) => format!("Option<{}>", rust_spelling(inner)),
+        TypeRef::Vec(inner) => format!("Vec<{}>", rust_spelling(inner)),
+        TypeRef::Lazy(inner) => format!("Lazy<{}>", rust_spelling(inner)),
+        TypeRef::Stream(inner) => format!("impl Stream<Item = {}>", rust_spelling(inner)),
+        TypeRef::Map(k, v) => format!("Map<{}, {}>", rust_spelling(k), rust_spelling(v)),
+        TypeRef::Result(ok, err) => format!("Result<{}, {}>", rust_spelling(ok), rust_spelling(err)),
+        other => other.to_string(),
     }
 }
 

@@ -292,11 +292,75 @@ fn objects_cannot_cross_as_values() {
     ));
     s.records
         .push(record("R", "", vec![field("a", named("A"))]));
-    assert_eq!(codes(&s), ["E0001"]);
+    assert_eq!(codes(&s), ["E0064"]);
     s.records.clear();
     s.functions
         .push(function("f", "", vec![], named("A"), false));
+    assert_eq!(codes(&s), ["E0064"]);
+    // As an `object` reference it is fine in a function's parameter and return ...
+    s.functions.clear();
+    s.functions.push(function(
+        "f",
+        "",
+        vec![param("a", TypeRef::object("A"))],
+        TypeRef::object("A"),
+        false,
+    ));
+    assert!(undra_bindgen::validate(&s).is_ok());
+    // ... and not in a field.
+    s.records
+        .push(record("R", "", vec![field("a", TypeRef::object("A"))]));
+    assert_eq!(codes(&s), ["E0064"]);
+}
+
+#[test]
+fn an_object_nothing_returns_needs_a_constructor() {
+    let mut s = Schema::new("t");
+    s.objects.push(object("Orphan", "", vec![], vec![]));
     assert_eq!(codes(&s), ["E0001"]);
+    // Returned by a method of another object, it is created by the core and needs none.
+    s.objects.push(object(
+        "Parent",
+        "",
+        vec![ctor("Parent", "new", vec![], false)],
+        vec![method(
+            "Parent",
+            "orphan",
+            "",
+            vec![],
+            TypeRef::option(TypeRef::object("Orphan")),
+            false,
+        )],
+    ));
+    assert!(undra_bindgen::validate(&s).is_ok(), "{:?}", codes(&s));
+}
+
+#[test]
+fn callback_interfaces_have_their_own_names_and_reserved_methods() {
+    let mut s = Schema::new("t");
+    s.enums.push(error_def("E", "", vec![with_message(unit_variant("X", 0), "x")]));
+    s.ports.push(port(
+        "Listener",
+        "",
+        PortKind::Callback,
+        vec![
+            port_method("Listener", "release_instance", "", vec![], TypeRef::Unit, false),
+            port_method(
+                "Listener",
+                "ask",
+                "",
+                vec![],
+                TypeRef::result(TypeRef::Bool, named("E")),
+                true,
+            ),
+        ],
+    ));
+    assert_eq!(codes(&s), ["E0051"], "`releaseInstance` is reserved for `__release`");
+    s.ports[0].methods.remove(0);
+    assert!(undra_bindgen::validate(&s).is_ok(), "{:?}", codes(&s));
+    // A callback that is not a callback port, and a synchronous value method, are meta's.
+    s.ports[0].methods.push(port_method("Listener", "get", "", vec![], TypeRef::U32, false));
+    assert_eq!(codes(&s), ["E0071"]);
 }
 
 #[test]

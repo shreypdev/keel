@@ -151,6 +151,111 @@ fn object_as_a_value() -> Schema {
     s
 }
 
+fn object_in_a_field() -> Schema {
+    let mut s = Schema::new("t");
+    s.objects.push(object(
+        "Child",
+        "",
+        vec![ctor("Child", "new", vec![], false)],
+        vec![],
+    ));
+    s.records.push(record(
+        "Parent",
+        "",
+        vec![field("child", TypeRef::object("Child"))],
+    ));
+    s
+}
+
+fn record_as_an_object() -> Schema {
+    let mut s = Schema::new("t");
+    s.records.push(record("Plain", "", vec![field("id", TypeRef::U32)]));
+    s.objects.push(object(
+        "Holder",
+        "",
+        vec![ctor("Holder", "new", vec![], false)],
+        vec![method(
+            "Holder",
+            "take",
+            "",
+            vec![param("plain", TypeRef::object("Plain"))],
+            TypeRef::Unit,
+            false,
+        )],
+    ));
+    s
+}
+
+fn object_in_a_signal() -> Schema {
+    let mut s = Schema::new("t");
+    s.objects.push(object(
+        "Child",
+        "",
+        vec![ctor("Child", "new", vec![], false)],
+        vec![],
+    ));
+    s.objects.push(store(
+        object("Feed", "", vec![ctor("Feed", "new", vec![], false)], vec![]),
+        vec![("children", TypeRef::vec(TypeRef::object("Child")), false, None)],
+    ));
+    s
+}
+
+fn callback_in_a_field() -> Schema {
+    let mut s = Schema::new("t");
+    s.ports.push(port(
+        "Listener",
+        "",
+        PortKind::Callback,
+        vec![port_method("Listener", "changed", "", vec![], TypeRef::Unit, false)],
+    ));
+    s.records.push(record(
+        "Holder",
+        "",
+        vec![field("listener", TypeRef::callback("Listener"))],
+    ));
+    s
+}
+
+fn callback_without_a_port() -> Schema {
+    let mut s = Schema::new("t");
+    s.ports.push(port(
+        "Platform",
+        "",
+        PortKind::Async,
+        vec![port_method("Platform", "ping", "", vec![], TypeRef::Unit, false)],
+    ));
+    s.objects.push(object(
+        "Service",
+        "",
+        vec![ctor("Service", "new", vec![], false)],
+        vec![method(
+            "Service",
+            "use_it",
+            "",
+            vec![param("p", TypeRef::callback("Platform"))],
+            TypeRef::Unit,
+            false,
+        )],
+    ));
+    s
+}
+
+fn callback_method_shapes() -> Schema {
+    let mut s = Schema::new("t");
+    s.ports.push(port(
+        "Provider",
+        "",
+        PortKind::Callback,
+        vec![
+            port_method("Provider", "token", "", vec![], TypeRef::String, false),
+            port_method("Provider", "ask", "", vec![], TypeRef::Unit, true),
+            port_method("Provider", "__release", "", vec![], TypeRef::Unit, false),
+        ],
+    ));
+    s
+}
+
 fn unit_as_a_field() -> Schema {
     let mut s = Schema::new("t");
     s.records
@@ -223,8 +328,14 @@ const CASES: &[(&str, &[Case])] = &[
         &[
             ("an unknown type", unknown_type),
             ("a lazy signal", lazy_signal),
-            ("an object used as a value", object_as_a_value),
             ("a unit field", unit_as_a_field),
+        ],
+    ),
+    (
+        "E0004",
+        &[
+            ("a callback in a record field", callback_in_a_field),
+            ("a callback that names no callback port", callback_without_a_port),
         ],
     ),
     ("E0005", &[("a Result in a field", result_in_a_field)]),
@@ -243,6 +354,19 @@ const CASES: &[(&str, &[Case])] = &[
     (
         "E0031",
         &[("an event method that returns", event_method_that_returns)],
+    ),
+    (
+        "E0064",
+        &[
+            ("an object used as a value", object_as_a_value),
+            ("an object in a record field", object_in_a_field),
+            ("a record named as an object", record_as_an_object),
+            ("an object in a signal", object_in_a_signal),
+        ],
+    ),
+    (
+        "E0071",
+        &[("callback methods that break the shape", callback_method_shapes)],
     ),
     (
         "E0050",
