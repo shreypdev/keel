@@ -30,8 +30,11 @@ export interface PortImpl {
   readonly name?: string;
   /** Whether every method answers synchronously. */
   readonly sync: boolean;
-  /** Implementations by method id. */
-  readonly methods: Readonly<Record<number, (args: Uint8Array, portCallId: number) => Uint8Array | Promise<Uint8Array>>>;
+  /**
+   * Implementations by method id. The second argument is the core's id of the call: `0` for a call nobody waits for
+   * (a fire-and-forget callback method, ADR-041), and absent when a test calls the method directly.
+   */
+  readonly methods: Readonly<Record<number, (args: Uint8Array, portCallId?: number) => Uint8Array | Promise<Uint8Array>>>;
   /**
    * Called when the core that registered this port closes, and when a wasm core restarts after a
    * trap (`crashRecovery`, ADR-049): a port that holds platform resources for the core (the

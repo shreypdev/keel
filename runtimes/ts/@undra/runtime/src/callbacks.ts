@@ -196,7 +196,7 @@ export class UndraCallbacks {
 
   /** The `PortImpl` that receives the core's calls into instances of `spec`. */
   #bridge(spec: CallbackInterface<object>): PortImpl {
-    const methods: Record<number, (args: Uint8Array, portCallId: number) => Promise<Uint8Array>> = {
+    const methods: Record<number, (args: Uint8Array, portCallId?: number) => Promise<Uint8Array>> = {
       [spec.releaseInstance]: (args) => {
         const r = new UndraReader(args);
         const instance = r.readU64();
@@ -223,7 +223,7 @@ export class UndraCallbacks {
       },
     };
     for (const [id, method] of Object.entries(spec.methods)) {
-      methods[Number(id)] = (args, portCallId) => this.#invoke(spec, Number(id), method, args, portCallId);
+      methods[Number(id)] = (args, portCallId = 0) => this.#invoke(spec, Number(id), method, args, portCallId);
     }
     return { name: spec.name, sync: false, methods };
   }
