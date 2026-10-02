@@ -872,9 +872,9 @@ Generic objects, stores, functions, methods, ports, callbacks and queries stay o
 
 | Platform | Type | Notes |
 | --- | --- | --- |
-| Rust | `undra::Decimal { mantissa: i128, scale: u8 }` | exact `FromStr` and `Display`, `cmp_numeric`; no arithmetic. With the `rust_decimal` feature, `rust_decimal::Decimal` crosses too |
-| Swift | `Foundation.Decimal` | decoding is exact; a NaN encodes as zero, 2127 or more saturates, digits past the 38th after the point are cut off |
-| Kotlin | `java.math.BigDecimal` | `equals` is scale-sensitive, `compareTo` is numeric, as Kotlin engineers expect |
+| Rust | `undra::Decimal { mantissa: i128, scale: u8 }` | exact `FromStr` and `Display`, `cmp_numeric`; no arithmetic. With the `rust_decimal` feature, `rust_decimal::Decimal` crosses too; a value it cannot hold (more than 96 bits of mantissa, or a scale above 28, which a Swift `1 / 3` has) is a decode error, so round on the platform first |
+| Swift | `Foundation.Decimal` | decoding is exact; `==` and hashing are numeric (`1.0 == 1.00`, unlike the other three); a NaN encodes as zero, 2127 or more saturates, digits past the 38th after the point (or past a 127-bit mantissa) are cut off |
+| Kotlin | `java.math.BigDecimal` | `equals` is scale-sensitive, `compareTo` is numeric, as Kotlin engineers expect; digits past the 38th after the point (or past a 127-bit mantissa) round half up, a whole part of 2127 or more saturates |
 | TypeScript | `Decimal` of `@undra/runtime` | `mantissa: bigint`, `scale`, `parse`, `toString`, `equals`, `compare`; no arithmetic, convert through `toString()` to your decimal library |
 
 A scale above 38 is refused by every decoder, in the core as much as on the platforms. `i128` and `u128` stay out; the error points here, or at a `String` newtype for identifiers.

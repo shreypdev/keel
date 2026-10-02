@@ -2042,7 +2042,7 @@ export const ReporterCallback: CallbackInterface&lt;Reporter&gt;;
 <h2 id="queries">Queries<a class="anchor" href="#queries" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.</p>
 <p class="ref-names"><code>FeedQueryHandle</code> <code>RemoteTodosQueryHandle</code> <code>TickerQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code> <code>saveNote</code> <code>tagNote</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>186 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>189 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/queries.ts" rel="noopener">queries.ts</a></span></div><pre><code data-lang="ts">/**
  * Observes the `feed` query (cache key `feed/{even_only}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
@@ -2091,6 +2091,7 @@ export class FeedQueryHandle extends UndraStore {
   /**
    * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
    * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+   * An interval below 1 second or above 7 days is clamped to that range.
    * A failure is logged and passed to `onError`; the returned promise never rejects.
    */
   setPollInterval(ms: Duration | null): Promise&lt;void&gt;;
@@ -2133,6 +2134,7 @@ export class RemoteTodosQueryHandle extends UndraStore {
   /**
    * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
    * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+   * An interval below 1 second or above 7 days is clamped to that range.
    * A failure is logged and passed to `onError`; the returned promise never rejects.
    */
   setPollInterval(ms: Duration | null): Promise&lt;void&gt;;
@@ -2172,6 +2174,7 @@ export class TickerQueryHandle extends UndraStore {
   /**
    * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
    * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+   * An interval below 1 second or above 7 days is clamped to that range.
    * A failure is logged and passed to `onError`; the returned promise never rejects.
    */
   setPollInterval(ms: Duration | null): Promise&lt;void&gt;;
