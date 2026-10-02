@@ -3758,7 +3758,7 @@ Comparison
 
 Undra and Kotlin Multiplatform (KMP) both let you write your domain logic once and keep the screens in SwiftUI, Jetpack Compose and React. They bet on different languages, boundaries and toolchains. We build Undra, so read this with that in mind: every statement about KMP is dated to 30 September 2026 and linked to its source, and one section covers when KMP is the better choice.
 
-30 Sep 2026 · 12 min read · Undra team
+30 Sep 2026 · 13 min read · Undra team
 
 > **How to read this page.** Statements about KMP describe its state on 30 September 2026 and link to JetBrains' or Google's documentation where one exists. We have not benchmarked KMP and make no numeric claims about it. If something is wrong or has moved, [open an issue](https://github.com/shreypdev/undra/issues) and we will correct the page with a dated note.
 
@@ -3823,7 +3823,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
 }
 ```
 
-There is no Objective-C in the path. Records are `Sendable` structs, errors are enums thrown as themselves (`catch TodoError.emptyTitle`), and a SwiftUI view reads `todos.visible` like any other observable property. The price is a baseline of Swift 6 and iOS 17, which strict concurrency and `@Observable` need.
+There is no Objective-C in the path. Records are `Sendable` structs, errors are enums thrown as themselves (`catch TodoError.emptyTitle`), and a SwiftUI view reads `todos.visible` like any other observable property. The price is a baseline of Swift 6 and, by default, iOS 17, which `@Observable` needs; an app that supports iOS 15 or 16 lowers its deployment target and gets `ObservableObject` stores ([supporting iOS 15 and 16](https://shreypdev.github.io/undra/docs/cookbook/ios-15-16.html)).
 
 On Android the comparison inverts, in KMP's favour. Shared Kotlin is just Kotlin on Android's runtime, with no cross-language boundary. Undra's Android path crosses JNI into a Rust shared library and surfaces `StateFlow`s, `suspend` functions and sealed error classes that Compose reads with `collectAsState()`. That is idiomatic, but still a boundary.
 
