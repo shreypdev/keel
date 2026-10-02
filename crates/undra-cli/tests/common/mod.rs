@@ -104,9 +104,19 @@ pub fn init_project(name: &str, platforms: &str) -> Project {
     init_project_with(name, platforms, &[])
 }
 
+/// [`init_project`] in a scratch directory named after `tag` (the project is `name`, below it), so
+/// two projects of one name can live at paths that differ.
+pub fn init_project_in(tag: &str, name: &str, platforms: &str) -> Project {
+    init_project_tagged(tag, name, platforms, &[])
+}
+
 /// [`init_project`] with more `undra init` arguments (`--ios-deployment-target 15.0`).
 pub fn init_project_with(name: &str, platforms: &str, extra: &[&str]) -> Project {
-    let dir = TempDir::new(name);
+    init_project_tagged(name, name, platforms, extra)
+}
+
+fn init_project_tagged(tag: &str, name: &str, platforms: &str, extra: &[&str]) -> Project {
+    let dir = TempDir::new(tag);
     run_ok(
         undra()
             .args(["init", name, "--platforms", platforms, "--undra-path"])

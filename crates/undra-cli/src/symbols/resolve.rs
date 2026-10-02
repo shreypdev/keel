@@ -79,7 +79,7 @@ pub struct Report {
 pub struct Located {
     /// The function, demangled when the tool could.
     pub symbol: Option<String>,
-    /// The source file (remapped to `~/…` in a release build).
+    /// The source file (remapped in a release build: `/undra/app/…`, `/undra/src/…`, `~/…`; ADR-052).
     pub file: Option<String>,
     /// The line.
     pub line: Option<u32>,

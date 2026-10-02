@@ -174,8 +174,9 @@ EXAMPLES
     cat report.json | undra symbolicate -
 
 OUTPUT
-    0x998ef playground_core::lab::explode (~/src/examples/playground/core/src/lab.rs:222)
-    Release builds remap the builder's home directory to `~` in the paths; the standard library's are /rustc/<commit>/…"
+    0x998ef playground_core::lab::explode (/undra/app/core/src/lab.rs:222)
+    Release builds name the project /undra/app, the Undra checkout /undra/src, Cargo's sources /undra/deps and the
+    home directory ~ in the paths; the standard library's are /rustc/<commit>/…"
     )]
     Symbolicate(SymbolicateArgs),
     /// Serve the core over a WebSocket to running apps, rebuilding when the code changes.

@@ -91,6 +91,7 @@ pub fn cdylib_with(
         lib_name: crate::shim::shim_lib_name(&session.project.root),
         rustc_args: identity_args(session.sys.os(), &library_file_name(&namespace)),
         cargo_config,
+        remap: session.remap_roots(),
     })?;
     let wanted = library_file_name(&crate::shim::shim_lib_name(&session.project.root));
     Ok(files

@@ -340,8 +340,8 @@ undra symbolicate --platform android --image-id 16ed68dc3a85066f424f34d3d8020a5f
 ```
 
 ```text
-0x998ef playground_core::lab::explode (~/src/examples/playground/core/src/lab.rs:222)
-0x9983f playground_core::lab::__undra_dispatch_fn_explode (~/src/examples/playground/core/src/lab.rs:221)
+0x998ef playground_core::lab::explode (/undra/app/core/src/lab.rs:222)
+0x9983f playground_core::lab::__undra_dispatch_fn_explode (/undra/app/core/src/lab.rs:221)
 ```
 
 A report's `address` is the instruction address minus the load address of the image that holds the core, pointing into
@@ -353,7 +353,8 @@ and the line is the line where that function is *defined*, taken from the DWARF 
 frame carries no line inside its function: `wasm-opt` skips every pass that cannot update DWARF when it keeps DWARF, so a
 module that keeps it is 5 to 7% larger (and has other code), which the shipped module must not be; the panic's own
 `file:line:col` and the operation are in the report (the core logs them before it traps). Paths of a release
-build name the builder's home directory `~` (ADR-052); the standard library's are `/rustc/<commit>/…`. Rust symbols are
+build name the project `/undra/app`, the Undra checkout `/undra/src`, Cargo's registry and git sources `/undra/deps` and the
+builder's home directory `~` (ADR-052: no machine, and the same strings in any checkout); the standard library's are `/rustc/<commit>/…`. Rust symbols are
 demangled with Xcode's or the NDK's `llvm-cxxfilt` when there is one.
 
 `crates/undra-cli/tests/symbols.rs` is the regression test (R9): it builds the playground core in release, makes it panic

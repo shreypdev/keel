@@ -118,8 +118,11 @@ pub fn build(
         ]);
     if release {
         cmd.arg("--release");
-        // The builder's home directory stays out of what ships (ADR-052), as in the other builds.
-        match session.cargo().path_remap(Profile::Release) {
+        // The builder's directories stay out of what ships (ADR-052), as in the other builds.
+        match session
+            .cargo()
+            .path_remap(Profile::Release, &session.remap_roots())
+        {
             Some(PathRemap::Config(arg)) => {
                 cmd.arg("--config").arg(arg);
             }

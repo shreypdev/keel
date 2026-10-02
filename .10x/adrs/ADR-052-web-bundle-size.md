@@ -571,3 +571,29 @@ run: with `panic = "abort"` nothing catches a panic there. Two changes, no behav
 
 The hello wasm is **119,654** gzipped (+599 on `main`: the standard surface every schema carries, R1 and ADR-024, the idle
 dispatcher, the FATAL record's `at`/`in` trailer); the budget stays 120,000.
+
+## Note 2026-10-02 (objects-followups review): the gate no longer moves with the checkout's path
+
+**Finding.** The hello wasm measured 120,031 gzipped in `.work/objects-followups` and 119,856 in a sibling checkout with a
+shorter name, for the same source: the gate (and the record the README and the site publish) moved with the directory the
+build ran in, by more than the piece under review had changed. Cause: the remapping above covered `$HOME` only, so what
+stayed was the rest of the checkout's path (`~/Desktop/src/.work/objects-followups/crates/undra-runtime/src/…`) in every
+panic location of the Undra crates, and the project's own path in those of the core.
+
+**Decision.** `undra build` (every release profile: wasm, iOS, Android, host) names the directories of the build by fixed
+labels with `--remap-path-prefix`, widest first (rustc applies the last prefix that matches): `$HOME` to `~`, a `CARGO_HOME`
+outside it to `/cargo`, Cargo's registry sources and git checkouts to `/undra/deps`, the Undra checkout the core depends on
+by path to `/undra/src`, and the project's Cargo workspace (the project itself when the core is a workspace of its own) to
+`/undra/app`. The project's *workspace*, not its own directory, so that two cores of one workspace built into one target
+directory carry the same flags (Cargo fingerprints rustflags: a flag per project directory would rebuild every dependency
+each time the project changes). `crates/undra-cli/src/cargo.rs` (`RemapRoots`, `Cargo::path_remap`), `Session::remap_roots`.
+`scripts/wasm-size.sh` fails when the module names `$HOME`, the checkout or the hello project.
+
+**What this does not make identical.** Not every byte: a `TypeId` is a hash of its crate's identity, Cargo derives that
+from the absolute path of a path dependency outside the shim's workspace (the core, the Undra checkout), and no rustc flag
+changes it. The `TypeId` constants (about ten, i64 literals in code and 16-byte statics) differ in value and, as LEB128,
+by a byte or two in width: two copies of the hello project at paths of different length differ by 4 bytes of 278,794 raw,
+and every string of 16 printable bytes or more is the same in both (`build_web.rs`,
+`the_web_module_does_not_depend_on_where_the_project_lives`). The gate's number can still move by a few bytes with the path
+the repository is checked out at (the Undra crates' ids); it no longer moves by hundreds. Debuggers: the DWARF paths are the
+labels too (`--remap-path-scope=object`), and `.lldbinit` does not map them back (it did not map `~` either).

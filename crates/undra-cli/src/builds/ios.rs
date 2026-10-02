@@ -146,6 +146,7 @@ pub fn build(
             lib_name: crate::shim::shim_lib_name(&session.project.root),
             rustc_args: Vec::new(),
             cargo_config: symbols.cargo_config(profile, true),
+            remap: session.remap_roots(),
         })?;
         files
             .into_iter()

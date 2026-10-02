@@ -281,14 +281,18 @@ fn assert_resolved(resolved: &str, function: &str, line: u32) {
             panic!("no frame of `{function}` at lab.rs:{line} in\n{resolved}");
         });
     assert!(found.contains("core/src/lab.rs"), "{found}");
-    // Release builds name the builder's home directory `~` (ADR-052); the project is below it here.
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        if project().root.starts_with(&home) {
-            assert!(
-                found.contains("(~/") && !found.contains(&home.display().to_string()),
-                "paths are remapped to ~: {found}"
-            );
-        }
+    // Release builds name the project `/undra/app` (ADR-052): the path is the same in any checkout and
+    // names no machine, whatever the project's directory is below.
+    assert!(
+        found.contains("(/undra/app/core/src/lab.rs")
+            && !found.contains(&project().root.display().to_string()),
+        "the project's path is remapped to /undra/app: {found}"
+    );
+    if let Some(home) = std::env::var_os("HOME").filter(|h| h.len() > 1) {
+        assert!(
+            !found.contains(&*home.to_string_lossy()),
+            "the home directory is not in a frame: {found}"
+        );
     }
 }
 

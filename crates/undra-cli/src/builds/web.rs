@@ -73,6 +73,7 @@ pub fn build(session: &Session<'_>, symbols: &Symbols<'_, '_>) -> Result<Vec<Art
         lib_name: crate::shim::shim_lib_name(&session.project.root),
         rustc_args: Vec::new(),
         cargo_config: symbols.cargo_config(Profile::ReleaseWasm, false),
+        remap: session.remap_roots(),
     })?;
     let built = files
         .iter()

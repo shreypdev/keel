@@ -80,12 +80,16 @@ RAW="$(ls -t "$CARGO_TARGET_DIR"/wasm32-unknown-unknown/release-wasm/undra_core_
 [ -n "$RAW" ] || die "cannot find cargo's wasm output in $CARGO_TARGET_DIR"
 grep -q "before wasm-opt" "$WORK/build.log" \
   || die "undra build did not run wasm-opt (see $WORK/build.log); the gate does not measure an unoptimised module"
-# What ships must not name the machine it was built on: `undra build` remaps the home directory
-# out of release builds (ADR-052; the panic locations of the Undra and registry crates below it).
-if [ -n "${HOME:-}" ] && [ "$HOME" != "/" ] && LC_ALL=C grep -q -a -F -- "$HOME" "$WASM"; then
-  echo "wasm-size.sh: $WASM contains the builder's home directory ($HOME): the release build's --remap-path-prefix is missing" >&2
-  exit 1
-fi
+# What ships must not name the machine it was built on, nor the directory it was built in: `undra build`
+# remaps the home directory, the project, the Undra checkout and Cargo's sources out of release builds
+# (ADR-052; the panic locations of the Undra and registry crates below it), so the size does not move
+# with where this checkout lives.
+for NAMED in "${HOME:-}" "$ROOT" "$PROJECT"; do
+  if [ -n "$NAMED" ] && [ "$NAMED" != "/" ] && LC_ALL=C grep -q -a -F -- "$NAMED" "$WASM"; then
+    echo "wasm-size.sh: $WASM contains $NAMED: the release build's --remap-path-prefix is missing" >&2
+    exit 1
+  fi
+done
 
 # 3. The JavaScript runtime's share (gated like the wasm; a run that cannot measure it fails).
 RUNTIME_DIR="$ROOT/runtimes/ts/@undra/runtime"
