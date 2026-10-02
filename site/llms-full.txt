@@ -14,18 +14,21 @@ Undra owns the part of your app that is not pixels: domain logic, reactive state
 
 - **New here?** [Getting started](https://shreypdev.github.io/undra/docs/getting-started.html) installs the toolchain and CLI, scaffolds a project, runs the live dev loop and puts an app on each platform.
 - **Want a working example of a login, a paged list or an offline queue?** The [cookbook](https://shreypdev.github.io/undra/docs/cookbook/) has each as a tested recipe, and [Fieldbook](https://shreypdev.github.io/undra/docs/sample.html) puts them together in one app.
-- **Writing a core?** [Core concepts](https://shreypdev.github.io/undra/docs/concepts.html) covers stores, signals, computeds and keyed lists. [Queries & mutations](https://shreypdev.github.io/undra/docs/queries.html) covers the data layer, and [Ports & adapters](https://shreypdev.github.io/undra/docs/ports.html) covers everything that touches the outside world.
+- **Writing a core?** [Core concepts](https://shreypdev.github.io/undra/docs/concepts.html) covers stores, signals, computeds and keyed lists. [Queries & mutations](https://shreypdev.github.io/undra/docs/queries.html) covers the data layer, and [Ports & adapters](https://shreypdev.github.io/undra/docs/ports.html) covers everything that touches the outside world. [Objects](https://shreypdev.github.io/undra/docs/objects.html), [host callbacks](https://shreypdev.github.io/undra/docs/callbacks.html) and [types](https://shreypdev.github.io/undra/docs/types.html) cover what else crosses the boundary.
+- **Data that arrives or grows?** [Paging and lazy lists](https://shreypdev.github.io/undra/docs/paging.html), [polling](https://shreypdev.github.io/undra/docs/polling.html), [WebSocket and server-sent events](https://shreypdev.github.io/undra/docs/realtime.html) and the [local database](https://shreypdev.github.io/undra/docs/db.html).
+- **Testing, shipping, running?** [Testing your app](https://shreypdev.github.io/undra/docs/testing.html), [Shipping an update](https://shreypdev.github.io/undra/docs/updates.html), [Operating in production](https://shreypdev.github.io/undra/docs/production.html), and [one core or several](https://shreypdev.github.io/undra/docs/several-cores.html).
+- **Moving an existing app?** The guides [from Kotlin Multiplatform](https://shreypdev.github.io/undra/docs/cookbook/from-kmp.html) and [from UniFFI](https://shreypdev.github.io/undra/docs/cookbook/from-uniffi.html), and [supporting iOS 15 and 16](https://shreypdev.github.io/undra/docs/cookbook/ios-15-16.html).
 - **Looking something up?** [The CLI](https://shreypdev.github.io/undra/docs/cli.html) lists every command and flag. [Architecture](https://shreypdev.github.io/undra/docs/architecture.html) explains the schema, the generators, the wire and the twelve rules. The API overviews show what a record, error, store or port looks like in [Swift](https://shreypdev.github.io/undra/docs/api-swift.html), [Kotlin](https://shreypdev.github.io/undra/docs/api-kotlin.html) and [TypeScript](https://shreypdev.github.io/undra/docs/api-typescript.html).
 
 ## The idea in four sentences
 
-You write your domain in Rust and mark it with a handful of attributes. Undra generates idiomatic Swift, Kotlin and TypeScript from the schema those attributes produce, so the UI stays SwiftUI, Compose and React. Each platform keeps a local mirror of your state, so reads never cross the language boundary. A write crosses once per transaction, and the core answers with one compact binary change-set that patches every mirror.
+You write your domain in Rust and mark it with a handful of attributes. Undra generates idiomatic Swift, Kotlin and TypeScript from the schema those attributes produce, so the UI stays SwiftUI, Compose, React or React Native. Each platform keeps a local mirror of your state, so reads never cross the language boundary. A write crosses once per transaction, and the core answers with one compact binary change-set that patches every mirror.
 
 **Where these pages come from.** Everything here is digested from the repository: the README, the specification in `docs/SPEC.md`, the onboarding guide, the benchmark results and the playground app. When a page and the spec disagree, the spec wins; the [repository](https://github.com/shreypdev/undra) is the record.
 
 ## A note on numbers
 
-Performance figures on this site are host-measured (an Apple M5 Pro, release builds) and guarded by budgets in CI. They are not device numbers. The design's per-device targets (an iPhone, a mid-range Android phone, Chromium) are tracked in [bench/RESULTS.md](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md), and nothing on this site claims them as measured.
+Performance figures on this site are measured on an Apple M5 Pro host, in release builds, and guarded by budgets in CI. The device rows come from the iPhone simulator, the Android emulator and headless Chromium on that machine; none is from a physical phone, and nothing on this site claims a per-device target as met. The results are in [bench/RESULTS.md](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md).
 
 ---
 
@@ -201,7 +204,7 @@ undra build --platform ios,android,web --release
 
 `undra init` also writes `.github/workflows/undra.yml`: a job for the core (format, clippy, tests, `undra bindgen --check`) and one per app, each installing `undra` at the version pinned once at the top of the file. When a newer Undra is out, `undra upgrade` moves every pin of the project (the core's dependency, the runtimes, the workflow) in step, regenerates the bindings and prints the migration notes of every release it crosses; `undra upgrade --dry-run` shows the lines first.
 
-Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 116.7 KB gzipped (budget 120 KB, gated in CI) and an Android `.so` is 831 KB per ABI.
+Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 116.7 KB gzipped (budget 120 KB, gated in CI) and the arm64-v8a Android `.so` is 978.6 KB (budget 1.2 MB per ABI).
 
 ## Prefer to explore first?
 
@@ -975,68 +978,241 @@ Time comes from the Clock and delays from the Timer port, so a test under `undra
 
 ---
 
-Source: https://shreypdev.github.io/undra/docs/web.html
+Source: https://shreypdev.github.io/undra/docs/realtime.html
 
-# Workers & crash recovery
+# WebSocket & server-sent events
 
-On the web the core is a wasm module. It can run off the main thread, and when a panic traps it, it can come back from its last snapshot.
+Live data comes into the core like everything else: through a port. The core reads at its own pace and decides when to reconnect; the platform owns the socket.
 
-## Worker mode
+## Turn it on
 
-`mode: "wasm-worker"` runs the core in a Web Worker, so a heavy call never blocks the UI. The core calls some ports synchronously (Clock, Rng, Log and any `#[undra::port(sync)]`) and cannot wait for the main thread, so those are answered **in the worker**. Clock, Rng and Log need nothing from you. Ports with asynchronous methods (Http, Kv, SecureStore, Fs and your own async ports) run on the main thread, exactly as in `wasm-main`.
+`WebSocket` and `Sse` are opt-in ports: a core asks for them with a cargo feature, and a core that does not keeps the schema hash and the wasm size it had. Each platform answers with its own client: `URLSessionWebSocketTask`, the Kotlin runtime's client on the JVM and Android, the browser's `WebSocket`.
 
-## Your own synchronous ports
+core/Cargo.toml
 
-Put them in a small module the worker imports before the core starts, and pass its URL. The same module overrides Clock, Rng or the core's timers in this mode:
-
-ts
-
-```ts
-// main.ts
-const core = await UndraCore.load({
-  mode: "wasm-worker", wasm, expectedSchemaHash: UndraIds.schemaHash,
-  worker: { ports: new URL("./worker-ports.js", import.meta.url) },
-});
-
-// worker-ports.ts: runs inside the worker
-export default {
-  [UndraIds.Ports.Locale.portId]: localePortImpl({ hello: () => "Bonjour" }),
-};
-export const adapters = { timer: myTimer }; // optional: clock, rng, timer
+```toml
+[dependencies]
+undra = { version = "0.1", features = ["websocket", "sse"] }
 ```
 
-A synchronous port registered on the main thread in this mode is refused when the core loads (`UndraError("options")`, naming the port), not at its first call. With a bundler, make the module a worker entry.
+## A connection
 
-## Recovering from a crash
+The core connects, sends and reads. Messages arrive as a stream the core pulls: it asks for 16 at a time, so a core that stops reading stops the socket, on the platforms that can pause one.
 
-A native core contains a panic and keeps going. A wasm core cannot: the panic traps the instance. With `recovery: crashRecovery()` (imported from `@undra/runtime`, so an app without it ships none of this code), the runtime keeps a snapshot of your stores (at most once a second while they change, in an idle moment, in the worker in worker mode) and restarts from it:
+core/src/chat.rs
 
-ts
+```rust
+use undra::ports::ws::{WsConnection, WsError, WsMessage, WsOptions};
 
-```ts
-import { UndraCore, crashRecovery } from "@undra/runtime";
-
-const core = await UndraCore.load({
-  mode: "wasm-main", wasm, expectedSchemaHash: UndraIds.schemaHash,
-  recovery: crashRecovery(), // or crashRecovery({ snapshotEveryMs, maxSnapshotBytes, maxRestarts, perMs })
-  onPanic: (report) => crashReporter.send(report),
-  onCoreRestarted: (e) => configureRemote(core, settings), // re-apply core state that is not in a store
-});
+let conn = WsConnection::connect(&ctx, "wss://chat.example.com/room", WsOptions::default()).await?;
+conn.send_text("hello").await?;
+let mut messages = conn.messages();
+while let Some(next) = undra::ports::next(&mut messages).await {
+    match next {
+        Ok(WsMessage::Text(text)) => room.push(text),
+        Ok(WsMessage::Binary(_)) => {}
+        Err(WsError::Closed { code: 1000, .. }) => break, // the server said goodbye
+        Err(error) => return Err(error),
+    }
+}
 ```
 
-| On a trap | What your app sees |
+## Every end is typed
+
+| What happened | The stream ends with |
 | --- | --- |
-| Calls and streams in flight | fail with `UndraCallError.Unavailable`, reason `restarted`; they may or may not have run and are never retried for you |
-| Stores | keep their handles and show the snapshot's values |
-| Query handles | are created again behind the same objects, and refetch |
-| Other objects | go stale: calls on them are refused |
-| Store writes after the last snapshot, running tasks and timers, configuration a call set | lost; re-apply configuration in `onCoreRestarted` |
+| the core called `close` | nothing: it simply ends |
+| the server sent a close frame | `Closed { code, reason }` |
+| the connection dropped | `Network` |
+| the server broke the protocol | `Protocol` |
+| the upgrade was refused | `Refused { status }` (from `connect`) |
 
-Persisted queries and the offline queue live in `Kv` and are not affected. Past `maxRestarts` within `perMs` (default 3 a minute) the core stays down and `onClose` reports the crash, so a panic that recurs on every restart cannot loop. Recovery is off by default: it costs a snapshot up to once a second (about 0.04 ms for 100 KB of state; a restart takes about 1.6 ms).
+Browsers cannot send headers with a WebSocket, so the browser adapter refuses a connect that has some instead of dropping them: put the credential in the URL or a subprotocol.
 
-## Randomness
+## Reconnecting is yours
 
-A wasm core needs WebCrypto. Without `crypto.getRandomValues`, `load` rejects with `UndraTransportError("unsupported")` rather than run with predictable idempotency keys.
+The port never reconnects on its own: which close codes to retry, how long to wait and what to resend are your app's rules, and they run in the core, where a test drives them with a fake clock. `Backoff` gives the delay, a weak context sleeps.
+
+rust
+
+```rust
+let backoff = Backoff::default(); // 500 ms doubling to 30 s, with jitter from the Rng port
+let mut attempt = 0;
+while weak.sleep(backoff.delay(attempt, &*ctx.rng())).await.is_ok() {
+    attempt += 1;
+    // connect again, re-subscribe, reset `attempt` once a message arrives
+}
+```
+
+## Server-sent events
+
+`sse::subscribe` is a stream of events parsed as the HTML standard says. It ends with `Ended` when the server finishes the response; subscribe again with the last event id to resume.
+
+rust
+
+```rust
+let mut events = sse::subscribe(&ctx, "https://api.example.com/feed", vec![], last_id.clone());
+while let Some(Ok(event)) = undra::ports::next(&mut events).await {
+    last_id = event.id.clone().or(last_id);
+    feed.apply(event.data);
+}
+```
+
+## In tests
+
+`FakeWebSocket` and `FakeSse` are scripted servers: accept or refuse, push, close, drop, echo. They record what the core sent and how much it pulled, so backpressure is an assertion.
+
+rust
+
+```rust
+let fakes = fakes::install(&t);
+fakes.web_socket.echo(true);
+// ... the core connects and sends ...
+assert!(fakes.web_socket.delivered(conn) <= consumed + 24);
+```
+
+On the web the adapters are an opt-in import, `@undra/runtime/realtime`, so an app that does not use them ships none of them. Design: [ADR-047](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-047-websocket-and-sse-ports.md).
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/db.html
+
+# Local database
+
+Structured local data with SQLite, written once in the core. The platform owns the file and the thread; the core sends bound statements and gets typed rows back.
+
+## Turn it on
+
+`Db` is an opt-in port over the SQLite each platform already has: the system library on iOS, `android.database.sqlite` on Android, a JDBC driver on the JVM, `node:sqlite` in Node and wa-sqlite in a worker on the web. The core stays small and never blocks: the platform owns the database and its thread. On the web the files live in the origin private file system, which one tab holds at a time: a second tab of the same app gets `Unavailable`.
+
+core/Cargo.toml
+
+```toml
+[dependencies]
+undra = { version = "0.1", features = ["db"] }
+```
+
+## Open and migrate
+
+Migrations are numbered SQL. The platform runs every one the database has not seen yet, in one transaction: if one fails, none of them happened.
+
+core/src/notes.rs
+
+```rust
+const MIGRATIONS: &[Migration] = &[
+    Migration::new(1, "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0)"),
+    Migration::new(2, "CREATE INDEX notes_done ON notes (done)"),
+];
+
+let db = Database::open(&ctx, "notes", MIGRATIONS).await?;
+```
+
+## Values are parameters
+
+SQL is a `&'static str`, so a value can only reach a statement as a bound parameter. Cells come back typed.
+
+rust
+
+```rust
+db.execute("INSERT INTO notes (title) VALUES (?)", params![title]).await?;
+let rows = db.query("SELECT id, title, done FROM notes WHERE done = ?", params![false]).await?;
+for row in rows.iter() {
+    let id: i64 = row.get("id")?;
+    let title: String = row.get("title")?;
+}
+```
+
+## Transactions
+
+A transaction commits when its body returns `Ok` and rolls back on `Err`, or when its task is dropped half-way.
+
+rust
+
+```rust
+db.transaction(|tx| async move {
+    for title in titles {
+        tx.execute("INSERT INTO notes (title) VALUES (?)", params![title]).await?;
+    }
+    Ok(())
+}).await?;
+```
+
+## Errors you can match
+
+| Error | When |
+| --- | --- |
+| `Constraint { kind, .. }` | a `UNIQUE`, `NOT NULL`, foreign-key or `CHECK` constraint failed |
+| `Busy` | the database stayed locked past five seconds |
+| `Migration { version, .. }` | a migration failed and everything rolled back, or the file is newer than the app |
+| `Sql` | a syntax error, a missing table, a cell read as the wrong type |
+| `Corrupt`, `Full`, `Unavailable` | the file, the disk, or no database to talk to |
+
+## In tests
+
+`FakeDb` answers by SQL fragment, injects failures and records every statement, migration and transaction, so the core's database logic is tested without a device.
+
+rust
+
+```rust
+fakes.db.fail_on("INSERT", DbError::Full);
+assert_eq!(notes.add("milk".into()).await, Err(DbError::Full));
+```
+
+Design: [ADR-048](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-048-db-port.md).
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/testing.html
+
+# Testing your app
+
+The kit runs your real core on fakes and a manual clock, plays a recorded session as a screen state, and replays what a session asked of the platform.
+
+## Pick one
+
+| You want | Use |
+| --- | --- |
+| a screen that reacts, or a cache that goes stale | `PreviewCore`: the real core, its ports faked, time in your hands |
+| a state that is slow to reach | `RecordedCore`: a recorded session under the generated stores, no core |
+| a test that fails when the core makes another request | `Replayer`: a recording as the script for the ports |
+
+The same three exist in Swift (`UndraTestKit`, a product of the `UndraRuntime` package), Kotlin (`dev.undra:testkit`), TypeScript (`@undra/testkit`, no runtime dependencies) and, for tests of the core itself, Rust (`undra::testing`). They sit beside the runtimes: no generated file, wire frame or C entry point changes.
+
+## Preview a screen
+
+`PreviewCore.load` starts your app&rsquo;s own core in the process with a deterministic fake behind every standard port. A seed fills them; `advance` moves the clock one deadline at a time and lets the core settle between.
+
+**Sleeps in a native core run in real time.** The manual clock moves what the core reads (`Clock`, staleness, timestamps) and timers armed through the `Timer` port. A native core&rsquo;s `ctx.sleep` is waited for, as the C ABI never hands sleeps to the host: `advance(5_000)` does not finish a 5-second sleep, it returns at once and the task still wakes 5 real seconds later. In a native preview, make that delay a parameter the preview sets to a few milliseconds, wait the real duration and then `settle()`, preview the state after the wait with `RecordedCore`, or run the story on the web, where sleeps follow the clock. `advance` stops after `maxTimers` firings with a typed `TimerStormError` (a timer that re-arms itself without time passing never ends).
+
+## Play a recording
+
+`RecordedCore` loads a recording and releases its change-sets with a playhead you move. Calls are answered by the next recorded reply for the same target; a call the recording has no reply for is a typed refusal that names it.
+
+## Record a session
+
+The dev server sees every call, reply, change-set and port call, on iOS, Android and the web alike, so one flag captures a session. A reload starts a new core, so a new file (`session-2.json`).
+
+bash
+
+```bash
+undra dev --record session.json
+```
+
+A recording holds what the app asked the platform and was answered, so it can hold secrets. `SecureStore` payloads are left out by default (the calls are there, their arguments and replies are empty; `--record-secrets` keeps them). HTTP headers and bodies, `Kv` values and files are recorded as they are: do not share a recording of a real account&rsquo;s session. If the file cannot be written the runner warns once, stops recording and keeps serving.
+
+A recording is one canonical JSON document, `undra.recording` version 1: payloads in hex, handles as strings, times in milliseconds. A recording made on one platform is read by all of them.
+
+## Replay port traffic
+
+A `Replayer` answers a core&rsquo;s port calls from a recording, in order per port. A call that differs is a typed `mismatch`, an extra one is `exhausted`, a recorded call with no reply in the file is `unanswered`, and a recorded call never made is `unconsumed`. A deviation consumes nothing, so one wrong call does not shift every later answer.
+
+## In the playground
+
+- **iOS:** three SwiftUI `#Preview`s, built with the app.
+- **Android:** two Compose `@Preview`s over `RecordedCore` (the preview pane cannot load a native core); the kit is a debug-only dependency.
+- **Web:** four stories in Component Story Format, rendered by Vite alone. Storybook loads them unchanged and is not a dependency.
+
+The kit uses only public APIs, and CI builds all three. [docs/TESTING.md](https://github.com/shreypdev/undra/blob/main/docs/TESTING.md) has the full reference: the seed and recording formats, the fakes&rsquo; conformance file, and the limits.
 
 ---
 
@@ -1137,6 +1313,71 @@ query.discard_dead_letter(key);  // for good
 ## Testing an update
 
 Build the old and the new core, write the data with one and read it with the other. The playground does exactly this in its contract scenarios: `UNDRA_PLAYGROUND_V2=1 undra build` builds a second core whose stores, records and mutations changed the way an update does, and every platform checks that a snapshot and a queue written by the first are read by name by the second, and that an incompatible change is refused or dead-lettered. In Rust, a `TestRuntime` restores a snapshot you build from an edited `Schema` (its `stores_closure` is the description an older build would have written).
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/web.html
+
+# Workers & crash recovery
+
+On the web the core is a wasm module. It can run off the main thread, and when a panic traps it, it can come back from its last snapshot.
+
+## Worker mode
+
+`mode: "wasm-worker"` runs the core in a Web Worker, so a heavy call never blocks the UI. The core calls some ports synchronously (Clock, Rng, Log and any `#[undra::port(sync)]`) and cannot wait for the main thread, so those are answered **in the worker**. Clock, Rng and Log need nothing from you. Ports with asynchronous methods (Http, Kv, SecureStore, Fs and your own async ports) run on the main thread, exactly as in `wasm-main`.
+
+## Your own synchronous ports
+
+Put them in a small module the worker imports before the core starts, and pass its URL. The same module overrides Clock, Rng or the core's timers in this mode:
+
+ts
+
+```ts
+// main.ts
+const core = await UndraCore.load({
+  mode: "wasm-worker", wasm, expectedSchemaHash: UndraIds.schemaHash,
+  worker: { ports: new URL("./worker-ports.js", import.meta.url) },
+});
+
+// worker-ports.ts: runs inside the worker
+export default {
+  [UndraIds.Ports.Locale.portId]: localePortImpl({ hello: () => "Bonjour" }),
+};
+export const adapters = { timer: myTimer }; // optional: clock, rng, timer
+```
+
+A synchronous port registered on the main thread in this mode is refused when the core loads (`UndraError("options")`, naming the port), not at its first call. With a bundler, make the module a worker entry.
+
+## Recovering from a crash
+
+A native core contains a panic and keeps going. A wasm core cannot: the panic traps the instance. With `recovery: crashRecovery()` (imported from `@undra/runtime`, so an app without it ships none of this code), the runtime keeps a snapshot of your stores (at most once a second while they change, in an idle moment, in the worker in worker mode) and restarts from it:
+
+ts
+
+```ts
+import { UndraCore, crashRecovery } from "@undra/runtime";
+
+const core = await UndraCore.load({
+  mode: "wasm-main", wasm, expectedSchemaHash: UndraIds.schemaHash,
+  recovery: crashRecovery(), // or crashRecovery({ snapshotEveryMs, maxSnapshotBytes, maxRestarts, perMs })
+  onPanic: (report) => crashReporter.send(report),
+  onCoreRestarted: (e) => configureRemote(core, settings), // re-apply core state that is not in a store
+});
+```
+
+| On a trap | What your app sees |
+| --- | --- |
+| Calls and streams in flight | fail with `UndraCallError.Unavailable`, reason `restarted`; they may or may not have run and are never retried for you |
+| Stores | keep their handles and show the snapshot's values |
+| Query handles | are created again behind the same objects, and refetch |
+| Other objects | go stale: calls on them are refused |
+| Store writes after the last snapshot, running tasks and timers, configuration a call set | lost; re-apply configuration in `onCoreRestarted` |
+
+Persisted queries and the offline queue live in `Kv` and are not affected. Past `maxRestarts` within `perMs` (default 3 a minute) the core stays down and `onClose` reports the crash, so a panic that recurs on every restart cannot loop. Recovery is off by default: it costs a snapshot up to once a second (about 0.04 ms for 100 KB of state; a restart takes about 1.6 ms).
+
+## Randomness
+
+A wasm core needs WebCrypto. Without `crypto.getRandomValues`, `load` rejects with `UndraTransportError("unsupported")` rather than run with predictable idempotency keys.
 
 ---
 
@@ -1267,60 +1508,6 @@ On iOS each slice exports one symbol, so the two libraries link next to each oth
 - **Two local Swift packages need two directory names.** SwiftPM names a local package after its directory.
 
 The [two-core test apps](https://github.com/shreypdev/undra/tree/main/examples/two-cores) load one core under two namespaces on iOS, Android, the JVM and Node, and CI runs them on every change.
-
----
-
-Source: https://shreypdev.github.io/undra/docs/testing.html
-
-# Testing your app
-
-The kit runs your real core on fakes and a manual clock, plays a recorded session as a screen state, and replays what a session asked of the platform.
-
-## Pick one
-
-| You want | Use |
-| --- | --- |
-| a screen that reacts, or a cache that goes stale | `PreviewCore`: the real core, its ports faked, time in your hands |
-| a state that is slow to reach | `RecordedCore`: a recorded session under the generated stores, no core |
-| a test that fails when the core makes another request | `Replayer`: a recording as the script for the ports |
-
-The same three exist in Swift (`UndraTestKit`, a product of the `UndraRuntime` package), Kotlin (`dev.undra:testkit`), TypeScript (`@undra/testkit`, no runtime dependencies) and, for tests of the core itself, Rust (`undra::testing`). They sit beside the runtimes: no generated file, wire frame or C entry point changes.
-
-## Preview a screen
-
-`PreviewCore.load` starts your app&rsquo;s own core in the process with a deterministic fake behind every standard port. A seed fills them; `advance` moves the clock one deadline at a time and lets the core settle between.
-
-**Sleeps in a native core run in real time.** The manual clock moves what the core reads (`Clock`, staleness, timestamps) and timers armed through the `Timer` port. A native core&rsquo;s `ctx.sleep` is waited for, as the C ABI never hands sleeps to the host: `advance(5_000)` does not finish a 5-second sleep, it returns at once and the task still wakes 5 real seconds later. In a native preview, make that delay a parameter the preview sets to a few milliseconds, wait the real duration and then `settle()`, preview the state after the wait with `RecordedCore`, or run the story on the web, where sleeps follow the clock. `advance` stops after `maxTimers` firings with a typed `TimerStormError` (a timer that re-arms itself without time passing never ends).
-
-## Play a recording
-
-`RecordedCore` loads a recording and releases its change-sets with a playhead you move. Calls are answered by the next recorded reply for the same target; a call the recording has no reply for is a typed refusal that names it.
-
-## Record a session
-
-The dev server sees every call, reply, change-set and port call, on iOS, Android and the web alike, so one flag captures a session. A reload starts a new core, so a new file (`session-2.json`).
-
-bash
-
-```bash
-undra dev --record session.json
-```
-
-A recording holds what the app asked the platform and was answered, so it can hold secrets. `SecureStore` payloads are left out by default (the calls are there, their arguments and replies are empty; `--record-secrets` keeps them). HTTP headers and bodies, `Kv` values and files are recorded as they are: do not share a recording of a real account&rsquo;s session. If the file cannot be written the runner warns once, stops recording and keeps serving.
-
-A recording is one canonical JSON document, `undra.recording` version 1: payloads in hex, handles as strings, times in milliseconds. A recording made on one platform is read by all of them.
-
-## Replay port traffic
-
-A `Replayer` answers a core&rsquo;s port calls from a recording, in order per port. A call that differs is a typed `mismatch`, an extra one is `exhausted`, a recorded call with no reply in the file is `unanswered`, and a recorded call never made is `unconsumed`. A deviation consumes nothing, so one wrong call does not shift every later answer.
-
-## In the playground
-
-- **iOS:** three SwiftUI `#Preview`s, built with the app.
-- **Android:** two Compose `@Preview`s over `RecordedCore` (the preview pane cannot load a native core); the kit is a debug-only dependency.
-- **Web:** four stories in Component Story Format, rendered by Vite alone. Storybook loads them unchanged and is not a dependency.
-
-The kit uses only public APIs, and CI builds all three. [docs/TESTING.md](https://github.com/shreypdev/undra/blob/main/docs/TESTING.md) has the full reference: the seed and recording formats, the fakes&rsquo; conformance file, and the limits.
 
 ---
 
@@ -3558,190 +3745,6 @@ The runtime is testable without a browser: over the `remote` transport against a
 
 ---
 
-Source: https://shreypdev.github.io/undra/docs/db.html
-
-# Local database
-
-Structured local data with SQLite, written once in the core. The platform owns the file and the thread; the core sends bound statements and gets typed rows back.
-
-## Turn it on
-
-`Db` is an opt-in port over the SQLite each platform already has: the system library on iOS, `android.database.sqlite` on Android, a JDBC driver on the JVM, `node:sqlite` in Node and wa-sqlite in a worker on the web. The core stays small and never blocks: the platform owns the database and its thread. On the web the files live in the origin private file system, which one tab holds at a time: a second tab of the same app gets `Unavailable`.
-
-core/Cargo.toml
-
-```toml
-[dependencies]
-undra = { version = "0.1", features = ["db"] }
-```
-
-## Open and migrate
-
-Migrations are numbered SQL. The platform runs every one the database has not seen yet, in one transaction: if one fails, none of them happened.
-
-core/src/notes.rs
-
-```rust
-const MIGRATIONS: &[Migration] = &[
-    Migration::new(1, "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0)"),
-    Migration::new(2, "CREATE INDEX notes_done ON notes (done)"),
-];
-
-let db = Database::open(&ctx, "notes", MIGRATIONS).await?;
-```
-
-## Values are parameters
-
-SQL is a `&'static str`, so a value can only reach a statement as a bound parameter. Cells come back typed.
-
-rust
-
-```rust
-db.execute("INSERT INTO notes (title) VALUES (?)", params![title]).await?;
-let rows = db.query("SELECT id, title, done FROM notes WHERE done = ?", params![false]).await?;
-for row in rows.iter() {
-    let id: i64 = row.get("id")?;
-    let title: String = row.get("title")?;
-}
-```
-
-## Transactions
-
-A transaction commits when its body returns `Ok` and rolls back on `Err`, or when its task is dropped half-way.
-
-rust
-
-```rust
-db.transaction(|tx| async move {
-    for title in titles {
-        tx.execute("INSERT INTO notes (title) VALUES (?)", params![title]).await?;
-    }
-    Ok(())
-}).await?;
-```
-
-## Errors you can match
-
-| Error | When |
-| --- | --- |
-| `Constraint { kind, .. }` | a `UNIQUE`, `NOT NULL`, foreign-key or `CHECK` constraint failed |
-| `Busy` | the database stayed locked past five seconds |
-| `Migration { version, .. }` | a migration failed and everything rolled back, or the file is newer than the app |
-| `Sql` | a syntax error, a missing table, a cell read as the wrong type |
-| `Corrupt`, `Full`, `Unavailable` | the file, the disk, or no database to talk to |
-
-## In tests
-
-`FakeDb` answers by SQL fragment, injects failures and records every statement, migration and transaction, so the core's database logic is tested without a device.
-
-rust
-
-```rust
-fakes.db.fail_on("INSERT", DbError::Full);
-assert_eq!(notes.add("milk".into()).await, Err(DbError::Full));
-```
-
-Design: [ADR-048](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-048-db-port.md).
-
----
-
-Source: https://shreypdev.github.io/undra/docs/realtime.html
-
-# WebSocket & server-sent events
-
-Live data comes into the core like everything else: through a port. The core reads at its own pace and decides when to reconnect; the platform owns the socket.
-
-## Turn it on
-
-`WebSocket` and `Sse` are opt-in ports: a core asks for them with a cargo feature, and a core that does not keeps the schema hash and the wasm size it had. Each platform answers with its own client: `URLSessionWebSocketTask`, the Kotlin runtime's client on the JVM and Android, the browser's `WebSocket`.
-
-core/Cargo.toml
-
-```toml
-[dependencies]
-undra = { version = "0.1", features = ["websocket", "sse"] }
-```
-
-## A connection
-
-The core connects, sends and reads. Messages arrive as a stream the core pulls: it asks for 16 at a time, so a core that stops reading stops the socket, on the platforms that can pause one.
-
-core/src/chat.rs
-
-```rust
-use undra::ports::ws::{WsConnection, WsError, WsMessage, WsOptions};
-
-let conn = WsConnection::connect(&ctx, "wss://chat.example.com/room", WsOptions::default()).await?;
-conn.send_text("hello").await?;
-let mut messages = conn.messages();
-while let Some(next) = undra::ports::next(&mut messages).await {
-    match next {
-        Ok(WsMessage::Text(text)) => room.push(text),
-        Ok(WsMessage::Binary(_)) => {}
-        Err(WsError::Closed { code: 1000, .. }) => break, // the server said goodbye
-        Err(error) => return Err(error),
-    }
-}
-```
-
-## Every end is typed
-
-| What happened | The stream ends with |
-| --- | --- |
-| the core called `close` | nothing: it simply ends |
-| the server sent a close frame | `Closed { code, reason }` |
-| the connection dropped | `Network` |
-| the server broke the protocol | `Protocol` |
-| the upgrade was refused | `Refused { status }` (from `connect`) |
-
-Browsers cannot send headers with a WebSocket, so the browser adapter refuses a connect that has some instead of dropping them: put the credential in the URL or a subprotocol.
-
-## Reconnecting is yours
-
-The port never reconnects on its own: which close codes to retry, how long to wait and what to resend are your app's rules, and they run in the core, where a test drives them with a fake clock. `Backoff` gives the delay, a weak context sleeps.
-
-rust
-
-```rust
-let backoff = Backoff::default(); // 500 ms doubling to 30 s, with jitter from the Rng port
-let mut attempt = 0;
-while weak.sleep(backoff.delay(attempt, &*ctx.rng())).await.is_ok() {
-    attempt += 1;
-    // connect again, re-subscribe, reset `attempt` once a message arrives
-}
-```
-
-## Server-sent events
-
-`sse::subscribe` is a stream of events parsed as the HTML standard says. It ends with `Ended` when the server finishes the response; subscribe again with the last event id to resume.
-
-rust
-
-```rust
-let mut events = sse::subscribe(&ctx, "https://api.example.com/feed", vec![], last_id.clone());
-while let Some(Ok(event)) = undra::ports::next(&mut events).await {
-    last_id = event.id.clone().or(last_id);
-    feed.apply(event.data);
-}
-```
-
-## In tests
-
-`FakeWebSocket` and `FakeSse` are scripted servers: accept or refuse, push, close, drop, echo. They record what the core sent and how much it pulled, so backpressure is an assertion.
-
-rust
-
-```rust
-let fakes = fakes::install(&t);
-fakes.web_socket.echo(true);
-// ... the core connects and sends ...
-assert!(fakes.web_socket.delivered(conn) <= consumed + 24);
-```
-
-On the web the adapters are an opt-in import, `@undra/runtime/realtime`, so an app that does not use them ships none of them. Design: [ADR-047](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-047-websocket-and-sse-ports.md).
-
----
-
 Source: https://shreypdev.github.io/undra/reference/swift.html
 
 # Swift reference
@@ -3950,7 +3953,7 @@ Roadmap
 
 # What is shipped, in flight and next.
 
-Undra v1.0 shipped on 30 September 2026. This page follows the project's working record, [.10x/handoff.md](https://github.com/shreypdev/undra/blob/main/.10x/handoff.md), and changes with it. Last updated 30 Sep 2026.
+Undra v1 was finished on 30 September 2026, and the v1.x work since is merged on main; the first tag, v1.0.0, is still to cut. This page follows the project's working record, [.10x/handoff.md](https://github.com/shreypdev/undra/blob/main/.10x/handoff.md), and changes with it. Last updated 2 Oct 2026.
 
 Shipped
 
@@ -3969,7 +3972,7 @@ The framework you can build on today.
 - Schema-hash gateChecked at load and at build; a mismatched UI and core refuse to talk.
 - undra devA live core over a WebSocket, rebuilt on save.
 - Teaching diagnosticsEvery macro error says what, why and how to fix it.
-- 18 contract scenarios on 3 platformsThe same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 54 of 54 pass.
+- 17 contract scenarios on 3 platformsThe same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 51 of 51 pass.
 - Adversarial reviews of every core crateSignals, runtime, macros and ffi were each reviewed by someone who did not write them.
 
 Shipped
@@ -3980,6 +3983,7 @@ Shipped
 
 Landed in the two days after v1.0; the record of each piece is in the repository.
 
+- The contract grid, grown to every featureThirty-three scenarios run against the real core, 95 of 95 cells passing at the last merge (the web-only two on TypeScript alone).
 - Frame-coalesced delivery (ADR-031)The platform mirrors merge queued change-set entries once per frame, bound their backlog and re-observe on overflow; keyed-list firehoses cost ~10x less per frame on the web. Contract scenario S18 proves a 1,000-transaction burst applies in one drain on all three platforms.
 - Harsh-conditions benchmark suite and the live stress screenFirehose, event firehose, keyed churn, fan-out, stream backpressure, concurrent completions and a soak, with CI budgets that pass on the GitHub runner; the playground's stress screen shows the same numbers live in your browser.
 - Swift error channel (ADR-032)Generated Swift never traps: calls throw the method's own error, CancellationError or UndraCallError; commands report through onError.
@@ -4006,31 +4010,36 @@ Landed in the two days after v1.0; the record of each piece is in the repository
 - React Native (ADR-038)@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI.
 - Migration guidesFrom Kotlin Multiplatform and from UniFFI, a cookbook of recipes, and Fieldbook, a production-shaped sample beyond the playground.
 - Several cores in one app (ADR-044)Each core is a self-contained image with one namespaced entry point, so two Undra libraries share a process without sharing anything, storage included.
-- iOS 15 and 16 (ADR-045)A lower deployment target generates ObservableObject stores; the iOS 17 output is unchanged.
+- iOS 15 and 16 (ADR-045)A lower deployment target generates ObservableObject stores and the iOS 17 output is unchanged; the mode is proven by compilation and a runtime probe on iOS 26.5, not yet on an iOS 15 or 16 runtime.
 - The web call path (ADR-056)A generated TypeScript call went from 3.2–3.5 µs to 0.47–0.68 µs in headless Chromium, and React Native's mirror work at 100,000 updates a second from about 22 ms to about 5 ms a frame on the iPhone simulator.
 
 Now
 
-## v1.x
+## Open items
 
-in flight
+owed
 
-In flight for the v1.x releases.
+Built and merged, with these still open; each is a known limit that the default-choice post and the docs name too.
 
-- Distributionbrew, npm, a curl installer and cargo-from-git. The release pipeline is built, security-reviewed and proved by a green dry run; the three package channels go live with the v1.0.0 tag.
+- Rows from physical devicesThe device benchmarks run on the iPhone simulator, the Android emulator and headless Chromium, and are labelled so; rows from real phones are owed, and no device target is claimed as met.
+- The JavaScript runtime at 16 KBWhat a hello-world page loads up front sits exactly at its gate, and the design's 16 KB target is not reachable without removing behaviour, so the next growth makes room or restates the budget.
+- Generic functions and objectsA generic record or enum crosses as one named type per instantiation; generic objects, stores, functions and methods do not cross yet.
+- Query handles across a dev reloadundra dev keeps the stores across a rebuild but not query handles, which need a decision record of their own.
+- Android module tests in CIThe undra-compose and android-adapters tests pass locally and on the emulator but do not run in CI yet.
 
 Next
 
-## v1.1 and v1.2
+## Release and reach
 
 planned
 
-Planned for the releases after v1.0. The order may change with what the benchmarks show.
+Needs a release, an account or a decision rather than more code; the order may change.
 
+- The v1.0.0 release channelsbrew, npm and the curl installer go live with the first tagged release, which needs the npm organisation, the Homebrew tap and the tag, all the maintainer's to create; the pipeline is built, reviewed and proved by a green dry run.
 - crates.io and Maven CentralPublish the crates under a registry-safe prefix (its own ADR) and the Kotlin runtime without a local build.
 - Windows CLIRelease binaries and docs for the undra command on Windows.
-- A custom domainA home for the site and docs that is ours.
 - Flutter and DartNot started: decided after React Native, which has shipped.
+- A custom domainA home for the site and docs that is ours.
 
 Later
 
@@ -4048,7 +4057,7 @@ Not planned
 
 ## Not planned
 
-Shared UI of any kind, and hosted services. Undra owns everything under the pixels and leaves the screens to SwiftUI, Compose and React.
+Shared UI of any kind, and hosted services. Undra owns everything under the pixels and leaves the screens to SwiftUI, Compose, React and React Native.
 
 > ## How to influence the roadmap
 >
@@ -4576,7 +4585,7 @@ Every number here comes from [bench/RESULTS.md](https://github.com/shreypdev/und
 | Decoding and replaying a one-operation patch on 10,000 rows (Rust wire crate) | 2.57 µs | [Keyed patch](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#wire-keyed-patch-undra-wire) |
 | Cold start, restoring 100 KB of state | 70.87 µs | [Snapshot](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#snapshot-and-restore) |
 | Wasm runtime plus hello-world core, gzipped | 116.7 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
-| Android core, per ABI, release | 831 KB | [README](https://github.com/shreypdev/undra#why-its-fast) |
+| Android core, hello world, arm64-v8a, release | 978.6 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/android-size.jsonl) |
 
 Read these for what they are. They are core-side, on a host faster than the phones the design targets, so within budget here is necessary and not sufficient. The per-device targets (an iPhone with an A15, a 2022 mid-range Android phone, Chromium) are measured in a later device phase, and the platform half of a crossing, meaning the Swift, JNI or JavaScript side and applying a change-set to a mirror, is not in these numbers. The 46 operations covered by the CI gate have budgets about five times what they measure, so the gate catches an operation that becomes several times slower, not a few percent ([the gate](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#the-ci-gate)). We have not published a stress benchmark for sustained very high write rates, and we have not compared Undra against other tools, so this page makes no such comparison.
 

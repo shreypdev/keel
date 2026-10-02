@@ -46,8 +46,8 @@
           "text": "Every macro error says what, why and how to fix it."
         },
         {
-          "title": "18 contract scenarios on 3 platforms",
-          "text": "The same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 54 of 54 pass."
+          "title": "17 contract scenarios on 3 platforms",
+          "text": "The same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 51 of 51 pass."
         },
         {
           "title": "Adversarial reviews of every core crate",
@@ -62,6 +62,10 @@
       "when": "30 Sep – 2 Oct 2026",
       "intro": "Landed in the two days after v1.0; the record of each piece is in the repository.",
       "items": [
+        {
+          "title": "The contract grid, grown to every feature",
+          "text": "Thirty-three scenarios run against the real core, 95 of 95 cells passing at the last merge (the web-only two on TypeScript alone)."
+        },
         {
           "title": "Frame-coalesced delivery (ADR-031)",
           "text": "The platform mirrors merge queued change-set entries once per frame, bound their backlog and re-observe on overflow; keyed-list firehoses cost ~10x less per frame on the web. Contract scenario S18 proves a 1,000-transaction burst applies in one drain on all three platforms."
@@ -168,7 +172,7 @@
         },
         {
           "title": "iOS 15 and 16 (ADR-045)",
-          "text": "A lower deployment target generates ObservableObject stores; the iOS 17 output is unchanged."
+          "text": "A lower deployment target generates ObservableObject stores and the iOS 17 output is unchanged; the mode is proven by compilation and a runtime probe on iOS 26.5, not yet on an iOS 15 or 16 runtime."
         },
         {
           "title": "The web call path (ADR-056)",
@@ -179,23 +183,43 @@
     {
       "id": "now",
       "status": "Now",
-      "title": "v1.x",
-      "when": "in flight",
-      "intro": "In flight for the v1.x releases.",
+      "title": "Open items",
+      "when": "owed",
+      "intro": "Built and merged, with these still open; each is a known limit that the default-choice post and the docs name too.",
       "items": [
         {
-          "title": "Distribution",
-          "text": "brew, npm, a curl installer and cargo-from-git. The release pipeline is built, security-reviewed and proved by a green dry run; the three package channels go live with the v1.0.0 tag."
+          "title": "Rows from physical devices",
+          "text": "The device benchmarks run on the iPhone simulator, the Android emulator and headless Chromium, and are labelled so; rows from real phones are owed, and no device target is claimed as met."
+        },
+        {
+          "title": "The JavaScript runtime at 16 KB",
+          "text": "What a hello-world page loads up front sits exactly at its gate, and the design's 16 KB target is not reachable without removing behaviour, so the next growth makes room or restates the budget."
+        },
+        {
+          "title": "Generic functions and objects",
+          "text": "A generic record or enum crosses as one named type per instantiation; generic objects, stores, functions and methods do not cross yet."
+        },
+        {
+          "title": "Query handles across a dev reload",
+          "text": "undra dev keeps the stores across a rebuild but not query handles, which need a decision record of their own."
+        },
+        {
+          "title": "Android module tests in CI",
+          "text": "The undra-compose and android-adapters tests pass locally and on the emulator but do not run in CI yet."
         }
       ]
     },
     {
       "id": "next",
       "status": "Next",
-      "title": "v1.1 and v1.2",
+      "title": "Release and reach",
       "when": "planned",
-      "intro": "Planned for the releases after v1.0. The order may change with what the benchmarks show.",
+      "intro": "Needs a release, an account or a decision rather than more code; the order may change.",
       "items": [
+        {
+          "title": "The v1.0.0 release channels",
+          "text": "brew, npm and the curl installer go live with the first tagged release, which needs the npm organisation, the Homebrew tap and the tag, all the maintainer's to create; the pipeline is built, reviewed and proved by a green dry run."
+        },
         {
           "title": "crates.io and Maven Central",
           "text": "Publish the crates under a registry-safe prefix (its own ADR) and the Kotlin runtime without a local build."
@@ -205,12 +229,12 @@
           "text": "Release binaries and docs for the undra command on Windows."
         },
         {
-          "title": "A custom domain",
-          "text": "A home for the site and docs that is ours."
-        },
-        {
           "title": "Flutter and Dart",
           "text": "Not started: decided after React Native, which has shipped."
+        },
+        {
+          "title": "A custom domain",
+          "text": "A home for the site and docs that is ours."
         }
       ]
     },
@@ -238,6 +262,6 @@
   ],
   "notPlanned": {
     "title": "Not planned",
-    "text": "Shared UI of any kind, and hosted services. Undra owns everything under the pixels and leaves the screens to SwiftUI, Compose and React."
+    "text": "Shared UI of any kind, and hosted services. Undra owns everything under the pixels and leaves the screens to SwiftUI, Compose, React and React Native."
   }
 }
