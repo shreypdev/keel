@@ -139,3 +139,21 @@ the React hooks are the web ones, so `docs/REACT_NATIVE.md` needs no change beyo
   run there too and exercise the stale-reply path. `remote` is the same.
 * The playground store with a `Lazy<T>` and the infinite query handle (`FeedQuery`-shaped, with `fetchNextPage()`) come from the
   integrator's merge of bindgen and the core; `useLoadMore` has no scenario (it is UI) and is covered by `lazy-react.test.ts`.
+
+## S31 in the TypeScript and React Native columns (after the merge of `wt/types-paging`)
+
+* `wt/tp-ts` is `wt/types-paging` (be0602f) plus `contract-tests/ts/test/s31-newtypes-generics-leaf-types.test.ts`,
+  `contract-tests/ts/{run.sh,NOTES.md}` (comments and a note) and `runtimes/rn/@undra/react-native/vitest.contract.config.ts`
+  (S31 added to its include list). `check.sh` and `run-all.sh` untouched: they need `S31` in `IDS` for `ts` (and for `rn`, whose own
+  list does not run S20 and S23 to S26 either).
+* `contract-tests/ts/run.sh` (real wasm builds of the playground core, build B, and two-cores a and b): S01 to S25, S28, S31 and the
+  web-only S21 and S22 PASS. **S26 and S27 FAIL, only because `examples/two-cores/{a,b}/generated/**` were not regenerated** ("the
+  bindings expect 0xe4c001b130237f02 but the core reports 0x5a8a8212ec2b22b2": the playground core gained the ledger). `undra bindgen -C
+  examples/two-cores/a` and `.../b` (28 files written each, Swift, Kotlin and TypeScript) make both pass; I reverted that regeneration
+  (not my files). The RN contract column: the same list plus S31, 20 PASS, S17 SKIP (app-tested), S27 FAIL for the same reason.
+* No generated-code problem in the ledger TypeScript bindings: they type-check under the contract package's strict `tsc` (the four
+  `@ts-expect-error` lines of `distinctTypes()` all fire, so the brands are distinct types), the `Map<AccountId, Price>` of
+  `balances()` (`objects.ts:1596`, `codecs.map(AccountIdCodec, PriceCodec)`) is a real `Map` keyed by the plain string, `Price`
+  comes back as a `Decimal` instance, keyed patches are one op each. Style notes only: the brand is the string-literal property
+  `__brand` (`types.ts:37`, `:47`, `:238`), which autocomplete shows on the value; a `unique symbol` brand would hide it.
+* `examples/playground/web`: `npm run build` (tsc + vite) passes and `npm test` is 124 passed (11 files) against the new bindings.
