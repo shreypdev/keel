@@ -49,6 +49,76 @@ impl GeneratedFile {
     }
 }
 
+/// How a generated Swift store is observed by SwiftUI (ADR-045).
+///
+/// `Observation` is the `@Observable` macro (iOS 17 / macOS 14 and later); `ObservableObject` is Combine's
+/// `ObservableObject` with `@Published` properties, which every iOS and macOS version the Swift runtime supports
+/// (iOS 15 / macOS 12 and later) has. Everything else in the generated code is the same.
+///
+/// ```
+/// use undra_bindgen::SwiftObservation;
+///
+/// assert_eq!(SwiftObservation::for_ios(17), SwiftObservation::Observation);
+/// assert_eq!(SwiftObservation::for_ios(16), SwiftObservation::ObservableObject);
+/// assert_eq!("observable-object".parse(), Ok(SwiftObservation::ObservableObject));
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SwiftObservation {
+    /// `@MainActor @Observable` stores; needs iOS 17 / macOS 14.
+    #[default]
+    Observation,
+    /// `@MainActor` stores that are `ObservableObject`s with `@Published` properties; works from iOS 15 / macOS 12.
+    ObservableObject,
+}
+
+impl SwiftObservation {
+    /// The first iOS major version that has Observation.
+    pub const OBSERVATION_MIN_IOS: u32 = 17;
+
+    /// The first iOS major version the Swift runtime supports (ADR-045).
+    pub const RUNTIME_MIN_IOS: u32 = 15;
+
+    /// The mode a deployment target of iOS `major` gets unless it is told otherwise: `Observation` from iOS 17,
+    /// `ObservableObject` below.
+    #[must_use]
+    pub fn for_ios(major: u32) -> SwiftObservation {
+        if major >= Self::OBSERVATION_MIN_IOS {
+            SwiftObservation::Observation
+        } else {
+            SwiftObservation::ObservableObject
+        }
+    }
+
+    /// The spelling used in `undra.toml` (`[bindings] swift_observation`) and on the command line.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SwiftObservation::Observation => "observation",
+            SwiftObservation::ObservableObject => "observable-object",
+        }
+    }
+}
+
+impl std::fmt::Display for SwiftObservation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for SwiftObservation {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<SwiftObservation, String> {
+        match text.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "observation" | "observable" => Ok(SwiftObservation::Observation),
+            "observable-object" | "observableobject" => Ok(SwiftObservation::ObservableObject),
+            other => Err(format!(
+                "`{other}` is not a Swift observation mode (use `observation` or `observable-object`)"
+            )),
+        }
+    }
+}
+
 /// Configuration of the generators.
 ///
 /// [`Generator::for_crate`] derives every name from the core's crate name;
@@ -83,6 +153,15 @@ pub struct Generator {
     /// A port is implemented by the host, so `throws(E)` there tells the
     /// implementer exactly which errors the core understands.
     pub swift_typed_throws: bool,
+    /// How generated Swift stores are observed (ADR-045): `@Observable` (the default, iOS 17 and later) or
+    /// `ObservableObject` with `@Published` properties (iOS 15 and later). `undra bindgen` derives it from
+    /// `[ios] deployment_target` unless `[bindings] swift_observation` says otherwise.
+    pub swift_observation: SwiftObservation,
+    /// The major version of the lowest iOS the generated Swift supports (the major of `[ios]
+    /// deployment_target`; default 17). The wire `Duration` is `Swift.Duration` from 16 and the runtime's
+    /// `UndraDuration` below (`Swift.Duration` is iOS 16 / macOS 13), and the generated package declares it as
+    /// its platform floor.
+    pub swift_min_ios: u32,
     /// Kotlin package of every generated file; the files are written below
     /// `src/main/kotlin/<package path>/`.
     pub kotlin_package: String,
@@ -114,6 +193,8 @@ impl Generator {
             namespace: naming::CoreNames::default_namespace(crate_name),
             swift_module: naming::pascal(crate_name),
             swift_typed_throws: true,
+            swift_observation: SwiftObservation::Observation,
+            swift_min_ios: SwiftObservation::OBSERVATION_MIN_IOS,
             kotlin_package: format!("dev.undra.generated.{snake}"),
             ts_scope: "app".to_owned(),
             ts_package: crate_name.replace('_', "-").to_ascii_lowercase(),
@@ -155,11 +236,26 @@ impl Generator {
     ///
     /// Returns the validation errors when the schema cannot be generated.
     pub fn swift(&self, schema: &Schema) -> Result<Vec<GeneratedFile>, Vec<BindgenError>> {
-        self.validate(schema)?;
+        let mut problems = self.validate(schema).err().unwrap_or_default();
+        if problems.is_empty() {
+            problems = self.swift_floor_errors(schema);
+        }
+        if !problems.is_empty() {
+            return Err(problems);
+        }
         Ok(swift::generate(
             &model::Model::new(schema, model::Lang::Swift, self.emit_standard_library),
             self,
         ))
+    }
+
+    /// What this configuration's Swift floor cannot express about `schema` (ADR-045): the iOS 15 / 16 store shape is
+    /// an `ObservableObject`, which has an `objectWillChange` publisher of its own, so a store member of that name
+    /// would collide. Empty for the default `@Observable` stores and for a schema that is fine in either mode. The
+    /// errors are E0051, like every name the generated code already uses.
+    #[must_use]
+    pub fn swift_floor_errors(&self, schema: &Schema) -> Vec<BindgenError> {
+        validate::swift_floor(schema, self.swift_observation)
     }
 
     /// Generates the Kotlin sources:
