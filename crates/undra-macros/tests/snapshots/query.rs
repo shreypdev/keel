@@ -14,21 +14,28 @@ macro_rules! _undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_im
         ::core::option::Option < u64 > = ::core::option::Option::Some(30000u64); #[doc =
         r" Whether results are persisted."] pub const PERSIST : bool = true; #[doc =
         r" Retry attempts after a failure."] pub const RETRY : u32 = 5u32; #[doc =
-        r" Whether the call is safe to replay."] pub const IDEMPOTENT : bool = false; }
-        #[allow(non_upper_case_globals)] static __UNDRA_META_TodosQuery :
-        ::undra::meta::QueryMeta = ::undra::meta::QueryMeta { name : "todos", query_id :
+        r" Whether the call is safe to replay."] pub const IDEMPOTENT : bool = false;
+        #[doc = r" The polling interval in milliseconds, if the query polls by default."]
+        pub const INTERVAL_MS : ::core::option::Option < u64 > =
+        ::core::option::Option::None; #[doc =
+        r" Whether the query keeps polling while the app is in the background."] pub
+        const POLL_IN_BACKGROUND : bool = false; } #[allow(non_upper_case_globals)]
+        static __UNDRA_META_TodosQuery : ::undra::meta::QueryMeta =
+        ::undra::meta::QueryMeta { name : "todos", query_id :
         ::undra::meta::ids::query_id("todos"), kind : ::undra::meta::QueryKind::Query,
         key : "todos:{page}", params : & [::undra::meta::ParamMeta { name : "page", ty :
         ::undra::meta::TypeRefMeta::U32 }], returns :
         ::undra::meta::TypeRefMeta::Result(& ::undra::meta::TypeRefMeta::Vec(&
         ::undra::meta::TypeRefMeta::Named("Todo")), &
         ::undra::meta::TypeRefMeta::Named("HttpError")), stale_ms :
-        ::core::option::Option::Some(30000u64), persist : true, idempotent : false, };
-        ::undra::meta::inventory::submit! { ::undra::meta::Registration::Query(&
-        __UNDRA_META_TodosQuery) } ::undra::meta::inventory::submit! {
-        ::undra::query::QueryRegistration::of:: < TodosQuery > () }
-        ::undra::meta::inventory::submit! { ::undra::query::__private::HYDRATE }
-        ::undra::meta::inventory::submit! { ::undra::query::__private::LAYER }
+        ::core::option::Option::Some(30000u64), persist : true, idempotent : false,
+        interval_ms : ::core::option::Option::None, poll_in_background : false, infinite
+        : ::core::option::Option::None, }; ::undra::meta::inventory::submit! {
+        ::undra::meta::Registration::Query(& __UNDRA_META_TodosQuery) }
+        ::undra::meta::inventory::submit! { ::undra::query::QueryRegistration::of:: <
+        TodosQuery > () } ::undra::meta::inventory::submit! {
+        ::undra::query::__private::HYDRATE } ::undra::meta::inventory::submit! {
+        ::undra::query::__private::LAYER }
     };
 }
 _undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block!();
@@ -39,6 +46,8 @@ impl ::undra::query::QueryDef for TodosQuery {
     const STALE_MS: ::core::option::Option<u64> = Self::STALE_MS;
     const PERSIST: bool = Self::PERSIST;
     const RETRY: u32 = Self::RETRY;
+    const INTERVAL_MS: ::core::option::Option<u64> = Self::INTERVAL_MS;
+    const POLL_IN_BACKGROUND: bool = Self::POLL_IN_BACKGROUND;
     type Params = (u32,);
     type Output = Vec<Todo>;
     type Error = HttpError;

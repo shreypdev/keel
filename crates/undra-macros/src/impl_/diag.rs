@@ -71,6 +71,7 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0065 | a signal of a store written off its owning runtime's core (ADR-035): a runtime message |
 /// | E0066 | a `#[undra::migrate]` hook with a wrong target or shape (ADR-037; addition) |
 /// | E0071 | a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041) |
+/// | E0073 | an `infinite` query that does not meet ADR-043's shape: no `item_key` or one that names no field of the rows, no or more than one `#[undra(cursor)]` parameter, a cursor that is not `Option<C>` or is in the key, a success type that is not `Page<T, C>`, rows that are not a record (addition) |
 pub(crate) mod code {
     pub(crate) const E0001: &str = "E0001";
     pub(crate) const E0002: &str = "E0002";
@@ -101,6 +102,7 @@ pub(crate) mod code {
     pub(crate) const E0064: &str = "E0064";
     pub(crate) const E0066: &str = "E0066";
     pub(crate) const E0071: &str = "E0071";
+    pub(crate) const E0073: &str = "E0073";
 }
 
 /// A diagnostic under construction: everything except the span it is reported on.

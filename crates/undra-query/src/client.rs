@@ -6,11 +6,12 @@ use std::sync::Arc;
 use undra_runtime::Ctx;
 use undra_wire::{Encode, Uuid};
 
-use crate::defs::{MutationDef, QueryDef};
+use crate::defs::{InfiniteQueryDef, MutationDef, QueryDef};
 use crate::erased::{Erased, query_vtable};
 use crate::handle::QueryHandle;
 use crate::key::{Invalidate, QueryKey};
 use crate::mutation::MutationBuilder;
+use crate::paged::InfiniteHandle;
 use crate::queue::{DeadLetter, RetryError};
 use crate::shared::{Shared, shared_of};
 
@@ -51,7 +52,15 @@ impl QueryClient {
         QueryHandle::open(&self.ctx, &self.shared, &params)
     }
 
-    /// The cached data of `Q` with `params`, if any. Does not fetch and does not observe.
+    /// Observes the infinite query `Q` with `params` (ADR-043): registers an observer, fetches the
+    /// first page if the entry is stale or missing, and shows the rows loaded so far as one keyed
+    /// list. The returned handle keeps observing until dropped. See [`InfiniteHandle`].
+    pub fn infinite<Q: InfiniteQueryDef>(&self, params: Q::Params) -> InfiniteHandle<Q> {
+        InfiniteHandle::open(&self.ctx, &self.shared, &params)
+    }
+
+    /// The cached data of `Q` with `params`, if any. Does not fetch and does not observe. For an
+    /// infinite query the data is the list of every row loaded.
     pub fn get<Q: QueryDef>(&self, params: Q::Params) -> Option<Q::Output> {
         let key = QueryKey::new(Q::ID, Arc::from(params.encode_to_vec()));
         self.shared.read(&key)?.typed::<Q::Output>()

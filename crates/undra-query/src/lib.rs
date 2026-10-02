@@ -119,7 +119,9 @@ mod handle;
 mod inspect;
 mod key;
 mod mutation;
+mod paged;
 mod persist;
+mod poll;
 mod queue;
 mod retry;
 mod shared;
@@ -128,16 +130,22 @@ mod storage;
 mod walk;
 
 pub use client::{CtxQuery, PersistStats, QueryClient};
-pub use defs::{BoxFuture, CacheValue, MutationDef, QueryDef};
-pub use dispatch::{INVALIDATE_METHOD_ID, REFETCH_METHOD_ID};
+pub use defs::{
+    BoxFuture, CacheValue, InfiniteQueryDef, MutationDef, Page, QueryDef, fetch_first_page,
+};
+pub use dispatch::{
+    FETCH_NEXT_PAGE_METHOD_ID, INVALIDATE_METHOD_ID, REFETCH_METHOD_ID, SET_POLL_INTERVAL_METHOD_ID,
+};
 pub use erased::{MutationRegistration, MutationVTable, QueryRegistration, QueryVTable};
 pub use handle::{QueryHandle, Settled};
 pub use key::Invalidate;
 pub use mutation::{CacheView, MutationBuilder};
+pub use paged::{InfiniteHandle, PagedVTable, paged_vtable};
 pub use persist::{
     CACHE_KEY_PREFIX, CACHE_KEY_PREFIX_V1, DEAD_LETTER_KEY, QUEUE_KEY, QUEUE_KEY_V1,
     TYPES_KEY_PREFIX, cache_key, types_key,
 };
+pub use poll::{MAX_POLL_INTERVAL_MS, MIN_POLL_INTERVAL_MS};
 pub use queue::{DeadLetter, RetryError, idempotency_key};
 pub use retry::{BACKOFF_BASE_MS, BACKOFF_MAX_MS, JITTER_PERCENT, backoff_ms};
 pub use shared::{DEFAULT_GC_MS, PERSIST_DEBOUNCE_MS};

@@ -21,7 +21,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use undra_meta::{ClosureRoot, Schema, TypeClosure, TypeRef};
+use undra_meta::{ClosureRoot, ParamDef, QueryKind, Schema, TypeClosure, TypeRef};
 use undra_ports::{CtxPorts, StorageError};
 use undra_runtime::log::{DEBUG, WARN};
 use undra_runtime::persist::{self, RegisteredHooks};
@@ -144,7 +144,7 @@ impl Shared {
         if let Some(found) = cache.get(&query_id) {
             return Some(found.clone());
         }
-        let closure = schema.query_closure(query_id)?;
+        let closure = paged_closure(schema, query_id).or_else(|| schema.query_closure(query_id))?;
         let fingerprint = closure.fingerprint();
         let current: Current = Arc::new((closure, fingerprint));
         cache.insert(query_id, current.clone());
@@ -268,7 +268,7 @@ impl Shared {
             state
                 .entries
                 .get(key)
-                .and_then(|entry| Some((entry.data.as_ref()?.bytes.to_vec(), entry.updated_at?)))
+                .and_then(|entry| Some((entry.persist_bytes()?, entry.updated_at?)))
         };
         let Some((data, updated_at)) = snapshot else {
             self.state.lock().storage.failed.retain(|k| k != key);
@@ -728,11 +728,45 @@ impl Shared {
     }
 }
 
+/// The closure of an infinite query's persisted entry: `{ next: Option<C>, pages: Vec<Vec<T>> }`
+/// (ADR-043 decision 2.5), its fields migrated by name like a mutation's parameters. `None` for a
+/// query that is not infinite.
+fn paged_closure(schema: &Schema, query_id: u32) -> Option<TypeClosure> {
+    let query = schema
+        .queries
+        .iter()
+        .find(|q| q.query_id == query_id && q.kind == QueryKind::Query)?;
+    let infinite = query.infinite.as_ref()?;
+    let rows = match &query.returns {
+        TypeRef::Result(ok, _) => (**ok).clone(),
+        other => other.clone(),
+    };
+    Some(schema.closure_of_params(&[
+        ParamDef {
+            name: "next".to_owned(),
+            ty: TypeRef::option(infinite.cursor.clone()),
+        },
+        ParamDef {
+            name: "pages".to_owned(),
+            ty: TypeRef::vec(rows),
+        },
+    ]))
+}
+
 /// A cached value written with `old`, as bytes of the type `new` describes: structurally (with
-/// `ty` hooks inside), else the `ty` hook of the root type.
+/// `ty` hooks inside), else the `ty` hook of the root type. An infinite query's entry is a
+/// record of parameters (`next`, `pages`): converted field by field.
 fn migrate_value(data: &[u8], old: &TypeClosure, new: &TypeClosure) -> Result<Vec<u8>, String> {
+    if let (ClosureRoot::Params { .. }, ClosureRoot::Params { .. }) = (&old.root, &new.root) {
+        let record = persist::decode_params(data, "pages", old).map_err(|e| e.to_string())?;
+        return persist::migrate_params(&record, old, new, &RegisteredHooks)
+            .map_err(|e| e.to_string());
+    }
     let (Some(old_ty), Some(new_ty)) = (root_type(old), root_type(new)) else {
-        return Err("the stored description is not a query's".to_owned());
+        return Err(
+            "the stored description is not this query's kind (it was infinite, or is now)"
+                .to_owned(),
+        );
     };
     // Streamed first; the value is decoded only for the root type's hook.
     let error = match persist::migrate(data, old_ty, old, new_ty, new, &RegisteredHooks) {
