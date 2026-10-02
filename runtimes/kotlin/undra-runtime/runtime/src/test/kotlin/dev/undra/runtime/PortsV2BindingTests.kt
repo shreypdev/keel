@@ -21,6 +21,7 @@ import dev.undra.runtime.adapters.WsMessage
 import dev.undra.runtime.adapters.WsOpened
 import dev.undra.runtime.support.FakeTransport
 import dev.undra.runtime.support.ScriptedDb
+import dev.undra.runtime.support.ScriptedInbound
 import dev.undra.runtime.support.ScriptedSse
 import dev.undra.runtime.support.ScriptedWebSocket
 import dev.undra.runtime.adapters.dbPort
@@ -42,10 +43,12 @@ import dev.undra.runtime.wire.UndraCodec
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.decodeAll
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Level
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
@@ -110,6 +113,55 @@ private fun answer(t: FakeTransport, portId: UInt, methodId: UInt, args: ByteArr
 private val nextPortCallId = AtomicInteger(1)
 
 private fun args(fill: UndraWriter.() -> Unit): ByteArray = UndraWriter().also(fill).toByteArray()
+
+/**
+ * Pushes `"$prefix$i"` into [inbound] from a thread of its own, one every [everyNanos] and at most [count] of them.
+ *
+ * The feeder paces itself by spinning on the clock: `delay(1)` and `Thread.sleep(1)` slept 3 to 17 ms on a loaded or virtualised machine, and a feed that
+ * pauses is not the stimulus a test about bursts asked for.
+ */
+private class Feeder(private val inbound: ScriptedInbound<WsMessage>, private val prefix: String, private val count: Int, private val everyNanos: Long) {
+    @Volatile
+    private var stopped = false
+
+    private val thread = Thread {
+        var due = System.nanoTime()
+        var i = 0
+        while (!stopped && i < count) {
+            inbound.push(WsMessage.Text("$prefix$i"))
+            i++
+            due += everyNanos
+            while (System.nanoTime() < due && !stopped) Thread.onSpinWait()
+        }
+    }.also { it.isDaemon = true }
+
+    fun start() = thread.start()
+
+    /** Waits for a feed of a set size to have pushed everything. */
+    fun join() {
+        thread.join(10_000)
+    }
+
+    /** Stops the feed and waits for it. */
+    fun stop() {
+        stopped = true
+        thread.join(10_000)
+    }
+}
+
+/**
+ * The widest gap, in nanoseconds, between two items reaching the binding ([ScriptedInbound.takenAt]) up to the moment its pull answered ([answeredAt]),
+ * counting the item after it: a pump that was held up right after an item shows its pause only in when the next one came (or, when none had before the
+ * feed of [feedSize] items was over, in the answer's own time).
+ */
+private fun widestGapUntil(arrivedAt: List<Long>, answeredAt: Long, feedSize: Int): Long {
+    val before = arrivedAt.filter { it <= answeredAt }
+    val after = arrivedAt.firstOrNull { it > answeredAt } ?: if (before.size < feedSize) answeredAt else null
+    return (before + listOfNotNull(after)).zipWithNext { a, b -> b - a }.maxOrNull() ?: 0L
+}
+
+/** The binding's quiet period (what ends a burst) in nanoseconds. */
+private const val QUIET_NANOS = 2_000_000L
 
 /** The bindings of the opt-in ports (ADR-047, ADR-048) over scripted adapters: ids, the pull, ends, transactions. */
 class PortsV2BindingTests : Suite() {
@@ -193,44 +245,118 @@ class PortsV2BindingTests : Suite() {
             }
         }
 
-        case("WebSocket: a burst is answered as one reply; a lone message after 2 ms of quiet; a trickle within about 8 ms") {
+        // The next three cases are about how long the binding waits for more once it has a message, so what they push must arrive as each says. A machine
+        // that is loaded or virtualised can fail to deliver that (`delay(1)` between pushes was 3 to 17 ms there, and a pump that is not scheduled for 2 ms
+        // delivers two messages far apart however closely they were pushed), and then a pull answered between two messages is answered correctly and the
+        // test fails for it. The pushes are therefore paced by spinning on the clock, the time each message reached the binding is recorded, and a trial in
+        // which two of them arrived as far apart as the quiet period was not a burst (or a trickle): it is repeated, and the assertions are made on one that was.
+
+        case("WebSocket: a burst is answered as one reply") {
+            // A burst whose messages are all inside the quiet period of the one before and inside the 8 ms cap of the first comes back whole. A pull that is not
+            // scheduled for 2 ms after it saw a message answers with what it had (its quiet period is measured from when it last looked), which is the machine
+            // and not the binding, so the case asks for one trial in forty that came back whole: a binding that splits a burst does it every time.
+            val notBursts = ArrayList<Double>()
+            val split = ArrayList<Int>()
+            for (trial in 0 until 40) {
+                val ws = ScriptedWebSocket()
+                val port = WebSocketPortAdapter(ws)
+                val whole = blocking {
+                    val conn = port.connect("ws://a.test", emptyList(), emptyList()).conn
+                    // Six messages a millisecond apart: every gap is inside the 2 ms of quiet, and the last is 5 ms after the first, inside the 8 ms cap.
+                    val inbound = ws.connections[0].inbound
+                    val feeder = Feeder(inbound, "", 6, 1_000_000L)
+                    val pull = async { port.receive(conn, 16u) to System.nanoTime() }
+                    delay(5) // the pull is waiting
+                    feeder.start()
+                    val (first, at) = pull.await()
+                    feeder.join() // all six go in, whenever the pull answered
+                    eventually("the pump took all six") { inbound.taken == 6 }
+                    val widest = widestGapUntil(inbound.takenAt, at, 6)
+                    when {
+                        widest >= QUIET_NANOS -> notBursts.add(widest / 1e6)
+                        first.size == 6 -> {
+                            assertEq((0 until 6).map { WsMessage.Text("$it") }, first)
+                            return@blocking true
+                        }
+                        else -> split.add(first.size)
+                    }
+                    false
+                }
+                if (whole) return@case
+            }
+            val widest = notBursts.maxOrNull()?.let { " (two messages up to %.1f ms apart)".format(it) }.orEmpty()
+            fail("no trial of 40 came back whole: ${split.size} were split into replies of $split, ${notBursts.size} were not bursts$widest")
+        }
+
+        case("WebSocket: a lone message is answered within a few milliseconds of the quiet period, not held for the cap or a linger") {
+            // "Within a few milliseconds" is not a number a machine can be held to: the 2 ms that end a burst took 3 ms on a laptop and more on a loaded
+            // one. So each round arms a timer of that length on the same event loop at the same moment, and what is measured is how much later than it the
+            // binding answered. A message held for the 8 ms cap answers 6 ms after it on any machine whose timers can tell 2 ms from 8; a slow clock moves both
+            // and leaves the difference alone.
             val ws = ScriptedWebSocket()
             val port = WebSocketPortAdapter(ws)
+            val waited = ArrayList<Double>()
+            val buffered = ArrayList<Double>()
             blocking {
                 val conn = port.connect("ws://a.test", emptyList(), emptyList()).conn
                 val inbound = ws.connections[0].inbound
-                // A burst arriving over a few milliseconds: one reply.
-                val burst = async {
-                    for (i in 0 until 6) {
-                        inbound.push(WsMessage.Text("$i"))
-                        delay(1)
-                    }
+                for (round in 0 until 20) {
+                    // The pull waits; the message arrives.
+                    val pull = async { port.receive(conn, 16u) to System.nanoTime() }
+                    delay(5)
+                    val reference = async(start = CoroutineStart.UNDISPATCHED) { delay(2); System.nanoTime() }
+                    inbound.push(WsMessage.Text("w$round"))
+                    val (got, at) = pull.await()
+                    assertEq(text("w$round"), got)
+                    waited.add((at - reference.await()) / 1e6)
+                    // The message is there before the pull.
+                    inbound.push(WsMessage.Text("b$round"))
+                    eventually("the read-ahead took it") { inbound.taken == 2 * (round + 1) }
+                    val late = async(start = CoroutineStart.UNDISPATCHED) { delay(2); System.nanoTime() }
+                    val early = port.receive(conn, 16u)
+                    val answered = System.nanoTime()
+                    assertEq(text("b$round"), early)
+                    buffered.add((answered - late.await()) / 1e6)
                 }
-                val first = port.receive(conn, 16u)
-                burst.await()
-                assertTrue(first.size >= 3, "a burst comes back as one reply, got ${first.size}")
-                val rest = ArrayList(first)
-                while (rest.size < 6) rest.addAll(port.receive(conn, 16u))
-                assertEq((0 until 6).map { WsMessage.Text("$it") }, rest)
-                // A lone message: answered once nothing more came for 2 ms.
-                inbound.push(WsMessage.Text("lone"))
-                val started = System.nanoTime()
-                assertEq(text("lone"), port.receive(conn, 16u))
-                assertTrue((System.nanoTime() - started) / 1_000_000 < 500, "a lone message is not held back")
-                // A trickle that never pauses for 2 ms: answered about 8 ms after the first message, not when 16 are there.
-                val trickle = async {
-                    for (i in 0 until 60) {
-                        inbound.push(WsMessage.Text("t$i"))
-                        delay(1)
-                    }
-                }
-                val part = port.receive(conn, 16u)
-                assertTrue(part.isNotEmpty() && part.size < 60, "a trickle is answered in parts: ${part.size}")
-                trickle.await()
-                // The pump has filled the window meanwhile: max items are answered at once.
-                eventually("the window filled") { inbound.taken >= 7 + part.size + 16 }
-                assertEq(16, port.receive(conn, 16u).size)
             }
+            waited.sort()
+            buffered.sort()
+            assertTrue(waited[10] < 5, "a lone message was answered ${waited[10]} ms (the median of 20) after a quiet-period timer armed as it arrived")
+            assertTrue(buffered[10] < 5, "a pull that found one message was answered ${buffered[10]} ms (the median of 20) after a quiet-period timer armed with it")
+            // The tail: all but three rounds of twenty (a round in which the machine held up the binding's answer and not the timer beside it says nothing).
+            assertTrue(waited[17] < 100, "a lone message waited 100 ms or more past its quiet-period timer in three rounds of 20")
+            assertTrue(buffered[17] < 100, "a pull that found one message waited 100 ms or more past its quiet-period timer in three rounds of 20")
+        }
+
+        case("WebSocket: a trickle that never pauses for 2 ms is answered by the 8 ms cap, not held until it stops") {
+            val pauses = ArrayList<Double>()
+            // Forty tries of about 30 ms each: a machine busy enough to stall the feeder in ten of them still trickles in one of forty.
+            for (trial in 0 until 40) {
+                val ws = ScriptedWebSocket()
+                val port = WebSocketPortAdapter(ws)
+                val outcome = blocking {
+                    val conn = port.connect("ws://a.test", emptyList(), emptyList()).conn
+                    // One message every 0.5 ms, never a 2 ms gap, for as long as the test lets it go on; the pull takes up to 1,000, so only the cap can end it early.
+                    val inbound = ws.connections[0].inbound
+                    val feeder = Feeder(inbound, "t", 20_000, 500_000L)
+                    val pull = async { port.receive(conn, 1_000u) to System.nanoTime() }
+                    delay(5)
+                    feeder.start()
+                    val (part, at) = pull.await()
+                    feeder.stop()
+                    port.close(conn, 1000u, "")
+                    val widest = widestGapUntil(inbound.takenAt.toList(), at, 20_000)
+                    if (widest >= QUIET_NANOS) return@blocking widest / 1e6
+                    assertTrue(part.size > 1, "the trickle was one burst: ${part.size}")
+                    // The cap answers on the first look 8 ms after the pull's first message: about 17 messages at one per 0.5 ms, counted where the binding
+                    // answered and so the same on any machine. (A pull held until the trickle stops is answered by its max, 1,000.)
+                    assertTrue(part.size <= 64, "a trickle held the pull for ${part.size} messages")
+                    null
+                }
+                if (outcome == null) return@case
+                pauses.add(outcome)
+            }
+            fail("no trial of 40 was a trickle: two messages reached the binding ${pauses.map { "%.1f".format(it) }} ms apart")
         }
 
         case("WebSocket: one receive per connection at a time") {
@@ -721,17 +847,29 @@ class PortsV2BindingTests : Suite() {
                 expectError(DbError.Busy) { port.execute(id, "INSERT INTO t VALUES (2)", emptyList()) }
                 assertTrue((System.nanoTime() - started) / 1_000_000 >= 180, "it waited for the busy timeout")
                 expectError(DbError.Busy) { port.begin(id) }
-                // A statement that waits less than the busy timeout runs once the transaction ends.
+                port.commit(tx)
+                expectError(DbError.Unavailable("transaction 2 is over")) { port.execute(tx, "SELECT 1", emptyList()) }
+                expectError(DbError.Unavailable("transaction 2 is over")) { port.commit(tx) }
+                expectError(DbError.Sql("a transaction cannot begin inside a transaction")) { port.begin(port.begin(id)) }
+            }
+        }
+
+        case("Db: a statement on the database id waits for the transaction, however long that takes, and runs once it ends") {
+            val db = ScriptedDb()
+            // A busy timeout that never elapses here (a hang detector, not a speed): with the 200 ms of the case above, a machine that took that long
+            // between this statement and the commit made it Busy, and the case failed for the machine's speed.
+            val port = DbPortAdapter(db, busyTimeoutMillis = 60_000)
+            blocking {
+                val id = port.open("app", emptyList()).db
+                val tx = port.begin(id)
                 val waiting = async { port.query(id, "SELECT 1", emptyList()) }
                 delay(50)
-                assertTrue(!waiting.isCompleted)
+                assertTrue(!waiting.isCompleted, "the statement waits for the transaction")
+                assertTrue(db.calls.none { it.sql == "SELECT 1" }, "and has not run")
                 port.commit(tx)
                 waiting.await()
                 val sql = db.calls.map { it.sql }
                 assertTrue(sql.indexOf("COMMIT") < sql.indexOf("SELECT 1"), "the outer statement ran after the commit")
-                expectError(DbError.Unavailable("transaction 2 is over")) { port.execute(tx, "SELECT 1", emptyList()) }
-                expectError(DbError.Unavailable("transaction 2 is over")) { port.commit(tx) }
-                expectError(DbError.Sql("a transaction cannot begin inside a transaction")) { port.begin(port.begin(id)) }
             }
         }
 
