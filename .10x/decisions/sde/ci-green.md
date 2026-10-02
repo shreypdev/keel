@@ -39,7 +39,7 @@ run either. Two of the causes below (the ASan overflow, the stale devtools asset
 | TypeScript runtime (not yet reached) | `bash runtimes/ts/devtools/build.sh --check`: the committed page assets were not a rebuild of their sources (the wire module changed under them; only minifier names moved) | rebuilt and committed |
 | Swift runtime + C ABI (macOS) | 12 failures in 4 tests. (a) `testALoneMessageIsAnsweredWithin…`: median 10.09/10.24 ms against a hard 10 ms; here 3.1 ms. The binding answers a lone message when its 2 ms `burstGap` timer fires, and that timer fired after about 10 ms on the runner | the budget is the platform's own `burstGap` timer (median of 21) plus 5 ms: still tighter than 10 ms on a machine with accurate timers, and it measures the binding's delay, not the runner's clock |
 | | (b) client-initiated close (`testEcho…`, `testSubprotocol…`, `testAConnectionTheCoreLetsGoIsClosedGoingAway`, `testShutdownDuringAPendingReceive…`): the server never saw a close code within 5 s; they pass on macOS 26, and S23 (same adapter, same server) passes on the same runner | **cause not established.** `URLSessionWebSocketConnection.close` called `cancel(with:)` and then at once `finishTasksAndInvalidate()`; it now waits (1 s at most) for the delegate's last word before invalidating, so invalidation cannot race the frame. `waitFor` now says what the server had. If the run still fails, its message names the connection the server saw |
-| iOS 15 / 16 floor (`da4fbbe` only) | S30 (100 ms window) and S33 (gap measured as 0.0 s) in iOS 15 mode on the runner; passed in the run before and the run after | **not fixed.** Timing scenarios on a loaded VM; reading `TimedRecorder` (it reports 0.0 when it recorded fewer than two changes, which means its poller never ran, not that the ticks were close) does not show a defect in the binding. Left as observed |
+| iOS 15 / 16 floor (`da4fbbe` only) and Swift contract S33 | S33 (gap between the first two ticks read as 0.0 s) in iOS 15 mode on the runner, and **here, on an idle Mac, in 2 runs of 3**: a race in the scenario. `TimedRecorder` polls the store every 5 ms, `waitUntil` every 10 ms, and the first tick is already the recorder's first entry (the handle's first fetch runs while it is made), so when the wait saw the second tick before the recorder did, `lastGap` had one entry and returned 0 | the scenario waits for the recorder to have seen the second tick before it reads the gap; 6 of 6 passes. The same run's S30 ("cache entry written within 100 ms of Background") is a 100 ms window of the spec on a loaded VM; passes here, **not changed** |
 
 ## Node
 
@@ -69,9 +69,33 @@ goldens regenerated, the budgets and the size re-recorded. `cas_update` had alre
   (gate 22,100); both recorded inside the gates. The Android record (978,552 / 1,045,200) re-measured under the pin:
   byte-identical.
 
+## Landing rule (founder, 2026-10-02)
+
+No piece lands on `main` unless CI is green on its branch's exact head. `ci.yml`, `bench.yml`, `two-cores.yml` and `site.yml`
+also run on pushes to `wt/**` (a newer push cancels the run it supersedes on `wt/**` only; main's runs have a group per
+commit and are never cancelled, as `bench.yml` already did; `rn-devices.yml` keeps its path filter; Site's deploy job and
+its Pages steps are `main`-only). Bench compares a branch with the merge base with main, as a pull request is compared with
+its base. `scripts/wt.sh merge <slug>` fast-forwards only when main is an ancestor of the branch and
+`gh run list --branch wt/<slug> --commit <head>` shows CI, Bench, Two cores (and Site when the branch touches its path
+filter) completed with success for that sha, naming what is missing or red and how to push; `--no-ci` is the loud override
+for state-only commits. The parsing is `scripts/wt-ci-check.sh`, tested on fixtures by `scripts/wt-ci-check.test.sh` (a CI
+step); the merge itself was exercised against a scratch repository with a stub `gh` (red, green, stale branch, `--no-ci`).
+
+## Clean-clone verification (macOS, Rust 1.99.0, Node 24, `UNDRA_REQUIRE_TOOLCHAINS` as each step needs it)
+
+A fresh `git clone` of the branch (no `node_modules`, no build output), every step of the workflows that gate code, in order,
+all exit 0: Rust job (npm ci of the runtime, fmt, vectors, device bench report, clippy, `cargo test --workspace`
+3,537 passed 0 failed, bindgen checks, realtime recipes, cookbook TS, Fieldbook web test and build, build integrations,
+write rule in release, wasm32 clippy, C ABI under ASan, schema retention and docs, rustdoc, wasm32 builds), TypeScript (runtime
+1,858, testkit 37, devtools 71 and `build.sh --check`), wasm ABI, Playground web, leaf features, the Site workflow's own
+steps (core, playground build, rustdoc, script tests, `build-all.mjs` leaves nothing stale, both link checks, staging),
+React Native (cores, derived vectors, C++ host and JSI, Android Java, 110 unit tests, the contract column), contracts
+(`run-all.sh` ts kotlin and swift: 95 of 95), Kotlin runtime (881), Swift (870), `typecheck_swift`, Swift over the C ABI,
+iOS cross-checks, Xcode, cookbook Swift and Kotlin, iOS floor (runtime, golden, apps, contract). Miri: `--lib` and the `abi` subset.
+
 ## Not reproduced, and what to watch
 
-* The Swift client-close failures (above), and S30/S33 in the floor job.
+* The Swift client-close failures (above), and S30 in the floor job (S33 was a race and is fixed).
 * Linux: after the devtools tests the Rust job runs about 20 more steps that have not run on Linux for a day. Each was run
   here on macOS from a clean clone (see the report); a Linux-only difference in one of them would show on the next run.
 * `a_commit_storm…` and the page tests were hardened under CPU load, not on a 4-core Linux runner.
