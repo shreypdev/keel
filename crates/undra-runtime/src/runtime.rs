@@ -1556,7 +1556,11 @@ impl Runtime {
             Dispatched::Bad(reason) => bad(&reason),
             Dispatched::Failed(reason) => {
                 let report = failed_report(&reason);
-                self.log(ERROR, "undra::runtime", &format!("call_sync failed: {reason}"));
+                self.log(
+                    ERROR,
+                    "undra::runtime",
+                    &format!("call_sync failed: {reason}"),
+                );
                 SyncReply::Owned(reply_payload(
                     call_id,
                     ReplyStatus::Panic,

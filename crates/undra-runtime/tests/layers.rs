@@ -174,12 +174,19 @@ fn a_failed_call_is_status_two_with_its_reason_and_the_runtime_carries_on() {
     assert_eq!(t.call(CallTarget::Function { method_id: FAIL }, 2, &[]), 0);
     let replies = t.take_replies();
     assert_eq!(replies.len(), 1);
-    assert_eq!((replies[0].call_id, replies[0].status), (2, ReplyStatus::Panic));
+    assert_eq!(
+        (replies[0].call_id, replies[0].status),
+        (2, ReplyStatus::Panic)
+    );
     assert_eq!(
         Reader::new(&replies[0].body).read_str().unwrap(),
         "the layer took its arguments and failed"
     );
-    let ok = t.call_sync(CallTarget::Function { method_id: DOUBLE }, 3, &1_u32.encode_to_vec());
+    let ok = t.call_sync(
+        CallTarget::Function { method_id: DOUBLE },
+        3,
+        &1_u32.encode_to_vec(),
+    );
     assert_eq!(ok.status, ReplyStatus::Ok);
 }
 
