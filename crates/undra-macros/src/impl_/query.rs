@@ -1053,7 +1053,7 @@ fn infinite_shape(
     errors: &mut Errors,
 ) -> Option<InfiniteShape> {
     let item_key = args.item_key.clone()?;
-    let [(cursor_name, cursor_span)] = cursors else {
+    let [(cursor_name, _)] = cursors else {
         return None;
     };
     let cursor = params.iter().position(|p| &p.name == cursor_name)?;
@@ -1066,7 +1066,7 @@ fn infinite_shape(
             ),
             "the cursor is `None` for the first page and the previous page's `next` after it",
             &format!("write `#[undra(cursor)] {cursor_name}: Option<String>`, or another value type for the cursor your server uses"),
-            *cursor_span,
+            cursor_param.ty.span(),
         ));
         return None;
     };
@@ -1549,6 +1549,397 @@ mod tests {
             )
             .is_ok(),
             "mutations may return either"
+        );
+    }
+
+    // ----- polling (ADR-043 decision 1) --------------------------------------------------------
+
+    #[test]
+    fn interval_and_poll_in_background_reach_the_constants_the_trait_and_the_meta() {
+        let out = run(
+            Flavor::Query,
+            "key = \"todos:{page}\", interval = \"30s\", poll_in_background",
+            TODOS,
+        )
+        .unwrap();
+        for needle in [
+            "pub const INTERVAL_MS: ::core::option::Option<u64> = ::core::option::Option::Some(30000u64)",
+            "pub const POLL_IN_BACKGROUND: bool = true",
+            "const INTERVAL_MS: ::core::option::Option<u64> = Self::INTERVAL_MS",
+            "const POLL_IN_BACKGROUND: bool = Self::POLL_IN_BACKGROUND",
+            "interval_ms: ::core::option::Option::Some(30000u64)",
+            "poll_in_background: true",
+            "infinite: ::core::option::Option::None",
+        ] {
+            assert!(has(&out, needle), "missing `{needle}` in {out}");
+        }
+        let plain = run(Flavor::Query, "key = \"todos:{page}\"", TODOS).unwrap();
+        assert!(
+            has(&plain, "pub const POLL_IN_BACKGROUND: bool = false"),
+            "{plain}"
+        );
+        assert!(
+            has(&plain, "interval_ms: ::core::option::Option::None"),
+            "{plain}"
+        );
+    }
+
+    #[test]
+    fn an_interval_is_at_least_one_second_and_a_poll_is_not_a_stream() {
+        assert!(run(Flavor::Query, "key = \"k\", interval = \"1s\"", TODOS).is_ok());
+        assert!(run(Flavor::Query, "key = \"k\", interval = \"1000ms\"", TODOS).is_ok());
+        for text in ["999ms", "500ms", "0s"] {
+            let message = run(
+                Flavor::Query,
+                &format!("key = \"k\", interval = \"{text}\""),
+                TODOS,
+            )
+            .unwrap_err();
+            assert!(
+                message.starts_with(&format!(
+                    "error[undra::E0040]: `interval = \"{text}\"` is below one second"
+                )),
+                "{message}"
+            );
+            assert!(
+                message.contains("use a stream for real-time data"),
+                "{message}"
+            );
+        }
+        let message = run(Flavor::Query, "key = \"k\", interval = \"soon\"", TODOS).unwrap_err();
+        assert!(message.contains("invalid `interval` duration"), "{message}");
+        let message = run(Flavor::Query, "key = \"k\", interval = 30", TODOS).unwrap_err();
+        assert!(
+            message.contains("`interval` must be a string literal"),
+            "{message}"
+        );
+        let message = run(
+            Flavor::Query,
+            "key = \"k\", poll_in_background = true",
+            TODOS,
+        )
+        .unwrap_err();
+        assert!(
+            message.contains("`poll_in_background` takes no value"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_mutation_has_no_polling_or_paging() {
+        for option in [
+            "interval = \"5s\"",
+            "poll_in_background",
+            "infinite",
+            "item_key = \"id\"",
+            "refetch_pages = 2",
+            "persist_pages = 2",
+        ] {
+            let message = run(
+                Flavor::Mutation,
+                option,
+                "async fn m(ctx: &Ctx) -> Result<u8, E> { Ok(1) }",
+            )
+            .unwrap_err();
+            let name = option.split([' ', '=']).next().unwrap();
+            assert!(
+                message.starts_with(&format!("error[undra::E0040]: mutation `m` has `{name}`")),
+                "{message}"
+            );
+        }
+    }
+
+    // ----- infinite queries (ADR-043 decision 2) -----------------------------------------------
+
+    const FEED: &str = "pub async fn feed(ctx: &Ctx, filter: Filter, #[undra(cursor)] cursor: Option<String>) -> Result<undra::query::Page<Post, String>, ApiError> { todo }";
+
+    const FEED_ARGS: &str = "key = \"feed/{filter}\", infinite, item_key = \"id\"";
+
+    #[test]
+    fn an_infinite_query_gets_the_paging_impls_and_a_schema_without_the_cursor() {
+        let out = run(
+            Flavor::Query,
+            &format!("{FEED_ARGS}, stale = \"1m\", refetch_pages = 3, persist, persist_pages = 2"),
+            FEED,
+        )
+        .unwrap();
+        for needle in [
+            "pub struct FeedQuery;",
+            // The cursor is not a parameter: the key and `Params` are the filter alone.
+            "type Params = (Filter,)",
+            "type Output = Vec<Post>",
+            "type Error = ApiError",
+            "const PAGED: ::core::option::Option<&'static ::undra::query::PagedVTable> = ::core::option::Option::Some(::undra::query::paged_vtable::<Self>())",
+            "::undra::query::fetch_first_page::<Self>(__ctx, __params)",
+            "impl ::undra::query::InfiniteQueryDef for FeedQuery",
+            "type Item = Post",
+            "type Cursor = String",
+            "const REFETCH_PAGES: ::core::option::Option<u32> = Self::REFETCH_PAGES",
+            "const PERSIST_PAGES: u32 = Self::PERSIST_PAGES",
+            "pub const REFETCH_PAGES: ::core::option::Option<u32> = ::core::option::Option::Some(3u32)",
+            "pub const PERSIST_PAGES: u32 = 2u32",
+            "pub const ITEM_KEY: &'static str = \"id\"",
+            "__cursor: ::core::option::Option<String>",
+            "Output = ::core::result::Result<::undra::query::Page<Post, String>, ApiError>",
+            // The function gets the cursor where it was declared.
+            "feed(&__ctx, __undra_a0, __cursor)",
+            "fn item_key(__item: &Post) -> u64",
+            "<Post>::__UNDRA_FIELDS",
+            "::undra::meta::keys::index_of(__UNDRA_FIELDS, \"id\")",
+            "::undra::meta::ids::fnv1a64(__buf.as_slice())",
+            "params: &[::undra::meta::ParamMeta { name: \"filter\"",
+            "returns: ::undra::meta::TypeRefMeta::Result(&::undra::meta::TypeRefMeta::Vec(&::undra::meta::TypeRefMeta::Named(\"Post\")), &::undra::meta::TypeRefMeta::Named(\"ApiError\"))",
+            "infinite: ::core::option::Option::Some(::undra::meta::InfiniteMeta { cursor: ::undra::meta::TypeRefMeta::String, item_key: \"id\" })",
+        ] {
+            assert!(has(&out, needle), "missing `{needle}` in {out}");
+        }
+        assert!(
+            !has(&out, "name: \"cursor\""),
+            "the cursor is not in the schema: {out}"
+        );
+        assert!(
+            !has(&out, "undra(cursor)"),
+            "the helper attribute is consumed: {out}"
+        );
+    }
+
+    #[test]
+    fn the_cursor_can_come_first_and_be_any_value_type_and_page_defaults_to_a_string_cursor() {
+        let out = run(
+            Flavor::Query,
+            "key = \"f\", infinite, item_key = \"id\"",
+            "async fn f(ctx: &Ctx, #[undra(cursor)] after: Option<u64>, q: String) -> Result<Page<Post, u64>, E> { todo }",
+        )
+        .unwrap();
+        assert!(has(&out, "f(&__ctx, __cursor, __undra_a1)"), "{out}");
+        assert!(has(&out, "type Params = (String,)"), "{out}");
+        assert!(has(&out, "type Cursor = u64"), "{out}");
+        assert!(
+            has(&out, "cursor: ::undra::meta::TypeRefMeta::U64"),
+            "{out}"
+        );
+        // `Page<T>` is `Page<T, String>`.
+        let out = run(
+            Flavor::Query,
+            "key = \"f\", infinite, item_key = \"id\"",
+            "async fn f(ctx: &Ctx, #[undra(cursor)] c: Option<String>) -> Result<Page<Post>, E> { todo }",
+        )
+        .unwrap();
+        assert!(has(&out, "type Params = ()"), "{out}");
+        assert!(has(&out, "type Cursor = String"), "{out}");
+    }
+
+    fn infinite(attr: &str, src: &str) -> String {
+        run(Flavor::Query, attr, src).unwrap_err()
+    }
+
+    #[test]
+    fn e0073_the_paging_options_come_together() {
+        let message = infinite("key = \"feed/{filter}\", infinite", FEED);
+        assert!(
+            message.starts_with("error[undra::E0073]: the infinite query `feed` has no `item_key`"),
+            "{message}"
+        );
+        assert!(
+            message.contains("help: add `item_key = \"id\"`"),
+            "{message}"
+        );
+        for (option, expect) in [
+            (
+                "item_key = \"id\"",
+                "`item_key` on `todos`, which is not `infinite`",
+            ),
+            (
+                "refetch_pages = 2",
+                "`refetch_pages` on `todos`, which is not `infinite`",
+            ),
+            (
+                "persist_pages = 2",
+                "`persist_pages` on `todos`, which is not `infinite`",
+            ),
+        ] {
+            let message = infinite(&format!("key = \"k\", {option}"), TODOS);
+            assert!(
+                message.starts_with(&format!("error[undra::E0073]: {expect}")),
+                "{message}"
+            );
+        }
+        let message = infinite(&format!("{FEED_ARGS}, persist_pages = 2"), FEED);
+        assert!(
+            message.starts_with(
+                "error[undra::E0073]: `persist_pages` on `feed`, which does not `persist`"
+            ),
+            "{message}"
+        );
+        let message = infinite(&format!("{FEED_ARGS}, refetch_pages = 0"), FEED);
+        assert!(
+            message.starts_with(
+                "error[undra::E0040]: `refetch_pages` must be a whole number of at least 1"
+            ),
+            "{message}"
+        );
+        let message = infinite(&format!("{FEED_ARGS}, persist, persist_pages = x"), FEED);
+        assert!(
+            message.contains("`persist_pages` must be a whole number of pages"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn e0073_exactly_one_cursor_of_type_option() {
+        let none = "async fn f(ctx: &Ctx, q: String) -> Result<Page<Post>, E> { todo }";
+        let message = infinite("key = \"f\", infinite, item_key = \"id\"", none);
+        assert!(
+            message.starts_with(
+                "error[undra::E0073]: the infinite query `f` has no `#[undra(cursor)]` parameter"
+            ),
+            "{message}"
+        );
+        let two = "async fn f(ctx: &Ctx, #[undra(cursor)] a: Option<String>, #[undra(cursor)] b: Option<String>) -> Result<Page<Post>, E> { todo }";
+        let message = infinite("key = \"f\", infinite, item_key = \"id\"", two);
+        assert!(
+            message.contains("has 2 `#[undra(cursor)]` parameters"),
+            "{message}"
+        );
+        let not_option =
+            "async fn f(ctx: &Ctx, #[undra(cursor)] c: String) -> Result<Page<Post>, E> { todo }";
+        let message = infinite("key = \"f\", infinite, item_key = \"id\"", not_option);
+        assert!(
+            message.contains("the cursor `c` of `f` is `String`, not an `Option<C>`"),
+            "{message}"
+        );
+        let on_plain = infinite(
+            "key = \"k\"",
+            "async fn q(ctx: &Ctx, #[undra(cursor)] c: Option<String>) -> Result<u8, E> { todo }",
+        );
+        assert!(
+            on_plain.starts_with("error[undra::E0073]: `#[undra(cursor)]` on `c`, which is not a parameter of an `infinite` query"),
+            "{on_plain}"
+        );
+    }
+
+    #[test]
+    fn e0073_the_cursor_is_not_part_of_the_key() {
+        let message = infinite(
+            "key = \"feed/{filter}/{cursor}\", infinite, item_key = \"id\"",
+            FEED,
+        );
+        assert!(
+            message.starts_with("error[undra::E0073]: the cursor `cursor` is in the `key` of the infinite query `feed`"),
+            "{message}"
+        );
+        assert_eq!(
+            message.matches("error[").count(),
+            1,
+            "one finding, not two: {message}"
+        );
+    }
+
+    #[test]
+    fn e0073_the_success_type_is_a_page_of_records_with_the_cursors_type() {
+        let not_page = "async fn f(ctx: &Ctx, #[undra(cursor)] c: Option<String>) -> Result<Vec<Post>, E> { todo }";
+        let message = infinite("key = \"f\", infinite, item_key = \"id\"", not_page);
+        assert!(
+            message.starts_with("error[undra::E0073]: the success type of the infinite query `f` is `Vec<Post>`, not `Page<T, C>`"),
+            "{message}"
+        );
+        let mismatch = "async fn f(ctx: &Ctx, #[undra(cursor)] c: Option<String>) -> Result<Page<Post, u64>, E> { todo }";
+        let message = infinite("key = \"f\", infinite, item_key = \"id\"", mismatch);
+        assert!(
+            message.contains("the cursor of `f` is `Option<String>` but its pages carry `u64`"),
+            "{message}"
+        );
+        let defaulted = "async fn f(ctx: &Ctx, #[undra(cursor)] c: Option<u64>) -> Result<Page<Post>, E> { todo }";
+        let message = infinite("key = \"f\", infinite, item_key = \"id\"", defaulted);
+        assert!(message.contains("its pages carry `String`"), "{message}");
+        let scalar = "async fn f(ctx: &Ctx, #[undra(cursor)] c: Option<String>) -> Result<Page<u32>, E> { todo }";
+        let message = infinite("key = \"f\", infinite, item_key = \"id\"", scalar);
+        assert!(
+            message.contains("the rows of the infinite query `f` are `u32`, not a record"),
+            "{message}"
+        );
+        let plain_result =
+            "async fn f(ctx: &Ctx, #[undra(cursor)] c: Option<String>) -> Result<u8, E> { todo }";
+        let message = infinite("key = \"f\", infinite, item_key = \"id\"", plain_result);
+        assert!(
+            message.starts_with(
+                "error[undra::E0073]: the success type of the infinite query `f` is `u8`"
+            ),
+            "{message}"
+        );
+        let no_result = "async fn f(ctx: &Ctx, #[undra(cursor)] c: Option<String>) -> u8 { 1 }";
+        let message = infinite("key = \"f\", infinite, item_key = \"id\"", no_result);
+        assert!(
+            message.contains("does not return `Result<Page<T, C>, E>`"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn an_infinite_query_keeps_every_other_rule_of_a_query() {
+        let message = infinite("infinite, item_key = \"id\"", FEED);
+        assert!(message.contains("query `feed` has no `key`"), "{message}");
+        let message = infinite("key = \"feed/{nope}\", infinite, item_key = \"id\"", FEED);
+        assert!(
+            message.contains("`{nope}` in `key` is not a parameter"),
+            "{message}"
+        );
+        assert!(message.contains("the parameters are: filter"), "{message}");
+        let sync = "fn feed(ctx: &Ctx, #[undra(cursor)] c: Option<String>) -> Result<Page<Post>, E> { todo }";
+        let message = infinite("key = \"f\", infinite, item_key = \"id\"", sync);
+        assert!(message.contains("E0041"), "{message}");
+    }
+
+    // ----- snapshots of the paging and polling expansions ---------------------------------------
+
+    /// Compares the pretty-printed expansion with `tests/snapshots/<name>.rs` (regenerate with
+    /// `UPDATE_SNAPSHOTS=1 cargo test -p undra-macros`, like the other snapshots).
+    fn snapshot(name: &str, attr: &str, src: &str) {
+        let args = parse_query_args(attr.parse().unwrap(), Flavor::Query).unwrap();
+        let item: ItemFn = syn::parse_str(src).unwrap();
+        let tokens = expand(Flavor::Query, args, item).unwrap_or_else(|e| {
+            panic!(
+                "fixture `{name}` produced a diagnostic: {:?}",
+                e.to_string()
+            )
+        });
+        let file: syn::File = syn::parse2(tokens).expect("the expansion parses");
+        let actual = prettyplease::unparse(&file);
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("snapshots")
+            .join(format!("{name}.rs"));
+        if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+            std::fs::write(&path, &actual).expect("write the snapshot");
+            return;
+        }
+        let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+            panic!(
+                "missing snapshot {}; create it with UPDATE_SNAPSHOTS=1 cargo test -p undra-macros",
+                path.display()
+            )
+        });
+        assert!(
+            expected == actual,
+            "snapshot `{name}` changed; review and run UPDATE_SNAPSHOTS=1 cargo test -p undra-macros"
+        );
+    }
+
+    #[test]
+    fn snapshot_of_a_polling_query() {
+        snapshot(
+            "query_polling",
+            "key = \"ticker/{symbol}\", stale = \"10s\", interval = \"30s\", poll_in_background",
+            "/// The latest quote.\npub async fn ticker(ctx: &Ctx, symbol: String) -> Result<Quote, HttpError> { todo!() }",
+        );
+    }
+
+    #[test]
+    fn snapshot_of_an_infinite_query() {
+        snapshot(
+            "query_infinite",
+            "key = \"feed/{filter}\", infinite, item_key = \"id\", stale = \"1m\", interval = \"30s\", refetch_pages = 3, persist, persist_pages = 2",
+            "/// The posts of a filter, newest first.\npub async fn feed(ctx: &Ctx, filter: Filter, #[undra(cursor)] cursor: Option<String>) -> Result<undra::query::Page<Post, String>, ApiError> { todo!() }",
         );
     }
 

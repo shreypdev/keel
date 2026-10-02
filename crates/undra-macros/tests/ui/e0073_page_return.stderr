@@ -1,0 +1,44 @@
+error: error[undra::E0073]: the success type of the infinite query `a_list` is `Vec<Post>`, not `Page<T, C>`
+         = note: the macro finds the rows and the next cursor of a page by the `Page<T, C>` struct of `undra::query`; any other type has no `next`
+         = help: return `Result<undra::query::Page<T, C>, E>` (`C` is `String` when left out)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_page_return.rs:12:13
+   |
+12 | ) -> Result<Vec<Post>, FeedError> {
+   |             ^^^
+
+error: error[undra::E0073]: the cursor of `another_cursor_type` is `Option<String>` but its pages carry `u64`
+         = note: the `next` of each page is the value the next call receives as its cursor: they are one type
+         = help: spell the cursor parameter and the `Page<T, C>` with the same `C`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_page_return.rs:19:30
+   |
+19 |     #[undra(cursor)] cursor: Option<String>,
+   |                              ^^^^^^
+
+error: error[undra::E0073]: the cursor of `the_default_cursor_is_a_string` is `Option<u64>` but its pages carry `String`
+         = note: the `next` of each page is the value the next call receives as its cursor: they are one type
+         = help: spell the cursor parameter and the `Page<T, C>` with the same `C`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_page_return.rs:27:30
+   |
+27 |     #[undra(cursor)] cursor: Option<u64>,
+   |                              ^^^^^^
+
+error: error[undra::E0073]: the rows of the infinite query `rows_that_are_not_records` are `u32`, not a record
+         = note: the handle's list is keyed by a field of its rows (`item_key`), so a row is a record declared with `#[undra::api]`
+         = help: make the rows a record, for example `struct Post { id: u64, .. }`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_page_return.rs:36:32
+   |
+36 | ) -> Result<undra::query::Page<u32>, FeedError> {
+   |                                ^^^
+
+error: error[undra::E0073]: the success type of the infinite query `no_page_at_all` is `u32`, not `Page<T, C>`
+         = note: the macro finds the rows and the next cursor of a page by the `Page<T, C>` struct of `undra::query`; any other type has no `next`
+         = help: return `Result<undra::query::Page<T, C>, E>` (`C` is `String` when left out)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_page_return.rs:44:13
+   |
+44 | ) -> Result<u32, FeedError> {
+   |             ^^^

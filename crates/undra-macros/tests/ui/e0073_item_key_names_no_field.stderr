@@ -1,0 +1,29 @@
+error[E0080]: evaluation panicked: error[undra::E0073]: `item_key = "idd"` of the infinite query `typo` names no field of `Post`
+                = note: `item_key` names the field of the rows that identifies them, and `Post` has the fields `id`, `title`
+                = help: write the name of one of those fields as `item_key`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_item_key_names_no_field.rs:47:47
+   |
+47 | #[k::query(key = "typo", infinite, item_key = "idd")]
+   |                                               ^^^^^ evaluation of `<TypoQuery as undra::query::InfiniteQueryDef>::item_key::__UNDRA_KEY_IS_A_FIELD` failed here
+
+note: erroneous constant encountered
+  --> tests/ui/e0073_item_key_names_no_field.rs:47:47
+   |
+47 | #[k::query(key = "typo", infinite, item_key = "idd")]
+   |                                               ^^^^^
+
+error[E0080]: evaluation panicked: error[undra::E0073]: `item_key = "not a name"` of the infinite query `not_a_name` names no field of `Tagged`
+                = note: `item_key` names the field of the rows that identifies them, and `Tagged` has the fields `type`, `id`
+                = help: write the name of one of those fields as `item_key`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_item_key_names_no_field.rs:55:53
+   |
+55 | #[k::query(key = "not a name", infinite, item_key = "not a name")]
+   |                                                     ^^^^^^^^^^^^ evaluation of `<NotANameQuery as undra::query::InfiniteQueryDef>::item_key::__UNDRA_KEY_IS_A_FIELD` failed here
+
+note: erroneous constant encountered
+  --> tests/ui/e0073_item_key_names_no_field.rs:55:53
+   |
+55 | #[k::query(key = "not a name", infinite, item_key = "not a name")]
+   |                                                     ^^^^^^^^^^^^
