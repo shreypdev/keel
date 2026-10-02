@@ -12,3 +12,8 @@ error[undra::E0051]: at record Todo, `1st` is not a name the generated code can 
   = note: every name of the schema becomes an identifier in Swift, Kotlin and TypeScript: ASCII letters, digits and underscores, not starting with a digit
   = help: rename it to letters, digits and underscores, starting with a letter
   = docs: https://shreypdev.github.io/undra/docs/errors.html#E0051
+
+error[undra::E0051]: at object Counter, `object_will_change` becomes `objectWillChange`, a name the generated code already uses
+  = note: with the iOS 15 / 16 store shape (`swift_observation = "observable-object"`, the default for a deployment target below iOS 17) a store is a Combine `ObservableObject`, which declares that member itself
+  = help: rename it so that it does not meet that name
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0051

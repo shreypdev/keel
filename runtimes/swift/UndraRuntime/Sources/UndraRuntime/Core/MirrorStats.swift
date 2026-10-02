@@ -61,15 +61,32 @@ public struct DrainStats: Sendable, Equatable {
     public var entries: Int
     /// Entries applied to stores after merging: calls of their apply functions.
     public var appliedEntries: Int
-    /// How long the drain took on the main actor, measured with `ContinuousClock`.
-    public var duration: Duration
+    /// How long the drain took on the main actor, in nanoseconds (measured with `DispatchTime`).
+    public var durationNanoseconds: Int64
 
     /// A drain report with the given values.
-    public init(changeSets: Int, entries: Int, appliedEntries: Int, duration: Duration) {
+    public init(changeSets: Int, entries: Int, appliedEntries: Int, durationNanoseconds: Int64) {
         self.changeSets = changeSets
         self.entries = entries
         self.appliedEntries = appliedEntries
-        self.duration = duration
+        self.durationNanoseconds = durationNanoseconds
+    }
+
+    /// How long the drain took, as a Swift `Duration`.
+    @available(iOS 16, macOS 13, *)
+    public var duration: Duration {
+        return Duration.nanoseconds(durationNanoseconds)
+    }
+
+    /// A drain report with the given values, the duration as a Swift `Duration`.
+    @available(iOS 16, macOS 13, *)
+    public init(changeSets: Int, entries: Int, appliedEntries: Int, duration: Duration) {
+        self.init(
+            changeSets: changeSets,
+            entries: entries,
+            appliedEntries: appliedEntries,
+            durationNanoseconds: UndraDuration(duration).nanoseconds
+        )
     }
 }
 

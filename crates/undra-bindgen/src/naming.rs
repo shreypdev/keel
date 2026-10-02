@@ -205,6 +205,7 @@ pub const RESERVED_ENTRIES: &[&str] = &[
     "UndraClosedReason",
     "UndraCodec",
     "UndraConnection",
+    "UndraConnectionObject",
     "UndraConnectionState",
     "UndraCore",
     "UndraCoreEntry",

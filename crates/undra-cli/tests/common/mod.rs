@@ -101,13 +101,19 @@ pub struct Project {
 
 /// Creates a project named `name` for `platforms` ("web", "ios,android,web", ...).
 pub fn init_project(name: &str, platforms: &str) -> Project {
+    init_project_with(name, platforms, &[])
+}
+
+/// [`init_project`] with more `undra init` arguments (`--ios-deployment-target 15.0`).
+pub fn init_project_with(name: &str, platforms: &str, extra: &[&str]) -> Project {
     let dir = TempDir::new(name);
     run_ok(
         undra()
             .args(["init", name, "--platforms", platforms, "--undra-path"])
             .arg(repo_root())
             .arg("--dir")
-            .arg(dir.path()),
+            .arg(dir.path())
+            .args(extra),
     );
     let root = dir.path().join(name);
     // Pin the dependency versions the workspace itself was tested with, so the tests resolve the

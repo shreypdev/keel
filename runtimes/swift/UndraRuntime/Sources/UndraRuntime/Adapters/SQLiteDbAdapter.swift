@@ -152,8 +152,10 @@ final class SQLiteConnection: DbConnection, @unchecked Sendable {
                 }
                 throw SQLiteConnection.lastError(db, code)
             }
+            // `sqlite3_changes`, not `sqlite3_changes64`: that one is SQLite 3.37, iOS 15.4 / macOS 12.3, above the
+            // runtime's floor (ADR-045). A statement that changes more than 2^31 rows is not one an app's database runs.
             return DbExecuted(
-                changes: UInt64(clamping: sqlite3_changes64(db)),
+                changes: UInt64(clamping: sqlite3_changes(db)),
                 lastInsertId: sqlite3_last_insert_rowid(db)
             )
         }

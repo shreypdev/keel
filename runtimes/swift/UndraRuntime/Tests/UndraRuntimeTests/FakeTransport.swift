@@ -200,9 +200,17 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
         return statsDocument
     }
 
+    /// Forget the core when shut down, as the in-process transport does, so that a core nothing else holds can be
+    /// released (the review of ADR-045: a connection a view holds must not depend on the core being alive).
+    var releasesInboundOnShutdown = false
+
     func shutdown() {
+        let release = releasesInboundOnShutdown
         state.withLock { (current: inout State) -> Void in
             current.shutDown = true
+            if release {
+                current.inbound = nil
+            }
         }
     }
 

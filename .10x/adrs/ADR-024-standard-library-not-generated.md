@@ -177,3 +177,13 @@ Locked, Corrupt(String), Io(String) }` is the ninth standard type (type id `0x3d
 golden and the three runtimes' standard types follow; every core's schema hash moves (the standard
 surface alone is now `0xbbf6_f70d_0c56_7f47`). What this ADR decides is unchanged: the standard
 types are in every schema and in no app's generated bindings.
+
+## Note (2026-10-01): the standard types at an iOS 15 floor (ADR-045)
+
+No change to the decision or to any shape. The Swift runtime's floor drops to iOS 15 / macOS 12 (ADR-045), and the
+standard surface needs nothing newer: none of the eight standard types or ten ports carries a `Duration` (the
+request timeout is `u32` milliseconds), so `Core/StandardRecords.swift` and `Core/StandardPorts.swift` compile at the
+floor unchanged, and the `stdlib` golden case is built for the iOS 15.0 and 16.0 simulators with the rest
+(`typecheck_swift`). What the floor does change is the one generated spelling that this ADR left to the schema:
+a wire `Duration` field of an app's own type is `Swift.Duration` from a floor of iOS 16 and the runtime's
+`UndraDuration` below it; neither is a standard type, so the filtering rules above are untouched.

@@ -1,0 +1,50 @@
+# undra.toml: this file makes the directory an Undra project (`undra --help` for the commands).
+
+[project]
+name = "ios15-sample"
+# The Android applicationId, the iOS bundle identifier and the base of the Kotlin package.
+id = "com.example.ios15sample"
+platforms = ["ios"]
+
+[core]
+# The crate `undra bindgen`, `undra build` and `undra dev` work on.
+path = "core"
+# namespace = "todo"   # names the core's symbol, libraries and entry point; default: the crate name
+
+[paths]
+# Written by `undra bindgen` (Swift package, Gradle module, npm package). Commit it or
+# regenerate it in CI with `undra bindgen --check`.
+generated = "generated"
+# Written by `undra build` (XCFramework, jniLibs, wasm). Do not commit.
+build = "build"
+
+[undra]
+# Where Undra comes from. `path` is a checkout of the Undra repository (crates and
+# runtimes are used from there); without it, the release `version` names is used: the
+# crates by git tag (see core/Cargo.toml), the runtimes from their package registries.
+version = "0.1"
+path = "../.."
+
+[bindings]
+# Names of the generated code. Defaults are derived from the core crate's name.
+# swift_module = "TodoCore"
+# kotlin_package = "com.example.todo.core"
+# ts_scope = "app"
+# ts_js_number = false        # i64/u64 as `number` instead of `bigint`
+# swift_typed_throws = true   # port requirements: `throws(E)`; false emits plain `throws`
+# swift_observation = "observable-object"   # Swift stores: "observation" (@Observable, iOS 17+) or "observable-object" (iOS 15+); default follows [ios] deployment_target
+
+[ios]
+# The lowest iOS the app runs on, 15.0 or later. From 17.0 the generated Swift stores are `@Observable`;
+# below it they are `ObservableObject`s (docs/IOS_15_16.md).
+deployment_target = "15.0"
+# Simulator slices of the XCFramework. Add "x86_64" for Intel Macs.
+simulator_archs = ["arm64"]
+
+[android]
+abis = ["arm64-v8a", "x86_64"]
+min_sdk = 26
+
+[web]
+# "z" is smallest, "s" is small and a little faster: measure both.
+opt_level = "z"
