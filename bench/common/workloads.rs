@@ -25,9 +25,7 @@ use undra::wire::{Bytes, Decode, Encode, Handle, KeyedPatch, Reader, Timestamp, 
 use undra_bench::workload::{Bench, Workload, plain, with_reset};
 
 use super::fixtures::{self, Item, Shape};
-use super::host::{
-    Core, CountingHost, call_ok, construct, method_call, runtime, runtime_with,
-};
+use super::host::{Core, CountingHost, call_ok, construct, method_call, runtime, runtime_with};
 
 /// Every operation the budgets test gates: one per wire type (the round trip), plus dispatch,
 /// signals, snapshot and the per-operation rows of the harsh-conditions scenarios (`stress`).
@@ -394,7 +392,13 @@ impl undra::runtime::Host for PingHost {
     fn reply(&self, _: u32, _: &[u8]) {}
     fn change_set(&self, _: &[u8]) {}
     fn stream_item(&self, _: u32, _: &[u8]) {}
-    fn port_call(&self, _port: u32, method: u32, id: u32, args: &[u8]) -> undra::runtime::PortCallOutcome {
+    fn port_call(
+        &self,
+        _port: u32,
+        method: u32,
+        id: u32,
+        args: &[u8],
+    ) -> undra::runtime::PortCallOutcome {
         self.calls.fetch_add(1, Ordering::Relaxed);
         if method == ids::port_method_id("Pinger", "echo") {
             // `instance u64, n u32` -> the `Ok` body is `n`.

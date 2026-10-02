@@ -32,7 +32,11 @@ fn an_uncommitted_scope_gives_everything_back_and_a_committed_one_keeps_it() {
     assert_eq!(scope.len(), 2);
     assert_eq!(rt.objects().host_refs(), 2);
     drop(scope);
-    assert_eq!(rt.objects().host_refs(), 0, "nothing carried them: nobody owns them");
+    assert_eq!(
+        rt.objects().host_refs(),
+        0,
+        "nothing carried them: nobody owns them"
+    );
     assert!(rt.objects().host_refs_of(a).is_none() && rt.objects().host_refs_of(b).is_none());
     assert_eq!(rt.objects().live(), 0);
 
@@ -56,7 +60,11 @@ fn a_rolled_back_second_issue_of_a_held_object_only_gives_its_own_reference_back
     assert_eq!(scope.issue(thing.clone()).unwrap(), held);
     assert_eq!(rt.objects().host_refs_of(held), Some(2));
     drop(scope);
-    assert_eq!(rt.objects().host_refs_of(held), Some(1), "the host's own reference stays");
+    assert_eq!(
+        rt.objects().host_refs_of(held),
+        Some(1),
+        "the host's own reference stays"
+    );
 }
 
 #[test]
@@ -87,7 +95,10 @@ fn a_restore_makes_every_plain_handle_stale_issued_or_constructed() {
     scope.commit();
     assert_ne!(derived, constructed);
     rt.restore(&rt.snapshot()).unwrap();
-    assert!(rt.objects().host_refs_of(derived).is_none(), "a restore makes every plain handle stale");
+    assert!(
+        rt.objects().host_refs_of(derived).is_none(),
+        "a restore makes every plain handle stale"
+    );
     assert_eq!(rt.objects().host_refs(), 0);
 }
 

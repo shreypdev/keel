@@ -605,10 +605,15 @@ mod tests {
             "{canonical}"
         );
         assert!(
-            canonical.contains(r#""returns":{"kind":"option","of":{"kind":"object","of":"Calculator"}}"#),
+            canonical.contains(
+                r#""returns":{"kind":"option","of":{"kind":"object","of":"Calculator"}}"#
+            ),
             "{canonical}"
         );
-        assert!(canonical.contains(r#""kind":"callback","methods":[]"#), "{canonical}");
+        assert!(
+            canonical.contains(r#""kind":"callback","methods":[]"#),
+            "{canonical}"
+        );
         assert_ne!(schema.hash(), representative_schema().hash());
         assert_eq!(Schema::from_json(&schema.to_json_pretty()).unwrap(), schema);
     }

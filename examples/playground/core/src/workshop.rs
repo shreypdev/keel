@@ -77,7 +77,8 @@ impl Shelf {
 
     /// Puts `count` more items on the shelf.
     pub fn stock(&self, count: u32) {
-        self.items.update(|items| *items = items.saturating_add(count));
+        self.items
+            .update(|items| *items = items.saturating_add(count));
     }
 
     /// Takes every item off the shelf.
@@ -185,7 +186,8 @@ impl Workshop {
             return Err(WorkshopError::NoName);
         }
         if let Ok(ctx) = self.ctx.upgrade() {
-            ctx.sleep(std::time::Duration::from_millis(u64::from(delay_ms))).await;
+            ctx.sleep(std::time::Duration::from_millis(u64::from(delay_ms)))
+                .await;
         }
         Ok(self.shelf(name))
     }
@@ -196,7 +198,8 @@ impl Workshop {
         txn(|| {
             let moved = from.items.get();
             from.items.set(0);
-            onto.items.update(|items| *items = items.saturating_add(moved));
+            onto.items
+                .update(|items| *items = items.saturating_add(moved));
         });
     }
 
@@ -219,7 +222,10 @@ impl Workshop {
             reporter.note(format!("step {step} of {steps}"));
         }
         self.jobs.update(|jobs| *jobs += 1);
-        if reporter.confirm(format!("ran {steps} steps; go on?")).await? {
+        if reporter
+            .confirm(format!("ran {steps} steps; go on?"))
+            .await?
+        {
             Ok(steps)
         } else {
             Err(ReportError::Declined)
@@ -272,8 +278,13 @@ impl Workshop {
 
     /// How many reporters are subscribed.
     pub fn watching(&self) -> u32 {
-        u32::try_from(self.watchers.lock().unwrap_or_else(|e| e.into_inner()).len())
-            .unwrap_or(u32::MAX)
+        u32::try_from(
+            self.watchers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .len(),
+        )
+        .unwrap_or(u32::MAX)
     }
 }
 

@@ -86,7 +86,8 @@ impl CallbackHandle {
         let mut w = Writer::new();
         w.write_u64(self.instance);
         args(&mut w);
-        ctx.runtime().port_notify(self.port_id, method_id, w.into_vec());
+        ctx.runtime()
+            .port_notify(self.port_id, method_id, w.into_vec());
     }
 
     /// Calls an `async` method: an ordinary port call, answered through `port_reply`. Dropping
@@ -103,7 +104,9 @@ impl CallbackHandle {
         let mut w = Writer::new();
         w.write_u64(self.instance);
         args(&mut w);
-        let future = ctx.runtime().port_call(self.port_id, method_id, w.into_vec());
+        let future = ctx
+            .runtime()
+            .port_call(self.port_id, method_id, w.into_vec());
         let id = future.port_call_id();
         CallbackCall {
             future: Some(future),

@@ -24,8 +24,16 @@ fn a_disconnect_gives_back_what_the_clients_calls_returned() {
     let mut client = f.client();
     let counter = client.new_counter(1);
     let child = child_of(&mut client, counter);
-    assert_eq!(child_of(&mut client, counter), child, "one object, one handle");
-    assert_eq!(stat(&f.rt, "host_refs"), 3, "the counter, and two references to the child");
+    assert_eq!(
+        child_of(&mut client, counter),
+        child,
+        "one object, one handle"
+    );
+    assert_eq!(
+        stat(&f.rt, "host_refs"),
+        3,
+        "the counter, and two references to the child"
+    );
     assert_eq!(stat(&f.rt, "origin_refs"), 2);
 
     drop(client);
@@ -43,10 +51,14 @@ fn a_release_gives_one_reference_back_and_the_disconnect_the_rest() {
     let child = child_of(&mut client, counter);
     assert_eq!(child_of(&mut client, counter), child);
     client.release(child);
-    f.eventually("one reference went back", |f| stat(&f.rt, "origin_refs") == 1);
+    f.eventually("one reference went back", |f| {
+        stat(&f.rt, "origin_refs") == 1
+    });
     assert_eq!(stat(&f.rt, "host_refs"), 2);
     drop(client);
-    f.eventually("the other went back with the disconnect", |f| stat(&f.rt, "host_refs") == 0);
+    f.eventually("the other went back with the disconnect", |f| {
+        stat(&f.rt, "host_refs") == 0
+    });
 }
 
 #[test]
@@ -63,11 +75,19 @@ fn a_resumed_session_keeps_its_returned_objects_until_it_releases_or_expires() {
     let child = child_of(&mut first, counter);
     drop(first);
     f.eventually("the slot is free", |f| !f.bridge.is_connected());
-    assert_eq!(stat(&f.rt, "host_refs"), 2, "the counter and the child were kept");
+    assert_eq!(
+        stat(&f.rt, "host_refs"),
+        2,
+        "the counter and the child were kept"
+    );
 
     let mut back = f.session_client("tok-objects", true);
     let (status, body) = back.method(child, undra::meta::ids::method_id("Child", "tag"), &[]);
-    assert_eq!((status, dec::<u32>(&body)), (ReplyStatus::Ok, 7), "the same child");
+    assert_eq!(
+        (status, dec::<u32>(&body)),
+        (ReplyStatus::Ok, 7),
+        "the same child"
+    );
     drop(back);
     f.eventually("the slot is free again", |f| !f.bridge.is_connected());
 

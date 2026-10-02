@@ -131,7 +131,9 @@ impl Calculator {
 
     /// A new child every call: the first issue of a handle (ADR-040).
     pub fn fresh_dock(&self) -> Arc<Dock> {
-        Arc::new(Dock { slots: self.base as u32 })
+        Arc::new(Dock {
+            slots: self.base as u32,
+        })
     }
 
     /// The same child every call: the handle the host already holds, one more reference.

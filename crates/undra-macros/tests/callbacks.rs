@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 
 use undra::meta::{PortKind, TypeRef, collect_schema, ids};
-use undra::runtime::{Ctx, PortError, Port};
+use undra::runtime::{Ctx, Port, PortError};
 use undra::wire::{Decode, Encode, Handle, Writer};
 use undra_macros as k;
 
@@ -62,6 +62,7 @@ impl Watch {
     }
 }
 
+#[derive(Default)]
 pub struct Uploader {
     kept: Mutex<Vec<Arc<dyn UploadListener>>>,
 }
@@ -69,10 +70,16 @@ pub struct Uploader {
 #[k::api]
 impl Uploader {
     pub fn new() -> Self {
-        Uploader { kept: Mutex::new(Vec::new()) }
+        Uploader {
+            kept: Mutex::new(Vec::new()),
+        }
     }
 
-    pub async fn upload(&self, name: String, listener: Arc<dyn UploadListener>) -> Result<bool, PromptError> {
+    pub async fn upload(
+        &self,
+        name: String,
+        listener: Arc<dyn UploadListener>,
+    ) -> Result<bool, PromptError> {
         listener.progress(0, 10);
         let replace = listener.confirm_replace(name.clone()).await?;
         listener.progress(10, 10);
@@ -133,7 +140,11 @@ fn is_release(call: &support::PortCallRecord, instance: u64) -> bool {
 #[test]
 fn the_schema_describes_a_callback_port_and_callback_parameters() {
     let schema = collect_schema("test");
-    let port = schema.ports.iter().find(|p| p.name == "UploadListener").unwrap();
+    let port = schema
+        .ports
+        .iter()
+        .find(|p| p.name == "UploadListener")
+        .unwrap();
     assert_eq!(port.kind, PortKind::Callback);
     assert!(!port.background);
     assert_eq!(port.port_id, ids::port_id("UploadListener"));
@@ -146,14 +157,29 @@ fn the_schema_describes_a_callback_port_and_callback_parameters() {
         find("confirm_replace").returns,
         TypeRef::result(TypeRef::Bool, TypeRef::named("PromptError"))
     );
-    let provider = schema.ports.iter().find(|p| p.name == "TokenProvider").unwrap();
+    let provider = schema
+        .ports
+        .iter()
+        .find(|p| p.name == "TokenProvider")
+        .unwrap();
     assert!(provider.background);
 
-    let uploader = schema.objects.iter().find(|o| o.name == "Uploader").unwrap();
-    let upload = uploader.methods.iter().find(|m| m.name == "upload").unwrap();
+    let uploader = schema
+        .objects
+        .iter()
+        .find(|o| o.name == "Uploader")
+        .unwrap();
+    let upload = uploader
+        .methods
+        .iter()
+        .find(|m| m.name == "upload")
+        .unwrap();
     assert_eq!(upload.params[1].ty, TypeRef::callback("UploadListener"));
     let maybe = uploader.methods.iter().find(|m| m.name == "maybe").unwrap();
-    assert_eq!(maybe.params[0].ty, TypeRef::option(TypeRef::callback("UploadListener")));
+    assert_eq!(
+        maybe.params[0].ty,
+        TypeRef::option(TypeRef::callback("UploadListener"))
+    );
     assert_eq!(schema.validate(), Ok(()));
     assert_eq!(<dyn UploadListener as Port>::KIND, PortKind::Callback);
 }
@@ -174,10 +200,15 @@ fn an_instance_becomes_a_proxy_that_calls_the_host_with_the_instance_first() {
     });
     let up = uploader(&rt);
     let out = rt
-        .call_object("Uploader", "upload", up, &args(|w| {
-            "a.txt".encode(w);
-            42_u64.encode(w);
-        }))
+        .call_object(
+            "Uploader",
+            "upload",
+            up,
+            &args(|w| {
+                "a.txt".encode(w);
+                42_u64.encode(w);
+            }),
+        )
         .run_async()
         .unwrap();
     assert!(bool::decode_exact(&out).unwrap());
@@ -197,17 +228,27 @@ fn an_instance_becomes_a_proxy_that_calls_the_host_with_the_instance_first() {
         ]
     );
     assert_eq!(calls[0].port_call_id, 0, "fire-and-forget");
-    assert_eq!(calls[0].args, args(|w| {
-        42_u64.encode(w);
-        0_u64.encode(w);
-        10_u64.encode(w);
-    }));
+    assert_eq!(
+        calls[0].args,
+        args(|w| {
+            42_u64.encode(w);
+            0_u64.encode(w);
+            10_u64.encode(w);
+        })
+    );
     assert_ne!(calls[1].port_call_id, 0, "an async method is a real call");
-    assert_eq!(calls[1].args, args(|w| {
-        42_u64.encode(w);
-        "a.txt".encode(w);
-    }));
-    assert!(is_release(&calls[4], 42), "the proxy gave its reference back: {:?}", calls[4]);
+    assert_eq!(
+        calls[1].args,
+        args(|w| {
+            42_u64.encode(w);
+            "a.txt".encode(w);
+        })
+    );
+    assert!(
+        is_release(&calls[4], 42),
+        "the proxy gave its reference back: {:?}",
+        calls[4]
+    );
 }
 
 fn args_of(encode: impl FnOnce(&mut Writer)) -> Vec<u8> {
@@ -226,10 +267,16 @@ fn the_same_instance_twice_is_one_proxy_and_the_duplicate_reference_goes_back() 
     };
     assert!(!keep(7), "the first crossing makes a proxy");
     assert!(rt.port_calls().is_empty(), "and sends nothing");
-    assert!(keep(7), "the second finds the live proxy: Arc::ptr_eq holds");
+    assert!(
+        keep(7),
+        "the second finds the live proxy: Arc::ptr_eq holds"
+    );
     let calls = rt.port_calls();
     assert_eq!(calls.len(), 1);
-    assert!(is_release(&calls[0], 7), "the duplicate reference went back at once: {calls:?}");
+    assert!(
+        is_release(&calls[0], 7),
+        "the duplicate reference went back at once: {calls:?}"
+    );
     assert!(!keep(8), "another instance is another proxy");
     rt.port_calls();
 
@@ -244,7 +291,11 @@ fn the_same_instance_twice_is_one_proxy_and_the_duplicate_reference_goes_back() 
             u64::decode_exact(&c.args).unwrap()
         })
         .collect();
-    assert_eq!(released.len(), 2, "the two Arcs of instance 7 are one proxy: one reference");
+    assert_eq!(
+        released.len(),
+        2,
+        "the two Arcs of instance 7 are one proxy: one reference"
+    );
     assert!(released.contains(&7) && released.contains(&8));
 }
 
@@ -257,25 +308,51 @@ fn a_refused_call_transfers_nothing() {
         .call_object("Uploader", "keep", up, &args(|w| 11_u64.encode(w)))
         .bad_request();
     assert!(reason.contains("stale handle"), "{reason}");
-    assert!(rt.port_calls().is_empty(), "no proxy was made, so nothing is released by the core");
+    assert!(
+        rt.port_calls().is_empty(),
+        "no proxy was made, so nothing is released by the core"
+    );
     assert!(rt.real().stats_json().contains("\"live_callbacks\":0"));
 
     // The null instance and undecodable bytes are refused before any proxy is made.
     let up = uploader(&rt);
-    let reason = rt.call_object("Uploader", "keep", up, &args(|w| 0_u64.encode(w))).bad_request();
-    assert!(reason.contains("argument `listener` of `Uploader.keep`"), "{reason}");
+    let reason = rt
+        .call_object("Uploader", "keep", up, &args(|w| 0_u64.encode(w)))
+        .bad_request();
+    assert!(
+        reason.contains("argument `listener` of `Uploader.keep`"),
+        "{reason}"
+    );
     assert!(reason.contains("null instance"), "{reason}");
-    let reason = rt.call_object("Uploader", "keep", up, &[1, 2]).bad_request();
-    assert!(reason.contains("cannot decode argument `listener`"), "{reason}");
+    let reason = rt
+        .call_object("Uploader", "keep", up, &[1, 2])
+        .bad_request();
+    assert!(
+        reason.contains("cannot decode argument `listener`"),
+        "{reason}"
+    );
     assert!(rt.port_calls().is_empty());
 
     // An optional callback: none transfers nothing, some transfers one reference.
-    let none = rt.call_object("Uploader", "maybe", up, &args(|w| Option::<u64>::None.encode(w))).sync_ok();
+    let none = rt
+        .call_object(
+            "Uploader",
+            "maybe",
+            up,
+            &args(|w| Option::<u64>::None.encode(w)),
+        )
+        .sync_ok();
     assert!(!bool::decode_exact(&none).unwrap());
-    let some = rt.call_object("Uploader", "maybe", up, &args(|w| Some(5_u64).encode(w))).sync_ok();
+    let some = rt
+        .call_object("Uploader", "maybe", up, &args(|w| Some(5_u64).encode(w)))
+        .sync_ok();
     assert!(bool::decode_exact(&some).unwrap());
     let calls = rt.port_calls();
-    assert_eq!(calls.len(), 1, "the unused proxy dropped at the end of the call");
+    assert_eq!(
+        calls.len(),
+        1,
+        "the unused proxy dropped at the end of the call"
+    );
     assert!(is_release(&calls[0], 5));
     let reason = rt
         .call_object("Uploader", "maybe", up, &args(|w| Some(0_u64).encode(w)))
@@ -295,10 +372,15 @@ fn dropping_the_future_of_an_async_callback_sends_cancel() {
         }
     });
     let up = uploader(&rt);
-    let pending = rt.call_object("Uploader", "upload", up, &args(|w| {
-        "b.txt".encode(w);
-        43_u64.encode(w);
-    }));
+    let pending = rt.call_object(
+        "Uploader",
+        "upload",
+        up,
+        &args(|w| {
+            "b.txt".encode(w);
+            43_u64.encode(w);
+        }),
+    );
     // Poll it once so the proxy has made its call, then drop it: the call is cancelled.
     let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
     let undra::runtime::DispatchResult::Async(mut future) = pending.0 else {
@@ -306,7 +388,11 @@ fn dropping_the_future_of_an_async_callback_sends_cancel() {
     };
     assert!(future.as_mut().poll(&mut cx).is_pending());
     let calls = rt.port_calls();
-    let question = calls.iter().find(|c| c.method_id == method("confirm_replace")).unwrap().clone();
+    let question = calls
+        .iter()
+        .find(|c| c.method_id == method("confirm_replace"))
+        .unwrap()
+        .clone();
     assert!(question.port_call_id != 0);
     drop(future);
     let calls = rt.port_calls();
@@ -315,14 +401,21 @@ fn dropping_the_future_of_an_async_callback_sends_cancel() {
         .find(|c| c.method_id == ids::callback_cancel_id("UploadListener"))
         .unwrap_or_else(|| panic!("no __cancel in {calls:?}"));
     assert_eq!(cancel.port_call_id, 0, "__cancel is fire-and-forget");
-    assert_eq!(cancel.args, args(|w| {
-        43_u64.encode(w);
-        question.port_call_id.encode(w);
-    }));
+    assert_eq!(
+        cancel.args,
+        args(|w| {
+            43_u64.encode(w);
+            question.port_call_id.encode(w);
+        })
+    );
     // The proxy that went with the future gave its reference back as well.
     assert!(calls.iter().any(|c| is_release(c, 43)), "{calls:?}");
     // A late answer is discarded, as for any port call.
-    rt.real().port_reply(&undra::runtime::testing::port_reply_ok(question.port_call_id, &[1]));
+    rt.real()
+        .port_reply(&undra::runtime::testing::port_reply_ok(
+            question.port_call_id,
+            &[1],
+        ));
 }
 
 #[test]
@@ -336,16 +429,22 @@ fn an_answered_async_callback_sends_no_cancel() {
         }
     });
     let up = uploader(&rt);
-    rt.call_object("Uploader", "upload", up, &args(|w| {
-        "c.txt".encode(w);
-        44_u64.encode(w);
-    }))
+    rt.call_object(
+        "Uploader",
+        "upload",
+        up,
+        &args(|w| {
+            "c.txt".encode(w);
+            44_u64.encode(w);
+        }),
+    )
     .run_async()
     .unwrap();
-    assert!(rt
-        .port_calls()
-        .iter()
-        .all(|c| c.method_id != ids::callback_cancel_id("UploadListener")));
+    assert!(
+        rt.port_calls()
+            .iter()
+            .all(|c| c.method_id != ids::callback_cancel_id("UploadListener"))
+    );
 }
 
 #[test]
@@ -354,37 +453,57 @@ fn a_host_that_fails_or_is_gone_is_a_typed_error_not_a_panic() {
     // The host reports the typed error of the method (status 1).
     rt.bind_foreign(PORT, |method_id, _| {
         if method_id == method("confirm_replace") {
-            Err(PortError::Failed(args_of(|w| PromptError::Declined.encode(w))))
+            Err(PortError::Failed(args_of(|w| {
+                PromptError::Declined.encode(w)
+            })))
         } else {
             Ok(Vec::new())
         }
     });
     let up = uploader(&rt);
     let err = rt
-        .call_object("Uploader", "upload", up, &args(|w| {
-            "d.txt".encode(w);
-            45_u64.encode(w);
-        }))
+        .call_object(
+            "Uploader",
+            "upload",
+            up,
+            &args(|w| {
+                "d.txt".encode(w);
+                45_u64.encode(w);
+            }),
+        )
         .run_async()
         .expect_err("the host's own error");
-    assert_eq!(PromptError::decode_exact(&err).unwrap(), PromptError::Declined);
+    assert_eq!(
+        PromptError::decode_exact(&err).unwrap(),
+        PromptError::Declined
+    );
 
     // No host binding at all: unavailable, which the error type represents.
     let rt = Runtime::new();
     let up = uploader(&rt);
     let err = rt
-        .call_object("Uploader", "upload", up, &args(|w| {
-            "e.txt".encode(w);
-            46_u64.encode(w);
-        }))
+        .call_object(
+            "Uploader",
+            "upload",
+            up,
+            &args(|w| {
+                "e.txt".encode(w);
+                46_u64.encode(w);
+            }),
+        )
         .run_async()
         .expect_err("unavailable");
-    assert!(matches!(PromptError::decode_exact(&err).unwrap(), PromptError::Unavailable(_)));
+    assert!(matches!(
+        PromptError::decode_exact(&err).unwrap(),
+        PromptError::Unavailable(_)
+    ));
 
     // After shutdown a kept proxy is silent and its async method is `Unavailable(cancelled)`.
     let rt = Runtime::new();
     let up = uploader(&rt);
-    let _ = rt.call_object("Uploader", "keep", up, &args(|w| 47_u64.encode(w))).sync_ok();
+    let _ = rt
+        .call_object("Uploader", "keep", up, &args(|w| 47_u64.encode(w)))
+        .sync_ok();
     rt.port_calls();
     let ctx: Ctx = rt.ctx();
     let kept = ctx.runtime().callback::<dyn UploadListener>(47);
@@ -403,26 +522,43 @@ fn objects_and_callbacks_mix_in_one_signature() {
     let rt = Runtime::new();
     let up = uploader(&rt);
     let watch = u64::decode_exact(
-        &rt.call_object("Uploader", "watch", up, &args(|w| 50_u64.encode(w))).sync_ok(),
+        &rt.call_object("Uploader", "watch", up, &args(|w| 50_u64.encode(w)))
+            .sync_ok(),
     )
     .unwrap();
     assert!(Handle(watch).generation() > 0);
     let one = rt
-        .call_object("Uploader", "with_token", up, &args(|w| {
-            51_u64.encode(w);
-            watch.encode(w);
-        }))
+        .call_object(
+            "Uploader",
+            "with_token",
+            up,
+            &args(|w| {
+                51_u64.encode(w);
+                watch.encode(w);
+            }),
+        )
         .sync_ok();
     assert_eq!(u32::decode_exact(&one).unwrap(), 1);
     // A stale object parameter refuses the call before the callback proxy is made.
     rt.real().release(watch);
     rt.port_calls();
     let reason = rt
-        .call_object("Uploader", "with_token", up, &args(|w| {
-            52_u64.encode(w);
-            watch.encode(w);
-        }))
+        .call_object(
+            "Uploader",
+            "with_token",
+            up,
+            &args(|w| {
+                52_u64.encode(w);
+                watch.encode(w);
+            }),
+        )
         .bad_request();
-    assert!(reason.contains("argument `other` of `Uploader.with_token`"), "{reason}");
-    assert!(rt.port_calls().iter().all(|c| !is_release(c, 52)), "no reference to give back");
+    assert!(
+        reason.contains("argument `other` of `Uploader.with_token`"),
+        "{reason}"
+    );
+    assert!(
+        rt.port_calls().iter().all(|c| !is_release(c, 52)),
+        "no reference to give back"
+    );
 }

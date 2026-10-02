@@ -145,11 +145,10 @@ impl<'a> IssueScope<'a> {
             .__undra_attach()
             .map_err(|e| IssueError::Attach(e.to_string()))?;
         let address = Arc::as_ptr(&object).cast::<()>() as usize;
-        let (handle, _new) = self.rt.objects().issue_with(
-            address,
-            || any_object(Arc::clone(&object)),
-            transient,
-        );
+        let (handle, _new) =
+            self.rt
+                .objects()
+                .issue_with(address, || any_object(Arc::clone(&object)), transient);
         self.issued.push(handle);
         Ok(handle)
     }

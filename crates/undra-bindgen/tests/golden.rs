@@ -154,7 +154,17 @@ macro_rules! golden_cases {
 }
 
 golden_cases!(
-    object_graph, callbacks, records, enums, errors, objects, stores, ports, queries, full, stdlib,
+    object_graph,
+    callbacks,
+    records,
+    enums,
+    errors,
+    objects,
+    stores,
+    ports,
+    queries,
+    full,
+    stdlib,
     recursive
 );
 

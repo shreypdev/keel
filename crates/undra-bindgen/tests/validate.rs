@@ -338,13 +338,24 @@ fn an_object_nothing_returns_needs_a_constructor() {
 #[test]
 fn callback_interfaces_have_their_own_names_and_reserved_methods() {
     let mut s = Schema::new("t");
-    s.enums.push(error_def("E", "", vec![with_message(unit_variant("X", 0), "x")]));
+    s.enums.push(error_def(
+        "E",
+        "",
+        vec![with_message(unit_variant("X", 0), "x")],
+    ));
     s.ports.push(port(
         "Listener",
         "",
         PortKind::Callback,
         vec![
-            port_method("Listener", "release_instance", "", vec![], TypeRef::Unit, false),
+            port_method(
+                "Listener",
+                "release_instance",
+                "",
+                vec![],
+                TypeRef::Unit,
+                false,
+            ),
             port_method(
                 "Listener",
                 "ask",
@@ -355,11 +366,22 @@ fn callback_interfaces_have_their_own_names_and_reserved_methods() {
             ),
         ],
     ));
-    assert_eq!(codes(&s), ["E0051"], "`releaseInstance` is reserved for `__release`");
+    assert_eq!(
+        codes(&s),
+        ["E0051"],
+        "`releaseInstance` is reserved for `__release`"
+    );
     s.ports[0].methods.remove(0);
     assert!(undra_bindgen::validate(&s).is_ok(), "{:?}", codes(&s));
     // A callback that is not a callback port, and a synchronous value method, are meta's.
-    s.ports[0].methods.push(port_method("Listener", "get", "", vec![], TypeRef::U32, false));
+    s.ports[0].methods.push(port_method(
+        "Listener",
+        "get",
+        "",
+        vec![],
+        TypeRef::U32,
+        false,
+    ));
     assert_eq!(codes(&s), ["E0071"]);
 }
 

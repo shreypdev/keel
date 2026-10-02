@@ -374,7 +374,10 @@ impl Checks {
         let named_items = if self.named.is_empty() {
             TokenStream::new()
         } else {
-            let asserts = self.named.iter().map(|named| named.assertion(&meta, &runtime));
+            let asserts = self
+                .named
+                .iter()
+                .map(|named| named.assertion(&meta, &runtime));
             quote! {
                 trait __UndraFallback {
                     const UNDRA_TYPE_ID: u32 = 0;
@@ -527,13 +530,17 @@ impl Named {
             code::E0064,
             format!("`{shown}` is a record, enum or error, not an object"),
             "only an object (a type with an `#[undra::api] impl` block) crosses as `Arc<T>` or `&T`, as a handle; records, enums and errors cross by value, copied",
-            format!("write `{shown}` without `Arc` or `&`, or give it an `#[undra::api] impl` block if it is meant to be an object"),
+            format!(
+                "write `{shown}` without `Arc` or `&`, or give it an `#[undra::api] impl` block if it is meant to be an object"
+            ),
         ));
         let undeclared = panic_text(&Diag::new(
             code::E0064,
             format!("`{shown}` is not an object"),
             "an object is a type with an `#[undra::api] impl` block: the macro generates what lets the core hand it to the platforms as a handle, and without one there is nothing to hand out",
-            format!("add `#[undra::api]` to an `impl {shown} {{ .. }}` block, or use a record (`#[undra::api] struct`) if it is plain data"),
+            format!(
+                "add `#[undra::api]` to an `impl {shown} {{ .. }}` block, or use a record (`#[undra::api] struct`) if it is plain data"
+            ),
         ));
         let mismatch = panic_text(&Diag::new(
             code::E0061,
@@ -543,7 +550,7 @@ impl Named {
             format!(
                 "Undra describes an object to the platforms by the name it is written with, while the handle the core issues is of the type that name resolves to; with `type {name} = Other` or `use path::Other as {name}` the platforms would wrap it as `{name}`"
             ),
-            format!("write the object under the name it is declared with (`Other` in the examples above)"),
+            "write the object under the name it is declared with (`Other` in the examples above)",
         ));
         quote_spanned! {span=>
             const _: () = {
@@ -571,9 +578,7 @@ impl Named {
             format!(
                 "`{name}` here is an alias or a renamed import of a callback trait that is declared under another name"
             ),
-            format!(
-                "Undra describes a callback interface to the platforms by the name it is written with, while the proxy the core calls is of the trait that name resolves to"
-            ),
+            "Undra describes a callback interface to the platforms by the name it is written with, while the proxy the core calls is of the trait that name resolves to",
             "write the trait under the name it is declared with",
         ));
         quote_spanned! {span=>

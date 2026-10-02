@@ -155,7 +155,10 @@ pub enum Released {
 impl core::fmt::Debug for Released {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Released::Kept { remaining } => f.debug_struct("Kept").field("remaining", remaining).finish(),
+            Released::Kept { remaining } => f
+                .debug_struct("Kept")
+                .field("remaining", remaining)
+                .finish(),
             Released::Removed(_) => f.write_str("Removed(..)"),
         }
     }
@@ -287,7 +290,8 @@ impl Generations {
 
     /// Makes sure nothing at or below `floor` is issued from now on. Never lowers the counter.
     fn raise_to(&self, floor: u64) {
-        self.last.fetch_max(floor.min(Handle::MAX_GENERATION), Ordering::AcqRel);
+        self.last
+            .fetch_max(floor.min(Handle::MAX_GENERATION), Ordering::AcqRel);
     }
 }
 
@@ -510,7 +514,9 @@ impl ObjectTable {
             if saturated {
                 crate::runtime::log_error_current(
                     "undra::runtime",
-                    &format!("host references to {handle:?} reached u32::MAX and stay there; the host leaks"),
+                    &format!(
+                        "host references to {handle:?} reached u32::MAX and stay there; the host leaks"
+                    ),
                 );
             }
             return (handle, false);

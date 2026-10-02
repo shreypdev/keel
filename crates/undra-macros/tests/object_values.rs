@@ -93,8 +93,12 @@ pub struct Account {
 impl Account {
     pub fn new(ctx: Ctx) -> Self {
         Account {
-            inbox: Arc::new(Mailbox { name: "inbox".into() }),
-            sent: Arc::new(Mailbox { name: "sent".into() }),
+            inbox: Arc::new(Mailbox {
+                name: "inbox".into(),
+            }),
+            sent: Arc::new(Mailbox {
+                name: "sent".into(),
+            }),
             chat: Arc::new(ChatStore::new(ctx.clone())),
             moved: Mutex::new(Vec::new()),
             _ctx: ctx.downgrade(),
@@ -115,7 +119,11 @@ impl Account {
     }
 
     pub fn mailboxes(&self) -> Vec<Arc<Mailbox>> {
-        vec![Arc::clone(&self.inbox), Arc::clone(&self.sent), Arc::clone(&self.inbox)]
+        vec![
+            Arc::clone(&self.inbox),
+            Arc::clone(&self.sent),
+            Arc::clone(&self.inbox),
+        ]
     }
 
     pub async fn open_thread(&self, id: u32) -> Result<Arc<Thread>, MailError> {
@@ -132,7 +140,10 @@ impl Account {
     }
 
     pub fn move_to(&self, message: u32, target: &Mailbox) {
-        self.moved.lock().unwrap().push(format!("{message}->{}", target.name));
+        self.moved
+            .lock()
+            .unwrap()
+            .push(format!("{message}->{}", target.name));
     }
 
     pub fn move_to_shared(&self, target: Arc<Mailbox>) -> String {
@@ -148,7 +159,11 @@ impl Account {
     }
 
     pub fn names(&self, boxes: Vec<Arc<Mailbox>>) -> String {
-        boxes.iter().map(|b| b.name.as_str()).collect::<Vec<_>>().join(",")
+        boxes
+            .iter()
+            .map(|b| b.name.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
     }
 
     pub async fn rename_later(&self, target: &Mailbox) -> String {
@@ -216,11 +231,19 @@ fn the_schema_names_objects_by_object_references() {
         assert_eq!(params.last().unwrap().ty, ty, "{name}");
     }
     // A constructor still returns its own object as `Named` (hash stability), `Arc<Self>` too.
-    let registry = schema.objects.iter().find(|o| o.name == "Registry").unwrap();
+    let registry = schema
+        .objects
+        .iter()
+        .find(|o| o.name == "Registry")
+        .unwrap();
     assert_eq!(registry.constructors[0].returns, TypeRef::named("Registry"));
     let account_ctor = &account.constructors[0];
     assert_eq!(account_ctor.returns, TypeRef::named("Account"));
-    let function = schema.functions.iter().find(|f| f.name == "same_box").unwrap();
+    let function = schema
+        .functions
+        .iter()
+        .find(|f| f.name == "same_box")
+        .unwrap();
     assert_eq!(function.params[0].ty, mailbox);
     assert_eq!(function.returns, mailbox);
     assert_eq!(schema.validate(), Ok(()));
@@ -233,9 +256,15 @@ fn a_returned_object_is_one_owned_host_reference_and_one_handle() {
     let acct = account(&rt);
     let before = rt.real().objects().host_refs();
 
-    let first = handle_of(&rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w))).sync_ok());
+    let first = handle_of(
+        &rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w)))
+            .sync_ok(),
+    );
     assert_eq!(refs(&rt, first), Some(1));
-    let again = handle_of(&rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w))).sync_ok());
+    let again = handle_of(
+        &rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w)))
+            .sync_ok(),
+    );
     assert_eq!(again, first, "an object has at most one live handle");
     assert_eq!(refs(&rt, first), Some(2));
     assert_eq!(rt.real().objects().host_refs(), before + 2);
@@ -249,12 +278,23 @@ fn a_returned_object_is_one_owned_host_reference_and_one_handle() {
     assert_eq!(refs(&rt, first), Some(1));
     rt.real().release(first);
     assert_eq!(refs(&rt, first), None);
-    assert!(rt.call_object("Mailbox", "name", first, &[]).bad_request().contains("stale handle"));
+    assert!(
+        rt.call_object("Mailbox", "name", first, &[])
+            .bad_request()
+            .contains("stale handle")
+    );
 
     // Returned again after the host let go, it is a fresh handle.
-    let fresh = handle_of(&rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w))).sync_ok());
+    let fresh = handle_of(
+        &rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w)))
+            .sync_ok(),
+    );
     assert_ne!(fresh, first);
-    assert_eq!(Handle(fresh).index(), Handle(first).index(), "the slot is reused");
+    assert_eq!(
+        Handle(fresh).index(),
+        Handle(first).index(),
+        "the slot is reused"
+    );
     assert!(Handle(fresh).generation() > Handle(first).generation());
 }
 
@@ -263,9 +303,13 @@ fn option_and_vec_returns_issue_one_reference_per_handle() {
     let rt = Runtime::new();
     let acct = account(&rt);
 
-    let none = rt.call_object("Account", "drafts", acct, &args(|w| false.encode(w))).sync_ok();
+    let none = rt
+        .call_object("Account", "drafts", acct, &args(|w| false.encode(w)))
+        .sync_ok();
     assert_eq!(none, [0]);
-    let some = rt.call_object("Account", "drafts", acct, &args(|w| true.encode(w))).sync_ok();
+    let some = rt
+        .call_object("Account", "drafts", acct, &args(|w| true.encode(w)))
+        .sync_ok();
     let some = Option::<u64>::decode_exact(&some).unwrap().unwrap();
     assert_eq!(refs(&rt, some), Some(1));
 
@@ -274,7 +318,11 @@ fn option_and_vec_returns_issue_one_reference_per_handle() {
     assert_eq!(all.len(), 3);
     assert_eq!(all[0], all[2], "the same Arc twice is one handle");
     assert_eq!(all[0], some, "and the same handle as before");
-    assert_eq!(refs(&rt, all[0]), Some(3), "one from drafts, two from the list");
+    assert_eq!(
+        refs(&rt, all[0]),
+        Some(3),
+        "one from drafts, two from the list"
+    );
     assert_eq!(refs(&rt, all[1]), Some(1));
 }
 
@@ -282,33 +330,69 @@ fn option_and_vec_returns_issue_one_reference_per_handle() {
 fn object_parameters_resolve_before_the_method_runs() {
     let rt = Runtime::new();
     let acct = account(&rt);
-    let sent = handle_of(&rt.call_object("Account", "mailbox", acct, &args(|w| "sent".encode(w))).sync_ok());
-    let inbox = handle_of(&rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w))).sync_ok());
+    let sent = handle_of(
+        &rt.call_object("Account", "mailbox", acct, &args(|w| "sent".encode(w)))
+            .sync_ok(),
+    );
+    let inbox = handle_of(
+        &rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w)))
+            .sync_ok(),
+    );
 
-    rt.call_object("Account", "move_to", acct, &args(|w| {
-        3_u32.encode(w);
-        sent.encode(w);
-    }))
+    rt.call_object(
+        "Account",
+        "move_to",
+        acct,
+        &args(|w| {
+            3_u32.encode(w);
+            sent.encode(w);
+        }),
+    )
     .sync_ok();
     let moved = rt.call_object("Account", "moved", acct, &[]).sync_ok();
     assert_eq!(Vec::<String>::decode_exact(&moved).unwrap(), ["3->sent"]);
     // Borrowed: the call gave nothing and took nothing.
     assert_eq!(refs(&rt, sent), Some(1));
 
-    let by_arc = rt.call_object("Account", "move_to_shared", acct, &args(|w| inbox.encode(w))).sync_ok();
+    let by_arc = rt
+        .call_object(
+            "Account",
+            "move_to_shared",
+            acct,
+            &args(|w| inbox.encode(w)),
+        )
+        .sync_ok();
     assert_eq!(String::decode_exact(&by_arc).unwrap(), "inbox");
     let opt = |h: Option<u64>| args(|w| h.encode(w));
     for (method, expect_some) in [("move_maybe", true), ("move_maybe_shared", true)] {
-        let got = rt.call_object("Account", method, acct, &opt(Some(sent))).sync_ok();
-        assert_eq!(String::decode_exact(&got).unwrap(), "sent", "{method} {expect_some}");
-        let got = rt.call_object("Account", method, acct, &opt(None)).sync_ok();
+        let got = rt
+            .call_object("Account", method, acct, &opt(Some(sent)))
+            .sync_ok();
+        assert_eq!(
+            String::decode_exact(&got).unwrap(),
+            "sent",
+            "{method} {expect_some}"
+        );
+        let got = rt
+            .call_object("Account", method, acct, &opt(None))
+            .sync_ok();
         assert_eq!(String::decode_exact(&got).unwrap(), "none", "{method}");
     }
-    let names = rt.call_object("Account", "names", acct, &args(|w| vec![sent, inbox, sent].encode(w))).sync_ok();
+    let names = rt
+        .call_object(
+            "Account",
+            "names",
+            acct,
+            &args(|w| vec![sent, inbox, sent].encode(w)),
+        )
+        .sync_ok();
     assert_eq!(String::decode_exact(&names).unwrap(), "sent,inbox,sent");
 
     // A free function takes and returns an object: the same handle back, one more reference.
-    let back = handle_of(&rt.call_function("same_box", &args(|w| sent.encode(w))).sync_ok());
+    let back = handle_of(
+        &rt.call_function("same_box", &args(|w| sent.encode(w)))
+            .sync_ok(),
+    );
     assert_eq!(back, sent);
     assert_eq!(refs(&rt, sent), Some(2));
 }
@@ -317,43 +401,78 @@ fn object_parameters_resolve_before_the_method_runs() {
 fn a_stale_or_wrongly_typed_object_parameter_is_a_bad_request_naming_it() {
     let rt = Runtime::new();
     let acct = account(&rt);
-    let sent = handle_of(&rt.call_object("Account", "mailbox", acct, &args(|w| "sent".encode(w))).sync_ok());
+    let sent = handle_of(
+        &rt.call_object("Account", "mailbox", acct, &args(|w| "sent".encode(w)))
+            .sync_ok(),
+    );
     rt.real().release(sent);
 
     let reason = rt
-        .call_object("Account", "move_to", acct, &args(|w| {
-            3_u32.encode(w);
-            sent.encode(w);
-        }))
+        .call_object(
+            "Account",
+            "move_to",
+            acct,
+            &args(|w| {
+                3_u32.encode(w);
+                sent.encode(w);
+            }),
+        )
         .bad_request();
-    assert!(reason.contains("argument `target` of `Account.move_to`"), "{reason}");
+    assert!(
+        reason.contains("argument `target` of `Account.move_to`"),
+        "{reason}"
+    );
     assert!(reason.contains("stale handle"), "{reason}");
 
     // The account's own handle is not a mailbox.
     let reason = rt
-        .call_object("Account", "move_to", acct, &args(|w| {
-            3_u32.encode(w);
-            acct.encode(w);
-        }))
+        .call_object(
+            "Account",
+            "move_to",
+            acct,
+            &args(|w| {
+                3_u32.encode(w);
+                acct.encode(w);
+            }),
+        )
         .bad_request();
-    assert!(reason.contains("argument `target` of `Account.move_to`"), "{reason}");
+    assert!(
+        reason.contains("argument `target` of `Account.move_to`"),
+        "{reason}"
+    );
     assert!(reason.contains("not a"), "{reason}");
 
     // The null handle is not an object either.
     let reason = rt
-        .call_object("Account", "move_to", acct, &args(|w| {
-            3_u32.encode(w);
-            0_u64.encode(w);
-        }))
+        .call_object(
+            "Account",
+            "move_to",
+            acct,
+            &args(|w| {
+                3_u32.encode(w);
+                0_u64.encode(w);
+            }),
+        )
         .bad_request();
     assert!(reason.contains("null handle"), "{reason}");
 
     // One bad handle in a list refuses the call.
-    let inbox = handle_of(&rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w))).sync_ok());
+    let inbox = handle_of(
+        &rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w)))
+            .sync_ok(),
+    );
     let reason = rt
-        .call_object("Account", "names", acct, &args(|w| vec![inbox, sent].encode(w)))
+        .call_object(
+            "Account",
+            "names",
+            acct,
+            &args(|w| vec![inbox, sent].encode(w)),
+        )
         .bad_request();
-    assert!(reason.contains("argument `boxes` of `Account.names`"), "{reason}");
+    assert!(
+        reason.contains("argument `boxes` of `Account.names`"),
+        "{reason}"
+    );
 }
 
 #[test]
@@ -376,7 +495,11 @@ fn an_async_method_issues_in_its_last_poll_and_an_error_issues_nothing() {
         .run_async()
         .expect_err("a typed error");
     assert_eq!(MailError::decode_exact(&err).unwrap(), MailError::NoThread);
-    assert_eq!(rt.real().objects().host_refs(), before + 1, "the error issued nothing");
+    assert_eq!(
+        rt.real().objects().host_refs(),
+        before + 1,
+        "the error issued nothing"
+    );
 
     // A call dropped before it finishes (a cancelled call) never got to issue.
     let dispatched = rt.call_object("Account", "open_thread", acct, &args(|w| 6_u32.encode(w)));
@@ -384,7 +507,10 @@ fn an_async_method_issues_in_its_last_poll_and_an_error_issues_nothing() {
     assert_eq!(rt.real().objects().host_refs(), before + 1);
 
     // An object parameter is held for the whole call: released while it runs, it still resolves.
-    let inbox = handle_of(&rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w))).sync_ok());
+    let inbox = handle_of(
+        &rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w)))
+            .sync_ok(),
+    );
     let pending = rt.call_object("Account", "rename_later", acct, &args(|w| inbox.encode(w)));
     rt.real().release(inbox);
     let out = pending.run_async().expect("the call kept its Arc");
@@ -429,7 +555,8 @@ fn a_returned_store_is_attached_transient_and_observable() {
     // starts clean: the new mirror gets the initial values.
     rt.real().release(fresh);
     let third = handle_of(&rt.call_object("Account", "chat", acct, &[]).sync_ok());
-    rt.real().observe(third, undra::meta::ids::ALL_SIGNALS, true);
+    rt.real()
+        .observe(third, undra::meta::ids::ALL_SIGNALS, true);
     let delivered = rt.change_sets();
     assert_eq!(delivered.len(), 1);
     assert_eq!(delivered[0].entries[0].handle, Handle(third));
@@ -466,14 +593,17 @@ fn origins_hold_what_their_calls_returned_until_released() {
     );
     // Session 7 asks for the mailbox twice, session 8 once.
     assert_eq!(rt.real().call_from(7, &mailbox_call), 0);
-    let first = rt.real().call_from(8, &payload(
-        11,
-        undra::wire::payload::CallTarget::Method {
-            handle: Handle(acct),
-            method_id: ids::method_id("Account", "mailbox"),
-        },
-        &args(|w| "inbox".encode(w)),
-    ));
+    let first = rt.real().call_from(
+        8,
+        &payload(
+            11,
+            undra::wire::payload::CallTarget::Method {
+                handle: Handle(acct),
+                method_id: ids::method_id("Account", "mailbox"),
+            },
+            &args(|w| "inbox".encode(w)),
+        ),
+    );
     assert_eq!(first, 0);
     let inbox = rt.call_object("Account", "mailbox", acct, &args(|w| "inbox".encode(w)));
     let inbox = handle_of(&inbox.sync_ok());

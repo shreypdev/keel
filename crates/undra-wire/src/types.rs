@@ -264,7 +264,10 @@ impl Handle {
     /// exhaustion) before it ever calls this.
     #[inline]
     pub const fn new(index: u32, generation: u64) -> Self {
-        Handle(((generation & Self::MAX_GENERATION) << Self::INDEX_BITS) | (index & Self::MAX_INDEX) as u64)
+        Handle(
+            ((generation & Self::MAX_GENERATION) << Self::INDEX_BITS)
+                | (index & Self::MAX_INDEX) as u64,
+        )
     }
 
     /// The slot index (low 24 bits).
@@ -304,7 +307,7 @@ mod tests {
     #[test]
     fn handle_packs_index_and_generation() {
         let h = Handle::new(0xde_adbe, 0x12_3456_789a);
-        assert_eq!(h.0, 0x12_3456_789a_deadbe);
+        assert_eq!(h.0, 0x1234_5678_9ade_adbe);
         assert_eq!(h.index(), 0xde_adbe);
         assert_eq!(h.generation(), 0x12_3456_789a);
         // A field never spills into its neighbour.

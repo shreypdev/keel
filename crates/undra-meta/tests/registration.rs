@@ -347,7 +347,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
         docs: String::new(),
     });
     let ctor = |ty: &str, takes_ctx: bool| MethodDef {
-    coalesce: false,
+        coalesce: false,
         name: "new".into(),
         method_id: ids::method_id(ty, "new"),
         params: vec![],

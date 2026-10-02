@@ -411,15 +411,27 @@ impl<'a> Checker<'a> {
             }
             TypeRef::Option(inner) => {
                 let inner_allow = Allow {
-                    object: if allow.object == Slot::Wrapped { Slot::Here } else { Slot::No },
-                    callback: if allow.callback == Slot::Wrapped { Slot::Here } else { Slot::No },
+                    object: if allow.object == Slot::Wrapped {
+                        Slot::Here
+                    } else {
+                        Slot::No
+                    },
+                    callback: if allow.callback == Slot::Wrapped {
+                        Slot::Here
+                    } else {
+                        Slot::No
+                    },
                     ..PLAIN
                 };
                 self.check(inner, inner_allow, at);
             }
             TypeRef::Vec(inner) => {
                 let inner_allow = Allow {
-                    object: if allow.object == Slot::Wrapped { Slot::Here } else { Slot::No },
+                    object: if allow.object == Slot::Wrapped {
+                        Slot::Here
+                    } else {
+                        Slot::No
+                    },
                     ..PLAIN
                 };
                 self.check(inner, inner_allow, at);
@@ -709,7 +721,9 @@ fn rust_spelling(ty: &TypeRef) -> String {
         TypeRef::Lazy(inner) => format!("Lazy<{}>", rust_spelling(inner)),
         TypeRef::Stream(inner) => format!("impl Stream<Item = {}>", rust_spelling(inner)),
         TypeRef::Map(k, v) => format!("Map<{}, {}>", rust_spelling(k), rust_spelling(v)),
-        TypeRef::Result(ok, err) => format!("Result<{}, {}>", rust_spelling(ok), rust_spelling(err)),
+        TypeRef::Result(ok, err) => {
+            format!("Result<{}, {}>", rust_spelling(ok), rust_spelling(err))
+        }
         other => other.to_string(),
     }
 }
@@ -718,14 +732,20 @@ fn rust_spelling(ty: &TypeRef) -> String {
 /// reports (returns `()` and is not `async`) or is `async` and returns a `Result`.
 fn callback_method_problem(method: &crate::MethodDef) -> Option<&'static str> {
     if method.name.starts_with("__") {
-        return Some("has a name that starts with `__`, which is reserved for `__release` and `__cancel`");
+        return Some(
+            "has a name that starts with `__`, which is reserved for `__release` and `__cancel`",
+        );
     }
     match (&method.returns, method.is_async) {
         (TypeRef::Unit, false) => None,
         (TypeRef::Result(..), true) => None,
-        (TypeRef::Unit, true) => Some("is `async` and returns nothing: an async method must return a `Result`"),
+        (TypeRef::Unit, true) => {
+            Some("is `async` and returns nothing: an async method must return a `Result`")
+        }
         (_, true) => Some("is `async` but does not return a `Result<T, E>`"),
-        (_, false) => Some("returns a value synchronously: make it `async` and return a `Result<T, E>`"),
+        (_, false) => {
+            Some("returns a value synchronously: make it `async` and return a `Result<T, E>`")
+        }
     }
 }
 
@@ -925,8 +945,10 @@ mod tests {
         }
         // An object is `Object`, not `Named` (ADR-040), and not a field either way.
         let mut s = representative_schema();
-        s.records
-            .push(record("Holder", vec![field("f", TypeRef::named("Calculator"))]));
+        s.records.push(record(
+            "Holder",
+            vec![field("f", TypeRef::named("Calculator"))],
+        ));
         assert!(matches!(
             &s.validate().unwrap_err()[..],
             [SchemaError::ObjectNamedAsValue { name, .. }] if name == "Calculator"
@@ -1305,7 +1327,8 @@ mod tests {
                 )]));
             }));
             assert!(
-                errs.iter().any(|e| matches!(e, SchemaError::MisplacedObject { .. })),
+                errs.iter()
+                    .any(|e| matches!(e, SchemaError::MisplacedObject { .. })),
                 "{ty}: {errs:?}"
             );
         }
@@ -1313,9 +1336,21 @@ mod tests {
         let in_record = errors(&with_child(|s| {
             s.records.push(record("Holder", vec![field("c", child())]));
         }));
-        assert!(matches!(&in_record[..], [SchemaError::MisplacedObject { at, .. }] if at == "record Holder, field c"));
+        assert!(
+            matches!(&in_record[..], [SchemaError::MisplacedObject { at, .. }] if at == "record Holder, field c")
+        );
         let in_signal = errors(&with_child(|s| {
-            let mut store = object("Store", vec![method("Store", "new", vec![], TypeRef::named("Store"), false)], vec![]);
+            let mut store = object(
+                "Store",
+                vec![method(
+                    "Store",
+                    "new",
+                    vec![],
+                    TypeRef::named("Store"),
+                    false,
+                )],
+                vec![],
+            );
             store.store = Some(StoreDef {
                 signals: vec![SignalDef {
                     name: "s".into(),
@@ -1329,7 +1364,10 @@ mod tests {
             });
             s.objects.push(store);
         }));
-        assert!(matches!(&in_signal[..], [SchemaError::MisplacedObject { .. }]), "{in_signal:?}");
+        assert!(
+            matches!(&in_signal[..], [SchemaError::MisplacedObject { .. }]),
+            "{in_signal:?}"
+        );
         let in_stream = errors(&with_child(|s| {
             s.objects.push(parent(vec![method(
                 "Parent",
@@ -1339,7 +1377,10 @@ mod tests {
                 false,
             )]));
         }));
-        assert!(matches!(&in_stream[..], [SchemaError::MisplacedObject { .. }]), "{in_stream:?}");
+        assert!(
+            matches!(&in_stream[..], [SchemaError::MisplacedObject { .. }]),
+            "{in_stream:?}"
+        );
         let in_error_side = errors(&with_child(|s| {
             s.objects.push(parent(vec![method(
                 "Parent",
@@ -1349,7 +1390,10 @@ mod tests {
                 false,
             )]));
         }));
-        assert!(matches!(&in_error_side[..], [SchemaError::MisplacedObject { .. }]), "{in_error_side:?}");
+        assert!(
+            matches!(&in_error_side[..], [SchemaError::MisplacedObject { .. }]),
+            "{in_error_side:?}"
+        );
         let in_query = errors(&with_child(|s| {
             s.queries.push(QueryDef {
                 name: "q".into(),
@@ -1364,29 +1408,56 @@ mod tests {
             });
         }));
         assert_eq!(in_query.len(), 2, "{in_query:?}");
-        assert!(in_query.iter().all(|e| matches!(e, SchemaError::MisplacedObject { .. })));
+        assert!(
+            in_query
+                .iter()
+                .all(|e| matches!(e, SchemaError::MisplacedObject { .. }))
+        );
         let in_port = errors(&with_child(|s| {
             s.ports.push(PortDef {
                 name: "P".into(),
                 port_id: 1,
                 kind: PortKind::Async,
                 background: false,
-                methods: vec![method("P", "m", vec![param("c", child())], TypeRef::Unit, false)],
+                methods: vec![method(
+                    "P",
+                    "m",
+                    vec![param("c", child())],
+                    TypeRef::Unit,
+                    false,
+                )],
                 docs: String::new(),
             });
         }));
-        assert!(matches!(&in_port[..], [SchemaError::MisplacedObject { .. }]), "{in_port:?}");
+        assert!(
+            matches!(&in_port[..], [SchemaError::MisplacedObject { .. }]),
+            "{in_port:?}"
+        );
         assert_eq!(in_port[0].code(), "E0064");
     }
 
     #[test]
     fn object_references_must_name_objects_and_named_must_not() {
         let unknown = errors(&base(|s| {
-            s.objects.push(parent(vec![method("Parent", "m", vec![], TypeRef::object("Ghost"), false)]));
+            s.objects.push(parent(vec![method(
+                "Parent",
+                "m",
+                vec![],
+                TypeRef::object("Ghost"),
+                false,
+            )]));
         }));
-        assert!(matches!(&unknown[..], [SchemaError::UnresolvedType { name, .. }] if name == "Ghost"));
+        assert!(
+            matches!(&unknown[..], [SchemaError::UnresolvedType { name, .. }] if name == "Ghost")
+        );
         let record = errors(&base(|s| {
-            s.objects.push(parent(vec![method("Parent", "m", vec![], TypeRef::object("Known"), false)]));
+            s.objects.push(parent(vec![method(
+                "Parent",
+                "m",
+                vec![],
+                TypeRef::object("Known"),
+                false,
+            )]));
         }));
         assert!(
             matches!(&record[..], [SchemaError::NotAnObject { name, found: TypeKind::Record, .. }] if name == "Known"),
@@ -1395,13 +1466,27 @@ mod tests {
         assert!(record[0].to_string().contains("E0064"));
         // `Named` of an object is refused as a value, but a constructor returns its own object so.
         let named = errors(&with_child(|s| {
-            s.objects.push(parent(vec![method("Parent", "m", vec![], TypeRef::named("Child"), false)]));
+            s.objects.push(parent(vec![method(
+                "Parent",
+                "m",
+                vec![],
+                TypeRef::named("Child"),
+                false,
+            )]));
         }));
-        assert!(matches!(&named[..], [SchemaError::ObjectNamedAsValue { name, .. }] if name == "Child"));
+        assert!(
+            matches!(&named[..], [SchemaError::ObjectNamedAsValue { name, .. }] if name == "Child")
+        );
         let ctor_ok = with_child(|s| {
             s.objects.push(object(
                 "Parent",
-                vec![method("Parent", "new", vec![], TypeRef::named("Parent"), false)],
+                vec![method(
+                    "Parent",
+                    "new",
+                    vec![],
+                    TypeRef::named("Parent"),
+                    false,
+                )],
                 vec![],
             ));
         });
@@ -1410,11 +1495,20 @@ mod tests {
         let ctor_other = errors(&with_child(|s| {
             s.objects.push(object(
                 "Parent",
-                vec![method("Parent", "new", vec![], TypeRef::named("Child"), false)],
+                vec![method(
+                    "Parent",
+                    "new",
+                    vec![],
+                    TypeRef::named("Child"),
+                    false,
+                )],
                 vec![],
             ));
         }));
-        assert!(matches!(&ctor_other[..], [SchemaError::ObjectNamedAsValue { .. }]));
+        assert!(matches!(
+            &ctor_other[..],
+            [SchemaError::ObjectNamedAsValue { .. }]
+        ));
     }
 
     fn callback_port(methods: Vec<crate::MethodDef>) -> PortDef {
@@ -1433,7 +1527,13 @@ mod tests {
         let cb = || TypeRef::callback("Listener");
         let schema = base(|s| {
             s.ports.push(callback_port(vec![
-                method("Listener", "progress", vec![param("n", TypeRef::U64)], TypeRef::Unit, false),
+                method(
+                    "Listener",
+                    "progress",
+                    vec![param("n", TypeRef::U64)],
+                    TypeRef::Unit,
+                    false,
+                ),
                 method(
                     "Listener",
                     "confirm",
@@ -1451,7 +1551,13 @@ mod tests {
             )]));
             s.objects.push(object(
                 "Other",
-                vec![method("Other", "new", vec![param("l", cb())], TypeRef::named("Other"), false)],
+                vec![method(
+                    "Other",
+                    "new",
+                    vec![param("l", cb())],
+                    TypeRef::named("Other"),
+                    false,
+                )],
                 vec![],
             ));
         });
@@ -1461,30 +1567,62 @@ mod tests {
     #[test]
     fn callbacks_are_refused_elsewhere_and_must_name_a_callback_port() {
         let cb = || TypeRef::callback("Listener");
-        for ty in [TypeRef::vec(cb()), TypeRef::map(TypeRef::String, cb()), TypeRef::option(TypeRef::option(cb()))] {
+        for ty in [
+            TypeRef::vec(cb()),
+            TypeRef::map(TypeRef::String, cb()),
+            TypeRef::option(TypeRef::option(cb())),
+        ] {
             let errs = errors(&base(|s| {
                 s.ports.push(callback_port(vec![]));
-                s.objects.push(parent(vec![method("Parent", "m", vec![param("p", ty.clone())], TypeRef::Unit, false)]));
+                s.objects.push(parent(vec![method(
+                    "Parent",
+                    "m",
+                    vec![param("p", ty.clone())],
+                    TypeRef::Unit,
+                    false,
+                )]));
             }));
-            assert!(errs.iter().any(|e| matches!(e, SchemaError::MisplacedCallback { .. })), "{ty}: {errs:?}");
+            assert!(
+                errs.iter()
+                    .any(|e| matches!(e, SchemaError::MisplacedCallback { .. })),
+                "{ty}: {errs:?}"
+            );
         }
         let as_return = errors(&base(|s| {
             s.ports.push(callback_port(vec![]));
-            s.objects.push(parent(vec![method("Parent", "m", vec![], cb(), false)]));
+            s.objects
+                .push(parent(vec![method("Parent", "m", vec![], cb(), false)]));
         }));
-        assert!(matches!(&as_return[..], [SchemaError::MisplacedCallback { .. }]), "{as_return:?}");
+        assert!(
+            matches!(&as_return[..], [SchemaError::MisplacedCallback { .. }]),
+            "{as_return:?}"
+        );
         assert_eq!(as_return[0].code(), "E0004");
         let as_field = errors(&base(|s| {
             s.ports.push(callback_port(vec![]));
             s.records.push(record("Holder", vec![field("l", cb())]));
         }));
-        assert!(matches!(&as_field[..], [SchemaError::MisplacedCallback { .. }]));
+        assert!(matches!(
+            &as_field[..],
+            [SchemaError::MisplacedCallback { .. }]
+        ));
         // A plain port is not a callback.
         let not_callback = errors(&base(|s| {
-            s.ports.push(PortDef { kind: PortKind::Async, ..callback_port(vec![]) });
-            s.objects.push(parent(vec![method("Parent", "m", vec![param("p", cb())], TypeRef::Unit, false)]));
+            s.ports.push(PortDef {
+                kind: PortKind::Async,
+                ..callback_port(vec![])
+            });
+            s.objects.push(parent(vec![method(
+                "Parent",
+                "m",
+                vec![param("p", cb())],
+                TypeRef::Unit,
+                false,
+            )]));
         }));
-        assert!(matches!(&not_callback[..], [SchemaError::NotACallback { name, .. }] if name == "Listener"));
+        assert!(
+            matches!(&not_callback[..], [SchemaError::NotACallback { name, .. }] if name == "Listener")
+        );
         // A callback method cannot take a callback or an object.
         let nested = errors(&with_child(|s| {
             s.ports.push(callback_port(vec![method(
@@ -1495,20 +1633,42 @@ mod tests {
                 false,
             )]));
         }));
-        assert!(matches!(&nested[..], [SchemaError::MisplacedObject { .. }]), "{nested:?}");
+        assert!(
+            matches!(&nested[..], [SchemaError::MisplacedObject { .. }]),
+            "{nested:?}"
+        );
     }
 
     #[test]
     fn callback_methods_report_or_are_async_with_a_result() {
-        let bad = |m: crate::MethodDef| {
-            errors(&base(|s| s.ports.push(callback_port(vec![m]))))
-        };
+        let bad = |m: crate::MethodDef| errors(&base(|s| s.ports.push(callback_port(vec![m]))));
         for (m, needle) in [
-            (method("Listener", "get", vec![], TypeRef::U32, false), "returns a value synchronously"),
-            (method("Listener", "get", vec![], TypeRef::Result(Box::new(TypeRef::U32), Box::new(TypeRef::named("Known"))), false), "returns a value synchronously"),
-            (method("Listener", "go", vec![], TypeRef::Unit, true), "returns nothing"),
-            (method("Listener", "go", vec![], TypeRef::U32, true), "does not return a `Result"),
-            (method("Listener", "__release", vec![], TypeRef::Unit, false), "reserved"),
+            (
+                method("Listener", "get", vec![], TypeRef::U32, false),
+                "returns a value synchronously",
+            ),
+            (
+                method(
+                    "Listener",
+                    "get",
+                    vec![],
+                    TypeRef::Result(Box::new(TypeRef::U32), Box::new(TypeRef::named("Known"))),
+                    false,
+                ),
+                "returns a value synchronously",
+            ),
+            (
+                method("Listener", "go", vec![], TypeRef::Unit, true),
+                "returns nothing",
+            ),
+            (
+                method("Listener", "go", vec![], TypeRef::U32, true),
+                "does not return a `Result",
+            ),
+            (
+                method("Listener", "__release", vec![], TypeRef::Unit, false),
+                "reserved",
+            ),
         ] {
             let errs = bad(m);
             assert!(
@@ -1516,7 +1676,11 @@ mod tests {
                 "{needle}: {errs:?}"
             );
             assert_eq!(errs[0].code(), "E0071");
-            assert!(errs[0].to_string().contains(needle), "{needle}: {}", errs[0]);
+            assert!(
+                errs[0].to_string().contains(needle),
+                "{needle}: {}",
+                errs[0]
+            );
         }
     }
 

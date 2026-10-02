@@ -562,12 +562,62 @@ fn reference_error(ty: &Type, reference: &syn::TypeReference) -> TyErr {
 
 /// Names a type that can only be a record, an enum or a built-in: never an object.
 const NOT_OBJECTS: &[&str] = &[
-    "bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "usize", "isize",
-    "i128", "u128", "char", "str", "String", "Bytes", "Duration", "Timestamp", "Uuid", "Vec",
-    "Option", "Box", "Arc", "Rc", "Result", "HashMap", "BTreeMap", "HashSet", "BTreeSet",
-    "VecDeque", "LinkedList", "BinaryHeap", "Cow", "Cell", "RefCell", "Mutex", "RwLock", "OnceCell",
-    "OnceLock", "PathBuf", "Path", "OsString", "OsStr", "Instant", "SystemTime", "Lazy", "Signal",
-    "Computed", "Effect", "Ctx", "Handle", "Pin", "Self",
+    "bool",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "f32",
+    "f64",
+    "usize",
+    "isize",
+    "i128",
+    "u128",
+    "char",
+    "str",
+    "String",
+    "Bytes",
+    "Duration",
+    "Timestamp",
+    "Uuid",
+    "Vec",
+    "Option",
+    "Box",
+    "Arc",
+    "Rc",
+    "Result",
+    "HashMap",
+    "BTreeMap",
+    "HashSet",
+    "BTreeSet",
+    "VecDeque",
+    "LinkedList",
+    "BinaryHeap",
+    "Cow",
+    "Cell",
+    "RefCell",
+    "Mutex",
+    "RwLock",
+    "OnceCell",
+    "OnceLock",
+    "PathBuf",
+    "Path",
+    "OsString",
+    "OsStr",
+    "Instant",
+    "SystemTime",
+    "Lazy",
+    "Signal",
+    "Computed",
+    "Effect",
+    "Ctx",
+    "Handle",
+    "Pin",
+    "Self",
 ];
 
 /// The name of the object a plain type path spells (`Mailbox`, `crate::mail::Mailbox`): the last
@@ -602,12 +652,11 @@ fn object_reference(reference: &syn::TypeReference, allow: Allow) -> Option<Stri
 }
 
 /// `&T` of an object inside a `Vec`: the way to write a list of objects is `Vec<Arc<T>>`.
-fn reference_in_list(
-    reference: &syn::TypeReference,
-    ty: &Type,
-    allow: Allow,
-) -> Option<TyErr> {
-    if allow.object != Objects::InnerOwned || reference.lifetime.is_some() || reference.mutability.is_some() {
+fn reference_in_list(reference: &syn::TypeReference, ty: &Type, allow: Allow) -> Option<TyErr> {
+    if allow.object != Objects::InnerOwned
+        || reference.lifetime.is_some()
+        || reference.mutability.is_some()
+    {
         return None;
     }
     let Type::Path(path) = &*reference.elem else {
@@ -650,7 +699,11 @@ fn map_arc(inner: &Type, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result<KType, T
                     ty,
                     Diag::new(
                         code::E0064,
-                        format!("object `{}` cannot be {}", ty_string(ty), position_phrase(cx.pos)),
+                        format!(
+                            "object `{}` cannot be {}",
+                            ty_string(ty),
+                            position_phrase(cx.pos)
+                        ),
                         why,
                         format!("{help} (the object here is `{name}`)"),
                     ),
@@ -700,7 +753,8 @@ fn callback_trait(object: &syn::TypeTraitObject, ty: &Type) -> Result<String, Ty
                 if auto {
                     continue;
                 }
-                if last.is_some_and(|seg| matches!(seg.arguments, PathArguments::Parenthesized(_))) {
+                if last.is_some_and(|seg| matches!(seg.arguments, PathArguments::Parenthesized(_)))
+                {
                     return Err(TyErr::new(
                         ty,
                         Diag::new(
@@ -724,18 +778,16 @@ fn callback_trait(object: &syn::TypeTraitObject, ty: &Type) -> Result<String, Ty
                 }
                 found = Some(bound);
             }
-            TypeParamBound::Lifetime(lifetime) => {
-                if lifetime.ident != "static" {
-                    return Err(TyErr::new(
-                        ty,
-                        Diag::new(
-                            code::E0003,
-                            format!("lifetime `{lifetime}` in `{}`", ty_string(ty)),
-                            "the host's instance outlives the call that passed it",
-                            "use `Arc<dyn Trait>`",
-                        ),
-                    ));
-                }
+            TypeParamBound::Lifetime(lifetime) if lifetime.ident != "static" => {
+                return Err(TyErr::new(
+                    ty,
+                    Diag::new(
+                        code::E0003,
+                        format!("lifetime `{lifetime}` in `{}`", ty_string(ty)),
+                        "the host's instance outlives the call that passed it",
+                        "use `Arc<dyn Trait>`",
+                    ),
+                ));
             }
             _ => {}
         }
@@ -764,7 +816,10 @@ fn callback_trait(object: &syn::TypeTraitObject, ty: &Type) -> Result<String, Ty
             ty,
             Diag::new(
                 code::E0002,
-                format!("generic trait `{}` cannot cross the boundary", ty_string(ty)),
+                format!(
+                    "generic trait `{}` cannot cross the boundary",
+                    ty_string(ty)
+                ),
                 "the schema describes concrete callback interfaces; every target language would need one per instantiation",
                 "declare a concrete `#[undra::callback]` trait",
             ),
@@ -1647,9 +1702,15 @@ mod tests {
     #[test]
     fn map_return_defaults_to_unit() {
         let sig: syn::Signature = syn::parse_quote!(fn f());
-        assert_eq!(map_return_at(&sig.output, Pos::PortReturn).unwrap(), KType::Unit);
+        assert_eq!(
+            map_return_at(&sig.output, Pos::PortReturn).unwrap(),
+            KType::Unit
+        );
         let sig: syn::Signature = syn::parse_quote!(fn f() -> u8);
-        assert_eq!(map_return_at(&sig.output, Pos::PortReturn).unwrap(), KType::U8);
+        assert_eq!(
+            map_return_at(&sig.output, Pos::PortReturn).unwrap(),
+            KType::U8
+        );
     }
 
     #[test]

@@ -47,9 +47,7 @@ use super::common::{
 use super::diag::{Diag, Errors, code};
 use super::naming::{fnv1a32, unraw};
 use super::paths::Root;
-use super::types::{
-    Allow, KType, Pos, map_error_type, map_method_return, map_type, ty_string,
-};
+use super::types::{Allow, KType, Pos, map_error_type, map_method_return, map_type, ty_string};
 
 /// A leading `ctx: Ctx` / `ctx: &Ctx` parameter.
 #[derive(Clone, Copy, Debug)]
@@ -134,8 +132,14 @@ fn object_of(ty: &Type) -> Option<(Type, bool)> {
 fn plan_of(ty: &Type, kty: &KType) -> ParamPlan {
     match kty {
         KType::Object(_) => match object_of(ty) {
-            Some((elem, true)) => ParamPlan::Object { elem, shape: ObjShape::Ref },
-            Some((elem, false)) => ParamPlan::Object { elem, shape: ObjShape::Arc },
+            Some((elem, true)) => ParamPlan::Object {
+                elem,
+                shape: ObjShape::Ref,
+            },
+            Some((elem, false)) => ParamPlan::Object {
+                elem,
+                shape: ObjShape::Arc,
+            },
             None => ParamPlan::Plain,
         },
         KType::Callback(_) => match sole_arg(ty) {
@@ -147,8 +151,14 @@ fn plan_of(ty: &Type, kty: &KType) -> ParamPlan {
         },
         KType::Option(inner) => match (&**inner, sole_arg(ty)) {
             (KType::Object(_), Some(arg)) => match object_of(arg) {
-                Some((elem, true)) => ParamPlan::Object { elem, shape: ObjShape::OptionRef },
-                Some((elem, false)) => ParamPlan::Object { elem, shape: ObjShape::OptionArc },
+                Some((elem, true)) => ParamPlan::Object {
+                    elem,
+                    shape: ObjShape::OptionRef,
+                },
+                Some((elem, false)) => ParamPlan::Object {
+                    elem,
+                    shape: ObjShape::OptionArc,
+                },
                 None => ParamPlan::Plain,
             },
             (KType::Callback(_), Some(arg)) => match sole_arg(arg) {
@@ -162,7 +172,10 @@ fn plan_of(ty: &Type, kty: &KType) -> ParamPlan {
         },
         KType::Vec(inner) if matches!(**inner, KType::Object(_)) => match sole_arg(ty) {
             Some(arg) => match object_of(arg) {
-                Some((elem, false)) => ParamPlan::Object { elem, shape: ObjShape::VecArc },
+                Some((elem, false)) => ParamPlan::Object {
+                    elem,
+                    shape: ObjShape::VecArc,
+                },
                 _ => ParamPlan::Plain,
             },
             None => ParamPlan::Plain,
@@ -528,8 +541,7 @@ fn is_arc_self(ty: &Type, type_name: &str) -> bool {
             let Some(seg) = path.path.segments.last() else {
                 return false;
             };
-            seg.ident == "Arc"
-                && sole_arg(ty).is_some_and(|inner| is_self_type(inner, type_name))
+            seg.ident == "Arc" && sole_arg(ty).is_some_and(|inner| is_self_type(inner, type_name))
         }
         _ => false,
     }
@@ -863,7 +875,9 @@ fn object_return(ret: &KType) -> Option<(ObjReturn, bool)> {
     fn plain(ret: &KType) -> Option<ObjReturn> {
         match ret {
             KType::Object(_) => Some(ObjReturn::One),
-            KType::Option(inner) if matches!(**inner, KType::Object(_)) => Some(ObjReturn::Optional),
+            KType::Option(inner) if matches!(**inner, KType::Object(_)) => {
+                Some(ObjReturn::Optional)
+            }
             KType::Vec(inner) if matches!(**inner, KType::Object(_)) => Some(ObjReturn::Many),
             _ => None,
         }
@@ -1252,8 +1266,14 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
     call_args.extend(m.params.iter().enumerate().map(|(index, p)| {
         let local = arg_local(index);
         match &p.plan {
-            ParamPlan::Object { shape: ObjShape::Ref, .. } => quote!(&*#local),
-            ParamPlan::Object { shape: ObjShape::OptionRef, .. } => quote!(#local.as_deref()),
+            ParamPlan::Object {
+                shape: ObjShape::Ref,
+                ..
+            } => quote!(&*#local),
+            ParamPlan::Object {
+                shape: ObjShape::OptionRef,
+                ..
+            } => quote!(#local.as_deref()),
             _ => quote!(#local),
         }
     }));
@@ -1813,16 +1833,18 @@ pub(crate) fn expand_impl(
             let ctor_shared = returns.shared();
             let ret = match returns {
                 CtorReturn::Plain | CtorReturn::Shared => named,
-                CtorReturn::Fallible(err_ty) | CtorReturn::FallibleShared(err_ty) => match map_error_type(&err_ty, Pos::Return) {
-                    Ok(err) => {
-                        checks.error_ty(&err_ty, &err);
-                        KType::Result(Box::new(named), Box::new(err))
+                CtorReturn::Fallible(err_ty) | CtorReturn::FallibleShared(err_ty) => {
+                    match map_error_type(&err_ty, Pos::Return) {
+                        Ok(err) => {
+                            checks.error_ty(&err_ty, &err);
+                            KType::Result(Box::new(named), Box::new(err))
+                        }
+                        Err(err) => {
+                            errors.push(err.into_error());
+                            named
+                        }
                     }
-                    Err(err) => {
-                        errors.push(err.into_error());
-                        named
-                    }
-                },
+                }
             };
             constructors.push(FnModel {
                 ident: func.sig.ident.clone(),

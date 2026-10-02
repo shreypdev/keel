@@ -643,8 +643,14 @@ impl<'a> Checker<'a> {
             // a collision of a user method's id with either would route a call wrongly.
             let reserved = (p.kind == PortKind::Callback).then(|| {
                 [
-                    (undra_meta::ids::callback_release_id(&p.name), undra_meta::ids::CALLBACK_RELEASE.to_owned()),
-                    (undra_meta::ids::callback_cancel_id(&p.name), undra_meta::ids::CALLBACK_CANCEL.to_owned()),
+                    (
+                        undra_meta::ids::callback_release_id(&p.name),
+                        undra_meta::ids::CALLBACK_RELEASE.to_owned(),
+                    ),
+                    (
+                        undra_meta::ids::callback_cancel_id(&p.name),
+                        undra_meta::ids::CALLBACK_CANCEL.to_owned(),
+                    ),
                 ]
             });
             self.dup_ids(

@@ -1842,7 +1842,10 @@ fn object_graph() -> Schema {
                 "Account",
                 "move_to",
                 "Moves a message to `target`.",
-                vec![param("message", TypeRef::U32), param("target", obj("Mailbox"))],
+                vec![
+                    param("message", TypeRef::U32),
+                    param("target", obj("Mailbox")),
+                ],
                 TypeRef::Unit,
                 false,
             ),
@@ -1895,7 +1898,14 @@ fn object_graph() -> Schema {
         "Mailbox",
         "A folder.",
         vec![],
-        vec![method("Mailbox", "name", "", vec![], TypeRef::String, false)],
+        vec![method(
+            "Mailbox",
+            "name",
+            "",
+            vec![],
+            TypeRef::String,
+            false,
+        )],
     ));
     s.objects.push(object(
         "Thread",
@@ -1917,12 +1927,20 @@ fn object_graph() -> Schema {
                 false,
             )],
         ),
-        vec![("messages", TypeRef::vec(named("Message")), false, Some("id"))],
+        vec![(
+            "messages",
+            TypeRef::vec(named("Message")),
+            false,
+            Some("id"),
+        )],
     ));
     s.functions.push(function(
         "mailbox_of",
         "The mailbox of `account` for `folder`.",
-        vec![param("account", obj("Account")), param("folder", TypeRef::String)],
+        vec![
+            param("account", obj("Account")),
+            param("folder", TypeRef::String),
+        ],
         obj("Mailbox"),
         false,
     ));
@@ -1939,13 +1957,19 @@ fn callbacks() -> Schema {
         "",
         vec![
             with_message(unit_variant("Declined", 0), "the user declined"),
-            with_message(tuple_variant("Unavailable", 1, vec![TypeRef::String]), "{0}"),
+            with_message(
+                tuple_variant("Unavailable", 1, vec![TypeRef::String]),
+                "{0}",
+            ),
         ],
     ));
     s.enums.push(error_def(
         "AuthError",
         "",
-        vec![with_message(unit_variant("Expired", 0), "the token expired")],
+        vec![with_message(
+            unit_variant("Expired", 0),
+            "the token expired",
+        )],
     ));
     s.enums.push(error_def(
         "UploadError",
@@ -2026,7 +2050,10 @@ fn callbacks() -> Schema {
                 "Uploader",
                 "upload",
                 "Uploads `file`, reporting to `listener`.",
-                vec![param("file", TypeRef::String), param("listener", cb("UploadListener"))],
+                vec![
+                    param("file", TypeRef::String),
+                    param("listener", cb("UploadListener")),
+                ],
                 TypeRef::result(TypeRef::U32, named("UploadError")),
                 true,
             ),

@@ -607,7 +607,7 @@ fn reply_tokens(
         }
     };
     let (ok_ty, err_ty) = result_types(&m.sig.output, m.is_async);
-    let reply = match (&m.ret, ok_ty, err_ty) {
+    match (&m.ret, ok_ty, err_ty) {
         // A method with an error channel turns every outcome into a value: the encoded `E`
         // the adapter reported, or `E::from(PortError)` for an unavailable port, a
         // cancelled call or a reply that does not decode.
@@ -679,8 +679,7 @@ fn reply_tokens(
                 }
             }
         }
-    };
-    reply
+    }
 }
 
 /// The proxy, the accessor and the Rust-side dispatcher of a request/reply port.

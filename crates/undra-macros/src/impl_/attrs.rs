@@ -366,7 +366,9 @@ fn option_home(option: &str) -> &'static str {
         }
         "key" => "move it to a `Signal<Vec<T>>` field of a `#[undra::store]` struct, or remove it",
         "no_coalesce" => "move it to a signal field of a `#[undra::store]` struct, or remove it",
-        "coalesce" => "move it to a fire-and-forget method of a `#[undra::callback]` trait, or remove it",
+        "coalesce" => {
+            "move it to a fire-and-forget method of a `#[undra::callback]` trait, or remove it"
+        }
         _ => "remove the option, or move it to where it applies",
     }
 }
