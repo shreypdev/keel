@@ -14,7 +14,8 @@
 //   node scripts/web-size-runtime.mjs <project-dir> <runtime-dir> <out-dir>
 //   UNDRA_SIZE_MODULES=1 node scripts/web-size-runtime.mjs ...   also print, on stderr, the unminified
 //                                                                bytes each source module contributes
-//                                                                to each chunk (what grew: ADR-052, section 5)
+//                                                                to each chunk (what grew: ADR-052, section 5);
+//                                                                `=exports` adds the exports each one keeps
 //
 // Prints one JSON object: { runtime, bindings, app, lazy } with each chunk's path (relative to out-dir);
 // `lazy` lists the other JavaScript chunks (loaded on demand).
@@ -45,9 +46,11 @@ const moduleReport = {
       if (chunk.type !== "chunk") continue;
       console.error(`chunk ${chunk.fileName} (${chunk.code.length} bytes minified)`);
       const rows = Object.entries(chunk.modules)
-        .map(([id, m]) => [m.renderedLength, id.replace(/^.*[\\/](?=runtimes[\\/]|generated[\\/]|web[\\/])/, "")])
+        .map(([id, m]) => [m.renderedLength, id.replace(/^.*[\\/](?=runtimes[\\/]|generated[\\/]|web[\\/])/, ""), m.renderedExports ?? []])
         .sort((a, b) => b[0] - a[0]);
-      for (const [length, id] of rows) if (length > 0) console.error(`  ${String(length).padStart(7)}  ${id}`);
+      for (const [length, id, exports] of rows) {
+        if (length > 0) console.error(`  ${String(length).padStart(7)}  ${id}${process.env.UNDRA_SIZE_MODULES === "exports" ? `  [${exports.join(" ")}]` : ""}`);
+      }
     }
   },
 };
