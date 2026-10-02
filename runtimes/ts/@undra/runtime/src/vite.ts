@@ -60,6 +60,7 @@ export interface ViteDevServerLike {
 export interface UndraVitePlugin {
   readonly name: "undra";
   readonly enforce: "pre";
+  config(config: { readonly build?: { readonly target?: unknown } }): { readonly build: { readonly target: string } } | undefined;
   configResolved(config: ViteConfigLike): void;
   buildStart(): Promise<void>;
   configureServer(server: ViteDevServerLike): void;
@@ -230,7 +231,8 @@ function runCommand(command: string, args: readonly string[], cwd: string): Prom
 
 /**
  * The Vite plugin that builds the Rust core for the web before Vite starts and, under `vite dev`,
- * whenever the core's sources change.
+ * whenever the core's sources change. It also sets `build.target` to `es2022` when the app sets none: the
+ * runtime is ES2022, and Vite 6's default target (es2020) would turn its class fields into helper calls.
  *
  * @example
  * ```ts
@@ -287,6 +289,12 @@ export function undra(options: UndraPluginOptions = {}): UndraVitePlugin {
   return {
     name: "undra",
     enforce: "pre",
+
+    // The runtime is ES2022 (class fields, private methods): Vite 6 and older build for es2020 unless told otherwise, which
+    // rewrites such syntax into helper calls. The app's own `build.target` wins.
+    config(userConfig) {
+      return userConfig.build?.target === undefined ? { build: { target: "es2022" } } : undefined;
+    },
 
     configResolved(resolved) {
       config = resolved;
