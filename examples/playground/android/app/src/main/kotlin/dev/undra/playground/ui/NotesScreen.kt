@@ -23,9 +23,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,7 +39,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.undra.playground.core.Note
+import dev.undra.playground.core.NoteSelection
 import dev.undra.playground.core.Notes
+import dev.undra.playground.core.draft as draftRow
+import dev.undra.playground.core.newest
 import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.adapters.DbError
 import kotlinx.coroutines.launch
@@ -46,10 +51,16 @@ import kotlinx.coroutines.launch
  * Owns the `Notes` store: a list the core keeps in SQLite through the opt-in `Db` port (ADR-048). On Android that is the
  * platform's own SQLite (`AndroidDbAdapter`, file `undra-playground_core-playground.sqlite` under the app's database directory: `undra-<namespace>-<name>.sqlite`), so the notes
  * survive the process. The store's list changes only after the database did.
+ *
+ * It owns a `NoteSelection` too: the ticked notes, the second instantiation (after the to-do screen's) of the core's
+ * generic `Selection<T>` (ADR-058).
  */
 class NotesViewModel : ViewModel() {
     /** The notes in the core. */
     val store = Notes.create()
+
+    /** The ticked notes. */
+    val selection = NoteSelection.create()
 
     /** The text field. */
     var draft by mutableStateOf("")
@@ -86,6 +97,12 @@ class NotesViewModel : ViewModel() {
     /** Removes note [id]. */
     fun remove(id: Long) = perform { store.remove(id) }
 
+    /** Ticks a note the core made with `draft` and did not store: the draft is selected, not saved to the database. */
+    fun newDraft() {
+        val title = draft.trim().ifEmpty { "Untitled" }
+        runCatching { draftRow(Note::class, title) }.onSuccess { selection.toggle(it) }
+    }
+
     /** Runs a call of the store, turning the typed `DbError` (and any failed call) into words for the screen. */
     private fun perform(call: suspend () -> Unit) {
         viewModelScope.launch {
@@ -102,6 +119,7 @@ class NotesViewModel : ViewModel() {
     }
 
     override fun onCleared() {
+        selection.close()
         store.close()
     }
 
@@ -117,6 +135,11 @@ fun NotesScreen(vm: NotesViewModel = viewModel()) {
     val notes by vm.store.notes.collectAsState()
     val version by vm.store.version.collectAsState()
     val open = notes.count { !it.done }
+    val picked by vm.selection.rows.collectAsState()
+    val pickedCount by vm.selection.count.collectAsState()
+    // The newest note is the core's to say: one call of the function `newest`.
+    var latest by remember { mutableStateOf<Note?>(null) }
+    LaunchedEffect(notes) { latest = runCatching { newest(notes) }.getOrNull() }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).imePadding()) {
         ScreenHeader("Notes · SQLite v$version", "$open open", "notes-open")
@@ -135,6 +158,16 @@ fun NotesScreen(vm: NotesViewModel = viewModel()) {
             Button(onClick = vm::add, enabled = vm.ready, modifier = Modifier.padding(top = 8.dp).testTag("notes-add")) { Text("Add") }
         }
         HorizontalDivider(Modifier.padding(top = 4.dp))
+        SelectionStrip(
+            kind = "note",
+            count = pickedCount,
+            latest = latest?.title,
+            picked = picked.map { it.title },
+            onSelectAll = { vm.selection.selectAll(notes) },
+            onClear = vm.selection::clear,
+            onNewDraft = vm::newDraft,
+        )
+        HorizontalDivider()
         if (notes.isEmpty()) {
             Text(
                 if (vm.ready) "No notes yet. They are kept in SQLite, so they are still here after a restart." else "Opening the database…",
@@ -146,14 +179,20 @@ fun NotesScreen(vm: NotesViewModel = viewModel()) {
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
             // The list is keyed by the row id, as the core's signal is.
             items(notes, key = { it.id }) { note ->
-                NoteRow(note, onToggle = { vm.toggle(note.id) }, onRemove = { vm.remove(note.id) })
+                NoteRow(
+                    note,
+                    selected = picked.any { it.id == note.id },
+                    onToggle = { vm.toggle(note.id) },
+                    onSelect = { vm.selection.toggle(note) },
+                    onRemove = { vm.remove(note.id) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun NoteRow(note: Note, onToggle: () -> Unit, onRemove: () -> Unit) {
+private fun NoteRow(note: Note, selected: Boolean, onToggle: () -> Unit, onSelect: () -> Unit, onRemove: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onToggle).testTag("notes-row"),
         verticalAlignment = Alignment.CenterVertically,
@@ -166,6 +205,7 @@ private fun NoteRow(note: Note, onToggle: () -> Unit, onRemove: () -> Unit) {
             color = if (note.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
+        Checkbox(checked = selected, onCheckedChange = { onSelect() }, modifier = Modifier.testTag("notes-select"))
         IconButton(onClick = onRemove, modifier = Modifier.testTag("notes-remove")) {
             Icon(Icons.Filled.Close, contentDescription = "Remove ${note.title}")
         }

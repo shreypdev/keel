@@ -64,6 +64,9 @@ struct PlaygroundApp: App {
 @MainActor
 final class PlaygroundModel {
     let todos: Todos
+    /// The ticked to-dos and the ticked notes: one generic `Selection<T>` of the core, instantiated twice (ADR-058).
+    let todoSelection: TodoSelection
+    let noteSelection: NoteSelection
     let counter: Counter
     let bigList: BigList
     let inbox: RemoteTodosQueryHandle
@@ -81,6 +84,8 @@ final class PlaygroundModel {
 
     init() throws {
         todos = try Todos()
+        todoSelection = try TodoSelection()
+        noteSelection = try NoteSelection()
         counter = try Counter()
         bigList = try BigList()
         inbox = try RemoteTodosQueryHandle(list: UndraBootstrap.inboxList)

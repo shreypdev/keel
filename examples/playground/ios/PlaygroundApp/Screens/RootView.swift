@@ -13,7 +13,7 @@ struct RootView: View {
 
     var body: some View {
         TabView(selection: $selection) {
-            TodosScreen(todos: model.todos)
+            TodosScreen(todos: model.todos, selection: model.todoSelection)
                 .tabItem { Label("Todos", systemImage: "checklist").accessibilityIdentifier("tab-todos") }
                 .tag(Tab.todos)
             CounterScreen(counter: model.counter)
@@ -25,7 +25,7 @@ struct RootView: View {
             RemoteScreen(inbox: model.inbox)
                 .tabItem { Label("Remote", systemImage: "icloud").accessibilityIdentifier("tab-remote") }
                 .tag(Tab.remote)
-            NotesScreen(notes: model.notes)
+            NotesScreen(notes: model.notes, selection: model.noteSelection)
                 .tabItem { Label("Notes", systemImage: "note.text").accessibilityIdentifier("tab-notes") }
                 .tag(Tab.notes)
             WorkshopScreen(workshop: model.workshop, left: model.leftShelf, right: model.rightShelf)

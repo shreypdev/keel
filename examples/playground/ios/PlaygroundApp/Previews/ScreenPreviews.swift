@@ -16,13 +16,13 @@ import UndraTestKit
 #Preview("Todos: a recorded session, played to the end") {
     let recorded = try! RecordedCore.load(PreviewData.recording("session-todos"), expectedSchemaHash: UndraIds.schemaHash)
     recorded.playAll()
-    return TodosScreen(todos: try! Todos(ctx: recorded.core))
+    return TodosScreen(todos: try! Todos(ctx: recorded.core), selection: try! TodoSelection(ctx: recorded.core))
 }
 
 #Preview("Todos: the real core on scripted ports") {
     let preview = try! PreviewCore.load(UndraPlaygroundCore.load, seed: PreviewData.seed())
     let todos = try! Todos(ctx: preview.core)
-    return TodosScreen(todos: todos)
+    return TodosScreen(todos: todos, selection: try! TodoSelection(ctx: preview.core))
         .task {
             for title in ["Buy milk", "Walk the dog", "Write the docs"] {
                 _ = try? await todos.add(title: title)
