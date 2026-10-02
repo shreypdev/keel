@@ -3,7 +3,7 @@
 
 mod common;
 
-use undra_bindgen::{GeneratedFile, Generator};
+use undra_bindgen::{GeneratedFile, Generator, SwiftObservation};
 use undra_meta::{Schema, TypeRef};
 
 fn all_files(case: &str, configure: impl Fn(&mut Generator)) -> Vec<(String, Vec<GeneratedFile>)> {
@@ -178,6 +178,171 @@ fn swift_streams_are_decoded_by_the_runtime_so_credit_follows_the_consumer() {
     ));
     assert!(swift.contains("mapError: { UndraCallError.mapped(streamFailure: $0) }"));
     assert!(!swift.contains("mapError: { $0 }"));
+}
+
+// ----- the iOS 15 / 16 mode (ADR-045) ----------------------------------------------------
+
+fn swift_in(case: &str, observation: SwiftObservation, min_ios: u32) -> Vec<GeneratedFile> {
+    let schema = common::case(case);
+    let mut generator = common::generator_for(case, &schema);
+    generator.swift_observation = observation;
+    generator.swift_min_ios = min_ios;
+    generator.swift(&schema).unwrap()
+}
+
+#[test]
+fn the_observable_object_mode_changes_only_how_a_store_is_observed() {
+    let default = swift_in("stores", SwiftObservation::Observation, 17);
+    let floor = swift_in("stores", SwiftObservation::ObservableObject, 15);
+    let stores = file(&floor, "Stores.swift");
+    assert!(stores.contains("import Combine\n") && !stores.contains("import Observation"));
+    assert!(!stores.contains("@Observable"));
+    assert!(stores.contains(
+        "@MainActor\npublic final class Todos: UndraStore, ObservableObject, @unchecked Sendable {"
+    ));
+    // Every property of a store is `@Published`, and each is still read-only outside it.
+    let props: Vec<&str> = stores
+        .lines()
+        .filter(|l| l.contains("public private(set) var "))
+        .collect();
+    assert!(props.len() > 10);
+    assert!(
+        props.iter().all(|l| l
+            .trim_start()
+            .starts_with("@Published public private(set) var ")),
+        "{props:?}"
+    );
+    // The default is `@Observable` and says nothing of a mode.
+    let observation = file(&default, "Stores.swift");
+    assert!(observation.contains(
+        "@MainActor @Observable\npublic final class Todos: UndraStore, @unchecked Sendable {"
+    ));
+    assert!(!observation.contains("@Published") && !observation.contains("Swift mode:"));
+    // Apart from those lines, the two modes generate the same store: the constructors, the commands
+    // and the apply function are shared (what the mode changes, written back to the other's spelling).
+    let to_observation = |text: &str| -> String {
+        text.lines()
+            .filter(|l| !l.starts_with("// Swift mode:") && !l.starts_with("import "))
+            .map(|l| {
+                l.replace("@Published ", "")
+                    .replace("@MainActor @Observable", "@MainActor")
+                    .replace(", ObservableObject", "")
+                    .replace("UndraDuration", "Duration")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(
+        to_observation(observation) == to_observation(stores),
+        "the stores of the two modes differ in more than the observation lines"
+    );
+}
+
+#[test]
+fn query_handles_follow_the_observation_mode_too() {
+    let floor = swift_in("queries", SwiftObservation::ObservableObject, 15);
+    let queries = file(&floor, "Queries.swift");
+    assert!(queries.contains("import Combine\n") && !queries.contains("@Observable"));
+    assert!(queries.contains("ObservableObject, @unchecked Sendable"));
+    assert!(queries.contains("@Published public private(set) var "));
+}
+
+#[test]
+fn the_mode_is_recorded_in_every_swift_file_header_and_the_default_has_no_such_line() {
+    for file in swift_in("stores", SwiftObservation::ObservableObject, 15)
+        .iter()
+        .filter(|f| f.path.ends_with(".swift") && f.path.contains("/Generated/"))
+    {
+        let second = file.contents.lines().nth(1).unwrap_or_default();
+        assert!(
+            second.starts_with("// Swift mode: observable-object") && second.contains("iOS 15"),
+            "{}: {second}",
+            file.path
+        );
+    }
+    for file in swift_in("stores", SwiftObservation::Observation, 17)
+        .iter()
+        .filter(|f| f.path.contains("/Generated/"))
+    {
+        assert!(!file.contents.contains("Swift mode:"), "{}", file.path);
+    }
+    // A switch of mode changes the files, so `undra bindgen --check` sees stale bindings.
+    assert_ne!(
+        swift_in("stores", SwiftObservation::Observation, 17),
+        swift_in("stores", SwiftObservation::ObservableObject, 17)
+    );
+}
+
+#[test]
+fn the_wire_duration_is_swift_duration_from_ios_16_and_undra_duration_below() {
+    let types = |min_ios: u32| {
+        let files = swift_in("full", SwiftObservation::ObservableObject, min_ios);
+        file(&files, "Types.swift").to_owned()
+    };
+    let at_16 = types(16);
+    assert!(
+        at_16.contains("public var elapsed: Duration\n")
+            && at_16.contains("elapsed: Duration.undraDecode(&r)")
+    );
+    let at_15 = types(15);
+    assert!(
+        at_15.contains("public var elapsed: UndraDuration\n")
+            && at_15.contains("elapsed: UndraDuration.undraDecode(&r)")
+    );
+    // Not tied to the observation mode: an app on iOS 17 and later keeps `Swift.Duration`.
+    let files = swift_in("full", SwiftObservation::Observation, 17);
+    assert!(file(&files, "Types.swift").contains("public var elapsed: Duration\n"));
+}
+
+#[test]
+fn the_observation_mode_follows_the_deployment_floor_unless_told_otherwise() {
+    assert_eq!(
+        SwiftObservation::for_ios(15),
+        SwiftObservation::ObservableObject
+    );
+    assert_eq!(
+        SwiftObservation::for_ios(16),
+        SwiftObservation::ObservableObject
+    );
+    assert_eq!(SwiftObservation::for_ios(17), SwiftObservation::Observation);
+    assert_eq!(SwiftObservation::for_ios(26), SwiftObservation::Observation);
+    for mode in [
+        SwiftObservation::Observation,
+        SwiftObservation::ObservableObject,
+    ] {
+        assert_eq!(mode.to_string().parse(), Ok(mode));
+    }
+    assert!("combine".parse::<SwiftObservation>().is_err());
+    assert_eq!(
+        Generator::for_crate("x").swift_observation,
+        SwiftObservation::Observation
+    );
+    assert_eq!(Generator::for_crate("x").swift_min_ios, 17);
+}
+
+#[test]
+fn a_store_member_that_observable_object_declares_is_a_diagnostic_only_in_that_mode() {
+    let mut schema = common::case("stores");
+    let todos = schema
+        .objects
+        .iter_mut()
+        .find(|o| o.name == "Todos")
+        .unwrap();
+    todos.store.as_mut().unwrap().signals[0].name = "object_will_change".into();
+    let mut generator = Generator::for_crate(&schema.crate_name);
+    assert!(generator.swift(&schema).is_ok());
+    generator.swift_observation = SwiftObservation::ObservableObject;
+    let errors = generator.swift(&schema).unwrap_err();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    let text = errors[0].to_string();
+    assert!(
+        errors[0].code() == "E0051"
+            && text.contains("objectWillChange")
+            && text.contains("ObservableObject"),
+        "{text}"
+    );
+    // The other languages do not mind.
+    assert!(generator.kotlin(&schema).is_ok() && generator.typescript(&schema).is_ok());
 }
 
 #[test]

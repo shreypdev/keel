@@ -1,6 +1,8 @@
 // Wire value types that have no native Swift spelling with the exact wire semantics
 // (docs/SPEC.md section 3.1). The Foundation bridges (`Date`, `Foundation.UUID`) live in
-// `Foundation+Undra.swift`; this file needs no Foundation.
+// `Foundation+Undra.swift`; this file needs Foundation only for `TimeInterval`.
+
+import Foundation
 
 // MARK: - Bytes
 
@@ -29,43 +31,61 @@ public struct UndraBytes: UndraCodec, Sendable, Hashable {
 
 // MARK: - Duration
 
-/// The wire `Duration`: an `i64` count of nanoseconds. Wraps `Swift.Duration`.
+/// The wire `Duration`: an `i64` count of nanoseconds, exactly. It exists so that a floor of iOS 15
+/// or macOS 12, which have no `Swift.Duration`, can use durations at all (ADR-045): generated code
+/// maps the wire `Duration` to `Swift.Duration` when its deployment target is iOS 16 or later and to
+/// this type below. From iOS 16 / macOS 13 it converts to and from `Swift.Duration`.
 ///
 /// The core's durations are non-negative, so decoding a negative value throws
-/// `WireError.negativeDuration`. Encoding does not clamp: a negative `Duration` is written as
-/// is and the core rejects it as a bad request. Values beyond the `Int64` nanosecond range
-/// (about 292 years) saturate, and sub-nanosecond precision is truncated toward zero.
+/// `WireError.negativeDuration`. Encoding does not clamp: a negative `UndraDuration` is written as
+/// is and the core rejects it as a bad request. Values converted from a `Swift.Duration` beyond the
+/// `Int64` nanosecond range (about 292 years) saturate, and sub-nanosecond precision is truncated
+/// toward zero.
 public struct UndraDuration: UndraCodec, Sendable, Hashable, Comparable {
-    /// The wrapped duration.
-    public var duration: Duration
-
-    /// Wraps a Swift duration.
-    public init(_ duration: Duration) {
-        self.duration = duration
-    }
+    /// The duration in whole nanoseconds.
+    public var nanoseconds: Int64
 
     /// Creates a duration from a nanosecond count.
     public init(nanoseconds: Int64) {
-        self.duration = Duration.nanoseconds(nanoseconds)
+        self.nanoseconds = nanoseconds
     }
 
-    /// The duration in whole nanoseconds, saturating at `Int64.min` / `Int64.max`.
-    public var nanoseconds: Int64 {
+    /// The zero duration.
+    public static let zero = UndraDuration(nanoseconds: 0)
+
+    /// The duration in seconds. A `Double` keeps about 15 significant digits, so the nanosecond
+    /// count (`nanoseconds`) is the exact value.
+    public var timeInterval: TimeInterval {
+        return Double(nanoseconds) / 1_000_000_000
+    }
+
+    /// Wraps a Swift duration, saturating at `Int64.min` / `Int64.max` nanoseconds.
+    @available(iOS 16, macOS 13, *)
+    public init(_ duration: Duration) {
         let parts = duration.components
         let scaled = parts.seconds.multipliedReportingOverflow(by: 1_000_000_000)
         if scaled.overflow {
-            return parts.seconds < 0 ? Int64.min : Int64.max
+            self.nanoseconds = parts.seconds < 0 ? Int64.min : Int64.max
+            return
         }
         let fraction = parts.attoseconds / 1_000_000_000
         let total = scaled.partialValue.addingReportingOverflow(fraction)
         if total.overflow {
-            return scaled.partialValue < 0 ? Int64.min : Int64.max
+            self.nanoseconds = scaled.partialValue < 0 ? Int64.min : Int64.max
+            return
         }
-        return total.partialValue
+        self.nanoseconds = total.partialValue
+    }
+
+    /// The same duration as a Swift `Duration`.
+    @available(iOS 16, macOS 13, *)
+    public var duration: Duration {
+        get { return Duration.nanoseconds(nanoseconds) }
+        set { self = UndraDuration(newValue) }
     }
 
     public static func < (lhs: UndraDuration, rhs: UndraDuration) -> Bool {
-        return lhs.duration < rhs.duration
+        return lhs.nanoseconds < rhs.nanoseconds
     }
 
     public static func undraDecode(_ r: inout UndraReader) throws -> UndraDuration {
@@ -82,6 +102,7 @@ public struct UndraDuration: UndraCodec, Sendable, Hashable, Comparable {
     }
 }
 
+@available(iOS 16, macOS 13, *)
 extension Duration: UndraCodec {
     public static func undraDecode(_ r: inout UndraReader) throws -> Duration {
         let value = try UndraDuration.undraDecode(&r)

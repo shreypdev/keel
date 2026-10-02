@@ -361,6 +361,44 @@ pub(crate) fn validate_for(schema: &Schema, emit_standard: bool) -> Result<(), V
     }
 }
 
+/// The names an `ObservableObject` store cannot use for a member, which only matter in the iOS 15 / 16 Swift
+/// mode (ADR-045): the protocol declares `objectWillChange`.
+const OBSERVABLE_OBJECT_MEMBERS: &[&str] = &["objectWillChange"];
+
+/// The E0051 problems of `schema` that exist only in the given Swift observation `mode` (none for
+/// `Observation`): a store member named like a member of `ObservableObject`.
+pub(crate) fn swift_floor(schema: &Schema, mode: crate::SwiftObservation) -> Vec<BindgenError> {
+    let mut errors = Vec::new();
+    if mode != crate::SwiftObservation::ObservableObject {
+        return errors;
+    }
+    for object in schema.objects.iter().filter(|o| o.store.is_some()) {
+        let members = object
+            .constructors
+            .iter()
+            .chain(&object.methods)
+            .map(|m| m.name.as_str())
+            .chain(
+                object
+                    .store
+                    .iter()
+                    .flat_map(|s| s.signals.iter().map(|g| g.name.as_str())),
+            );
+        for source in members {
+            let converted = naming::camel(source);
+            if OBSERVABLE_OBJECT_MEMBERS.contains(&converted.as_str()) {
+                errors.push(BindgenError::NameCollision {
+                    at: format!("object {}", object.name),
+                    names: vec![source.to_owned()],
+                    converted,
+                    why: "with the iOS 15 / 16 store shape (`swift_observation = \"observable-object\"`, the default for a deployment target below iOS 17) a store is a Combine `ObservableObject`, which declares that member itself".to_owned(),
+                });
+            }
+        }
+    }
+    errors
+}
+
 /// What a type name refers to, for the checks below.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {

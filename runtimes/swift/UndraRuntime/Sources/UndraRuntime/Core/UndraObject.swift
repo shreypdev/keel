@@ -85,7 +85,7 @@ open class UndraObject: @unchecked Sendable {
 ///
 /// `init(core:handle:noCoalesce:)` registers the store with the core's mirror; change-set entries
 /// for the store's handle then arrive at `apply(signal:op:reader:)` on the main actor. The
-/// generated subclass (which is `@Observable`) overrides `apply` to decode each signal into its
+/// generated subclass (an `@Observable` class, or an `ObservableObject` below iOS 17, ADR-045) overrides `apply` to decode each signal into its
 /// properties. After `super.init` the generated initializer calls
 /// `core.observe(handle, signal:on:)`, which applies the initial values before it returns.
 ///

@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use common::*;
-use undra_bindgen::{BindgenError, validate};
+use undra_bindgen::{BindgenError, Generator, SwiftObservation, validate};
 use undra_meta::{PortKind, Schema, TypeRef};
 
 type Case = (&'static str, fn() -> Schema);
@@ -323,6 +323,21 @@ fn store_without_a_constructor() -> Schema {
     s
 }
 
+/// Fine as the default `@Observable` store, a collision in the iOS 15 / 16 shape (ADR-045).
+fn store_member_named_like_observable_object() -> Schema {
+    let mut s = Schema::new("t");
+    s.objects.push(store(
+        object(
+            "Counter",
+            "",
+            vec![ctor("Counter", "new", vec![], false)],
+            vec![],
+        ),
+        vec![("object_will_change", TypeRef::U32, false, None)],
+    ));
+    s
+}
+
 fn event_method_that_returns() -> Schema {
     let mut s = Schema::new("t");
     s.ports.push(port(
@@ -419,6 +434,10 @@ const CASES: &[(&str, &[Case])] = &[
                 "a name that is not an identifier",
                 name_that_is_not_an_identifier,
             ),
+            (
+                "a store member that an iOS 15 / 16 store already has",
+                store_member_named_like_observable_object,
+            ),
         ],
     ),
     (
@@ -441,7 +460,12 @@ fn update() -> bool {
 /// The messages `case` raises with `code`, in order (a case may also raise others; they belong to
 /// another code's golden).
 fn raised(code: &str, case: fn() -> Schema) -> Vec<String> {
-    let errors: Vec<BindgenError> = validate(&case()).err().unwrap_or_default();
+    let schema = case();
+    let mut errors: Vec<BindgenError> = validate(&schema).err().unwrap_or_default();
+    // What only the iOS 15 / 16 Swift mode rejects (ADR-045).
+    let mut floor = Generator::for_crate("t");
+    floor.swift_observation = SwiftObservation::ObservableObject;
+    errors.extend(floor.swift_floor_errors(&schema));
     errors
         .iter()
         .filter(|e| e.code() == code)

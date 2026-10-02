@@ -186,6 +186,19 @@ pub const CASES: &[&str] = &[
     "recursive",
 ];
 
+/// The cases whose Swift output is also locked in the iOS 15 / 16 mode (`ObservableObject` stores,
+/// `UndraDuration`; ADR-045), as `tests/golden/<case>/swift-observable-object/`. They are the cases that
+/// have stores or query handles, and the one with a `Duration` field.
+pub const FLOOR_CASES: &[&str] = &["stores", "queries", "full"];
+
+/// `generator_for` in the iOS 15 mode: `ObservableObject` stores and a floor of iOS 15 (the strictest one).
+pub fn floor_generator_for(case: &str, schema: &Schema) -> Generator {
+    let mut generator = generator_for(case, schema);
+    generator.swift_observation = undra_bindgen::SwiftObservation::ObservableObject;
+    generator.swift_min_ios = 15;
+    generator
+}
+
 /// The generator configuration of a case: default names, and a Kotlin package
 /// per case so every case can be compiled together.
 pub fn generator_for(case: &str, schema: &Schema) -> Generator {

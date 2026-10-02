@@ -232,11 +232,11 @@ public final class Mirror: @unchecked Sendable {
     }
 
     /// Calls `listener` on the main actor after every drain with what the drain did. Drains are
-    /// timed (`ContinuousClock`) only while a listener is registered. Safe from any thread.
+    /// timed (`DispatchTime`) only while a listener is registered. Safe from any thread.
     ///
     /// ```swift
     /// let registration = core.mirror.addDrainListener { stats in
-    ///     print("\(stats.changeSets) change-sets, \(stats.appliedEntries) applies in \(stats.duration)")
+    ///     print("\(stats.changeSets) change-sets, \(stats.appliedEntries) applies in \(stats.durationNanoseconds) ns")
     /// }
     /// registration.remove()
     /// ```
@@ -469,8 +469,8 @@ public final class Mirror: @unchecked Sendable {
         guard let start = start else {
             return
         }
-        let clock = ContinuousClock()
-        let started = start.timed ? clock.now : nil
+        // `DispatchTime`, not `ContinuousClock`: the clock types are iOS 16 / macOS 13 (ADR-045).
+        let started: UInt64? = start.timed ? DispatchTime.now().uptimeNanoseconds : nil
         var round = start.round
         var rounds = 0
         var changeSets = 0
@@ -526,7 +526,8 @@ public final class Mirror: @unchecked Sendable {
             requestFrame()
         }
         if let started = started, !finish.listeners.isEmpty {
-            let stats = DrainStats(changeSets: changeSets, entries: entries, appliedEntries: applied, duration: clock.now - started)
+            let elapsed = DispatchTime.now().uptimeNanoseconds &- started
+            let stats = DrainStats(changeSets: changeSets, entries: entries, appliedEntries: applied, durationNanoseconds: Int64(clamping: elapsed))
             for listener in finish.listeners {
                 listener(stats)
             }

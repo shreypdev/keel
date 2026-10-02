@@ -21,7 +21,7 @@ In scope: everything under the pixels.
 
 Out of scope for v1: sync engine, hosted services, desktop targets beyond macOS-via-Swift, shared UI of any kind, Rust-owned SQLite (Kv is a foreign port in v1, see ADR-014; SQL arrives in v1.2 as the foreign, opt-in `Db` port of §8.1, ADR-048).
 
-Toolchain baseline: Rust 1.85+ (edition 2024), Swift 6.0 / iOS 17+, Kotlin 2.0 / Android API 26+ (NDK r27, 16 KB pages), TypeScript 5.5 / ES2022, Node 20+.
+Toolchain baseline: Rust 1.85+ (edition 2024), Swift 6.0 / iOS 17+ by default and iOS 15+ in the compatibility mode (§10.1, ADR-045), Kotlin 2.0 / Android API 26+ (NDK r27, 16 KB pages), TypeScript 5.5 / ES2022, Node 20+.
 
 ---
 
@@ -754,6 +754,17 @@ public enum UndraPlaygroundCore {
 ```
 Sync methods in `inproc` mode call the table's `call_sync`. Store initial values are decoded from the change-set emitted by `undra_observe` during `init`.
 
+**Two store shapes: the iOS floor (ADR-045).** Observation is iOS 17 / macOS 14, so the generator has a second shape for apps that support iOS 15 or 16 (`Generator::swift_observation`, `SwiftObservation`). `undra bindgen` chooses it from `[ios] deployment_target`: below 17.0 the stores are `ObservableObject`s, from 17.0 `@Observable`; `[bindings] swift_observation = "observation" | "observable-object"` (and `--swift-observation`) overrides, and `observation` for a target below 17.0 is a CLI error naming both settings. The deployment target must be 15.0 or later (the Swift runtime's floor).
+
+```swift
+// store, iOS 15 / 16 (swift_observation = observable-object): the same class, observed through Combine
+@MainActor public final class Todos: UndraStore, ObservableObject, @unchecked Sendable {
+    @Published public private(set) var todos: [Todo]; @Published public private(set) var filter: Filter   // every signal; `$todos` is the Combine publisher
+    // init(ctx:), commands, `apply(signal:op:reader:)`, the mirror registration and the ADR-031/032 behaviour: byte for byte the code of the `@Observable` shape
+}
+```
+Only the class attributes, the `@Published` on each signal, `import Combine` (for `import Observation`) and, below iOS 16, the type of the wire `Duration` differ; a generated file of this mode says so on its second line (`// Swift mode: observable-object …`), so switching mode makes `undra bindgen --check` report stale bindings. The wire `Duration` is `Swift.Duration` from a floor of iOS 16 and the runtime's `UndraDuration` (exact `Int64` nanoseconds, `.zero`, `Hashable`, `UndraCodec`) below, because `Swift.Duration` is iOS 16 / macOS 13. The generated package declares `.iOS(.v15), .macOS(.v12)` (`.v16`/`.v13` for a floor of 16). What degrades: a view that observes an `ObservableObject` re-renders when *any* property of that store publishes (Observation re-renders on the properties the view read), SwiftUI coalesces the several `objectWillChange` events of one drain into one update; split big stores, or observe smaller ones. `@Published` has no in-place accessor, so a keyed patch to a list property copies the array once per applied patch (Observation mutates in place): measured, 48 µs for a 10,000-row list against 0.2 µs, 0.5 ms at 100,000 rows, linear and not per op because the mirror merges a frame's patches into one apply (`docs/IOS_15_16.md`). The views change as the table in `docs/IOS_15_16.md` shows (`@ObservedObject`, `@StateObject`, `.environmentObject`). A store member named `objectWillChange` is E0051 in this mode only (`ObservableObject` declares it).
+
 **Recursive types.** A Swift value type cannot hold itself inline, so bindgen computes the *inline containment graph* of the schema's records, data enums and errors: `A → B` when a field of `A` (a payload field, for an enum) is a `B` or an optional `B`. `Vec`, `Map` and `Bytes` keep their elements on the heap and add no edge. A field whose edge lies on a cycle (`B` reaches `A` again, `A == B` included, so mutual recursion and record/enum cycles are covered) is stored behind a reference; everything else is generated exactly as before.
 * A **record** keeps the public shape `public var next: ListNode?`: a computed property over `private var _next: UndraIndirect<ListNode>?`, whose setter replaces the immutable box, so value semantics, the memberwise `init`, `Hashable`, `Sendable` and the `Codable` JSON shape (a nil child is omitted, a missing key decodes as nil, through a private `CodingKeys` that maps `_next` to `"next"`) are those of a plain optional. `UndraIndirect<Value: Sendable>` is an `internal final class` around a `let`, emitted once into `Types.swift`, and only when some field needs it. (A property wrapper would read better but Swift rejects a public property whose wrapper type is internal, and a public wrapper would put a helper type into every generated module's API.)
 * A **data enum or error** with a payload on a cycle is `indirect` (an array or dictionary payload never makes it so).
@@ -1009,7 +1020,7 @@ The catalogue is audited by `crates/undra-macros/tests/catalogue.rs`: every row 
 | E0041 | macros | query or mutation function with an invalid signature (not `async`, no `ctx: &Ctx` first parameter, not returning `Result<T, E>`, a stream result, `self`) |
 | E0042 | macros | query whose success value is `()` or an `Option` (a query caches a value; use a mutation for effects) |
 | E0050 | schema validation | duplicate type name, a type named like something the generated code depends on, two items with one id, two variants with one index |
-| E0051 | schema validation | a name that collides after case conversion (`a_b` and `aB`), shadows a member of the runtime base classes, or is not an identifier in a target language |
+| E0051 | schema validation | a name that collides after case conversion (`a_b` and `aB`), shadows a member of the runtime base classes, or is not an identifier in a target language; in the iOS 15 / 16 Swift mode also a store member named `objectWillChange` (§10.1, ADR-045) |
 | E0052 | schema validation | a record, enum, error, object or port named like a standard library item (section 8) but with another id: the runtimes implement the standard items under those names and ids |
 | E0060 | macros (a check the compiler runs) | a spelling that looks like a built-in Undra type (`Bytes`, `Uuid`, `String`, `Vec`, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit |
 | E0061 | macros (a check the compiler runs) | the schema records a name that the type written there does not have: an alias of an Undra type (`type Todo = Item`), a renamed import (`use m::Item as Todo`), or a name that is not a type declared with `#[undra::api]` at all (a plain struct, `type Id = u64`); reported by a const assertion on `UNDRA_TYPE_ID` |
@@ -1560,7 +1571,7 @@ public final class UndraCore: @unchecked Sendable {
                                      mapError: @escaping @Sendable (Error) -> Error = { $0 }) -> AsyncThrowingStream<Item, Error>   // what generated stream methods return; decodes on demand so credit follows the consumer (§3.7)
   public func construct(type: UInt32, method: UInt32, args: [UInt8]) throws -> UndraHandle
   public func observe(_ handle: UndraHandle, signal: UInt32, on: Bool); public func release(_ handle: UndraHandle)
-  public var connectionState: UndraConnectionState { get }   // ADR-051: .connecting | .connected | .reconnecting(attempt:) | .closed(UndraClosedReason: .requested | .schemaMismatch | .sessionLost | .failed); also `connection` (@MainActor @Observable, `.state`) and `connectionStates() -> AsyncStream`; LoadOptions.reconnect (UndraReconnectPolicy), onConnectionChange; UndraSessionLostError
+  public var connectionState: UndraConnectionState { get }   // ADR-051: .connecting | .connected | .reconnecting(attempt:) | .closed(UndraClosedReason: .requested | .schemaMismatch | .sessionLost | .failed); also `connection` (@MainActor @Observable, `.state`, iOS 17 / macOS 14) and `connectionObject` (@MainActor ObservableObject, `@Published state`, every floor: the twin below iOS 17, ADR-045) and `connectionStates() -> AsyncStream`; LoadOptions.reconnect (UndraReconnectPolicy), onConnectionChange; UndraSessionLostError
   public let mirror: Mirror        // register(handle, noCoalesce: Set<UInt32> = []) { @MainActor (signalId, op, reader) in … }; stats() -> MirrorStats;
                                    // addDrainListener { @MainActor (DrainStats) in … } -> DrainListenerRegistration (remove()); @MainActor flush()  (§11.1)
   public func registerPort(_ id: UInt32, _ impl: PortImpl)   // a shut-down core (and the `shared` placeholder) ignores it, with a warning
@@ -1568,9 +1579,10 @@ public final class UndraCore: @unchecked Sendable {
   public func report(_ error: any Error, operation: String)   // a failure no caller can see: logs at error level, then calls LoadOptions.onError (ADR-032); generated commands and store `apply` call it; a failure that is a remote core's connection being down (.unavailable while connectionState is .reconnecting, or .closed for a reason other than .requested) is only logged, at warning level (ADR-051)
 }
 public struct MirrorStats: Sendable, Equatable { changeSetsReceived, entriesReceived, entriesApplied, drains, compactions, resyncs, pendingEntries, pendingBytes, droppedEntries: Int }
-public struct DrainStats: Sendable, Equatable { changeSets: Int; entries: Int; appliedEntries: Int; duration: Duration }
+public struct DrainStats: Sendable, Equatable { changeSets: Int; entries: Int; appliedEntries: Int; durationNanoseconds: Int64; /* iOS 16 / macOS 13: */ var duration: Duration }   // ADR-045: the runtime's floor is iOS 15 / macOS 12; Swift.Duration and the clock types are 16 / 13, so the drain is timed with DispatchTime
+public struct UndraDuration: UndraCodec, Sendable, Hashable, Comparable { public var nanoseconds: Int64; public static let zero; public var timeInterval: Double; /* iOS 16 / macOS 13: */ public init(_ d: Duration); public var duration: Duration }   // the wire Duration without Swift.Duration; `extension Duration: UndraCodec` is iOS 16
 open class UndraObject: @unchecked Sendable { public init(core: UndraCore, handle: UndraHandle); public func close() }
-@MainActor open class UndraStore: UndraObject { public init(core: UndraCore, handle: UndraHandle, noCoalesce: Set<UInt32> = []); open func apply(signal: UInt32, op: ChangeOp, reader: inout UndraReader) }   // generated subclass is @Observable
+@MainActor open class UndraStore: UndraObject { public init(core: UndraCore, handle: UndraHandle, noCoalesce: Set<UInt32> = []); open func apply(signal: UInt32, op: ChangeOp, reader: inout UndraReader) }   // the generated subclass is @Observable, or an ObservableObject when the app supports iOS 15 / 16 (ADR-045)
 public struct UndraReplyError: Error { public let status: ReplyStatus; public let body: [UInt8] }   // what the raw entry points throw
 public struct LoadOptions: Sendable { …; public var onError: (@Sendable (UndraUnhandledError) -> Void)?; public var onDevNotice: (@Sendable (String) -> Void)? /* last; dev only: a remote core served by `undra dev` (also `.remote(…, onDevNotice:)`), runs on a queue of the runtime's, §5.10 (ADR-053) */ }   // runs synchronously on the calling thread (the main actor for a store); must not call into Undra
 /// What a generated method throws when the call itself fails: not its own `E`, not `CancellationError` (ADR-032).

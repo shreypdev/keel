@@ -181,6 +181,24 @@ final class TypedValueTests: XCTestCase {
         XCTAssertEqual(UndraDuration(oneAndAHalfNanoseconds).nanoseconds, 1)
     }
 
+    /// ADR-045: what an iOS 15 app has, with no `Swift.Duration`: the exact nanoseconds, `.zero`, seconds.
+    func testUndraDurationWorksOnItsOwn() {
+        var duration = UndraDuration(nanoseconds: 1_500_000_000)
+        XCTAssertEqual(duration.nanoseconds, 1_500_000_000)
+        XCTAssertEqual(duration.timeInterval, 1.5)
+        XCTAssertEqual(UndraDuration.zero, UndraDuration(nanoseconds: 0))
+        XCTAssertEqual(UndraDuration.zero.timeInterval, 0)
+        XCTAssertTrue(UndraDuration(nanoseconds: 1) < UndraDuration(nanoseconds: 2))
+        XCTAssertEqual(Set([duration, UndraDuration(nanoseconds: 1_500_000_000)]).count, 1)
+        // Every nanosecond survives, which a `TimeInterval` would not (2^53 + 1 is not a Double).
+        let odd = Int64(1) << 53 + 1
+        XCTAssertEqual(UndraDuration(nanoseconds: odd).nanoseconds, odd)
+        assertRoundTrip(UndraDuration(nanoseconds: odd))
+        duration.nanoseconds = 7
+        assertCodec(duration, hex: "0700000000000000")
+        XCTAssertEqual(try UndraDuration.undraDecoded(from: hexToBytes("0700000000000000")), duration)
+    }
+
     func testDurationSaturatesBeyondTheInt64NanosecondRange() {
         XCTAssertEqual(UndraDuration(.seconds(Int64.max)).nanoseconds, Int64.max)
         XCTAssertEqual(UndraDuration(.seconds(Int64.min)).nanoseconds, Int64.min)

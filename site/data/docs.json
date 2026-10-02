@@ -25,6 +25,7 @@
       { "file": "cookbook/offline.html", "title": "Offline-first" },
       { "file": "cookbook/from-kmp.html", "title": "From Kotlin Multiplatform", "pager": "Cookbook, from Kotlin Multiplatform" },
       { "file": "cookbook/from-uniffi.html", "title": "From UniFFI", "pager": "Cookbook, from UniFFI" },
+      { "file": "cookbook/ios-15-16.html", "title": "iOS 15 and 16", "pager": "Cookbook, iOS 15 and 16" },
       { "file": "sample.html", "title": "Sample app" }
     ] },
     { "title": "Reference", "pages": [

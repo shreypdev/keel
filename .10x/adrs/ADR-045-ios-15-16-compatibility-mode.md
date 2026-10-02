@@ -1,6 +1,6 @@
 # ADR-045: an iOS 15/16 compatibility mode: generated stores as `ObservableObject`, chosen by the deployment target
 
-Status: **Proposed** (2026-10-01, `wt/boundary-adrs`; Amendment B "iOS floor", catalogue M-9 and finding 5).
+Status: **Accepted** (2026-10-01; implemented in `wt/ios-floor`; Amendment B "iOS floor", catalogue M-9 and finding 5). Proposed 2026-10-01 in `wt/boundary-adrs`; the dated deviations are at the end.
 Touches SPEC 0 (the toolchain baseline: iOS 15 / macOS 12 as the Swift floor), 10.1 (a second generated store
 shape and one type mapping), 17.3 (a few runtime signatures gain availability annotations) and the CLI's
 `undra.toml`; `undra-bindgen` (a Swift generator option), `undra-cli` (passing the deployment target), the
@@ -147,3 +147,62 @@ Typed `throws(E)` in an async protocol requirement (port requirements, ADR-032),
 
 None. ADR-043's `UndraLazyList` follows decision 4's two-form rule when it lands; whichever lands second adds
 the twin.
+
+## Deviations and notes from the implementation (2026-10-01, `wt/ios-floor`)
+
+* **The runtime did import Observation.** The context says it did not; since ADR-051 `UndraConnection` (`core.connection`, the
+  `@Observable` connection state) does, so the runtime had a fourth file to port (with `UndraTypes`, `Mirror`, `MirrorStats`),
+  and `UndraTestKit` a fifth (`PreviewCore.settle` used `ContinuousClock` and `Task.sleep(for:)`). Decision 4's rule for runtime types a
+  generated store exposes was applied: `UndraConnection` stays `@Observable` and becomes `@available(iOS 17, macOS 14, *)`
+  (`core.connection` likewise, a computed property over an `any Sendable` slot `init` fills, because a stored property cannot
+  have an availability-limited type), and its `ObservableObject` twin is `UndraConnectionObject` / `core.connectionObject`, on every floor.
+* **`DrainStats.durationNanoseconds`** is the stored field and `duration: Duration` an iOS 16 accessor, as decision 3 says; the
+  old `init(…, duration:)` is kept behind the same availability. The mirror times a drain with `DispatchTime`.
+* **The mode line.** The generated header records the mode in a second line, `// Swift mode: observable-object …`, only in that
+  mode: the default output is byte-identical to what it was, so no golden, example or generated package changed. A mode switch
+  changes the files, which is what makes `undra bindgen --check` report it.
+* **`--ios-deployment-target`.** `undra bindgen` also takes `--ios-deployment-target VERSION` (the generator's floor for this run,
+  not the Xcode target): the contract suite and `scripts/ios-floor.sh` use it to generate the iOS 15 bindings of the playground and
+  Fieldbook without editing their `undra.toml`. `undra init` takes the same flag and writes it as `[ios] deployment_target`.
+  `deployment_target` below 15.0 or not a version is a CLI error (it was accepted as any string).
+* **The generated package's platforms** follow the floor (`.iOS(.v15), .macOS(.v12)` / `.v16, .v13` / `.v17, .v14`), which the
+  ADR did not list; a package that said iOS 17 would refuse an iOS 15 app.
+* **R8 diagnostics.** The two CLI errors the decision asks for (observation below 17; and, new, a target below 15) name both
+  settings with what, why and fix. The one schema feature that exists only at the floor is a store member named
+  `objectWillChange`, which `ObservableObject` declares: E0051 in this mode only (`Generator::swift_floor_errors`). Nothing else
+  is unavailable at 15, because the `Duration` mapping removed the one thing that was.
+* **Template views.** `undra init --ios-deployment-target 15.0` writes three differing files (`MainApp.swift`, `ContentView.swift`,
+  `DevStatusBar.swift`; the bootstrap is shared). The owning `@State` of the app is kept (the app replaces the store when `undra dev`
+  loads a new core, which `@StateObject` cannot do) and the screens observe with `@ObservedObject`; `NavigationStack` is
+  `NavigationView` with the stack style; `Task.sleep(for:)` is `Task.sleep(nanoseconds:)`.
+* **Golden trees and checks.** `swift-observable-object/` exists for `stores`, `queries` and `full`, locked for a floor of 15
+  (`UndraDuration`); the floor-16 combination (`ObservableObject` with `Swift.Duration`) is a generator test. `typecheck_swift`
+  builds *every* golden case for the iOS 15.0 simulator and for iOS 16.0 (`--triple arm64-apple-ios15.0-simulator`), not only the
+  three with goldens, and falls back to the macOS version with the same availability when the iOS SDK is absent.
+* **The sample** is `examples/ios15-sample` (an `undra init --ios-deployment-target 15.0` project, iOS only, in the repository's
+  workspace) with a store and its keyed list, and a `tips` query handle; the playground's and Fieldbook's *apps* stay on iOS 17
+  (they dogfood Observation, and their screens use iOS 16/17 APIs), but their *bindings* are generated for iOS 15 and compiled
+  for the iOS 15.0 simulator by `scripts/ios-floor.sh apps`, and the playground's Swift contract grid runs against the floor
+  bindings (`contract-tests/swift/run.sh --floor`).
+* **Simulator coverage (the Risks paragraph).** This machine has only the iOS 26.5 simulator runtime; no iOS 15 or 16 runtime was
+  installed or downloaded. The floor is therefore proven by compilation for the iOS 15.0 / 16.0 simulator targets, the app's
+  `minos 15.0` / `MinimumOSVersion 15.0`, a run of the iOS-15.0-built sample on the iOS 26.5 simulator (store, keyed list and query
+  handle updating through `@Published`), and the contract grid; running it on an iOS 15 or 16 runtime remains the device pass
+  (`scripts/ios-floor.sh simulator` does it where such a runtime exists).
+* **ADR-043's `UndraLazyList`** has not landed; when it does it follows decision 4's twin rule (the runtime already has the pattern in
+  `UndraConnection` / `UndraConnectionObject`).
+
+## Review addendum (2026-10-02, `wt/ios-floor` review)
+
+* **The cost decision 4 did not state.** `@Published` has no in-place accessor, so `try applyPatch(ops, to: &self.visible)` in the
+  generated `apply` copies the array once per applied patch where `@Observable` mutates it in place. Measured (Apple M5 Pro, release,
+  32-byte rows with a heap string, one patch, `objectWillChange` subscribed): 5 µs at 1,000 rows, 48 µs at 10,000, 0.5 ms at 100,000,
+  against 0.2 µs at every size under Observation; linear (about 5 ns a row) and paid per applied patch, not per op (a 100-op patch is
+  56 µs at 10,000 rows), because the mirror merges a frame's patches into one apply. Accepted as the known cost of `@Published`
+  arrays; stated in SPEC 10.1, `docs/IOS_15_16.md` and the cookbook. (Swapping the array out and back in avoids the copy but publishes
+  an empty list to `$property` subscribers in between, so it is not used.)
+* **A held connection must not depend on the core.** `core.connection` (iOS 17) and `core.connectionObject` are told in one hop to the
+  main queue; the hop captures both observables, not the core (it first captured the core weakly, so an `@Observable` connection missed
+  the final state when the app released the core from `onConnectionChange`).
+* **SQLite.** `sqlite3_changes` (a C `int`) replaces `sqlite3_changes64` below iOS 15.4 / macOS 12.3; a single statement over
+  2,147,483,647 changed rows reports an undefined count. Documented in `docs/IOS_15_16.md`.

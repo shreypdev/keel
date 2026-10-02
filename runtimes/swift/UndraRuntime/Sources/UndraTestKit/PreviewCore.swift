@@ -75,10 +75,11 @@ public final class PreviewCore: @unchecked Sendable {
     /// raise `quietMs` on a machine that is busy.
     @MainActor
     public func settle(quietMs: Int = 20, timeoutMs: Int = 5_000) async {
-        let deadline = ContinuousClock.now + .milliseconds(timeoutMs)
+        // `DispatchTime` and `Task.sleep(nanoseconds:)`, not the clock types: those are iOS 16 / macOS 13 (ADR-045).
+        let deadline = DispatchTime.now().uptimeNanoseconds &+ UInt64(max(0, timeoutMs)) &* 1_000_000
         var quiet = 0
         var last = ""
-        while ContinuousClock.now < deadline {
+        while DispatchTime.now().uptimeNanoseconds < deadline {
             let stats = core.stats()
             let polls = stats.values["polls"] ?? -1
             let now = "\(polls):\(stats.values["pending_port_calls"] ?? 0):\(stats.coreActiveCalls):\(stats.hostPendingCalls)"
@@ -91,7 +92,7 @@ public final class PreviewCore: @unchecked Sendable {
             if quiet >= max(1, quietMs / 2) {
                 break
             }
-            try? await Task.sleep(for: .milliseconds(2))
+            try? await Task.sleep(nanoseconds: 2_000_000)
         }
         core.mirror.flush()
     }

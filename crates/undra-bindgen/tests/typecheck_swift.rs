@@ -9,7 +9,11 @@
 //!
 //! Every case becomes one target of a single scratch SwiftPM package below the target
 //! directory, so that one `swift build` type-checks all of them and nothing is written
-//! into the repository. Each case also brings the C module bindgen generates for its core,
+//! into the repository. The default mode builds for the host (macOS 14, which has the same API
+//! availability as iOS 17); the iOS 15 / 16 mode of ADR-045 (`ObservableObject` stores,
+//! `UndraDuration` below iOS 16) is built once more for each floor, for the iOS simulator at that
+//! version (`--triple arm64-apple-ios15.0-simulator`), so a use of an API newer than the floor
+//! fails here; without the iOS SDK it is built for the macOS version with the same availability. Each case also brings the C module bindgen generates for its core,
 //! `<Namespace>CoreFFI` (the declaration of `<namespace>_undra_api`, ADR-044), which its Swift
 //! target depends on; an execution check, which is linked, gets a C target that defines that
 //! function as returning NULL (the checks never load a core in process). A compiler error fails the test; warnings do not (the generator
@@ -25,7 +29,54 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use common::{manifest_dir, on_path, repo_root, scratch, skip};
-use undra_bindgen::GeneratedFile;
+use undra_bindgen::{GeneratedFile, SwiftObservation};
+
+/// One way to build the generated Swift: which mode and floor it is generated for and which
+/// platform floor the package declares.
+struct Variant {
+    /// The scratch directory and the package name.
+    name: &'static str,
+    observation: SwiftObservation,
+    /// The major iOS version of the floor (`Generator::swift_min_ios`).
+    min_ios: u32,
+    /// The package's `platforms:` in the iOS build and in the host build used without the iOS SDK.
+    ios_platforms: &'static str,
+    host_platforms: &'static str,
+    /// The simulator triple of the iOS build.
+    triple: &'static str,
+    /// Whether the execution checks run (they need the host).
+    checks: bool,
+}
+
+const DEFAULT: Variant = Variant {
+    name: "swift-generated",
+    observation: SwiftObservation::Observation,
+    min_ios: 17,
+    ios_platforms: ".iOS(.v17), .macOS(.v14)",
+    host_platforms: ".macOS(.v14)",
+    triple: "",
+    checks: true,
+};
+
+const IOS15: Variant = Variant {
+    name: "swift-generated-ios15",
+    observation: SwiftObservation::ObservableObject,
+    min_ios: 15,
+    ios_platforms: ".iOS(.v15), .macOS(.v12)",
+    host_platforms: ".macOS(.v12)",
+    triple: "arm64-apple-ios15.0-simulator",
+    checks: false,
+};
+
+const IOS16: Variant = Variant {
+    name: "swift-generated-ios16",
+    observation: SwiftObservation::ObservableObject,
+    min_ios: 16,
+    ios_platforms: ".iOS(.v16), .macOS(.v13)",
+    host_platforms: ".macOS(.v13)",
+    triple: "arm64-apple-ios16.0-simulator",
+    checks: false,
+};
 
 /// The SwiftPM target a case is compiled as: `records` is `GoldenRecords`.
 fn target_name(case: &str) -> String {
@@ -82,7 +133,7 @@ fn unavailable() -> Option<&'static str> {
 
 /// The manifest of the scratch package: per case, the C module of its core and its Swift target;
 /// per check, the stand-in for the core and the executable; all on the real runtime.
-fn manifest(runtime: &Path, cases: &[&str], checks: &[(&str, &str)]) -> String {
+fn manifest(runtime: &Path, cases: &[&str], checks: &[(&str, &str)], platforms: &str) -> String {
     let runtime_product = ".product(name: \"UndraRuntime\", package: \"UndraRuntime\")";
     let mut targets: String = cases
         .iter()
@@ -109,7 +160,7 @@ fn manifest(runtime: &Path, cases: &[&str], checks: &[(&str, &str)]) -> String {
          import PackageDescription\n\n\
          let package = Package(\n    \
              name: \"GoldenSwift\",\n    \
-             platforms: [.macOS(.v14)],\n    \
+             platforms: [{platforms}],\n    \
              dependencies: [.package(path: \"{}\")],\n    \
              targets: [\n{targets}    ],\n    \
              swiftLanguageModes: [.v6]\n\
@@ -119,10 +170,12 @@ fn manifest(runtime: &Path, cases: &[&str], checks: &[(&str, &str)]) -> String {
 }
 
 /// Writes the generated Swift of `cases` as the targets of one package in `root`.
-fn lay_out(root: &Path, runtime: &Path, cases: &[&str]) {
+fn lay_out(root: &Path, runtime: &Path, cases: &[&str], variant: &Variant, platforms: &str) {
     for case in cases {
         let schema = common::case(case);
-        let generator = common::generator_for(case, &schema);
+        let mut generator = common::generator_for(case, &schema);
+        generator.swift_observation = variant.observation;
+        generator.swift_min_ios = variant.min_ios;
         let files = generator.swift(&schema).unwrap();
         // The generated Swift never names its own module, so a case compiles under any target
         // name; the golden path's module (`PlaygroundCore`, `GoldenRecords`, ...) is replaced by
@@ -148,7 +201,8 @@ fn lay_out(root: &Path, runtime: &Path, cases: &[&str]) {
         );
         GeneratedFile::write_all(&renamed, root).unwrap();
     }
-    for (case, fixture) in CHECKS {
+    let checks: &[(&str, &str)] = if variant.checks { CHECKS } else { &[] };
+    for (case, fixture) in checks {
         let stub = root.join("Sources").join(stub_name(case));
         fs::create_dir_all(stub.join("include")).unwrap();
         fs::write(stub.join("core_stub.c"), stub_source(case)).unwrap();
@@ -162,7 +216,11 @@ fn lay_out(root: &Path, runtime: &Path, cases: &[&str]) {
         )
         .unwrap();
     }
-    fs::write(root.join("Package.swift"), manifest(runtime, cases, CHECKS)).unwrap();
+    fs::write(
+        root.join("Package.swift"),
+        manifest(runtime, cases, checks, platforms),
+    )
+    .unwrap();
 }
 
 /// The compiler diagnostics that are errors, one per line, for a readable failure.
@@ -182,9 +240,25 @@ fn has_module(root: &Path, target: &str) -> bool {
         .any(|dir| dir.join(format!("{target}.swiftmodule")).exists())
 }
 
-fn build(root: &Path) -> Result<String, String> {
-    let output = Command::new("swift")
-        .arg("build")
+/// The iPhone Simulator SDK, when Xcode is installed.
+fn simulator_sdk() -> Option<String> {
+    let output = Command::new("xcrun")
+        .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
+        .output()
+        .ok()?;
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (output.status.success() && Path::new(&path).exists()).then_some(path)
+}
+
+/// `swift build` of the scratch package; for the iOS simulator at `triple` when `sdk` is given.
+fn build(root: &Path, ios: Option<(&str, &str)>) -> Result<String, String> {
+    let mut command = Command::new("swift");
+    if let Some((sdk, triple)) = ios {
+        command.args(["build", "--sdk", sdk, "--triple", triple]);
+    } else {
+        command.arg("build");
+    }
+    let output = command
         .arg("--package-path")
         .arg(root)
         .arg("--scratch-path")
@@ -206,19 +280,31 @@ fn build(root: &Path) -> Result<String, String> {
     }
 }
 
-#[test]
-fn every_case_compiles_and_the_generated_swift_behaves() {
+/// Generates every case for `variant`, builds the package and checks that every case compiled
+/// into a module of its own; runs the execution checks when the variant has them.
+fn compile(variant: &Variant) {
     if let Some(why) = unavailable() {
         skip(&format!("no Swift toolchain: {why}"));
         return;
     }
+    // The floors are built for the iOS simulator at their own version; without Xcode's iOS SDK for
+    // the macOS version with the same API availability.
+    let sdk = if variant.triple.is_empty() {
+        None
+    } else {
+        simulator_sdk()
+    };
+    let (platforms, ios) = match &sdk {
+        Some(sdk) => (variant.ios_platforms, Some((sdk.as_str(), variant.triple))),
+        None => (variant.host_platforms, None),
+    };
     let runtime: PathBuf = repo_root()
         .join("runtimes/swift/UndraRuntime")
         .canonicalize()
         .expect("the Swift runtime package exists");
-    let root = scratch("swift-generated");
-    lay_out(&root, &runtime, common::CASES);
-    match build(&root) {
+    let root = scratch(variant.name);
+    lay_out(&root, &runtime, common::CASES, variant, platforms);
+    match build(&root, ios) {
         Ok(output) => {
             assert!(
                 output.contains("Build complete"),
@@ -233,10 +319,14 @@ fn every_case_compiles_and_the_generated_swift_behaves() {
             assert!(missing.is_empty(), "no compiled module for {missing:?}");
         }
         Err(output) => panic!(
-            "the generated Swift does not compile ({} golden cases as one package):\n{}\n\nfull output:\n{output}",
+            "the generated Swift ({}) does not compile ({} golden cases as one package):\n{}\n\nfull output:\n{output}",
+            variant.name,
             common::CASES.len(),
             errors(&output)
         ),
+    }
+    if !variant.checks {
+        return;
     }
     for (case, _) in CHECKS {
         let output = Command::new(root.join(".build/debug").join(check_name(case)))
@@ -252,9 +342,31 @@ fn every_case_compiles_and_the_generated_swift_behaves() {
 }
 
 #[test]
+fn every_case_compiles_and_the_generated_swift_behaves() {
+    compile(&DEFAULT);
+}
+
+/// ADR-045: the `ObservableObject` stores and `UndraDuration` build against the runtime at iOS 15.
+#[test]
+fn every_case_compiles_at_the_ios_15_floor() {
+    compile(&IOS15);
+}
+
+/// ADR-045: from iOS 16 the wire `Duration` is `Swift.Duration` again, with `ObservableObject` stores.
+#[test]
+fn every_case_compiles_at_the_ios_16_floor() {
+    compile(&IOS16);
+}
+
+#[test]
 fn the_scratch_package_names_one_target_per_case_and_one_executable_per_check() {
     // Needs no Swift toolchain: the layout is plain text.
-    let manifest = manifest(Path::new("/runtime"), common::CASES, CHECKS);
+    let manifest = manifest(
+        Path::new("/runtime"),
+        common::CASES,
+        CHECKS,
+        DEFAULT.host_platforms,
+    );
     for case in common::CASES {
         let ffi = ffi_module(case);
         assert!(manifest.contains(&format!(
@@ -288,4 +400,5 @@ fn the_scratch_package_names_one_target_per_case_and_one_executable_per_check() 
     }
     assert!(manifest.contains("swiftLanguageModes: [.v6]"));
     assert!(manifest.contains(".package(path: \"/runtime\")"));
+    assert!(manifest.contains("platforms: [.macOS(.v14)]"));
 }

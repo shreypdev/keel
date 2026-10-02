@@ -16,7 +16,9 @@ mod common;
 use std::path::Path;
 use std::process::Command;
 
-use common::{flag, has_rust_target, has_tool, init_project, path_with_undra, run_ok};
+use common::{
+    flag, has_rust_target, has_tool, init_project, init_project_with, path_with_undra, run_ok,
+};
 
 fn skipped(variable: &str) -> bool {
     if flag(variable) {
@@ -115,6 +117,57 @@ fn ios_builds_an_xcframework_with_device_and_simulator_slices() {
             size(&app)
         );
     }
+}
+
+/// ADR-045: an app that supports iOS 15 builds for the simulator at that floor: the runtime and the generated
+/// bindings (`ObservableObject` stores, `UndraDuration`) compile for iOS 15.0, and so do the template's views.
+#[test]
+fn an_ios_15_app_builds_for_the_simulator_at_its_floor() {
+    if skipped("UNDRA_TEST_IOS_APP") {
+        return;
+    }
+    assert!(
+        has_rust_target("aarch64-apple-ios") && has_rust_target("aarch64-apple-ios-sim"),
+        "rustup target add aarch64-apple-ios aarch64-apple-ios-sim"
+    );
+    let project = init_project_with("ios15app", "ios", &["--ios-deployment-target", "15.0"]);
+    let derived = common::TempDir::new("ios15-dd");
+    let build = Command::new("xcodebuild")
+        .args(["-quiet", "-project"])
+        .arg(project.root.join("ios/Ios15app.xcodeproj"))
+        .args([
+            "-scheme",
+            "Ios15app",
+            "-configuration",
+            "Debug",
+            "-destination",
+            "generic/platform=iOS Simulator",
+            "-derivedDataPath",
+        ])
+        .arg(derived.path())
+        .arg("build")
+        .env("PATH", path_with_undra())
+        .output()
+        .expect("xcodebuild runs");
+    assert!(
+        build.status.success(),
+        "xcodebuild at iOS 15.0 failed:\n{}\n{}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let plist = derived
+        .path()
+        .join("Build/Products/Debug-iphonesimulator/Ios15app.app/Info.plist");
+    let minimum = Command::new("/usr/libexec/PlistBuddy")
+        .args(["-c", "Print :MinimumOSVersion"])
+        .arg(&plist)
+        .output()
+        .expect("PlistBuddy runs");
+    assert_eq!(
+        String::from_utf8_lossy(&minimum.stdout).trim(),
+        "15.0",
+        "the app declares its floor"
+    );
 }
 
 #[test]
