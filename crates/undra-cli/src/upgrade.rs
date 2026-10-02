@@ -842,13 +842,19 @@ pub fn edit_gradle(text: &str, target: &Target) -> FileResult {
         let mut search_from = 0;
         while let Some(at) = out[search_from..].find("dev.undra:") {
             let start = search_from + at;
-            if comment.get(start).copied().unwrap_or(false) {
-                search_from = start + "dev.undra:".len();
-                continue;
-            }
             let rest = &out[start + "dev.undra:".len()..];
             let Some(colon) = rest.find(':') else { break };
             let module = &rest[..colon];
+            // A comment is left alone, except the commented-out dependency the generated app ships for the optional
+            // WorkManager module: uncommenting it later must give the version of the others.
+            let template_line = module == "android-work"
+                && line
+                    .trim_start()
+                    .starts_with("// implementation(\"dev.undra:android-work:");
+            if comment.get(start).copied().unwrap_or(false) && !template_line {
+                search_from = start + "dev.undra:".len();
+                continue;
+            }
             let after = &rest[colon + 1..];
             let end = after
                 .find(['"', '\'', ')', ' ', ','])
@@ -1445,12 +1451,15 @@ mod tests {
     }
 
     #[test]
-    fn gradle_moves_the_optional_work_module_once_it_is_uncommented_and_never_while_it_is_a_comment()
-     {
-        // The generated app has the line commented out (ADR-046: WorkManager is an optional module).
+    fn gradle_moves_the_optional_work_module_commented_out_or_not() {
+        // The generated app has the line commented out (ADR-046: WorkManager is an optional module): it moves
+        // with the others, so that an upgraded project is the one `undra init` would write; other comments do not.
         let commented =
             "dependencies {\n    // implementation(\"dev.undra:android-work:0.1.0\")\n}\n";
-        assert!(edit_gradle(commented, &target("0.2.1")).changes.is_empty());
+        let moved = edit_gradle(commented, &target("0.2.1"));
+        assert_eq!(moved.after, commented.replace("0.1.0", "0.2.0"));
+        let prose = "    // we used dev.undra:android-work:0.1.0 for a while\n";
+        assert!(edit_gradle(prose, &target("0.2.1")).changes.is_empty());
         let on = "dependencies {\n    implementation(\"dev.undra:android-work:0.1.0\")\n}\n";
         let r = edit_gradle(on, &target("0.2.1"));
         assert_eq!(r.after, on.replace("0.1.0", "0.2.0"));

@@ -162,7 +162,7 @@ THE MANIFEST\n\
 `build/symbols/manifest.json` lists, per shipped image (an Android ABI, an iOS slice, the web module, a host library): platform, \
 namespace, coreVersion, schemaHash, arch, format (elf, macho, wasm), imageId (ELF build id; the SHA-256 of the wasm module; for iOS \
 null, because the image is the app, whose UUID is that of its dSYM), sha256 and size of the shipped file, and `symbols` (and for \
-the web `functionMap`), paths relative to the manifest's directory.",
+the web `functionMap` and `dwarf`), paths relative to the manifest's directory.",
         after_long_help = "\
 EXAMPLES
     undra symbolicate report.json                              resolve a report with build/symbols of this project

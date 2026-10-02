@@ -168,14 +168,14 @@ pub fn parse_report(text: &str) -> std::result::Result<Report, String> {
         }
         out.frames.push(parsed);
     }
-    let text_of = |keys: [&str; 2]| {
+    let text_of = |keys: &[&str]| {
         keys.iter()
             .find_map(|k| value.get(k).and_then(Value::as_str))
             .map(ToOwned::to_owned)
     };
-    out.namespace = text_of(["namespace", "namespace"]).filter(|s| !s.is_empty());
-    out.core_version = text_of(["coreVersion", "core_version"]).filter(|s| !s.is_empty());
-    out.image_id = text_of(["imageId", "image_id"]).and_then(|id| normalize_image_id(&id));
+    out.namespace = text_of(&["namespace"]).filter(|s| !s.is_empty());
+    out.core_version = text_of(&["coreVersion", "core_version"]).filter(|s| !s.is_empty());
+    out.image_id = text_of(&["imageId", "image_id"]).and_then(|id| normalize_image_id(&id));
     out.schema_hash = ["schemaHash", "schema_hash"]
         .iter()
         .find_map(|k| match value.get(k)? {

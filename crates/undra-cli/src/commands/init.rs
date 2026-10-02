@@ -704,6 +704,7 @@ mod tests {
             "undra.toml",
             "Cargo.toml",
             ".gitignore",
+            ".lldbinit",
             "README.md",
             "core/Cargo.toml",
             "core/src/lib.rs",
@@ -730,6 +731,18 @@ mod tests {
                 assert!(!text.contains("@@"), "{file} still has a placeholder");
             }
         }
+        // The Rust formatters for LLDB are loaded from the toolchain on the machine, not from a path
+        // of this one (ADR-046), so the file can be committed.
+        let lldbinit = std::fs::read_to_string(root.join(".lldbinit")).unwrap();
+        assert!(
+            lldbinit.contains("rustc\", \"--print\", \"sysroot\"")
+                && lldbinit.contains("lldb_lookup.py"),
+            "{lldbinit}"
+        );
+        assert!(
+            !lldbinit.contains(&parent.display().to_string()),
+            "{lldbinit}"
+        );
         // The project reads back as a project.
         let project = Project::open(&root).unwrap();
         assert_eq!(project.config.name, "todo-app");

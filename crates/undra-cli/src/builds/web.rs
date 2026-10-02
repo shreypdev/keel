@@ -9,8 +9,11 @@
 //! One `wasm-opt` run (`-Oz -g`) over the module *without its DWARF* makes the optimised module
 //! with its names, and prints its function map (`--print-function-map`); the module that ships is
 //! that module with its name section removed and nothing else changed, so a `wasm-function[i]:0x…`
-//! of a production stack trace names the same function and the same byte offset in both, and the
-//! shipped module is not larger than the one `-Oz --strip-debug --strip-producers` made before.
+//! of a production stack trace names the same function and the same byte offset in both. The
+//! optimisation is the one `-Oz --strip-debug --strip-producers` always made; `wasm-opt` breaks ties
+//! between functions by name, so a run that sees the names orders them differently from the nameless
+//! one, and the module differs by about 0.1% either way (measured: the hello world +90 bytes
+//! gzipped, the playground -421); `--no-symbols` makes the old bytes.
 //! (The DWARF stays out of that run on purpose: when `wasm-opt` keeps DWARF it skips every pass that
 //! cannot update it, and the module grows 5 to 7%, so a debug module with DWARF and a shipped module
 //! of the same code cannot both exist.) A second run, over the module with its DWARF, makes the one

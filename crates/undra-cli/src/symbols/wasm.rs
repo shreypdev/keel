@@ -450,12 +450,8 @@ mod tests {
     #[test]
     fn function_bodies_are_located_by_module_offset_after_the_imports() {
         // One imported function (type 0), two defined ones: `nop; end` (3 bytes) and `end` (1 byte).
-        let import = {
-            let mut body = vec![1, 1, b'u', 1, b'f', 0, 0];
-            body.insert(0, 0);
-            body.remove(0);
-            section(2, &body)
-        };
+        // One import: module "u", field "f", a function of type 0.
+        let import = section(2, &[1, 1, b'u', 1, b'f', 0, 0]);
         let code = section(10, &[2, 3, 0, 0x01, 0x0b, 1, 0x0b]);
         let m = module(&[
             section(1, &[1, 0x60, 0, 0]),

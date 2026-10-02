@@ -380,6 +380,71 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    fn run_in(dir: &std::path::Path, args: &SymbolicateArgs) -> Result<()> {
+        let sys = crate::sys::RealSys;
+        let env = Env {
+            sys: &sys,
+            ui: crate::ui::Ui::plain(),
+            project_dir: Some(dir.to_path_buf()),
+        };
+        run(&env, args)
+    }
+
+    #[test]
+    fn nothing_to_resolve_no_manifest_and_an_ambiguous_one_are_explained() {
+        let dir = crate::fsutil::unique_temp_dir("symbolicate-run");
+        std::fs::create_dir_all(&dir).unwrap();
+        // No report and no address.
+        let error = run_in(&dir, &args(&[])).unwrap_err();
+        assert_eq!(error.code, Code::BadArgument);
+        assert!(error.what.contains("nothing to resolve"), "{}", error.what);
+        // A symbols directory with no manifest.
+        let mut with_dir = args(&["0x10"]);
+        with_dir.symbols = Some(dir.clone());
+        let error = run_in(&dir, &with_dir).unwrap_err();
+        assert!(error.what.contains("no symbol manifest"), "{}", error.what);
+        // Two ABIs of one namespace and a report with no image id: the error names both.
+        let entry = |abi: &str, id: &str| {
+            format!(
+                r#"{{"platform":"android","namespace":"acme","coreVersion":"1.0.0","schemaHash":null,"arch":"{abi}","format":"elf","imageId":"{id}","sha256":"","shipped":"","shippedBytes":0,"symbols":"x/{abi}.so"}}"#
+            )
+        };
+        std::fs::write(
+            dir.join("manifest.json"),
+            format!(
+                r#"{{"version":1,"undra":"0","artifacts":[{},{}]}}"#,
+                entry("arm64-v8a", "aa"),
+                entry("x86_64", "bb")
+            ),
+        )
+        .unwrap();
+        let mut by_namespace = args(&["0x10"]);
+        by_namespace.symbols = Some(dir.clone());
+        by_namespace.platform = Some("android".to_owned());
+        let error = run_in(&dir, &by_namespace).unwrap_err();
+        assert!(
+            error.what.contains("arm64-v8a") && error.what.contains("x86_64"),
+            "{}",
+            error.what
+        );
+        assert!(
+            error.fix.contains("--image-id") || error.fix.contains("--platform"),
+            "{}",
+            error.fix
+        );
+        // The right image id picks one; its symbol file is missing here, which is said, not guessed.
+        let mut by_id = args(&["0x10"]);
+        by_id.symbols = Some(dir.clone());
+        by_id.image_id = Some("bb".to_owned());
+        let error = run_in(&dir, &by_id).unwrap_err();
+        assert!(
+            error.what.contains("symbol file") && error.what.contains("x86_64.so"),
+            "{}",
+            error.what
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn platforms_have_aliases_and_an_error_that_lists_them() {
         assert_eq!(parse_platform("wasm").unwrap(), "web");
