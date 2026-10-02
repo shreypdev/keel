@@ -2685,6 +2685,14 @@ fn lazy() -> Schema {
         "",
         vec![field("name", TypeRef::String), field("count", TypeRef::U32)],
     ));
+    s.records.push(record(
+        "Chapter",
+        "",
+        vec![
+            field("number", TypeRef::U32),
+            field("title", TypeRef::String),
+        ],
+    ));
     s.enums.push(error_def(
         "LibraryError",
         "",
@@ -2714,6 +2722,16 @@ fn lazy() -> Schema {
             ("recent", TypeRef::lazy(named("Book")), true, None),
             ("total", TypeRef::U64, false, None),
         ],
+    ));
+    // A store that is nothing but a lazy list.
+    s.objects.push(store(
+        object(
+            "Archive",
+            "Chapters, paged.",
+            vec![ctor("Archive", "new", vec![], false)],
+            vec![],
+        ),
+        vec![("chapters", TypeRef::lazy(named("Chapter")), false, None)],
     ));
     s
 }

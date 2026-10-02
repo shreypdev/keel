@@ -49,6 +49,26 @@
           "default": false
         }
       ]
+    },
+    {
+      "name": "Chapter",
+      "type_id": 1838161906,
+      "fields": [
+        {
+          "name": "number",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ]
     }
   ],
   "enums": [
@@ -190,6 +210,42 @@
         ]
       },
       "docs": "A library with more books than a screen holds."
+    },
+    {
+      "name": "Archive",
+      "type_id": 1936264037,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 1137474749,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Archive"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [],
+      "store": {
+        "signals": [
+          {
+            "name": "chapters",
+            "signal_id": 0,
+            "ty": {
+              "kind": "lazy",
+              "of": {
+                "kind": "named",
+                "of": "Chapter"
+              }
+            },
+            "computed": false,
+            "key": null
+          }
+        ]
+      },
+      "docs": "Chapters, paged."
     }
   ],
   "functions": [],
