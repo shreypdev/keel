@@ -1176,6 +1176,8 @@ mod tests {
             ("struct N(Lazy<u8>);", "E0001"),
             ("struct N(Signal<u8>);", "E0001"),
             ("struct N(Arc<dyn Listener>);", "E0004"),
+            ("struct N(Arc<Calculator>);", "E0064"),
+            ("struct N(Vec<Option<Option<u8>>>);", "E0063"),
             ("struct N(HashMap<f64, u8>);", "E0006"),
         ] {
             let out = expand(src);
