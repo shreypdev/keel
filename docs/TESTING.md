@@ -140,7 +140,7 @@ One JSON document, `undra.recording`, version 1. The same shape holds change-set
 {
   "format": "undra.recording",
   "version": 1,
-  "schema_hash": "0xcaec1b9d8ea1f199",
+  "schema_hash": "0x437ce0973ce54a88",
   "source": "dev-server",
   "platform": "ios",
   "events": [
