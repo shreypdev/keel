@@ -17,6 +17,14 @@
 //! reference goes. An entry first issued by a return is *transient*: a snapshot leaves it out and
 //! a restore makes its handle stale.
 //!
+//! **Dormant entries (ADR-059).** A restore re-issues the handle of a re-creatable object (a query
+//! handle) as an entry whose object is a placeholder until the host first uses the handle. The
+//! table does not build it: [`Runtime::object`](crate::Runtime::object),
+//! [`param`](crate::Runtime::param) and [`observe`](crate::Runtime::observe) do, so a dispatcher
+//! resolves its receiver and its object parameters through them. [`get`](ObjectTable::get) and
+//! [`get_dyn`](ObjectTable::get_dyn) answer for what is in the entry now: a dormant handle is live
+//! and has its type id, but it is not a `T` yet.
+//!
 //! The table has its own reader-writer lock and is safe to use from anywhere, including from
 //! inside a dispatcher that runs under the core lock. Objects are `Arc`s, so an object
 //! outlives its handle while a task still holds it.
@@ -724,7 +732,9 @@ impl ObjectTable {
         }
     }
 
-    /// Resolves `handle` to its object, whatever its type.
+    /// Resolves `handle` to its object, whatever its type. A handle a restore re-issued and nobody has
+    /// used yet resolves to its dormant placeholder (ADR-059); use
+    /// [`Runtime::object`](crate::Runtime::object) to have it built.
     pub fn get_dyn(&self, handle: Handle) -> Result<Arc<dyn AnyObject>, BadHandle> {
         let inner = self.inner.read();
         Self::check(&inner, handle).map(|e| e.object.clone())
@@ -737,7 +747,9 @@ impl ObjectTable {
         Self::check(&inner, handle).map(|e| (e.object.undra_type_id(), e.object.undra_type_name()))
     }
 
-    /// Resolves `handle` to a `T`.
+    /// Resolves `handle` to a `T`. A dormant handle (ADR-059: re-issued by a restore, not built yet) is
+    /// not a `T`: this reports it as a wrong type. A dispatcher resolves through
+    /// [`Runtime::object`](crate::Runtime::object), which builds it and asks again.
     pub fn get<T: Send + Sync + 'static>(&self, handle: Handle) -> Result<Arc<T>, BadHandle> {
         let inner = self.inner.read();
         let entry = Self::check(&inner, handle)?;
