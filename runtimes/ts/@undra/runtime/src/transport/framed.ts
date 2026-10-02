@@ -3,6 +3,8 @@
 import { Kind, encodeCancel, encodeEvent, encodeObserve, encodeRelease, encodeStreamCredit, encodeTimerFired } from "../wire/index.js";
 import type { Channel, Transport } from "./transport.js";
 
+export { mirrorWaiters } from "../mirror-waiters.js";
+
 /** `transport` with every {@link Channel} method: its own where it has one, an encoded `send` otherwise. */
 export function framed<T extends Transport>(transport: T): T & Channel {
   const t = transport as T & Partial<Channel>;

@@ -594,8 +594,11 @@ export class UndraCore {
 
   private static async _attach(transport: Transport, options: CoreOptions, adapters: Partial<Adapters>): Promise<UndraCore> {
     // A transport that only has `send(kind, payload)` (remote, worker, a custom one) is driven through the framed adapter.
-    const channel = transport.observe === undefined ? (await import("./transport/framed.js")).framed(transport) : (transport as Transport & Channel);
+    const framing = transport.observe === undefined || !transport.synchronous ? await import("./transport/framed.js") : undefined;
+    const channel = transport.observe === undefined ? framing!.framed(transport) : (transport as Transport & Channel);
     const core = new UndraCore(channel, options, adapters);
+    // A core that answers later resolves `observe` when the initial change-set was applied: the mirror's waiters.
+    if (!transport.synchronous) core.mirror._w = framing!.mirrorWaiters(core.mirror);
     try {
       await core._start();
     } catch (error) {
@@ -837,7 +840,7 @@ export class UndraCore {
       this.mirror.flush();
       return Promise.resolve();
     }
-    return on ? this.mirror.whenObserved(handle, signalId, this._observeTimeoutMs) : Promise.resolve();
+    return on ? this.mirror._w!.when(handle, signalId, this._observeTimeoutMs) : Promise.resolve();
   }
 
   /** Releases an object handle: the store is unregistered from the mirror and the core drops its reference. Unknown handles and a closed core are ignored. */
