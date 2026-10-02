@@ -501,3 +501,12 @@ In flight: `types-paging` (ADR-042/043), `objects-followups` (O1–O8); drafted:
 
 Matrix at checkpoint 25: Rust 3,518 · TS 1,847 + 37 · Kotlin 880 + 32 · Swift 862 · RN 109 · contracts 95/95.
 Every ADR from 029 to 056 is implemented and merged. In flight: `objects-followups` (review + the path-independent size gate); drafted: `default-choice-post`.
+
+### Checkpoint 26 (2026-10-02) — the objects follow-ups; every code piece of the v1.x program is merged
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **objects-followups** (O1–O8 of the objects review): streams that take objects or callbacks lend and give back on every platform, one Swift wrapper per handle with cleanup under the identity map's lock, restore cancels calls holding a replaced store as a parameter, TS crash-restart replay distinguishes give-backs from releases, per-origin dev-session accounting, a constructor failing after taking callbacks answers status 2 without a double release, an abort racing a success reply reclaims the reference on every transport, Kotlin `invoke` for every `new`, the Swift weak wrapper fails rather than hangs; release builds remap `~`, `CARGO_HOME`, the registry, the checkout and the project so the module does not depend on where it was built | `14aae90` | sonnet review `.10x/reviews/2026-10-02-objects-followups-review.md`: merge; F1 (High) a pre-existing deadlock in Swift's identity map (a weak load under the lock deallocating a wrapper whose `deinit` takes the lock — found by an 8-thread stress), F3 StrictMode double effects closed a live object, F4/F5 parameter-slot gaps; Rust 3,536 · Swift 870 · Kotlin 881 · TS 1,856 · RN 110 · contracts 95/95; hash `0xcaec1b9d8ea1f199`; wasm 116,690 of 120,000, JS 22,100 of 22,100 (zero headroom: the next JS change makes room or restates ADR-052) |
+
+Matrix at checkpoint 26: Rust 3,536 · TS 1,856 + 37 · Kotlin 881 + 32 · Swift 870 · RN 110 · contracts 95/95 (S01–S33).
+**Every code piece of the v1.1/v1.2 program is merged.** Left: the `default-choice-post` fact-check and publication, the Rust 1.99 bump (needs `rustup update stable`), the final state pass.
