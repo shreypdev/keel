@@ -986,10 +986,14 @@ impl Schema {
 /// How `other` differs from `first`, two members of one generic family, if it does.
 fn disagreement(first: &Member<'_>, other: &Member<'_>) -> Option<String> {
     let (a, b) = (first.generic?, other.generic?);
-    let pair = |what: &str, x: String, y: String| {
+    let pair = |x: usize, y: usize| {
+        let parameters = |n: usize| format!("{n} parameter{}", if n == 1 { "" } else { "s" });
         format!(
-            "`{}` has {x} {what} and `{}` has {y}",
-            other.name, first.name
+            "`{}` has {} and `{}` has {}",
+            other.name,
+            parameters(x),
+            first.name,
+            parameters(y)
         )
     };
     let (arg_a, arg_b) = (a.args.first()?, b.args.first()?);
@@ -1015,11 +1019,7 @@ fn disagreement(first: &Member<'_>, other: &Member<'_>) -> Option<String> {
         ));
     }
     if first.params.len() != other.params.len() {
-        return Some(pair(
-            "parameters",
-            other.params.len().to_string(),
-            first.params.len().to_string(),
-        ));
+        return Some(pair(other.params.len(), first.params.len()));
     }
     for (x, y) in first.params.iter().zip(other.params) {
         if x.name != y.name {
