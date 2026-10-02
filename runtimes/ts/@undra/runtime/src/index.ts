@@ -11,6 +11,7 @@ export * from "./port.js";
 export * from "./signal.js";
 export * from "./lazy.js";
 export * from "./stream.js";
+export { streams, type UndraFeature } from "./stream-support.js";
 export * from "./version.js";
 export * from "./transport/transport.js";
 export { WasmMainTransport, type WasmMainOptions, type WasmSource } from "./transport/wasm-main.js";

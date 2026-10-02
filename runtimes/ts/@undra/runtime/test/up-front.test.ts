@@ -30,6 +30,8 @@ const STAYS_OUT: Readonly<Record<string, string>> = {
   "adapters/ids.ts": "`PortIds`, the names and hashes of every standard port: the first chunk spells the nine ids it needs as literals (`adapters/port-literals.ts`)",
   "fnv.ts": "the hash that `PortIds` is computed with",
   "wire/codecs-more.ts": "the fourteen codecs a hello page does not name (`codecs` is a namespace, ADR-057): a first-chunk module that names one puts it up front",
+  "stream-support.ts": "the stream support: the generated entry of a schema with a stream imports it (`features: [streams]`); a core without it loads it at its first stream",
+  "stream.ts": "`StreamCall`, which only the stream support opens",
 };
 
 describe("what UndraCore loads up front", () => {

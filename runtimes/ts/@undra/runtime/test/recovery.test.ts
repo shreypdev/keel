@@ -10,6 +10,7 @@ import { type CallbackInterface, callbacks, lend } from "../src/callbacks.js";
 import { dbPort, nodeSqliteDb } from "../src/db.js";
 import { type WebSocketAdapter, webSocketPort } from "../src/realtime.js";
 import { UndraCore } from "../src/core.js";
+import { streams } from "../src/stream-support.js";
 import { UndraTransportError } from "../src/errors.js";
 import { adopt, collected } from "../src/identity.js";
 import { UndraStore } from "../src/object.js";
@@ -158,6 +159,8 @@ async function recovering(options: { recovery?: false | Parameters<typeof crashR
       shared: false,
       adapters: { log, http: null, timer: null, kv: null, secureStore: null, fs: null, connectivity: null, lifecycle: null },
       ...(options.recovery !== false && { recovery: crashRecovery(options.recovery) }),
+      // What the generated entry of a schema with a stream passes (ADR-057): the stream this test leaves in flight is open, not loading.
+      features: [streams],
       onPanic: (report) => panics.push(report),
       onCoreRestarted: (event) => restarts.push(event),
       onError: (error) => errors.push(error),

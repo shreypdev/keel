@@ -15,6 +15,7 @@ import {
 } from "./errors.js";
 import { nextCallId } from "./callid.js";
 import { UndraCallError, UndraUnhandledError } from "./call-error.js";
+import { type CallTargetArg, type CallTargetRef, HEAD_LEN, encodeTarget, writeHead } from "./call-head.js";
 import { Mirror, type MirrorOptions, type MirrorStats } from "./mirror.js";
 import type { RecreateCall, UndraStore } from "./object.js";
 import { isTrap } from "./panic.js";
@@ -23,8 +24,9 @@ import type { CrashRecovery, UndraCoreRestarted } from "./recovery.js";
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
 import { dispatchPortCall, portOperation } from "./port-dispatch.js";
+import { onDemand } from "./on-demand.js";
 import { Signal } from "./signal.js";
-import { StreamCall } from "./stream.js";
+import type { PendingStream, StreamSupport, UndraFeature } from "./stream-support.js";
 import type { ReconnectOptions, WebSocketFactory } from "./transport/remote.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport/transport.js";
 import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
@@ -36,41 +38,21 @@ import {
   type HelloPayload,
   Kind,
   ReplyStatus,
-  StreamFlag,
   type PortCallPayload,
-  type StreamFailure,
   codecs,
-  decodeStreamFailure,
   decodeValue,
   encodeCall,
   encodeCancel,
   encodeEvent,
   encodeObserve,
   encodeRelease,
-  encodeStreamCredit,
   encodeTimerFired,
-  streamFailureReplyBody,
 } from "./wire/index.js";
+
+export type { CallTargetArg, CallTargetRef } from "./call-head.js";
 
 /** How the core is reached (SPEC 17.1). */
 export type LoadMode = "wasm-main" | "wasm-worker" | "remote";
-
-/**
- * What a call addresses: a free function, or a method of the object behind a
- * handle. (Addition to SPEC 17.1: the wire `CallTarget` enum has no room for
- * the handle, so generated code passes this object.) A bare
- * `CallTarget.FreeFunction` is accepted as shorthand for the first form.
- */
-export type CallTargetRef =
-  | { readonly target: CallTarget.FreeFunction }
-  | { readonly target: CallTarget.ObjectMethod; readonly handle: Handle }
-  | PageTarget;
-
-/** The target of a page call (ADR-043): the page server's handle and the rows wanted. */
-type PageTarget = { readonly target: CallTarget.LazyListPage; readonly handle: Handle; readonly offset: number; readonly limit: number };
-
-/** The argument type of `call`, `callSync` and `stream`. */
-export type CallTargetArg = CallTargetRef | CallTarget.FreeFunction;
 
 /** Live counters of a core; see {@link UndraCore.stats}. */
 export interface UndraStats {
@@ -208,6 +190,14 @@ export interface AttachOptions {
    */
   readonly mirror?: Pick<MirrorOptions, "schedule" | "maxPendingEntries" | "maxPendingBytes">;
   /**
+   * Parts of the runtime this core loads up front because its schema needs them (ADR-057): the generated entry passes
+   * `features: [streams]` when the schema has a stream method or function, and fills it in itself (do not pass it to a
+   * generated `load` or `attach`). A feature left out is loaded when it is first used (a core loaded by hand, or with bindings
+   * generated before ADR-057, loads the stream support at its first stream), so this changes when a chunk is fetched and nothing
+   * else.
+   */
+  readonly features?: readonly UndraFeature[];
+  /**
    * **Development only, and inert unless the core is a `remote` one served by `undra dev`.** Called with a
    * one-line message the dev server says about itself, such as `Reloaded, state kept` after it rebuilt the
    * core (ADR-053): show it in a status bar for a few seconds. `undra dev` tells every client that attaches
@@ -297,11 +287,6 @@ class DirectCall implements PendingCall {
   }
 }
 
-interface PendingStream {
-  readonly kind: "stream";
-  readonly stream: StreamCall;
-}
-
 const UNLOADED_MESSAGE =
   "the core is not loaded: load it at app startup (the bindings' Undra<Namespace>.load(...), or UndraCore.load(...)), before creating any Undra object, or pass a core explicitly";
 const DEFAULT_OBSERVE_TIMEOUT_MS = 10_000;
@@ -311,69 +296,6 @@ function abortReason(signal: AbortSignal): unknown {
   const error = new Error("The operation was aborted");
   error.name = "AbortError";
   return error;
-}
-
-/** The 32-bit halves of the last few handles used by calls: BigInt arithmetic allocates, and a store calls with the same handle again and again. */
-const HANDLE_HALVES = 4;
-const handleKeys: bigint[] = [];
-const handleLo: number[] = [];
-const handleHi: number[] = [];
-let handleNext = 0;
-
-/** Writes the `u64` `handle` at `out[at..at+8]` (little-endian): from the cache of recent handles, or after splitting it. */
-function putHandle(out: Uint8Array, at: number, handle: Handle): void {
-  let i = handleKeys.length;
-  while (i-- > 0) if (handleKeys[i] === handle) break;
-  if (i < 0) {
-    if (BigInt.asUintN(64, handle) !== handle) throw new RangeError(`u64 out of range: ${String(handle)}`);
-    i = handleNext;
-    handleNext = (handleNext + 1) % HANDLE_HALVES;
-    handleKeys[i] = handle;
-    handleLo[i] = Number(handle & 0xffff_ffffn);
-    handleHi[i] = Number(handle >> 32n);
-  }
-  put32(out, at, handleLo[i] as number);
-  put32(out, at + 4, handleHi[i] as number);
-}
-
-function put32(out: Uint8Array, at: number, v: number): void {
-  out[at] = v;
-  out[at + 1] = v >>> 8;
-  out[at + 2] = v >>> 16;
-  out[at + 3] = v >>> 24;
-}
-
-/** The length of the `Call` header of a free function or a method (SPEC 3.3): target u8, handle u64, method id u32, call id u32. */
-const HEAD_LEN = 17;
-
-/** Writes that header into `out` (which holds at least {@link HEAD_LEN} bytes), clearing what an earlier call left in it. */
-function writeHead(out: Uint8Array, target: CallTargetArg, methodId: number, callId: number): void {
-  let handle: Handle | undefined;
-  if (typeof target === "number") {
-    if (target !== CallTarget.FreeFunction) {
-      throw new TypeError("a bare CallTarget must be FreeFunction; pass { target, handle } for a method");
-    }
-  } else if (target.target === CallTarget.ObjectMethod) {
-    handle = target.handle;
-  }
-  if (methodId >>> 0 !== methodId) throw new RangeError(`u32 out of range: ${String(methodId)}`);
-  if (handle === undefined) {
-    out.fill(0, 0, 9);
-  } else {
-    out[0] = CallTarget.ObjectMethod;
-    putHandle(out, 1, handle);
-  }
-  put32(out, 9, methodId);
-  put32(out, 13, callId);
-}
-
-/** A `Call` payload (SPEC 3.3) for a free function or a method, in one allocation: `encodeCall` without its writer. */
-function encodeTarget(target: CallTargetArg, methodId: number, callId: number, args: Uint8Array): Uint8Array {
-  if ((target as CallTargetRef).target === CallTarget.LazyListPage) return encodeCall({ ...(target as PageTarget), callId });
-  const out = new Uint8Array(HEAD_LEN + args.length);
-  writeHead(out, target, methodId, callId);
-  if (args.length > 0) out.set(args, HEAD_LEN);
-  return out;
 }
 
 /**
@@ -589,12 +511,14 @@ export class UndraCore {
   /** What the core said in its `Hello` (for wasm modes, synthesised from the module). Set once `load` resolves. */
   hello: HelloPayload = { undraVersion: "", schemaHash: 0n, platform: "", mode: "" };
 
-  private readonly _transport: Transport;
+  /** @internal Used by the stream support. */
+  readonly _transport: Transport;
   private readonly _options: CoreOptions;
   private readonly _adapters: Partial<Adapters>;
   private readonly _observeTimeoutMs: number;
   private readonly _ports = new Map<number, PortImpl>();
-  private readonly _pending = new Map<number, PendingCall | PendingStream>();
+  /** The calls and streams waiting for the core, by call id. @internal Read by the stream support. */
+  readonly _pending = new Map<number, PendingCall | PendingStream>();
   private readonly _handles = new Set<Handle>();
   /** The signals the app observes, per handle: what a reconnect observes again. */
   private readonly _observed = new Map<Handle, Set<number>>();
@@ -607,8 +531,10 @@ export class UndraCore {
   private readonly _head = new Uint8Array(HEAD_LEN);
   private _nextCallId = 0;
   private _closed = false;
-  /** What a call on this closed core says; the default is "the core is closed". */
-  private _closedMessage = "the core is closed";
+  /** What a call on this closed core says; the default is "the core is closed". @internal Read by the stream support. */
+  _closedMessage = "the core is closed";
+  /** The stream support, once `features: [streams]` or the first stream installed it (`stream-support.ts`). @internal */
+  _streams: StreamSupport | undefined = undefined;
   private _reporting = false;
   /** The failures of calls the `onError` handler started (see `report`): reported, they are only logged. */
   private readonly _handlerFailures = new WeakSet<object>();
@@ -623,6 +549,7 @@ export class UndraCore {
   private constructor(transport: Transport, options: CoreOptions, adapters: Partial<Adapters>) {
     this._options = options;
     this._adapters = adapters;
+    for (const feature of options.features ?? []) feature._install(this);
     // With `recovery`, the core runs over the layer that restarts it after a trap (ADR-049; `crashRecovery`).
     this._transport =
       options.recovery?.attach(
@@ -760,7 +687,39 @@ export class UndraCore {
    * that it panicked, cancelled the stream or refused it (ADR-036).
    */
   stream(target: CallTargetArg, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array> {
-    return { [Symbol.asyncIterator]: () => this._openStream(target, methodId, args) };
+    // With the stream support (`features: [streams]`, which the generated entry passes) the call goes out as iteration starts.
+    return { [Symbol.asyncIterator]: () => this._streams?.open(this, target, methodId, args) ?? this._streamAfterLoad(target, methodId, args) };
+  }
+
+  /**
+   * The iterator of a stream on a core that was not given the stream support: the support loads (once per page) as iteration
+   * starts and the stream opens right after, so streams open in the order they were started. A support that cannot load ends
+   * the iteration with `UndraTransportError("closed")` (said once, as a failed stream says its failure), and the next stream
+   * tries again.
+   */
+  private _streamAfterLoad(target: CallTargetArg, methodId: number, args: Uint8Array): AsyncIterableIterator<Uint8Array> {
+    const opened = (async () => {
+      this._assertOpen();
+      if (this._streams === undefined) (await onDemand("stream support", () => import("./stream-support.js"))).streams._install(this);
+      return (this._streams as StreamSupport).open(this, target, methodId, args);
+    })();
+    opened.catch(() => {});
+    let said = false;
+    const done = { done: true, value: undefined } as const;
+    const iterator: AsyncIterableIterator<Uint8Array> = {
+      next: () =>
+        opened.then(
+          (stream) => stream.next(),
+          (error: unknown) => (said ? done : ((said = true), Promise.reject(error))),
+        ),
+      return: () =>
+        opened.then(
+          (stream) => stream.return(),
+          () => ((said = true), done),
+        ),
+      [Symbol.asyncIterator]: () => iterator,
+    };
+    return iterator;
   }
 
   /**
@@ -1131,7 +1090,8 @@ export class UndraCore {
     return import("./panic-report.js").then((module) => start(module.panicSupport), (error: unknown) => this._reportError("onPanic", error));
   }
 
-  private _assertOpen(): void {
+  /** Throws the closed core's `UndraTransportError("closed")`. @internal Used by the stream support. */
+  _assertOpen(): void {
     if (this._closed) throw new UndraTransportError("closed", this._closedMessage);
   }
 
@@ -1155,12 +1115,8 @@ export class UndraCore {
     const pending = [...this._pending.values()];
     this._pending.clear();
     for (const p of pending) {
-      if (p.kind === "call") {
-        p.cleanup?.();
-        p.reject(failure);
-      } else {
-        p.stream.fail(failure);
-      }
+      p.cleanup?.();
+      p.reject(failure);
     }
     this.mirror.failWaiters(failure);
     return pending.length;
@@ -1261,7 +1217,8 @@ export class UndraCore {
     }
   }
 
-  private _allocCallId(): number {
+  /** The call id of the next call. @internal Used by the stream support. */
+  _allocCallId(): number {
     this._nextCallId = nextCallId(this._nextCallId, (id) => this._pending.has(id));
     return this._nextCallId;
   }
@@ -1369,33 +1326,6 @@ export class UndraCore {
     });
   }
 
-  private _openStream(target: CallTargetArg, methodId: number, args: Uint8Array): StreamCall {
-    const callId = this._closed ? 0 : this._allocCallId();
-    const stream = new StreamCall(callId, {
-      sendCredit: (id, credit) => {
-        this._assertOpen();
-        this._transport.send(Kind.StreamCredit, encodeStreamCredit({ callId: id, credit }));
-      },
-      cancel: (id) => {
-        this._pending.delete(id);
-        if (this._closed) return;
-        this._transport.send(Kind.Cancel, encodeCancel({ callId: id }));
-      },
-    });
-    if (this._closed) {
-      stream.fail(new UndraTransportError("closed", this._closedMessage));
-      return stream;
-    }
-    this._pending.set(callId, { kind: "stream", stream });
-    try {
-      this._transport.send(Kind.Call, encodeTarget(target, methodId, callId, args));
-    } catch (error) {
-      this._pending.delete(callId);
-      stream.fail(error);
-    }
-    return stream;
-  }
-
   // ----- what the transport tells us --------------------------------------------------
 
   private readonly _handler: TransportHandler = {
@@ -1406,7 +1336,7 @@ export class UndraCore {
       this.mirror.enqueue(payload);
     },
     streamItem: (payload) => {
-      this._onStreamItem(payload);
+      this._streams?.item(this, payload);
     },
     portCall: (call) => this._onPortCall(call),
     log: (level, target, message) => {
@@ -1439,29 +1369,14 @@ export class UndraCore {
     const entry = this._pending.get(callId);
     if (entry === undefined) return; // aborted or cancelled meanwhile, or never ours
 
-    if (status > ReplyStatus.BadRequest) {
-      this._pending.delete(callId);
-      const error = new UndraTransportError("protocol", `the core sent reply status ${status}`);
-      if (entry.kind === "call") {
-        entry.cleanup?.();
-        entry.reject(error);
-      } else {
-        entry.stream.fail(error);
-      }
+    if (entry.kind === "stream") {
+      entry.reply(status, body);
       return;
     }
-
-    if (entry.kind === "stream") {
-      if (status === ReplyStatus.StreamOpened) {
-        entry.stream.opened();
-        return;
-      }
+    if (status > ReplyStatus.BadRequest) {
       this._pending.delete(callId);
-      entry.stream.fail(
-        status === ReplyStatus.Ok
-          ? new UndraTransportError("protocol", "the core answered a stream call with a plain result")
-          : new UndraReplyError(status as ReplyStatus, body),
-      );
+      entry.cleanup?.();
+      entry.reject(new UndraTransportError("protocol", `the core sent reply status ${status}`));
       return;
     }
 
@@ -1484,52 +1399,6 @@ export class UndraCore {
     this.mirror.queueFlush();
     if (status === ReplyStatus.Ok) entry.resolve(body);
     else entry.reject(new UndraReplyError(status as ReplyStatus, body));
-  }
-
-  private _onStreamItem(payload: Uint8Array): void {
-    if (payload.length < 5) {
-      this._reportError("stream", new UndraTransportError("protocol", "the core sent a truncated stream item"));
-      return;
-    }
-    const callId = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint32(0, true);
-    const flag = payload[4] as number;
-    const entry = this._pending.get(callId);
-    if (entry?.kind !== "stream") return;
-    const body = payload.subarray(5);
-    switch (flag) {
-      case StreamFlag.Item:
-        entry.stream.push(body);
-        return;
-      case StreamFlag.End:
-        this._pending.delete(callId);
-        entry.stream.end();
-        return;
-      case StreamFlag.Error:
-        // The stream's own `E`; generated code decodes it.
-        this._pending.delete(callId);
-        entry.stream.fail(new UndraReplyError(ReplyStatus.Error, body));
-        return;
-      case StreamFlag.Failed: {
-        // Panicked, cancelled by the core or refused: exactly the failed reply with that status (ADR-036).
-        this._pending.delete(callId);
-        let failure: StreamFailure;
-        try {
-          failure = decodeStreamFailure(body);
-        } catch (error) {
-          entry.stream.fail(
-            new UndraTransportError("protocol", `the core sent a malformed stream failure: ${errorMessage(error)}`, {
-              cause: error,
-            }),
-          );
-          return;
-        }
-        entry.stream.fail(new UndraReplyError(failure.status, streamFailureReplyBody(failure)));
-        return;
-      }
-      default:
-        this._pending.delete(callId);
-        entry.stream.fail(new UndraTransportError("protocol", `the core sent stream flag ${flag}`));
-    }
   }
 
   private _onPortCall(call: PortCallPayload): PortOutcome {
