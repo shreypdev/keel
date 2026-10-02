@@ -31,6 +31,9 @@ pub const CARGO_NDK: Check = Check::new("android.cargo-ndk", "cargo-ndk");
 pub const JDK: Check = Check::new("android.jdk", "jdk-17");
 /// The Gradle wrapper of the project's Android app.
 pub const GRADLE_WRAPPER: Check = Check::new("android.gradle-wrapper", "gradle-wrapper").optional();
+/// The NDK's LLDB: what steps into Rust from Android Studio's "Dual (Java + Native)" debugger and
+/// `ndk-lldb` (ADR-046).
+pub const LLDB: Check = Check::new("android.lldb", "debugging-into-rust").optional();
 /// The `undra` emulator that Undra's own device tests and benchmarks boot.
 pub const AVD: Check =
     Check::new("android.avd", "the-undra-emulator-contributors").for_contributors();
@@ -48,6 +51,7 @@ pub const ALL: &[Check] = &[
     CARGO_NDK,
     JDK,
     GRADLE_WRAPPER,
+    LLDB,
     AVD,
 ];
 
@@ -152,6 +156,7 @@ pub fn check(cx: &Context<'_>) -> Vec<Finding> {
     out.push(ndk(cx, sdk.as_deref()));
     if let Some(ndk) = &cx.toolchain.android_ndk {
         out.push(ndk_home(cx, ndk));
+        out.push(lldb(cx, ndk, sdk.as_deref()));
     }
     out.push(cargo_ndk(cx));
     for abi in cx.android_abis {
@@ -385,6 +390,29 @@ fn ndk(cx: &Context<'_>, sdk: Option<&Path>) -> Finding {
     }
 }
 
+/// The NDK's LLDB, which `ndk-lldb` and Android Studio's native debugger use to step into the core.
+fn lldb(cx: &Context<'_>, ndk: &Path, sdk: Option<&Path>) -> Finding {
+    let found = crate::symbols::tools::ndk_bin(cx.sys, ndk).and_then(|bin| {
+        ["lldb", "lldb.sh"]
+            .iter()
+            .map(|name| bin.join(name))
+            .find(|path| cx.sys.is_file(path))
+    });
+    match found {
+        Some(path) => LLDB.ok_with(
+            format!("the NDK's LLDB: {}", path.display()),
+            path.display().to_string(),
+        ),
+        None => LLDB.warn_missing(
+            format!(
+                "the NDK at {} has no LLDB, so native debugging of the core from Android Studio or `ndk-lldb` has none to use",
+                ndk.display()
+            ),
+            &[&sdkmanager(sdk, &["lldb;3.1"])],
+        ),
+    }
+}
+
 fn ndk_home(cx: &Context<'_>, ndk: &Path) -> Finding {
     let set = ["ANDROID_NDK_HOME", "ANDROID_NDK_ROOT", "NDK_HOME"]
         .iter()
@@ -560,6 +588,19 @@ mod tests {
     use crate::commands::doctor::finding::Status;
 
     const SDK_DIR: &str = "/opt/homebrew/share/android-commandlinetools";
+
+    #[test]
+    fn the_ndks_lldb_is_checked_for_native_debugging() {
+        let f = by_id(&scan(&good_machine(), &["android"]), "android.lldb").clone();
+        assert_eq!(f.status, Status::Ok, "{f:?}");
+        assert!(f.message.contains("bin/lldb"), "{f:?}");
+        // An NDK directory with nothing in it: a warning with the sdkmanager line, never a failure.
+        let sys = good_machine_without_ndk().with_dir(&format!("{SDK_DIR}/ndk/27.2.12479018"));
+        let f = by_id(&scan(&sys, &["android"]), "android.lldb").clone();
+        assert_eq!((f.status, f.state), (Status::Warn, State::Missing), "{f:?}");
+        assert!(f.fix[0].contains("lldb;3.1"), "{f:?}");
+        assert_eq!(f.anchor, "debugging-into-rust");
+    }
 
     #[test]
     fn versions_are_parsed() {

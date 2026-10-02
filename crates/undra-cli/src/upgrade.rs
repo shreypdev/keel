@@ -8,7 +8,7 @@
 //! | `Cargo.toml` of the core (and any crate of the project) | `undra = { git = "...", tag = "v1.0.0" }`, or a registry version | `tag = "v1.2.3"` / `"1.2.3"` |
 //! | `undra.toml` | `[undra] version = "1.0"` | `"1.2"` |
 //! | `web/package.json` (any `package.json`) | `"@undra/runtime": "^1.0.0"`, `"@undra/react-native"` | `"^1.2.0"` |
-//! | `android/**/*.gradle(.kts)` | `dev.undra:runtime:1.0.0`, `dev.undra:android-adapters:1.0.0` | `1.2.0` |
+//! | `android/**/*.gradle(.kts)` | `dev.undra:runtime:1.0.0`, `dev.undra:android-adapters:1.0.0`, `dev.undra:android-work:1.0.0` | `1.2.0` |
 //! | `ios/**/project.pbxproj` | the `undra-swift` package's `minimumVersion = 1.0.0;` | `1.2.0` |
 //! | `.github/workflows/*.yml` | `UNDRA_VERSION: "1.0.0"` | `"1.2.3"` |
 //!
@@ -826,7 +826,8 @@ fn gradle_comment_mask(line: &str, in_block: &mut bool) -> Vec<bool> {
     mask
 }
 
-/// Moves `dev.undra:runtime:<v>` and `dev.undra:android-adapters:<v>` to `<major>.<minor>.0`.
+/// Moves `dev.undra:runtime:<v>`, `dev.undra:android-adapters:<v>` and the optional WorkManager module
+/// `dev.undra:android-work:<v>` (ADR-046) to `<major>.<minor>.0`.
 ///
 /// Only a version written out is moved; a variable (`$undraVersion`), a dynamic version (`+`) and
 /// anything in a comment are left as they are (a variable is reported: its definition is where the
@@ -855,7 +856,9 @@ pub fn edit_gradle(text: &str, target: &Target) -> FileResult {
             let version = &after[..end];
             let version_start = start + "dev.undra:".len() + colon + 1;
             search_from = version_start + end;
-            if !matches!(module, "runtime" | "android-adapters") || version.is_empty() {
+            if !matches!(module, "runtime" | "android-adapters" | "android-work")
+                || version.is_empty()
+            {
                 continue;
             }
             if version.contains("SNAPSHOT") {
@@ -1439,6 +1442,19 @@ mod tests {
         );
         assert!(snapshot.changes.is_empty());
         assert_eq!(snapshot.unmovable[0].why, Why::Path);
+    }
+
+    #[test]
+    fn gradle_moves_the_optional_work_module_once_it_is_uncommented_and_never_while_it_is_a_comment()
+     {
+        // The generated app has the line commented out (ADR-046: WorkManager is an optional module).
+        let commented =
+            "dependencies {\n    // implementation(\"dev.undra:android-work:0.1.0\")\n}\n";
+        assert!(edit_gradle(commented, &target("0.2.1")).changes.is_empty());
+        let on = "dependencies {\n    implementation(\"dev.undra:android-work:0.1.0\")\n}\n";
+        let r = edit_gradle(on, &target("0.2.1"));
+        assert_eq!(r.after, on.replace("0.1.0", "0.2.0"));
+        assert_eq!(r.pins[0].what, "dev.undra:android-work");
     }
 
     #[test]

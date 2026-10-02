@@ -17,6 +17,10 @@ pub const TOOLCHAIN: Check = Check::new("rust.toolchain", "rust");
 pub const RUSTC: Check = Check::new("rust.rustc", "rust");
 /// `cargo`.
 pub const CARGO: Check = Check::new("rust.cargo", "rust");
+/// The Rust formatters for LLDB that ship with the toolchain (`lib/rustlib/etc`): what the
+/// `.lldbinit` of an `undra init` project loads, so Rust values read as values in the debugger.
+pub const LLDB_FORMATTERS: Check =
+    Check::new("rust.lldb-formatters", "debugging-into-rust").optional();
 
 /// `wasm32-unknown-unknown`: the web build.
 pub const TARGET_WASM: Check = Check::new("rust.target.wasm32-unknown-unknown", "rust-targets");
@@ -46,6 +50,7 @@ pub const ALL: &[Check] = &[
     TOOLCHAIN,
     RUSTC,
     CARGO,
+    LLDB_FORMATTERS,
     TARGET_WASM,
     TARGET_IOS_DEVICE,
     TARGET_IOS_SIM_ARM,
@@ -203,7 +208,42 @@ pub fn check(cx: &Context<'_>) -> Vec<Finding> {
         },
         None => out.push(CARGO.missing("cargo was not found", &[RUSTUP_INSTALL])),
     }
+    out.extend(lldb_formatters(cx));
     out
+}
+
+/// The files of a toolchain that make LLDB read Rust values: the module `lldb_lookup.py` (the
+/// current layout) or the older `lldb_commands` script, below `lib/rustlib/etc`.
+pub const LLDB_FORMATTER_FILES: [&str; 2] = ["lldb_lookup.py", "lldb_commands"];
+
+/// Whether the toolchain has the formatters the project's `.lldbinit` loads; `None` without a
+/// `rustc` that reports its sysroot (the findings of `rustc` itself say so).
+fn lldb_formatters(cx: &Context<'_>) -> Option<Finding> {
+    let rustc = cx.toolchain.which(cx.sys, "rustc")?;
+    let out = cx
+        .sys
+        .run(&rustc, &["--print", "sysroot"], &cx.toolchain.env_pairs())
+        .filter(|out| out.success)?;
+    let etc = PathBuf::from(out.stdout.trim()).join("lib/rustlib/etc");
+    Some(
+        match LLDB_FORMATTER_FILES
+            .iter()
+            .map(|file| etc.join(file))
+            .find(|path| cx.sys.is_file(path))
+        {
+            Some(found) => LLDB_FORMATTERS.ok_with(
+                format!("Rust formatters for LLDB: {}", found.display()),
+                found.display().to_string(),
+            ),
+            None => LLDB_FORMATTERS.warn_missing(
+                format!(
+                    "this Rust has no LLDB formatters ({} has neither lldb_lookup.py nor lldb_commands): the debugger shows Rust values as raw structs",
+                    etc.display()
+                ),
+                &["rustup toolchain install stable --force"],
+            ),
+        },
+    )
 }
 
 /// The channel `rustup` has active: Undra is built and tested on stable.
@@ -359,6 +399,46 @@ mod tests {
             let triple = check.id.trim_start_matches("rust.target.");
             assert_eq!(target_check(triple).id, check.id);
         }
+    }
+
+    #[test]
+    fn the_lldb_formatters_of_the_toolchain_are_checked_by_path() {
+        use crate::sys::fake::FakeSys;
+        let f = by_id(&scan(&good_machine(), &[]), "rust.lldb-formatters").clone();
+        assert_eq!(f.status, Status::Ok, "{f:?}");
+        assert!(f.message.contains("lldb_lookup.py"), "{f:?}");
+        assert_eq!(f.anchor, "debugging-into-rust");
+
+        // The older layout of a toolchain: one commands file.
+        let toolchain = |files: &[&str]| {
+            let mut sys = FakeSys::linux()
+                .with_tool("rustc", "/usr/bin/rustc")
+                .with_output("rustc", "--print sysroot", "/sr\n");
+            for file in files {
+                sys = sys.with_file(&format!("/sr/lib/rustlib/etc/{file}"));
+            }
+            sys
+        };
+        let f = by_id(
+            &scan(&toolchain(&["lldb_commands"]), &[]),
+            "rust.lldb-formatters",
+        )
+        .clone();
+        assert_eq!(f.status, Status::Ok, "{f:?}");
+        // A toolchain without either: a warning that says what the debugger shows instead, and the fix.
+        let f = by_id(&scan(&toolchain(&[]), &[]), "rust.lldb-formatters").clone();
+        assert_eq!((f.status, f.state), (Status::Warn, State::Missing), "{f:?}");
+        assert!(
+            f.message.contains("/sr/lib/rustlib/etc") && f.message.contains("raw structs"),
+            "{f:?}"
+        );
+        assert_eq!(f.fix, ["rustup toolchain install stable --force"]);
+        // No rustc: nothing to say about its formatters (the rustc finding says it).
+        assert!(
+            !scan(&bare_machine(), &[])
+                .findings()
+                .any(|f| f.id == "rust.lldb-formatters")
+        );
     }
 
     #[test]

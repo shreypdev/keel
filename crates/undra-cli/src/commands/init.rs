@@ -288,6 +288,14 @@ pub(super) fn variables(setup: &Setup) -> Vars {
             &build.join(format!("web/{}.wasm", core_names.namespace())),
         ),
     );
+    // What `vite dev` serves instead of the shipped module: the debug build (ADR-046).
+    vars.set(
+        "WASM_DEBUG_PATH",
+        rel(
+            &web_dir,
+            &build.join(format!("symbols/web/{}.dwarf.wasm", core_names.namespace())),
+        ),
+    );
     match &runtimes.ts {
         RuntimeRef::Path(dir) => {
             let runtime_src = rel(&web_dir, &dir.join("src/index.ts"));
@@ -381,6 +389,11 @@ fn scaffold(setup: &Setup) -> Result<usize> {
         write_if_changed(&setup.root.join(crate::ci::WORKFLOW_PATH), &text)?;
         count += 1;
     }
+    count += write_set(
+        &setup.root,
+        std::slice::from_ref(&templates::LLDBINIT),
+        &Vars::new(),
+    )?;
     count += write_set(
         &setup.root,
         std::slice::from_ref(&templates::README),
@@ -1122,6 +1135,19 @@ mod tests {
             "{vite}"
         );
         assert!(vite.contains("plugins: [undra(), react()],"), "{vite}");
+        // `vite dev` serves the debug build of the core (ADR-046); a production build names none.
+        assert!(
+            vite.contains("export default defineConfig(({ command }) => ({")
+                && vite.contains("command === \"serve\" ? \"/@fs\" + here(\"../build/symbols/web/")
+                && vite.contains(".dwarf.wasm\")"),
+            "{vite}"
+        );
+        let entry = std::fs::read_to_string(root.join("web/src/undra.ts")).unwrap();
+        assert!(
+            entry.contains("declare const __UNDRA_DEBUG_WASM__: string;")
+                && entry.contains("import.meta.env.DEV && __UNDRA_DEBUG_WASM__ !== \"\""),
+            "{entry}"
+        );
         let _ = std::fs::remove_dir_all(parent);
 
         // In a checkout there is no node_modules/@undra/runtime: the config names the plugin's source.

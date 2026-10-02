@@ -4,6 +4,9 @@ import { @@CORE_ENTRY@@, Todos } from "@@TS_PACKAGE@@";
 import wasmUrl from "@@WASM_IMPORT@@?url";
 import { onDevNotice, showDevConnection } from "./dev-banner";
 
+/** The debug build of the core, which `vite dev` serves (see vite.config.ts); empty in a production build. */
+declare const __UNDRA_DEBUG_WASM__: string;
+
 /**
  * Attaches the page to its Rust core and creates the store.
  *
@@ -36,7 +39,9 @@ export async function startUndra(): Promise<Todos> {
   } else {
     await @@CORE_ENTRY@@.load({
       mode: "wasm-main",
-      wasm: new URL(wasmUrl, location.href),
+      // Under `vite dev` the debug build of the core (DWARF line tables and names: breakpoints in .rs files in Chrome's
+      // DevTools); in a production build the stripped module.
+      wasm: new URL(import.meta.env.DEV && __UNDRA_DEBUG_WASM__ !== "" ? __UNDRA_DEBUG_WASM__ : wasmUrl, location.href),
     });
   }
   return Todos.create();

@@ -20,6 +20,10 @@ pub const PROJECT: &[TemplateFile] = &[
     template!("project/gitignore" => ".gitignore"),
 ];
 
+/// The LLDB startup file of a project made by `undra init`: the Rust formatters of the toolchain
+/// (ADR-046). Not written by `undra adopt`, whose directory is not where LLDB starts.
+pub const LLDBINIT: TemplateFile = template!("project/lldbinit" => ".lldbinit");
+
 /// The core crate.
 pub const CORE: &[TemplateFile] = &[
     template!("core/Cargo.toml.tmpl" => "core/Cargo.toml"),
