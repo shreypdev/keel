@@ -276,7 +276,7 @@ public object Payloads {
         /** The value is a keyed patch (see [KeyedPatch]). */
         PATCH(1u),
 
-        /** A lazy list was invalidated; the value is empty and the host re-pages. */
+        /** A lazy list was invalidated; the value is a [LazyInvalidated] (the new length and version) and the host re-pages its window. */
         INVALIDATED(2u);
 
         public companion object {

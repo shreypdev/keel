@@ -6,6 +6,8 @@ import dev.undra.runtime.support.LogCapture
 import dev.undra.runtime.support.changeSet
 import dev.undra.runtime.support.eventually
 import dev.undra.runtime.support.full
+import dev.undra.runtime.support.lazyInvalidated
+import dev.undra.runtime.support.lazyValue
 import dev.undra.runtime.support.replyPayload
 import dev.undra.runtime.testing.Suite
 import dev.undra.runtime.testing.assertEq
@@ -866,6 +868,47 @@ class LazyListTests : Suite() {
                 store.close()
                 store.books.close()
             }
+        }
+
+        case("a drain that folded [Full(handle), Inv] gives the list its page server and the newer length; a restore's new handle starts over") {
+            val log = LogCapture("dev.undra.runtime")
+            val server = LazyPageServer(300)
+            val t = FakeTransport()
+            t.onCallSync = server::answer
+            val a = 0x0000_0100_0000_0009L
+            val b = 0x0000_0200_0000_0004L
+            dev.undra.runtime.support.attach(t).use { core ->
+                val store = LazyLibraryStore(core, 11L)
+                // One change-set, one drain: the full value and an invalidation (the mirror keeps both, in order).
+                t.events.onChangeSet(changeSet(1uL, full(11L, 3u, lazyValue(a, 300, 1uL)), lazyInvalidated(11L, 3u, 305, 2uL)))
+                // And, in the next change-sets of the same drain, more invalidations: the last one wins.
+                t.events.onChangeSet(changeSet(2uL, lazyInvalidated(11L, 3u, 308, 3uL)))
+                t.events.onChangeSet(changeSet(3uL, lazyInvalidated(11L, 3u, 310, 4uL)))
+                server.total = 310
+                server.version = 4uL
+                core.mirror.flush()
+                eventually("the drain was applied") { store.books.size.value == 310 }
+                assertEq(4uL, store.books.currentVersion())
+                assertEq(listOf("full on undra-main", "invalidated on undra-main"), store.seen.toList(), "[Full, Inv, Inv] was folded to [Full, Inv]")
+                assertEq(null, store.books[0])
+                eventually("the first page arrives, asked of the page server the full value named") { store.books[0] != null }
+                assertEq(Handle(a), server.requests.first().handle)
+
+                // A restore: a new page server, then an invalidation, in one drain: [Full(b), Inv].
+                server.requests.clear()
+                server.total = 25
+                server.version = 6uL
+                t.events.onChangeSet(changeSet(4uL, full(11L, 3u, lazyValue(b, 20, 5uL)), lazyInvalidated(11L, 3u, 25, 6uL)))
+                core.mirror.flush()
+                eventually("the restore was applied") { store.books.size.value == 25 }
+                assertEq(6uL, store.books.currentVersion())
+                assertEq(null, store.books[0], "the cache of the old page server is gone")
+                eventually("rows come from the new page server") { store.books[0] != null }
+                assertTrue(server.requests.all { it.handle == Handle(b) }, "every page call goes to the new page server: ${server.requests}")
+                store.close()
+                store.books.close()
+            }
+            log.close()
         }
 
         // ---- threads --------------------------------------------------------------------------------

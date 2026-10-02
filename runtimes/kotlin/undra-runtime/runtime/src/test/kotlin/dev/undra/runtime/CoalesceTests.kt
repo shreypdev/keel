@@ -10,7 +10,8 @@ import dev.undra.runtime.support.attach
 import dev.undra.runtime.support.eventually
 import dev.undra.runtime.support.flushOnThisThread
 import dev.undra.runtime.support.full
-import dev.undra.runtime.support.invalidated
+import dev.undra.runtime.support.lazyInvalidated
+import dev.undra.runtime.support.lazyValue
 import dev.undra.runtime.support.manualMirror
 import dev.undra.runtime.support.patch
 import dev.undra.runtime.support.replyPayload
@@ -305,16 +306,132 @@ class CoalesceTests : Suite() {
             assertEq(2, host.applies - before, "the full value, then one merged patch")
         }
 
-        case("a lazy invalidation supersedes what came before it") {
+        // A full value (op 0) supersedes everything before it; a lazy invalidation (op 2) supersedes only the earlier invalidations of
+        // its signal, never the op 0, which carries the page server's handle (ADR-031 amendment, ADR-043 3.2).
+        fun lazyLog(mirror: Mirror, handle: Long = 1L, noCoalesce: Set<UInt> = emptySet()): CopyOnWriteArrayList<String> {
+            val seen = CopyOnWriteArrayList<String>()
+            mirror.register(handle, noCoalesce) { signal, op, r ->
+                seen.add(
+                    when (op) {
+                        ChangeOp.FULL -> Payloads.LazyValue.decode(r).let { "$signal:FULL:${it.handle.raw}/${it.len}/${it.version}" }
+                        ChangeOp.INVALIDATED -> Payloads.LazyInvalidated.decode(r).let { "$signal:INV:${it.len}/${it.version}" }
+                        ChangeOp.PATCH -> "$signal:PATCH:${r.remaining}"
+                    },
+                )
+            }
+            return seen
+        }
+
+        case("a lazy invalidation does not supersede the full value before it: [Full, Inv] applies both, in order") {
             val main = ManualMainThread()
             val mirror = manualMirror(main)
-            val ops = CopyOnWriteArrayList<ChangeOp>()
-            mirror.register(1L) { _, op, _ -> ops.add(op) }
-            mirror.submit(cs(full(1L, 0u, u32(1))))
-            mirror.submit(cs(patch(1L, 0u, patchBytes(listOf(PatchOp.Clear)))))
-            mirror.submit(cs(invalidated(1L, 0u)))
+            val seen = lazyLog(mirror)
+            mirror.submit(cs(full(1L, 3u, lazyValue(40L, 10, 1uL))))
+            mirror.submit(cs(lazyInvalidated(1L, 3u, 11, 2uL)))
             mirror.flushOnThisThread(main)
-            assertEq(listOf(ChangeOp.INVALIDATED), ops.toList())
+            assertEq(listOf("3:FULL:40/10/1", "3:INV:11/2"), seen.toList())
+        }
+
+        case("[Full, Inv, Inv] applies the full value and the last invalidation") {
+            val main = ManualMainThread()
+            val mirror = manualMirror(main)
+            val seen = lazyLog(mirror)
+            mirror.submit(cs(full(1L, 3u, lazyValue(40L, 10, 1uL)), lazyInvalidated(1L, 3u, 11, 2uL)))
+            mirror.submit(cs(lazyInvalidated(1L, 3u, 12, 3uL)))
+            mirror.flushOnThisThread(main)
+            assertEq(listOf("3:FULL:40/10/1", "3:INV:12/3"), seen.toList())
+            assertEq(2L, mirror.stats().entriesApplied)
+        }
+
+        case("[Inv, Full] applies only the full value, [Inv, Inv] only the last invalidation") {
+            val main = ManualMainThread()
+            val mirror = manualMirror(main)
+            val seen = lazyLog(mirror)
+            mirror.submit(cs(lazyInvalidated(1L, 3u, 11, 2uL), full(1L, 3u, lazyValue(40L, 20, 5uL))))
+            mirror.flushOnThisThread(main)
+            assertEq(listOf("3:FULL:40/20/5"), seen.toList())
+            seen.clear()
+            mirror.submit(cs(lazyInvalidated(1L, 3u, 21, 6uL)))
+            mirror.submit(cs(lazyInvalidated(1L, 3u, 22, 7uL)))
+            mirror.flushOnThisThread(main)
+            assertEq(listOf("3:INV:22/7"), seen.toList())
+        }
+
+        case("a restore's new page server then an invalidation: [Full(h1), Inv, Full(h2), Inv] applies the last full value and the last invalidation") {
+            val main = ManualMainThread()
+            val mirror = manualMirror(main)
+            val seen = lazyLog(mirror)
+            mirror.submit(cs(full(1L, 3u, lazyValue(40L, 10, 1uL)), lazyInvalidated(1L, 3u, 11, 2uL)))
+            mirror.submit(cs(full(1L, 3u, lazyValue(41L, 11, 2uL)), lazyInvalidated(1L, 3u, 12, 3uL)))
+            mirror.flushOnThisThread(main)
+            assertEq(listOf("3:FULL:41/11/2", "3:INV:12/3"), seen.toList())
+            // Across drains the order is the arrival order, trivially.
+            seen.clear()
+            mirror.submit(cs(full(1L, 3u, lazyValue(42L, 5, 9uL))))
+            mirror.flushOnThisThread(main)
+            mirror.submit(cs(lazyInvalidated(1L, 3u, 6, 10uL)))
+            mirror.flushOnThisThread(main)
+            assertEq(listOf("3:FULL:42/5/9", "3:INV:6/10"), seen.toList())
+        }
+
+        case("invalidations of one signal never touch another signal's full value or patches") {
+            val main = ManualMainThread()
+            val mirror = manualMirror(main)
+            val seen = lazyLog(mirror)
+            mirror.submit(
+                cs(
+                    full(1L, 0u, lazyValue(40L, 10, 1uL)),
+                    full(1L, 3u, lazyValue(41L, 20, 1uL)),
+                    patch(1L, 5u, patchBytes(listOf(PatchOp.Clear))),
+                    lazyInvalidated(1L, 3u, 21, 2uL),
+                    patch(1L, 5u, patchBytes(listOf(PatchOp.Clear))),
+                    lazyInvalidated(1L, 0u, 11, 2uL),
+                ),
+            )
+            mirror.flushOnThisThread(main)
+            // Signals in the order of their first entry; a keyed-patch signal is merged as before (one patch of two ops).
+            val merged = 4 + 2 * (patchBytes(listOf(PatchOp.Clear)).size - 4)
+            assertEq(listOf("0:FULL:40/10/1", "0:INV:11/2", "3:FULL:41/20/1", "3:INV:21/2", "5:PATCH:$merged"), seen.toList())
+        }
+
+        case("a no_coalesce lazy signal applies every entry, in order") {
+            val main = ManualMainThread()
+            val mirror = manualMirror(main)
+            val seen = lazyLog(mirror, noCoalesce = setOf(3u))
+            mirror.submit(cs(full(1L, 3u, lazyValue(40L, 10, 1uL)), lazyInvalidated(1L, 3u, 11, 2uL), lazyInvalidated(1L, 3u, 12, 3uL)))
+            mirror.flushOnThisThread(main)
+            assertEq(listOf("3:FULL:40/10/1", "3:INV:11/2", "3:INV:12/3"), seen.toList())
+        }
+
+        case("folding a backlog in place keeps the full value and the last invalidation") {
+            val main = ManualMainThread()
+            val mirror = manualMirror(main, NEVER, maxPendingEntries = 4)
+            val seen = lazyLog(mirror)
+            mirror.submit(cs(full(1L, 3u, lazyValue(40L, 10, 1uL))))
+            for (i in 1..30) mirror.submit(cs(lazyInvalidated(1L, 3u, 10 + i, (1 + i).toULong())))
+            assertTrue(mirror.stats().compactions > 0, "the backlog was folded in place")
+            mirror.flushOnThisThread(main)
+            assertEq(listOf("3:FULL:40/10/1", "3:INV:40/31"), seen.toList())
+            assertEq(31L, mirror.stats().entriesReceived)
+        }
+
+        case("an invalidation of a signal that waits for a full value is discarded: it names a page server this host never saw") {
+            val main = ManualMainThread()
+            val resyncs = CopyOnWriteArrayList<Pair<Long, UInt>>()
+            val mirror = manualMirror(main, NEVER, resync = { h, s -> resyncs.add(h to s) })
+            val seen = lazyLog(mirror)
+            LogCapture("dev.undra.runtime").use {
+                mirror.submit(cs(full(1L, 3u, lazyValue(40L, 10, 1uL)), patch(1L, 3u, byteArrayOf(1, 0))))
+                mirror.flushOnThisThread(main)
+            }
+            assertEq(listOf(1L to 3u), resyncs.toList())
+            seen.clear()
+            mirror.submit(cs(lazyInvalidated(1L, 3u, 11, 2uL)))
+            mirror.flushOnThisThread(main)
+            assertEq(emptyList<String>(), seen.toList())
+            mirror.submit(cs(full(1L, 3u, lazyValue(40L, 11, 2uL)), lazyInvalidated(1L, 3u, 12, 3uL)))
+            mirror.flushOnThisThread(main)
+            assertEq(listOf("3:FULL:40/11/2", "3:INV:12/3"), seen.toList())
         }
 
         case("signals are applied in the order of their first entry") {

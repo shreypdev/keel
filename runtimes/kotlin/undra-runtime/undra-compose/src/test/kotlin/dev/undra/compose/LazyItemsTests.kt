@@ -66,7 +66,7 @@ class LazyItemsTests {
         }
     }
 
-    private fun listOf(core: UndraCore, length: Int): UndraLazyList<Int> {
+    private fun lazyListOf(core: UndraCore, length: Int): UndraLazyList<Int> {
         val list = UndraLazyList(core, Codecs.i32)
         list.applyFull(UndraReader(Payloads.LazyValue(Handle(7L), length.toUInt(), 1uL).toByteArray()))
         return list
@@ -74,7 +74,7 @@ class LazyItemsTests {
 
     @Test
     fun theLayoutGetsOneItemPerRowKeyedByItsIndex() {
-        val list = listOf(PagedCore(100_000), 100_000)
+        val list = lazyListOf(PagedCore(100_000), 100_000)
         val scope = RecordingScope()
         scope.items(list) { _, _ -> }
         assertEquals(100_000, scope.count)
@@ -96,7 +96,7 @@ class LazyItemsTests {
 
     @Test
     fun theBuilderReadsTheChangeCounterSoTheLayoutRebuildsWhenTheListChanges() {
-        val list = listOf(PagedCore(100), 100)
+        val list = lazyListOf(PagedCore(100), 100)
         val read = ArrayList<Any>()
         val snapshot = Snapshot.takeSnapshot(readObserver = { read.add(it) })
         try {
@@ -110,7 +110,7 @@ class LazyItemsTests {
 
     @Test
     fun theCounterMovesWheneverTheLengthOrTheRowsChange() {
-        val list = listOf(PagedCore(100), 100)
+        val list = lazyListOf(PagedCore(100), 100)
         val tick = changeTick(list)
         assertSame(tick, changeTick(list))
         val start = tick.longValue
@@ -126,8 +126,8 @@ class LazyItemsTests {
 
     @Test
     fun everyListHasItsOwnCounter() {
-        val a = listOf(PagedCore(10), 10)
-        val b = listOf(PagedCore(10), 10)
+        val a = lazyListOf(PagedCore(10), 10)
+        val b = lazyListOf(PagedCore(10), 10)
         assertNotSame(changeTick(a), changeTick(b))
         a.close()
         b.close()

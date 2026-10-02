@@ -39,6 +39,14 @@ fun patch(handle: Long, signal: UInt, value: ByteArray): Payloads.ChangeEntry =
 fun invalidated(handle: Long, signal: UInt): Payloads.ChangeEntry =
     Payloads.ChangeEntry(Handle(handle), signal, Payloads.ChangeOp.INVALIDATED, NO_BYTES)
 
+/** The value of a `Lazy<T>` signal's `Full` entry: the page server [pageServer], [len] items at [version]. */
+fun lazyValue(pageServer: Long, len: Int, version: ULong): ByteArray =
+    Payloads.LazyValue(Handle(pageServer), len.toUInt(), version).toByteArray()
+
+/** A change-set entry of op 2 with its value (the new [len] and [version]), as a `Lazy<T>` signal gets it. */
+fun lazyInvalidated(handle: Long, signal: UInt, len: Int, version: ULong): Payloads.ChangeEntry =
+    Payloads.ChangeEntry(Handle(handle), signal, Payloads.ChangeOp.INVALIDATED, Payloads.LazyInvalidated(len.toUInt(), version).toByteArray())
+
 /** A whole `Reply` payload. */
 fun replyPayload(callId: UInt, status: Payloads.ReplyStatus, body: ByteArray = NO_BYTES): ByteArray =
     Payloads.Reply(callId, status, body).toByteArray()
