@@ -158,8 +158,18 @@ final class WireVectorTests: XCTestCase {
             let decoded = try! Decimal.undraDecoded(from: hexBytes)
             XCTAssertEqual(decoded, decimal, "\(name) decoding")
             XCTAssertEqual(decoded.undraEncoded(), hexBytes, "\(name) the scale survives a round trip")
-        case "lazy value", "lazy invalidated", "lazy page (item i32)":
-            return true // the lazy-list codecs are checked by LazyListTests
+        case "lazy value":
+            guard let fields = value as? [String: Any], let rawHandle = jsonUInt64(jsonField(fields, "handle")),
+                  let len = jsonInt64(jsonField(fields, "len")).flatMap({ UInt32(exactly: $0) }),
+                  let version = jsonUInt64(jsonField(fields, "version")) else { return bad(name, "value") }
+            assertCodec(UndraLazyValue(handle: UndraHandle(rawValue: rawHandle), len: len, version: version), hex: hex, name)
+        case "lazy invalidated":
+            guard let fields = value as? [String: Any],
+                  let len = jsonInt64(jsonField(fields, "len")).flatMap({ UInt32(exactly: $0) }),
+                  let version = jsonUInt64(jsonField(fields, "version")) else { return bad(name, "value") }
+            assertCodec(UndraLazyInvalidated(len: len, version: version), hex: hex, name)
+        case "lazy page (item i32)":
+            return checkLazyPage(name: name, hex: hex, value: value)
         case "handle":
             guard let raw = jsonUInt64(value) else { return bad(name, "value") }
             let handle = UndraHandle(rawValue: raw)
@@ -183,6 +193,34 @@ final class WireVectorTests: XCTestCase {
             return checkSnapshot(name: name, hex: hex, value: value)
         default:
             return checkStructured(name: name, type: type, hex: hex, value: value)
+        }
+        return true
+    }
+
+    /// The reply to a page call: the header, then the items (here `i32`s).
+    private func checkLazyPage(name: String, hex: String, value: Any) -> Bool {
+        guard let fields = value as? [String: Any], let version = jsonUInt64(jsonField(fields, "version")),
+              let total = jsonInt64(jsonField(fields, "total")).flatMap({ UInt32(exactly: $0) }),
+              let items = jsonInt32Array(jsonField(fields, "items")) else { return bad(name, "value") }
+        let header = UndraLazyPageHeader(version: version, total: total, count: UInt32(items.count))
+        var writer = UndraWriter()
+        header.undraEncode(&writer)
+        for item in items {
+            item.undraEncode(&writer)
+        }
+        XCTAssertEqual(bytesToHex(writer.finish()), hex, "\(name) encode")
+        do {
+            var reader = UndraReader(hexToBytes(hex))
+            let decoded = try UndraLazyPageHeader.undraDecode(&reader)
+            XCTAssertEqual(decoded, header, "\(name) header")
+            var rows: [Int32] = []
+            for _ in 0 ..< Int(decoded.count) {
+                rows.append(try Int32.undraDecode(&reader))
+            }
+            try reader.finish()
+            XCTAssertEqual(rows, items, "\(name) items")
+        } catch {
+            XCTFail("\(name) decode threw \(error)")
         }
         return true
     }
