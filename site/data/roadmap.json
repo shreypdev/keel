@@ -180,7 +180,7 @@
         },
         {
           "title": "The JavaScript runtime at 16 KB (ADR-057)",
-          "text": "What a hello-world page loads up front of @undra/runtime went from 22.1 KB to 15.7 KB gzipped without removing behaviour: what a page cannot run or has not asked for loads with the thing that needs it, the production build says error codes with a link where the development build says sentences, and the page that uses every feature loads less than before."
+          "text": "What a hello-world page loads up front of @undra/runtime went from 22.1 KB to 15.8 KB gzipped without removing behaviour: what a page cannot run or has not asked for loads with the thing that needs it, the production build says error codes with a link where the development build says sentences, and the page that uses every feature loads less than before."
         }
       ]
     },

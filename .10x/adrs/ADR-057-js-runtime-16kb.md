@@ -328,6 +328,31 @@ development page's first chunk, and a development page is served by Vite's dev s
   as an installed app's does) and counts the Worker script out and the bundler's own chunks out.
 * **`@undra/runtime/mangle-cache.json`** is a package export (the table of renamed names), as section 4 says.
 
+### Review (2026-10-02, `.10x/reviews/2026-10-02-ts-runtime-16k-review.md`)
+
+The adversarial review changed four things; the decisions D1 to D9 stand.
+
+* **`snapshot()` and `restore()` run at the call** (row 8, partly undone). Behind `await import()` they lost the order SPEC 17.1
+  and 5.9 give them, in every mode and on every call (an `import()` of a cached module still yields): a call made after `restore()`
+  reached the core first and was cancelled or overwritten by it, and `snapshot(); close()` rejected "closed". The in-process host's
+  two exports are `WasmHost._snapshot` and `_restore` again; only the class of a refused restore loads on demand. D5 holds as
+  written for `stats()` and `runInBackground()`; for a method whose effect is ordered with the calls around it, "already answers with
+  a promise" is not enough, and it stays up front.
+* **The page's background window calls `run_background` itself.** Through `runInBackground` it had to fetch `core-extras` before it
+  could drain, which a page being left (pagehide, freeze) or offline cannot do; ADR-046 decision 3.4's window is within the page's life.
+* **Text that leaves the runtime as data is a sentence in both builds** (D1 made exact). A port error's field reaches the core, and a
+  WebSocket close frame's reason reaches the peer (`DID_NOT_KEEP_UP`, a public constant of `./realtime`): D1 keeps every field the
+  same in both flavours, and the production build had made 89 of them T-codes. They are written where they are raised (opt-in and
+  on-demand modules only) and their 78 codes are retired; SPEC 12 says which text is data.
+* **`reclaim` is public in the declarations.** `stripInternal` removed it (it was `@internal`), and every binding of a schema with an
+  `async` method that returns objects failed `tsc` against the installed package; `test/declarations.test.ts` holds every name the
+  generator imports.
+
+Numbers after the review (`scripts/wasm-size.sh --record`): `web/hello-runtime-js` **15,811** (budget 16,000: 190 of margin, +131 for
+the first two items), with the helper **16,333** (16,600), all features **40,221** (27,455 + 12,766; the data sentences are in the
+on-demand chunks). The call path on Node, base and this tree alternating four times on one host (load 11): awaited call 313 to 316 ns
+before, 325 to 333 after (+4%), `callSync` 162 to 168 both (budgets 1,600 and 800).
+
 ## Levers measured and not taken
 
 | Lever | Worth | Why not |

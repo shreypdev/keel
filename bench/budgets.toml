@@ -852,19 +852,25 @@ tolerance = 0.05
 # run): its first chunk plus every chunk of the runtime it loads on demand, 40,100 (27,355 + 12,745) from 42,385; its
 # budget is the old figure, 42,400: the first chunk may shed bytes to chunks a page loads on demand, a page that uses
 # everything may not load more.
+# The review of ts-runtime-16k put three things back up front or into both builds (ADR-057, "Review"): `snapshot` and
+# `restore` run at the call (their order with the calls around them is their meaning), the page's background window
+# calls `run_background` itself (a page being left, or offline, cannot fetch a chunk), and a port error's field and a
+# close frame's reason are sentences in both builds. Recorded after it: 15,811 (190 under the budget), with the helper
+# 16,333, all features 40,221 (27,455 + 12,766). The next change that grows the chunk by 190 bytes is over the budget:
+# make room (ADR-057's levers not taken: host events by use first, about 530) or restate it in an ADR.
 [size."web/hello-runtime-js"]
 budget_gzip_bytes = 16000
-measured_gzip_bytes = 15680
+measured_gzip_bytes = 15811
 tolerance = 0.05
 
 [size."web/hello-runtime-js-with-helper"]
 budget_gzip_bytes = 16600
-measured_gzip_bytes = 16191
+measured_gzip_bytes = 16333
 tolerance = 0.05
 
 [size."web/all-features-runtime-js"]
 budget_gzip_bytes = 42400
-measured_gzip_bytes = 40100
+measured_gzip_bytes = 40221
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------
