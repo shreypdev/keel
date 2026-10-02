@@ -34,6 +34,16 @@ pub(crate) struct Stats {
     /// Signal writes refused because the writing thread did not hold this runtime's core lock
     /// (E0065, ADR-035).
     pub off_core_writes: AtomicU64,
+    /// Structured panic reports handed to the `Diagnostics` port (ADR-046).
+    pub panic_reports: AtomicU64,
+    /// Background runs started (`run_background`).
+    pub background_runs: AtomicU64,
+    /// Background runs that finished all their work inside the window.
+    pub background_finished: AtomicU64,
+    /// Queued mutations sent in background runs.
+    pub background_replayed: AtomicU64,
+    /// Queries fetched again in background runs.
+    pub background_refetched: AtomicU64,
 }
 
 impl Stats {

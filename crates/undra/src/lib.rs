@@ -7,6 +7,7 @@
 //! | Path | What |
 //! |---|---|
 //! | [`api`], [`error`], [`store`], [`port`], [`callback`], [`query`](macro@query), [`mutation`], [`migrate`] | the attribute macros (`undra-macros`) |
+//! | [`background`] | register a background task of your own (`undra::background::register`, ADR-046) |
 //! | [`persist`] | what a `#[undra::migrate]` hook works with: `DynValue`, `DynRecord`, `MigrateError` (ADR-037) |
 //! | [`prelude`] | what an application core imports: signals, `Ctx`, the wire scalars, the macros |
 //! | [`runtime`] | `undra-runtime`: `Runtime`, `Ctx`, dispatch, ports, the test runtime |
@@ -31,6 +32,7 @@ pub use undra_signals as signals;
 pub use undra_testkit as testing;
 pub use undra_wire as wire;
 
+pub mod background;
 pub mod query;
 
 /// What an application core imports: `use undra::prelude::*;`.

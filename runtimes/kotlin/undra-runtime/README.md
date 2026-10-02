@@ -16,7 +16,7 @@ It has two layers:
 
 ```
 undra-runtime/
-  settings.gradle.kts        includes :runtime, and :android-adapters when an Android SDK is found
+  settings.gradle.kts        includes :runtime and :testkit, and :android-adapters and :android-work when an Android SDK is found
   build.gradle.kts           group / version, Kotlin plugin declared once
   gradle/libs.versions.toml  Kotlin 2.0.21, coroutines 1.6.4, JUnit 5.10.3 (+ AGP 8.7.3, JUnit 4 and AndroidX Test for :android-adapters' tests)
   gradlew, gradle/wrapper/   Gradle 8.14.3 wrapper
@@ -37,6 +37,7 @@ undra-runtime/
       support/                                      FakeTransport, FakeNative (JNI contract), WsTestServer, ...
     src/test/kotlin/dev/undra/fixture/               UndraCoreNative of undra-ffi's fixture core, as bindgen generates one
   android-adapters/          the Android module: the adapters of the ten standard ports + the Choreographer frame pacer
+  android-work/              the optional WorkManager module (ADR-046): UndraWorker + UndraWork, background drains of the offline queue
   test-support/kotlin/       test code shared by both modules' tests (FaultyFileSystem: a file system that fails on demand)
   scripts/
     test-local.sh            build + test without Gradle or JUnit
@@ -47,7 +48,8 @@ undra-runtime/
 `:android-adapters` holds everything Android-specific (the Http, Kv, SecureStore, Fs, Connectivity and Lifecycle adapters,
 installed by `AndroidPlatformDefaults.install(core, context)`, and the Choreographer frame pacer); see
 [android-adapters/README.md](android-adapters/README.md). `:runtime` never depends on it, and never touches an Android API at
-compile time (Android is detected by reflection).
+compile time (Android is detected by reflection). `:android-work` is the one module with a WorkManager dependency, so an app that
+does not drain in the background does not carry it; see [android-work/README.md](android-work/README.md).
 
 ## Using it
 
@@ -65,8 +67,8 @@ todos.close()                             // or let the cleaner release it if yo
 | Type | What it is |
 |---|---|
 | `Undra<Namespace>` (generated) | `load(LoadOptions = LoadOptions())`, `core` (the loaded core, or a closed placeholder whose calls fail `Unavailable`), `NAMESPACE`. Delegates to `CoreEntry(namespace, schemaHash) { UndraCoreNative }`, which fills in the schema hash, refuses a second load while its core is open, and loads the library only for an in-process core |
-| `UndraCore` | `load(LoadOptions)` (`Mode.REMOTE` only: an in-process core is loaded through its generated entry), `load(LoadOptions, NativeApi)` (what the entry calls), `shared` (the first core loaded, for app code; generated code never reads it), `callSync`, `call` (suspend, cancellable), `stream` (`Flow`, credit 16 / top-up 8), `construct`, `observe`, `release`, `event`, `timerFired`, `mirror`, `registerPort`, `stats`, `snapshot` / `restore`, `close`. Open with a protected constructor, so tests can subclass it as a fake core |
-| `LoadOptions` | `mode` (`INPROC` or `REMOTE`), `remoteUrl`, `adapters` (port id to `PortImpl`), `expectedSchemaHash` (optional: the generated entry fills it in; `UndraCore.load` refuses options without it), `defaultAdapters`, `remoteTimeout`, `mirror`, `reconnect`, `onConnectionChange`, `onError` |
+| `UndraCore` | `load(LoadOptions)` (`Mode.REMOTE` only: an in-process core is loaded through its generated entry), `load(LoadOptions, NativeApi)` (what the entry calls), `shared` (the first core loaded, for app code; generated code never reads it), `callSync`, `call` (suspend, cancellable), `stream` (`Flow`, credit 16 / top-up 8), `construct`, `observe`, `release`, `event`, `timerFired`, `mirror`, `registerPort`, `stats` (with `panicReports` and `background`, ADR-046), `runInBackground(deadlineMs)` (suspend; gives the core a window to replay the offline queue, refetch stale persisted queries and flush persistence, and returns an `UndraBackgroundReport`), `snapshot` / `restore`, `close`. Open with a protected constructor, so tests can subclass it as a fake core |
+| `LoadOptions` | `mode` (`INPROC` or `REMOTE`), `remoteUrl`, `adapters` (port id to `PortImpl`), `expectedSchemaHash` (optional: the generated entry fills it in; `UndraCore.load` refuses options without it), `defaultAdapters`, `remoteTimeout`, `mirror`, `reconnect`, `onConnectionChange`, `onError`, `onDevNotice`, `onPanic` (ADR-046: one `UndraPanicReport` per panic the core contained, on the main dispatcher, once and in order; without it the runtime logs each report at error level) |
 | `NativeApi`, `NativeCallbacks`, `NativeLibrary` | The JNI surface of one core: implemented by its generated `UndraCoreNative`, whose library `NativeLibrary.load(namespace)` loads (`lib<namespace>`, or the file in `-Dundra.native.<namespace>.path`; a missing library is reported, not thrown). Apps do not use them |
 | `UndraObject`, `UndraStore` | `AutoCloseable` handles; a `java.lang.ref.Cleaner` (or a phantom-reference fallback where it does not exist, Android below API 33) releases leaked ones. `UndraStore.signal(initial)` makes the `MutableStateFlow` that `apply(signalId, op, reader)` updates. The mirror holds stores weakly: keep a reference to the store while you use its flows |
 | Objects (ADR-040) | `UndraCore.adopt(handle, ::Wrapper)` is how every generated wrapper is made: one wrapper per handle (a weak identity map), the extra reference of a handle the app already holds given back at once, a store observed when its wrapper is made; `adoptObject`/`adoptOptional`/`adoptList` read a reply body; `requireOwn(obj)` refuses another core's object with `UndraCallError.Refused` before anything is sent; `reachabilityFence(obj)` keeps an argument alive until its call is sent; `UndraStats.hostRefs` is the core's count of the references the host owns |
@@ -75,6 +77,24 @@ todos.close()                             // or let the cleaner release it if yo
 | `UndraDispatchers` | `main`: `Dispatchers.Main.immediate` on Android (found by reflection), else a daemon thread named `undra-main` |
 | `PortImpl(sync, methods, detach)` | What generated `<trait>PortImpl(...)` returns and `LoadOptions.adapters` / `registerPort` take. Sync ports are answered inline (they must not suspend or call Undra); async ports run off the core's threads and answer through `portReply`. `detach` (optional) runs once when the implementation stops serving its core (the core closed, or another one was registered for the port): the WebSocket, Sse and Db bindings close what they hold |
 | Errors | `UndraException` (base of generated errors, and of everything below), `UndraCallError` (sealed: `CancelledByCore`, `Panicked`, `Refused`, `Unavailable`, `Malformed`; what a generated call throws besides its own `E` and `CancellationException`), `UndraUnhandledError(operation, error)` (what `LoadOptions.onError` receives), `UndraReplyException(status, body)` (+ `panicInfo`, `badRequestReason`), `UndraTransportException(reason, ...)`, `UndraProtocolException`, `UndraRestoreException(code)`, `UndraModeException`, `UndraSchemaMismatchException(expected, got)`, `UndraPortException(body)`, `WireException` (sealed) A stream that fails ends with the same set (`UndraCallError.mappedStream`): `E` for its own typed error (flag 2), and for a failure the core ends it with (flag 3) `CancelledByCore`, `Panicked` or `Refused` by the failure's status (ADR-036), `Malformed` for an item or failure body the runtime cannot read |
+
+### Panic reports and background runs (ADR-046)
+
+A panic the core contains fails the call that made it (`UndraCallError.Panicked`) and, on top of that, produces one structured
+report that reaches the app's crash reporter: the core calls the standard sync port `Diagnostics.panicked(report)` (fire and
+forget, on the thread it panicked on, possibly with its lock held), the runtime's own adapter answers at once and hops to the
+main dispatcher, and `LoadOptions.onPanic` receives the `UndraPanicReport` there (`message`, `location` as `file:line:column`,
+`operation`, `thread`, `frames` innermost first, `namespace`, `coreVersion`, `schemaHash`, `imageId`). A handler that throws is
+caught, logged and reported to `onError`; without a handler the report is logged at error level. The Diagnostics adapter is
+registered for every core, also with `defaultAdapters = false`; the testkit's `CaptureDiagnostics` replaces it to record reports.
+
+```kotlin
+UndraPlaygroundCore.load(LoadOptions(onPanic = { report -> crashReporter.recordException(RuntimeException(report.summary)) }))
+
+// Give the core a window the OS granted; the work already done is kept if the window closes (cancel the coroutine).
+val report = core.runInBackground(deadlineMs = 8 * 60_000)    // UndraBackgroundReport(finished, replayed, refetched, stillPending)
+if (core.stats().background.pending > 0) { /* ask the OS for a window */ }
+```
 
 ### Threading, in one paragraph
 
@@ -149,7 +169,9 @@ other's keys, files or databases (ADR-044 amendment A). `JvmAdapters.standard(di
 for every core it serves, as an adapter you pass yourself does; `JvmAdapters.defaultDataDir(core.namespace)` is the directory `load` uses. On Android only
 Clock, Rng, Log and Timer are installed; the rest comes from `android-adapters` (`AndroidPlatformDefaults.install`). Port and method ids are `fnv1a32("port.<Trait>")`
 and `fnv1a32("<Trait>.<method>")` (`StandardPorts`), and the nine standard types of SPEC §8 have hand-written codecs
-(`HttpRequest`, `HttpResponse`, `HttpError`, `Header`, `FsError`, `StorageError`, `NetKind`, `AppState`, `HttpMethod`).
+(`HttpRequest`, `HttpResponse`, `HttpError`, `Header`, `FsError`, `StorageError`, `NetKind`, `AppState`, `HttpMethod`), and the three
+records of ADR-046 (`UndraPanicFrame`, `UndraPanicReport`, `UndraBackgroundReport`, with the `Diagnostics` port and the standard function
+`run_background` in `StandardPorts` / `StandardFunctions`).
 
 **Storage failures are typed** (ADR-049). `Kv` and `SecureStore` answer every failure with a `StorageError`
 (`Unavailable`, `Full`, `Locked`, `Corrupt`, `Io`; port status 1), never with a crash of the core: `FileKv` maps a full disk or

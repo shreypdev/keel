@@ -81,6 +81,8 @@ dependencies {
     implementation("dev.undra:runtime:0.1.0-SNAPSHOT")
     // The Android half of the runtime: the Choreographer frame pacer (ADR-031).
     implementation("dev.undra:android-adapters:0.1.0-SNAPSHOT")
+    // The optional WorkManager module (ADR-046): replays the offline queue while the app is in the background.
+    implementation("dev.undra:android-work:0.1.0-SNAPSHOT")
     implementation(project(":core-bindings"))
 
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))

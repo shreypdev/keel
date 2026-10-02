@@ -157,6 +157,17 @@ val undraBuild = tasks.register<UndraBuild>("undraBuild") {
 
 tasks.named("preBuild") { dependsOn(undraBuild) }
 
+// The debug variant keeps the debug info of the core's library (`lib@@NAMESPACE@@.so` comes unstripped from a debug
+// `undra build`), which Gradle would strip from the APK: Android Studio's native debugger ("Dual (Java + Native)") needs
+// the line tables to stop at a breakpoint in a .rs file. A release variant packages the library `undra build --release`
+// already stripped; its unstripped twin is build/symbols/android/<abi>/lib@@NAMESPACE@@.so (and native-debug-symbols.zip for
+// the Play Console).
+androidComponents {
+    onVariants(selector().withBuildType("debug")) { variant ->
+        variant.packaging.jniLibs.keepDebugSymbols.add("**/lib@@NAMESPACE@@.so")
+    }
+}
+
 gradle.taskGraph.whenReady {
     val requested = providers.gradleProperty("undraRelease").map { it.toBoolean() }.orNull
     val releaseBuild = requested ?: allTasks.any { it.project == project && it.name.contains("Release") }
@@ -169,6 +180,9 @@ dependencies {
     // The Android half of the runtime: the adapters of the standard ports (Http, Kv, SecureStore, Fs, Connectivity,
     // Lifecycle) and the Choreographer frame pacer. Its manifest declares INTERNET and ACCESS_NETWORK_STATE.
     implementation("dev.undra:android-adapters:@@KOTLIN_RUNTIME_VERSION@@")
+    // Optional: WorkManager drains the core's offline queue while the app is in the background (UndraApp.kt says how to
+    // schedule it). Uncomment to use it; `undra upgrade` keeps the version in step with the others once it is.
+    // implementation("dev.undra:android-work:@@KOTLIN_RUNTIME_VERSION@@")
     implementation(project(":core-bindings"))
 
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))

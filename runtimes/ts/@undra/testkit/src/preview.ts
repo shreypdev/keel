@@ -4,7 +4,7 @@ import { settleCore } from "./recorded.js";
 import { applySeed, parseSeed, type Seed } from "./seed.js";
 
 /** Options of {@link PreviewCore.load}. */
-export interface PreviewOptions extends Pick<AttachOptions, "onError" | "shared" | "mirror"> {
+export interface PreviewOptions extends Pick<AttachOptions, "onError" | "onPanic" | "shared" | "mirror"> {
   /** The app's own core, built for the web (`undra build --platform web`): a URL (a string is resolved against the page), its bytes or a compiled module. */
   readonly wasm: WasmSource | string;
   /** The schema hash of the bindings (`UndraIds.schemaHash`). */
@@ -40,7 +40,7 @@ export class PreviewCore {
   static readonly MAX_TIMERS_PER_ADVANCE = 1_000;
   /** The core. */
   readonly core: UndraCore;
-  /** The fakes it runs on: script `fakes.http`, seed `fakes.kv`, read `fakes.log`. */
+  /** The fakes it runs on: script `fakes.http`, seed `fakes.kv`, read `fakes.log` and the panic reports of `fakes.diagnostics`. */
   readonly fakes: Fakes;
 
   private constructor(core: UndraCore, fakes: Fakes) {
@@ -71,6 +71,11 @@ export class PreviewCore {
       },
       ...(options.ports !== undefined && { ports: options.ports }),
       ...(options.onError !== undefined && { onError: options.onError }),
+      // A trap of the core is kept by `fakes.diagnostics` (and heard by the test's own `onPanic`, if it gave one).
+      onPanic: (report) => {
+        fakes.diagnostics.panicked(report);
+        options.onPanic?.(report);
+      },
       ...(options.shared !== undefined && { shared: options.shared }),
       ...(options.mirror !== undefined && { mirror: options.mirror }),
     });

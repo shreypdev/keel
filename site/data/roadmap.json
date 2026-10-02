@@ -133,6 +133,14 @@
         {
           "title": "WebSocket, SSE and Db ports (ADR-047, ADR-048)",
           "text": "Real-time streams with the core's credit as backpressure, and SQL over SQLite on every platform with the same deterministic fake; opt-in, so nothing grows for apps that do not use them."
+        },
+        {
+          "title": "Objects as parameters, host callbacks (ADR-040, ADR-041)",
+          "text": "Generated classes cross the boundary as themselves, one wrapper per handle; the core calls back into app code through typed callback interfaces that never unwind into it."
+        },
+        {
+          "title": "Production operations (ADR-046)",
+          "text": "Every contained panic becomes a structured report the app receives with symbolicable frames; background runs drain the queue under a deadline; release builds keep symbols beside the binary and undra symbolicate reads them."
         }
       ]
     },
@@ -169,10 +177,6 @@
       "intro": "Planned for the releases after v1.0. The order may change with what the benchmarks show.",
       "items": [
         {
-          "title": "Objects as parameters, host callbacks, generics and Decimal (ADR-040 to 042)",
-          "text": "The boundary types a production app reaches for, each with a schema description and generated code that reads as native."
-        },
-        {
           "title": "crates.io and Maven Central",
           "text": "Publish the crates under a registry-safe prefix (its own ADR) and the Kotlin runtime without a local build."
         },
@@ -191,6 +195,10 @@
         {
           "title": "Flutter and Dart",
           "text": "Decided after React Native ships."
+        },
+        {
+          "title": "Newtypes, generics, Decimal; paged and lazy lists; polling (ADR-042, ADR-043)",
+          "text": "In flight."
         }
       ]
     },

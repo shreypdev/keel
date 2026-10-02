@@ -474,3 +474,21 @@ In flight: `ns-storage` (review), `objects-callbacks`, `prod-ops`, `ts-size-e4`.
 
 Matrix at checkpoint 22: Rust 3,079 · TS 1,580 + 32 · Kotlin 756 + 30 · Swift 686 · RN 88 · contracts 74/74.
 In flight: `objects-callbacks` (ADR-040/041, final matrix), `prod-ops` (ADR-046, final matrix); drafted: `default-choice-post` (fact-check pending).
+
+### Checkpoint 23 (2026-10-02) — objects as parameters, host callbacks
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **objects-callbacks** (ADR-040 + ADR-041 Accepted): handles are 24-bit slot + 40-bit generation with a `u64` floor; `TypeRef::Object`/`Callback`; `Arc<T>`/`&T`/`Option`/`Vec<Arc<T>>` parameters and returns, `Arc<Self>` constructors; the object table counts host references, interns by address, an RAII `IssueScope` gives back what a reply did not carry; one wrapper per handle on every platform; a foreign core's handle refused host-side; `#[undra::callback]` traits as ports with instances (`main` delivery through the mirror drain, `background` on a serial executor), typed errors status 1, anything else `onError` + status 2, cancellation to `Task`/`Job`/`AbortSignal`; the playground's Workshop tab; S27/S28 on all columns; bench rows (object param 48.7 ns ≈ `add`; return 84 ns; callback round trip 183 ns) | `848d3a7` | opus review `.10x/reviews/2026-10-02-objects-callbacks-review.md`: merge; F1 (High) a collected wrapper's handle returned later threw in TS, F2 restore reset host refs, F3 a return racing shutdown answered status 0, F4 the callback registry survived a crash restart, F5 Swift ran `onCancel` under the core lock; the JS gate restated at 21,800 (record 21,672; lazy-loading the identity map would cost 2.6–3.8 ms on the first `create()`); the stress-screen smoke failure was a stale build; O1–O10 to `objects-followups`; Rust 3,133 · Swift 705 · Kotlin 782 · TS 1,613 · RN 92 · contracts 80/80 (S01–S28) |
+
+Matrix at checkpoint 23: Rust 3,133 · TS 1,613 + 32 · Kotlin 782 + 30 · Swift 705 · RN 92 · contracts 80/80.
+In flight: `prod-ops` (ADR-046, opus review), `types-paging` (ADR-042/043), `objects-followups` (O1–O8), `default-choice-post` (drafted).
+
+### Checkpoint 24 (2026-10-02) — production operations
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **prod-ops** (ADR-046 Accepted, 19-point amendment): every contained panic is a FATAL `undra::panic` record plus one `PanicReport` (message, location, operation, thread, frames with image-relative addresses, namespace, core version, schema hash, image id) to the standard `Diagnostics.panicked` port, delivered to `onPanic` in order on every platform (wasm builds it host-side from the trap); `run_background(deadline)` runs per-runtime tasks (the query client's replay/refetch/flush) with iOS `UndraBackground`, Android `android-work`, the web page window; the CLI keeps line-table symbols, writes `build/symbols/manifest.json`, `undra symbolicate`, `.lldbinit`; S29/S30 | `4d6effd` | opus review `.10x/reviews/2026-10-02-prod-ops-review.md`: sound with fixes; H1 the hello wasm went over its gate after the cross (the panic path is linked by use on wasm — `guarded()` is `Ok(f())` under `panic=abort`; 119,654 of 120,000), M1 two `SAFETY` claims held only for images `undra build` makes (bounded ELF/Mach-O reads with the real load bias, Miri-checked), M2 two containment sites reported nothing, M4 an empty image id right after load; the JS gate reconciled at 22,100 (main 21,336 + objects 336 + prod-ops 333, `runInBackground` and the Diagnostics registration lazy); symbolication proven on iOS Release, Android, host and web (`lab.rs:222/221/236`); Rust 3,229 · Swift 772 · Kotlin 810 · TS 1,681 · RN 104 · contracts 86/86; hash `0xcc36d9fa84455aef` |
+
+Matrix at checkpoint 24: Rust 3,229 · TS 1,681 + 37 · Kotlin 810 + 32 · Swift 772 · RN 104 · contracts 86/86 (S01–S30).
+In flight: `types-paging` (ADR-042/043), `objects-followups` (O1–O8); drafted: `default-choice-post`.

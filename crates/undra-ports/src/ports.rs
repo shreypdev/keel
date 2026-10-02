@@ -1,4 +1,4 @@
-//! The ten standard ports (SPEC 8).
+//! The eleven standard ports (SPEC 8).
 //!
 //! Each trait is a `#[undra::port]`: the platform (Swift, Kotlin, TypeScript) implements it, and
 //! the core calls it through the runtime's port table. Method declaration order and names are
@@ -17,6 +17,7 @@
 //! | [`Timer`] | sync | `set` |
 //! | [`Connectivity`] | event | `changed` |
 //! | [`Lifecycle`] | event | `changed` |
+//! | [`Diagnostics`] | sync | `panicked` |
 //!
 //! For each request/reply port the macro also generates a proxy (`ClockProxy`, ...), an accessor
 //! function (`clock(&Ctx) -> Arc<dyn Clock>`, ...: the Rust binding if one is bound, else the
@@ -29,7 +30,7 @@
 use undra_wire::Bytes;
 
 use crate::records::{
-    AppState, FsError, HttpError, HttpRequest, HttpResponse, NetKind, StorageError,
+    AppState, FsError, HttpError, HttpRequest, HttpResponse, NetKind, PanicReport, StorageError,
 };
 
 /// Wall-clock and monotonic time. The core asks this port instead of reading the system clock.
@@ -145,4 +146,12 @@ pub trait Connectivity {
 pub trait Lifecycle {
     /// The app moved to `state`.
     fn changed(&self, state: AppState);
+}
+
+/// Receives the reports of contained panics.
+#[undra_macros::port(sync, dispatcher_by_use)]
+#[undra(crate = "crate::root")]
+pub trait Diagnostics {
+    /// A panic was contained.
+    fn panicked(&self, report: PanicReport);
 }

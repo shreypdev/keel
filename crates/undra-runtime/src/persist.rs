@@ -1200,10 +1200,17 @@ pub(crate) fn run_hook<T>(
         Ok(Err(refused)) => Err(MigrateError::new(format!(
             "the migration hook `{name}` refused the value: {refused}"
         ))),
-        Err(report) => Err(MigrateError::new(format!(
-            "the migration hook `{name}` panicked: {}",
-            report.message
-        ))),
+        Err(report) => {
+            crate::runtime::report_current(
+                &format!("the migration hook `{name}` panicked"),
+                &format!("migration {name}"),
+                &report,
+            );
+            Err(MigrateError::new(format!(
+                "the migration hook `{name}` panicked: {}",
+                report.message
+            )))
+        }
     }
 }
 

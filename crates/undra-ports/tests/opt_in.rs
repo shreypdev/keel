@@ -23,7 +23,7 @@ use undra_wire::payload::PortStatus;
 use undra_wire::{Bytes, Decode, Encode};
 
 /// `Schema::hash()` of the standard ports with all three opt-in ports.
-const SCHEMA_HASH: u64 = 0x716f_c678_df98_087c;
+const SCHEMA_HASH: u64 = 0x479b_5f0e_c05a_175a;
 
 const GOLDEN: &str = "tests/golden/schema-opt-in.json";
 

@@ -463,6 +463,26 @@ pub struct Build {
     /// Arguments for rustc itself, after `--` (`-Clink-arg=...`): they apply to the shim only,
     /// never to the dependencies, which stay shared with the workspace's own builds.
     pub rustc_args: Vec<String>,
+    /// Extra `--config` arguments (`profile.release.split-debuginfo="unpacked"`): Cargo settings
+    /// that hold for this build only, for what a profile in the shim's manifest cannot say because it
+    /// depends on the target.
+    pub cargo_config: Vec<String>,
+}
+
+/// The `--config` argument that sets `split-debuginfo = "unpacked"` for `profile` (ADR-046: on
+/// Apple targets the debug info stays in the objects, which the prelinked iOS object and the host
+/// dylib's dSYM are made from). Not a line of the shim's manifest, because on ELF targets `unpacked`
+/// would leave the DWARF in `.dwo` files next to the objects instead of in the library.
+#[must_use]
+pub fn unpacked_debuginfo(profile: Profile) -> String {
+    format!(
+        "profile.{}.split-debuginfo=\"unpacked\"",
+        match profile {
+            Profile::Dev => "dev",
+            Profile::Release => "release",
+            Profile::ReleaseWasm => "release-wasm",
+        }
+    )
 }
 
 impl Cargo<'_> {
@@ -524,6 +544,9 @@ impl Cargo<'_> {
         }
         let mut cmd = Command::new(&cargo);
         cmd.arg("rustc");
+        for config in &build.cargo_config {
+            cmd.arg("--config").arg(config);
+        }
         match self.path_remap(build.profile) {
             Some(PathRemap::Config(arg)) => {
                 cmd.arg("--config").arg(arg);
@@ -1034,6 +1057,18 @@ mod tests {
             vec![PathBuf::from("/t/libundra_core.a")]
         );
         assert!(artifacts(&lines, "other", "cdylib").is_empty());
+    }
+
+    #[test]
+    fn apple_builds_leave_the_debug_info_in_the_objects() {
+        assert_eq!(
+            unpacked_debuginfo(Profile::Release),
+            "profile.release.split-debuginfo=\"unpacked\""
+        );
+        assert_eq!(
+            unpacked_debuginfo(Profile::Dev),
+            "profile.dev.split-debuginfo=\"unpacked\""
+        );
     }
 
     #[test]

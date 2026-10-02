@@ -1,9 +1,12 @@
 package dev.undra.runtime
 
+import dev.undra.runtime.adapters.StandardFunctions
+import dev.undra.runtime.adapters.UndraBackgroundReport
 import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.Payloads.CallTarget
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.UndraReader
+import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.decodeAll
 import java.net.URI
 import java.security.SecureRandom
@@ -184,6 +187,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
                 onError = options.onError,
                 onDevNotice = options.onDevNotice,
                 namespace = options.namespace ?: UNNAMED_NAMESPACE,
+                onPanic = options.onPanic,
             )
             try {
                 val expected = options.expectedSchemaHash ?: throw missingSchemaHash()
@@ -322,6 +326,37 @@ public open class UndraCore protected constructor() : AutoCloseable {
      */
     public open suspend fun call(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray =
         throw unsupported("call")
+
+    /**
+     * Gives the core a window of [deadlineMs] milliseconds to do the work that can wait for the app to be in the background, and
+     * returns what it did (ADR-046): replays the queued offline mutations, refetches the stale persisted queries and flushes
+     * pending persistence, together, until all of them finished or `deadlineMs - 500` ms have passed, whichever comes first.
+     * It is the standard function `run_background`, called like any generated `suspend` function.
+     *
+     * An OS that grants a window calls this (the `android-work` module's `UndraWorker` does, with a deadline a little under
+     * WorkManager's 10 minutes), and the core must be loaded for it first: a worker started by the OS in a process the app never
+     * opened loads it itself. The core never fails the run: [UndraBackgroundReport.finished] says whether it got through, and
+     * [UndraBackgroundReport.stillPending] how much is left; progress is kept per item, so a run that did not finish loses nothing.
+     * [UndraStats.background] says, without a run, whether one is worth asking the OS for (`pending > 0`).
+     *
+     * Cancelling the coroutine cancels the call (a host about to lose its window does): the caller sees
+     * [kotlinx.coroutines.CancellationException] at once and the core drops the run; what was already done is kept.
+     *
+     * @param deadlineMs the window, in milliseconds; a negative value counts as zero.
+     * @throws UndraCallError when the core is closed or cannot be reached ([UndraCallError.Unavailable]), refuses the call, or
+     *   cancels it ([UndraCallError.CancelledByCore], a restore or a shutdown meanwhile). Never a panic into the caller's OS callback.
+     * @throws kotlinx.coroutines.CancellationException if the calling coroutine is cancelled.
+     */
+    public suspend fun runInBackground(deadlineMs: Long): UndraBackgroundReport {
+        val w = UndraWriter(8)
+        w.writeU64(deadlineMs.coerceAtLeast(0L).toULong())
+        try {
+            val body = call(CallTarget.FreeFunction(StandardFunctions.RUN_BACKGROUND), StandardFunctions.RUN_BACKGROUND, w.toByteArray())
+            return UndraBackgroundReport.decodeAll(body)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e)
+        }
+    }
 
     /**
      * Opens a stream and returns its items as a cold [Flow]: every collection starts a new call. Items

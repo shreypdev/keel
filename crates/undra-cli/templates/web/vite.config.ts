@@ -5,10 +5,16 @@ import { undra } from "@@RUNTIME_VITE_IMPORT@@";
 
 const here = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   // `undra()` builds the Rust core (`undra build --platform web`) when Vite starts, for `vite build` as for `vite dev`, and
   // under `vite dev` rebuilds it and reloads the page whenever core/src changes: there is no manual build step.
   plugins: [undra(), react()],
+  // `vite dev` serves the debug build of the core (`@@WASM_DEBUG_PATH@@`: optimised with its DWARF line tables
+  // kept), so Chrome's DevTools sets breakpoints in .rs files (it needs the C/C++ DevTools Support (DWARF) extension;
+  // `undra doctor` has the link). `vite build` bundles the stripped module and never names the debug one.
+  define: {
+    __UNDRA_DEBUG_WASM__: JSON.stringify(command === "serve" ? "/@fs" + here("@@WASM_DEBUG_PATH@@") : ""),
+  },
   resolve: {
     alias: {
       // The bindings `undra bindgen` generates, used from their TypeScript sources so there is no
@@ -20,4 +26,4 @@ export default defineConfig({
     // The wasm core (`undra build --platform web`) lives outside this directory.
     fs: { allow: [here("@@PROJECT_ROOT_PATH@@")@@EXTRA_FS_ALLOW@@] },
   },
-});
+}));

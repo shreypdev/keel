@@ -3,6 +3,45 @@
   "crate_name": "golden-stdlib",
   "records": [
     {
+      "name": "BackgroundReport",
+      "type_id": 1572775411,
+      "fields": [
+        {
+          "name": "finished",
+          "ty": {
+            "kind": "bool"
+          },
+          "default": false,
+          "docs": "Everything ran to completion."
+        },
+        {
+          "name": "replayed",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false,
+          "docs": "Mutations sent."
+        },
+        {
+          "name": "refetched",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false,
+          "docs": "Queries fetched again."
+        },
+        {
+          "name": "still_pending",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false,
+          "docs": "Work still waiting."
+        }
+      ],
+      "docs": "What a background run did."
+    },
+    {
       "name": "DbExecuted",
       "type_id": 1101112230,
       "fields": [
@@ -219,6 +258,137 @@
         }
       ],
       "docs": "An HTTP response. Any status, including 4xx and 5xx, is a response; only failures before a\nresponse exists are an `HttpError`."
+    },
+    {
+      "name": "PanicFrame",
+      "type_id": 430217169,
+      "fields": [
+        {
+          "name": "address",
+          "ty": {
+            "kind": "u64"
+          },
+          "default": false,
+          "docs": "Offset of the instruction into its image; 0 if unknown."
+        },
+        {
+          "name": "symbol",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false,
+          "docs": "The function, in builds that name it."
+        },
+        {
+          "name": "file",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false,
+          "docs": "The source file."
+        },
+        {
+          "name": "line",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "u32"
+            }
+          },
+          "default": false,
+          "docs": "The line in `file`."
+        }
+      ],
+      "docs": "One frame of a panic's backtrace."
+    },
+    {
+      "name": "PanicReport",
+      "type_id": 3498923062,
+      "fields": [
+        {
+          "name": "message",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The panic message."
+        },
+        {
+          "name": "location",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "`file:line:column` of the panic."
+        },
+        {
+          "name": "operation",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "What was running."
+        },
+        {
+          "name": "thread",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The panicking thread."
+        },
+        {
+          "name": "frames",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "PanicFrame"
+            }
+          },
+          "default": false,
+          "docs": "The backtrace."
+        },
+        {
+          "name": "namespace",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The core's namespace."
+        },
+        {
+          "name": "core_version",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The core's version."
+        },
+        {
+          "name": "schema_hash",
+          "ty": {
+            "kind": "u64"
+          },
+          "default": false,
+          "docs": "The core's schema hash."
+        },
+        {
+          "name": "image_id",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "The image the addresses belong to, in hex."
+        }
+      ],
+      "docs": "A panic the core contained."
     },
     {
       "name": "SseEvent",
@@ -1585,7 +1755,27 @@
       "docs": "Mirrors what the platform reports about the connection."
     }
   ],
-  "functions": [],
+  "functions": [
+    {
+      "name": "run_background",
+      "method_id": 240850175,
+      "params": [
+        {
+          "name": "deadline_ms",
+          "ty": {
+            "kind": "u64"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "named",
+        "of": "BackgroundReport"
+      },
+      "is_async": true,
+      "takes_ctx": true,
+      "docs": "Runs the background tasks for at most `deadline_ms` (the window the OS granted)."
+    }
+  ],
   "ports": [
     {
       "name": "Clock",
@@ -1891,6 +2081,33 @@
         }
       ],
       "docs": "SQLite on the platform (ADR-048). Use [`Database`] rather than calling it directly.\n\nEvery open database has one connection and one serial worker owned by the adapter; the core\nonly awaits replies. Statements on a transaction id run inside it; statements on the database\nid wait for a running transaction to end (at most the busy timeout, then `Busy`)."
+    },
+    {
+      "name": "Diagnostics",
+      "port_id": 2875772284,
+      "kind": "sync",
+      "methods": [
+        {
+          "name": "panicked",
+          "method_id": 3172236846,
+          "params": [
+            {
+              "name": "report",
+              "ty": {
+                "kind": "named",
+                "of": "PanicReport"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "A panic was contained."
+        }
+      ],
+      "docs": "Receives the reports of contained panics."
     },
     {
       "name": "Fs",

@@ -195,14 +195,21 @@ pub const fn __namespace(name: &'static str) -> &'static CStr {
 /// generated shim does). The namespace is a C identifier of at most 32 bytes, checked at compile
 /// time; on wasm the macro exports nothing (a wasm module is its own namespace, SPEC 7).
 ///
+/// `version = "1.2.3"` names the core's version in the panic reports it delivers (ADR-046); the
+/// generated shim passes the app core crate's. Without it the version is that of the crate that
+/// calls the macro. On wasm too the macro submits the core's identity (namespace and version), so
+/// a panic report names the core there as well.
+///
 /// ```ignore
-/// undra_ffi::export_core!(acme_pay, jni_class = "dev/acme/pay/core/UndraCoreNative");
+/// undra_ffi::export_core!(acme_pay, jni_class = "dev/acme/pay/core/UndraCoreNative", version = "1.4.0");
 /// // extern "C" fn acme_pay_undra_api() -> &'static UndraApi
 /// ```
 #[macro_export]
 macro_rules! export_core {
-    ($ns:ident $(, jni_class = $class:literal)? $(,)?) => {
+    ($ns:ident $(, jni_class = $class:literal)? $(, version = $version:literal)? $(,)?) => {
         const _: &::core::ffi::CStr = $crate::__namespace(concat!(stringify!($ns), "\0"));
+
+        $crate::__submit_identity!($ns $(, $version)?);
 
         #[cfg(not(target_family = "wasm"))]
         const _: () = {
@@ -219,6 +226,23 @@ macro_rules! export_core {
         };
 
         $( $crate::__export_jni!($class); )?
+    };
+}
+
+/// Submits the core's identity (ADR-046): what its panic reports name.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __submit_identity {
+    ($ns:ident) => {
+        $crate::__submit_identity!($ns, env!("CARGO_PKG_VERSION"));
+    };
+    ($ns:ident, $version:expr) => {
+        $crate::__private::inventory::submit! {
+            $crate::__private::CoreIdentity {
+                namespace: stringify!($ns),
+                version: $version,
+            }
+        }
     };
 }
 

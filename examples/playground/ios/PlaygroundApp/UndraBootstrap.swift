@@ -22,6 +22,27 @@ enum UndraBootstrap {
             .error("\(unhandled.description, privacy: .public)")
     }
 
+    /// Where the core's panic reports end up (ADR-046): the app's own log, as an app would hand them to its crash
+    /// reporter (Crashlytics, Sentry), and `PanicLog` for the Debug section of the Remote tab. The runtime calls this
+    /// on the main thread, once per panic, after the core has answered the call that panicked.
+    private static let onPanic: @Sendable (UndraPanicReport) -> Void = { report in
+        Logger(subsystem: "dev.undra.playground", category: "undra").error(
+            "the core panicked in \(report.operation, privacy: .public): \(report.message, privacy: .public) at \(report.location, privacy: .public) (\(report.frames.count) frames, image \(report.imageId, privacy: .public))"
+        )
+        Task { @MainActor in PanicLog.shared.record(report) }
+    }
+
+    /// Asks the OS for background windows (ADR-046): offline mutations that are still queued replay, and the cached list
+    /// refetches, while the app is not on screen. The identifiers, `dev.undra.playground.undra.processing` and
+    /// `.refresh`, are in `Config/Info.plist`. Called from the app's `init`, before it finishes launching, and idempotent.
+    /// Try it on a device (the simulator has no background scheduler): background the app with an offline item queued, pause it in the debugger and evaluate
+    /// `e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"dev.undra.playground.undra.refresh"]`.
+    private static func registerBackground() {
+        UndraBackground.register(taskIdentifier: "dev.undra.playground.undra") {
+            try UndraPlaygroundCore.load()
+        }
+    }
+
     /// Loads the core linked into the app (`undra build --platform ios`) with the default adapters,
     /// except that `Http` is the in-memory server, `Connectivity` is the one the Offline switch
     /// drives (the app's network is simulated, so its connectivity is too) and `Kv` is emptied at launch. In debug builds, when
@@ -41,6 +62,7 @@ enum UndraBootstrap {
 
     @MainActor
     static func start() throws {
+        registerBackground()
         // The server the app carries forgets everything when the app quits, so the core's cache of
         // it must too: the key-value store (the query cache, the offline queue) lives in a temporary
         // directory that every launch starts empty.
@@ -66,13 +88,14 @@ enum UndraBootstrap {
                 // What the dev server says about a reload ("Reloaded, state kept"), for the status bar.
                 onDevNotice: { message in
                     Task { @MainActor in DevNotice.shared.show(message) }
-                }
+                },
+                onPanic: onPanic
             ))
             configureRemote(RemoteConfig(baseUrl: serverURL))
             return
         }
         #endif
-        core = try UndraPlaygroundCore.load(.inproc(adapters: adapters, onError: onError))
+        core = try UndraPlaygroundCore.load(.inproc(adapters: adapters, onError: onError, onPanic: onPanic))
         // Tell the core where the server is, before anything observes the remote list.
         configureRemote(RemoteConfig(baseUrl: serverURL))
     }

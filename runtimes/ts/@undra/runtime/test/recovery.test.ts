@@ -26,7 +26,7 @@ import {
   withGenerationFloor,
 } from "../src/recovery.js";
 import { Signal } from "../src/signal.js";
-import { type UndraPanicReport, panicReport } from "../src/panic.js";
+import type { UndraPanicReport } from "../src/adapters/types.js";
 import { WasmMainTransport } from "../src/transport/wasm-main.js";
 import { WasmWorkerTransport } from "../src/transport/wasm-worker.js";
 import {
@@ -51,8 +51,7 @@ import { STUB, compileStub } from "./support/stub-core.js";
 import { channelWorker } from "./support/worker.js";
 
 /*
- * Recovering a web core that trapped (ADR-049 decision 3): the options, the snapshot keeper, the panic report
- * (ADR-046 decision 4.4, minimal), the restart sequence of UndraCore over a scripted transport (every step and its
+ * Recovering a web core that trapped (ADR-049 decision 3): the options, the snapshot keeper, the restart sequence of UndraCore over a scripted transport (every step and its
  * order, the budget, a restart that traps again), and the two wasm transports over the stub core. The real core in
  * both modes is covered by crates/undra-ffi/tests/wasm/ts-runtime.test.mjs.
  */
@@ -318,29 +317,6 @@ describe("snapshot helpers", () => {
     expect(snapshotStoreHandles(snapshot)).toEqual([makeHandle(4, 2)]);
     expect(snapshotStoreHandles(Uint8Array.of(1, 2, 3))).toBeNull();
     expect(decodeSnapshot(emptySnapshot(7n, 12))).toEqual({ generationFloor: 12, schemaHash: 7n, types: [], description: "", stores: [] });
-  });
-});
-
-describe("the panic report (ADR-046 decision 4.4, minimal)", () => {
-  it("takes the message of the core's FATAL record and the wasm frames of the trap's stack", () => {
-    const report = panicReport("kaboom", trapError(), 0xabcn, "wasm-main");
-    expect(report.message).toBe("kaboom");
-    expect(report.location).toBe("");
-    expect(report.schemaHash).toBe(0xabcn);
-    expect(report.trap).toBe("RuntimeError: unreachable");
-    expect(report.operation).toBe("wasm-main: RuntimeError: unreachable");
-    expect(report.frames).toEqual([
-      "undra_core.wasm.core::panicking::panic (wasm://wasm/0012abcd:wasm-function[123]:0x4567)",
-      "undra_call (wasm://wasm/0012abcd:wasm-function[9]:0x89)",
-    ]);
-  });
-
-  it("splits the location off a record that carries it, and falls back to the trap's text without a record", () => {
-    expect(panicReport("index out of bounds at src/lib.rs:12", trapError(), 0n, "wasm-worker")).toMatchObject({
-      message: "index out of bounds",
-      location: "src/lib.rs:12",
-    });
-    expect(panicReport(null, trapError("stack overflow"), 0n, "wasm-main").message).toBe("RuntimeError: stack overflow");
   });
 });
 

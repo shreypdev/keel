@@ -78,7 +78,10 @@ impl Spec {
                 .with_output("rustup", "show active-toolchain", "stable-aarch64-apple-darwin (default)\n")
                 .with_output("rustc", "--version", "rustc 1.98.1 (48a229cea 2026-09-01)\n")
                 .with_output("cargo", "--version", "cargo 1.98.1 (797e8a9bc 2026-08-05)\n")
-                .with_output("rustc", "--print sysroot", &format!("{home}/.rustup/toolchains/stable\n"));
+                .with_output("rustc", "--print sysroot", &format!("{home}/.rustup/toolchains/stable\n"))
+                .with_file(&format!(
+                    "{home}/.rustup/toolchains/stable/lib/rustlib/etc/lldb_lookup.py"
+                ));
             if self.targets {
                 let mut triples = vec![
                     "wasm32-unknown-unknown",
@@ -121,7 +124,11 @@ impl Spec {
                 sys = sys.with_dir(&format!("{SDK}/platforms/android-35"));
             }
             if let Some(ndk) = self.ndk {
-                sys = sys.with_dir(&format!("{SDK}/ndk/{ndk}"));
+                sys = sys
+                    .with_dir(&format!("{SDK}/ndk/{ndk}"))
+                    .with_file(&format!(
+                        "{SDK}/ndk/{ndk}/toolchains/llvm/prebuilt/darwin-x86_64/bin/lldb"
+                    ));
             }
             if self.adb {
                 sys = sys

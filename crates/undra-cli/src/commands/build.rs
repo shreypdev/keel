@@ -24,7 +24,11 @@ pub fn run(env: &Env<'_>, args: &BuildArgs) -> Result<()> {
             .configuration
             .as_deref()
             .is_some_and(builds::xcode::is_release);
-    let options = Options { targets, release };
+    let options = Options {
+        targets,
+        release,
+        symbols: !args.no_symbols,
+    };
     let artifacts = builds::run(&session, &options)?;
     if options.targets.contains(&Target::Ios) {
         // What Xcode's build phase watches (see `builds::xcode`): the inputs of the core as they are

@@ -2,7 +2,7 @@
 # Runs the Swift column of the contract scenarios (contract-tests/scenarios.md): the Swift runtime
 # over the C ABI, against the real playground core, through the generated bindings.
 #
-#   contract-tests/swift/run.sh                 all of them (S01 to S20, S23 to S26), then the check
+#   contract-tests/swift/run.sh                 all of them (S01 to S20, S23 to S26, S29, S30), then the check
 #   contract-tests/swift/run.sh --filter ContractScenarios/testS07_streamWithBackpressure
 #   contract-tests/swift/run.sh --floor         the same grid against bindings generated for an iOS 15 floor (ADR-045):
 #                                               `ObservableObject` stores and `UndraDuration` (the first argument; it may

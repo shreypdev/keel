@@ -46,7 +46,7 @@ help: the trait `undra::undra_wire::Decode` is not implemented for `Child`
              (A,)
              AppState
              BTreeMap<K, V>
-             Box<T>
+             BackgroundReport
            and $N others
 
 error[E0080]: evaluation panicked: error[undra::E0064]: `Child` is an object and cannot be used as a value
