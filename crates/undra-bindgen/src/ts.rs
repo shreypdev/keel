@@ -503,6 +503,11 @@ impl<'a> Ctx<'a> {
                 self.use_type(name);
                 name.clone()
             }
+            // todo(objects-callbacks): objects and callbacks (ADR-040, ADR-041)
+            TypeRef::Object(name) | TypeRef::Callback(name) => {
+                self.use_type(name);
+                name.clone()
+            }
             // Rejected by validation before generation starts.
             TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => "never".to_owned(),
         }
@@ -545,6 +550,9 @@ impl<'a> Ctx<'a> {
                 let symbol = format!("{name}Codec");
                 self.use_value(name, &symbol);
                 symbol
+            }
+            TypeRef::Object(_) | TypeRef::Callback(_) => {
+                unreachable!("an object or callback has no value codec")
             }
             TypeRef::Option(_) | TypeRef::Vec(_) | TypeRef::Map(..) => {
                 if !self.hoistable(t) {
@@ -764,6 +772,7 @@ impl<'a> Ctx<'a> {
             TypeRef::Vec(_) => "[]".to_owned(),
             TypeRef::Map(..) => "new Map()".to_owned(),
             TypeRef::Named(name) => return self.zero_named(name, state),
+            TypeRef::Object(_) | TypeRef::Callback(_) => return None,
             TypeRef::Unit | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
                 "undefined".to_owned()
             }

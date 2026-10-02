@@ -285,6 +285,8 @@ impl Types<'_> {
             TypeRef::Vec(inner) => format!("[{}]", self.ty(inner)),
             TypeRef::Map(k, v) => format!("[{}: {}]", self.ty(k), self.ty(v)),
             TypeRef::Named(name) => self.model.spelled(name).to_owned(),
+            // todo(objects-callbacks): objects and callbacks (ADR-040, ADR-041)
+            TypeRef::Object(name) | TypeRef::Callback(name) => name.clone(),
             // Rejected by validation before generation starts.
             TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => "Never".to_owned(),
         }
@@ -378,6 +380,7 @@ impl Types<'_> {
                 "UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))".to_owned()
             }
             TypeRef::Named(name) => return self.zero_named(name, state),
+            TypeRef::Object(_) | TypeRef::Callback(_) => return None,
             TypeRef::Unit | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
                 "()".to_owned()
             }

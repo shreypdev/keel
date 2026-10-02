@@ -336,6 +336,8 @@ impl<'a> Ctx<'a> {
                 format!("{map}<{}, {}>", self.ty(k, sh), self.ty(v, sh))
             }
             TypeRef::Named(name) => self.named(name, sh),
+            // todo(objects-callbacks): objects and callbacks (ADR-040, ADR-041)
+            TypeRef::Object(name) | TypeRef::Callback(name) => self.named(name, sh),
             // Rejected by validation before generation starts.
             TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => "Nothing".to_owned(),
         }
@@ -368,6 +370,7 @@ impl<'a> Ctx<'a> {
             TypeRef::Duration => self.prim("duration"),
             TypeRef::Timestamp => self.prim("timestamp"),
             TypeRef::Uuid => self.prim("uuid"),
+            TypeRef::Object(_) | TypeRef::Callback(_) => unreachable!("an object or callback has no value codec"),
             TypeRef::Named(name) => self.named(name, sh),
             TypeRef::Option(_) | TypeRef::Vec(_) | TypeRef::Map(..) => {
                 if let Some(name) = self.hoist_names.get(t) {
@@ -535,6 +538,7 @@ impl<'a> Ctx<'a> {
             TypeRef::Vec(_) => "emptyList()".to_owned(),
             TypeRef::Map(..) => "emptyMap()".to_owned(),
             TypeRef::Named(name) => return self.zero_named(name, state),
+            TypeRef::Object(_) | TypeRef::Callback(_) => return None,
             TypeRef::Unit | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
                 "Unit".to_owned()
             }
