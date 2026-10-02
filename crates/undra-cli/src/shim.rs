@@ -184,7 +184,26 @@ pub struct ShimNames {
     pub jni_class: String,
 }
 
+/// The core crate's version as the text of a Rust string literal for `export_core!`'s `version =`
+/// (ADR-046): the package version, `0.0.0` for a core that has none. A version Cargo accepts has no
+/// quote or backslash; anything that does is dropped rather than escaped.
+fn core_version_literal(version: &str) -> String {
+    let clean: String = version
+        .trim()
+        .chars()
+        .filter(|c| !matches!(c, '"' | '\\') && !c.is_control())
+        .collect();
+    if clean.is_empty() {
+        "0.0.0".to_owned()
+    } else {
+        clean
+    }
+}
+
 /// Generates the shim crate and returns its `Cargo.toml`.
+///
+/// The shim exports the core under `names` and tells `export_core!` the core crate's version
+/// (`core.version`), which a panic report carries as `core_version` (ADR-046).
 ///
 /// # Errors
 ///
@@ -203,7 +222,8 @@ pub fn write_shim(
         .with("WASM_OPT_LEVEL", wasm_opt_level)
         .with("NAMESPACE", names.namespace.clone())
         .with("JNI_CLASS", names.jni_class.clone())
-        .with("JNI_CLASS_DOTTED", names.jni_class.replace('/', "."));
+        .with("JNI_CLASS_DOTTED", names.jni_class.replace('/', "."))
+        .with("CORE_VERSION", core_version_literal(&core.version));
     write_if_changed(&dir.join("Cargo.toml"), &render(SHIM_MANIFEST, &vars)?)?;
     write_if_changed(&dir.join("src/lib.rs"), &render(SHIM_LIB, &vars)?)?;
     seed_lockfile(&dir, project_root, core);
@@ -312,12 +332,66 @@ mod tests {
         let lib = std::fs::read_to_string(manifest.parent().unwrap().join("src/lib.rs")).unwrap();
         assert!(
             lib.contains(
-                "undra_ffi::export_core!(todo_core, jni_class = \"com/example/todo/core/UndraCoreNative\");"
+                "undra_ffi::export_core!(todo_core, jni_class = \"com/example/todo/core/UndraCoreNative\", version = \"0.1.0\");"
             ),
             "{lib}"
         );
         assert!(lib.contains("extern crate app_core;"), "{lib}");
         assert!(!lib.contains("pub use undra_ffi::*"), "{lib}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_shim_tells_the_macro_the_core_version_and_falls_back_to_zero() {
+        let dir = crate::fsutil::unique_temp_dir("shim-version");
+        let mut info = core(false);
+        info.version = "2.5.1-rc.1".to_owned();
+        let manifest = write_shim(&dir, Path::new("/nonexistent"), &info, &names(), "z").unwrap();
+        let lib = std::fs::read_to_string(manifest.parent().unwrap().join("src/lib.rs")).unwrap();
+        assert!(lib.contains("version = \"2.5.1-rc.1\");"), "{lib}");
+        // A core without a version (the metadata had none) reports 0.0.0, never an empty string.
+        info.version = String::new();
+        let manifest = write_shim(&dir, Path::new("/nonexistent"), &info, &names(), "z").unwrap();
+        let lib = std::fs::read_to_string(manifest.parent().unwrap().join("src/lib.rs")).unwrap();
+        assert!(lib.contains("version = \"0.0.0\");"), "{lib}");
+        assert_eq!(
+            core_version_literal("1.0.0\"; evil(); \\"),
+            "1.0.0; evil(); "
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_release_profile_keeps_line_tables_and_strips_nothing() {
+        let dir = crate::fsutil::unique_temp_dir("shim-profile");
+        let manifest =
+            write_shim(&dir, Path::new("/nonexistent"), &core(false), &names(), "z").unwrap();
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        let release = text
+            .split("[profile.release]")
+            .nth(1)
+            .and_then(|rest| rest.split("\n[").next())
+            .unwrap();
+        // ADR-046: the same code (LTO, one unit, opt-level 3) with line tables, and no `strip`:
+        // `undra build --release` strips the copies it ships and keeps the unstripped ones.
+        for needle in [
+            "lto = \"fat\"",
+            "codegen-units = 1",
+            "opt-level = 3",
+            "panic = \"unwind\"",
+            "debug = \"line-tables-only\"",
+        ] {
+            assert!(release.contains(needle), "{needle}: {release}");
+        }
+        assert!(
+            !release.lines().any(|l| l.trim_start().starts_with("strip")),
+            "{release}"
+        );
+        // The wasm profile inherits it (and so its line tables, which the debug module keeps).
+        assert!(
+            text.contains("[profile.release-wasm]\ninherits = \"release\""),
+            "{text}"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

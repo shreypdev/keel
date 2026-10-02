@@ -1,7 +1,10 @@
 package dev.undra.runtime
 
+import dev.undra.runtime.adapters.DiagnosticsAdapter
 import dev.undra.runtime.adapters.JulLog
 import dev.undra.runtime.adapters.JvmAdapters
+import dev.undra.runtime.adapters.StandardPorts
+import dev.undra.runtime.adapters.UndraPanicReport
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.UndraWriter
@@ -54,11 +57,12 @@ internal class ConnectedCore(
     private val blockingTimeout: Duration,
     initialCallId: Int = 0,
     mirrorOptions: MirrorOptions = MirrorOptions(),
-    main: MainThread = UndraDispatchers.mainThread(),
+    private val main: MainThread = UndraDispatchers.mainThread(),
     private val onConnectionChange: ((ConnectionState) -> Unit)? = null,
     private val onError: ((UndraUnhandledError) -> Unit)? = null,
     private val onDevNotice: ((String) -> Unit)? = null,
     override val namespace: String = UNNAMED_NAMESPACE,
+    private val onPanic: ((UndraPanicReport) -> Unit)? = null,
 ) : UndraCore(), TransportEvents {
 
     private sealed interface Pending {
@@ -120,8 +124,12 @@ internal class ConnectedCore(
 
     // ---- setup -------------------------------------------------------------------------------------------
 
-    /** Registers the ports of [options]: the defaults for what is missing, then the explicit adapters. */
+    /**
+     * Registers the ports of [options]: this core's own `Diagnostics` adapter (which feeds `onPanic`, so it is there whatever
+     * `defaultAdapters` says), the defaults for what is missing, then the explicit adapters.
+     */
     fun installPorts(options: LoadOptions) {
+        ports.register(StandardPorts.Diagnostics.PORT_ID, DiagnosticsAdapter(::panicReported).portImpl())
         if (options.defaultAdapters) {
             for ((id, impl) in JvmAdapters.defaults(namespace, this::timerFired)) ports.register(id, impl)
         }
@@ -416,6 +424,34 @@ internal class ConnectedCore(
             UndraLog.warn("the onError handler threw while handling \"${unhandled.message}\"", e)
         } finally {
             reporting.set(false)
+        }
+    }
+
+    /**
+     * A panic report from the core (the `Diagnostics` port, ADR-046), arriving on the thread the core panicked on with its lock
+     * possibly held: it only queues. The handler runs on the main thread, in the order the reports arrived (the main thread's queue is
+     * first in, first out), so the core is never blocked on application code.
+     */
+    private fun panicReported(panic: UndraPanicReport) {
+        try {
+            main.post { handlePanic(panic) }
+        } catch (e: Exception) {
+            // A main thread that cannot take a task (an Android looper that is quitting): the report must not be lost.
+            UndraLog.error("the Undra core panicked in ${panic.summary}; it could not be handed to the main thread for onPanic", e)
+        }
+    }
+
+    /** Hands [panic] to `onPanic`, or logs it when there is none. An `Exception` of the handler is logged and reported to `onError`. */
+    private fun handlePanic(panic: UndraPanicReport) {
+        val handler = onPanic
+        if (handler == null) {
+            UndraLog.error("the Undra core panicked in ${panic.summary}")
+            return
+        }
+        try {
+            handler(panic)
+        } catch (e: Exception) {
+            report(e, "onPanic")
         }
     }
 

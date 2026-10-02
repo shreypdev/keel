@@ -2,7 +2,7 @@ package dev.undra.testkit
 
 import dev.undra.runtime.wire.Fnv
 
-/** `(trait, methods)` of the ten standard ports (docs/SPEC.md section 8). */
+/** `(trait, methods)` of the standard ports (docs/SPEC.md section 8; `Diagnostics` is ADR-046's). */
 private val STANDARD: List<Pair<String, List<String>>> = listOf(
     "Clock" to listOf("now_ms", "monotonic_ns"),
     "Rng" to listOf("fill"),
@@ -14,6 +14,7 @@ private val STANDARD: List<Pair<String, List<String>>> = listOf(
     "Timer" to listOf("set"),
     "Connectivity" to listOf("changed"),
     "Lifecycle" to listOf("changed"),
+    "Diagnostics" to listOf("panicked"),
 )
 
 /** `"Http.request"` for the standard port method ([port], [method]), `null` for anything else. The ids stay authoritative; the name is for the person reading a recording. */

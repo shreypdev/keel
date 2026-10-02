@@ -151,7 +151,13 @@ impl Shared {
             .store(app_state_code(state), Ordering::SeqCst);
         match state {
             AppState::Active => self.on_active(ctx),
-            AppState::Background => self.retry_unreadable_queue(ctx),
+            // Going to the background: what waits out its debounce is written now (the OS may
+            // suspend the process before 250 ms pass), and a queue that was unreadable is another
+            // chance to be read (ADR-046 decision 3.3, ADR-049).
+            AppState::Background => {
+                self.flush_soon(ctx);
+                self.retry_unreadable_queue(ctx);
+            }
             AppState::Inactive => {}
         }
         self.reschedule_all(ctx);

@@ -300,7 +300,7 @@ the C++ module drives.)
 | The Android library's pure Java (the seal against an AES-GCM vector from Node, which `android-adapters` opens too; the network classification; the per-namespace store names) | `javac` and the JDK | `runtimes/rn/@undra/react-native/android/test/run.sh` | the same job |
 | `NativeTransport`, the frame scheduler, the polyfills, `loadNative`, which ports are native for which options, `reactNativeHttp()` | a fake module and a scripted `fetch`, on Node | `npm test` in `runtimes/rn/@undra/react-native` | the same job |
 | Types of the package and its build config | `tsc`, against `@undra/runtime`'s sources and its emitted declarations (`npm run build` in `runtimes/ts/@undra/runtime` first) | `npm run typecheck` | the same job |
-| The contract scenarios S01..S19 | through `NativeTransport` over a stand-in of the module on the wasm core: 18 pass, S17 (native panic containment) is app-tested | `npm run test:contract` | the same job |
+| The contract scenarios S01..S19 and S30 | through `NativeTransport` over a stand-in of the module on the wasm core: 19 pass, S17 (native panic containment) and S29 (the panic report through `Diagnostics`) are app-tested | `npm run test:contract` | the same job |
 | JSI, Hermes, `invokeAsync`, the vsync sources, both builds, native panic containment; every default port on the real platform | the playground app's on-device checks RN01..RN21 (RN11..RN16: each default through the core; RN17..RN21: the opt-in `Db`, natively, and `WebSocket` and `Sse` against the script's realtime server), then the script's RN22..RN25 (a secret not in the app's files, `Kv` across a killed process, `Lifecycle` to the background and back, `Connectivity` in airplane mode on Android): the script prints `UNDRA-RN CHECKS 25/25 passed` (24/24 on the iOS simulator, which has no airplane mode) | `scripts/rn-device-checks.sh ios` (iPhone simulator) and `scripts/rn-device-checks.sh android` (emulator or phone; RN22 needs `su`, which emulator images have) | `rn-devices.yml`: on demand, every Monday, and on pull requests that touch `runtimes/rn/**` or `examples/playground/rn/**` |
 
 The contract column proves `NativeTransport` and the module's rules as modelled by the stand-in, not the
@@ -316,7 +316,7 @@ table, by namespace. On a Mac (Apple clang, Xcode 26.6):
 |---|---|---|
 | The C++ host, both shims, ASan + UBSan, against `playground_core` and `playground_a` in one process | `cpp/test/run.sh`, macOS | 21 + 21 checks (the refusals, two cores side by side, the 14 of before, now per core); `UndraJsi.cpp` and `UndraTurboModule.cpp` compile against 0.87's headers |
 | `NativeTransport`, `loadNative` (the generated entry, two namespaces) and friends | `npm test`, `npm run typecheck`, Node 24 | 50 tests; typecheck clean |
-| Contract scenarios through `NativeTransport` | `npm run test:contract` | 17 pass, S17 skipped (app-tested) |
+| Contract scenarios through `NativeTransport` | `npm run test:contract` | 19 pass, S17 and S29 skipped (app-tested) |
 | The on-device checks, iOS | iPhone 17 Pro simulator (iOS 26.5), release core (`PlaygroundCore` pod, no `-force_load`), Release app | `CHECKS 10/10 passed`; RN01 calls through `UndraPlaygroundCore.core`, RN10 also sees `no_such_core` refused |
 | The on-device checks, Android | `undra` emulator (arm64, API 35), release core (`libplayground_core.so`), release APK | `CHECKS 10/10 passed`, the same lines |
 
@@ -330,7 +330,7 @@ bench, diagnostics, dev loop and parity pieces: the typed failure model, `snapsh
 |---|---|---|
 | The C++ host, both shims, ASan + UBSan | macOS; also a clean `git clone` (Node 20) running the CI job's steps | 14 + 14 checks, `UndraJsi.cpp` compiles against 0.87's headers |
 | `NativeTransport` and friends | Node 24 and Node 20 | 41 tests; typecheck clean |
-| Contract scenarios through `NativeTransport` | Node 24 and Node 20 | 18 pass, S17 skipped (app-tested); S15 uses the public `core.snapshot()` and `core.restore()` |
+| Contract scenarios through `NativeTransport` | Node 24 and Node 20 | 19 pass, S17 and S29 skipped (app-tested); S15 uses the public `core.snapshot()` and `core.restore()` |
 | The on-device checks, iOS | iPhone 17 Pro simulator (iOS 26.5), release core, Release app, `scripts/rn-device-checks.sh ios` | `CHECKS 10/10 passed` |
 | The on-device checks, Android | `undra-rn` emulator (arm64, API 35), release core, release APK, `scripts/rn-device-checks.sh android` | `CHECKS 10/10 passed` |
 | JavaScript reload, iOS | debug build on Metro, `POST /reload`: three reloads, one in the middle of the benchmarks (review, before the merge) | four runtimes in one process, 10/10 each |

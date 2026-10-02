@@ -9,6 +9,9 @@
 //   :undra-compose     The optional Compose helpers (ADR-043: `LazyListScope.items(list)` for a lazily paged list and
 //                      `LazyListState.LoadMoreWhenNearEnd` for an infinite query). The only module that depends on Compose;
 //                      included under the same condition as :android-adapters (see undra-compose/README.md).
+//   :android-work      the optional WorkManager module (ADR-046): UndraWorker + UndraWork run the core's background
+//                      tasks in a window the OS grants. Its own module because WorkManager is a dependency
+//                      :runtime and :android-adapters must not carry; included under the same condition.
 
 pluginManagement {
     repositories {
@@ -46,4 +49,5 @@ fun androidSdk(): File? {
 if (androidSdk() != null) {
     include(":android-adapters")
     include(":undra-compose")
+    include(":android-work")
 }

@@ -72,6 +72,8 @@ struct Inner {
     stream_items: Vec<(u32, Vec<u8>)>,
     port_calls: Vec<PortCall>,
     logs: Vec<(u8, String, String)>,
+    /// The `PanicReport` arguments of every `Diagnostics.panicked` call (ADR-046).
+    reports: Vec<Vec<u8>>,
 }
 
 struct Capture {
@@ -336,6 +338,7 @@ fn port_reply_payload(port_call_id: u32, status: PortStatus, body: &[u8]) -> Vec
 }
 
 const LOG_PORT: u32 = ids::port_id("Log");
+const DIAGNOSTICS_PORT: u32 = ids::port_id("Diagnostics");
 const SUM_PORT: u32 = ids::port_id("Sum");
 const ECHO_PORT: u32 = ids::port_id("Echo");
 
@@ -356,6 +359,14 @@ extern "C" fn on_port(
         let target = r.read_str().expect("target").to_owned();
         let message = r.read_str().expect("message").to_owned();
         cap.with(|inner| inner.logs.push((level, target, message)));
+        // SAFETY: `out` is the core's `out_reply`.
+        unsafe { answer_sync(out, &port_reply_payload(port_call_id, PortStatus::Ok, &[])) };
+        return 0;
+    }
+    if port_id == DIAGNOSTICS_PORT {
+        // Fire and forget (`port_call_id 0`): the host answers a sync port all the same.
+        assert_eq!(port_call_id, 0, "a panic report is not a pending call");
+        cap.with(|inner| inner.reports.push(args));
         // SAFETY: `out` is the core's `out_reply`.
         unsafe { answer_sync(out, &port_reply_payload(port_call_id, PortStatus::Ok, &[])) };
         return 0;
@@ -459,7 +470,7 @@ impl Embedder {
     }
 
     fn register_ports(&self) {
-        for port in [LOG_PORT, SUM_PORT, ECHO_PORT] {
+        for port in [LOG_PORT, DIAGNOSTICS_PORT, SUM_PORT, ECHO_PORT] {
             // SAFETY: `on_port` is an `extern "C"` function and the capture outlives the runtime.
             unsafe { undra_port_register(port, Some(on_port), self.user()) };
         }
@@ -1127,6 +1138,55 @@ fn a_panic_in_a_dispatched_call_is_status_2_not_an_abort() {
                 .any(|(level, target, _)| *level == 5 && target == "undra::panic")
         );
     });
+    // ADR-046: each contained panic reached the app's `Diagnostics` adapter once, as the record,
+    // with frames read by this crate's frame source and the core's identity.
+    assert_eq!(stats["panic_reports"], 3);
+    let reports: Vec<undra::ports::PanicReport> = host.cap.with(|inner| {
+        inner
+            .reports
+            .iter()
+            .map(|bytes| undra::wire::Decode::decode_exact(bytes).expect("a PanicReport"))
+            .collect()
+    });
+    let seen: Vec<(&str, &str)> = reports
+        .iter()
+        .map(|r| (r.message.as_str(), r.operation.as_str()))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            ("kaboom", "Calculator.boom"),
+            ("kaboom", "Calculator.boom"),
+            ("async kaboom", "Calculator.async_boom")
+        ]
+    );
+    let first = &reports[0];
+    assert!(first.location.contains("core.rs:"), "{}", first.location);
+    assert_eq!(first.namespace, "undra_ffi_abi_test");
+    assert_eq!(first.core_version, "7.7.7");
+    assert!(!first.thread.is_empty());
+    assert_eq!(first.schema_hash, undra_schema_hash());
+    assert!(!first.frames.is_empty(), "the frame source read the stack");
+    assert!(
+        first
+            .frames
+            .iter()
+            .all(|f| f.address != 0 || f.symbol.is_some()),
+        "{:?}",
+        first.frames
+    );
+    if cfg!(target_vendor = "apple") {
+        assert_eq!(
+            first.image_id.len(),
+            32,
+            "a Mach-O UUID: {:?}",
+            first.image_id
+        );
+    }
+}
+
+undra::runtime::inventory::submit! {
+    undra::runtime::CoreIdentity { namespace: "undra_ffi_abi_test", version: "7.7.7" }
 }
 
 #[test]

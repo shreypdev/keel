@@ -12,6 +12,7 @@ import dev.undra.runtime.adapters.HttpRequest
 import dev.undra.runtime.adapters.HttpResponse
 import dev.undra.runtime.adapters.NetKind
 import dev.undra.runtime.adapters.StandardPorts
+import dev.undra.runtime.adapters.UndraPanicReport
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
@@ -650,6 +651,48 @@ public class CaptureLog {
     )
 }
 
+/**
+ * A `Diagnostics` that records every panic report the core hands it (ADR-046), for assertions: `CaptureDiagnostics` of `undra::ports::fakes`.
+ *
+ * It answers on the thread the core calls from, immediately, and keeps the reports in the order they arrived. It is the `Diagnostics` adapter
+ * of the core while it is installed ([Fakes.ports] installs it), so `LoadOptions.onPanic` is not called then: the reports are here instead.
+ * To test the app's own `onPanic` handler, load a core without it, or call the handler with a report built by hand.
+ */
+public class CaptureDiagnostics {
+    private val lock = Any()
+    private val recorded = ArrayList<UndraPanicReport>()
+
+    /** The reports so far, oldest first. */
+    public val reports: List<UndraPanicReport> get() = synchronized(lock) { recorded.toList() }
+
+    /** The most recent report, or `null`. */
+    public val last: UndraPanicReport? get() = synchronized(lock) { recorded.lastOrNull() }
+
+    /** How many reports there are. */
+    public val size: Int get() = synchronized(lock) { recorded.size }
+
+    /** Whether there are none. */
+    public val isEmpty: Boolean get() = synchronized(lock) { recorded.isEmpty() }
+
+    /** Removes and returns every report so far. */
+    public fun take(): List<UndraPanicReport> = synchronized(lock) { recorded.toList().also { recorded.clear() } }
+
+    /** Forgets the reports. */
+    public fun clear(): Unit = synchronized(lock) { recorded.clear() }
+
+    /** This recorder as the `Diagnostics` port (sync). */
+    public fun portImpl(): PortImpl = PortImpl(
+        sync = true,
+        methods = mapOf<UInt, Method>(
+            StandardPorts.Diagnostics.PANICKED to { args ->
+                val report = readArgs(args) { UndraPanicReport.decode(it) }
+                synchronized(lock) { recorded += report }
+                NO_BYTES
+            },
+        ),
+    )
+}
+
 /** A source of connectivity changes a test or a preview drives: [set] reports the new state to the core it is attached to. */
 public class ScriptedConnectivity {
     private val lock = Any()
@@ -728,6 +771,9 @@ public class Fakes {
     /** The `Log`. */
     public val log: CaptureLog = CaptureLog()
 
+    /** The `Diagnostics`: the panic reports of the core (ADR-046). */
+    public val diagnostics: CaptureDiagnostics = CaptureDiagnostics()
+
     /** The `Http`. */
     public val http: FakeHttp = FakeHttp()
 
@@ -752,6 +798,7 @@ public class Fakes {
         StandardPorts.Timer.PORT_ID to clock.timerPortImpl(),
         StandardPorts.Rng.PORT_ID to rng.portImpl(),
         StandardPorts.Log.PORT_ID to log.portImpl(),
+        StandardPorts.Diagnostics.PORT_ID to diagnostics.portImpl(),
         StandardPorts.Http.PORT_ID to http.portImpl(),
         StandardPorts.Kv.PORT_ID to kv.portImpl(),
         StandardPorts.SecureStore.PORT_ID to secureStore.portImpl(),

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, test } from "vitest";
-import { RemoteTodosQueryHandle, Todos, UndraIds, configureRemote, fileRead, fileWrite, kvGet, kvPut, secretGet } from "@playground/core";
+import { RemoteTodosQueryHandle, Todos, UndraIds, configureRemote, explode, fileRead, fileWrite, kvGet, kvPut, secretGet } from "@playground/core";
 import { PreviewCore, parseSeed, response } from "@undra/testkit";
 import { PLAYGROUND_WASM } from "../src/harness.js";
 
@@ -84,6 +84,32 @@ test("T5 preview: the seeded ports are what the core reads, and its writes land 
   await fileWrite("out/b.txt", new TextEncoder().encode("written"), preview.core);
   expect(text(preview.fakes.fs.contents("out/b.txt"))).toBe("written");
   await expect(fileRead("nope", preview.core)).rejects.toMatchObject({ kind: "notFound" });
+});
+
+test("T6 preview: a panic of the core is a report in fakes.diagnostics (ADR-046), and the app's own onPanic hears it too", async () => {
+  const heard: string[] = [];
+  const preview = await PreviewCore.load({
+    wasm: new Uint8Array(wasm),
+    expectedSchemaHash: UndraIds.schemaHash,
+    shared: false,
+    onPanic: (report) => heard.push(report.operation),
+  });
+  previews.push(preview);
+  // The module is hashed in the background once it is loaded: wait for the trap's report to say so.
+  await preview.settle();
+  await explode("on purpose", preview.core).then(
+    () => undefined,
+    () => undefined,
+  );
+  await preview.settle();
+  expect(preview.fakes.diagnostics.length).toBe(1);
+  const report = preview.fakes.diagnostics.last;
+  expect(report?.message).toContain("on purpose");
+  expect(report?.operation).toBe("explode");
+  expect(report?.location).toContain("lab.rs:");
+  expect(report?.schemaHash).toBe(UndraIds.schemaHash);
+  expect(report?.imageId).toMatch(/^[0-9a-f]{64}$/);
+  expect(heard).toEqual(["explode"]);
 });
 
 test("T4 preview: the same seed document reads in every kit", () => {

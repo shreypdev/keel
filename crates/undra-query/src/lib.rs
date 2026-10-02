@@ -137,6 +137,7 @@
 //! the `Clock` port, jitter and idempotency keys from `Rng`, delays from `Ctx::sleep`. Under
 //! `undra_ports::fakes` a test controls all of it.
 
+mod background;
 mod client;
 mod defs;
 mod dispatch;

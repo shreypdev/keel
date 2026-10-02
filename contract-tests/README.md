@@ -1,9 +1,10 @@
 # Contract tests
 
-The definition of "the platforms agree" (SPEC section 14): twenty-eight scenarios, run against the **real
-playground core** (`examples/playground/core`) through the real boundary: S01 to S20 and S23 to S28 (the opt-in
-ports of ADR-047 and ADR-048, two cores, objects as parameters and returns, host callbacks) by each platform
-runtime, S21 and S22 (web worker mode and crash recovery, ADR-049) by TypeScript only, 80 cells in all.
+The definition of "the platforms agree" (SPEC section 14): thirty scenarios, run against the **real
+playground core** (`examples/playground/core`) through the real boundary: S01 to S20 and S23 to S30 (the opt-in
+ports of ADR-047 and ADR-048, two cores, objects as parameters and returns, host callbacks, the panic report and
+the background run of ADR-046) by each platform runtime, S21 and S22 (web worker mode and crash recovery, ADR-049)
+by TypeScript only, 86 cells in all.
 
 | Directory | Platform | Boundary | Run |
 |---|---|---|---|

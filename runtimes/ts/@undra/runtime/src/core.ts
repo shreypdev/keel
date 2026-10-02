@@ -4,7 +4,7 @@ import { defaultPorts } from "./adapters/default-ports.js";
 import { startEventSources } from "./adapters/events.js";
 import { PortIds } from "./adapters/ids.js";
 import { WEB_CRYPTO_REQUIRED, consoleLog, hasCryptoRandom } from "./adapters/system.js";
-import type { Adapters, AdapterOverrides } from "./adapters/types.js";
+import type { Adapters, AdapterOverrides, UndraBackgroundReport, UndraBackgroundStats, UndraPanicReport } from "./adapters/types.js";
 import {
   UndraError,
   UndraModeError,
@@ -17,7 +17,8 @@ import { nextCallId } from "./callid.js";
 import { UndraCallError, UndraUnhandledError } from "./call-error.js";
 import { Mirror, type MirrorOptions, type MirrorStats } from "./mirror.js";
 import type { RecreateCall, UndraStore } from "./object.js";
-import { type UndraPanicReport, isTrap, panicReport } from "./panic.js";
+import { isTrap } from "./panic.js";
+import type { PanicReporter, PanicSupport } from "./panic-report.js";
 import type { CrashRecovery, UndraCoreRestarted } from "./recovery.js";
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
@@ -93,7 +94,14 @@ export interface UndraStats {
   readonly mirror: MirrorStats;
   /** The core's own statistics (`undra_stats_json`, parsed) when the transport can ask for them: wasm modes. `null` over a socket. */
   readonly core: Readonly<Record<string, unknown>> | null;
+  /** Panics the core reported through the `Diagnostics` port (`panic_reports`); `0` for a core that does not count them, and for a wasm core (it traps instead of reporting). */
+  readonly panicReports: number;
+  /** What the core's background tasks have to do and have done (ADR-046 decision 3); every counter is `0` for a core that does not report them. */
+  readonly background: UndraBackgroundStats;
 }
+
+/** How long the runtime lets the core drain its background work when a page goes to the background (ADR-046 decision 3.4), in ms. */
+const PAGE_BACKGROUND_MS = 1000;
 
 /** The `Log` target of the messages `undra dev` addresses to the developer (ADR-053); see `AttachOptions.onDevNotice`. */
 const DEV_NOTICE_TARGET = "undra::dev";
@@ -125,7 +133,8 @@ export interface AttachOptions {
    * generated entry (`Undra<Namespace>.load`, `.attach`) fills it in. Default `"_"`, which two cores that are loaded without one
    * share, and a generated entry always sets one. It is the rule of `undra.toml`: lowercase letters, digits and `_`, starting
    * with a letter, at most 32; anything else (`..`, `a/b`, an empty one) is refused with `UndraError("options")` by `load` and
-   * `attach`. An adapter you give (`adapters`, `ports`) keeps its own location.
+   * `attach`. An adapter you give (`adapters`, `ports`) keeps its own location. It is also the `namespace` of the panic report of a
+   * wasm core that trapped (`onPanic`), which the module does not say itself: `""` for a core loaded without one.
    */
   readonly namespace?: string;
   /**
@@ -175,11 +184,23 @@ export interface AttachOptions {
   /** Called after a wasm core trapped and was restarted (`recovery`), with what happened; `onError` receives the same value. */
   readonly onCoreRestarted?: (event: UndraCoreRestarted) => void;
   /**
-   * Called once per trap of a wasm core with its panic report (ADR-046 decision 4.4: the core's FATAL `undra::panic`
-   * record and the trap's stack), before any restart, with or without `recovery`: the place to forward a core panic to
-   * a crash reporter. A handler that throws is logged.
+   * Called once per panic of the core with its report (ADR-046 decision 4): the place to forward a core panic to a crash
+   * reporter (Sentry, Crashlytics, `reportError`). A native core (React Native, a `remote` core) reports each panic it
+   * contained through its `Diagnostics` port, on the JavaScript thread, in the order the panics happened; a wasm core traps, so
+   * the runtime builds the same report from the core's FATAL `undra::panic` record and the trap's stack, once per trap,
+   * before any restart (ADR-049) and with or without `recovery`. A handler that throws is reported to `onError` and changes
+   * nothing. Without a handler a native core's report is logged at error level (one line: operation, message, location).
+   * Setting it makes the runtime load the code that builds the report of a wasm trap, and hash the module (SHA-256) for
+   * `imageId` while the module compiles: `load` resolves once both are there, so a trap right after it is reported in full.
    */
   readonly onPanic?: (report: UndraPanicReport) => void;
+  /**
+   * What to do when a web page goes to the background (ADR-046 decision 3.4, within the page's life only). The runtime reports
+   * `Lifecycle.Background` when the page is hidden, left (`pagehide`) or frozen; the core then flushes its debounced persistence
+   * at once, and if `stats().background.pending > 0` the runtime runs `runInBackground(1000)` without waiting for it (a failure
+   * goes to `onError`). `false` turns the background run off (the Lifecycle report stays). Default on. Not for a core that is not in a page. Only the page's own life: Background Sync in a service worker would need the core to run inside the worker, and is a follow-up.
+   */
+  readonly backgroundRun?: boolean;
   /**
    * How the mirror delivers change-sets (docs/SPEC.md section 11): `schedule` replaces the frame
    * scheduler (`scheduleFrame`) that drains what the core produced on its own, and
@@ -197,6 +218,9 @@ export interface AttachOptions {
   readonly onDevNotice?: (message: string) => void;
 }
 
+/** What a core keeps of the options it was started with: `load` has the rest of {@link LoadOptions}, `attach` does not. */
+type CoreOptions = AttachOptions & Partial<Pick<LoadOptions, "wasm" | "coreVersion">>;
+
 /** Options of `UndraCore.load`. */
 export interface LoadOptions extends AttachOptions {
   /** Where the core runs: `"wasm-main"` (this thread), `"wasm-worker"` (a Worker) or `"remote"` (a native core over WebSocket). */
@@ -209,6 +233,8 @@ export interface LoadOptions extends AttachOptions {
   readonly devtools?: boolean;
   /** Platform name reported to the core. Default `"web"` (`"node"` under Node.js). */
   readonly platform?: string;
+  /** The core's version, for the `coreVersion` of the panic report of a wasm trap: the module does not carry it, so default `""`. */
+  readonly coreVersion?: string;
   /** Core log threshold, 0 trace .. 5 fatal, for the wasm modes. Default 2. */
   readonly logLevel?: number;
   /** Handshake timeout for `"remote"` and `"wasm-worker"`, in ms. */
@@ -546,7 +572,7 @@ export class UndraCore {
     return UndraCore._attach(transport, options, mergeAdapters(lightAdapters(), options.adapters));
   }
 
-  private static async _attach(transport: Transport, options: AttachOptions, adapters: Partial<Adapters>): Promise<UndraCore> {
+  private static async _attach(transport: Transport, options: CoreOptions, adapters: Partial<Adapters>): Promise<UndraCore> {
     const core = new UndraCore(transport, options, adapters);
     try {
       await core._start();
@@ -564,7 +590,7 @@ export class UndraCore {
   hello: HelloPayload = { undraVersion: "", schemaHash: 0n, platform: "", mode: "" };
 
   private readonly _transport: Transport;
-  private readonly _options: AttachOptions;
+  private readonly _options: CoreOptions;
   private readonly _adapters: Partial<Adapters>;
   private readonly _observeTimeoutMs: number;
   private readonly _ports = new Map<number, PortImpl>();
@@ -587,8 +613,12 @@ export class UndraCore {
   private _stopEvents: (() => void) | null = null;
   /** The message of the last FATAL `undra::panic` record: what a trap's panic report says (ADR-046). */
   private _lastPanicRecord: string | null = null;
+  /** What reports the traps of this wasm core (`panic-report.ts`, loaded on demand: see {@link UndraCore._loadPanics}); `null` until it is there, and for a core that wants no reports. */
+  private _panics: PanicReporter | null = null;
+  /** A background run the page started is in flight. */
+  private _backgroundRunning = false;
 
-  private constructor(transport: Transport, options: AttachOptions, adapters: Partial<Adapters>) {
+  private constructor(transport: Transport, options: CoreOptions, adapters: Partial<Adapters>) {
     this._options = options;
     this._adapters = adapters;
     // With `recovery`, the core runs over the layer that restarts it after a trap (ADR-049; `crashRecovery`).
@@ -924,6 +954,8 @@ export class UndraCore {
       else streams++;
     }
     const coreHandles = core?.live_handles;
+    const count = (value: unknown): number => (typeof value === "number" ? value : 0);
+    const background = (core?.background ?? {}) as CoreStatsJson;
     const hostRefs = core?.host_refs;
     return {
       liveHandles: typeof coreHandles === "number" ? coreHandles : this._handles.size,
@@ -934,7 +966,41 @@ export class UndraCore {
       droppedEntries: this.mirror.dropped,
       mirror: this.mirror.stats(),
       core,
+      panicReports: count(core?.panic_reports),
+      background: {
+        tasks: count(background.tasks),
+        pending: count(background.pending),
+        runs: count(background.runs),
+        finished: count(background.finished),
+        replayed: count(background.replayed),
+        refetched: count(background.refetched),
+      },
     };
+  }
+
+  /**
+   * Gives the core a window to drain its background work (ADR-046 decision 3): replays the offline queue, fetches stale
+   * persisted queries again and flushes pending persistence, concurrently, and resolves when every task finished or
+   * `deadlineMs` less half a second (kept for the host) has passed, whichever is first. Over a native core this is what an OS
+   * background task (a `BGTaskScheduler` task, WorkManager) calls; in a page the runtime calls it itself when the page goes
+   * to the background (see `AttachOptions.backgroundRun`). `stats().background.pending` says whether there is anything to drain.
+   *
+   * Aborting `signal` cancels the call in the core: the work already done is kept (the offline queue persists per item) and the
+   * promise rejects with the signal's reason. Never rejects with a panic: the failures are `UndraCallError`s (`Unavailable` for a
+   * closed core, `CancelledByCore` when the core ended the call).
+   *
+   * ```ts
+   * const report = await core.runInBackground(25_000, { signal });
+   * if (!report.finished) scheduleAnotherWindow(report.stillPending);
+   * ```
+   */
+  async runInBackground(deadlineMs: number, options: { readonly signal?: AbortSignal } = {}): Promise<UndraBackgroundReport> {
+    try {
+      // Loaded on demand (`background.ts`): a hello page, whose core has no background task, never runs it (ADR-052).
+      return await (await import("./background.js")).runInBackground(this, deadlineMs, options.signal);
+    } catch (error) {
+      throw UndraCallError.mapped(error);
+    }
   }
 
   /**
@@ -982,25 +1048,30 @@ export class UndraCore {
   // ----- internals -------------------------------------------------------------------
 
   private async _start(): Promise<void> {
+    const reporterLoaded = this._loadPanics();
     // In `wasm-worker` the core's Clock, Rng and timers are the worker's (ADR-049): explicit adapters for them are said not to reach it.
     const given = (["clock", "rng", "timer"] as const).filter((name) => this._options.adapters?.[name] != null);
     if (given.length > 0 && this._transport.mode === "wasm-worker") {
       this._log(3, "undra::worker", `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`);
     }
-    // An explicit Timer adapter on a native core is served by a port built from a module that loads on demand: fetched before the
-    // transport starts, so that the port is registered before the first message after the Hello can reach it.
-    const timerModule = this._options.adapters?.timer && this._transport.mode === "remote" ? await import("./adapters/ports.js") : undefined;
+    // What a native core is served by ports built from a module that loads on demand (`adapters/ports.js`): its `Diagnostics` port, to which
+    // it reports each panic it contained (ADR-046 decision 4.2), and the Timer port of an explicit adapter. Fetched before the transport
+    // starts, so that they are registered before the first message after the Hello can reach them. A wasm core needs neither: it traps.
+    const ports = this._transport.mode.startsWith("wasm") ? undefined : await import("./adapters/ports.js");
+    ports?.serveDiagnostics(this, this._ports, this._options.onPanic, this._adapters.log);
     const hello = await this._transport.start(this._handler);
     if (hello.schemaHash !== this._options.expectedSchemaHash) {
       throw new UndraSchemaMismatchError(this._options.expectedSchemaHash, hello.schemaHash);
     }
+    // The report builder was fetched while the core loaded: it is there before the first call, so that no trap finds it missing.
+    await reporterLoaded;
     this.hello = hello;
     this._setConnection({ kind: "connected" });
-    if (timerModule !== undefined && this._options.adapters?.timer) {
+    if (ports !== undefined && this._transport.mode === "remote" && this._options.adapters?.timer) {
       // A native core normally times itself; an explicit Timer adapter is a request to serve its Timer port.
       this._ports.set(
         PortIds.Timer.portId,
-        timerModule.timerPort(this._options.adapters.timer, (timerId) => {
+        ports.timerPort(this._options.adapters.timer, (timerId) => {
           try {
             this.timerFired(timerId);
           } catch (error) {
@@ -1009,9 +1080,49 @@ export class UndraCore {
         }),
       );
     }
-    this._stopEvents = startEventSources(this, this._adapters, (error) => {
-      this._reportError("event", error);
-    });
+    this._stopEvents = startEventSources(
+      this,
+      this._adapters,
+      (error) => {
+        this._reportError("event", error);
+      },
+      () => {
+        this._backgroundWindow();
+      },
+    );
+  }
+
+  /**
+   * The core was told it is in the background (`Lifecycle.Background`). A web page then drains what the core has queued, inside the
+   * time the browser still gives it (ADR-046 decision 3.4; `backgroundRun: false` and anything but a page do not): if there is work a
+   * background window would drain, runs `runInBackground(1000)` and does not wait for it. One at a time; a failure goes to `onError`
+   * (not when the core is closed: the app did that).
+   */
+  private _backgroundWindow(): void {
+    if (this._backgroundRunning || this._options.backgroundRun === false || typeof document === "undefined") return;
+    this._backgroundRunning = true;
+    this.stats()
+      .then((stats) => (stats.background.pending > 0 ? this.runInBackground(PAGE_BACKGROUND_MS) : undefined))
+      .catch((error: unknown) => {
+        if (!this._closed) this._reportError("runInBackground", error);
+      })
+      .finally(() => {
+        this._backgroundRunning = false;
+      });
+  }
+
+  /**
+   * Gets ready to report a trap of a wasm core (ADR-046 decision 4.4) when the app wants reports: loads the code that builds
+   * them (a page without `onPanic` or `recovery` never fetches it; with `recovery` it came with it) and, with `onPanic`, hashes
+   * the module for `imageId`; `_start` waits for both while the module is fetched, so that they are there when a trap needs them.
+   */
+  private _loadPanics(): Promise<void> | undefined {
+    const options = this._options;
+    if (!this._transport.mode.startsWith("wasm") || (options.onPanic === undefined && options.recovery === undefined)) return undefined;
+    // Ready when the builder is there and the module is hashed (`imageId`): `_start` waits for both.
+    const start = (support: PanicSupport): Promise<void> => (this._panics = support.start(this, options)).ready;
+    if (options.recovery !== undefined) return start(options.recovery.panics);
+    return import("./panic-report.js").then((module) => start(module.panicSupport), (error: unknown) => this._reportError("onPanic", error));
   }
 
   private _assertOpen(): void {
@@ -1052,7 +1163,7 @@ export class UndraCore {
   /** The channel to the core was lost; a trap's panic report goes to `onPanic` first. (A trap the core recovers from never gets here: `crashRecovery` restarts it.) */
   private _lost(error: Error): void {
     if (this._closed) return;
-    if (isTrap(error)) this._panicReport(error);
+    if (isTrap(error) && this._panics !== null) this._panicReport(error);
     this._lostForGood(error);
   }
 
@@ -1081,15 +1192,10 @@ export class UndraCore {
     this._options.recovery?.track(store, call);
   }
 
-  /** The panic report of `trap` (ADR-046 decision 4.4), handed to `onPanic`. */
+  /** The panic report of `trap` (ADR-046 decision 4.4), handed to `onPanic`. The builder is loaded: see {@link UndraCore._loadPanics}. */
   private _panicReport(trap: Error): UndraPanicReport {
-    const report = panicReport(this._lastPanicRecord, trap, this.hello.schemaHash, this._transport.mode);
+    const report = (this._panics as PanicReporter).trapped(this._lastPanicRecord, trap);
     this._lastPanicRecord = null;
-    try {
-      this._options.onPanic?.(report);
-    } catch (thrown) {
-      this._reportError("onPanic", thrown);
-    }
     return report;
   }
 

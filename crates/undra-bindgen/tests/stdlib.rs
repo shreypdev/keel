@@ -116,6 +116,8 @@ fn the_table_is_what_undra_ports_registers() {
     // The dev-dependency turns the opt-in ports on, so all of them are registered here.
     assert_eq!(covered.types.len(), TYPES.len(), "{:?}", covered.types);
     assert_eq!(covered.ports.len(), PORTS.len(), "{:?}", covered.ports);
+    // ADR-046: the standard function is recognised too, so the generators leave it out.
+    assert_eq!(covered.functions.len(), 1, "{:?}", covered.functions);
 }
 
 #[test]
@@ -154,6 +156,9 @@ const STANDARD_DECLARATIONS: &[&str] = &[
     "FsError",
     "NetKind",
     "AppState",
+    "PanicFrame",
+    "PanicReport",
+    "BackgroundReport",
     "WsOpened",
     "WsMessage",
     "WsError",

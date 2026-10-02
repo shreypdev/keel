@@ -42,6 +42,9 @@ use crate::host::{Host, PortCallOutcome};
 use crate::issue::{IssueScope, OriginScope, Origins, WithOrigin};
 use crate::lazy::{LazyList, lazy_page_dispatch, page_server};
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
+
+/// The `port_call_id` of a fire-and-forget port call: no answer is expected (SPEC 6, host contract 6).
+const FIRE_AND_FORGET: u32 = 0;
 use crate::object::{AnyObject, StoreObject, StoreRestorer, UndraObject, erased, store};
 use crate::object_table::{BadHandle, GENERATION_CEILING, ObjectTable, Released};
 use crate::persist::{self, RegisteredHooks};
@@ -151,9 +154,34 @@ impl Drop for HostCall {
     }
 }
 
+/// The call the runtime is running, for the FATAL record of a panic on wasm, where nothing can
+/// catch the panic and so nothing at a guard can name it (ADR-046 decision 4.4). Only wasm sets it
+/// (single-threaded; the cost is not paid on native, where the guards know).
+static RUNNING: std::sync::Mutex<Option<CallTarget>> = std::sync::Mutex::new(None);
+
+fn set_running(target: Option<CallTarget>) {
+    if let Ok(mut running) = RUNNING.lock() {
+        *running = target;
+    }
+}
+
+/// What the runtime was running when it panicked on wasm, as `Todos.add`.
+pub(crate) fn running_operation() -> Option<String> {
+    let target = RUNNING.lock().ok().and_then(|running| *running)?;
+    current_or_global().map(|rt| rt.operation_of(&target))
+}
+
 /// The runtime executing on this thread, else the global one.
 pub(crate) fn current_or_global() -> Option<Arc<Runtime>> {
     current_runtime().or_else(|| GLOBAL.lock().clone())
+}
+
+/// Reports a panic contained where no runtime is at hand (a timer thread, a waker, a migration
+/// hook): through the runtime this thread is in, else the global one. Nothing happens without one.
+pub(crate) fn report_current(what: &str, operation: &str, report: &PanicReport) {
+    if let Some(rt) = current_or_global() {
+        rt.log_panic(what, operation, report);
+    }
 }
 
 /// Logs a fatal record through the current runtime (the wasm panic hook).
@@ -347,6 +375,8 @@ struct CallEntry {
     /// The handle of the receiver the call was made on (null for free functions and
     /// constructors): what a restore must check before the call may go on running.
     receiver: Handle,
+    /// What the call is, to name it in a panic report (ADR-046).
+    target: CallTarget,
     stream: Option<Arc<StreamState>>,
 }
 
@@ -414,7 +444,7 @@ pub struct Runtime {
     exec: Executor,
     pub(crate) ports: Arc<PortTable>,
     events: Events,
-    timers: Arc<Timers>,
+    pub(crate) timers: Arc<Timers>,
     blocking: Blocking,
     table: DispatchTable,
     restorers: HashMap<u32, &'static StoreRestorer>,
@@ -428,7 +458,9 @@ pub struct Runtime {
     stats_sections: Mutex<Vec<crate::ext::StatsSection>>,
     port_dispatchers: HashMap<u32, &'static PortDispatcher>,
     calls: Mutex<HashMap<u32, CallEntry>>,
-    stats: Stats,
+    pub(crate) stats: Stats,
+    /// The background tasks registered on this runtime (ADR-046).
+    pub(crate) background: crate::background::Registry,
     extensions: Extensions,
     inspectors: Inspectors,
     shut_down: AtomicBool,
@@ -812,6 +844,7 @@ impl Runtime {
             port_dispatchers,
             calls: Mutex::new(HashMap::new()),
             stats: Stats::default(),
+            background: crate::background::Registry::default(),
             extensions: Extensions::default(),
             inspectors: Inspectors::default(),
             shut_down: AtomicBool::new(false),
@@ -897,7 +930,11 @@ impl Runtime {
             }
             ran.push(hook.name);
             if let Err(report) = guard::guarded(|| (hook.run)(&ctx)) {
-                self.log_panic(&format!("init hook `{}` panicked", hook.name), &report);
+                self.log_panic(
+                    &format!("init hook `{}` panicked", hook.name),
+                    &format!("init hook {}", hook.name),
+                    &report,
+                );
             }
         }
     }
@@ -1110,6 +1147,7 @@ impl Runtime {
             crate::ext::Answer::Panicked(report) => {
                 self.log_panic(
                     &format!("inspector `{name}` panicked and is skipped from now on"),
+                    &format!("inspector {name}"),
                     &report,
                 );
                 None
@@ -1148,7 +1186,7 @@ impl Runtime {
         }) {
             Ok(value) => Some(value),
             Err(report) => {
-                self.log_panic(&format!("{what} panicked"), &report);
+                self.log_panic(&format!("{what} panicked"), what, &report);
                 None
             }
         }
@@ -1167,18 +1205,130 @@ impl Runtime {
         .unwrap_or(PortCallOutcome::Unavailable)
     }
 
-    fn log_panic(&self, what: &str, report: &PanicReport) {
+    /// A panic the runtime contained: the FATAL record, the counter, and the structured report
+    /// for the app's crash reporter (ADR-046 decision 4). `what` is the sentence of the record,
+    /// `operation` what was running (`Todos.add`, `task`).
+    pub(crate) fn log_panic(&self, what: &str, operation: &str, report: &PanicReport) {
         Stats::inc(&self.stats.panics);
         self.log(
             FATAL,
             "undra::panic",
             &format!("{what}: {}\n{}", report.message, report.backtrace),
         );
+        self.emit_report(operation, report);
+    }
+
+    /// Reports a panic an embedder contained at its own boundary (`undra-ffi`'s entries): the
+    /// report names `entry` as the operation and carries no frames.
+    pub fn report_boundary_panic(&self, entry: &str, message: &str) {
+        Stats::inc(&self.stats.panics);
+        let report = PanicReport {
+            message: message.to_owned(),
+            backtrace: String::new(),
+            location: String::new(),
+            thread: std::thread::current()
+                .name()
+                .unwrap_or("unnamed")
+                .to_owned(),
+            frames: Vec::new(),
+        };
+        self.emit_report(entry, &report);
+    }
+
+    /// Hands the report of a contained panic to the `Diagnostics` port, fire and forget: to a
+    /// Rust binding (a fake) if there is one, else to the platform with `port_call_id` 0, like a
+    /// log record. A report that itself panics, or one made while a report is being delivered,
+    /// is dropped: there is nowhere left to say so but the log, which already has it.
+    fn emit_report(&self, operation: &str, report: &PanicReport) {
+        // A wasm core aborts on a panic: there is nothing to report from here (the host builds the
+        // report from the FATAL record, ADR-046 decision 4.4), and nothing of this is linked.
+        if cfg!(target_family = "wasm") {
+            return;
+        }
+        thread_local! {
+            static REPORTING: Cell<bool> = const { Cell::new(false) };
+        }
+        if REPORTING.with(|flag| flag.replace(true)) {
+            return;
+        }
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                let _ = REPORTING.try_with(|flag| flag.set(false));
+            }
+        }
+        let _reset = Reset;
+        Stats::inc(&self.stats.panic_reports);
+        let bytes = crate::diagnostics::encode_report(report, operation, self.schema_hash);
+        let (port, method) = (
+            crate::diagnostics::DIAGNOSTICS_PORT,
+            crate::diagnostics::PANICKED_METHOD,
+        );
+        match self.ports.binding(port) {
+            PortBinding::Rust(imp, own) => {
+                let _ = guard::guarded(|| self.dispatch_to_rust(&imp, own, port, method, &bytes));
+            }
+            PortBinding::Foreign => {
+                let _ = self.host_port_call(port, method, FIRE_AND_FORGET, &bytes);
+            }
+        }
+    }
+
+    /// `verb` and the type of the store at `handle`, for a panic report: `observe Todos`.
+    fn store_operation(&self, verb: &str, handle: Handle) -> String {
+        match self.objects.type_of(handle) {
+            Ok((_, type_name)) => format!("{verb} {type_name}"),
+            Err(_) => verb.to_owned(),
+        }
+    }
+
+    /// What `target` is, for a panic report: `Todos.add`, `add_later`, `Todos.new`.
+    fn operation_of(&self, target: &CallTarget) -> String {
+        let named = |name: &str, id: u32| {
+            if name == "?" {
+                format!("{id:#010x}")
+            } else {
+                name.to_owned()
+            }
+        };
+        match *target {
+            CallTarget::Function { method_id } => self
+                .table
+                .functions
+                .get(&method_id)
+                .map_or_else(|| format!("fn {method_id:#010x}"), |m| m.name.to_owned()),
+            CallTarget::Method { handle, method_id } => match self.objects.type_of(handle) {
+                Ok((type_id, type_name)) => {
+                    let method = self
+                        .table
+                        .objects
+                        .get(&type_id)
+                        .map_or("?", |entry| entry.name_of(method_id, false));
+                    format!("{type_name}.{}", named(method, method_id))
+                }
+                Err(_) => format!("method {method_id:#010x}"),
+            },
+            CallTarget::Constructor { type_id, method_id } => {
+                match self.table.objects.get(&type_id) {
+                    Some(entry) => format!(
+                        "{}.{}",
+                        entry.meta.name,
+                        named(entry.name_of(method_id, true), method_id)
+                    ),
+                    None => format!("constructor {method_id:#010x}"),
+                }
+            }
+            CallTarget::LazyPage { .. } => "lazy page".to_owned(),
+        }
     }
 
     fn drop_guarded_logged<T>(&self, what: &str, value: T) {
         if let Err(report) = drop_guarded(value) {
-            self.log_panic(&format!("dropping {what} panicked"), &report);
+            self.log_panic(
+                &format!("dropping {what} panicked"),
+                &format!("drop of {what}"),
+                &report,
+            );
         }
     }
 
@@ -1378,7 +1528,9 @@ impl Runtime {
         }
         match self.dispatch(&call, false) {
             Dispatched::Bad(reason) => self.reply_bad(call_id, &reason),
-            Dispatched::Panicked(report, handle) => self.reply_panic(call_id, handle, &report),
+            Dispatched::Panicked(report, handle) => {
+                self.reply_panic(call_id, handle, &call.target, &report);
+            }
             Dispatched::Done(result, handle) => match result {
                 DispatchResult::Sync(Ok(body)) => self.send_reply(call_id, ReplyStatus::Ok, &body),
                 DispatchResult::Sync(Err(body)) => {
@@ -1386,12 +1538,19 @@ impl Runtime {
                 }
                 DispatchResult::Async(future) => {
                     if origin == 0 {
-                        self.spawn_call(call_id, handle, future);
+                        self.spawn_call(call_id, handle, call.target, future);
                     } else {
-                        self.spawn_call(call_id, handle, Box::pin(WithOrigin::new(origin, future)));
+                        self.spawn_call(
+                            call_id,
+                            handle,
+                            call.target,
+                            Box::pin(WithOrigin::new(origin, future)),
+                        );
                     }
                 }
-                DispatchResult::Stream(stream) => self.open_stream(call_id, handle, stream),
+                DispatchResult::Stream(stream) => {
+                    self.open_stream(call_id, handle, call.target, stream);
+                }
                 DispatchResult::Unknown | DispatchResult::BadRequest(_) => {
                     // `dispatch` maps both to `Dispatched::Bad`.
                     self.reply_bad(call_id, "internal: unmapped dispatch result");
@@ -1487,7 +1646,12 @@ impl Runtime {
             },
             Dispatched::Bad(reason) => bad(&reason),
             Dispatched::Panicked(report, handle) => {
-                self.note_panic("call_sync", handle, &report);
+                self.note_panic(
+                    "call_sync",
+                    &self.operation_of(&call.target),
+                    handle,
+                    &report,
+                );
                 SyncReply::Owned(reply_payload(
                     call_id,
                     ReplyStatus::Panic,
@@ -1559,6 +1723,17 @@ impl Runtime {
     /// the core lock. `sync_only` rejects async-shaped methods (by their metadata) before
     /// running anything.
     fn dispatch(&self, call: &Call<'_>, sync_only: bool) -> Dispatched {
+        if cfg!(target_family = "wasm") {
+            set_running(Some(call.target));
+            let dispatched = self.dispatch_inner(call, sync_only);
+            set_running(None);
+            dispatched
+        } else {
+            self.dispatch_inner(call, sync_only)
+        }
+    }
+
+    fn dispatch_inner(&self, call: &Call<'_>, sync_only: bool) -> Dispatched {
         let async_reason = |name: &str| {
             Dispatched::Bad(format!(
                 "`{name}` is asynchronous; call it with call(), not call_sync()"
@@ -1730,6 +1905,19 @@ impl Runtime {
                  delivered) and evaluated again when its inputs change"
             ),
         );
+        // (A wasm core never gets here: nothing catches a panic there, and the report is not built.)
+        if !cfg!(target_family = "wasm") {
+            let signal = self
+                .schema
+                .objects
+                .iter()
+                .find(|o| o.name == store)
+                .and_then(|o| o.store.as_ref())
+                .and_then(|s| s.signals.iter().find(|s| s.signal_id == signal_id))
+                .map_or_else(|| signal_id.to_string(), |s| s.name.clone());
+            let report = guard::caught_elsewhere(message);
+            self.emit_report(&format!("computed {store}.{signal}"), &report);
+        }
     }
 
     /// A held-back computed evaluated again and was delivered.
@@ -1745,15 +1933,15 @@ impl Runtime {
     }
 
     /// Accounts for a caught panic: log level 5, counters, store poisoning.
-    fn note_panic(&self, what: &str, handle: Handle, report: &PanicReport) {
-        self.log_panic(&format!("{what} panicked"), report);
+    fn note_panic(&self, what: &str, operation: &str, handle: Handle, report: &PanicReport) {
+        self.log_panic(&format!("{what} panicked"), operation, report);
         if !handle.is_null() {
             self.objects.mark_poisoned(handle);
         }
     }
 
-    fn reply_panic(&self, call_id: u32, handle: Handle, report: &PanicReport) {
-        self.note_panic("call", handle, report);
+    fn reply_panic(&self, call_id: u32, handle: Handle, target: &CallTarget, report: &PanicReport) {
+        self.note_panic("call", &self.operation_of(target), handle, report);
         self.send_reply(call_id, ReplyStatus::Panic, &encode_panic_body(report));
     }
 
@@ -1761,6 +1949,7 @@ impl Runtime {
         &self,
         call_id: u32,
         handle: Handle,
+        target: CallTarget,
         future: Pin<Box<dyn Future<Output = DispatchBytes> + Send>>,
     ) {
         // The task holds the runtime weakly (ADR-034): the executor owns the task, so a strong
@@ -1792,6 +1981,7 @@ impl Runtime {
             CallEntry {
                 task,
                 receiver: handle,
+                target,
                 stream: None,
             },
         );
@@ -1819,6 +2009,7 @@ impl Runtime {
         &self,
         call_id: u32,
         handle: Handle,
+        target: CallTarget,
         stream: Pin<Box<dyn futures_core::Stream<Item = DispatchBytes> + Send>>,
     ) {
         let state = Arc::new(StreamState::default());
@@ -1848,6 +2039,7 @@ impl Runtime {
             CallEntry {
                 task,
                 receiver: handle,
+                target,
                 stream: Some(state),
             },
         );
@@ -2000,7 +2192,14 @@ impl Runtime {
                 self.objects
                     .with_observed(handle, |o| o.record(signal_id, true, signal_count));
             }
-            Err(report) => self.note_panic("observe", handle, &report),
+            Err(report) => {
+                self.note_panic(
+                    "observe",
+                    &self.store_operation("observe", handle),
+                    handle,
+                    &report,
+                );
+            }
         }
     }
 
@@ -2320,7 +2519,20 @@ impl Runtime {
         };
         Stats::inc(&self.stats.polls);
         let mut cx = Context::from_waker(&waker);
-        match guard::guarded(|| future.as_mut().poll(&mut cx)) {
+        if cfg!(target_family = "wasm") {
+            let target = match kind {
+                TaskKind::Call { call_id, .. } | TaskKind::Stream { call_id, .. } => {
+                    self.calls.lock().get(&call_id).map(|entry| entry.target)
+                }
+                TaskKind::Detached => None,
+            };
+            set_running(target);
+        }
+        let polled = guard::guarded(|| future.as_mut().poll(&mut cx));
+        if cfg!(target_family = "wasm") {
+            set_running(None);
+        }
+        match polled {
             Ok(Poll::Pending) => {
                 if let EndPoll::Gone(future) = self.exec.end_poll(id, Some(future)) {
                     self.drop_task_future(future);
@@ -2345,16 +2557,20 @@ impl Runtime {
     }
 
     fn task_panicked(&self, kind: TaskKind, report: &PanicReport) {
+        let operation = |call_id: u32| {
+            let target = self.calls.lock().get(&call_id).map(|entry| entry.target);
+            target.map_or_else(|| "async call".to_owned(), |t| self.operation_of(&t))
+        };
         match kind {
-            TaskKind::Detached => self.log_panic("a spawned task panicked", report),
+            TaskKind::Detached => self.log_panic("a spawned task panicked", "task", report),
             TaskKind::Call { call_id, handle } => {
-                self.note_panic("async call", handle, report);
+                self.note_panic("async call", &operation(call_id), handle, report);
                 if self.calls.lock().remove(&call_id).is_some() {
                     self.send_reply(call_id, ReplyStatus::Panic, &encode_panic_body(report));
                 }
             }
             TaskKind::Stream { call_id, handle } => {
-                self.note_panic("stream", handle, report);
+                self.note_panic("stream", &operation(call_id), handle, report);
                 if self.calls.lock().remove(&call_id).is_some() {
                     self.send_stream_failure(
                         call_id,
@@ -2572,6 +2788,12 @@ impl Runtime {
             PortStatus::Error => Err(PortError::Failed(reply.body.to_vec())),
             PortStatus::Unavailable => Err(PortError::Unavailable),
         };
+        // The answer to a fire-and-forget call (a log record, a panic report) is of no interest to
+        // anyone, and acting on it would log "no port call 0 is pending": one more record (SPEC 6,
+        // host contract 6). A remote client answers these like any port call.
+        if reply.port_call_id == FIRE_AND_FORGET {
+            return;
+        }
         Stats::inc(&self.stats.port_replies);
         let id = reply.port_call_id;
         match self.finish_port_call(id, result) {
@@ -2611,7 +2833,7 @@ impl Runtime {
         let ctx = self.ctx();
         for callback in callbacks {
             if let Err(report) = guard::guarded(|| callback(&ctx, payload)) {
-                self.log_panic("an event subscriber panicked", &report);
+                self.log_panic("an event subscriber panicked", "event subscriber", &report);
             }
         }
     }
@@ -2678,7 +2900,8 @@ impl Runtime {
             match guard::guarded(|| cell.encode_snapshot(&mut w)) {
                 Ok(()) => {}
                 Err(report) => {
-                    self.note_panic("snapshot", handle, &report);
+                    let operation = self.store_operation("snapshot", handle);
+                    self.note_panic("snapshot", &operation, handle, &report);
                     continue;
                 }
             }
@@ -2871,7 +3094,11 @@ impl Runtime {
                 Ok(Ok(any)) => any,
                 Ok(Err(source)) => return Err(RestoreError::Store { type_id, source }),
                 Err(report) => {
-                    self.log_panic("a store's restore panicked", &report);
+                    self.log_panic(
+                        "a store's restore panicked",
+                        &format!("restore {}", self.store_name(type_id)),
+                        &report,
+                    );
                     return Err(RestoreError::Panicked {
                         type_id,
                         message: report.message,
@@ -2997,7 +3224,8 @@ impl Runtime {
                         if let Err(report) =
                             guard::guarded(|| self.deliver_observed(cell, &signal_ids))
                         {
-                            self.note_panic("restore", *handle, &report);
+                            let operation = self.store_operation("restore", *handle);
+                            self.note_panic("restore", &operation, *handle, &report);
                         }
                     }
                     self.objects
@@ -3008,6 +3236,7 @@ impl Runtime {
         if let Err(panic) = phase3 {
             self.log_panic(
                 "restore: committing the writes of the re-observed stores panicked",
+                "restore",
                 &panic,
             );
         }
@@ -3054,7 +3283,7 @@ impl Runtime {
         out.push_str(",\"mode\":");
         push_json_string(&mut out, &self.config.mode);
         out.push_str(&format!(
-            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"host_refs\":{},\"live_callbacks\":{},\"origin_refs\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"poisoned_signals\":{},\"transactions\":{},\"panics\":{},\"off_core_writes\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}}}",
+            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"host_refs\":{},\"live_callbacks\":{},\"origin_refs\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"poisoned_signals\":{},\"transactions\":{},\"panics\":{},\"off_core_writes\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}",
             self.schema_hash,
             strong_refs,
             self.objects.live(),
@@ -3087,6 +3316,12 @@ impl Runtime {
             Stats::get(&s.events),
             Stats::get(&s.bad_requests),
             Stats::get(&s.cancelled),
+        ));
+        // ADR-046: the reports delivered to `Diagnostics`. (The background tasks have a section of
+        // their own, added when the first is registered: `background::stats_section`.)
+        out.push_str(&format!(
+            ",\"panic_reports\":{}}}",
+            Stats::get(&s.panic_reports)
         ));
         // Sections of layered crates (`undra-query`'s persistence counters), before the closing
         // brace of the document.
@@ -3210,7 +3445,7 @@ fn core_loop(weak: &Weak<Runtime>, shared: &Shared) {
             // `undra-core` thread would silently stall every async call.
             Some(rt) => {
                 if let Err(report) = guard::guarded(|| rt.run_batch(batch)) {
-                    rt.log_panic("the executor loop panicked", &report);
+                    rt.log_panic("the executor loop panicked", "executor", &report);
                 }
             }
             None => break,

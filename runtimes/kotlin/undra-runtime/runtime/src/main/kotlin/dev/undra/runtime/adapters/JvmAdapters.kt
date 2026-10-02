@@ -18,6 +18,7 @@ import java.nio.file.Paths
  * | `Clock`, `Rng`, `Log` | [ClockAdapter], [RngAdapter] (`SecureRandom`), [LogAdapter] (`java.util.logging`) |
  * | `Timer` | [TimerAdapter] over a scheduled executor |
  * | `Connectivity`, `Lifecycle` | none: they are event ports; see [ConnectivityEvents] and [LifecycleEvents] |
+ * | `Diagnostics` | none here: the loaded core registers its own [DiagnosticsAdapter] (whatever `defaultAdapters` says), which calls `LoadOptions.onPanic` |
  * | `WebSocket` (opt-in, ADR-047) | [WebSocketPortAdapter] over [ClientWebSocketAdapter], the runtime's own RFC 6455 client |
  * | `Sse` (opt-in, ADR-047) | [SsePortAdapter] over [JdkHttpSseAdapter] (`java.net.http`) |
  * | `Db` (opt-in, ADR-048) | [DbPortAdapter] over [JdbcDbAdapter] in `<dataDir>/<namespace>/db` (needs `org.xerial:sqlite-jdbc` on the class path) |

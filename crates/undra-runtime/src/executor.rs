@@ -146,10 +146,12 @@ impl Shared {
     /// Asks the host to poll soon. A panicking host is ignored: wakers run in arbitrary
     /// contexts and must not unwind.
     fn schedule_host(&self) {
-        let _ = crate::guard::guarded(|| {
+        if let Err(report) = crate::guard::guarded(|| {
             let _call = crate::runtime::HostCall::enter(self.runtime_id);
             self.host.schedule();
-        });
+        }) {
+            crate::runtime::report_current("Host::schedule panicked", "Host::schedule", &report);
+        }
     }
 
     fn push_ready(&self, id: TaskId) {

@@ -8,7 +8,7 @@ import { BigListScreen } from './screens/BigListScreen';
 import { NotesScreen } from './screens/NotesScreen';
 import { TodosScreen } from './screens/TodosScreen';
 import { colors } from './theme';
-import { type Playground, nativeCounters, startUndra } from './undra';
+import { type Playground, describePanic, nativeCounters, startUndra } from './undra';
 
 type Tab = 'todos' | 'notes' | 'biglist' | 'bench';
 const TABS: ReadonlyArray<readonly [Tab, string]> = [
@@ -31,7 +31,7 @@ export default function App() {
   const [playground, setPlayground] = useState<Playground | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('todos');
-  const [bench, setBench] = useState<BenchState>({ checks: null, bench: null, running: null, log: [] });
+  const [bench, setBench] = useState<BenchState>({ checks: null, bench: null, running: null, log: [], panic: null });
   const logLines = useRef<string[]>([]);
 
   const log = useCallback((line: string) => {
@@ -63,7 +63,7 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
-        const p = await startUndra(log);
+        const p = await startUndra(log, report => setBench(state => ({ ...state, panic: describePanic(report) })));
         if (cancelled) {
           return;
         }

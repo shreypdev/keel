@@ -13,7 +13,7 @@
 # same command with UNDRA_PLAYGROUND_V2=1; its wasm is copied to build/b/playground_core.wasm (not committed) before
 # build A is built again, so the default wasm stays build A. UNDRA_PLAYGROUND_WASM_B overrides its path.
 # Prints `SCENARIO Sxx PASS|FAIL|SKIP <title>` lines (src/reporter.ts) and pipes them through
-# contract-tests/check.sh, so the exit status is non-zero unless every one (S01..S28 and S31) passes.
+# contract-tests/check.sh, so the exit status is non-zero unless every one (S01..S33) passes.
 # UNDRA_CLI overrides the path of the undra binary (default target/debug/undra, built if missing).
 set -euo pipefail
 

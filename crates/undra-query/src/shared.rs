@@ -30,6 +30,7 @@ use std::sync::{Arc, Weak};
 use parking_lot::Mutex;
 use undra_meta::TypeClosure;
 use undra_meta::ids::fnv1a64;
+use undra_runtime::background::{BackgroundOutcome, Deadline};
 use undra_runtime::executor::TaskId;
 use undra_runtime::log::ERROR;
 use undra_runtime::{Ctx, Runtime, WeakCtx};
@@ -524,6 +525,13 @@ pub(crate) struct Shared {
     next_stamp: AtomicU64,
     /// The last time read from the `Clock` port, used if the port fails.
     last_now: AtomicI64,
+    /// What the background tasks wait on: bumped whenever a replay step, a fetch, a write or a
+    /// hydration finishes (ADR-046).
+    pub(crate) idle: crate::background::Notifier,
+    /// Queued mutations answered by a replay, ever (the background run's `replayed`).
+    pub(crate) replayed: AtomicU64,
+    /// Fetches that succeeded, ever (the background run's `refetched`).
+    pub(crate) fetched: AtomicU64,
     /// The persistence counters (`stats_json`'s `query.persist`).
     pub(crate) counters: Counters,
     /// Closures read from the store or written by this build, by fingerprint.
@@ -544,6 +552,9 @@ impl Shared {
             next_sink: AtomicU64::new(0),
             next_stamp: AtomicU64::new(0),
             last_now: AtomicI64::new(0),
+            idle: crate::background::Notifier::default(),
+            replayed: AtomicU64::new(0),
+            fetched: AtomicU64::new(0),
             counters: Counters::default(),
             closures: Mutex::new(HashMap::new()),
             current: Mutex::new(HashMap::new()),
@@ -764,6 +775,7 @@ impl Shared {
             self.reschedule_poll(ctx, key, entry, &mut fx, now, Base::Now);
         }
         fx.run(ctx);
+        self.idle.bump();
     }
 
     /// What a successful fetch does to an entry besides replacing its data: the error is gone,
@@ -781,6 +793,7 @@ impl Shared {
         entry.failed = false;
         entry.invalidated = false;
         entry.updated_at = Some(now);
+        self.fetched.fetch_add(1, Ordering::SeqCst);
         if entry.vt.persist {
             self.schedule_persist(ctx, key, entry);
         }
@@ -822,6 +835,7 @@ impl Shared {
             "a query fetch panicked; the entry shows an error",
         );
         fx.run(ctx);
+        self.idle.bump();
     }
 
     // ----- invalidation --------------------------------------------------------------------
@@ -904,6 +918,7 @@ impl Shared {
         if !hydrate_hook_linked() {
             self.spawn_hydration(ctx);
         }
+        crate::background::register(self, ctx);
         // The subscribers use the `Ctx` they are given (ADR-034): the runtime owns them, so one
         // they captured would keep it alive. (`Shared` holds no `Ctx`.)
         // The devtools page of `undra dev` reads the cache through the runtime (ADR-054). The
@@ -936,6 +951,193 @@ impl Shared {
     pub(crate) fn spawn_hydration(self: &Arc<Self>, ctx: &Ctx) {
         let (shared, weak) = (self.clone(), ctx.downgrade());
         ctx.spawn(async move { shared.hydrate(&weak).await });
+    }
+
+    // ----- background runs (ADR-046) ---------------------------------------------------------
+
+    /// Starts writing, on the core, whatever waits out its debounce ([`Shared::flush_entries`]).
+    pub(crate) fn flush_soon(self: &Arc<Self>, ctx: &Ctx) {
+        let (shared, weak) = (self.clone(), ctx.downgrade());
+        ctx.spawn(async move { shared.flush_entries(&weak).await });
+    }
+
+    /// Writes every cache entry that waits out its debounce now, and ends the debounce. The
+    /// queue has no debounce (its writer starts when it changes); see
+    /// [`Shared::background_flush`] for waiting on it.
+    pub(crate) async fn flush_entries(self: &Arc<Self>, weak: &WeakCtx) {
+        let todo: Vec<(QueryKey, Option<TaskId>)> = self
+            .state
+            .lock()
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.persist_dirty)
+            .map(|(key, entry)| (key.clone(), entry.persist_task))
+            .collect();
+        for (key, task) in todo {
+            let Ok(ctx) = weak.upgrade() else {
+                return;
+            };
+            if let Some(task) = task {
+                ctx.cancel_task(task);
+            }
+            {
+                let mut state = self.state.lock();
+                if let Some(entry) = state.entries.get_mut(&key) {
+                    entry.persist_dirty = false;
+                    entry.persist_task = None;
+                }
+            }
+            self.persist_entry(&ctx, &key).await;
+        }
+        self.idle.bump();
+    }
+
+    /// The entries a background run fetches again: observed or persisted, stale, and either
+    /// past a staleness window the query declared or known to need it (invalidated, failed,
+    /// holding an error, or never filled). An entry whose query has no window is "always stale"
+    /// while it is observed, which is no reason to ask the OS for time.
+    fn refetch_candidates(state: &State, now: i64) -> Vec<QueryKey> {
+        state
+            .entries
+            .iter()
+            .filter(|(_, e)| {
+                (e.observers > 0 || e.vt.persist)
+                    && e.is_stale(now)
+                    && (e.vt.stale_ms.is_some()
+                        || e.invalidated
+                        || e.failed
+                        || e.error.is_some()
+                        || e.data.is_none())
+            })
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
+    /// How many entries a background run would fetch again.
+    pub(crate) fn background_refetch_pending(&self, ctx: &Ctx) -> u32 {
+        let any = self
+            .state
+            .lock()
+            .entries
+            .values()
+            .any(|e| e.observers > 0 || e.vt.persist);
+        if !any {
+            return 0;
+        }
+        let now = self.now(ctx);
+        let count = Self::refetch_candidates(&self.state.lock(), now).len();
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
+    /// The refetch task of a background run: starts the fetches of [`Shared::refetch_candidates`]
+    /// and settles (see [`Shared::background_settle`]).
+    pub(crate) async fn background_refetch(
+        self: &Arc<Self>,
+        weak: &WeakCtx,
+        deadline: &Deadline,
+    ) -> BackgroundOutcome {
+        use crate::background::outcome;
+        let baseline = self.fetched.load(Ordering::SeqCst);
+        let keys = {
+            let Ok(ctx) = weak.upgrade() else {
+                return BackgroundOutcome::Incomplete;
+            };
+            let now = self.now(&ctx);
+            let mut fx = Fx::default();
+            let keys = {
+                let mut state = self.state.lock();
+                let keys = Self::refetch_candidates(&state, now);
+                for key in &keys {
+                    if let Some(entry) = state.entries.get_mut(key) {
+                        self.start_fetch(&ctx, key, entry, &mut fx);
+                    }
+                }
+                keys
+            };
+            fx.run(&ctx);
+            keys
+        };
+        let settled = self.background_settle(weak, deadline, baseline).await;
+        let failed = {
+            let state = self.state.lock();
+            keys.iter()
+                .filter_map(|key| state.entries.get(key))
+                .any(|e| e.failed || e.error.is_some())
+        };
+        outcome(settled && !failed)
+    }
+
+    /// What every task of a background run does last: waits for the fetches in flight to end (a
+    /// replay's invalidations refetch the observed lists, whichever task started them), writes what
+    /// they fetched and what waited out its debounce, and waits for the queue's writer, so the run
+    /// is finished when the client is quiet, not while something it started is still going. Counts
+    /// the fetches that succeeded since `baseline` (the run's, whichever task sees them). `false`
+    /// when the window ended first, or the queue was never read (nothing may be written over it).
+    pub(crate) async fn background_settle(
+        self: &Arc<Self>,
+        weak: &WeakCtx,
+        deadline: &Deadline,
+        baseline: u64,
+    ) -> bool {
+        use crate::background::{Woke, wait};
+        let count = || {
+            let fetched = self.fetched.load(Ordering::SeqCst);
+            deadline.reach_refetched(
+                u32::try_from(fetched.saturating_sub(baseline)).unwrap_or(u32::MAX),
+            );
+        };
+        let quiet = loop {
+            let epoch = self.idle.epoch();
+            count();
+            if !self
+                .state
+                .lock()
+                .entries
+                .values()
+                .any(|e| e.inflight.is_some())
+            {
+                break true;
+            }
+            if matches!(wait(self, epoch, weak, deadline).await, Woke::Expired) {
+                break false;
+            }
+        };
+        count();
+        self.flush_entries(weak).await;
+        let written = loop {
+            let epoch = self.idle.epoch();
+            let (busy, readable) = {
+                let state = self.state.lock();
+                (state.queue.writer_busy(), state.queue.is_hydrated())
+            };
+            if !busy {
+                break true;
+            }
+            if !readable || matches!(wait(self, epoch, weak, deadline).await, Woke::Expired) {
+                break false;
+            }
+        };
+        quiet && written
+    }
+
+    /// How much waits to be written: entries out their debounce and a queue its writer has not
+    /// finished with.
+    pub(crate) fn background_flush_pending(&self) -> u32 {
+        let state = self.state.lock();
+        let entries = state.entries.values().filter(|e| e.persist_dirty).count();
+        let queue = usize::from(state.queue.writer_busy());
+        u32::try_from(entries + queue).unwrap_or(u32::MAX)
+    }
+
+    /// The flush task of a background run: writes the cache entries now and settles (it is
+    /// incomplete if the queue was never read: nothing may be written over it, ADR-049).
+    pub(crate) async fn background_flush(
+        self: &Arc<Self>,
+        weak: &WeakCtx,
+        deadline: &Deadline,
+    ) -> BackgroundOutcome {
+        let baseline = self.fetched.load(Ordering::SeqCst);
+        crate::background::outcome(self.background_settle(weak, deadline, baseline).await)
     }
 
     // ----- garbage collection --------------------------------------------------------------
@@ -975,8 +1177,11 @@ impl Shared {
         if entry.persist_task.is_some() {
             return;
         }
-        entry.persist_task =
-            Some(ctx.spawn(run_persist(self.clone(), ctx.downgrade(), key.clone())));
+        let (shared, weak, key) = (self.clone(), ctx.downgrade(), key.clone());
+        entry.persist_task = Some(ctx.spawn(async move {
+            let _bump = crate::background::BumpOnDrop(shared.clone());
+            run_persist(shared, weak, key).await;
+        }));
     }
 
     /// Reads the persisted cache entries, the offline queue and its dead letters from the `Kv`

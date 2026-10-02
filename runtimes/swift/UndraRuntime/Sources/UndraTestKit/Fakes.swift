@@ -840,6 +840,54 @@ public final class CaptureLog: UndraAdapter, @unchecked Sendable {
     }
 }
 
+// MARK: - Diagnostics
+
+/// A `Diagnostics` that keeps every panic report the core hands it (ADR-046): what a test asserts on instead of a crash reporter.
+///
+/// It records on the thread the core reported from, at once, in order; unlike the runtime's default adapter it does not hop to the main
+/// thread and does not call `LoadOptions.onPanic`. Reports that do not decode are dropped, as the default adapter drops them.
+///
+/// ```swift
+/// let fakes = Fakes()
+/// let preview = try PreviewCore.load(UndraPlaygroundCore.load, fakes: fakes)
+/// _ = try? explode(reason: "boom", ctx: preview.core)
+/// XCTAssertEqual(fakes.diagnostics.reports.first?.operation, "explode")
+/// ```
+public final class CaptureDiagnostics: UndraAdapter, @unchecked Sendable {
+    private let recorded = Locked<[UndraPanicReport]>([])
+
+    /// An adapter with no reports.
+    public init() {}
+
+    /// The reports so far, oldest first.
+    public var reports: [UndraPanicReport] {
+        return recorded.withLock { $0 }
+    }
+
+    /// Whether any report's message contains `needle`.
+    public func contains(_ needle: String) -> Bool {
+        return reports.contains { $0.message.contains(needle) }
+    }
+
+    /// Forgets the reports.
+    public func clear() {
+        recorded.withLock { $0.removeAll() }
+    }
+
+    public var portId: UInt32 { undraPortId("Diagnostics") }
+
+    public func makePortImpl(core: UndraCore) -> PortImpl? {
+        return .sync([
+            undraMethodId("Diagnostics", "panicked"): { [self] args in
+                if let report = try? UndraPanicReport.undraDecoded(from: args) {
+                    recorded.withLock { $0.append(report) }
+                }
+                return []
+            },
+        ])
+    }
+}
+
 // MARK: - Connectivity and Lifecycle
 
 /// A source of connectivity changes a test or a preview drives: ``set(online:kind:)`` reports the new state to the core it is attached to.
@@ -943,7 +991,7 @@ public final class ScriptedLifecycle: UndraAdapter, @unchecked Sendable {
 
 // MARK: - The bundle
 
-/// One of each fake in the documented default state: the default time and seed, empty stores, no scripted replies, online on Wi-Fi, active.
+/// One of each fake in the documented default state: the default time and seed, empty stores, no scripted replies, no panic reports, online on Wi-Fi, active.
 public final class Fakes: @unchecked Sendable {
     /// The `Clock` and the `Timer`.
     public let clock = FakeClock()
@@ -951,6 +999,8 @@ public final class Fakes: @unchecked Sendable {
     public let rng = SeededRng()
     /// The `Log`.
     public let log = CaptureLog()
+    /// The `Diagnostics`: the panic reports of the core (ADR-046).
+    public let diagnostics = CaptureDiagnostics()
     /// The `Http`.
     public let http = FakeHttp()
     /// The `Kv`.
@@ -973,7 +1023,7 @@ public final class Fakes: @unchecked Sendable {
     /// concurrently with the registrations (docs/SPEC.md section 6), so the stores come first, then the rest.
     public func adapters() -> Adapters {
         return Adapters([
-            kv, secureStore, fs, http, clock.clockAdapter, clock.timerAdapter, rng, log, connectivity, lifecycle,
+            kv, secureStore, fs, http, clock.clockAdapter, clock.timerAdapter, rng, log, diagnostics, connectivity, lifecycle,
         ])
     }
 }

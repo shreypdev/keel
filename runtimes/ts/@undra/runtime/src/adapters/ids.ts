@@ -19,7 +19,7 @@ export function port<const M extends readonly string[]>(name: string, methods: M
 }
 
 /**
- * Port and method ids of the ten standard ports. The three opt-in ones (`WebSocket`, `Sse` and
+ * Port and method ids of the eleven standard ports. The three opt-in ones (`WebSocket`, `Sse` and
  * `Db`, ADR-047 and ADR-048) are `OptInPortIds` of `@undra/runtime/realtime` and
  * `@undra/runtime/db`, so the main entry carries none of them (ADR-052).
  */
@@ -34,4 +34,5 @@ export const PortIds = Object.freeze({
   Timer: port("Timer", ["set"] as const),
   Connectivity: port("Connectivity", ["changed"] as const),
   Lifecycle: port("Lifecycle", ["changed"] as const),
+  Diagnostics: port("Diagnostics", ["panicked"] as const),
 });

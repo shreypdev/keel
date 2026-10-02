@@ -178,6 +178,27 @@ golden and the three runtimes' standard types follow; every core's schema hash m
 surface alone is now `0xbbf6_f70d_0c56_7f47`). What this ADR decides is unchanged: the standard
 types are in every schema and in no app's generated bindings.
 
+## Amendment (2026-10-01, ADR-046): the standard surface gains `Diagnostics`, three records and one function
+
+ADR-046 changes the standard surface once more (the standard surface alone now hashes to
+`0x543d_0961_0867_e387`): the sync port `Diagnostics` (`panicked(report: PanicReport)`, port id
+`0xab68cd7c`), the records `PanicFrame`, `PanicReport` and `BackgroundReport` (type ids `0x19a497d1`,
+`0xd08d5436`, `0x5dbea5f3`: the table is now eleven ports and twelve types) and **one standard
+function**, `run_background(deadline_ms: u64) -> BackgroundReport` (function id `0x0e5b14ff`).
+What this ADR decides holds, with two additions:
+
+1. **A standard function is a standard item.** `undra_bindgen::stdlib` has a `FUNCTIONS` table next to
+   `TYPES` and `PORTS` (name, id, declaration), `covered` reports the functions a schema declares
+   exactly as the table does, `Model::new` leaves them out of every language's output, and an item
+   named like one with another id is E0052. The platform runtimes call it themselves
+   (`runInBackground`).
+2. **The three report types are spelled `Undra...` in every language** (`UndraPanicReport`,
+   `UndraPanicFrame`, `UndraBackgroundReport`), the name TypeScript has used for the report since
+   ADR-049, rather than the bare names the other standard types have: they are values the runtime
+   hands the app (`onPanic`, `runInBackground`), never names an app's own records or generated code
+   mention, and the prefix keeps them clear of an app's own `PanicReport`
+   (`stdlib::runtime_spelling` is still the one place that says so).
+
 ## Note (2026-10-01): the standard types at an iOS 15 floor (ADR-045)
 
 No change to the decision or to any shape. The Swift runtime's floor drops to iOS 15 / macOS 12 (ADR-045), and the

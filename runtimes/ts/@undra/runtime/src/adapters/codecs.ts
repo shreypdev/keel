@@ -22,6 +22,9 @@ import {
   SseError,
   type SseEvent,
   StorageError,
+  type UndraBackgroundReport,
+  type UndraPanicFrame,
+  type UndraPanicReport,
   WsError,
   type WsMessage,
   type WsOpened,
@@ -51,6 +54,7 @@ export const HeaderCodec: Codec<Header> = {
 const headers = codecs.vec(HeaderCodec);
 const optionBytes = codecs.option(codecs.bytes);
 const optionU32 = codecs.option(codecs.u32);
+const optionName = codecs.option(codecs.string);
 
 /** Reads a `u16` index into `variants` (the decoding half of a unit enum's codec). */
 function readIndex<T extends string>(r: UndraReader, name: string, variants: readonly T[]): T {
@@ -212,6 +216,86 @@ export const StorageErrorCodec: Codec<StorageError> = {
     }
   },
 };
+
+/*
+ * The records of ADR-046 (`undra-ports`: `PanicFrame`, `PanicReport` of the `Diagnostics` port, `BackgroundReport` of
+ * `run_background`). Golden bytes: `crates/undra-ports/tests/encoding.rs`. The halves are separate so that an app ships only
+ * the one it uses (a native core's report is decoded by the runtime, encoded only by tests and fakes).
+ */
+
+
+/** Reads a panic frame (`PanicFrameCodec.decode`). */
+export function readPanicFrame(r: UndraReader): UndraPanicFrame {
+  const address = r.readU64();
+  const symbol = optionName.decode(r);
+  const file = optionName.decode(r);
+  return { address, symbol, file, line: optionU32.decode(r) };
+}
+
+/** Writes a panic frame (`PanicFrameCodec.encode`). */
+export function writePanicFrame(w: UndraWriter, v: UndraPanicFrame): void {
+  w.writeU64(v.address);
+  optionName.encode(w, v.symbol);
+  optionName.encode(w, v.file);
+  optionU32.encode(w, v.line);
+}
+
+/** The smallest encoding of a panic frame: the `u64` address and three `None`s. */
+const PANIC_FRAME_MIN = 11;
+
+/** Reads a panic report (`PanicReportCodec.decode`): the argument of `Diagnostics.panicked`. */
+export function readPanicReport(r: UndraReader): UndraPanicReport {
+  const message = r.readStr();
+  const location = r.readStr();
+  const operation = r.readStr();
+  const thread = r.readStr();
+  const frames: UndraPanicFrame[] = [];
+  for (let n = r.readLen(PANIC_FRAME_MIN); n > 0; n--) frames.push(readPanicFrame(r));
+  const namespace = r.readStr();
+  const coreVersion = r.readStr();
+  const schemaHash = r.readU64();
+  return { message, location, operation, thread, frames, namespace, coreVersion, schemaHash, imageId: r.readStr() };
+}
+
+/** Writes a panic report (`PanicReportCodec.encode`). */
+export function writePanicReport(w: UndraWriter, v: UndraPanicReport): void {
+  w.writeStr(v.message);
+  w.writeStr(v.location);
+  w.writeStr(v.operation);
+  w.writeStr(v.thread);
+  w.writeLen(v.frames.length);
+  for (const frame of v.frames) writePanicFrame(w, frame);
+  w.writeStr(v.namespace);
+  w.writeStr(v.coreVersion);
+  w.writeU64(v.schemaHash);
+  w.writeStr(v.imageId);
+}
+
+/** `PanicFrame { address: u64, symbol: Option<String>, file: Option<String>, line: Option<u32> }` (ADR-046). */
+export const PanicFrameCodec: Codec<UndraPanicFrame> = { encode: writePanicFrame, decode: readPanicFrame };
+
+/** `PanicReport { message, location, operation, thread, frames, namespace, core_version, schema_hash: u64, image_id }` (ADR-046). */
+export const PanicReportCodec: Codec<UndraPanicReport> = { encode: writePanicReport, decode: readPanicReport };
+
+
+/** Reads a background report (`BackgroundReportCodec.decode`): the reply of `run_background`. */
+export function readBackgroundReport(r: UndraReader): UndraBackgroundReport {
+  const finished = r.readBool();
+  const replayed = r.readU32();
+  const refetched = r.readU32();
+  return { finished, replayed, refetched, stillPending: r.readU32() };
+}
+
+/** Writes a background report (`BackgroundReportCodec.encode`). */
+export function writeBackgroundReport(w: UndraWriter, v: UndraBackgroundReport): void {
+  w.writeBool(v.finished);
+  w.writeU32(v.replayed);
+  w.writeU32(v.refetched);
+  w.writeU32(v.stillPending);
+}
+
+/** `BackgroundReport { finished: bool, replayed: u32, refetched: u32, still_pending: u32 }` (ADR-046). */
+export const BackgroundReportCodec: Codec<UndraBackgroundReport> = { encode: writeBackgroundReport, decode: readBackgroundReport };
 
 // ---------------------------------------------------------------------------
 // The opt-in ports (ADR-047, ADR-048): WebSocket, Sse and Db. The shared codecs are built inside pure

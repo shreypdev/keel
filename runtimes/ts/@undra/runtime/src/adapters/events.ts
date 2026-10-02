@@ -59,11 +59,14 @@ export function emitLifecycle(core: EventSink, state: AppState): void {
  * Connects the Connectivity and Lifecycle adapters to the core: every change
  * they report is sent as an event. Returns the function that disconnects
  * them. `onError` receives failures to send (the core closed meanwhile).
+ * `onBackground` is called after the core was told the app went to the
+ * background (`Lifecycle.changed(background)`).
  */
 export function startEventSources(
   core: EventSink,
   adapters: Partial<Adapters>,
   onError: (error: unknown) => void,
+  onBackground?: () => void,
 ): () => void {
   const stops: Array<() => void> = [];
   const guarded =
@@ -79,7 +82,14 @@ export function startEventSources(
     stops.push(adapters.connectivity.subscribe(guarded((online, kind) => emitConnectivity(core, online, kind))));
   }
   if (adapters.lifecycle) {
-    stops.push(adapters.lifecycle.subscribe(guarded((state) => emitLifecycle(core, state))));
+    stops.push(
+      adapters.lifecycle.subscribe(
+        guarded((state) => {
+          emitLifecycle(core, state);
+          if (state === "background") onBackground?.();
+        }),
+      ),
+    );
   }
   return () => {
     for (const stop of stops.splice(0)) stop();

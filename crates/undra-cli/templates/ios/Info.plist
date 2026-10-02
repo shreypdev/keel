@@ -11,5 +11,19 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Connects to the core served by `undra dev` on your computer.</string>
+	<!-- Background execution (ADR-046): UndraBootstrap registers `UndraBackground` under
+	     `<bundle id>.undra`, and the OS may then give the app a processing window and a refresh window
+	     (`.processing`, `.refresh`) to replay queued offline mutations and refetch stale queries while the app
+	     is not on screen. Both identifiers must be listed here and the two modes enabled, or the OS refuses. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).undra.processing</string>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).undra.refresh</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>processing</string>
+		<string>fetch</string>
+	</array>
 </dict>
 </plist>

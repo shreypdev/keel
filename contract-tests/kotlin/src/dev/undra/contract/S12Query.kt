@@ -80,6 +80,12 @@ fun s12Query(w: World) {
     awaitUntil("a BadBody error after a body that is not JSON") { first.error.value is RemoteError.BadBody }
     expectEq("the data after a bad body", listOf(milk, walk), first.data.value)
 
+    // Not a step of scenarios.md: leave the entry healthy and fresh before the handles go. It is persisted, so a background run (S30)
+    // fetches it again for as long as it holds the 503's or the bad body's error, and could not finish.
+    w.server.respond(HttpMethod.GET, url, 200, """[{"id":1,"title":"Buy milk","done":false},{"id":2,"title":"Walk the dog","done":false}]""")
+    first.refetch()
+    awaitUntil("the s12 entry to be healthy again") { first.status.value == QueryStatus.SUCCESS && first.error.value == null }
+
     // 8. Releasing every handle takes them out of the core.
     all.forEach { it.close() }
     expectEq("live_handles after releasing the three handles", handles, w.stats().liveHandles)

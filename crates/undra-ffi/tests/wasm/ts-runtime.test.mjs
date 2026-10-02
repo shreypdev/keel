@@ -5,13 +5,14 @@
 // UNDRA_TS_DIST; by hand, `npm ci && npx tsc -p tsconfig.build.json` in runtimes/ts/@undra/runtime
 // (a dist/ older than its sources is refused, so this can never test a stale build).
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Worker, isMainThread } from "node:worker_threads";
-import { Instance, ids, loadModule } from "./helpers.mjs";
+import { Instance, fixturePath, ids, loadModule } from "./helpers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tsRoot = resolve(here, "../../../../runtimes/ts/@undra/runtime");
@@ -79,7 +80,7 @@ async function boot({ log = [], adapters = {}, ports, onClose, logLevel, drains,
   const core = await UndraCore.load({
     ...extra,
     mode: "wasm-main",
-    wasm: module,
+    wasm: extra.wasm ?? module,
     expectedSchemaHash: SCHEMA_HASH,
     platform: "test",
     ...(logLevel !== undefined && { logLevel }),
@@ -151,7 +152,7 @@ async function bootWorker({ log = [], adapters = {}, ports, onClose, onError, dr
     ...extra,
     mode: "wasm-worker",
     worker: workerPorts === undefined ? workerLike(thread) : { create: workerLike(thread), ports: workerPorts },
-    wasm: module,
+    wasm: extra.wasm ?? module,
     expectedSchemaHash: SCHEMA_HASH,
     platform: "test",
     shared: false,
@@ -163,6 +164,29 @@ async function bootWorker({ log = [], adapters = {}, ports, onClose, onError, dr
   });
   opened.push(core);
   return core;
+}
+
+/** The nine fields of `UndraPanicReport`, and only those (ADR-046: one shape on every platform). */
+const REPORT_FIELDS = ["coreVersion", "frames", "imageId", "location", "message", "namespace", "operation", "schemaHash", "thread"];
+
+/** What the report of a trapped wasm core says (ADR-046 decision 4.4), whatever mode it ran in. */
+function assertTrapReport(report, { thread = "main", namespace = "", coreVersion = "", imageId = "", message = /kaboom/ } = {}) {
+  assert.deepEqual(Object.keys(report).sort(), REPORT_FIELDS);
+  assert.match(report.message, message);
+  assert.match(report.location, /\.rs:\d+:\d+$/, `the panic's file:line:column, from the core's FATAL record: ${report.location}`);
+  assert.equal(report.operation, "Calculator.boom", "what the core was running, from the FATAL record");
+  assert.equal(report.thread, thread);
+  assert.equal(report.namespace, namespace);
+  assert.equal(report.coreVersion, coreVersion);
+  assert.equal(report.schemaHash, SCHEMA_HASH);
+  assert.equal(report.imageId, imageId);
+  assert.ok(report.frames.length > 0, `wasm frames in the report: ${JSON.stringify(report, (_key, value) => (typeof value === "bigint" ? String(value) : value))}`);
+  for (const frame of report.frames) {
+    assert.equal(typeof frame.address, "bigint");
+    assert.ok(frame.symbol === null || typeof frame.symbol === "string");
+    assert.equal(frame.file, null);
+    assert.equal(frame.line, null);
+  }
 }
 
 const calculator = async (core, base = 100) => core.construct(ids.type(CALC), ids.method(CALC, "new"), i64(base));
@@ -321,7 +345,7 @@ test("a panic in the core logs at level 5, then the transport reports a trap and
   assert.ok(closed instanceof UndraTransportError, "the handler heard that the core died");
   assert.throws(() => callSync(core, calc, "add", concat(i64(1), i64(1))), UndraTransportError);
   assert.equal(panics.length, 1);
-  assert.match(panics[0].message, /kaboom/);
+  assertTrapReport(panics[0]);
 });
 
 // ----- randomness never degrades silently (ADR-049 decision 2.5, gap PO-11) -------------------------
@@ -564,6 +588,52 @@ function inEachMode(name, body) {
   }
 }
 
+inEachMode("a trap's report: the namespace and version the app gave, the SHA-256 of the module's bytes as its image id, and onPanic is heard once, before onClose", async (mode, bootMode) => {
+  const bytes = readFileSync(fixturePath());
+  const imageId = createHash("sha256").update(bytes).digest("hex");
+  const events = [];
+  const panics = [];
+  const core = await bootMode({
+    wasm: bytes,
+    namespace: "fixture_core",
+    coreVersion: "9.8.7",
+    onPanic: (report) => {
+      events.push("onPanic");
+      panics.push(report);
+    },
+    onClose: () => events.push("onClose"),
+  });
+  // The module is hashed in the background once the core is up (WebCrypto), so that its id is ready at the first trap.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const calc = await calculator(core);
+  const failure = await call(core, calc, "boom").then(() => undefined, (e) => e);
+  assert.ok(failure instanceof UndraTransportError, String(failure));
+  assert.equal(failure.reason, "trap");
+  await until("the core to close", () => events.length === 2, 10_000);
+  assert.deepEqual(events, ["onPanic", "onClose"]);
+  assert.equal(panics.length, 1);
+  assertTrapReport(panics[0], { thread: mode === "wasm-worker" ? "worker" : "main", namespace: "fixture_core", coreVersion: "9.8.7", imageId });
+  assert.match(panics[0].imageId, /^[0-9a-f]{64}$/);
+});
+
+inEachMode("a handler that throws is reported to onError and changes nothing: the core still closes with the trap", async (_mode, bootMode) => {
+  const errors = [];
+  const closed = [];
+  const core = await bootMode({
+    onPanic: () => {
+      throw new Error("the reporter is down");
+    },
+    onError: (error) => errors.push(error),
+    onClose: (error) => closed.push(error),
+  });
+  const calc = await calculator(core);
+  await call(core, calc, "boom").then(() => undefined, () => undefined);
+  await until("the core to close", () => closed.length === 1, 10_000);
+  assert.equal(closed[0].reason, "trap");
+  assert.equal(errors.length, 1);
+  assert.match(String(errors[0].message), /the reporter is down/);
+});
+
 inEachMode("snapshot, mutate, restore: the same handle shows the snapshot's value as soon as restore resolves", async (_mode, bootMode) => {
   const core = await bootMode();
   const { counter, seen, bump } = await observedCounter(core);
@@ -663,9 +733,7 @@ inEachMode("recovery: a trap restarts the core from its last snapshot; calls in 
 
   // The panic report: the core's FATAL record and the trap's frames.
   assert.equal(panics.length, 1);
-  assert.match(panics[0].message, /kaboom/);
-  assert.equal(panics[0].schemaHash, SCHEMA_HASH);
-  assert.ok(panics[0].frames.length > 0, `wasm frames in the report of "${panics[0].trap}": ${panics[0].frames.join(" | ")}`);
+  assertTrapReport(panics[0], { thread: mode === "wasm-worker" ? "worker" : "main" });
   // The event, to both hooks.
   const event = restarts[0];
   assert.equal(event.report, panics[0]);

@@ -810,9 +810,12 @@ measured = 1.34
 # Hooks, the value decoder and the E0066 check are linked only by a core that has a `#[undra::migrate]`.
 # After main's ABI table (ADR-044) the merged core measured 120,188, over the budget; the persistence-v2 review
 # links the standard ports' Rust dispatchers by use (ADR-052 note): 116,731; 116,800 with devtools' inspector seam.
+# prod-ops (ADR-046: the Diagnostics port and the panic report, `run_background`, the stats section, the
+# trap path's trailer lines) added 2,146 bytes to the merged tree's 117,081: 119,227, 773 under the budget. The
+# background run's task table and poll loop are linked only when a task is registered (by use, ADR-052).
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 119055
+measured_gzip_bytes = 119654
 tolerance = 0.05
 
 # What a hello-world app loads up front of the JavaScript runtime: `@undra/runtime` as the template's
@@ -829,9 +832,13 @@ tolerance = 0.05
 # what). Gated like the wasm. Restated at 21,800 by the objects-callbacks review (ADR-052, note of 2026-10-02): every
 # generated constructor adopts through the identity map of ADR-040, and the mirror carries ADR-041's callback
 # entries, in the up-front chunk; loading the identity map lazily was measured and rejected (the note says why).
+# prod-ops (ADR-046) restates it at 22,100 (+333 on 21,672): up front, the report loader of the wasm trap path, the page's
+# background window with its `pagehide` and `freeze` listeners and the stats fields; `runInBackground`, the report builder
+# and the Diagnostics port with its registration and codecs are lazy chunks. The item-by-item verdict, with both pieces'
+# bytes, is ADR-052's prod-ops review note.
 [size."web/hello-runtime-js"]
-budget_gzip_bytes = 21800
-measured_gzip_bytes = 21672
+budget_gzip_bytes = 22100
+measured_gzip_bytes = 22005
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------

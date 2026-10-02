@@ -4,12 +4,14 @@
 //! |---|---|---|
 //! | `host` | `host/lib<ns>.{dylib,so}` | the shim as a cdylib, with the JNI shim (Kotlin on the JVM); on macOS its install name is `@rpath/lib<ns>.dylib`, not a path into `target/` |
 //! | `ios` | `ios/<Ns>Core.xcframework` | the shim as a staticlib for device and simulator, each slice prelinked into one object (`lib<ns>.a`), with `<ns>_undra.h`, `xcodebuild -create-xcframework` |
-//! | `android` | `android/jniLibs/<abi>/lib<ns>.so` | `cargo ndk`, 16 KB page aligned |
-//! | `web` | `web/<ns>.wasm` | the wasm profile of SPEC 7, then `wasm-opt -Oz` when present |
+//! | `android` | `android/jniLibs/<abi>/lib<ns>.so` | `cargo ndk`, 16 KB page aligned; a release build strips the shipped copy |
+//! | `web` | `web/<ns>.wasm` | the wasm profile of SPEC 7, then `wasm-opt -Oz` when present; the shipped module has no names or DWARF |
 //! | `rn` | `ios/<Ns>Core.xcframework` + `ios/<Ns>Core.podspec`, `android/jniLibs/` | the iOS and Android builds and the pod React Native apps link (ADR-038) |
 //!
 //! `<ns>` is the core's namespace (`[core] namespace`, ADR-044) and `<Ns>Core` its `CoreNames::bundle`.
 //!
+//! A release build also writes the **symbol files** that resolve a crash report's addresses to
+//! `file:line` (`symbols/`, ADR-046; `--no-symbols` skips them): see [`crate::symbols`].
 //! Every target prints the size of what it made, next to the budget of the blueprint.
 
 pub(crate) mod android;
@@ -26,6 +28,7 @@ use crate::config::Platform;
 use crate::error::{CliError, Code, Result};
 use crate::fsutil::human_size;
 use crate::session::Session;
+use crate::symbols::Symbols;
 use crate::ui::table;
 
 /// Something `undra build` can build for.
@@ -109,6 +112,9 @@ pub struct Options {
     pub targets: Vec<Target>,
     /// Release builds (LTO, optimized) instead of debug.
     pub release: bool,
+    /// Write the symbol files of a release build (`false` for `--no-symbols`): the unstripped
+    /// twins, the web debug modules and the manifest (ADR-046).
+    pub symbols: bool,
 }
 
 /// Builds every target of `options`, then prints what was made and how big it is.
@@ -118,6 +124,7 @@ pub struct Options {
 /// The first failure; targets already built stay built.
 pub fn run(session: &Session<'_>, options: &Options) -> Result<Vec<Artifact>> {
     let mut all = Vec::new();
+    let symbols = Symbols::new(session, options.symbols, options.release);
     for target in &options.targets {
         session.ui.step(&format!(
             "Building the core for {} ({})",
@@ -129,11 +136,11 @@ pub fn run(session: &Session<'_>, options: &Options) -> Result<Vec<Artifact>> {
             }
         ));
         let produced = match target {
-            Target::Host => host::package(session, options.release)?,
-            Target::Ios => ios::build(session, options.release)?,
-            Target::Android => android::build(session, options.release)?,
-            Target::Web => web::build(session)?,
-            Target::ReactNative => rn::build(session, options.release)?,
+            Target::Host => host::package(session, options.release, &symbols)?,
+            Target::Ios => ios::build(session, options.release, &symbols)?,
+            Target::Android => android::build(session, options.release, &symbols)?,
+            Target::Web => web::build(session, &symbols)?,
+            Target::ReactNative => rn::build(session, options.release, &symbols)?,
         };
         all.extend(produced);
     }
@@ -150,6 +157,7 @@ pub fn hints(session: &Session<'_>, options: &Options, artifacts: &[Artifact]) -
             || options.targets.contains(&Target::ReactNative))
     {
         out.extend(android::hint(session, artifacts));
+        out.extend(android::debugger_hint(session));
     }
     out
 }

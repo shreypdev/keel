@@ -92,6 +92,24 @@ final class PreviewAndRecordedTests: XCTestCase {
         XCTAssertEqual(preview.fakes.kv.ops.map { $0.op }.filter { $0 == "set" }.count, 1)
     }
 
+    func testT5ACorePanicLandsInTheDiagnosticsFake() async throws {
+        // ADR-046: the kit's Diagnostics fake records the structured report of every panic, so a test of a failure path asserts on it.
+        let preview = try PreviewCore.load(UndraPlaygroundCore.load)
+        defer { preview.close() }
+        XCTAssertEqual(preview.fakes.diagnostics.reports, [])
+        XCTAssertThrowsError(try explode(reason: "preview kaboom", ctx: preview.core))
+        await preview.settle()
+        let report = try XCTUnwrap(preview.fakes.diagnostics.reports.first)
+        XCTAssertEqual(preview.fakes.diagnostics.reports.count, 1)
+        XCTAssertEqual(report.operation, "explode")
+        XCTAssertTrue(report.message.contains("preview kaboom"), report.message)
+        XCTAssertEqual(report.namespace, "playground_core")
+        XCTAssertEqual(report.schemaHash, UndraIds.schemaHash)
+        XCTAssertTrue(preview.fakes.diagnostics.contains("preview kaboom"))
+        // The core keeps working.
+        XCTAssertEqual(try PlaygroundCore.add(a: 1, b: 2, ctx: preview.core), 3)
+    }
+
     func testT4ARecordedSessionPlaysUnderTheGeneratedStore() async throws {
         let recorded = try RecordedCore.load(try Recording(json: try fixture("fixtures/session-todos.json")), expectedSchemaHash: UndraIds.schemaHash)
         defer { recorded.close() }

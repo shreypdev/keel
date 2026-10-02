@@ -15,6 +15,9 @@ androidx-test-ext-junit = "1.2.1"
 # The optional :undra-compose module: the Compose BOM the playground app uses (examples/playground/android). The module
 # depends on compose-foundation (LazyListScope) and compose-runtime (snapshot state) only; :runtime never sees Compose.
 compose-bom = "2024.10.01"
+# The optional :android-work module (ADR-046): WorkManager runs the core's background tasks in a window the OS grants.
+# 2.10 builds against API 35 and AGP 8.7, which is what this project's toolchain pins; a newer line may ask for more.
+androidx-work = "2.10.5"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -31,6 +34,8 @@ androidx-compose-runtime = { module = "androidx.compose.runtime:runtime" }
 # Test-only (the instrumented tests of :undra-compose, never shipped).
 androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
 androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
+androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "androidx-work" }
+androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "androidx-work" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

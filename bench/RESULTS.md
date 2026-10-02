@@ -743,6 +743,19 @@ Web: the browser `Db` adapter is an opt-in worker bundle outside the hello world
 in all (zlib level 9, the playground's Vite production build). The hello world is unchanged: an app pays this
 only when it imports `@undra/runtime/db`.
 
+### Production operations (ADR-046)
+
+Nothing on the hot path moved: reads never cross, a write crosses once, and the panic report is built only when a
+panic is contained, so no budgeted row changed. `sync_alloc`, `commit_alloc` and `derived_alloc` still hold their
+exact counts, and the budgets test passes at its committed numbers (2026-10-01, the merged tree).
+
+| What | Number | How |
+|---|---|---|
+| A contained panic answered with status 2, and the `PanicReport` encoded and handed to `Diagnostics` | p50 34.6 µs with the report, 32.5 µs with the port unbound: the report is about 2 µs of it | `cargo test --release -p undra-ports --test diagnostics -- --ignored --nocapture panic_cost` (p50 of 400; an ignored measurement, not a gated row); a `TestRuntime` has no frame source, so `undra-ffi`'s stack walk is not in it |
+| Hello-world web core, gzipped (the wasm alone) | 119,055 (`main` with objects-callbacks) to 119,654 (+599); budget 120,000 | `scripts/wasm-size.sh`; the standard surface (one port, three records, `run_background`) is in every schema and the FATAL record carries location and operation. Merged as the piece first landed it measured 121,164 (over the gate); the review made `guarded` `Ok(f())` on wasm and `run_background` idle-synchronous (ADR-052, the prod-ops review note) |
+| Hello-world JavaScript runtime up front, gzipped | 21,672 (`main` with objects-callbacks) to 22,005 (+333); budget 22,100 (ADR-052, the prod-ops review note; the review made `runInBackground` and the `Diagnostics` registration lazy) | `scripts/wasm-size.sh`; the report builder (853 bytes), `runInBackground` and the `Diagnostics` port are lazy chunks |
+| Shipped artefacts, built with `--no-symbols` (the profile before ADR-046) and with the symbol work, same core | Android `.so` arm64-v8a 2,355,912 to 2,355,848, x86_64 2,515,840 to 2,515,776; iOS app, linked and stripped, byte-identical (2,190,456); host dylib +16; web wasm 879,095 to 875,686 raw (353,111 to 351,605 gzipped) | `cargo test -p undra-cli --test symbols` (`shipped_artefacts_do_not_grow_and_no_symbols_writes_none`, which fails if any grew); the playground core |
+
 ## The CI gate
 
 `bench/budgets.toml` holds a host budget for each of the 56 operations the gate runs (the wire round trips,

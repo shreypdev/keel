@@ -31,9 +31,11 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use parking_lot::Mutex;
 use undra_ports::{CtxPorts, HttpError, StorageError};
+use undra_runtime::background::{BackgroundOutcome, Deadline};
 use undra_runtime::executor::Notify;
 use undra_runtime::log::{DEBUG, WARN};
 use undra_runtime::persist::{
@@ -197,6 +199,16 @@ pub(crate) struct QueueState {
 }
 
 impl QueueState {
+    /// Whether the stored queue was read (so the writer may write it).
+    pub(crate) fn is_hydrated(&self) -> bool {
+        self.hydration == Hydration::Hydrated
+    }
+
+    /// Whether the queue's writer has something to write or is writing it (ADR-046).
+    pub(crate) fn writer_busy(&self) -> bool {
+        self.writer_running || self.dirty || self.dead_dirty || self.v1_pending
+    }
+
     /// The fingerprints the stored queue and dead letters reference (for the collection of
     /// unreferenced closures).
     pub(crate) fn fingerprints(&self) -> impl Iterator<Item = u64> + '_ {
@@ -315,7 +327,11 @@ impl Shared {
         }
         if !state.queue.writer_running {
             state.queue.writer_running = true;
-            ctx.spawn(run_queue_writer(self.clone(), ctx.downgrade()));
+            let (shared, weak) = (self.clone(), ctx.downgrade());
+            ctx.spawn(async move {
+                let _bump = crate::background::BumpOnDrop(shared.clone());
+                run_queue_writer(shared, weak).await;
+            });
         }
     }
 
@@ -596,7 +612,83 @@ impl Shared {
             }
             self.start_queue_writer(ctx, &mut state);
         }
+        self.idle.bump();
         self.replay_queue(ctx);
+    }
+
+    // ----- background runs (ADR-046) ---------------------------------------------------------
+
+    /// How much work the replay task has: the queued mutations, and a queue that could not be
+    /// read yet.
+    pub(crate) fn background_queue_pending(&self) -> u32 {
+        let state = self.state.lock();
+        let unread = u32::from(state.queue.hydration == Hydration::Unreadable);
+        u32::try_from(state.queue.items.len())
+            .unwrap_or(u32::MAX)
+            .saturating_add(unread)
+    }
+
+    /// The replay task of a background run: an unreadable queue is read again first (ADR-049),
+    /// then the queue is replayed (when online) and waited for until it is empty, the network is
+    /// gone or the window ends. Offline it ends at once, incomplete: the OS's window is not held
+    /// for a network that may not come back inside it. The mutations answered meanwhile are
+    /// counted as they happen, including those a replay already running (the client's own, started
+    /// by `Connectivity` coming back) answers.
+    pub(crate) async fn background_replay(
+        self: &Arc<Self>,
+        weak: &WeakCtx,
+        deadline: &Deadline,
+    ) -> BackgroundOutcome {
+        use crate::background::{Woke, outcome, wait};
+        if self.state.lock().queue.hydration != Hydration::Hydrated {
+            self.hydrate_queue(weak).await;
+        }
+        let baseline = self.fetched.load(Ordering::SeqCst);
+        let mut counted = self.replayed.load(Ordering::SeqCst);
+        let mut starts = 0_u32;
+        let done = loop {
+            let epoch = self.idle.epoch();
+            let (empty, replaying, hydrated) = {
+                let state = self.state.lock();
+                (
+                    state.queue.items.is_empty(),
+                    state.queue.replaying,
+                    state.queue.hydration == Hydration::Hydrated,
+                )
+            };
+            let replayed = self.replayed.load(Ordering::SeqCst);
+            deadline.note_replayed(u32::try_from(replayed - counted).unwrap_or(u32::MAX));
+            counted = replayed;
+            if !hydrated {
+                break false;
+            }
+            if empty {
+                break true;
+            }
+            if !self.is_online() {
+                break false;
+            }
+            if !replaying {
+                // Not running (nothing triggered it, or it ended): start it, a few times at most.
+                starts += 1;
+                let Ok(ctx) = weak.upgrade() else {
+                    break false;
+                };
+                if starts > 3 {
+                    break false;
+                }
+                self.replay_queue(&ctx);
+                continue;
+            }
+            match wait(self, epoch, weak, deadline).await {
+                Woke::Changed => {}
+                Woke::Expired => break false,
+            }
+        };
+        // The replay is done when what it did has settled: the lists its invalidations refetched
+        // are fetched and written, and the emptied queue is stored.
+        let done = done && self.background_settle(weak, deadline, baseline).await;
+        outcome(done)
     }
 
     /// Reads an unreadable queue again (on `Active`, on a background run).
@@ -768,7 +860,13 @@ impl Shared {
             return;
         }
         state.queue.replaying = true;
-        ctx.spawn(run_replay(self.clone(), ctx.downgrade()));
+        let (shared, weak) = (self.clone(), ctx.downgrade());
+        ctx.spawn(async move {
+            // Whatever ends the replay (the queue is empty, the network is gone, the runtime
+            // is), a background run waiting for it hears of it (ADR-046).
+            let _bump = crate::background::BumpOnDrop(shared.clone());
+            run_replay(shared, weak).await;
+        });
     }
 
     /// Removes the head of the queue (it was answered) and persists the change.
@@ -1021,6 +1119,10 @@ async fn run_replay(shared: Arc<Shared>, weak: WeakCtx) {
         attempt = 0;
 
         let item = shared.pop_queue(&ctx);
+        if item.is_some() {
+            shared.replayed.fetch_add(1, Ordering::SeqCst);
+        }
+        shared.idle.bump();
         let (waiter, invalidations) = match item {
             Some(item) => (item.waiter, item.invalidations),
             None => (None, Vec::new()),

@@ -15,13 +15,24 @@ that links the core into a library (the shim `undra build` generates) says which
 
 ```rust,ignore
 // The shim crate's lib.rs (`ignore`: `acme_pay_core` is the app's crate, not one of this workspace)
-undra_ffi::export_core!(acme_pay, jni_class = "com/acme/pay/UndraCoreNative");
+undra_ffi::export_core!(acme_pay, jni_class = "com/acme/pay/UndraCoreNative", version = "1.4.0");
 extern crate acme_pay_core; // the core's #[undra::api] items
 ```
 
 That emits `acme_pay_undra_api()`, which returns the core's `UndraApi` table, and on Android
 `JNI_OnLoad`, which registers the natives on the bindings' own class. Nothing else is exported, so
 two cores link into one app side by side. `undra-ffi` itself is an rlib and exports nothing.
+`version` (the core crate's, which the generated shim passes) and the namespace are what the core's
+panic reports name (ADR-046); the macro submits them as a `CoreIdentity` on wasm too.
+
+## Panic reports
+
+On native targets this crate reads the stack and the loaded image for the report of every panic
+the runtime contains (`frames`: each instruction address as an offset into the image that holds the
+core, from `_Unwind_Backtrace`; `image_id`: the Mach-O `LC_UUID` or the ELF GNU build id, read from
+the image's own headers; the only `unsafe` involved, in `frames.rs`) and installs that as the
+runtime's `FrameSource` when the core starts. A panic caught at one of this crate's own boundary
+entries is reported with the entry's name as its operation.
 
 ## Embedding the C ABI (about 30 lines of C)
 

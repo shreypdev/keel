@@ -82,6 +82,13 @@ enum StandardPorts {
         static let changed: UInt32 = fnv1a32("Lifecycle.changed")
     }
 
+    /// `Diagnostics`, sync, one method (ADR-046): the core hands every contained panic to it as one
+    /// `PanicReport`, fire and forget (port call id 0, like a `Log` record).
+    enum Diagnostics {
+        static let portId: UInt32 = fnv1a32("port.Diagnostics")
+        static let panicked: UInt32 = fnv1a32("Diagnostics.panicked")
+    }
+
     // The opt-in ports (ADR-047, ADR-048): a core declares them only when it is built with the
     // `websocket`, `sse` or `db` feature. Registering one the core does not declare is harmless.
 
@@ -128,6 +135,7 @@ enum StandardPorts {
         "Timer": ["set"],
         "Connectivity": ["changed"],
         "Lifecycle": ["changed"],
+        "Diagnostics": ["panicked"],
         "WebSocket": ["connect", "send", "receive", "close"],
         "Sse": ["open", "next", "close"],
         "Db": ["open", "execute", "query", "begin", "commit", "rollback", "close"],
@@ -160,6 +168,15 @@ enum StandardPorts {
         let digits = String(value, radix: 16)
         return String(repeating: "0", count: Swift.max(0, 8 - digits.count)) + digits
     }
+}
+
+// MARK: - Standard functions
+
+/// `fnv1a32("fn.<name>")` for the standard functions: free functions every schema has and no binding
+/// generates (ADR-024 and its amendment), which the runtime calls by itself.
+enum StandardFunctions {
+    /// `run_background(deadline_ms: u64) -> BackgroundReport` (ADR-046), an async call.
+    static let runBackground: UInt32 = fnv1a32("fn.run_background")
 }
 
 // MARK: - RuntimeConfig

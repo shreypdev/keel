@@ -117,6 +117,34 @@ public class LogAdapter {
     )
 }
 
+/**
+ * The `Diagnostics` port (ADR-046): the core calls `panicked(report)` once for every panic it contained, fire and forget, on the thread
+ * it panicked on, possibly with the core lock held. The adapter decodes the one [UndraPanicReport] and hands it to [handler] **on that
+ * thread**, so [handler] must return quickly, must not call into Undra and must not throw (a failure of the handler is the port's failure:
+ * logged, and the core is answered "unavailable", which it ignores). The core registers its own adapter for every core it loads; that
+ * handler hops to the runtime's main thread and calls `LoadOptions.onPanic` there. Register another one in `LoadOptions.adapters` to
+ * take the reports yourself, as the testing kit's `CaptureDiagnostics` does.
+ *
+ * @param handler receives each decoded report.
+ */
+public class DiagnosticsAdapter(private val handler: (UndraPanicReport) -> Unit) {
+    /** Hands [report] to the handler. */
+    public fun panicked(report: UndraPanicReport) {
+        handler(report)
+    }
+
+    /** This adapter as a sync [PortImpl] for [StandardPorts.Diagnostics]. */
+    public fun portImpl(): PortImpl = PortImpl(
+        sync = true,
+        methods = portMethods {
+            this[StandardPorts.Diagnostics.PANICKED] = { args ->
+                panicked(readArgs(args) { UndraPanicReport.decode(it) })
+                NO_REPLY
+            }
+        },
+    )
+}
+
 /** The mapping of Undra log levels (SPEC 8: 0 trace ... 5 fatal) to `java.util.logging`. */
 public object JulLog {
     /** Writes [message] to the logger named [target] (`undra` when empty) at the level for [level]. */

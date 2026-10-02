@@ -328,6 +328,7 @@ script, not twiggy's shallow bytes (gzip is not additive).
    `report` / `onError`, snapshot and restore, worker sync ports) added 2.3 KB to what the hello app ships, so the
    record is 24,841 bytes; 24 KB would have failed from the day it was set, which is not a test (R9). The
    record is the honest number; `ts-runtime-size` still targets 16 KB.
+
 3. **The 5% tolerance over the record stays**, alongside the budget, for both artefacts.
 4. **No second landing card.** The landing row says plainly that it is the wasm alone ("Web core, hello
    world: the wasm alone, gzipped"); the README states the JavaScript number and its budget in prose.
@@ -480,6 +481,30 @@ Worker script) so that growth in what loads on demand is visible in review, thou
 change in this piece; still within the 120,000 budget and 5% of itself). The README's number is
 generated from the record as before. A run still fails when the runtime's `node_modules` are missing.
 
+## Amendment (2026-10-01, `prod-ops`): the up-front gate is 22,000
+
+ADR-046 puts a panic report and a background run on every platform, and the web column pays for part of it in the page's
+first chunk. Measured on the merged tree with the gate's own script (`scripts/web-size-runtime.mjs`, the `$initial`
+chunk, zlib level 9): **21,756** bytes gzipped, against 21,336 for `main` alone (+420), so the budget `web/hello-runtime-js`
+becomes **22,000** (the record is 21,756; the 5% tolerance stays). The hello wasm is 119,227 gzipped (+2,146 on `main`'s
+117,081; budget 120,000, unchanged).
+
+What the 420 bytes are (an ablation on the final tree, gzipped, the pieces overlap): loading the trap-report builder
+when the app set `onPanic` or `crashRecovery` (130), `runInBackground` (112), the page's background window and its callback
+(80), the `pagehide` and `freeze` listeners (80), the `panicReports` and `background` stats fields (76), the Diagnostics
+registration (56). What is lazy and costs the hello world nothing: the report builder for the wasm trap path
+(`panic-report.js`, 853 bytes, loaded only for an app with `onPanic` or `crashRecovery`), and the `Diagnostics` port with its
+codecs (in the `ports` chunk, for native cores only). Tried and rejected: decoding the background report from a lazy
+`codecs.js` (+30 bytes: the inline four-field read is cheaper); a lazy `runInBackground` (-45 bytes, but the page window
+must run at `pagehide` or `freeze`, when a chunk fetch is unreliable, so it needs a second code path); all of that plus
+no stats fields reaches about 21,617, still over the old gate, and drops specified behaviour. `up-front.test.ts` fails if
+`core.ts` statically reaches `ports`, `codecs`, `standard`, `panic-report`, `remote`, `wasm-worker` or `recovery`.
+
+One behaviour change on `main`'s lazy design: a page that loads a native core over `remote` (`undra dev`, React Native's
+stand-in) now fetches the `ports` chunk (about 2.3 KB gzipped) at load, because the `Diagnostics` port must be registered
+before the transport starts; `main` fetched it there only for an explicit Timer adapter. A failed fetch rejects `load`, as
+it already did in that case.
+
 ## Note (2026-10-02, the objects-callbacks review): the JavaScript gate is restated at 21,800 bytes
 
 ADR-040 and ADR-041 put code in the chunk a page loads up front, because every generated constructor now goes
@@ -507,3 +532,42 @@ gate's own build):
 
 The README's and the site's numbers come from the record as before.
 
+## Review note (2026-10-02, `prod-ops` adversarial review): the JavaScript gate is 22,100; the wasm is back under 120,000
+
+Measured on `prod-ops` merged with `main` at `f9a37a8` (objects-callbacks in), with the gate's own script.
+
+**D1, the JavaScript up front.** The rule (R9): growth of `web/hello-runtime-js` is allowed only for behaviour a hello
+app gets at load. The amendment above, item by item (its ablation's numbers, gzipped, overlapping):
+
+| Item | Bytes | Verdict |
+|---|---|---|
+| The `pagehide` and `freeze` listeners | 80 | **Kept up front.** Registered at load for every page; at `pagehide`/`freeze` a chunk fetch is unreliable. |
+| The page's background window (`_backgroundWindow`, its `stats()` read) | 80 | **Kept up front.** Runs at every hide, for every page. |
+| The `panicReports` and `background` stats fields | 76 | **Kept up front.** Specified surface of `stats()` on every platform; the window reads `background.pending`. |
+| The trap-report loader (`_loadPanics`) | 130 | **Kept up front.** The trigger must run at load: the builder and the module's SHA-256 (`imageId`) have to be there before a trap, and with `recovery` the report is built synchronously before the restart. The builder itself (`panic-report.js`) stays lazy. |
+| `runInBackground` | 112 | **Lazy** (`background.js`, 281 bytes on demand). A hello core has no background task, so `background.pending` is 0 and the window never calls it. The window fetches the chunk at the first hide with work pending; `visibilitychange` to hidden precedes `pagehide` and `freeze` (a page is frozen only when hidden), and the debounced persistence is flushed by the core on `Lifecycle.Background` itself, not by the run. The amendment's objection (a fetch at `pagehide` is unreliable) holds only for a browser that fires `pagehide` without hiding first, where the page is going away and the replay's network calls could not finish either. A failed chunk fetch rejects the call with an `UndraCallError` (to `onError` in the window), like the other lazy chunks. |
+| The `Diagnostics` registration | 56 | **Lazy** (`serveDiagnostics` in the `ports` chunk). Only a native core runs it, and that chunk is already fetched before the transport starts; a wasm page ships none of it. |
+
+On `prod-ops` alone that took the chunk from 21,756 to 21,666 (-90). On the merged tree: **22,005** bytes gzipped, against
+**21,672** for `main` (objects-callbacks' record): this piece is **+333**, the four kept items, and 4 bytes for `load` waiting for the module's hash when the app set `onPanic` (the review's fix of
+S29: a trap right after load had no `imageId`). The budget is **22,100**, the
+record rounded up to the next hundred (the 5% tolerance stays); 22,000 would already fail. Both pieces' bytes, for the
+integrator: `main` before either 21,336; objects-callbacks +336 (21,672, its note above: the identity map, the mirror's
+callback entries, the handle layout); prod-ops +333 (22,005: the trap-report trigger, the page window with
+`pagehide`/`freeze`, the stats fields). `up-front.test.ts` also fails if `core.ts` statically reaches `background.ts`.
+
+**The wasm (a finding of the review, fixed).** Merged with `main`, the hello wasm measured **121,164** gzipped, 1,164 over
+the 120,000 budget: `main` was at 119,055 and this piece added 2,109. Where (named builds, twiggy, then the script's
+gzipped deltas): the standard function `run_background`, generated as an `async fn`, linked its future, its reply encoding
+and its dispatcher into every core (-745 when removed); the wasm hook's `in <operation>` naming (-78); and, the most, the
+report paths of a *caught* panic (`report_from`, the frames, the reporting at every guard), which a wasm core can never
+run: with `panic = "abort"` nothing catches a panic there. Two changes, no behaviour lost:
+
+1. `guarded` is `Ok(f())` on wasm (the hook still logs the FATAL record before the trap), so no reporting path of a caught
+   panic is linked into a wasm core: -1,137 bytes gzipped (part of it `main`'s own dead paths).
+2. `run_background`'s dispatcher is written by hand in `undra-ports` (the same declaration, so the schema and its hash are
+   unchanged): a runtime with no background task answers an idle report synchronously
+   (`Runtime::background_call`), and the asynchronous run is reachable only through `Runtime::add_background_task`: -378.
+
+The hello wasm is **119,654** gzipped (+599 on `main`: the standard surface every schema carries, R1 and ADR-024, the idle
+dispatcher, the FATAL record's `at`/`in` trailer); the budget stays 120,000.

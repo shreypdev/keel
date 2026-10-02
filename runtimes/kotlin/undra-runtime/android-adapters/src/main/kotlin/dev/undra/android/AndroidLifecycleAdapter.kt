@@ -101,6 +101,44 @@ internal class ProcessStateMachine(
 }
 
 /**
+ * What the lifecycle adapter does with each state it reports, kept apart from Android so that JVM unit tests can drive it
+ * (ADR-046): it sends the state to the core, and when the app has just gone to the background it asks the core whether a
+ * background window has work to drain (`stats().background.pending`), and tells [onBackgroundWorkPending] if so.
+ *
+ * The first state an adapter reports is where the app already is, not a move to the background, so it never asks.
+ */
+internal class LifecycleReporter(
+    private val send: (AppState) -> Unit,
+    private val hasBackgroundWork: () -> Boolean,
+    private val onBackgroundWorkPending: (() -> Unit)?,
+) {
+    private var reportedFirst = false
+
+    /** Reports [state] to the core and, for a move to [AppState.BACKGROUND], offers pending background work to the app. */
+    fun changed(state: AppState) {
+        val first = !reportedFirst
+        reportedFirst = true
+        try {
+            send(state)
+        } catch (e: Exception) {
+            Log.w(TAG, "could not report the lifecycle state to the core", e)
+        }
+        if (first || state != AppState.BACKGROUND) return
+        val callback = onBackgroundWorkPending ?: return
+        try {
+            // Read right after the Background event: the core has flushed what it was debouncing and says what is left.
+            if (hasBackgroundWork()) callback()
+        } catch (e: Exception) {
+            Log.w(TAG, "onBackgroundWorkPending failed", e)
+        }
+    }
+
+    private companion object {
+        const val TAG = "Undra"
+    }
+}
+
+/**
  * The `Lifecycle` event port over the app's activities: tells the core when the app is in the foreground and receiving
  * input ([AppState.ACTIVE]), in the foreground without the focus ([AppState.INACTIVE]) or not visible
  * ([AppState.BACKGROUND]). The core refetches the observed queries that went stale while the app was away when it
@@ -181,16 +219,23 @@ public class AndroidLifecycleAdapter(context: Context, private val settleMs: Lon
         listener(initial)
     }
 
-    /** Starts reporting to [core] as `Lifecycle.changed(state)` events; see [start]. */
-    public fun attach(core: UndraCore) {
+    /**
+     * Starts reporting to [core] as `Lifecycle.changed(state)` events; see [start].
+     *
+     * @param onBackgroundWorkPending called on the main thread when the app has moved to the background and the core says a
+     *   background window has work to drain (`core.stats().background.pending > 0`: queued offline mutations, stale persisted
+     *   queries, unflushed persistence; ADR-046). It is where an app asks the OS for that window: the optional `android-work`
+     *   module's `UndraWork.schedule(context)` enqueues the WorkManager job. `null`, the default, asks for nothing. It is not
+     *   called for the state the adapter starts in, only for a move to the background after it, and an exception it throws is logged.
+     */
+    public fun attach(core: UndraCore, onBackgroundWorkPending: (() -> Unit)? = null) {
         val events = LifecycleEvents(core)
-        start { state ->
-            try {
-                events.changed(state)
-            } catch (e: Exception) {
-                Log.w(TAG, "could not report the lifecycle state to the core", e)
-            }
-        }
+        val reporter = LifecycleReporter(
+            send = events::changed,
+            hasBackgroundWork = { core.stats().background.hasPendingWork },
+            onBackgroundWorkPending = onBackgroundWorkPending,
+        )
+        start(reporter::changed)
     }
 
     /** Stops reporting. Idempotent. */
