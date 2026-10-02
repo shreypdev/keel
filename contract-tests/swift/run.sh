@@ -2,7 +2,7 @@
 # Runs the Swift column of the contract scenarios (contract-tests/scenarios.md): the Swift runtime
 # over the C ABI, against the real playground core, through the generated bindings.
 #
-#   contract-tests/swift/run.sh                 all of them (S01 to S20, S23 to S33), then the check
+#   contract-tests/swift/run.sh                 all of them (S01 to S20, S23 to S33 and S35), then the check
 #   contract-tests/swift/run.sh --filter ContractScenarios/testS07_streamWithBackpressure
 #   contract-tests/swift/run.sh --floor         the same grid against bindings generated for an iOS 15 floor (ADR-045):
 #                                               `ObservableObject` stores and `UndraDuration` (the first argument; it may
@@ -16,13 +16,13 @@
 #   2. stages a copy of each lib<namespace>.dylib under .build/core (Package.swift links them and adds
 #      the rpath). Each exports one symbol, its table entry (ADR-044), so the three sit side by side;
 #      a dynamic library keeps every object file of the core, so its registrations need no flag,
-#   3. runs `swift test`. S14 and S15 hand what build A persisted over in .build/migration,
+#   3. runs `swift test`. S14, S15 and S35 hand what build A persisted, snapshotted and held over in .build/migration,
 #   4. swaps build B's library into .build/core and runs only `MigrationBuildB` in a second process
-#      (`swift test --skip-build`, UNDRA_CONTRACT_PHASE=B), which prints `SCENARIO S14|S15 FAIL` lines
+#      (`swift test --skip-build`, UNDRA_CONTRACT_PHASE=B), which prints `SCENARIO S14|S15|S35 FAIL` lines
 #      if build B's steps fail, then puts build A's library back (also when something fails),
 #   5. pipes the `SCENARIO` lines of both processes through contract-tests/check.sh.
 # The exit status is non-zero if the tests fail or any scenario is not a PASS.
-# A filtered run skips step 4 (the build-B steps need the whole of S14 and S15).
+# A filtered run skips step 4 (the build-B steps need the whole of S14, S15 and S35).
 # S23 and S24 start contract-tests/servers/realtime-server.mjs with Node (it exits with this run).
 set -euo pipefail
 FLOOR=0
