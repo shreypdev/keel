@@ -85,6 +85,10 @@ thread_local! {
     /// Ids of the runtimes whose `Host` callback this thread is currently inside, innermost
     /// last (ADR-023, finding M2).
     static IN_HOST: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+    /// The handles a dispatcher resolved to objects while it ran on this thread (`Runtime::object`),
+    /// collected only while `dispatch` has armed it: the objects a call holds (its receiver and its
+    /// object parameters), which a restore must check before the call may go on (ADR-023, O3).
+    static RESOLVED: RefCell<Option<Vec<Handle>>> = const { RefCell::new(None) };
     /// Nesting depth of `testing::unchecked_writes` scopes on this thread.
     static UNCHECKED_WRITES: Cell<u32> = const { Cell::new(0) };
     /// This thread created a `TestRuntime`, so it is that test's driver.
@@ -347,7 +351,45 @@ struct CallEntry {
     /// The handle of the receiver the call was made on (null for free functions and
     /// constructors): what a restore must check before the call may go on running.
     receiver: Handle,
+    /// The handles of the objects the call took as parameters (resolved before its body ran): a
+    /// restore that replaced or invalidated one of them cancels the call as it does for the
+    /// receiver, since the call would finish on an object the handle no longer names.
+    params: Vec<Handle>,
     stream: Option<Arc<StreamState>>,
+}
+
+/// Arms the thread's collector of resolved object handles for the span of a dispatch, and hands
+/// back what the dispatcher resolved.
+struct ResolvedScope(());
+
+impl ResolvedScope {
+    fn arm() -> ResolvedScope {
+        let _ = RESOLVED.try_with(|slot| *slot.borrow_mut() = Some(Vec::new()));
+        ResolvedScope(())
+    }
+
+    /// The handles resolved so far, in order; the collector stays armed until the scope drops.
+    fn take(&self) -> Vec<Handle> {
+        RESOLVED
+            .try_with(|slot| slot.borrow_mut().as_mut().map(std::mem::take))
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for ResolvedScope {
+    fn drop(&mut self) {
+        let _ = RESOLVED.try_with(|slot| *slot.borrow_mut() = None);
+    }
+}
+
+fn note_resolved(handle: Handle) {
+    let _ = RESOLVED.try_with(|slot| {
+        if let Some(list) = slot.borrow_mut().as_mut() {
+            list.push(handle);
+        }
+    });
 }
 
 /// Credit accounting for one open stream (SPEC 3.7).
@@ -1376,7 +1418,13 @@ impl Runtime {
             );
             return 5;
         }
-        match self.dispatch(&call, false) {
+        // The objects the dispatcher resolves (the receiver, the object parameters) are what an
+        // asynchronous call or a stream holds while it runs: a restore checks them (ADR-023).
+        let resolved = ResolvedScope::arm();
+        let dispatched = self.dispatch(&call, false);
+        let params = resolved.take();
+        drop(resolved);
+        match dispatched {
             Dispatched::Bad(reason) => self.reply_bad(call_id, &reason),
             Dispatched::Panicked(report, handle) => self.reply_panic(call_id, handle, &report),
             Dispatched::Done(result, handle) => match result {
@@ -1386,9 +1434,14 @@ impl Runtime {
                 }
                 DispatchResult::Async(future) => {
                     if origin == 0 {
-                        self.spawn_call(call_id, handle, future);
+                        self.spawn_call(call_id, handle, params, future);
                     } else {
-                        self.spawn_call(call_id, handle, Box::pin(WithOrigin::new(origin, future)));
+                        self.spawn_call(
+                            call_id,
+                            handle,
+                            params,
+                            Box::pin(WithOrigin::new(origin, future)),
+                        );
                     }
                 }
                 DispatchResult::Stream(stream) => self.open_stream(call_id, handle, stream),
@@ -1784,6 +1837,7 @@ impl Runtime {
                 task,
                 receiver: handle,
                 stream: None,
+        params: Vec<Handle>,
             },
         );
     }
@@ -1815,6 +1869,7 @@ impl Runtime {
         let state = Arc::new(StreamState::default());
         let spawned = self.exec.try_spawn(
             Box::pin(drive_stream(
+                params,
                 self.weak.clone(),
                 call_id,
                 stream,
@@ -1842,6 +1897,7 @@ impl Runtime {
                 stream: Some(state),
             },
         );
+        params: Vec<Handle>,
         self.send_reply(call_id, ReplyStatus::StreamOpened, &[]);
     }
 
@@ -1865,12 +1921,14 @@ impl Runtime {
         }
     }
 
-    /// Cancels the in-flight calls and streams whose receiver a restore replaced or invalidated:
-    /// a plain call is answered with status 3, a stream ends with an error item saying so, and
-    /// the task is dropped, each exactly once (the call table is the gate). Calls with no
-    /// receiver, and calls on an object that is still the one its handle names, go on.
+    /// Cancels the in-flight calls and streams whose receiver, or any object they took as a
+    /// parameter, a restore replaced or invalidated: a plain call is answered with status 3, a
+    /// stream ends with an error item saying so, and the task is dropped, each exactly once (the
+    /// call table is the gate). Calls that hold no object (a free function, a constructor with no
+    /// object parameter), and calls whose objects are still the ones their handles name, go on.
     ///
     /// `before` maps every handle that was live before the restore to its object's address.
+                params,
     /// A call is affected when its handle was live before or is live now and does not name the
     /// same object in both (after a restore that is every call on a store, since each one is
     /// rebuilt); a call on an object that had already been released, whose handle the restore did
@@ -1880,15 +1938,11 @@ impl Runtime {
             let calls = self.calls.lock();
             calls
                 .iter()
-                .filter(|(_, entry)| !entry.receiver.is_null())
                 .filter(|(_, entry)| {
-                    let was = before.get(&entry.receiver.0).copied();
-                    let now = self
-                        .objects
-                        .get_dyn(entry.receiver)
-                        .ok()
-                        .map(|object| object_address(&object));
-                    (was.is_some() || now.is_some()) && was != now
+                    std::iter::once(entry.receiver)
+                        .chain(entry.params.iter().copied())
+                        .filter(|handle| !handle.is_null())
+                        .any(replaced)
                 })
                 .map(|(&call_id, _)| call_id)
                 .collect()
@@ -1908,6 +1962,16 @@ impl Runtime {
         for call_id in ids {
             self.abort_call(call_id, why);
         }
+        // Whether the object `handle` names is not the one it named before the restore.
+        let replaced = |handle: Handle| {
+            let was = before.get(&handle.0).copied();
+            let now = self
+                .objects
+                .get_dyn(handle)
+                .ok()
+                .map(|object| object_address(&object));
+            (was.is_some() || now.is_some()) && was != now
+        };
     }
 
     /// Ends in-flight call `call_id` from the runtime's side: drops its task and tells the host,
@@ -2127,7 +2191,12 @@ impl Runtime {
 
     /// Resolves a raw handle to a `T`: what a generated dispatcher does for its receiver.
     pub fn object<T: Send + Sync + 'static>(&self, handle: u64) -> Result<Arc<T>, BadHandle> {
-        self.objects.get::<T>(Handle(handle))
+        let resolved = self.objects.get::<T>(Handle(handle));
+        if resolved.is_ok() {
+            // A call that outlives its dispatch holds this object (see `cancel_calls_replaced_by_restore`).
+            note_resolved(Handle(handle));
+        }
+        resolved
     }
 
     // ----- executor ----------------------------------------------------------------------
@@ -2731,11 +2800,11 @@ impl Runtime {
     /// Restoring into a fresh runtime (after a crash) has no memory of observations: the host
     /// re-observes what it mirrors. Detached tasks keep the objects they already hold; those
     /// stores are detached and no longer deliver change-sets. **In-flight calls and streams
-    /// whose receiver the restore replaced or invalidated are cancelled** (ADR-023): a plain
-    /// call is answered with status 3, exactly once, a stream ends with a failed item (flag 3,
-    /// status 3; ADR-036), and their tasks are dropped, so none can report success for a write
-    /// the restored store never saw. Calls without a receiver (free functions, constructors)
-    /// carry on.
+    /// whose receiver, or any object they took as a parameter, the restore replaced or
+    /// invalidated are cancelled** (ADR-023): a plain call is answered with status 3, exactly
+    /// once, a stream ends with a failed item (flag 3, status 3; ADR-036), and their tasks are
+    /// dropped, so none can report success for a write the restored store never saw. Calls that
+    /// hold no object (a free function or constructor without object parameters) carry on.
     ///
     /// All stores are built before anything is replaced: on error the runtime is unchanged.
     ///

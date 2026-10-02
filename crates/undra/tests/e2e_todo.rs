@@ -255,6 +255,21 @@ pub fn version() -> String {
     "undra-e2e 1".to_owned()
 }
 
+/// An asynchronous free function that holds a store it was handed while it waits: no receiver, so
+/// only the parameter ties it to what a restore replaces (objects-followups, O3).
+#[undra::api]
+pub async fn count_after(ctx: Ctx, todos: &Todos, seconds: u64) -> u32 {
+    ctx.sleep(Duration::from_secs(seconds)).await;
+    todos.todos.with(|list| list.len() as u32)
+}
+
+/// A stream with a store parameter and no receiver.
+#[undra::api]
+pub fn ticks_for(todos: &Todos, n: u32) -> impl Stream<Item = u32> {
+    let _held = todos.todos.with(|list| list.len());
+    Ticks { next: 0, n }
+}
+
 /// A Rust implementation of the `Store` port; `fail` scripts an error.
 #[derive(Default)]
 struct FakeStore {
@@ -1017,4 +1032,95 @@ fn nothing_is_left_undecoded_in_a_change_set() {
     assert!(ChangeSet::decode(&mut Reader::new(&payload)).is_ok());
     payload.truncate(payload.len() - 1);
     assert!(ChangeSet::decode(&mut Reader::new(&payload)).is_err());
+}
+
+// ---------------------------------------------------------------------------------------------
+// Restore and the objects a call holds as parameters (ADR-023, ADR-040; objects-followups O3)
+// ---------------------------------------------------------------------------------------------
+
+fn function_target(name: &str) -> CallTarget {
+    CallTarget::Function {
+        method_id: ids::function_id(name),
+    }
+}
+
+#[test]
+fn a_call_holding_a_store_parameter_across_a_restore_is_answered_cancelled() {
+    let core = Core::new();
+    let store = core.todos();
+    core.run(method(store, "Todos", "add"), &enc(&"Milk".to_owned()));
+    let snapshot = core.t.runtime().snapshot();
+    // The free function has no receiver: the store it was handed is all that ties it to the restore.
+    let id = core.start(
+        function_target("count_after"),
+        &[enc(&store), enc(&5_u64)].concat(),
+    );
+    core.t.run_pending();
+    assert!(core.t.take_replies().is_empty(), "still sleeping");
+
+    core.t.runtime().restore(&snapshot).expect("restores");
+    let reply = one(core.t.take_replies());
+    assert_eq!(
+        (reply.call_id, reply.status),
+        (id, ReplyStatus::Cancelled),
+        "the call would have finished on the store the restore replaced"
+    );
+    // Exactly one reply: the old future's timer finds nothing to answer.
+    core.t.advance(Duration::from_secs(10));
+    assert!(core.t.take_replies().is_empty());
+    // The restored store is live under the same handle, and a call made now is served.
+    let reply = core.run(
+        function_target("count_after"),
+        &[enc(&store), enc(&0_u64)].concat(),
+    );
+    assert_eq!(reply.status, ReplyStatus::Ok);
+    assert_eq!(decode::<u32>(&reply.body), 1);
+}
+
+#[test]
+fn a_call_whose_store_parameter_was_released_before_the_restore_carries_on() {
+    // The restore did not touch a handle that was already released: its object is not something
+    // the restore replaced or invalidated, so the call that still holds it finishes as it always did.
+    let core = Core::new();
+    let kept = core.todos();
+    let snapshot = core.t.runtime().snapshot();
+    // Made after the snapshot, so the restore has nothing to put back under its handle.
+    let released = core.todos();
+    let id = core.start(
+        function_target("count_after"),
+        &[enc(&released), enc(&2_u64)].concat(),
+    );
+    core.t.run_pending();
+    core.t.runtime().release(released.0);
+    core.t.runtime().restore(&snapshot).expect("restores");
+    assert!(core.t.take_replies().is_empty(), "not cancelled");
+    core.t.advance(Duration::from_secs(2));
+    let reply = one(core.t.take_replies());
+    assert_eq!((reply.call_id, reply.status), (id, ReplyStatus::Ok));
+    assert_eq!(decode::<u32>(&reply.body), 0);
+    let _ = kept;
+}
+
+#[test]
+fn a_stream_holding_a_store_parameter_across_a_restore_ends_with_a_failed_item() {
+    let core = Core::new();
+    let store = core.todos();
+    let snapshot = core.t.runtime().snapshot();
+    let id = core.start(
+        function_target("ticks_for"),
+        &[enc(&store), enc(&1000_u32)].concat(),
+    );
+    core.t.run_pending();
+    assert_eq!(one(core.t.take_replies()).status, ReplyStatus::StreamOpened);
+    core.t.runtime().stream_credit(id, 2);
+    core.t.run_pending();
+    assert_eq!(core.t.host().take_stream_items().len(), 2);
+
+    core.t.runtime().restore(&snapshot).expect("restores");
+    let items = core.t.host().take_stream_items();
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!((items[0].call_id, items[0].flag), (id, StreamFlag::Failed));
+    core.t.runtime().stream_credit(id, 100);
+    core.t.run_pending();
+    assert!(core.t.host().take_stream_items().is_empty());
 }
