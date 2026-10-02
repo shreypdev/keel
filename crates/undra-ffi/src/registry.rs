@@ -169,6 +169,10 @@ pub(crate) struct Registry {
     /// the map itself — so the loser of a removal race still returns only once no callback of
     /// that port runs (re-review N1). Entries leave the list once drained.
     draining: Mutex<Vec<(u32, Arc<PortReg>)>>,
+    /// Tests only: runs while a removal holds registrations it took out of the map (the window in
+    /// which a concurrent removal of the same port finds the map without it, re-review N1).
+    #[cfg(test)]
+    after_take: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
 }
 
 /// The process-wide registry behind `undra_port_register`: it survives between registration and
@@ -180,55 +184,79 @@ impl Registry {
         Registry {
             ports: RwLock::new(BTreeMap::new()),
             draining: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            after_take: Mutex::new(None),
         }
     }
 
     /// Registers `cb` for `port_id`, replacing (and draining) a previous registration.
     pub(crate) fn install(&self, port_id: u32, cb: UndraPortCb, user: *mut c_void) {
         let new = Arc::new(PortReg::new(cb, user));
-        let old = self
-            .ports
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(port_id, new);
-        self.settle(Some(port_id), old.map(|old| (port_id, old)).into_iter());
+        self.take(|ports| {
+            ports
+                .insert(port_id, new)
+                .map(|old| (port_id, old))
+                .into_iter()
+                .collect()
+        });
+        self.settle(Some(port_id));
     }
 
     /// Removes the registration of `port_id`, returning once none of its callbacks is running —
     /// including callbacks of a registration that a concurrent removal or shutdown took out of
     /// the map first (re-review N1).
     pub(crate) fn remove(&self, port_id: u32) {
-        let old = self
-            .ports
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&port_id);
-        self.settle(Some(port_id), old.map(|old| (port_id, old)).into_iter());
+        self.take(|ports| {
+            ports
+                .remove(&port_id)
+                .map(|old| (port_id, old))
+                .into_iter()
+                .collect()
+        });
+        self.settle(Some(port_id));
     }
 
     /// Removes every registration (`undra_shutdown`), returning once no callback of any of them
     /// is running, whoever took them out of the map.
     pub(crate) fn retire_all(&self) {
-        let all: Vec<(u32, Arc<PortReg>)> =
-            std::mem::take(&mut *self.ports.write().unwrap_or_else(PoisonError::into_inner))
-                .into_iter()
-                .collect();
-        self.settle(None, all.into_iter());
+        self.take(|ports| std::mem::take(ports).into_iter().collect());
+        self.settle(None);
     }
 
-    /// Publishes `taken` on the draining list, retires the entries, then waits until no
-    /// callback of `port_id` (every port for `None`) still runs — the entries taken here AND
-    /// the ones concurrent removals published. Skips all waiting, with a debug assertion and a
-    /// FATAL log, when called from inside a port callback (undra.h forbids it; waiting could
-    /// only deadlock — re-review N2).
-    fn settle(&self, port_id: Option<u32>, taken: impl Iterator<Item = (u32, Arc<PortReg>)>) {
-        {
-            let mut draining = self.draining.lock().unwrap_or_else(PoisonError::into_inner);
-            for (id, reg) in taken {
-                reg.mark_retired();
-                draining.push((id, reg));
+    /// Takes registrations out of the map with `take`, retires them and publishes them on the
+    /// draining list **before the map's lock is released**. A concurrent removal of the same port
+    /// that finds the map without the registration therefore finds it draining, and waits for it
+    /// (re-review N1; with the two steps apart, the loser could run its whole removal in between
+    /// and return while a callback still ran). Lock order: the map, then the draining list.
+    fn take(
+        &self,
+        take: impl FnOnce(&mut BTreeMap<u32, Arc<PortReg>>) -> Vec<(u32, Arc<PortReg>)>,
+    ) {
+        let mut ports = self.ports.write().unwrap_or_else(PoisonError::into_inner);
+        let taken = take(&mut ports);
+        #[cfg(test)]
+        if !taken.is_empty() {
+            if let Some(hook) = self
+                .after_take
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_ref()
+            {
+                hook();
             }
         }
+        let mut draining = self.draining.lock().unwrap_or_else(PoisonError::into_inner);
+        for (id, reg) in taken {
+            reg.mark_retired();
+            draining.push((id, reg));
+        }
+    }
+
+    /// Waits until no callback of `port_id` (every port for `None`) still runs: the entries this
+    /// removal published AND the ones concurrent removals published. Skips all waiting, with a
+    /// debug assertion and a FATAL log, when called from inside a port callback (undra.h forbids
+    /// it; waiting could only deadlock — re-review N2).
+    fn settle(&self, port_id: Option<u32>) {
         let on_callback_thread = RUNNING
             .try_with(|running| !running.borrow().is_empty())
             .unwrap_or(false);
@@ -512,6 +540,60 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(50));
             assert!(done.iter().all(|f| !f.load(Ordering::Acquire)));
+            drop(invocation);
+        });
+        assert!(done.iter().all(|f| f.load(Ordering::Acquire)));
+    }
+
+    /// Re-review N1 with the race forced: the losing remover runs while the winner holds the
+    /// registration it took out of the map and has not published it as draining yet. The loser
+    /// finds the map empty and must still wait for the running callback (the hosted ASan job hit
+    /// this window by chance in `n1_two_removers_of_one_port_both_wait`). Every wait here only ever
+    /// lets a wrong early return show; a slow machine cannot make the test fail.
+    #[test]
+    fn n1_a_remover_that_finds_the_map_empty_while_the_winner_publishes_still_waits() {
+        let registry = registry_with(7);
+        let invocation = registry.enter(7).expect("registered");
+        let (taken_tx, taken_rx) = mpsc::channel::<()>();
+        let taken_tx = Mutex::new(Some(taken_tx));
+        *registry
+            .after_take
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Box::new(move || {
+            if let Some(tx) = taken_tx
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+            {
+                let _ = tx.send(());
+            }
+            // Long enough for the loser's whole removal to run inside the window, unless it is
+            // held off until the winner has published.
+            std::thread::sleep(Duration::from_millis(100));
+        }));
+        let done = [AtomicBool::new(false), AtomicBool::new(false)];
+        std::thread::scope(|scope| {
+            let (registry, done) = (&registry, &done);
+            scope.spawn(move || {
+                registry.remove(7);
+                done[0].store(true, Ordering::Release);
+            });
+            taken_rx
+                .recv()
+                .expect("the winner took the registration out of the map");
+            scope.spawn(move || {
+                registry.remove(7);
+                done[1].store(true, Ordering::Release);
+            });
+            std::thread::sleep(Duration::from_millis(300));
+            assert!(
+                !done[1].load(Ordering::Acquire),
+                "the losing remover returned with a callback running"
+            );
+            assert!(
+                !done[0].load(Ordering::Acquire),
+                "the winner returned early"
+            );
             drop(invocation);
         });
         assert!(done.iter().all(|f| f.load(Ordering::Acquire)));
