@@ -4,7 +4,7 @@ import type { CallTargetArg, PendingStream, UndraCore } from "./core.js";
 import { UndraReplyError, UndraTransportError } from "./errors.js";
 import { errorMessage } from "./platform.js";
 import { StreamCall } from "./stream.js";
-import { Kind, ReplyStatus, StreamFlag, type StreamFailure, decodeStreamFailure, encodeCancel, encodeStreamCredit, streamFailureReplyBody } from "./wire/index.js";
+import { ReplyStatus, StreamFlag, type StreamFailure, decodeStreamFailure, streamFailureReplyBody } from "./wire/index.js";
 
 /** What `UndraCore.stream` and the transport's stream items are handed to. */
 export interface StreamSupport {
@@ -23,12 +23,12 @@ export const streams: StreamSupport = {
     const stream = new StreamCall(callId, {
       sendCredit: (id, credit) => {
         if (core.closed) throw new UndraTransportError("closed", closedMessage);
-        transport.send(Kind.StreamCredit, encodeStreamCredit({ callId: id, credit }));
+        transport.streamCredit(id, credit);
       },
       cancel: (id) => {
         pending.delete(id);
         if (core.closed) return;
-        transport.send(Kind.Cancel, encodeCancel({ callId: id }));
+        transport.cancel(id);
       },
     });
     if (core.closed) {
@@ -56,7 +56,7 @@ export const streams: StreamSupport = {
     };
     pending.set(callId, entry);
     try {
-      transport.send(Kind.Call, encode(target, methodId, callId, args));
+      transport.sendCall(encode(target, methodId, callId, args));
     } catch (error) {
       pending.delete(callId);
       stream.fail(error);

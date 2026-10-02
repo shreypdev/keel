@@ -26,25 +26,18 @@ import { dispatchPortCall, portOperation } from "./port-dispatch.js";
 import { Signal } from "./signal.js";
 import type { StreamSupport } from "./stream-support.js";
 import type { ReconnectOptions, WebSocketFactory } from "./transport/remote.js";
-import type { PortOutcome, Transport, TransportHandler } from "./transport/transport.js";
-import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
+import type { Channel, PortOutcome, Transport, TransportHandler } from "./transport/transport.js";
+import { WasmHost, type WasmSource } from "./transport/wasm-main.js";
 import type { WorkerLike } from "./transport/wasm-worker.js";
 import {
   ALL_SIGNALS,
   CallTarget,
   type Handle,
   type HelloPayload,
-  Kind,
   ReplyStatus,
   type PortCallPayload,
   codecs,
   decodeValue,
-  encodeCall,
-  encodeCancel,
-  encodeEvent,
-  encodeObserve,
-  encodeRelease,
-  encodeTimerFired,
 } from "./wire/index.js";
 
 /** How the core is reached (SPEC 17.1). */
@@ -366,12 +359,32 @@ function writeHead(out: Uint8Array, target: CallTargetArg, methodId: number, cal
   put32(out, 13, callId);
 }
 
-/** A `Call` payload (SPEC 3.3) for a free function or a method, in one allocation: `encodeCall` without its writer. */
+/** A `Call` payload (SPEC 3.3) in one allocation: a free function or a method with its arguments, or a page call (no arguments, 21 bytes). */
 function encodeTarget(target: CallTargetArg, methodId: number, callId: number, args: Uint8Array): Uint8Array {
-  if ((target as CallTargetRef).target === CallTarget.LazyListPage) return encodeCall({ ...(target as PageTarget), callId });
+  if ((target as CallTargetRef).target === CallTarget.LazyListPage) {
+    const page = target as PageTarget;
+    const out = new Uint8Array(21);
+    out[0] = CallTarget.LazyListPage;
+    putHandle(out, 1, page.handle);
+    put32(out, 9, page.offset);
+    put32(out, 13, page.limit);
+    put32(out, 17, callId);
+    return out;
+  }
   const out = new Uint8Array(HEAD_LEN + args.length);
   writeHead(out, target, methodId, callId);
   if (args.length > 0) out.set(args, HEAD_LEN);
+  return out;
+}
+
+/** The `Call` payload of a constructor (SPEC 3.3): target u8, type id u32, method id u32, call id u32, the arguments. */
+function encodeConstructor(typeId: number, methodId: number, callId: number, args: Uint8Array): Uint8Array {
+  const out = new Uint8Array(13 + args.length);
+  out[0] = CallTarget.Constructor;
+  put32(out, 1, typeId);
+  put32(out, 5, methodId);
+  put32(out, 9, callId);
+  out.set(args, 13);
   return out;
 }
 
@@ -461,6 +474,14 @@ export class UndraCore {
           send: gone,
           callSync: gone,
           close: () => {},
+          sendCall: gone,
+          observe: gone,
+          release: gone,
+          cancel: gone,
+          streamCredit: gone,
+          event: gone,
+          timerFired: gone,
+          portReply: gone,
         },
         { expectedSchemaHash: 0n, shared: false },
         {},
@@ -503,7 +524,7 @@ export class UndraCore {
         // The core's only random source is the `random` import: refuse before instantiating rather than let its
         // `Rng` fail at the first idempotency key (ADR-049). An app that supplies its own `rng` adapter has one.
         if (options.adapters?.rng == null && !hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
-        transport = new WasmMainTransport({
+        transport = new WasmHost({
           wasm: options.wasm,
           expectedSchemaHash: options.expectedSchemaHash,
           ...(options.platform !== undefined && { platform: options.platform }),
@@ -515,7 +536,7 @@ export class UndraCore {
           onError: (error) => {
             adapters.log?.log(4, "undra::runtime", `import failed: ${errorMessage(error)}`);
           },
-        });
+        }) as unknown as Transport;
         break;
       }
       case "wasm-worker": {
@@ -572,7 +593,9 @@ export class UndraCore {
   }
 
   private static async _attach(transport: Transport, options: CoreOptions, adapters: Partial<Adapters>): Promise<UndraCore> {
-    const core = new UndraCore(transport, options, adapters);
+    // A transport that only has `send(kind, payload)` (remote, worker, a custom one) is driven through the framed adapter.
+    const channel = transport.observe === undefined ? (await import("./transport/framed.js")).framed(transport) : (transport as Transport & Channel);
+    const core = new UndraCore(channel, options, adapters);
     try {
       await core._start();
     } catch (error) {
@@ -588,7 +611,7 @@ export class UndraCore {
   /** What the core said in its `Hello` (for wasm modes, synthesised from the module). Set once `load` resolves. */
   hello: HelloPayload = { undraVersion: "", schemaHash: 0n, platform: "", mode: "" };
 
-  private readonly _transport: Transport;
+  private readonly _transport: Transport & Channel;
   private readonly _options: CoreOptions;
   private readonly _adapters: Partial<Adapters>;
   private readonly _observeTimeoutMs: number;
@@ -619,12 +642,12 @@ export class UndraCore {
   /** A background run the page started is in flight. */
   private _backgroundRunning = false;
 
-  private constructor(transport: Transport, options: CoreOptions, adapters: Partial<Adapters>) {
+  private constructor(transport: Transport & Channel, options: CoreOptions, adapters: Partial<Adapters>) {
     this._options = options;
     this._adapters = adapters;
     // With `recovery`, the core runs over the layer that restarts it after a trap (ADR-049; `crashRecovery`).
     this._transport =
-      options.recovery?.attach(
+      (options.recovery?.attach(
         transport,
         {
           core: this,
@@ -641,7 +664,7 @@ export class UndraCore {
           ports: this._ports,
         },
         options.onCoreRestarted,
-      ) ?? transport;
+      ) as (Transport & Channel) | undefined) ?? transport;
     this._notifyConnection(this._connection.peek());
     this._observeTimeoutMs = options.observeTimeoutMs ?? DEFAULT_OBSERVE_TIMEOUT_MS;
     this.mirror = new Mirror({
@@ -784,9 +807,7 @@ export class UndraCore {
    * with the null handle.
    */
   async construct(typeId: number, methodId: number, args: Uint8Array): Promise<Handle> {
-    const body = await this._request((callId) =>
-      encodeCall({ target: CallTarget.Constructor, typeId, methodId, callId, args }),
-    );
+    const body = await this._request((callId) => encodeConstructor(typeId, methodId, callId, args));
     const handle = decodeValue(codecs.u64, body);
     if (handle === 0n) throw new UndraTransportError("protocol", "the core returned the null handle for a constructor");
     this._handles.add(handle);
@@ -806,7 +827,7 @@ export class UndraCore {
   observe(handle: Handle, signalId: number, on: boolean): Promise<void> {
     try {
       this._assertOpen();
-      this._transport.send(Kind.Observe, encodeObserve({ handle, signalId, on }));
+      this._transport.observe(handle, signalId, on);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -841,7 +862,7 @@ export class UndraCore {
       return;
     }
     try {
-      this._transport.send(Kind.Release, encodeRelease({ handle }));
+      this._transport.release(handle);
     } catch (error) {
       this._reportError("release", error);
     }
@@ -875,13 +896,13 @@ export class UndraCore {
   /** Sends a host-to-core event of an event port (`Connectivity.changed`, `Lifecycle.changed`, ...). Throws {@link UndraTransportError} when the core is closed. */
   event(portId: number, methodId: number, payload: Uint8Array): void {
     this._assertOpen();
-    this._transport.send(Kind.Event, encodeEvent({ portId, methodId, payload }));
+    this._transport.event(portId, methodId, payload);
   }
 
   /** Tells the core that a timer it set through a foreign `Timer` port is due (see `timerPort`). Wasm cores own their timers and do not need this. */
   timerFired(timerId: number): void {
     this._assertOpen();
-    this._transport.send(Kind.TimerFired, encodeTimerFired({ timerId }));
+    this._transport.timerFired(timerId);
   }
 
   /**
@@ -1234,10 +1255,10 @@ export class UndraCore {
     if (this._closed) return;
     this.hello = hello;
     try {
-      for (const handle of this._releasedWhileDown) this._transport.send(Kind.Release, encodeRelease({ handle }));
+      for (const handle of this._releasedWhileDown) this._transport.release(handle);
       this._releasedWhileDown.length = 0;
       for (const [handle, signals] of this._observed) {
-        for (const signalId of signals) this._transport.send(Kind.Observe, encodeObserve({ handle, signalId, on: true }));
+        for (const signalId of signals) this._transport.observe(handle, signalId, true);
       }
     } catch (error) {
       // The connection dropped again already: not connected after all. The transport reports the loss and the
@@ -1265,7 +1286,7 @@ export class UndraCore {
   private _resync(handle: Handle, signalId: number): void {
     if (this._closed) return;
     try {
-      this._transport.send(Kind.Observe, encodeObserve({ handle, signalId, on: true }));
+      this._transport.observe(handle, signalId, true);
     } catch (error) {
       this._reportError("resync", error);
     }
@@ -1323,7 +1344,7 @@ export class UndraCore {
           if (orphan === undefined) this._pending.delete(callId);
           else entry.resolve = orphan;
           try {
-            this._transport.send(Kind.Cancel, encodeCancel({ callId }));
+            this._transport.cancel(callId);
           } catch {
             // The channel is gone; the core cancels with it.
           }
@@ -1334,7 +1355,7 @@ export class UndraCore {
         };
       }
       try {
-        this._transport.send(Kind.Call, encode(callId));
+        this._transport.sendCall(encode(callId));
       } catch (error) {
         if (this._pending.get(callId) === entry) {
           this._pending.delete(callId);
@@ -1356,12 +1377,11 @@ export class UndraCore {
     const entry = new DirectCall();
     this._pending.set(callId, entry);
     try {
-      const transport = this._transport;
-      if (transport.sendCall === undefined) {
-        transport.send(Kind.Call, encodeTarget(target, methodId, callId, args));
+      if ((target as CallTargetRef).target === CallTarget.LazyListPage) {
+        this._transport.sendCall(encodeTarget(target, methodId, callId, args));
       } else {
         writeHead(this._head, target, methodId, callId);
-        transport.sendCall(this._head, args);
+        this._transport.sendCall(this._head, args);
       }
     } catch (error) {
       // A send that fails before the core answered fails the call. One that fails after (a trap in the same export, the
@@ -1439,7 +1459,7 @@ export class UndraCore {
       entry.cleanup?.();
       entry.reject(new UndraError("state", "this method is a stream; call it with UndraCore.stream"));
       try {
-        this._transport.send(Kind.Cancel, encodeCancel({ callId }));
+        this._transport.cancel(callId);
       } catch {
         // Closing anyway.
       }
@@ -1469,7 +1489,7 @@ export class UndraCore {
   private _sendPortReply(reply: Uint8Array): void {
     if (this._closed) return;
     try {
-      this._transport.send(Kind.PortReply, reply);
+      this._transport.portReply(reply);
     } catch (error) {
       this._reportError("port reply", error);
     }

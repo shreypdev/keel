@@ -8,7 +8,7 @@ import { dispatchPortCall, portOperation } from "./port-dispatch.js";
 import { trapStack } from "./panic.js";
 import { type SnapshotKeeper, keeperOf, restartHere } from "./recovery.js";
 import type { Transport, TransportHandler } from "./transport/transport.js";
-import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
+import { WasmMainTransport, type WasmSource } from "./transport/wasm-main-transport.js";
 import {
   type HostToWorker,
   WORKER_FEATURES,

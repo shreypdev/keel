@@ -7,20 +7,13 @@ import {
   type HelloPayload,
   UndraReader,
   UndraWriter,
-  Kind,
   ReplyStatus,
   codecs,
-  decodeCancel,
-  decodeEvent,
-  decodeObserve,
-  decodeRelease,
-  decodeStreamCredit,
-  decodeTimerFired,
   encodeValue,
   splitHandle,
 } from "../wire/index.js";
 import type { PortCallPayload } from "../wire/index.js";
-import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
+import type { Channel, PortOutcome, TransportHandler } from "./transport.js";
 
 /** The error of a call the core refused without a reply (`undra_call` returned `code`). */
 function refused(code: number): UndraReplyError {
@@ -177,7 +170,7 @@ function parseLog(raw: Uint8Array): { readonly target: string; readonly message:
  * valid during it), and no import handler ever throws into wasm, since a JS
  * exception crossing wasm frames would leave the core's lock held.
  */
-export class WasmMainTransport implements Transport {
+export class WasmHost implements Channel {
   readonly mode = "wasm-main";
   readonly synchronous = true;
 
@@ -255,57 +248,38 @@ export class WasmMainTransport implements Transport {
    * A new transport over the same compiled module (no recompile) and options, not started: what a restart after a trap
    * runs on (ADR-049, `crashRecovery`). This one stays dead.
    */
-  twin(): WasmMainTransport {
-    return new WasmMainTransport({ ...this._options, wasm: this._module ?? this._options.wasm });
+  twin(): this {
+    return new (this.constructor as new (options: WasmMainOptions) => this)({ ...this._options, wasm: this._module ?? this._options.wasm });
   }
 
-  send(kind: Kind, payload: Uint8Array): void {
-    switch (kind) {
-      case Kind.Call: {
-        const code = this._invoke(payload, (e, ptr, len) => e.undra_call(ptr, len));
-        if (code !== 0) throw refused(code);
-        return;
-      }
-      case Kind.Cancel: {
-        const { callId } = decodeCancel(payload);
-        this._run((e) => e.undra_cancel(callId));
-        return;
-      }
-      case Kind.StreamCredit: {
-        const { callId, credit } = decodeStreamCredit(payload);
-        this._run((e) => e.undra_stream_credit(callId, credit));
-        return;
-      }
-      case Kind.Observe: {
-        const { handle, signalId, on } = decodeObserve(payload);
-        const { lo, hi } = splitHandle(handle);
-        this._run((e) => e.undra_observe(lo, hi, signalId, on ? 1 : 0));
-        return;
-      }
-      case Kind.Release: {
-        const { lo, hi } = splitHandle(decodeRelease(payload).handle);
-        this._run((e) => e.undra_release(lo, hi));
-        return;
-      }
-      case Kind.Event: {
-        const event = decodeEvent(payload);
-        this._invoke(event.payload, (e, ptr, len) => e.undra_event(event.portId, event.methodId, ptr, len));
-        return;
-      }
-      case Kind.PortReply:
-        this._invoke(payload, (e, ptr, len) => e.undra_port_reply(ptr, len));
-        return;
-      case Kind.TimerFired: {
-        const { timerId } = decodeTimerFired(payload);
-        this._run((e) => e.undra_timer_fired(timerId));
-        return;
-      }
-      case Kind.Restore:
-        this._restore(payload);
-        return;
-      default:
-        throw new UndraTransportError("protocol", `cannot send a ${Kind[kind] ?? String(kind)} message to a wasm core`);
-    }
+  observe(handle: bigint, signalId: number, on: boolean): void {
+    const { lo, hi } = splitHandle(handle);
+    this._run((e) => e.undra_observe(lo, hi, signalId, on ? 1 : 0));
+  }
+
+  release(handle: bigint): void {
+    const { lo, hi } = splitHandle(handle);
+    this._run((e) => e.undra_release(lo, hi));
+  }
+
+  cancel(callId: number): void {
+    this._run((e) => e.undra_cancel(callId));
+  }
+
+  streamCredit(callId: number, credit: number): void {
+    this._run((e) => e.undra_stream_credit(callId, credit));
+  }
+
+  event(portId: number, methodId: number, payload: Uint8Array): void {
+    this._invoke(payload, (e, ptr, len) => e.undra_event(portId, methodId, ptr, len));
+  }
+
+  timerFired(timerId: number): void {
+    this._run((e) => e.undra_timer_fired(timerId));
+  }
+
+  portReply(reply: Uint8Array): void {
+    this._invoke(reply, (e, ptr, len) => e.undra_port_reply(ptr, len));
   }
 
   callSync(payload: Uint8Array): Uint8Array {
@@ -316,7 +290,7 @@ export class WasmMainTransport implements Transport {
     return this._invoke(head, (e, ptr, len) => this._takeBuf(e, e.undra_call_sync(ptr, len)), tail);
   }
 
-  sendCall(head: Uint8Array, tail: Uint8Array): void {
+  sendCall(head: Uint8Array, tail?: Uint8Array): void {
     const code = this._invoke(head, (e, ptr, len) => e.undra_call(ptr, len), tail);
     if (code !== 0) throw refused(code);
   }
@@ -368,7 +342,8 @@ export class WasmMainTransport implements Transport {
   }
 
   /** `undra_restore`; throws `UndraRestoreError` for a non-zero code. */
-  private _restore(bytes: Uint8Array): void {
+  /** @internal */
+  _restore(bytes: Uint8Array): void {
     const code = this._invoke(bytes, (e, ptr, len) => {
       if (e.undra_restore === undefined) {
         throw new UndraTransportError("unsupported", "the core does not export undra_restore");
@@ -426,7 +401,8 @@ export class WasmMainTransport implements Transport {
   }
 
   /** Runs `call` with a copy of `bytes` in wasm memory. */
-  private _invoke<R>(bytes: Uint8Array, call: (e: CoreExports, ptr: number, len: number) => R, tail?: Uint8Array): R {
+  /** @internal */
+  _invoke<R>(bytes: Uint8Array, call: (e: CoreExports, ptr: number, len: number) => R, tail?: Uint8Array): R {
     const e = this._live();
     // A payload copied while another export is running (a sync port reply
     // from inside `port_call`) must not reuse the scratch buffer the outer
@@ -456,7 +432,8 @@ export class WasmMainTransport implements Transport {
   }
 
   /** Runs `call` for an export that takes no buffer. */
-  private _run<R>(call: (e: CoreExports) => R): R {
+  /** @internal */
+  _run<R>(call: (e: CoreExports) => R): R {
     const e = this._live();
     this._depth++;
     try {
