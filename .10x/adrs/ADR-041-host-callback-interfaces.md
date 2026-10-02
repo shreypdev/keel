@@ -1,6 +1,8 @@
 # ADR-041: host callback interfaces are port instances: `#[undra::callback]` traits the host implements and passes in
 
-Status: **Proposed** (2026-10-01, `wt/boundary-adrs`; Amendment B "boundary surface", catalogue M-4).
+Status: **Accepted** (2026-10-02, implemented in `wt/objects-callbacks`; see "Implementation notes" at the end for what
+the code decided where this text left room, and the deviations). Proposed 2026-10-01 (`wt/boundary-adrs`; Amendment B
+"boundary surface", catalogue M-4).
 Touches SPEC 1 (a new concept), 2.1 (`TypeRef::Callback`), 2.2 (`PortKind::Callback`), 3.6 (two reserved
 methods on a callback port), 4 (a seventh-plus attribute, `#[undra::callback]`), 5.7, 10.1–10.3, 11 (delivery),
 12 (E0004's help, E0071) and 17 (the runtimes' callback registry); `undra-meta`, `undra-macros`,
@@ -251,3 +253,40 @@ ADR-034 (`WeakCtx` for proxies) should land first; ADR-040's subscription-object
 way to unregister, so 040 before 041 is the natural order (not a hard dependency). ADR-031's mirror queue gains
 an entry kind. The v1.2 port-cancellation ADR (Amendment C item 6) should reuse decision 7's mechanism or
 explain why not.
+
+## Implementation notes (2026-10-02, `wt/objects-callbacks`)
+
+Landed items 1 to 7 with ADR-040 in the same piece. No C ABI, wasm ABI or envelope change. What the code decided where the
+text left room, and the deviations:
+
+* **Scenario number.** The provisional S22 is **S28** (host callbacks, every column); S27 is ADR-040's.
+* **Schema fields, both written only when true** (decision 3): `PortDef.background` (the trait is
+  `#[undra::callback(background)]`; the platforms read it to pick the executor) and `MethodDef.coalesce` (a method marked
+  `#[undra(coalesce)]`; the platforms' drains read it). No existing hash moves. `Schema::validate` knows where a
+  `Callback` may stand (a parameter, alone or in an `Option`: E0004 elsewhere) and what a callback port's methods may be
+  (E0071).
+* **E0071 is a little wider than decision 1**: besides a synchronous method that returns a value and an `async` method
+  without a `Result`, it rejects a method whose name starts with `__` (reserved for `__release` and `__cancel`) and
+  `#[undra(coalesce)]` on an `async` method (a coalesced call that is dropped would leave its caller waiting).
+* **Reserved ids** are `ids::callback_release_id(trait)` and `callback_cancel_id(trait)`, `fnv1a32("<Trait>.__release")` and
+  `fnv1a32("<Trait>.__cancel")`; the platform id tables carry them as `releaseInstance` / `cancelCall` (Kotlin
+  `RELEASE_INSTANCE` / `CANCEL_CALL`).
+* **The core's half** is `undra_runtime::callbacks`: `CallbackInterface` (what `#[undra::callback]` implements for
+  `dyn Trait`: how a dispatcher makes a proxy from an instance handle), `CallbackHandle` (the port, the instance and a
+  `WeakCtx`; its drop sends `__release`), `CallbackCall` (the future of an async method; its drop sends `__cancel` and
+  abandons the id) and `Runtime::callback` (interning through a map of `Weak` proxies). Fire-and-forget methods go
+  through `Runtime::port_notify` (`port_call_id 0`, no reply read, no id allocated). A dispatcher makes the proxies
+  last, after every argument has decoded and every object parameter has resolved (everything that could refuse the call
+  has run); a refused call (status 5) therefore owns nothing, which is what lets the generated host code give its references back.
+* **Statistics.** `stats_json` reports `live_callbacks` (the proxies the core holds); the platforms report the registry's
+  live count and `MirrorStats.callbacksDelivered`.
+* **Testing in Rust**: a trait with `#[undra::callback]` is also a normal trait object, so a Rust test implements it with
+  `#[undra::port] impl Reporter for Recorder` (the playground's `workshop.rs` tests do) and passes its own `Arc`; the
+  `TestRuntime` records the callback port calls a proxy makes.
+* **Names**: the playground's example is `Reporter` / `Workshop::run`, `burst`, `watch`, `announce` (a `Watch` subscription
+  object, decision 9), not `UploadListener`; the SPEC and the generated-shape section above keep the ADR's names.
+* **Bench rows** (item 6): `boundary/port_call/notify` 24.3 ns, `boundary/callback/notify` 43.2 ns and
+  `boundary/callback/async_roundtrip` 182.7 ns, each with a budget in `bench/budgets.toml` (`bench/RESULTS.md`, finding 6).
+* **Docs**: `site/docs/callbacks.html` (a guide, next to Ports), SPEC 5.7, 6, 10.3a, 11 and 17, the playground's
+  `workshop.rs` for the example that runs.
+
