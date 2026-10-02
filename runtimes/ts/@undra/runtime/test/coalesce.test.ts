@@ -9,6 +9,7 @@ import {
   Mirror,
   type MirrorOptions,
 } from "../src/mirror.js";
+import { mirrorWaiters } from "../src/mirror-waiters.js";
 import { Signal } from "../src/signal.js";
 import { runWorker, type WorkerScope } from "../src/worker.js";
 import { WasmWorkerTransport, type WorkerLike } from "../src/transport/wasm-worker.js";
@@ -777,6 +778,7 @@ describe("the default schedule is frame-aligned", () => {
   it("an observe waiter drains without waiting for the frame", async () => {
     const raf = fakeFrames("visible");
     const mirror = new Mirror();
+    mirrorWaiters(mirror);
     mirror.register(1n, () => {});
     const observed = mirror.whenObserved(1n, ALL_SIGNALS);
     mirror.enqueue(cs({ signalId: 0, value: u32(1) }));

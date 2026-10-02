@@ -1,10 +1,13 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { PortIds } from "../src/adapters/ids.js";
+import { PanicReportCodec } from "../src/adapters/codecs.js";
+import type { UndraPanicReport } from "../src/adapters/types.js";
 import { writeHead } from "../src/call-head.js";
 import { UndraCore } from "../src/core.js";
 import { framed } from "../src/transport/framed.js";
 import type { CoreTransport, Transport } from "../src/transport/transport.js";
-import { CallTarget, Kind, UndraWriter, encodeCancel, encodeEvent, encodeObserve, encodeRelease, encodeStreamCredit, encodeTimerFired } from "../src/wire/index.js";
+import { CallTarget, ChangeOp, Kind, UndraWriter, encodeCancel, encodeChangeSet, encodeEvent, encodeObserve, encodeRelease, encodeStreamCredit, encodeTimerFired, encodeValue } from "../src/wire/index.js";
 import { FakeCoreTransport, SCHEMA } from "./support/fake-core.js";
 import { captureLog, track } from "./support/harness.js";
 import { fromHex, toHex } from "./helpers.js";
@@ -230,5 +233,88 @@ describe("UndraCore.attach: a transport with only send is wrapped, one with the 
     const core = track(await UndraCore.attach(typed as unknown as Transport, { expectedSchemaHash: SCHEMA, shared: false, adapters: { log: captureLog(), http: null, timer: null } }));
     core.release(4n);
     expect(calls).toEqual(["release 4"]);
+  });
+});
+
+describe("what a core outside this thread adds (ADR-057): the observe waiters and the extension", () => {
+  /** A transport with the typed methods (so it is not framed), whose handler the test holds. */
+  function typedTransport(options: { synchronous: boolean; mode: string }) {
+    let handler: Parameters<Transport["start"]>[0] | undefined;
+    const transport: CoreTransport = {
+      mode: options.mode,
+      synchronous: options.synchronous,
+      start: (given) => {
+        handler = given;
+        return Promise.resolve({ undraVersion: "x", schemaHash: SCHEMA, platform: "p", mode: "m" });
+      },
+      close: () => {},
+      sendCall: () => {},
+      observe: () => {},
+      release: () => {},
+      cancel: () => {},
+      streamCredit: () => {},
+      event: () => {},
+      timerFired: () => {},
+      portReply: () => {},
+    };
+    return { transport, handler: () => handler as NonNullable<typeof handler> };
+  }
+  const attach = (transport: CoreTransport, extra: Partial<Parameters<typeof UndraCore.attach>[1]> = {}) =>
+    UndraCore.attach(transport as unknown as Transport, { expectedSchemaHash: SCHEMA, shared: false, adapters: { log: captureLog(), http: null, timer: null }, ...extra });
+
+  it("a typed transport that answers later still gets the observe waiters: observe resolves once the change-set was applied", async () => {
+    const { transport, handler } = typedTransport({ synchronous: false, mode: "remote" });
+    const core = track(await attach(transport));
+    core.mirror.register(5n, () => {});
+    let resolved = false;
+    const observed = core.observe(5n, 0, true).then(() => {
+      resolved = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(resolved, "nothing arrived yet").toBe(false);
+    handler().changeSet(encodeChangeSet({ txnId: 1n, entries: [{ handle: 5n, signalId: 0, op: ChangeOp.FullValue, value: Uint8Array.of(1, 0, 0, 0) }] }));
+    await observed;
+    expect(resolved).toBe(true);
+  });
+
+  it("a typed, synchronous transport that is not a wasm host (a native core) gets the Diagnostics port: its panics reach onPanic", async () => {
+    const { transport, handler } = typedTransport({ synchronous: true, mode: "native" });
+    const reports: UndraPanicReport[] = [];
+    track(await attach(transport, { onPanic: (report) => void reports.push(report) }));
+    const report: UndraPanicReport = { message: "boom", location: "lib.rs:1", operation: "Todos.add", thread: "t", frames: [], namespace: "n", coreVersion: "1", schemaHash: 5n, imageId: "" };
+    const outcome = handler().portCall({
+      portId: PortIds.Diagnostics.portId,
+      methodId: PortIds.Diagnostics.panicked,
+      portCallId: 1,
+      args: encodeValue(PanicReportCodec, report),
+    });
+    expect(outcome.kind).toBe("sync");
+    expect(reports).toEqual([report]);
+  });
+
+  it("an in-process wasm host loads neither the framed adapter nor the waiters nor the extension", async () => {
+    vi.resetModules();
+    vi.doMock("../src/transport/framed.js", () => {
+      throw new Error("the framed module was loaded for an in-process core");
+    });
+    try {
+      const [{ UndraCore: Core }, { WasmMainTransport }, { compileStub, STUB }] = await Promise.all([
+        import("../src/core.js"),
+        import("../src/transport/wasm-main-transport.js"),
+        import("./support/stub-core.js"),
+      ]);
+      const core = track(
+        await Core.attach(new WasmMainTransport({ wasm: await compileStub(), expectedSchemaHash: STUB.SCHEMA_HASH, platform: "test" }), {
+          expectedSchemaHash: STUB.SCHEMA_HASH,
+          shared: false,
+          adapters: { log: captureLog() },
+        }),
+      );
+      await core.observe(STUB.HANDLE, 0, true);
+      expect(core.callSync({ target: CallTarget.FreeFunction }, STUB.ECHO, Uint8Array.of(7, 0, 0, 0))).toEqual(Uint8Array.of(7, 0, 0, 0));
+    } finally {
+      vi.doUnmock("../src/transport/framed.js");
+      vi.resetModules();
+    }
   });
 });

@@ -38,6 +38,7 @@ const STAYS_OUT: Readonly<Record<string, string>> = {
   "wire/stream-payloads.ts": "the stream failure: only the stream support reads it",
   "transport/framed.ts": "the adapter that frames the control messages of a send-only transport",
   "transport/wasm-main-transport.ts": "`WasmMainTransport`: the in-process host plus `send(kind, payload)`; `UndraCore.load` runs the host itself",
+  "mirror-waiters.ts": "the promises behind `observe` of a core that answers later; an in-process core delivers inside `observe`",
 };
 
 describe("what UndraCore loads up front", () => {

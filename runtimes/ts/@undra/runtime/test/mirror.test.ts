@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { mirrorWaiters } from "../src/mirror-waiters.js";
 import { Mirror } from "../src/mirror.js";
 import { Signal, setSignalErrorHandler } from "../src/signal.js";
 import { ALL_SIGNALS, ChangeOp, encodeChangeSet } from "../src/wire/index.js";
@@ -244,6 +245,7 @@ describe("Mirror change-sets", () => {
 
     it("settles a whenObserved waiter for an entry that arrived that way", async () => {
       const mirror = new Mirror();
+      mirrorWaiters(mirror);
       const count = counter(mirror);
       count.subscribe((n) => {
         if (n === 1) mirror.enqueue(changeSet([1n, 5, bytes(9)]));
@@ -332,9 +334,23 @@ describe("Mirror change-sets", () => {
   });
 });
 
+/** A mirror as a core that answers later has it: with the observe waiters of `mirror-waiters.ts` installed (ADR-057). */
+function withWaiters(): Mirror {
+  const mirror = new Mirror();
+  mirrorWaiters(mirror);
+  return mirror;
+}
+
 describe("Mirror.whenObserved", () => {
-  it("resolves after an entry for the signal has been applied and announced", async () => {
+  it("rejects with UndraError('state') on a mirror whose core installed no waiters (an in-process core delivers inside observe)", async () => {
     const mirror = new Mirror();
+    await expect(mirror.whenObserved(1n, 0)).rejects.toMatchObject({ kind: "state" });
+    mirror.failWaiters(new Error("nothing waits")); // nothing to fail, nothing thrown
+    mirror.unregister(1n);
+  });
+
+  it("resolves after an entry for the signal has been applied and announced", async () => {
+    const mirror = withWaiters();
     const count = new Signal(0);
     const seen: number[] = [];
     count.subscribe((v) => seen.push(v));
@@ -355,7 +371,7 @@ describe("Mirror.whenObserved", () => {
   });
 
   it("ALL_SIGNALS is satisfied by any entry of the handle, and only by that handle", async () => {
-    const mirror = new Mirror();
+    const mirror = withWaiters();
     mirror.register(1n, () => {});
     mirror.register(2n, () => {});
     let resolved = false;
@@ -372,7 +388,7 @@ describe("Mirror.whenObserved", () => {
   });
 
   it("settles every waiter of a handle at once, and leaves the others", async () => {
-    const mirror = new Mirror();
+    const mirror = withWaiters();
     mirror.register(1n, () => {});
     const a = mirror.whenObserved(1n, 0);
     const b = mirror.whenObserved(1n, 0);
@@ -387,7 +403,7 @@ describe("Mirror.whenObserved", () => {
   it("rejects with an observe error when nothing arrives in time, and forgets the waiter", async () => {
     vi.useFakeTimers();
     try {
-      const mirror = new Mirror();
+      const mirror = withWaiters();
       const waiting = mirror.whenObserved(7n, 0, 50);
       const assertion = expect(waiting).rejects.toMatchObject({ kind: "observe" });
       await vi.advanceTimersByTimeAsync(50);
@@ -404,7 +420,7 @@ describe("Mirror.whenObserved", () => {
   it("does not time out once resolved", async () => {
     vi.useFakeTimers();
     try {
-      const mirror = new Mirror();
+      const mirror = withWaiters();
       mirror.register(1n, () => {});
       const waiting = mirror.whenObserved(1n, 0, 50);
       mirror.enqueue(changeSet([1n, 0]));
@@ -417,7 +433,7 @@ describe("Mirror.whenObserved", () => {
   });
 
   it("failWaiters rejects all of them", async () => {
-    const mirror = new Mirror();
+    const mirror = withWaiters();
     const a = mirror.whenObserved(1n, 0);
     const b = mirror.whenObserved(2n, 0);
     const failure = new Error("transport lost");
