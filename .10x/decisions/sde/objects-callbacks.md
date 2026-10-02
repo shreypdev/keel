@@ -194,9 +194,9 @@ Run once at the end on the merged tree (after merging `main` at `8000d39`), macO
 | `cargo test --workspace` | 3,129 pass (3 bindgen golden failures after the merge with ios-floor, re-blessed and green), 16 ignored; `dev_reload` passes (the flake was fixed on main) |
 | wasm ABI harness (`crates/undra-ffi/tests/wasm/run.sh`) | 22 + 32 pass |
 | C harness, Swift over the C table, JNI e2e | `c smoke`, `c lifetime`, `c two cores` ok; 6 pass; 16 pass |
-| Swift runtime (`swift test`) | 692 pass (was 581 before this piece) |
+| Swift runtime (`swift test`) | 692 pass (this piece added 18 runtime tests and the contract column's S27 and S28 files) |
 | Kotlin runtime, `test-local.sh`, Kotlin 2.4.20 and 2.0.21 | 779 cases in 45 suites, 0 failed, 2 skipped (no native library); the testing kit's 30 cases pass, under both compilers |
-| TypeScript runtime: `tsc` and `npm test` | 1,463 pass in 48 files (was 1,264 before this piece); typecheck clean |
+| TypeScript runtime: `tsc` and `npm test` | 1,463 pass in 48 files (this piece added 31 tests and four test files); typecheck clean |
 | React Native: `npm test`, typecheck, `test:contract`, `cpp/test/run.sh` | 91 pass; clean; 20 pass + S17 skipped (S01 to S19, S27, S28); 33 host checks, every platform file compiles |
 | Contract scenarios, `bash contract-tests/run-all.sh` | **80/80** (28 scenarios: S01 to S20 and S23 to S28 on Swift, Kotlin and TypeScript, S21 and S22 on TypeScript); Kotlin's S25 needs `UNDRA_SQLITE_JDBC` |
 | `undra bindgen -C <project> --check --docs` | up to date for the playground, two-cores a and b, cookbook, fieldbook (and `--check` for ios15-sample) |
