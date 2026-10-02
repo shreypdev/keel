@@ -49,7 +49,10 @@ use super::diag::{Diag, Errors, code, in_instance};
 use super::generic_fn::{self, Label, Plan};
 use super::naming::{fnv1a32, unraw};
 use super::paths::Root;
-use super::types::{Allow, KType, Pos, map_error_type, map_method_return, map_type, ty_string};
+use super::types::{
+    Allow, Applications, KType, Pos, applications, map_error_type, map_method_return, map_type,
+    ty_string,
+};
 
 /// A leading `ctx: Ctx` / `ctx: &Ctx` parameter.
 #[derive(Clone, Copy, Debug)]
@@ -133,7 +136,7 @@ fn object_of(ty: &Type) -> Option<(Type, bool)> {
 /// Reads how a parameter the mapper accepted is spelled.
 fn plan_of(ty: &Type, kty: &KType) -> ParamPlan {
     match kty {
-        KType::Object(_) => match object_of(ty) {
+        KType::Object(_) | KType::ObjectOf(_) => match object_of(ty) {
             Some((elem, true)) => ParamPlan::Object {
                 elem,
                 shape: ObjShape::Ref,
@@ -152,7 +155,7 @@ fn plan_of(ty: &Type, kty: &KType) -> ParamPlan {
             None => ParamPlan::Plain,
         },
         KType::Option(inner) => match (&**inner, sole_arg(ty)) {
-            (KType::Object(_), Some(arg)) => match object_of(arg) {
+            (KType::Object(_) | KType::ObjectOf(_), Some(arg)) => match object_of(arg) {
                 Some((elem, true)) => ParamPlan::Object {
                     elem,
                     shape: ObjShape::OptionRef,
@@ -172,16 +175,18 @@ fn plan_of(ty: &Type, kty: &KType) -> ParamPlan {
             },
             _ => ParamPlan::Plain,
         },
-        KType::Vec(inner) if matches!(**inner, KType::Object(_)) => match sole_arg(ty) {
-            Some(arg) => match object_of(arg) {
-                Some((elem, false)) => ParamPlan::Object {
-                    elem,
-                    shape: ObjShape::VecArc,
+        KType::Vec(inner) if matches!(**inner, KType::Object(_) | KType::ObjectOf(_)) => {
+            match sole_arg(ty) {
+                Some(arg) => match object_of(arg) {
+                    Some((elem, false)) => ParamPlan::Object {
+                        elem,
+                        shape: ObjShape::VecArc,
+                    },
+                    _ => ParamPlan::Plain,
                 },
-                _ => ParamPlan::Plain,
-            },
-            None => ParamPlan::Plain,
-        },
+                None => ParamPlan::Plain,
+            }
+        }
         _ => ParamPlan::Plain,
     }
 }
@@ -559,38 +564,41 @@ impl CtorReturn {
 }
 
 /// `Arc<Self>` / `Arc<Type>`.
-fn is_arc_self(ty: &Type, type_name: &str) -> bool {
+fn is_arc_self(ty: &Type, type_name: &str, applied: bool) -> bool {
     match peel(ty) {
         Type::Path(path) if path.qself.is_none() => {
             let Some(seg) = path.path.segments.last() else {
                 return false;
             };
-            seg.ident == "Arc" && sole_arg(ty).is_some_and(|inner| is_self_type(inner, type_name))
+            seg.ident == "Arc"
+                && sole_arg(ty).is_some_and(|inner| is_self_type(inner, type_name, applied))
         }
         _ => false,
     }
 }
 
-fn is_self_type(ty: &Type, type_name: &str) -> bool {
+/// Whether `ty` is `Self` or the type's name. `applied` (the template of a generic object, whose
+/// type is written with its own parameters, `Selection<T>`) accepts arguments.
+fn is_self_type(ty: &Type, type_name: &str, applied: bool) -> bool {
     match ty {
         Type::Path(path) if path.qself.is_none() && path.path.segments.len() == 1 => {
             let seg = &path.path.segments[0];
-            (seg.ident == "Self" || seg.ident == type_name) && seg.arguments.is_none()
+            (seg.ident == "Self" || seg.ident == type_name) && (applied || seg.arguments.is_none())
         }
-        Type::Paren(inner) => is_self_type(&inner.elem, type_name),
-        Type::Group(inner) => is_self_type(&inner.elem, type_name),
+        Type::Paren(inner) => is_self_type(&inner.elem, type_name, applied),
+        Type::Group(inner) => is_self_type(&inner.elem, type_name, applied),
         _ => false,
     }
 }
 
-fn ctor_return(output: &ReturnType, type_name: &str) -> Option<CtorReturn> {
+fn ctor_return(output: &ReturnType, type_name: &str, applied: bool) -> Option<CtorReturn> {
     let ReturnType::Type(_, ty) = output else {
         return None;
     };
-    if is_self_type(ty, type_name) {
+    if is_self_type(ty, type_name, applied) {
         return Some(CtorReturn::Plain);
     }
-    if is_arc_self(ty, type_name) {
+    if is_arc_self(ty, type_name, applied) {
         return Some(CtorReturn::Shared);
     }
     let Type::Path(path) = &**ty else {
@@ -609,9 +617,9 @@ fn ctor_return(output: &ReturnType, type_name: &str) -> Option<CtorReturn> {
     });
     let ok = types.next()?;
     let err = types.next()?;
-    if is_self_type(ok, type_name) {
+    if is_self_type(ok, type_name, applied) {
         Some(CtorReturn::Fallible(Box::new(err.clone())))
-    } else if is_arc_self(ok, type_name) {
+    } else if is_arc_self(ok, type_name, applied) {
         Some(CtorReturn::FallibleShared(Box::new(err.clone())))
     } else {
         None
@@ -898,11 +906,13 @@ enum ObjReturn {
 fn object_return(ret: &KType) -> Option<(ObjReturn, bool)> {
     fn plain(ret: &KType) -> Option<ObjReturn> {
         match ret {
-            KType::Object(_) => Some(ObjReturn::One),
-            KType::Option(inner) if matches!(**inner, KType::Object(_)) => {
+            KType::Object(_) | KType::ObjectOf(_) => Some(ObjReturn::One),
+            KType::Option(inner) if matches!(**inner, KType::Object(_) | KType::ObjectOf(_)) => {
                 Some(ObjReturn::Optional)
             }
-            KType::Vec(inner) if matches!(**inner, KType::Object(_)) => Some(ObjReturn::Many),
+            KType::Vec(inner) if matches!(**inner, KType::Object(_) | KType::ObjectOf(_)) => {
+                Some(ObjReturn::Many)
+            }
             _ => None,
         }
     }
@@ -1842,6 +1852,65 @@ fn method_model(
     }
 }
 
+/// Expands `#[undra::api(generic)]` (`#[undra::api(store, generic)]` for a store) on
+/// `impl<T> Type<T> { .. }` (ADR-058): the block as written, the analysis of its signatures with
+/// the type parameters left as they are, and the template that carries them. A plain object
+/// exports the template itself; a store hands the signatures to the local macro of its struct,
+/// which must stand above the block in the same module and exports it.
+pub(crate) fn expand_impl_template(
+    args_root: Option<Root>,
+    store: bool,
+    item: ItemImpl,
+) -> syn::Result<TokenStream> {
+    let mut errors = Errors::new();
+    let mut probe = item.attrs.clone();
+    let root = item_root(&mut probe, args_root.clone(), &mut errors);
+    if let Some((_, path, _)) = &item.trait_ {
+        errors.push(shape_error(
+            format!("`#[undra::api]` on a trait impl (`impl {} for ..`)", ty_string(path)),
+            path,
+            "the attribute exposes the inherent methods of an object; trait methods have no schema representation",
+            "move the methods you want to expose into an inherent `impl Type { .. }` block",
+        ));
+    }
+    let header = super::generic_object::check_header(&item, &mut errors);
+    let Some(header) = header else {
+        errors.finish()?;
+        // A block that is not for a named type: the ordinary expansion says so.
+        return expand_impl(args_root, store, item);
+    };
+    errors.finish()?;
+    let type_docs = docs(&item.attrs);
+    let definition = super::generic_object::impl_definition(&item, &header);
+    let emitted = expand_impl_as(args_root, store, item, ImplMode::Template(&header))?;
+    if store {
+        let compose = super::generic_object::compose_macro_name(&header.name);
+        return Ok(quote! {
+            #emitted
+
+            #compose! { #type_docs { #definition } }
+        });
+    }
+    let root_path = root.path_string();
+    let template = super::generic_object::object_template(
+        &super::generic_object::TemplateInfo {
+            kind: "object",
+            name: &header.name,
+            params: &header.params,
+            docs: &type_docs,
+            impl_docs: "",
+            restore: "",
+            root: &root_path,
+        },
+        definition,
+    );
+    Ok(quote! {
+        #emitted
+
+        #template
+    })
+}
+
 /// What the expansion of one instantiation of a generic object knows about it (ADR-058).
 #[derive(Clone, Debug)]
 pub(crate) struct ObjectInstance {
@@ -1853,23 +1922,52 @@ pub(crate) struct ObjectInstance {
     pub(crate) plain: bool,
 }
 
+/// What an impl block is expanded as.
+#[derive(Clone, Copy)]
+pub(crate) enum ImplMode<'a> {
+    /// An ordinary object: the block, its dispatcher, its registration and its checks.
+    Plain,
+    /// The template of a generic object (`#[undra::api(generic)]`, ADR-058): the block as
+    /// written, and the analysis of its signatures with the type parameters left as they are, so
+    /// a mistake that does not depend on the type is reported once, at the template. Nothing is
+    /// registered.
+    Template(&'a super::generic_object::Header),
+    /// One instantiation of a generic object: the block holds signatures only, is for the alias
+    /// and is not emitted.
+    Instance(&'a ObjectInstance),
+}
+
 /// Expands `#[undra::api]` on an inherent `impl` block.
 pub(crate) fn expand_impl(
     args_root: Option<Root>,
     store: bool,
     item: ItemImpl,
 ) -> syn::Result<TokenStream> {
-    expand_impl_as(args_root, store, item, None)
+    expand_impl_as(args_root, store, item, ImplMode::Plain)
 }
 
-/// Expands an impl block: as written, or (`instance`) as one instantiation of a generic object,
-/// whose block holds signatures only, is for the alias and is not emitted (ADR-058).
+/// Expands an impl block as an object, the template of a generic object or one instantiation of
+/// it (see [`ImplMode`]).
 pub(crate) fn expand_impl_as(
     args_root: Option<Root>,
     store: bool,
     mut item: ItemImpl,
-    instance: Option<&ObjectInstance>,
+    mode: ImplMode<'_>,
 ) -> syn::Result<TokenStream> {
+    let instance = match mode {
+        ImplMode::Instance(instance) => Some(instance),
+        _ => None,
+    };
+    let template = match mode {
+        ImplMode::Template(header) => Some(header),
+        _ => None,
+    };
+    // What a generic type applied to a type parameter means in these signatures (ADR-058).
+    let _apps = match mode {
+        ImplMode::Plain => applications(Applications::Refuse),
+        ImplMode::Template(header) => applications(Applications::Template(header.params.clone())),
+        ImplMode::Instance(_) => applications(Applications::Instance),
+    };
     let mut errors = Errors::new();
     let root = item_root(&mut item.attrs, args_root, &mut errors);
     if let Some((_, path, _)) = &item.trait_ {
@@ -1886,14 +1984,15 @@ pub(crate) fn expand_impl_as(
         .params
         .iter()
         .any(|p| matches!(p, syn::GenericParam::Type(_)));
-    let type_name = match self_type_name(&self_ty, !own_params && instance.is_none()) {
+    let ordinary = matches!(mode, ImplMode::Plain);
+    let type_name = match self_type_name(&self_ty, !own_params && ordinary) {
         Ok(name) => name,
         Err(error) => {
             errors.push(error);
             String::new()
         }
     };
-    if instance.is_none() {
+    if ordinary {
         check_generics(
             &item.generics,
             &type_name,
@@ -1905,14 +2004,24 @@ pub(crate) fn expand_impl_as(
 
     let mut constructors: Vec<FnModel> = Vec::new();
     let mut methods: Vec<FnModel> = Vec::new();
-    let mut checks = match instance {
-        Some(_) => Checks::for_instance(&format_ident!("{}", type_name)),
-        None => Checks::new(),
+    // A type that has no name (the impl is not for a named type) has been reported already.
+    let type_ident = format_ident!(
+        "{}",
+        if type_name.is_empty() {
+            "__undra_object"
+        } else {
+            &type_name
+        }
+    );
+    let mut checks = match mode {
+        ImplMode::Instance(_) => Checks::for_instance(&type_ident),
+        ImplMode::Template(header) => Checks::for_template(&type_ident, header.params.clone()),
+        ImplMode::Plain => Checks::new(),
     };
     // The checks of the generic methods: one pass over each generic signature, and one set for
     // all the instantiations (ADR-058).
     let mut template_checks: Vec<TokenStream> = Vec::new();
-    let mut instance_checks = Checks::for_listed_instance(&format_ident!("{}", type_name));
+    let mut instance_checks = Checks::for_listed_instance(&type_ident);
     for impl_item in &mut item.items {
         let ImplItem::Fn(func) = impl_item else {
             continue;
@@ -1939,12 +2048,27 @@ pub(crate) fn expand_impl_as(
         let receiver = func.sig.receiver().is_some();
         let type_params = func.sig.generics.type_params().next().is_some();
 
+        // One level of generics per item: the methods of a generic object take no type parameters
+        // of their own (ADR-058).
+        if let Some(header) = template {
+            if type_params || !attr.generic.is_empty() {
+                super::generic_object::method_generics_refused(
+                    &func.sig,
+                    &header.name,
+                    &mut errors,
+                    attr.generic.first().map(|list| &list.param),
+                );
+                continue;
+            }
+        }
+
         // A method with a list: one method per listed type (ADR-058).
         if !attr.generic.is_empty() && (receiver || !type_params) {
             let on = GenericOn::Method;
             let Some(plan) = generic_fn::plan(&func.sig, on, &attr.generic, &mut errors) else {
                 continue;
             };
+            let apps = applications(Applications::Template(vec![plan.param.to_string()]));
             let mut template = Errors::new();
             let analysis = analyze(&mut func.sig, &mut template, Kindred::Callable, None);
             generic_fn::check_parameter_use(&func.sig, &plan.param, &mut template);
@@ -1961,6 +2085,7 @@ pub(crate) fn expand_impl_as(
             };
             tchecks.ret(&func.sig.output, &ret);
             ensure_static_streams_in(&mut func.sig.output);
+            drop(apps);
             let clean = template.is_empty();
             errors.absorb(template);
             if !clean {
@@ -1968,6 +2093,7 @@ pub(crate) fn expand_impl_as(
             }
             template_checks.push(tchecks.emit(&root));
             let inferred = generic_fn::inferred(&func.sig, &plan.param);
+            let _instance_apps = applications(Applications::Instance);
             for listed in &plan.instances {
                 let _guard = in_instance(&listed.name);
                 let mut sig = generic_fn::concrete_signature(&func.sig, &plan.param, &listed.ty);
@@ -2017,7 +2143,8 @@ pub(crate) fn expand_impl_as(
                 &mut checks,
             );
             methods.push(model);
-        } else if let Some(returns) = ctor_return(&func.sig.output, &type_name) {
+        } else if let Some(returns) = ctor_return(&func.sig.output, &type_name, template.is_some())
+        {
             for p in &analysis.params {
                 checks.ty(&p.ty, &p.kty);
             }
@@ -2110,6 +2237,27 @@ pub(crate) fn expand_impl_as(
                 patch.visit_impl_item_fn_mut(func);
             }
         }
+    }
+
+    // The template of a generic object: the block as written and the checks of its signatures,
+    // generic over the type parameters. What an instantiation registers is the alias's.
+    if template.is_some() {
+        let checks = checks.emit(&root);
+        // A type takes one block: a second one defines this constant again (see below).
+        let one_block = format_ident!(
+            "_undra_error_{}_{}_has_two_undra_api_impl_blocks_merge_them_into_one",
+            code::E0007,
+            type_name
+        );
+        return Ok(quote! {
+            #item
+
+            #[doc(hidden)]
+            #[allow(non_upper_case_globals, dead_code)]
+            const #one_block: () = ();
+
+            #checks
+        });
     }
 
     let meta = root.meta();
@@ -2515,6 +2663,7 @@ pub(crate) fn expand_generic_fn(
     };
 
     // The template pass: the signature as written.
+    let apps = applications(Applications::Template(vec![plan.param.to_string()]));
     let mut template = Errors::new();
     let analysis = analyze(&mut item.sig, &mut template, Kindred::Callable, None);
     if analysis.has_receiver {
@@ -2534,10 +2683,12 @@ pub(crate) fn expand_generic_fn(
     }
     checks.ret(&item.sig.output, &ret);
     ensure_static_streams_in(&mut item.sig.output);
+    drop(apps);
     errors.absorb(template);
     errors.finish()?;
     let template_checks = checks.emit(&root);
 
+    let _apps = applications(Applications::Instance);
     let mut out = TokenStream::new();
     let mut errors = Errors::new();
     for instance in &plan.instances {

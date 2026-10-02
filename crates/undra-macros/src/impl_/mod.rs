@@ -20,6 +20,7 @@ pub(crate) mod diag;
 pub(crate) mod error;
 pub(crate) mod generic;
 pub(crate) mod generic_fn;
+pub(crate) mod generic_object;
 pub(crate) mod migrate;
 pub(crate) mod naming;
 pub(crate) mod object;
@@ -137,6 +138,37 @@ fn item_kind(item: &syn::Item) -> &'static str {
     }
 }
 
+/// Whether the arguments of a macro mention `name` as an argument (`generic`, `store`): for a
+/// recovery step, which has to know what the expansion that failed was trying to be.
+fn mentions_argument(attr: &TokenStream, name: &str) -> bool {
+    attr.clone().into_iter().any(|tree| match tree {
+        proc_macro2::TokenTree::Ident(ident) => ident == name,
+        _ => false,
+    })
+}
+
+/// What a generic object or store whose expansion failed still has to define: its template, as a
+/// macro that swallows the aliases written for it, so the one error that was reported is not
+/// followed by "cannot find macro `Selection`" for each of them.
+fn recover_generic_object(item: &syn::Item) -> TokenStream {
+    match item {
+        syn::Item::Impl(item) => match &*item.self_ty {
+            syn::Type::Path(path) => match path.path.segments.last() {
+                Some(seg) => generic_object::stub_template(&naming::unraw(&seg.ident)),
+                None => TokenStream::new(),
+            },
+            _ => TokenStream::new(),
+        },
+        syn::Item::Struct(item) => {
+            let name = naming::unraw(&item.ident);
+            let compose = generic_object::stub_compose(&name);
+            let template = generic_object::stub_template(&name);
+            quote! { #compose #template }
+        }
+        _ => TokenStream::new(),
+    }
+}
+
 /// The `crate = ".."` path of a macro's arguments, for a recovery step that only needs that:
 /// errors in the arguments are reported by the expansion itself.
 fn recovery_root(attr: TokenStream, macro_name: &str) -> Option<Root> {
@@ -160,8 +192,15 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
         _ => &[],
     };
     let recovery_attr = attr.clone();
+    let generic_block = mentions_argument(&attr, "generic");
     let recover = move |item: &mut syn::Item| {
-        record::recover(recovery_root(recovery_attr, "api"), Mode::Api, item)
+        let stubs = if generic_block && matches!(item, syn::Item::Impl(_)) {
+            recover_generic_object(item)
+        } else {
+            TokenStream::new()
+        };
+        let rest = record::recover(recovery_root(recovery_attr, "api"), Mode::Api, item);
+        quote! { #stubs #rest }
     };
     run_recovering(item, strip, recover, |item| {
         let mut root: Option<Root> = None;
@@ -195,34 +234,39 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             },
         )?;
-        if let Some(span) =
-            generic.filter(|_| !matches!(item, syn::Item::Struct(_) | syn::Item::Enum(_)))
-        {
+        if let Some(span) = generic.filter(|_| {
+            !matches!(
+                item,
+                syn::Item::Struct(_) | syn::Item::Enum(_) | syn::Item::Impl(_)
+            )
+        }) {
             return Err(Diag::new(
                 code::E0008,
-                "`generic` is only valid on a struct or an enum",
-                "`#[undra::api(generic)]` marks a data type with type parameters as the template of named instantiations; a function with a type parameter lists the types it crosses for instead",
-                "remove `generic`, apply the attribute to a struct or an enum with a type parameter, or list the types of a function: `generic(T = [Todo, Note])`",
+                "`generic` is only valid on a struct, an enum or an impl block",
+                "`#[undra::api(generic)]` marks a type with type parameters, or the impl block of an object with them, as the template of named instantiations; a function with a type parameter lists the types it crosses for instead",
+                "remove `generic`, apply the attribute to a struct, an enum or the impl block of an object with a type parameter, or list the types of a function: `generic(T = [Todo, Note])`",
             )
             .at(span));
         }
         if let Some(span) = lists_span.filter(|_| !matches!(item, syn::Item::Fn(_))) {
             return Err(match &item {
-                syn::Item::Struct(_) | syn::Item::Enum(_) | syn::Item::Impl(_) => Diag::new(
-                    code::E0008,
-                    format!(
-                        "`generic(..)` with a list on `{}`",
-                        match &item {
-                            syn::Item::Struct(i) => i.ident.to_string(),
-                            syn::Item::Enum(i) => i.ident.to_string(),
-                            syn::Item::Impl(i) => ty_name(&i.self_ty),
-                            _ => String::new(),
-                        }
-                    ),
-                    "a list instantiates the type parameter of a function; a type is instantiated under a name, by an alias",
-                    "write `generic` alone and declare `#[undra::api] pub type TodoSelection = Selection<Todo>;`",
-                )
-                .at(span),
+                syn::Item::Struct(_) | syn::Item::Enum(_) | syn::Item::Impl(_) => {
+                    let name = match &item {
+                        syn::Item::Struct(i) => i.ident.to_string(),
+                        syn::Item::Enum(i) => i.ident.to_string(),
+                        syn::Item::Impl(i) => ty_name(&i.self_ty),
+                        _ => String::new(),
+                    };
+                    Diag::new(
+                        code::E0008,
+                        format!("`generic(..)` with a list on `{name}`"),
+                        "a list instantiates the type parameter of a function; a type is instantiated under a name, by an alias",
+                        format!(
+                            "write `generic` alone and declare `#[undra::api] pub type Todo{name} = {name}<Todo>;`"
+                        ),
+                    )
+                    .at(span)
+                }
                 other => wrong_item(
                     "api",
                     "a struct, an enum, an `impl` block, a free `fn` or a type alias that names an instantiation of a generic",
@@ -248,6 +292,9 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
             syn::Item::Struct(item) => record::expand_struct(root, item),
             syn::Item::Enum(item) => record::expand_enum(root, item, Mode::Api),
+            syn::Item::Impl(item) if generic.is_some() => {
+                object::expand_impl_template(root, store.is_some(), item)
+            }
             syn::Item::Impl(item) => object::expand_impl(root, store.is_some(), item),
             syn::Item::Fn(item) if !lists.is_empty() => {
                 object::expand_generic_fn(root, item, &lists)
@@ -278,6 +325,12 @@ fn ty_name(ty: &syn::Type) -> String {
 /// `undra::__instantiate!`: what the hidden macro of a generic data type calls (ADR-042).
 pub(crate) fn expand_instantiate(input: TokenStream) -> TokenStream {
     generic::expand_instantiate(input)
+}
+
+/// `undra::__compose_store!`: what the local macro of a generic store's struct calls with the
+/// signatures its impl block handed over (ADR-058).
+pub(crate) fn expand_compose_store(input: TokenStream) -> TokenStream {
+    generic_object::expand_compose_store(input)
 }
 
 /// `#[undra::error]`.
@@ -371,18 +424,31 @@ pub(crate) fn expand_callback(attr: TokenStream, item: TokenStream) -> TokenStre
 /// `#[undra::store]`.
 pub(crate) fn expand_store(attr: TokenStream, item: TokenStream) -> TokenStream {
     let recovery_attr = attr.clone();
-    let recover =
-        move |item: &mut syn::Item| store::recover(recovery_root(recovery_attr, "store"), item);
+    let generic_store = mentions_argument(&attr, "generic");
+    let recover = move |item: &mut syn::Item| {
+        let stubs = if generic_store {
+            recover_generic_object(item)
+        } else {
+            TokenStream::new()
+        };
+        let rest = store::recover(recovery_root(recovery_attr, "store"), item);
+        quote! { #stubs #rest }
+    };
     run_recovering(item, &[], recover, |item| {
         let mut root: Option<Root> = None;
         let mut hook: Option<syn::Path> = None;
+        let mut generic = false;
         parse_args(
             attr,
             "store",
-            "`crate = \"path\"` and `restore = \"Self::function\"`",
+            "`crate = \"path\"`, `restore = \"Self::function\"` and `generic` on a struct with type parameters",
             |meta| {
                 if meta.path.is_ident("crate") {
                     root = Some(root_arg(meta)?);
+                    Ok(true)
+                } else if meta.path.is_ident("generic") {
+                    flag(meta, code::E0008, "generic")?;
+                    generic = true;
                     Ok(true)
                 } else if meta.path.is_ident("restore") {
                     let example = "restore = \"Self::rebuild\"";
@@ -421,6 +487,9 @@ pub(crate) fn expand_store(attr: TokenStream, item: TokenStream) -> TokenStream 
             },
         )?;
         match item {
+            syn::Item::Struct(item) if generic => {
+                store::expand_store_as(root, hook, item, store::StoreMode::Template)
+            }
             syn::Item::Struct(item) => store::expand_store(root, hook, item),
             other => Err(wrong_item("store", "a struct", &other)),
         }

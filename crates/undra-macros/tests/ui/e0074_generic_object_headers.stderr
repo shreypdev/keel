@@ -1,0 +1,53 @@
+error: error[undra::E0074]: the impl block of the generic object `Cache` is for `Cache<Vec<T>>`
+         = note: a generic object is instantiated by naming its type arguments (`pub type TodoCache = Cache<Todo>;`), so its block is for the type with its own parameters, each exactly once
+         = help: write `impl<T> Cache<T>` and put the type you meant in the methods' types
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0074
+  --> tests/ui/e0074_generic_object_headers.rs:17:9
+   |
+17 | impl<T> Cache<Vec<T>> {
+   |         ^^^^^^^^^^^^^
+
+error: error[undra::E0074]: the impl block of the generic object `Pair` is for `Pair<A, Todo>`
+         = note: a generic object is instantiated by naming its type arguments (`pub type TodoPair = Pair<Todo>;`), so its block is for the type with its own parameters, each exactly once
+         = help: write `impl<A> Pair<A>` and put the type you meant in the methods' types
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0074
+  --> tests/ui/e0074_generic_object_headers.rs:27:9
+   |
+27 | impl<A> Pair<A, Todo> {
+   |         ^^^^^^^^^^^^^
+
+error: error[undra::E0074]: the impl block of the generic object `Twin` is for `Twin<A, A>`
+         = note: a generic object is instantiated by naming its type arguments (`pub type TodoTwin = Twin<Todo>;`), so its block is for the type with its own parameters, each exactly once
+         = help: write `impl<A, B> Twin<A, B>` and put the type you meant in the methods' types
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0074
+  --> tests/ui/e0074_generic_object_headers.rs:37:12
+   |
+37 | impl<A, B> Twin<A, A> {
+   |            ^^^^^^^^^^
+
+error: error[undra::E0074]: `generic(..)` on `convert`, a method of the generic object `Box2`
+         = note: an instantiation of a generic object is one class on each platform; a type parameter on a method would multiply every instantiation by it
+         = help: make the parameter a type parameter of the object and name it in the alias, or write the method for a concrete type
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0074
+  --> tests/ui/e0074_generic_object_headers.rs:52:21
+   |
+52 |     #[undra(generic(U = [Todo]))]
+   |                     ^
+
+error: error[undra::E0074]: generic parameter `U` on `map`, a method of the generic object `Box2`
+         = note: an instantiation of a generic object is one class on each platform; a type parameter on a method would multiply every instantiation by it
+         = help: make the parameter a type parameter of the object and name it in the alias, or write the method for a concrete type
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0074
+  --> tests/ui/e0074_generic_object_headers.rs:58:16
+   |
+58 |     pub fn map<U: Default>(&self) -> U {
+   |                ^^^^^^^^^^
+
+error[E0207]: the type parameter `B` is not constrained by the impl trait, self type, or predicates
+  --> tests/ui/e0074_generic_object_headers.rs:37:9
+   |
+37 | impl<A, B> Twin<A, A> {
+   |       --^
+   |       | |
+   |       | unconstrained type parameter
+   |       help: remove the unused type parameter `B`

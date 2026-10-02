@@ -72,7 +72,7 @@ use super::common::{GenericOn, check_generics, item_root};
 use super::diag::{Diag, Errors, code};
 use super::naming::unraw;
 use super::paths::Root;
-use super::types::{Allow, KType, Pos, map_type, ty_string};
+use super::types::{Allow, Applications, KType, Pos, applications, map_type, ty_string};
 
 /// The kind of a signal field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -395,23 +395,68 @@ fn lazy_in_a_signal(outer: &syn::Type, lazy: &syn::Type, kind: SigKind) -> Diag 
     )
 }
 
+/// What a store struct is expanded as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StoreMode<'a> {
+    /// An ordinary store: the struct, its signals, restore, attach and checks.
+    Plain,
+    /// The template of a generic store (`#[undra::store(generic)]`, ADR-058): the struct as
+    /// written, the analysis of its fields with the type parameters left as they are, and the
+    /// local macro its impl block hands its signatures to. Nothing is registered.
+    Template,
+    /// One instantiation (`#[undra::api] pub type TodoSelection = Selection<Todo>;`): the struct
+    /// is the template's, so it is not emitted; the members, the restorer and the checks are the
+    /// alias's. The name is the template's.
+    Instance(&'a str),
+}
+
 /// Expands `#[undra::store]` on a struct.
 pub(crate) fn expand_store(
     args_root: Option<Root>,
     restore_hook: Option<syn::Path>,
+    item: ItemStruct,
+) -> syn::Result<TokenStream> {
+    expand_store_as(args_root, restore_hook, item, StoreMode::Plain)
+}
+
+/// Expands a store struct as a store, the template of a generic store or one instantiation of it
+/// (see [`StoreMode`]).
+pub(crate) fn expand_store_as(
+    args_root: Option<Root>,
+    restore_hook: Option<syn::Path>,
     mut item: ItemStruct,
+    mode: StoreMode<'_>,
 ) -> syn::Result<TokenStream> {
     let mut errors = Errors::new();
     let root = item_root(&mut item.attrs, args_root, &mut errors);
-    check_generics(
-        &item.generics,
-        &item.ident.to_string(),
-        GenericOn::Store,
-        &mut errors,
-    );
+    // What an instantiation reads: the fields as written, before the helper attributes are taken.
+    let original = item.clone();
+    let template_params = match mode {
+        StoreMode::Plain => {
+            check_generics(
+                &item.generics,
+                &item.ident.to_string(),
+                GenericOn::Store,
+                &mut errors,
+            );
+            None
+        }
+        StoreMode::Template => super::generic_object::check_struct_generics(
+            &item.generics,
+            &item.ident.to_string(),
+            &mut errors,
+        ),
+        StoreMode::Instance(_) => None,
+    };
     let name = item.ident.clone();
     let name_str = unraw(&name);
     let struct_docs = super::attrs::docs(&item.attrs);
+    // What a generic type applied to a type parameter means in the signal types (ADR-058).
+    let _apps = match (mode, &template_params) {
+        (StoreMode::Template, Some(params)) => applications(Applications::Template(params.clone())),
+        (StoreMode::Instance(_), _) => applications(Applications::Instance),
+        _ => applications(Applications::Refuse),
+    };
 
     let mut signals: Vec<SignalField> = Vec::new();
     let mut state: Vec<StateField> = Vec::new();
@@ -615,7 +660,11 @@ pub(crate) fn expand_store(
     }
     errors.finish()?;
 
-    let mut checks = Checks::new();
+    let mut checks = match (mode, &template_params) {
+        (StoreMode::Template, Some(params)) => Checks::for_template(&name, params.clone()),
+        (StoreMode::Instance(_), _) => Checks::for_instance(&name),
+        _ => Checks::new(),
+    };
     for signal in &signals {
         checks.ty(&signal.value_ty, &signal.kty);
     }
@@ -627,6 +676,47 @@ pub(crate) fn expand_store(
         named.named.push(syn::parse_quote! {
             #[doc(hidden)]
             pub __undra_cell: #signals_path::CellSlot
+        });
+    }
+
+    // The template of a generic store: the struct, the marker that says it is one, the checks of
+    // its fields, and the local macro through which its impl block hands over its signatures.
+    if let (StoreMode::Template, Some(params)) = (mode, &template_params) {
+        let compose = super::generic_object::compose_macro_name(&name_str);
+        let compose_store = root.compose_store();
+        let root_path = root.path_string();
+        let definition = super::generic_object::struct_definition(&original, params);
+        let hook = restore_hook
+            .as_ref()
+            .map(|hook| quote!(#hook).to_string().replace(' ', ""))
+            .unwrap_or_default();
+        let param_idents: Vec<syn::Ident> = params.iter().map(|p| format_ident!("{}", p)).collect();
+        let (impl_generics, type_generics, where_clause) = item.generics.split_for_impl();
+        return Ok(quote! {
+            #item
+
+            impl #impl_generics #name #type_generics #where_clause {
+                /// Marks the struct as a generic store, so the impl block of a plain object
+                /// that is not marked as a store can be told (E0011).
+                #[doc(hidden)]
+                pub const __UNDRA_IS_GENERIC_STORE: bool = true;
+            }
+
+            #[doc(hidden)]
+            #[allow(unused_macros)]
+            macro_rules! #compose {
+                ( $__impl_docs:literal { $($__block:tt)* } ) => {
+                    #compose_store! {
+                        #name_str #root_path #struct_docs #hook
+                        [#(#param_idents),*]
+                        { #definition }
+                        $__impl_docs
+                        { $($__block)* }
+                    }
+                };
+            }
+
+            #checks
         });
     }
 
@@ -858,10 +948,23 @@ pub(crate) fn expand_store(
     // `UndraObject`) is written by the `#[undra::api(store)] impl` block next to `impl UndraObject`
     // and only forwards to them, so a store whose impl block is missing gets the branded E0011
     // and not also an unsatisfied `UndraObject` bound.
+    let emitted = match mode {
+        StoreMode::Instance(_) => None,
+        _ => Some(&item),
+    };
+    // An instantiation's second alias defines this again: `rustc` reports the constant by its
+    // name (E0070).
+    let alias_rule = match mode {
+        StoreMode::Instance(template) => {
+            super::generic::duplicate_alias_constant(template, name.span())
+        }
+        _ => TokenStream::new(),
+    };
     Ok(quote! {
-        #item
+        #emitted
 
         impl #name {
+            #alias_rule
             #[doc(hidden)]
             pub const __UNDRA_IS_STORE: bool = true;
 

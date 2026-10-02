@@ -51,6 +51,13 @@ impl Root {
         quote!(#path::__instantiate)
     }
 
+    /// `#root::__compose_store`: the hidden macro through which a generic store's struct exports
+    /// its template.
+    pub(crate) fn compose_store(&self) -> TokenStream {
+        let path = &self.path;
+        quote!(#path::__compose_store)
+    }
+
     /// `#root::wire`.
     pub(crate) fn wire(&self) -> TokenStream {
         let path = &self.path;

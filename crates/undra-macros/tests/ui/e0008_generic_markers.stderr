@@ -1,0 +1,37 @@
+error: error[undra::E0008]: `generic` on `Cache`, which has no type parameters
+         = note: `generic` marks the template of named instantiations, and a template needs a type parameter to be instantiated with
+         = help: remove `generic`, or add the type parameter: `impl<T> Cache<T> { .. }`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/e0008_generic_markers.rs:11:6
+   |
+11 | impl Cache {
+   |      ^^^^^
+
+error: error[undra::E0008]: `generic` on `Counter`, which has no type parameters
+         = note: `generic` marks the template of named instantiations, and a template needs a type parameter to be instantiated with
+         = help: remove `generic`, or add the type parameter: `struct Counter<T> { .. }`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/e0008_generic_markers.rs:17:1
+   |
+17 | #[k::store(generic)]
+   | ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `k::store` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error[undra::E0008]: `generic(..)` with a list on `Wrapper`
+         = note: a list instantiates the type parameter of a function; a type is instantiated under a name, by an alias
+         = help: write `generic` alone and declare `#[undra::api] pub type TodoWrapper = Wrapper<Todo>;`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/e0008_generic_markers.rs:25:10
+   |
+25 | #[k::api(generic(T = [u32]))]
+   |          ^^^^^^^
+
+error: error[undra::E0008]: `generic(..)` with a list on `Holder`
+         = note: a list instantiates the type parameter of a function; a type is instantiated under a name, by an alias
+         = help: write `generic` alone and declare `#[undra::api] pub type TodoHolder = Holder<Todo>;`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/e0008_generic_markers.rs:32:10
+   |
+32 | #[k::api(generic(T = [u32]))]
+   |          ^^^^^^^

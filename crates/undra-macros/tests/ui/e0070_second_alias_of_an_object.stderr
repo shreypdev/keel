@@ -1,0 +1,82 @@
+error[E0428]: the name `_undra_error_E0070_this_instantiation_of_Cache_Todo_is_declared_twice_keep_one_alias_per_instantiation` is defined multiple times
+  --> tests/ui/e0070_second_alias_of_an_object.rs:27:10
+   |
+24 | pub type TodoCache = Cache<Todo>;
+   |          --------- previous definition of the value `_undra_error_E0070_this_instantiation_of_Cache_Todo_is_declared_twice_keep_one_alias_per_instantiation` here
+25 |
+26 | #[k::api]
+   | --------- in this attribute macro expansion
+27 | pub type AnotherTodoCache = Cache<Todo>;
+   |          ^^^^^^^^^^^^^^^^ `_undra_error_E0070_this_instantiation_of_Cache_Todo_is_declared_twice_keep_one_alias_per_instantiation` redefined here
+   |
+   = note: `_undra_error_E0070_this_instantiation_of_Cache_Todo_is_declared_twice_keep_one_alias_per_instantiation` must be defined only once in the value namespace of this module
+   = note: this error originates in the macro `::undra::__instantiate` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `UndraObject` for type `Cache<Todo>`
+  --> tests/ui/e0070_second_alias_of_an_object.rs:16:1
+   |
+16 | #[k::api(generic)]
+   | ^^^^^^^^^^^^^^^^^^
+   | |
+   | first implementation here
+   | conflicting implementation for `Cache<Todo>`
+...
+23 | #[k::api]
+   | --------- in this attribute macro expansion
+   |
+   = note: this error originates in the macro `::undra::__instantiate` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0592]: duplicate definitions with name `_undra_error_E0070_this_instantiation_of_Cache_is_declared_twice_keep_one_alias_per_instantiation`
+  --> tests/ui/e0070_second_alias_of_an_object.rs:24:10
+   |
+23 | #[k::api]
+   | --------- in this attribute macro expansion
+24 | pub type TodoCache = Cache<Todo>;
+   |          ^^^^^^^^^ duplicate definitions for `_undra_error_E0070_this_instantiation_of_Cache_is_declared_twice_keep_one_alias_per_instantiation`
+...
+27 | pub type AnotherTodoCache = Cache<Todo>;
+   |          ---------------- other definition for `_undra_error_E0070_this_instantiation_of_Cache_is_declared_twice_keep_one_alias_per_instantiation`
+   |
+   = note: this error originates in the macro `::undra::__instantiate` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0592]: duplicate definitions with name `__UNDRA_IS_OBJECT`
+  --> tests/ui/e0070_second_alias_of_an_object.rs:16:1
+   |
+16 | #[k::api(generic)]
+   | ^^^^^^^^^^^^^^^^^^
+   | |
+   | duplicate definitions for `__UNDRA_IS_OBJECT`
+   | other definition for `__UNDRA_IS_OBJECT`
+...
+23 | #[k::api]
+   | --------- in this attribute macro expansion
+   |
+   = note: this error originates in the macro `::undra::__instantiate` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0592]: duplicate definitions with name `__UNDRA_OBJECT_ID`
+  --> tests/ui/e0070_second_alias_of_an_object.rs:16:1
+   |
+16 | #[k::api(generic)]
+   | ^^^^^^^^^^^^^^^^^^
+   | |
+   | duplicate definitions for `__UNDRA_OBJECT_ID`
+   | other definition for `__UNDRA_OBJECT_ID`
+...
+23 | #[k::api]
+   | --------- in this attribute macro expansion
+   |
+   = note: this error originates in the macro `::undra::__instantiate` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0592]: duplicate definitions with name `__UNDRA_OBJECT_NAME`
+  --> tests/ui/e0070_second_alias_of_an_object.rs:16:1
+   |
+16 | #[k::api(generic)]
+   | ^^^^^^^^^^^^^^^^^^
+   | |
+   | duplicate definitions for `__UNDRA_OBJECT_NAME`
+   | other definition for `__UNDRA_OBJECT_NAME`
+...
+23 | #[k::api]
+   | --------- in this attribute macro expansion
+   |
+   = note: this error originates in the macro `::undra::__instantiate` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -120,6 +120,11 @@ enum Is {
     /// A type in the instantiation list of a generic function (ADR-058): a value type declared
     /// with `#[undra::api]` under the name it is written with, and never an object.
     Listed,
+    /// A generic data type applied to a substituted type (`Page<Todo>`): it must be declared by an
+    /// alias, which gives it its name (ADR-058 section 4).
+    Application,
+    /// The same for a generic object (`Arc<Selection<Todo>>`).
+    ObjectApplication,
 }
 
 /// One named-type assertion.
@@ -307,8 +312,10 @@ impl Checks {
             }
             Type::Reference(reference) => {
                 // `&T`: an object taken by reference (ADR-040).
-                if let KType::Object(object) = kty {
-                    self.named(&reference.elem, object, Is::Object);
+                match kty {
+                    KType::Object(object) => self.named(&reference.elem, object, Is::Object),
+                    KType::ObjectOf(_) => self.application(&reference.elem, true),
+                    _ => {}
                 }
                 return;
             }
@@ -336,6 +343,10 @@ impl Checks {
             KType::Object(object) if name == "Arc" && args.len() == 1 => {
                 self.wrapper(ty, Wrapper::Arc, &args);
                 self.named(args[0], object, Is::Object);
+            }
+            KType::ObjectOf(_) if name == "Arc" && args.len() == 1 => {
+                self.wrapper(ty, Wrapper::Arc, &args);
+                self.application(args[0], true);
             }
             KType::Callback(callback) if name == "Arc" && args.len() == 1 => {
                 self.wrapper(ty, Wrapper::Arc, &args);
@@ -388,7 +399,8 @@ impl Checks {
             }
             KType::Unit | KType::Stream(_) => {}
             KType::Vec(_) | KType::Option(_) | KType::Map(..) | KType::Result(..) => {}
-            KType::Object(_) | KType::Callback(_) => {}
+            KType::Object(_) | KType::Callback(_) | KType::ObjectOf(_) => {}
+            KType::NamedOf(_) => self.application(ty, false),
             leaf => self.leaf(ty, leaf),
         }
     }
@@ -453,8 +465,32 @@ impl Checks {
         }
     }
 
+    /// `ty` is a generic type applied to a substituted type (ADR-058 section 4): an alias must
+    /// declare it, and the compiler reads its name from there. A template's generic signature has
+    /// nothing to check: it holds whatever an instantiation names.
+    fn application(&mut self, ty: &Type, object: bool) {
+        if matches!(self.scope, Scope::Template(_)) {
+            return;
+        }
+        let is = if object {
+            Is::ObjectApplication
+        } else {
+            Is::Application
+        };
+        if self.fresh(format!("application:{}:{is:?}", ty_string(ty))) {
+            self.named.push(Named {
+                ty: self.resolved(ty),
+                name: String::new(),
+                is,
+                listed_for: None,
+            });
+        }
+    }
+
     fn named(&mut self, ty: &Type, name: &str, is: Is) {
-        if !self.live() || (self.quiet_values && is == Is::Value) {
+        // A type parameter of a template holds whatever an instantiation names: the instantiation
+        // checks it.
+        if !self.live() || self.is_param(ty) || (self.quiet_values && is == Is::Value) {
             return;
         }
         if self.fresh(format!("named:{}:{name}:{is:?}", ty_string(ty))) {
@@ -669,6 +705,7 @@ impl Named {
             Is::Object => return self.object_assertion(meta),
             Is::Callback => return self.callback_assertion(meta, runtime),
             Is::Listed => return self.listed_assertion(meta),
+            Is::Application | Is::ObjectApplication => return self.application_assertion(),
             Is::Value | Is::Error => {}
         }
         let span = self.ty.span();
@@ -737,6 +774,78 @@ impl Named {
                     ::core::panic!(#mismatch);
                 }
                 #error_check
+            };
+        }
+    }
+
+    /// A generic type applied to a substituted type has the name its alias gave it: the inherent
+    /// constant of the instantiation is not the fallback's empty string (E0002 when it is), and an
+    /// object is an object (E0064).
+    fn application_assertion(&self) -> TokenStream {
+        let span = self.ty.span();
+        let ty = &self.ty;
+        let shown = ty_string(ty);
+        let object = self.is == Is::ObjectApplication;
+        let constant = if object {
+            quote!(__UNDRA_OBJECT_NAME)
+        } else {
+            quote!(UNDRA_TYPE_NAME)
+        };
+        let kind = if object { "object" } else { "type" };
+        let alias = alias_name_hint(ty);
+        let template = template_name(ty);
+        let nameless = panic_text(&Diag::new(
+            code::E0002,
+            format!("`{shown}` has no name"),
+            format!(
+                "the schema names every type, and an instantiated generic {kind} is named by the alias that declares it; `{shown}` is reached here by putting a listed type in place of a type parameter, and no alias declares it"
+            ),
+            format!("declare `#[undra::api] pub type {alias} = {shown};` next to `{template}`"),
+        ));
+        let body = if object {
+            let message = panic_text(&Diag::new(
+                code::E0064,
+                format!("`{shown}` is a record or enum, not an object"),
+                "only an object (a type with an `#[undra::api] impl` block) crosses as `Arc<T>` or `&T`, as a handle; records, enums and errors cross by value, copied",
+                format!("write `{shown}` without `Arc` or `&`"),
+            ));
+            quote! {
+                if <#ty>::#constant.is_empty() {
+                    // Whatever has an Undra type id is a record, an enum or an error.
+                    if <#ty>::UNDRA_TYPE_ID != 0 {
+                        ::core::panic!(#message);
+                    }
+                    ::core::panic!(#nameless);
+                }
+            }
+        } else {
+            let message = panic_text(&Diag::new(
+                code::E0064,
+                format!("`{shown}` is an object and cannot be used as a value"),
+                "an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value",
+                format!(
+                    "take it as `&{shown}` or `Arc<{shown}>`, or use a record with the data the platform needs"
+                ),
+            ));
+            quote! {
+                if <#ty>::__UNDRA_IS_OBJECT {
+                    ::core::panic!(#message);
+                }
+                if <#ty>::#constant.is_empty() {
+                    ::core::panic!(#nameless);
+                }
+            }
+        };
+        quote_spanned! {span=>
+            const _: () = {
+                // The fallback of what the inherent impls of an instantiation define: the empty
+                // name of a type no alias declares (`__UndraFallback` has the rest).
+                trait __UndraApplicationFallback {
+                    const UNDRA_TYPE_NAME: &'static str = "";
+                    const __UNDRA_OBJECT_NAME: &'static str = "";
+                }
+                impl<__UndraT: ?::core::marker::Sized> __UndraApplicationFallback for __UndraT {}
+                #body
             };
         }
     }
@@ -866,6 +975,50 @@ impl Named {
                 }
             };
         }
+    }
+}
+
+/// The alias a generic application would be declared as: the names of its type arguments, then
+/// the template's own (`TodoPage` for `Page<Todo>`).
+fn alias_name_hint(ty: &Type) -> String {
+    match ty {
+        Type::Path(path) => path
+            .path
+            .segments
+            .last()
+            .map(|seg| {
+                let arguments: String = match &seg.arguments {
+                    PathArguments::AngleBracketed(args) => args
+                        .args
+                        .iter()
+                        .filter_map(|arg| match arg {
+                            GenericArgument::Type(inner) => Some(alias_name_hint(inner)),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => String::new(),
+                };
+                format!("{arguments}{}", seg.ident)
+            })
+            .unwrap_or_default(),
+        Type::Group(group) => alias_name_hint(&group.elem),
+        Type::Paren(paren) => alias_name_hint(&paren.elem),
+        _ => String::new(),
+    }
+}
+
+/// The name of the template of an application: `Page` for `Page<Todo>`.
+fn template_name(ty: &Type) -> String {
+    match ty {
+        Type::Path(path) => path
+            .path
+            .segments
+            .last()
+            .map(|seg| seg.ident.to_string())
+            .unwrap_or_default(),
+        Type::Group(group) => template_name(&group.elem),
+        Type::Paren(paren) => template_name(&paren.elem),
+        _ => String::new(),
     }
 }
 

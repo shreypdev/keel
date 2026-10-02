@@ -26,7 +26,7 @@ error: error[undra::E0008]: `#[undra(key)]` is not valid on a record or variant 
    |             ^^^
 
 error: error[undra::E0008]: unknown argument `restor` for `#[undra::store]`
-         = note: `#[undra::store]` accepts: `crate = "path"` and `restore = "Self::function"`
+         = note: `#[undra::store]` accepts: `crate = "path"`, `restore = "Self::function"` and `generic` on a struct with type parameters
          = help: did you mean `restore`? Otherwise remove `restor`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
   --> tests/ui/d1_unknown_option_suggestions.rs:20:12

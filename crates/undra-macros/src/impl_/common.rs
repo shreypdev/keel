@@ -88,8 +88,11 @@ impl GenericOn {
             GenericOn::ImplBlock | GenericOn::Store => {
                 "the schema describes concrete objects: a generic object crosses once per instantiation, each under a name of its own, which the platforms generate a class for"
             }
-            GenericOn::Query | GenericOn::Mutation => {
+            GenericOn::Query => {
                 "a query is cached, persisted and invalidated under its name and key, and the schema describes one result type for it; a list of types would make several queries that share one name"
+            }
+            GenericOn::Mutation => {
+                "a mutation is queued, replayed and persisted under its name, and the schema describes one input and one result type for it; a list of types would make several mutations that share one name"
             }
             GenericOn::Port | GenericOn::Callback => {
                 "the platform implements the trait by its name, once per instance, and nothing names an instantiation it could implement"
@@ -124,8 +127,11 @@ impl GenericOn {
             GenericOn::Store => {
                 "write `#[undra::store(generic)]`, mark its impl block `#[undra::api(store, generic)]` and declare each instantiation: `#[undra::api] pub type TodoSelection = Selection<Todo>;`"
             }
-            GenericOn::Query | GenericOn::Mutation => {
-                "write one function per type (`todo_rows`, `note_rows`) and share the body in a generic Rust function they both call"
+            GenericOn::Query => {
+                "write one query per type (`todo_rows`, `note_rows`) and share the body in a generic Rust function they both call"
+            }
+            GenericOn::Mutation => {
+                "write one mutation per type (`save_todo`, `save_note`) and share the body in a generic Rust function they both call"
             }
             GenericOn::Port | GenericOn::Callback => {
                 "declare one trait per type (`TodoListener`), or pass a record or an enum that covers the cases"

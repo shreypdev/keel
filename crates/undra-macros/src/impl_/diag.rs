@@ -75,6 +75,7 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0071 | a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041) |
 /// | E0072 | the instantiation list of a generic function or method (`generic(T = [Todo, Note])`) is empty, repeats a type, lists something that is not a named value type, names a type parameter the function does not have, or the function has several type parameters; a schema whose `generic` labels do not describe their definitions (ADR-058; addition) |
 /// | E0073 | an `infinite` query that does not meet ADR-043's shape: no `item_key` or one that names no field of the rows, no or more than one `#[undra(cursor)]` parameter, a cursor that is not `Option<C>` or is in the key, a success type that is not `Page<T, C>`, rows that are not a record (addition) |
+/// | E0074 | the impl block of a generic object that is not for the type with its own type parameters, each exactly once, or a method of a generic object with type parameters of its own (ADR-058; addition) |
 pub(crate) mod code {
     pub(crate) const E0001: &str = "E0001";
     pub(crate) const E0002: &str = "E0002";
@@ -108,6 +109,7 @@ pub(crate) mod code {
     pub(crate) const E0071: &str = "E0071";
     pub(crate) const E0072: &str = "E0072";
     pub(crate) const E0073: &str = "E0073";
+    pub(crate) const E0074: &str = "E0074";
 }
 
 thread_local! {

@@ -1111,6 +1111,57 @@ mod tests {
         }
     }
 
+    mod instantiations {
+        use proptest::prelude::*;
+
+        use super::*;
+        use crate::fixtures::{field, record};
+
+        /// A schema with the records `R0` to `R5` and `newest<Ri>` for each of `chosen`, in that order.
+        fn schema_of(chosen: &[usize]) -> Schema {
+            let mut s = Schema::new("t");
+            for i in 0..6 {
+                s.records
+                    .push(record(&format!("R{i}"), vec![field("x", TypeRef::U8)]));
+            }
+            for i in chosen {
+                s.functions.push(newest("newest", &format!("R{i}")));
+            }
+            s
+        }
+
+        proptest! {
+            /// ADR-058 decision 5: the order the instantiations are declared in never moves the
+            /// hash, and each one that is added or removed does; every such schema is valid.
+            #[test]
+            fn the_hash_depends_on_which_instantiations_there_are_and_not_on_their_order(
+                order in Just((0..6usize).collect::<Vec<_>>()).prop_shuffle(),
+                count in 1..=6usize,
+            ) {
+                let chosen = &order[..count];
+                let mut sorted = chosen.to_vec();
+                sorted.sort_unstable();
+                let shuffled = schema_of(chosen);
+                prop_assert_eq!(shuffled.validate(), Ok(()));
+                prop_assert_eq!(shuffled.hash(), schema_of(&sorted).hash());
+                let mut reversed = chosen.to_vec();
+                reversed.reverse();
+                prop_assert_eq!(shuffled.hash(), schema_of(&reversed).hash());
+                // One fewer instantiation is another schema, and so is one more.
+                if count > 1 {
+                    prop_assert_ne!(shuffled.hash(), schema_of(&chosen[1..]).hash());
+                }
+                if count < 6 {
+                    prop_assert_ne!(shuffled.hash(), schema_of(&order[..count + 1]).hash());
+                }
+                // The ids of the instantiations that were there do not change.
+                for function in &shuffled.functions {
+                    prop_assert_eq!(function.method_id, crate::ids::function_id(&function.name));
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_generic_label_is_written_only_when_set() {
         // ADR-058 decision 5: a schema without a generic function or method serializes, and so
