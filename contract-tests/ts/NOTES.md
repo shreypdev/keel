@@ -129,3 +129,12 @@ Fixed since (playground finding 5): the Mirror stranded a change-set enqueued fr
    and about 1.26 ms with an observing store; the TypeScript side of it (decode, apply to the 10,000-item copy,
    announce) is about 15 us of that. The time is the core computing the patch by comparing the old and the new
    list. The 10k tab of the web app shows the same: about 1.2 to 1.8 ms from click to re-rendered window.
+6. **A wasm core's panic report cannot know the core's namespace or version** (ADR-046 decision 4.4). The module carries
+   neither (its `undra_schema_json` has the Undra version and the shim's crate name only), and the generated entry's
+   `load` (`UndraPlaygroundCore.load`) does not pass them to `UndraCore.load`. The runtime takes `LoadOptions.namespace` and
+   `LoadOptions.coreVersion` (default `""`); S29 passes `UndraIds.namespace` and the workspace version explicitly
+   (`PLAYGROUND_CORE_VERSION` in `src/harness.ts`). `undra-bindgen`'s TypeScript entry can set `namespace: UndraIds.namespace`
+   by itself; it has no core version to set (`package_version` is the bindings package's own, `0.1.0`).
+7. **S29 and S30 hash the module**: `BootOptions.wasmBytes` gives the runtime the module's bytes instead of the compiled module
+   the other scenarios share, because only bytes can be hashed for the report's `imageId` (a compiled `WebAssembly.Module`
+   has none: its image id is `""`).
