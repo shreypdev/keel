@@ -140,7 +140,25 @@ pub(crate) fn check_header(item: &ItemImpl, errors: &mut Errors) -> Option<Heade
                 .all(|d| applied.iter().filter(|a| *a == d).count() == 1)
     });
     if !right {
-        let own = declared.join(", ");
+        // The fix names as many parameters as the type takes, which the self type says (the
+        // block may declare fewer, `impl<A> Pair<A, Todo>`, or more).
+        let arity = match &seg.arguments {
+            syn::PathArguments::AngleBracketed(args) => args
+                .args
+                .iter()
+                .filter(|arg| matches!(arg, syn::GenericArgument::Type(_)))
+                .count(),
+            _ => 0,
+        };
+        let own =
+            fix_parameters(&declared, if arity == 0 { declared.len() } else { arity }).join(", ");
+        let example = ["Todo", "Tag", "Note", "User", "Item", "Page"]
+            .iter()
+            .cycle()
+            .take(if arity == 0 { declared.len() } else { arity })
+            .copied()
+            .collect::<Vec<_>>()
+            .join(", ");
         errors.push(
             Diag::new(
                 code::E0074,
@@ -149,7 +167,7 @@ pub(crate) fn check_header(item: &ItemImpl, errors: &mut Errors) -> Option<Heade
                     ty_string(&item.self_ty)
                 ),
                 format!(
-                    "a generic object is instantiated by naming its type arguments (`pub type Todo{name} = {name}<Todo>;`), so its block is for the type with its own parameters, each exactly once"
+                    "a generic object is instantiated by naming its type arguments (`pub type Todo{name} = {name}<{example}>;`), so its block is for the type with its own parameters, each exactly once"
                 ),
                 format!(
                     "write `impl<{own}> {name}<{own}>` and put the type you meant in the methods' types"
@@ -163,6 +181,30 @@ pub(crate) fn check_header(item: &ItemImpl, errors: &mut Errors) -> Option<Heade
         name,
         params: applied.unwrap_or_default(),
     })
+}
+
+/// `count` parameter names for the fix of E0074: the block's own, in order, then fresh capital
+/// letters after the last of them (`[A]` and 2 is `A, B`).
+fn fix_parameters(declared: &[String], count: usize) -> Vec<String> {
+    let mut names: Vec<String> = declared.iter().take(count).cloned().collect();
+    let start = declared
+        .last()
+        .and_then(|last| last.chars().next())
+        .filter(char::is_ascii_uppercase)
+        .map_or(b'T' - b'A', |c| c as u8 - b'A' + 1);
+    for step in 0..26u8 {
+        if names.len() >= count {
+            break;
+        }
+        let candidate = char::from(b'A' + (start + step) % 26).to_string();
+        if !names.contains(&candidate) && !declared.contains(&candidate) {
+            names.push(candidate);
+        }
+    }
+    while names.len() < count {
+        names.push(format!("T{}", names.len()));
+    }
+    names
 }
 
 /// The generics of a `#[undra::store(generic)]` struct: type parameters only (a lifetime is E0003,
@@ -561,6 +603,42 @@ mod tests {
         }
         let message = header("impl<T> Cache<T, T> {}").unwrap_err();
         assert!(message.contains("E0074"), "{message}");
+    }
+
+    #[test]
+    fn the_fix_of_e0074_has_as_many_parameters_as_the_type_takes() {
+        // The self type says how many parameters the type has; the block may declare fewer.
+        for (src, fix, alias) in [
+            (
+                "impl<A> Pair<A, Todo> {}",
+                "write `impl<A, B> Pair<A, B>`",
+                "`pub type TodoPair = Pair<Todo, Tag>;`",
+            ),
+            (
+                "impl<T, U> Cache<T> {}",
+                "write `impl<T> Cache<T>`",
+                "`pub type TodoCache = Cache<Todo>;`",
+            ),
+            (
+                "impl<T> Cache<Vec<T>> {}",
+                "write `impl<T> Cache<T>`",
+                "`pub type TodoCache = Cache<Todo>;`",
+            ),
+            (
+                "impl<A, B> Twin<A, A> {}",
+                "write `impl<A, B> Twin<A, B>`",
+                "`pub type TodoTwin = Twin<Todo, Tag>;`",
+            ),
+            (
+                "impl<T> Cache {}",
+                "write `impl<T> Cache<T>`",
+                "`pub type TodoCache = Cache<Todo>;`",
+            ),
+        ] {
+            let message = header(src).unwrap_err();
+            assert!(message.contains(fix), "{src}: {message}");
+            assert!(message.contains(alias), "{src}: {message}");
+        }
     }
 
     #[test]

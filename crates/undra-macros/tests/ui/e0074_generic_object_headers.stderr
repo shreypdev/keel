@@ -8,8 +8,8 @@ error: error[undra::E0074]: the impl block of the generic object `Cache` is for 
    |         ^^^^^^^^^^^^^
 
 error: error[undra::E0074]: the impl block of the generic object `Pair` is for `Pair<A, Todo>`
-         = note: a generic object is instantiated by naming its type arguments (`pub type TodoPair = Pair<Todo>;`), so its block is for the type with its own parameters, each exactly once
-         = help: write `impl<A> Pair<A>` and put the type you meant in the methods' types
+         = note: a generic object is instantiated by naming its type arguments (`pub type TodoPair = Pair<Todo, Tag>;`), so its block is for the type with its own parameters, each exactly once
+         = help: write `impl<A, B> Pair<A, B>` and put the type you meant in the methods' types
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0074
   --> tests/ui/e0074_generic_object_headers.rs:27:9
    |
@@ -17,7 +17,7 @@ error: error[undra::E0074]: the impl block of the generic object `Pair` is for `
    |         ^^^^^^^^^^^^^
 
 error: error[undra::E0074]: the impl block of the generic object `Twin` is for `Twin<A, A>`
-         = note: a generic object is instantiated by naming its type arguments (`pub type TodoTwin = Twin<Todo>;`), so its block is for the type with its own parameters, each exactly once
+         = note: a generic object is instantiated by naming its type arguments (`pub type TodoTwin = Twin<Todo, Tag>;`), so its block is for the type with its own parameters, each exactly once
          = help: write `impl<A, B> Twin<A, B>` and put the type you meant in the methods' types
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0074
   --> tests/ui/e0074_generic_object_headers.rs:37:12
