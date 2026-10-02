@@ -1256,6 +1256,7 @@ dependencies = [
  "tungstenite",
  "undra-bindgen",
  "undra-meta",
+ "undra-transport",
  "undra-wire",
 ]
 
@@ -1328,6 +1329,7 @@ dependencies = [
  "futures-core",
  "inventory",
  "parking_lot",
+ "proptest",
  "serde_json",
  "slab",
  "undra-meta",

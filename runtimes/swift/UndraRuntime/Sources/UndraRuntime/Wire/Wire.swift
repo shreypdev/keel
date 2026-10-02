@@ -2,8 +2,8 @@
 /// `Wire.Call`, `Wire.Reply`, `Wire.ChangeSet`, `Wire.PortCall`, `Wire.PortReply`, `Wire.Cancel`,
 /// `Wire.StreamCredit`, `Wire.StreamItem`, `Wire.Observe`, `Wire.Release`, `Wire.Event`,
 /// `Wire.Hello`, `Wire.Log`, `Wire.TimerFired` and `Wire.Snapshot`, plus the small types that
-/// only they use (`Wire.ChangeEntry`, `Wire.PortStatus`, `Wire.StreamFlag`, `Wire.SnapshotStore`,
-/// `Wire.SnapshotSignal`).
+/// only they use (`Wire.ChangeEntry`, `Wire.PortStatus`, `Wire.StreamFlag`, `Wire.SnapshotType`,
+/// `Wire.SnapshotStore`, `Wire.SnapshotSignal`).
 ///
 /// The payload types live in a namespace because generated code declares top-level types with
 /// the names of the standard ports (`Log`, `Http`, `Kv`, ...) and of user records; a payload

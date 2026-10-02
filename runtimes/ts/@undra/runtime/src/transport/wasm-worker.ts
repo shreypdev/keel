@@ -1,4 +1,5 @@
 import { UndraError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
+import { isTrap } from "../panic.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 import {
   type HelloPayload,
@@ -11,6 +12,9 @@ import {
   encodeEnvelope,
   encodePortReply,
 } from "../wire/index.js";
+import type { PortImpl } from "../port.js";
+import { syncPortRefusal } from "../port-dispatch.js";
+import type { RestartResult, SnapshotPolicy } from "../recovery.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
 import type { WasmSource } from "./wasm-main.js";
 import { type HostToWorker, WORKER_PROTOCOL_VERSION, type WorkerFailure, type WorkerToHost, type WorkerWasm } from "./worker-protocol.js";
@@ -47,19 +51,43 @@ export interface WasmWorkerOptions {
   readonly logLevel?: number;
   /** How long the worker may take to load and initialise the core, in ms. Default 15000; 0 waits forever. */
   readonly startTimeoutMs?: number;
+  /**
+   * The module the worker imports before `undra_init` (ADR-049): its default export maps port ids to
+   * implementations that run in the worker, which is where a synchronous port (an app's
+   * `#[undra::port(sync)]` port, an override of Clock or Rng) must live; see `WorkerPortsModule`.
+   */
+  readonly ports?: URL | string;
+  /**
+   * Keep snapshots in the worker for a restart after a trap (`LoadOptions.recovery`, ADR-049). With it, a trap does
+   * not end the worker: `restart` can bring the core back.
+   */
+  readonly recovery?: SnapshotPolicy;
 }
 
-/** What waits for the worker's answer to a `snapshot` or `restore` request. */
-type ControlWaiter =
-  | { readonly kind: "snapshot"; resolve(bytes: Uint8Array): void; reject(error: unknown): void }
-  | { readonly kind: "restore"; resolve(): void; reject(error: unknown): void };
+/** The worker's answers to the requests of {@link WasmWorkerTransport}: `stats`, `snapshot`, `restored`, `restarted`. */
+type ControlAnswer = Extract<WorkerToHost, { readonly t: "stats" | "snapshot" | "restored" | "restarted" }>;
+
+/** What waits for the worker's answer to a request: the answer, as it came. */
+interface ControlWaiter {
+  resolve(answer: ControlAnswer): void;
+  reject(error: unknown): void;
+}
+
+/** A transport failure from the worker; a trap keeps the engine's stack as the stack of its `cause` (for the panic report). */
+function transportError(failure: Extract<WorkerFailure, { kind: "transport" }>): UndraTransportError {
+  if (failure.stack === undefined) return new UndraTransportError(failure.reason, failure.message);
+  const cause = new Error(failure.message);
+  cause.name = "RuntimeError";
+  cause.stack = failure.stack;
+  return new UndraTransportError(failure.reason, failure.message, { cause });
+}
 
 function failureToError(failure: WorkerFailure): Error {
   switch (failure.kind) {
     case "schemaMismatch":
       return new UndraSchemaMismatchError(failure.expected, failure.got);
     case "transport":
-      return new UndraTransportError(failure.reason, failure.message);
+      return transportError(failure);
     case "error":
       return new UndraTransportError("handshake", failure.message);
   }
@@ -81,18 +109,26 @@ function isArrayBuffer(value: unknown): value is ArrayBuffer {
 }
 
 /**
- * The failure of a snapshot or restore request in a form a caller can use: a transport failure
- * keeps its reason, anything else is a protocol failure of this exchange.
+ * The ids of `ports` the worker forwards to the host's thread. A synchronous port cannot be served from there, because
+ * the core cannot wait for that thread: it is refused, naming it and saying where it belongs (ADR-049).
  */
-function controlFailure(failure: WorkerFailure): Error {
-  switch (failure.kind) {
-    case "transport":
-      return new UndraTransportError(failure.reason, failure.message);
-    case "schemaMismatch":
-      return new UndraSchemaMismatchError(failure.expected, failure.got);
-    case "error":
-      return new UndraTransportError("protocol", failure.message);
+function asyncPortIds(ports: Iterable<readonly [number, PortImpl]> = []): number[] {
+  const ids: number[] = [];
+  for (const [portId, impl] of ports) {
+    if (impl.sync) throw new UndraError("options", syncPortRefusal(portId, impl));
+    ids.push(portId);
   }
+  return ids;
+}
+
+/**
+ * The failure an answer of the worker carries, in a form a caller can use: a transport failure keeps its reason (a
+ * trap its stack), anything else, and an answer without what it should carry, is a protocol failure of this exchange.
+ */
+function controlFailure(answer: ControlAnswer): Error {
+  const failure = "failure" in answer ? answer.failure : undefined;
+  if (failure === undefined) return new UndraTransportError("protocol", "the worker gave an incomplete answer");
+  return failure.kind === "error" ? new UndraTransportError("protocol", failure.message) : failureToError(failure);
 }
 
 /**
@@ -100,28 +136,26 @@ function controlFailure(failure: WorkerFailure): Error {
  * `@undra/runtime/worker`), so heavy calls never block the UI thread. Envelopes
  * travel by `postMessage` with their buffers transferred, the worker's in one
  * message per worker task (so a burst of change-sets costs this thread one
- * task, not one each); port calls of the core execute here, on the main
- * thread, and are answered with `PortReply`.
+ * task, not one each).
  *
- * Everything is asynchronous: there is no `callSync`, and a port declared
- * `sync` cannot serve the core's synchronous calls (the core cannot block on
- * this thread, so the reply would come too late and the call fails as
- * unavailable). Which ports the core calls synchronously and which are served
- * where:
+ * Everything this thread does is asynchronous: there is no `callSync`, and the
+ * core, which cannot wait for this thread, answers its ports where it runs
+ * (ADR-049, worker protocol 3):
  *
  * * `Clock`, `Rng` and `Log` are answered inside the worker by the core's
  *   built-in bindings (the worker's own `Date.now`, `crypto.getRandomValues` and
- *   `log` import). `adapters.clock`, `adapters.rng`, `adapters.timer` and a
- *   `registerPort` of one of these three do not cross to the worker. The core's
- *   log records still reach `adapters.log`: the worker relays them.
- * * Every other port is called on this thread, asynchronously, and works as in
- *   `wasm-main`. A custom port declared `sync` is the exception: it cannot be
- *   served here. When one answers a call, this transport logs a warning (once
- *   per port) through the handler's log, and the core's call has already failed
- *   as unavailable; use `wasm-main` for such a port. (The transport only sees
- *   that a port answered inline, so an asynchronous port whose implementation
- *   returned bytes directly is warned about too; its reply is delivered and
- *   used, and the warning says so.)
+ *   `log` import). The core's log records still reach `adapters.log`: the worker
+ *   relays them. To override Clock, Rng or the core's timers, export them from
+ *   the module of {@link WasmWorkerOptions.ports}; `adapters.clock`, `adapters.rng`
+ *   and `adapters.timer` of this thread do not reach the worker.
+ * * A synchronous port of the app (`#[undra::port(sync)]`) is implemented in the
+ *   worker, in that same module, and answered there synchronously. Registering a
+ *   synchronous port on this thread is refused (a load-time error, or a throw of
+ *   `registerPort` after load) with a message that names it.
+ * * Every port registered on this thread with asynchronous methods (Http, Kv,
+ *   SecureStore, Fs, an app's async port) is called here, as in `wasm-main`: the
+ *   worker knows their ids (`init`, then a `ports` message for each
+ *   `registerPort` after load) and forwards their calls.
  *
  * `snapshot()` and `restore()` travel as control messages and are answered in
  * the order the worker handles them, behind the messages sent before them; a
@@ -138,16 +172,14 @@ export class WasmWorkerTransport implements Transport {
   #open = false;
   #closed = false;
   #seq = 0;
-  #nextStatsId = 1;
-  readonly #stats = new Map<number, { resolve(json: string | null): void; reject(error: unknown): void }>();
   #nextControlId = 1;
   readonly #control = new Map<number, ControlWaiter>();
   /** Whether the worker said, in `ready`, that it understands `snapshot` and `restore`. */
   #canSnapshot = false;
+  /** Whether the worker said, in `ready`, that it can restart the core after a trap (and `recovery` is on). */
+  #canRestart = false;
   /** Fails a `start` that has not settled yet (a protocol failure before `ready` must not wait for the timeout). */
   #abortStart: ((error: Error) => void) | null = null;
-  /** The custom ports already warned about (see the class doc). */
-  readonly #warnedPorts = new Set<number>();
   #detach: (() => void) | null = null;
 
   /** @param options See {@link WasmWorkerOptions}. */
@@ -159,7 +191,10 @@ export class WasmWorkerTransport implements Transport {
     this.#handler = handler;
     return new Promise<HelloPayload>((resolve, reject) => {
       let worker: WorkerLike;
+      let asyncPorts: number[];
       try {
+        // A synchronous port of this thread is refused before anything is spawned or sent.
+        asyncPorts = asyncPortIds(handler.ports?.());
         worker = this.#createWorker();
       } catch (error) {
         reject(error);
@@ -193,9 +228,19 @@ export class WasmWorkerTransport implements Transport {
               });
               return;
             }
+            // Ports answered in the worker need protocol 3 (ADR-049): a worker script older than this runtime would
+            // ignore the module and send the app's synchronous ports across, where the core traps at their first call.
+            if (this.#options.ports !== undefined && message.features?.includes("ports") !== true) {
+              settle(() => {
+                this.close();
+                reject(new UndraTransportError("unsupported", "worker.ports needs this @undra/runtime's worker script (protocol 3)"));
+              });
+              return;
+            }
             settle(() => {
               this.#open = true;
               this.#canSnapshot = message.features?.includes("snapshot") === true;
+              this.#canRestart = this.#options.recovery !== undefined && message.features?.includes("recovery") === true;
               resolve(message.hello);
             });
             return;
@@ -221,33 +266,23 @@ export class WasmWorkerTransport implements Transport {
               this.#receive(data);
             }
             return;
-          case "stats": {
-            const waiting = this.#stats.get(message.id);
-            this.#stats.delete(message.id);
-            waiting?.resolve(message.json);
-            return;
-          }
-          case "snapshot": {
+          case "stats":
+          case "snapshot":
+          case "restored":
+          case "restarted": {
             const waiting = this.#control.get(message.id);
-            if (waiting?.kind !== "snapshot") return;
             this.#control.delete(message.id);
-            if (message.failure !== undefined) waiting.reject(controlFailure(message.failure));
-            else if (isArrayBuffer(message.bytes)) waiting.resolve(new Uint8Array(message.bytes));
-            else waiting.reject(new UndraTransportError("protocol", "the worker answered a snapshot request without bytes"));
+            waiting?.resolve(message);
             return;
           }
-          case "restored": {
-            const waiting = this.#control.get(message.id);
-            if (waiting?.kind !== "restore") return;
-            this.#control.delete(message.id);
-            if (message.failure !== undefined) waiting.reject(controlFailure(message.failure));
-            else if (message.code !== 0) waiting.reject(new UndraRestoreError(message.code));
-            else waiting.resolve();
+          case "closed": {
+            const error = failureToError(message.failure);
+            // With recovery the worker keeps the compiled module and the last snapshot: the trap is the handler's to
+            // `restart` from (it refuses calls meanwhile), or to `close` on.
+            if (this.#canRestart && isTrap(error)) this.#handler?.closed(error);
+            else this.#fail(error);
             return;
           }
-          case "closed":
-            this.#fail(failureToError(message.failure));
-            return;
         }
       };
       const onError = (event: Event): void => {
@@ -289,6 +324,9 @@ export class WasmWorkerTransport implements Transport {
         devtools: this.#options.devtools === true,
         logLevel: this.#options.logLevel ?? 2,
         protocol: WORKER_PROTOCOL_VERSION,
+        asyncPorts,
+        ...(this.#options.ports !== undefined && { portsModule: String(this.#options.ports) }),
+        ...(this.#options.recovery !== undefined && { recovery: this.#options.recovery }),
       };
       try {
         worker.postMessage(init, transfer);
@@ -311,37 +349,48 @@ export class WasmWorkerTransport implements Transport {
     this.#post(kind, payload);
   }
 
-  stats(): Promise<string | null> {
+  /**
+   * After a trap the worker reported (`recovery`, ADR-049): the worker instantiates the same compiled module again
+   * and restores the last snapshot it kept, with its generation floor raised to `generationFloor`. Rejects with an
+   * `UndraTransportError` (`"trap"`, with the engine's stack, when the new instance traps too).
+   */
+  async restart(generationFloor: number): Promise<RestartResult> {
+    const answer = await this.#request(this.#canRestart, "restart", { t: "restart", id: 0, generationFloor: generationFloor >>> 0 });
+    // The answer carries the result's fields (a failure carries no `hello`).
+    if (answer.t !== "restarted" || answer.hello === undefined) throw controlFailure(answer);
+    return answer as RestartResult;
+  }
+
+  /** Refuses a synchronous port; tells a started worker to forward the calls of an asynchronous one here (a `registerPort`). */
+  portAdded(portId: number, impl: PortImpl): void {
+    const asyncPorts = asyncPortIds([...(this.#handler?.ports?.() ?? []), [portId, impl]]);
     const worker = this.#worker;
-    if (!this.#open || worker === null) return Promise.reject(new UndraTransportError("closed", "the core is closed"));
-    return new Promise<string | null>((resolve, reject) => {
-      const id = this.#nextStatsId++;
-      this.#stats.set(id, { resolve, reject });
-      const message: HostToWorker = { t: "stats", id };
+    if (!this.#open || worker === null) return;
+    const message: HostToWorker = { t: "ports", asyncPorts };
+    try {
       worker.postMessage(message);
-    });
+    } catch {
+      // The worker is gone; its loss is reported on its own.
+    }
   }
 
-  snapshot(): Promise<Uint8Array> {
-    return new Promise<Uint8Array>((resolve, reject) => {
-      const worker = this.#controlWorker("snapshot");
-      const id = this.#nextControlId++;
-      this.#control.set(id, { kind: "snapshot", resolve, reject });
-      const message: HostToWorker = { t: "snapshot", id };
-      this.#sendControl(id, worker, message);
-    });
+  async stats(): Promise<string | null> {
+    const answer = await this.#request(true, "stats", { t: "stats", id: 0 });
+    return answer.t === "stats" ? answer.json : null;
   }
 
-  restore(bytes: Uint8Array): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const worker = this.#controlWorker("restore");
-      const id = this.#nextControlId++;
-      this.#control.set(id, { kind: "restore", resolve, reject });
-      // A private copy is transferred: the caller keeps its bytes.
-      const copy = bytes.slice().buffer as ArrayBuffer;
-      const message: HostToWorker = { t: "restore", id, bytes: copy };
-      this.#sendControl(id, worker, message, [copy]);
-    });
+  async snapshot(): Promise<Uint8Array> {
+    const answer = await this.#request(this.#canSnapshot, "snapshot", { t: "snapshot", id: 0 });
+    if (answer.t !== "snapshot" || !isArrayBuffer(answer.data)) throw controlFailure(answer);
+    return new Uint8Array(answer.data);
+  }
+
+  async restore(bytes: Uint8Array): Promise<void> {
+    // A private copy is transferred: the caller keeps its bytes.
+    const copy = bytes.slice().buffer as ArrayBuffer;
+    const answer = await this.#request(this.#canSnapshot, "restore", { t: "restore", id: 0, data: copy }, [copy]);
+    if (answer.t !== "restored" || answer.failure !== undefined) throw controlFailure(answer);
+    if (answer.code !== 0) throw new UndraRestoreError(answer.code);
   }
 
   close(): void {
@@ -353,8 +402,6 @@ export class WasmWorkerTransport implements Transport {
     this.#detach?.();
     const worker = this.#worker;
     this.#worker = null;
-    for (const waiting of this.#stats.values()) waiting.reject(new UndraTransportError("closed", "the core is closed"));
-    this.#stats.clear();
     for (const waiting of this.#control.values()) waiting.reject(new UndraTransportError("closed", "the core is closed"));
     this.#control.clear();
     if (worker === null) return;
@@ -368,29 +415,24 @@ export class WasmWorkerTransport implements Transport {
     else worker.close?.();
   }
 
-  /** The worker a snapshot or restore request goes to; throws when the core is closed or the worker script cannot serve it. */
-  #controlWorker(operation: "snapshot" | "restore"): WorkerLike {
-    if (!this.#open || this.#worker === null) {
-      throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
-    }
-    if (!this.#canSnapshot) {
-      throw new UndraTransportError(
-        "unsupported",
-        `the worker script does not support ${operation}: it was built before snapshots and restores existed; rebuild it from the same @undra/runtime as the host`,
-      );
-    }
-    return this.#worker;
-  }
-
-  /** Posts a control request; a worker that cannot be reached fails it at once. */
-  #sendControl(id: number, worker: WorkerLike, message: HostToWorker, transfer: Transferable[] = []): void {
-    try {
-      worker.postMessage(message, transfer);
-    } catch (error) {
-      const waiting = this.#control.get(id);
-      this.#control.delete(id);
-      waiting?.reject(new UndraTransportError("closed", `could not reach the worker: ${errorMessage(error)}`, { cause: error }));
-    }
+  /**
+   * Sends a control request (`message` with a fresh `id`) and resolves with the worker's answer to it. Rejects when the
+   * core is closed, when the worker script cannot serve `operation` (`can` is false), or when the worker is unreachable.
+   */
+  #request(can: boolean, operation: string, message: HostToWorker & { readonly id: number }, transfer: Transferable[] = []): Promise<ControlAnswer> {
+    return new Promise<ControlAnswer>((resolve, reject) => {
+      const worker = this.#worker;
+      if (!this.#open || worker === null) throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
+      if (!can) throw new UndraTransportError("unsupported", `the worker script cannot ${operation}: rebuild it with this @undra/runtime`);
+      const id = this.#nextControlId++;
+      this.#control.set(id, { resolve, reject });
+      try {
+        worker.postMessage({ ...message, id }, transfer);
+      } catch (error) {
+        this.#control.delete(id);
+        reject(new UndraTransportError("closed", `could not reach the worker: ${errorMessage(error)}`, { cause: error }));
+      }
+    });
   }
 
   #createWorker(): WorkerLike {
@@ -444,7 +486,7 @@ export class WasmWorkerTransport implements Transport {
         }
         case Kind.PortCall: {
           const call = decodePortCall(envelope.payload);
-          this.#answerPortCall(call.portId, call.portCallId, handler.portCall(call), handler);
+          this.#answerPortCall(call.portCallId, handler.portCall(call));
           return;
         }
         default:
@@ -462,28 +504,9 @@ export class WasmWorkerTransport implements Transport {
     }
   }
 
-  /**
-   * A port answered inline, which a port declared `sync` does. If the core called it
-   * synchronously the reply is too late and the call already failed as unavailable (the core
-   * cannot wait for this thread); say so once, because the core's own panic message only names
-   * the port. The transport cannot tell how the core called: an asynchronous port whose
-   * implementation answered inline (a hand-written `PortImpl` that returns bytes, or a failure
-   * thrown before its first `await`) gets the same warning, and its reply is still delivered and
-   * used. The warning says both; it is logged once per port, so the false alarm costs one line.
-   */
-  #warnSyncPort(portId: number, handler: TransportHandler): void {
-    if (this.#warnedPorts.has(portId)) return;
-    this.#warnedPorts.add(portId);
-    handler.log(
-      3,
-      "undra::worker",
-      `port 0x${portId.toString(16)} answered inline on the main thread, as a port declared #[undra::port(sync)] does, but in wasm-worker mode the core cannot wait for the main thread: if the core called it synchronously, that call has already failed as unavailable and this reply comes too late; load the core with mode "wasm-main" to use such a port (Clock, Rng and Log are answered inside the worker). If the port is not declared sync, the reply was delivered and this warning can be ignored`,
-    );
-  }
-
-  #answerPortCall(portId: number, portCallId: number, outcome: PortOutcome, handler: TransportHandler): void {
+  /** Sends the answer of a port of this thread: an inline reply now (an asynchronous port that answered without waiting), "unavailable" now, or later. */
+  #answerPortCall(portCallId: number, outcome: PortOutcome): void {
     if (outcome.kind === "sync") {
-      this.#warnSyncPort(portId, handler);
       this.#post(Kind.PortReply, outcome.reply);
     } else if (outcome.kind === "unavailable") {
       this.#post(Kind.PortReply, encodePortReply({ portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));

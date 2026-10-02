@@ -8,6 +8,8 @@
       { "file": "concepts.html", "title": "Core concepts" },
       { "file": "queries.html", "title": "Queries & mutations" },
       { "file": "ports.html", "title": "Ports & adapters" },
+      { "file": "web.html", "title": "Workers & crash recovery" },
+      { "file": "updates.html", "title": "Shipping an update" },
       { "file": "several-cores.html", "title": "One core or several" },
       { "file": "testing.html", "title": "Testing your app" }
     ] },

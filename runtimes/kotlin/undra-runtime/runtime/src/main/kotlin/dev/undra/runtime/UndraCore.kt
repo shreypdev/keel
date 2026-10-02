@@ -381,8 +381,13 @@ public open class UndraCore protected constructor() : AutoCloseable {
      * Rebuilds the stores from [snapshot]; the handles the app holds stay valid. Called on the main thread, it
      * applies the restored values to the stores before it returns, like any synchronous call.
      *
+     * A snapshot taken by another build restores when its stores' values migrate to this build's types (by name,
+     * ADR-037); one that does not is refused as a whole with [UndraRestoreException.INCOMPATIBLE]. A store type this
+     * build no longer has is left out (its handle is stale) instead of failing the restore.
+     *
      * @throws UndraModeException over a remote transport.
-     * @throws UndraRestoreException if the core rejects the snapshot (the core is unchanged).
+     * @throws UndraRestoreException if the core rejects the snapshot (the core is unchanged); its
+     *   [UndraRestoreException.code] says why.
      * @throws UndraTransportException if this core is closed.
      */
     public open fun restore(snapshot: ByteArray): Unit = throw unsupported("restore")

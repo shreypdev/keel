@@ -223,8 +223,12 @@ internal class FakeTransport(
     }
 
     override fun portReply(payload: ByteArray) {
+        portReplyBytes.add(payload.copyOf())
         portReplies.add(Payloads.PortReply.decode(payload))
     }
+
+    /** Every `PortReply` payload exactly as the host sent it, in order (what [portReplies] decodes). */
+    val portReplyBytes = CopyOnWriteArrayList<ByteArray>()
 
     override fun event(portId: UInt, methodId: UInt, payload: ByteArray) {
         sentEvents.add(Payloads.Event(portId, methodId, payload))

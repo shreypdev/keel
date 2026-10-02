@@ -112,8 +112,9 @@ pub(crate) fn decode_port_reply(expected_id: u32, payload: &[u8]) -> Result<Vec<
 pub(crate) enum PortBinding {
     /// Implemented by the platform: calls go through [`Host::port_call`](crate::Host).
     Foreign,
-    /// Implemented by a Rust value (an `Arc<T>` behind `dyn Any`).
-    Rust(Arc<dyn Any + Send + Sync>),
+    /// Implemented by a Rust value (an `Arc<T>` behind `dyn Any`), with the dispatcher that runs
+    /// raw calls on it when it was bound with one (else the one `#[undra::port]` registered).
+    Rust(Arc<dyn Any + Send + Sync>, Option<&'static PortDispatcher>),
 }
 
 struct SlotInner {
@@ -379,6 +380,12 @@ impl fmt::Debug for PortDispatch {
 /// implementation, the runtime finds the dispatcher by `port_id` and calls it with the bound
 /// `Arc<Arc<dyn Trait>>` (as `dyn Any`), the `method_id` and the encoded arguments, so a
 /// generated proxy behaves the same whether the implementation is the platform's or a fake.
+///
+/// The standard ports' dispatchers are not submitted (every core links those ports, and a core
+/// rarely binds a Rust implementation of one): they are statics such as
+/// `undra_ports::KV_DISPATCHER`, linked only where they are used, which a binding passes to
+/// [`Runtime::bind_dyn_port_with`](crate::Runtime::bind_dyn_port_with) (`undra_ports::fakes::install`
+/// does, ADR-052).
 pub struct PortDispatcher {
     /// The port id (`fnv1a32("port.<TraitName>")`).
     pub port_id: u32,

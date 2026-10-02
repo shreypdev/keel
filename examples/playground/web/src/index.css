@@ -589,3 +589,13 @@ button.big {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+/* The debug panel (crash recovery, ADR-049): closed by default, under the views. */
+.debug {
+  margin-top: 1rem;
+}
+
+.debug summary {
+  cursor: pointer;
+  color: var(--muted);
+}

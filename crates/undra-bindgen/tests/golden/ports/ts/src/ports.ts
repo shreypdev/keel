@@ -34,6 +34,7 @@ export interface Clock extends UndraPort {
 /** Adapts an implementation of `Clock` to `UndraCore.registerPort(UndraIds.Ports.Clock.portId, ..)`. */
 export function clockPortImpl(impl: Clock): PortImpl {
   return {
+    name: "Clock",
     sync: true,
     methods: {
       [UndraIds.Ports.Clock.nowMs]: () => {
@@ -103,6 +104,7 @@ export interface Http extends UndraPort {
 /** Adapts an implementation of `Http` to `UndraCore.registerPort(UndraIds.Ports.Http.portId, ..)`. */
 export function httpPortImpl(impl: Http): PortImpl {
   return {
+    name: "Http",
     sync: false,
     methods: {
       [UndraIds.Ports.Http.request]: async (args) => {
@@ -137,6 +139,7 @@ export interface Kv extends UndraPort {
 /** Adapts an implementation of `Kv` to `UndraCore.registerPort(UndraIds.Ports.Kv.portId, ..)`. */
 export function kvPortImpl(impl: Kv): PortImpl {
   return {
+    name: "Kv",
     sync: false,
     methods: {
       [UndraIds.Ports.Kv.get]: async (args) => {

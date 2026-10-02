@@ -21,7 +21,7 @@ fn empty_snapshot_with_floor(generation_floor: u32) -> Vec<u8> {
     let mut w = Writer::new();
     Snapshot {
         generation_floor,
-        stores: Vec::new(),
+        ..Snapshot::default()
     }
     .encode(&mut w);
     w.into_vec()
@@ -131,9 +131,11 @@ fn h1_a_floor_below_the_current_counter_is_ignored() {
 fn h1_a_snapshot_with_generation_max_is_refused_instead_of_wrapping() {
     let t = TestRuntime::new();
     let a = new_counter(&t, 1, "a"); // (0, 1)
-    let mut snapshot = t.runtime().snapshot();
-    // count u32, generation_floor u32, then the handle u64 (index u32, generation u32).
-    snapshot[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+    let mut decoded = Snapshot::decode(&mut Reader::new(&t.runtime().snapshot())).unwrap();
+    decoded.stores[0].handle = Handle::new(0, u32::MAX);
+    let mut w = Writer::new();
+    decoded.encode(&mut w);
+    let snapshot = w.into_vec();
     assert_eq!(
         t.runtime().restore(&snapshot),
         Err(RestoreError::BadHandle {

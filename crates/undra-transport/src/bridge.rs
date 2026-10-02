@@ -4,9 +4,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use undra_runtime::{Host, PortCallOutcome};
-use parking_lot::{Condvar, Mutex};
+use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::conn::Conn;
+use crate::devtools::hub::{self, Hub, Route};
 use crate::notice::NOTICE_TARGET;
 
 /// A callback for log records: `(level, target, message)`, levels as in the Log port (0 trace
@@ -60,6 +61,8 @@ pub struct Bridge {
     active: Mutex<Option<Arc<Conn>>>,
     vacated: Condvar,
     sink: Mutex<Option<LogSink>>,
+    /// The devtools hub of the server this bridge belongs to, when it has one (ADR-054).
+    hub: RwLock<Option<Arc<Hub>>>,
 }
 
 impl Bridge {
@@ -69,7 +72,19 @@ impl Bridge {
             active: Mutex::new(None),
             vacated: Condvar::new(),
             sink: Mutex::new(None),
+            hub: RwLock::new(None),
         })
+    }
+
+    /// Gives the bridge the hub of its server (or takes it away).
+    pub(crate) fn set_hub(&self, hub: Option<Arc<Hub>>) {
+        *self.hub.write() = hub;
+    }
+
+    /// The hub, while a devtools page is attached to it: only then does a change-set take the
+    /// longer route of [`Host::change_set`].
+    pub(crate) fn active_hub(&self) -> Option<Arc<Hub>> {
+        self.hub.read().as_ref().filter(|h| h.is_active()).cloned()
     }
 
     /// Sends every log record the runtime emits (and the server's own notes about
@@ -83,6 +98,11 @@ impl Bridge {
     /// What the attached client said in its `Hello`, or `None` when nobody is attached.
     pub fn client(&self) -> Option<ClientInfo> {
         self.current().and_then(|conn| conn.client().cloned())
+    }
+
+    /// Whether a devtools page is attached (ADR-054): the runtime is then observing every store.
+    pub fn devtools_attached(&self) -> bool {
+        self.active_hub().is_some()
     }
 
     /// Whether a client is attached.
@@ -148,8 +168,23 @@ impl Host for Bridge {
     }
 
     fn change_set(&self, payload: &[u8]) {
-        if let Some(conn) = self.current() {
-            conn.on_change_set(payload);
+        let app = self.current();
+        let Some(hub) = self.active_hub() else {
+            if let Some(conn) = app {
+                conn.on_change_set(payload);
+            }
+            return;
+        };
+        // A devtools page is attached, so the runtime is observing more than the app client asked
+        // for: the pages get everything, the app client what it observed (ADR-054).
+        let route = hub::current_route();
+        hub.on_change_set(payload, route);
+        if let Some(conn) = app {
+            match route {
+                Route::Commit(_) => conn.on_change_set_observed(payload),
+                Route::AppObserve => conn.on_change_set(payload),
+                Route::Initial { .. } | Route::Silent => {}
+            }
         }
     }
 
@@ -166,10 +201,25 @@ impl Host for Bridge {
         port_call_id: u32,
         args: &[u8],
     ) -> PortCallOutcome {
-        match self.current() {
-            Some(conn) => conn.on_port_call(port_id, method_id, port_call_id, args),
-            None => PortCallOutcome::Unavailable,
+        let hub = self.active_hub();
+        let Some(conn) = self.current() else {
+            // Nobody to ask. Such calls repeat (a query's hydration retries while no app is
+            // attached), so the devtools count them instead of listing each.
+            if let Some(hub) = &hub {
+                hub.port_unattended();
+            }
+            return PortCallOutcome::Unavailable;
+        };
+        if let Some(hub) = &hub {
+            hub.port_start(port_call_id, port_id, method_id, args);
         }
+        let outcome = conn.on_port_call(port_id, method_id, port_call_id, args);
+        if outcome == PortCallOutcome::Unavailable {
+            if let Some(hub) = &hub {
+                hub.port_end(port_call_id, 2, &[]);
+            }
+        }
+        outcome
     }
 
     fn log(&self, level: u8, target: &str, message: &str) {

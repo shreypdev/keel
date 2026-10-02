@@ -2,6 +2,7 @@ import { cryptoRng, setTimeoutTimer, systemClock } from "../adapters/system.js";
 import type { ClockAdapter, RngAdapter, TimerAdapter } from "../adapters/types.js";
 import { UndraError, UndraReplyError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
 import { errorMessage, hostPlatform } from "../platform.js";
+
 import {
   type HelloPayload,
   UndraReader,
@@ -44,7 +45,10 @@ export interface WasmMainOptions {
   readonly logLevel?: number;
   /** Replaces `Date.now` behind the `now_ms` import. */
   readonly clock?: ClockAdapter;
-  /** Replaces `crypto.getRandomValues` behind the `random` import. */
+  /**
+   * Replaces `crypto.getRandomValues` behind the `random` import. It must fill the whole buffer with
+   * cryptographically secure bytes or throw: a throw makes the core's `Rng` unavailable (ADR-049).
+   */
   readonly rng?: RngAdapter;
   /** Replaces `setTimeout` behind the `timer_set` import. */
   readonly timer?: TimerAdapter;
@@ -108,12 +112,13 @@ function allocate(e: CoreExports, len: number): number {
   return ptr;
 }
 
-async function instantiate(source: WasmSource, imports: WebAssembly.Imports): Promise<WebAssembly.Instance> {
+/** Compiles (unless it is compiled already) and instantiates `source`; the compiled module is kept for a restart (ADR-049: no recompile). */
+async function instantiate(source: WasmSource, imports: WebAssembly.Imports): Promise<WebAssembly.WebAssemblyInstantiatedSource> {
   if (typeof WebAssembly !== "object") {
     throw new UndraTransportError("unsupported", "WebAssembly is not available on this platform");
   }
   try {
-    if (source instanceof WebAssembly.Module) return await WebAssembly.instantiate(source, imports);
+    if (source instanceof WebAssembly.Module) return { module: source, instance: await WebAssembly.instantiate(source, imports) };
     if (source instanceof URL) {
       const response = await fetch(source);
       if (!response.ok) throw new Error(`GET ${source.href} answered ${response.status}`);
@@ -121,11 +126,11 @@ async function instantiate(source: WasmSource, imports: WebAssembly.Imports): Pr
         typeof WebAssembly.instantiateStreaming === "function" &&
         response.headers.get("content-type")?.startsWith("application/wasm") === true
       ) {
-        return (await WebAssembly.instantiateStreaming(response, imports)).instance;
+        return await WebAssembly.instantiateStreaming(response, imports);
       }
-      return (await WebAssembly.instantiate(await response.arrayBuffer(), imports)).instance;
+      return await WebAssembly.instantiate(await response.arrayBuffer(), imports);
     }
-    return (await WebAssembly.instantiate(source, imports)).instance;
+    return await WebAssembly.instantiate(source, imports);
   } catch (cause) {
     throw new UndraTransportError("handshake", `could not instantiate the wasm core: ${errorMessage(cause)}`, {
       cause,
@@ -187,6 +192,8 @@ export class WasmMainTransport implements Transport {
   #pollScheduled = false;
   #closed = false;
   #dead: UndraTransportError | null = null;
+  /** The compiled module, kept so that a restart instantiates it again without compiling (ADR-049, `twin`). */
+  #module: WebAssembly.Module | null = null;
 
   /** @param options See {@link WasmMainOptions}. */
   constructor(options: WasmMainOptions) {
@@ -203,7 +210,9 @@ export class WasmMainTransport implements Transport {
 
   async start(handler: TransportHandler): Promise<HelloPayload> {
     this.#handler = handler;
-    const instance = await instantiate(this.#options.wasm, this.#imports());
+    const { module, instance } = await instantiate(this.#options.wasm, this.#imports());
+    if (this.#closed) throw new UndraTransportError("closed", "the core is closed");
+    this.#module = module;
     this.#instance = instance;
     const exported = instance.exports as unknown as Record<string, unknown>;
     const missing = [
@@ -235,6 +244,14 @@ export class WasmMainTransport implements Transport {
     const code = this.#invoke(config.finish(), (e, ptr, len) => e.undra_init(ptr, len));
     if (code !== 0) throw new UndraTransportError("handshake", `undra_init failed with code ${code}`);
     return { undraVersion: `wasm-abi-${abi}`, schemaHash, platform: "wasm", mode };
+  }
+
+  /**
+   * A new transport over the same compiled module (no recompile) and options, not started: what a restart after a trap
+   * runs on (ADR-049, `crashRecovery`). This one stays dead.
+   */
+  twin(): WasmMainTransport {
+    return new WasmMainTransport({ ...this.#options, wasm: this.#module ?? this.#options.wasm });
   }
 
   send(kind: Kind, payload: Uint8Array): void {
@@ -307,17 +324,18 @@ export class WasmMainTransport implements Transport {
   /** The persisted state of every store (`undra_snapshot`, SPEC 5.9). Rejects `UndraTransportError` when the core is closed or exports no `undra_snapshot`. */
   snapshot(): Promise<Uint8Array> {
     try {
-      return Promise.resolve(
-        this.#run((e) => {
-          if (e.undra_snapshot === undefined) {
-            throw new UndraTransportError("unsupported", "the core does not export undra_snapshot");
-          }
-          return this.#takeBuf(e, e.undra_snapshot());
-        }),
-      );
+      return Promise.resolve(this.takeSnapshot());
     } catch (error) {
       return Promise.reject(error);
     }
+  }
+
+  /** `undra_snapshot`, copied out of wasm memory, at once; throws `UndraTransportError` when the core cannot be asked. */
+  takeSnapshot(): Uint8Array {
+    return this.#run((e) => {
+      if (e.undra_snapshot === undefined) throw new UndraTransportError("unsupported", "the core does not export undra_snapshot");
+      return this.#takeBuf(e, e.undra_snapshot());
+    });
   }
 
   /**
@@ -514,6 +532,8 @@ export class WasmMainTransport implements Transport {
           this.#handler?.log(level & 0xff, target, message);
         }, undefined),
         now_ms: guard(() => this.#clock.nowMs(), 0),
+        // No CSPRNG (no WebCrypto, or an Rng adapter that throws): the guard writes nothing, so the core finds
+        // its canary untouched and answers `Rng.fill` unavailable (ADR-049) instead of using zeros. Never a fallback.
         random: guard((ptr: number, len: number) => {
           const start = ptr >>> 0;
           (this.#rng ??= cryptoRng()).fill(this.#bytes().subarray(start, start + (len >>> 0)));

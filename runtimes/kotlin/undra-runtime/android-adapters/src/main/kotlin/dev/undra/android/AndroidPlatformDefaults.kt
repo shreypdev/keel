@@ -76,7 +76,11 @@ public class AndroidPlatform internal constructor(
  *
  * Call it once, right after the core is loaded (`Undra<Namespace>.load`) and before any store is created. The core reads its persisted query cache
  * and offline queue through `Kv` while it starts and waits up to five seconds for the adapter to appear, which is why
- * installing after `load` is enough. To change one port, register another implementation afterwards:
+ * installing after `load` is enough.
+ *
+ * Every failure of the storage adapters reaches the core as a typed error, never as a crash or a silent miss
+ * (ADR-049): `StorageError` (`Full`, `Corrupt`, `Locked`, `Unavailable`, `Io`) for `Kv` and `SecureStore`, `FsError`
+ * (with `Full` for a full disk) for `Fs`, and `HttpError` for `Http`. To change one port, register another implementation afterwards:
  * `core.registerPort(StandardPorts.Http.PORT_ID, impl)` replaces what this installed.
  *
  * Needs the permissions `INTERNET` and `ACCESS_NETWORK_STATE`; this library's manifest declares both, so they merge into the

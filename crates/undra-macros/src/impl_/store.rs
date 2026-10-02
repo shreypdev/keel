@@ -99,6 +99,9 @@ struct SignalField {
     /// `#[undra(key = "..")]`: the key field and the list's item type.
     key: Option<KeyedList>,
     no_coalesce: bool,
+    /// `#[undra(default)]` on a `Signal<T>`: a snapshot without the signal restores it with
+    /// `T::default()` (ADR-037).
+    default: bool,
 }
 
 /// How a non-signal field is filled when the store is restored automatically.
@@ -415,6 +418,17 @@ pub(crate) fn expand_store(
                             (item_or_value, None)
                         };
                         let attr = take(&mut field.attrs, Site::SIGNAL, &mut errors);
+                        if attr.default && kind == SigKind::Computed {
+                            errors.push(
+                                Diag::new(
+                                    code::E0008,
+                                    format!("`#[undra(default)]` on `{ident}` needs a `Signal<T>`, not a `Computed<T>`"),
+                                    "a computed signal is not persisted: a restore recomputes it, so there is nothing to default",
+                                    "remove `#[undra(default)]`, or put it on the plain signal the computed one is derived from",
+                                )
+                                .on(&field.ty),
+                            );
+                        }
                         let kty = match map_type(&value_ty, Pos::Signal, Allow::NONE) {
                             Ok(kty) => kty,
                             Err(err) => {
@@ -485,6 +499,7 @@ pub(crate) fn expand_store(
                             kty,
                             key,
                             no_coalesce: attr.no_coalesce,
+                            default: attr.default && kind == SigKind::Signal,
                         });
                     }
                     None => {
@@ -570,8 +585,10 @@ pub(crate) fn expand_store(
         };
         // Recorded in the schema so the platform mirrors apply every entry of the signal (ADR-031).
         let no_coalesce = s.no_coalesce;
+        // Recorded so a restore knows the signal may be missing from an older snapshot (ADR-037).
+        let default = s.default;
         quote! {
-            #meta::SignalMeta { name: #sname, signal_id: #id, ty: #ty, computed: #computed, key: #key, no_coalesce: #no_coalesce }
+            #meta::SignalMeta { name: #sname, signal_id: #id, ty: #ty, computed: #computed, key: #key, no_coalesce: #no_coalesce, default: #default }
         }
     });
 
@@ -623,13 +640,28 @@ pub(crate) fn expand_store(
         .collect();
     let value_tys: Vec<&syn::Type> = plain.iter().map(|s| &s.value_ty).collect();
     let ids: Vec<u32> = plain.iter().map(|s| s.id).collect();
-    let missing: Vec<String> = plain
+    // What a signal the snapshot lacks becomes: `T::default()` for a `#[undra(default)]` signal
+    // (ADR-037), else a decode error naming it.
+    let fallbacks: Vec<TokenStream> = plain
         .iter()
         .map(|s| {
-            format!(
-                "snapshot of store {name_str} is missing signal {} ({})",
-                s.id, s.name
-            )
+            let value_ty = &s.value_ty;
+            if s.default {
+                quote_spanned!(value_ty.span()=> <#value_ty as ::core::default::Default>::default())
+            } else {
+                let id = s.id;
+                let missing = format!(
+                    "snapshot of store {name_str} is missing signal {} ({})",
+                    s.id, s.name
+                );
+                quote! {
+                    return ::core::result::Result::Err(#wire::WireError::InvalidTag {
+                        tag: #id,
+                        at: __r.position(),
+                        ty: #missing,
+                    })
+                }
+            }
         })
         .collect();
 
@@ -813,13 +845,7 @@ pub(crate) fn expand_store(
                 #(
                     let #values = match #slots {
                         ::core::option::Option::Some(__v) => __v,
-                        ::core::option::Option::None => {
-                            return ::core::result::Result::Err(#wire::WireError::InvalidTag {
-                                tag: #ids,
-                                at: __r.position(),
-                                ty: #missing,
-                            });
-                        }
+                        ::core::option::Option::None => #fallbacks,
                     };
                 )*
                 let __value = #build;
@@ -1230,7 +1256,7 @@ mod tests {
         assert!(
             has(
                 &out,
-                "SignalMeta { name: \"visible\", signal_id: 2u32, ty: ::undra::meta::TypeRefMeta::Vec(&::undra::meta::TypeRefMeta::Named(\"Row\")), computed: true, key: ::core::option::Option::Some(\"id\"), no_coalesce: true }"
+                "SignalMeta { name: \"visible\", signal_id: 2u32, ty: ::undra::meta::TypeRefMeta::Vec(&::undra::meta::TypeRefMeta::Named(\"Row\")), computed: true, key: ::core::option::Option::Some(\"id\"), no_coalesce: true, default: false }"
             ),
             "{out}"
         );

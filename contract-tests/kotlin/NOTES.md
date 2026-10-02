@@ -1,10 +1,11 @@
 # Kotlin column of the contract tests
 
-`run.sh` runs the twenty scenarios of `../scenarios.md` on the JVM, through `dev.undra.runtime.UndraCore`
-over the real JNI shim and the real `libplayground_core` of `examples/playground/core`, and pipes the verdicts
-through `../check.sh kotlin`. Sources are in `src/dev/undra/contract/`: one file per scenario
-(`S01Primitives.kt` ... `S19DerivedKeyedList.kt`), the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`) and
-the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `MemoryKv`, `CapturingLog`).
+`run.sh` runs the twenty-one scenarios of `../scenarios.md` that Kotlin runs (S01 to S20 and S26) on the JVM, through
+`dev.undra.runtime.UndraCore` over the real JNI shim and the real `libplayground_core` of `examples/playground/core`, and
+pipes the verdicts through `../check.sh kotlin`. Sources are in `src/dev/undra/contract/`: one file per scenario
+(`S01Primitives.kt` ... `S19DerivedKeyedList.kt`, `S20Storage.kt`, `S26TwoCores.kt`), the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`, `Handover.kt`),
+the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `MemoryKv`, `CapturingLog`) and the build-B
+process of S14 and S15 (`MigrationBuildB.kt`).
 
 ## How it is arranged
 
@@ -17,7 +18,12 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
   `BigList`, `RemoteTodosQueryHandle` and the free functions of the bindings. Raw signal entries (S08 to S11),
   raw calls (S03, S05), snapshot and restore (S15) and statistics use `RawStore` and `UndraCore` directly.
 * **Adapters** go in through `LoadOptions(adapters = ...)`: a manual Clock (starts at `1_700_000_000_000` ms),
-  the in-memory `Http` server, an in-memory `Kv` that records writes, a capturing `Log`. `Rng` and `Timer` are
+  the in-memory `Http` server, an in-memory `Kv`, a capturing `Log`. The `Kv` (`MemoryKv`) records every operation
+  (`get`, `set`, `delete`, `list`, with the key and the failure it answered with) and fails on demand with a
+  `StorageError` (`fail(kind, key, error, times)`, `heal()`); it is a `KeyValueBackend` served through the runtime's
+  own table, `StoragePort.KV.portImpl(backend)`, so a failure reaches the core exactly as `FileKv`'s or the Android
+  adapters' do (port status 1 and the encoded error). Its first `get` of `undra.query.queue2` fails `Locked`
+  (`Bootstrap`), as on Swift: S14 waits until the core read the queue again, S20 step 4 checks what it did meanwhile. `Rng` and `Timer` are
   the runtime's JVM defaults, and so are `SecureStore` and `Fs` (kept in a throwaway `undra.data.dir`).
   The adapters are `PortImpl`s built on `StandardPorts` and `StandardRecords`; no transport is reimplemented.
   Each of the four is wrapped by `PortCallCounter` (`World.portCalls`), which counts the calls it receives by port
@@ -34,6 +40,29 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
   S18 makes its calls on the main thread itself, where a synchronous call drains before it returns, and adds a
   Kotlin-only last check that does not drain: a burst made off the main thread must reach its store at a frame of
   the runtime's own pacer, so the frame path stays covered although every wait drains.
+
+## Two builds (S14 steps 7 to 9, S15 steps 11 to 14)
+
+`run.sh` builds the core twice with the undra CLI: build B first (`UNDRA_PLAYGROUND_V2=1 undra build --platform host`,
+which the core's `build.rs` turns into `cfg(playground_v2)`; the CLI rebuilds when only that variable changes), copied
+to `build/core-b`, then build A, copied to `build/core-a`. Each JVM loads its own copy (`-Djava.library.path`), so a
+later `undra build` by another runner cannot swap a library under a run. The script stops if the two are identical.
+
+The main JVM runs S01 to S20 against build A. S14 step 7 writes `build/migration/s14.json` (every key and value of the
+harness `Kv` once both notes wait in the queue, in hex, and the `Idempotency-Key` of the failed `save_note` POST); S15
+step 11 writes `s15.json` (snapshots `P` and `L` and the `Profile` handle). Each scenario deletes its file first, and
+`run.sh` deletes the directory before the run (`UNDRA_CONTRACT_HANDOVER` names it), so a failed scenario never hands
+over an older run's data.
+
+Then a second JVM runs `Main` with `UNDRA_CONTRACT_PHASE=B` and build B's library (`MigrationBuildB.kt`). It refuses to
+run against build A (it compares `undra_schema_hash` with the generated hash: both ids then print `FAIL`), loads build
+B with the hash the library reports and with a fresh `ManualClock`, `FakeServer`, `CapturingLog` and a `MemoryKv`
+holding exactly the handed-over contents (and no injected failure), emits `Connectivity.changed(false, None)` right
+after the load, and drives the core through `UndraCore`'s raw API (`configure_remote`, `storage_status`, `add` and
+`Profile.describe` by `fnv1a32` id; the generated `StorageStatus` and `RemoteConfig` only as codecs). It prints
+`SCENARIO S14 FAIL` / `SCENARIO S15 FAIL` lines when a build-B step fails and an informational
+`MIGRATION S14 build B ok: <the dead letter>` / `MIGRATION S15 build B ok` otherwise; its output is appended to
+`build/run.log`, which `check.sh` reads (the last line of an id counts).
 
 ## Reading the scenarios on the JVM
 
@@ -87,6 +116,21 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
   generated calls with the default core fail `Unavailable` (reason `CLOSED`) and that the placeholder never becomes `current`.
 * S16: the order (S16 first) is described above. Step 2 ("a subsequent load succeeds") is the load every other
   scenario uses.
+* S14.6: the core empties the offline queue by *deleting* `undra.query.queue2`; the scenario accepts that or a written
+  empty queue. As on Swift, the Kotlin column also checks that the first non-empty write of the queue (taken from the
+  `Kv`'s log before the network returns) holds one item, and that the `undra.types.<fingerprint>` key of that item's
+  fingerprint (the `u64` at offset 18) was written before it. The query handle is closed however the steps end, so a
+  failure in S14 does not leave a handle that S15.8's count of live handles sees.
+* S14.7 replays build A's notes after the handover: once the `Kv` contents and the idempotency key are written, the
+  notes' POST answers 201 and the device goes online, so both notes replay in build A and the queue is empty for the rest
+  of the run (S17.7's reload would otherwise hydrate and retry it, and S20's failing writes would meet it). Build B
+  starts from the contents kept before that.
+* S15.11 and S15.14 run in build A after step 10 (`Profile` "ada" visited twice, snapshot `P`; a `Legacy` of score 5,
+  snapshot `L`; the 8 zero bytes refused with `UndraRestoreException.BAD_SNAPSHOT`); 12 to 14 run in build B.
+* S20 runs its native variant: steps 1, 2, 4 (the harness failed the first `get` of `undra.query.queue2` with `Locked`
+  when S16 loaded the core) and 5; step 3 prints nothing. Step 1 also checks that a write of the `s20` entry was
+  attempted and failed `Full`. The entry's key is computed (`undra.query.cache2.<query id>.<fnv1a64 of the encoded
+  arguments>`). S20 runs after S18 and before S17, which shuts the core down.
 
 ## Findings about what the runner needs from the runtime
 

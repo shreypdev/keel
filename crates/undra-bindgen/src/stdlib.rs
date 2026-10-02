@@ -1,4 +1,4 @@
-//! The Undra standard library: the ten standard ports of SPEC section 8 and the eight records,
+//! The Undra standard library: the ten standard ports of SPEC section 8 and the nine records,
 //! enums and errors they exchange.
 //!
 //! Every app core links `undra-ports`, so its schema truthfully contains them (R1, and the schema
@@ -90,7 +90,7 @@ const fn m(id: u32, decl: &'static str) -> StandardMethod {
     StandardMethod { id, decl }
 }
 
-/// The eight standard types (SPEC section 8).
+/// The nine standard types (SPEC section 8; `StorageError` since ADR-049).
 pub const TYPES: &[StandardType] = &[
     StandardType {
         name: "HttpMethod",
@@ -126,7 +126,13 @@ pub const TYPES: &[StandardType] = &[
         name: "FsError",
         type_id: 0xd15e_c208,
         kind: StandardKind::Error,
-        shape: "NotFound = 0, Denied = 1, Io(String) = 2",
+        shape: "NotFound = 0, Denied = 1, Io(String) = 2, Full = 3, Unavailable(String) = 4",
+    },
+    StandardType {
+        name: "StorageError",
+        type_id: 0x3d40_b010,
+        kind: StandardKind::Error,
+        shape: "Unavailable(String) = 0, Full = 1, Locked = 2, Corrupt(String) = 3, Io(String) = 4",
     },
     StandardType {
         name: "NetKind",
@@ -143,17 +149,41 @@ pub const TYPES: &[StandardType] = &[
 ];
 
 const KV_METHODS: &[StandardMethod] = &[
-    m(0xf050_bb1a, "async get(key: String) -> Option<Bytes>"),
-    m(0x6242_7856, "async set(key: String, value: Bytes)"),
-    m(0x60a3_86b9, "async delete(key: String)"),
-    m(0x32f1_d03a, "async list(prefix: String) -> Vec<String>"),
+    m(
+        0xf050_bb1a,
+        "async get(key: String) -> Result<Option<Bytes>, StorageError>",
+    ),
+    m(
+        0x6242_7856,
+        "async set(key: String, value: Bytes) -> Result<(), StorageError>",
+    ),
+    m(
+        0x60a3_86b9,
+        "async delete(key: String) -> Result<(), StorageError>",
+    ),
+    m(
+        0x32f1_d03a,
+        "async list(prefix: String) -> Result<Vec<String>, StorageError>",
+    ),
 ];
 
 const SECURE_STORE_METHODS: &[StandardMethod] = &[
-    m(0x5703_6f6f, "async get(key: String) -> Option<Bytes>"),
-    m(0xe91e_017b, "async set(key: String, value: Bytes)"),
-    m(0xd57d_b4e2, "async delete(key: String)"),
-    m(0xf5ba_b8c9, "async list(prefix: String) -> Vec<String>"),
+    m(
+        0x5703_6f6f,
+        "async get(key: String) -> Result<Option<Bytes>, StorageError>",
+    ),
+    m(
+        0xe91e_017b,
+        "async set(key: String, value: Bytes) -> Result<(), StorageError>",
+    ),
+    m(
+        0xd57d_b4e2,
+        "async delete(key: String) -> Result<(), StorageError>",
+    ),
+    m(
+        0xf5ba_b8c9,
+        "async list(prefix: String) -> Result<Vec<String>, StorageError>",
+    ),
 ];
 
 const FS_METHODS: &[StandardMethod] = &[
@@ -476,14 +506,14 @@ pub fn covered(schema: &Schema) -> Covered {
 
 /// How the platform runtime of `lang` spells the standard type `name` (one of [`TYPES`]).
 ///
-/// Every runtime exports every standard type, so generated code refers to all eight and
+/// Every runtime exports every standard type, so generated code refers to all nine and
 /// declares none (ADR-024):
 ///
-/// * TypeScript: `@undra/runtime` exports all eight types with their codecs (`HttpRequestCodec`,
+/// * TypeScript: `@undra/runtime` exports all nine types with their codecs (`HttpRequestCodec`,
 ///   ...) from `adapters/types.ts` and `adapters/codecs.ts`, under the standard names.
-/// * Kotlin: `dev.undra.runtime.adapters` declares all eight as public classes whose companion
+/// * Kotlin: `dev.undra.runtime.adapters` declares all nine as public classes whose companion
 ///   object is the `UndraCodec` (`StandardRecords.kt`), under the standard names.
-/// * Swift: `UndraRuntime` exports all eight as public types (`Core/StandardRecords.swift`),
+/// * Swift: `UndraRuntime` exports all nine as public types (`Core/StandardRecords.swift`),
 ///   under the standard names except `AppState`, which is `UndraAppState`: an app's own
 ///   `AppState` is the commonest type name in Swift, and the runtime has exported it under that
 ///   name since v1 (ADR-024, amended).
@@ -578,13 +608,13 @@ mod tests {
     }
 
     #[test]
-    fn the_table_has_the_ten_ports_and_eight_types() {
+    fn the_table_has_the_ten_ports_and_nine_types() {
         assert_eq!(PORTS.len(), 10);
-        assert_eq!(TYPES.len(), 8);
+        assert_eq!(TYPES.len(), 9);
         let names: BTreeSet<_> = PORTS.iter().map(|p| p.name).collect();
         assert_eq!(names.len(), 10, "port names are unique");
         let names: BTreeSet<_> = TYPES.iter().map(|t| t.name).collect();
-        assert_eq!(names.len(), 8, "type names are unique");
+        assert_eq!(names.len(), 9, "type names are unique");
     }
 
     #[test]

@@ -1003,11 +1003,69 @@ pub fn snapshot() -> Vec<Workload> {
                 rt.restore(black_box(&snapshot)).expect("restore");
             })
         }),
+        // ADR-037: the same 100 KB, written by an older build whose `Item.id` was a `u32`: every
+        // store's fingerprint differs, so each one is decoded by name and migrated structurally
+        // (a widening of every row's id) before it is rebuilt. The budget is 10x the fast path.
+        Workload::new("snapshot/restore_100kb_migrated", || {
+            let (rt, _host, snapshot) = snapshot_fixture(4);
+            let older = older_feed_snapshot(&rt, &snapshot);
+            let report = rt
+                .restore_with_report(&older)
+                .expect("the older snapshot migrates");
+            assert_eq!(report.migrated, ["Feed"], "every store migrated");
+            plain(move || {
+                rt.restore(black_box(&older)).expect("restore");
+            })
+        }),
         Workload::new("snapshot/cold_start_restore_100kb", || cold_start(0)),
         Workload::new("snapshot/cold_start_restore_100kb_core_thread", || {
             cold_start(1)
         }),
     ]
+}
+
+/// `snapshot` as a build whose `Item.id` was a `u32` would have written it: the rows re-encoded
+/// with 32-bit ids, the `Feed` type's fingerprint and description of that build.
+fn older_feed_snapshot(rt: &Runtime, snapshot: &[u8]) -> Vec<u8> {
+    use undra::meta::TypeRef;
+    use undra::wire::payload::{Snapshot, SnapshotType};
+
+    let mut old = rt.schema().clone();
+    let item = old
+        .records
+        .iter_mut()
+        .find(|r| r.name == "Item")
+        .expect("the fixture's Item");
+    item.fields[0].ty = TypeRef::U32;
+    let mut snap = Snapshot::decode(&mut Reader::new(snapshot)).expect("a snapshot");
+    for store in &mut snap.stores {
+        for (_, value) in &mut store.signals {
+            let rows = Vec::<Item>::decode_exact(value).expect("Feed rows");
+            let older: Vec<(u32, String, bool)> = rows
+                .into_iter()
+                .map(|row| {
+                    (
+                        u32::try_from(row.id).expect("small ids"),
+                        row.title,
+                        row.done,
+                    )
+                })
+                .collect();
+            *value = older.encode_to_vec();
+        }
+    }
+    let type_ids: Vec<u32> = snap.types.iter().map(|t| t.type_id).collect();
+    snap.types = type_ids
+        .iter()
+        .map(|&type_id| SnapshotType {
+            type_id,
+            fingerprint: old.store_fingerprint(type_id).expect("a store"),
+        })
+        .collect();
+    snap.description = old.stores_closure(&type_ids).canonical_json();
+    let mut w = Writer::new();
+    snap.encode(&mut w);
+    w.into_vec()
 }
 
 /// A new runtime that restores the 100 KB snapshot: what launching the app pays in the core

@@ -13,8 +13,9 @@ use std::time::{Duration, Instant};
 use notify::{EventKind, RecursiveMode, Watcher};
 
 use crate::adb;
-use crate::cli::DevArgs;
+use crate::cli::{DevArgs, DevtoolsMode};
 use crate::config::Platform;
+use crate::devtools;
 use crate::error::{CliError, Code, Result};
 use crate::reload::{self, Outcome, Restored, Snapshot, Swap};
 use crate::runner::{self, RunnerEvent, Running};
@@ -59,11 +60,14 @@ pub fn run(env: &Env<'_>, args: &DevArgs) -> Result<()> {
     let mut run_id = 0_u64;
     let mut addr = args.addr.clone();
     let record = args.record.as_deref();
+    // The page of the devtools needs this run's secret in its address, whichever runner serves it.
+    let token = devtools::enabled(args.devtools, &args.addr).then(devtools::new_token);
     let (first, ready, _) = start(
         &exe,
         &addr,
         args.log_level,
         record,
+        token.as_deref(),
         &mut run_id,
         &runner_tx,
         &rx,
@@ -78,7 +82,15 @@ pub fn run(env: &Env<'_>, args: &DevArgs) -> Result<()> {
     } else {
         Some(watch(&core.local_dirs, tx.clone())?)
     };
-    announce(&session, &url, &hash, args, &core.local_dirs, None);
+    announce(
+        &session,
+        &url,
+        &hash,
+        args,
+        &core.local_dirs,
+        None,
+        token.as_deref(),
+    );
     // A port of 0 asked the OS to choose; keep that port across restarts so clients find the
     // server where they left it.
     addr = socket_of(&url).unwrap_or(addr);
@@ -114,6 +126,7 @@ pub fn run(env: &Env<'_>, args: &DevArgs) -> Result<()> {
                             addr: &addr,
                             log_level: args.log_level,
                             record,
+                            devtools: token.as_deref(),
                             run_id: &mut run_id,
                             runner_tx: &runner_tx,
                             rx: &rx,
@@ -144,6 +157,7 @@ pub fn run(env: &Env<'_>, args: &DevArgs) -> Result<()> {
                                     args,
                                     &core.local_dirs,
                                     Some((&hash, &outcome)),
+                                    token.as_deref(),
                                 );
                                 hash = new_hash;
                                 if args.android {
@@ -198,13 +212,23 @@ fn start(
     addr: &str,
     log_level: u8,
     record: Option<&Path>,
+    devtools: Option<&str>,
     run_id: &mut u64,
     runner_tx: &Sender<RunnerEvent>,
     rx: &Receiver<Event>,
 ) -> Result<(Running, (String, String), bool)> {
     *run_id += 1;
     let id = *run_id;
-    let running = runner::spawn(exe, addr, log_level, id, false, record, runner_tx.clone())?;
+    let running = runner::spawn(
+        exe,
+        addr,
+        log_level,
+        id,
+        false,
+        record,
+        devtools,
+        runner_tx.clone(),
+    )?;
     let deadline = Instant::now() + READY_TIMEOUT;
     let mut changed = false;
     loop {
@@ -256,6 +280,8 @@ struct ProcOps<'a> {
     addr: &'a str,
     log_level: u8,
     record: Option<&'a Path>,
+    /// This run's devtools token, when the page is served.
+    devtools: Option<&'a str>,
     run_id: &'a mut u64,
     runner_tx: &'a Sender<RunnerEvent>,
     rx: &'a Receiver<Event>,
@@ -317,6 +343,7 @@ impl reload::Ops for ProcOps<'_> {
             id,
             true,
             self.record,
+            self.devtools,
             self.runner_tx.clone(),
         )
         .map_err(|e| e.what)?;
@@ -533,6 +560,7 @@ fn announce(
     args: &DevArgs,
     watched: &[PathBuf],
     previous: Option<(&str, &Outcome)>,
+    token: Option<&str>,
 ) {
     let say = |s: &str| println!("{s}");
     if let Some((before, outcome)) = previous {
@@ -554,6 +582,17 @@ fn announce(
     say(url);
     say("");
     say(&format!("  schema hash   {hash}"));
+    match (token, args.devtools) {
+        (Some(token), _) => {
+            if let Some(page) = devtools::page_url(url, token) {
+                say(&format!("  devtools      {page}"));
+            }
+        }
+        (None, DevtoolsMode::Auto) => say(
+            "  devtools      off: the address is not a loopback one (--devtools on serves the page, behind its token)",
+        ),
+        (None, _) => {}
+    }
     say(
         "  web           UndraCore.load({ mode: \"remote\", url, expectedSchemaHash: UndraIds.schemaHash })  or ?undra=<url> in the page URL",
     );

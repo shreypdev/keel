@@ -1,6 +1,7 @@
-//! Persistence (SPEC 9): entries of `persist` queries are written to the `Kv` port 250 ms after
-//! each successful fetch under `undra.query.cache.<query_id>.<fnv1a64(params)>`, read back when the
-//! runtime starts, and dropped if they were written under another schema.
+//! Persistence (SPEC 9, format 2 of ADR-037): entries of `persist` queries are written to the `Kv`
+//! port 250 ms after each successful fetch under `undra.query.cache2.<query_id>.<fnv1a64(params)>`
+//! with the fingerprint of their type, read back when the runtime starts, and kept across a schema
+//! change that does not touch their type. Migration, failures and the queue: `tests/storage.rs`.
 
 mod common;
 
@@ -11,25 +12,67 @@ use undra_ports::{HttpError, HttpResponse};
 use undra_query::{CACHE_KEY_PREFIX, QueryStatus, cache_key};
 use undra_wire::{Bytes, Encode, Reader};
 
-/// A persisted entry as stored: `(schema hash, updated_at, data bytes)`.
+/// A persisted entry as stored: `(schema hash, updated_at, data bytes)`; the format and the
+/// fingerprint are checked here.
 fn stored(h: &Harness, key: &str) -> Option<(u64, i64, Vec<u8>)> {
     let bytes = h.fakes.kv.value(key)?;
     let mut r = Reader::new(&bytes);
+    assert_eq!(r.read_u16().unwrap(), 2, "format 2");
+    let hash = r.read_u64().unwrap();
+    let fingerprint = r.read_u64().unwrap();
     let entry = (
-        r.read_u64().unwrap(),
+        hash,
         r.read_i64().unwrap(),
         r.read_bytes().unwrap().to_vec(),
     );
     r.finish().unwrap();
+    assert_eq!(fingerprint, fingerprint_of(h, key), "today's fingerprint");
     Some(entry)
 }
 
+/// The current fingerprint of the query the cache key belongs to.
+fn fingerprint_of(h: &Harness, key: &str) -> u64 {
+    let id = u32::from_str_radix(&key["undra.query.cache2.".len()..][..8], 16).unwrap();
+    h.t.runtime()
+        .schema()
+        .query_closure(id)
+        .unwrap()
+        .fingerprint()
+}
+
+/// The fingerprint of `settings`' cached value (a `String`) in any build of this test core.
+fn settings_fingerprint() -> u64 {
+    undra_meta::Schema::new("t")
+        .closure(&undra_meta::TypeRef::String)
+        .fingerprint()
+}
+
+/// A format-2 entry of `settings` with today's fingerprint.
 fn encoded(hash: u64, updated_at: i64, data: &impl Encode) -> Vec<u8> {
+    let mut w = undra_wire::Writer::new();
+    w.write_u16(2);
+    w.write_u64(hash);
+    w.write_u64(settings_fingerprint());
+    w.write_i64(updated_at);
+    w.write_bytes(&data.encode_to_vec());
+    w.into_vec()
+}
+
+/// A format-1 entry (before ADR-037): `schema_hash, updated_at, data`.
+fn encoded_v1(hash: u64, updated_at: i64, data: &impl Encode) -> Vec<u8> {
     let mut w = undra_wire::Writer::new();
     w.write_u64(hash);
     w.write_i64(updated_at);
     w.write_bytes(&data.encode_to_vec());
     w.into_vec()
+}
+
+fn settings_key_v1() -> String {
+    format!(
+        "undra.query.cache.{:08x}.{:016x}",
+        SettingsQuery::QUERY_ID,
+        fnv1a64(&().encode_to_vec())
+    )
 }
 
 fn settings_key() -> String {
@@ -65,7 +108,7 @@ fn the_key_is_the_query_id_and_the_hash_of_the_parameters() {
     assert_eq!(
         cache_key(TodosQuery::QUERY_ID, &params),
         format!(
-            "undra.query.cache.{:08x}.{:016x}",
+            "undra.query.cache2.{:08x}.{:016x}",
             TodosQuery::QUERY_ID,
             fnv1a64(&params)
         )
@@ -265,26 +308,50 @@ fn the_age_of_a_persisted_entry_comes_from_when_it_was_fetched() {
 
 fn stored_at(fakes: &Fakes) -> i64 {
     let bytes = fakes.kv.value(&settings_key()).unwrap();
-    Reader::new(&bytes[8..16]).read_i64().unwrap()
+    // format u16, schema hash u64, fingerprint u64, then updated_at.
+    Reader::new(&bytes[18..26]).read_i64().unwrap()
 }
 
+/// ADR-037: an entry written by a build with another schema hash but the same type of value is
+/// kept (an unrelated change, a new method, no longer wipes the cache).
 #[test]
-fn an_entry_written_under_another_schema_is_deleted_and_ignored() {
+fn an_entry_written_under_another_schema_hash_with_the_same_type_is_kept() {
     let fakes = Fakes::new();
     fakes
         .kv
-        .insert(settings_key(), encoded(0xdead_beef, 5, &"stale".to_owned()));
+        .insert(settings_key(), encoded(0xdead_beef, 5, &"kept".to_owned()));
+    let h = Harness::with_fakes(fakes);
+    h.settle();
+    let handle = h.query().observe::<SettingsQuery>(());
+    assert_eq!(handle.data().get(), Some("kept".to_owned()));
+}
+
+#[test]
+fn an_entry_of_format_1_from_another_schema_is_deleted_reported_and_ignored() {
+    let fakes = Fakes::new();
+    fakes.kv.insert(
+        settings_key_v1(),
+        encoded_v1(0xdead_beef, 5, &"stale".to_owned()),
+    );
     // An unrelated key in the store is none of the cache's business.
     fakes.kv.insert("app.own.key", vec![1]);
     let h = Harness::with_fakes(fakes);
     h.settle();
 
     assert_eq!(
-        h.fakes.kv.value(&settings_key()),
+        h.fakes.kv.value(&settings_key_v1()),
         None,
         "dropped from storage"
     );
     assert!(h.fakes.kv.contains_key("app.own.key"));
+    assert!(
+        h.t.host()
+            .take_logs()
+            .iter()
+            .any(|l| l.message.contains("dropped the persisted cache entry")
+                && l.message.contains("format 1")),
+        "reported"
+    );
     serve_settings(&h, "fresh");
     let handle = h.query().observe::<SettingsQuery>(());
     assert_eq!(
@@ -333,9 +400,10 @@ fn an_entry_whose_bytes_do_not_decode_is_ignored_when_its_query_is_observed() {
     assert_eq!(handle.data().get(), Some("fresh".to_owned()));
 }
 
+/// ADR-037 decision 7: an entry of a query this build no longer defines can never be shown or
+/// fetched again; it is deleted and reported, so the persisted cache stays bounded.
 #[test]
-fn an_entry_of_a_query_nobody_defines_is_kept() {
-    // Same schema hash, unknown query id: another build's business, not ours to delete.
+fn an_entry_of_a_query_nobody_defines_is_dropped_and_reported() {
     let h0 = Harness::new();
     let schema_hash = h0.t.runtime().schema_hash();
     let fakes = Fakes::new();
@@ -343,7 +411,35 @@ fn an_entry_of_a_query_nobody_defines_is_kept() {
     fakes.kv.insert(key.clone(), encoded(schema_hash, 5, &1_u8));
     let h = Harness::with_fakes(fakes);
     h.settle();
-    assert!(h.fakes.kv.contains_key(&key));
+    assert!(!h.fakes.kv.contains_key(&key));
+    assert!(
+        h.t.host()
+            .take_logs()
+            .iter()
+            .any(|l| l.message.contains("this build has no such query"))
+    );
+}
+
+#[test]
+fn an_entry_of_format_1_from_this_very_build_is_rewritten_in_format_2() {
+    let h0 = Harness::new();
+    let schema_hash = h0.t.runtime().schema_hash();
+    let fakes = Fakes::new();
+    fakes.kv.insert(
+        settings_key_v1(),
+        encoded_v1(schema_hash, 5, &"old".to_owned()),
+    );
+    let h = Harness::with_fakes(fakes);
+    h.settle();
+    assert!(
+        !h.fakes.kv.contains_key(&settings_key_v1()),
+        "the old key is gone"
+    );
+    let (hash, updated_at, data) = stored(&h, &settings_key()).expect("rewritten");
+    assert_eq!((hash, updated_at), (schema_hash, 5));
+    assert_eq!(data, "old".to_owned().encode_to_vec());
+    let handle = h.query().observe::<SettingsQuery>(());
+    assert_eq!(handle.data().get(), Some("old".to_owned()));
 }
 
 #[test]
@@ -390,12 +486,26 @@ fn bytes_in_the_store_use_the_documented_layout() {
     h.advance_ms(250);
     let raw = h.fakes.kv.value(&settings_key()).unwrap();
     let hash = h.t.runtime().schema_hash();
-    let mut expected = hash.to_le_bytes().to_vec();
+    let mut expected = 2_u16.to_le_bytes().to_vec();
+    expected.extend_from_slice(&hash.to_le_bytes());
+    expected.extend_from_slice(&settings_fingerprint().to_le_bytes());
     expected.extend_from_slice(&stored(&h, &settings_key()).unwrap().1.to_le_bytes());
     expected.extend_from_slice(&Bytes("x".to_owned().encode_to_vec()).encode_to_vec());
     assert_eq!(
         raw, expected,
-        "{{ schema_hash u64, updated_at i64, data bytes }}, little-endian"
+        "{{ format u16 = 2, schema_hash u64, fingerprint u64, updated_at i64, data bytes }}, little-endian"
+    );
+    // The closure is stored once, under its fingerprint, before the entry that needs it.
+    let closure = h
+        .fakes
+        .kv
+        .value(&undra_query::types_key(settings_fingerprint()))
+        .expect("the type description is stored");
+    assert_eq!(
+        undra_meta::TypeClosure::from_json(std::str::from_utf8(&closure).unwrap())
+            .unwrap()
+            .fingerprint(),
+        settings_fingerprint()
     );
 }
 

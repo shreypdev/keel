@@ -2,7 +2,7 @@
 //! `remote` transport.
 //!
 //! ```text
-//! undra-dev-runner [ADDR] [--log-level N] [--standby] [--print-schema] [--record FILE]
+//! undra-dev-runner [ADDR] [--log-level N] [--standby] [--devtools] [--print-schema] [--record FILE]
 //! ```
 //!
 //! It talks to `undra dev` over its stdin and stdout, in lines (docs/DEV_LOOP.md has the table; the
@@ -24,10 +24,30 @@ use undra_runtime::undra_wire::payload::Snapshot;
 use undra_runtime::undra_wire::Reader;
 use undra_runtime::{Runtime, RuntimeConfig};
 use undra_testkit::Recorder;
-use undra_transport::{AttachNotices, Bridge, FrameTap, KeptSession, Server, ServerConfig};
+use undra_transport::{Asset, AttachNotices, Bridge, DevtoolsConfig, FrameTap, KeptSession, Server, ServerConfig};
 
 // Links the core, whose `#[undra::api]` items register themselves with the runtime at load time.
 extern crate app_core;
+
+/// The devtools page `undra dev` embeds (ADR-054): served at `/devtools` when `--devtools` is given, behind
+/// the per-run token in `UNDRA_DEVTOOLS_TOKEN`.
+static DEVTOOLS_PAGE: [Asset; 3] = [
+    Asset {
+        path: "index.html",
+        content_type: "text/html; charset=utf-8",
+        bytes: include_bytes!("devtools/index.html"),
+    },
+    Asset {
+        path: "app.js",
+        content_type: "text/javascript; charset=utf-8",
+        bytes: include_bytes!("devtools/app.js"),
+    },
+    Asset {
+        path: "app.css",
+        content_type: "text/css; charset=utf-8",
+        bytes: include_bytes!("devtools/app.css"),
+    },
+];
 
 const LEVELS: [&str; 6] = ["TRACE", "DEBUG", "INFO ", "WARN ", "ERROR", "FATAL"];
 
@@ -124,9 +144,18 @@ fn bind_native_ports(runtime: &Arc<Runtime>, recorder: Option<&Arc<Recorder>>) {
         ),
         None => (clock, rng),
     };
-    runtime.bind_dyn_port::<dyn undra_ports::Clock>(<dyn undra_ports::Clock as Port>::PORT_ID, clock);
-    runtime.bind_dyn_port::<dyn undra_ports::Rng>(<dyn undra_ports::Rng as Port>::PORT_ID, rng);
-    runtime.bind_dyn_port::<dyn undra_ports::Log>(<dyn undra_ports::Log as Port>::PORT_ID, Arc::new(NativeLog));
+    // With their dispatchers, so a raw port call (a generated proxy) reaches them too (ADR-052).
+    runtime.bind_dyn_port_with::<dyn undra_ports::Clock>(
+        <dyn undra_ports::Clock as Port>::PORT_ID,
+        clock,
+        &undra_ports::CLOCK_DISPATCHER,
+    );
+    runtime.bind_dyn_port_with::<dyn undra_ports::Rng>(<dyn undra_ports::Rng as Port>::PORT_ID, rng, &undra_ports::RNG_DISPATCHER);
+    runtime.bind_dyn_port_with::<dyn undra_ports::Log>(
+        <dyn undra_ports::Log as Port>::PORT_ID,
+        Arc::new(NativeLog),
+        &undra_ports::LOG_DISPATCHER,
+    );
 }
 // @ports:end
 
@@ -219,31 +248,44 @@ fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
         return reset(handover, "the state handed over was malformed".to_owned());
     };
     let ours = format!("{:#018x}", runtime.schema_hash());
-    // A snapshot is restored by position into whatever types the new core has: across a schema
-    // change that can succeed with wrong values (ADR-037), so a changed hash means fresh state.
-    if old_hash != ours {
-        return reset(handover, format!("schema changed (was {old_hash}, now {ours})"));
-    }
     let (Some(bytes), Some(handles)) = (from_hex(hex), parse_handles(handles)) else {
         return reset(handover, "the state handed over did not decode".to_owned());
     };
-    let stores: HashSet<u64> = {
+    let mut stores: HashSet<u64> = {
         let mut reader = Reader::new(&bytes);
         match Snapshot::decode(&mut reader) {
             Ok(snapshot) => snapshot.stores.iter().map(|s| s.handle.0).collect(),
             Err(e) => return reset(handover, format!("the snapshot is malformed: {e}")),
         }
     };
+    // Across a schema change too (ADR-037): the restore matches signals by name, migrates what
+    // changed structurally (and through the app's `#[undra::migrate]` hooks), and otherwise refuses
+    // as a whole and changes nothing, so the state is never restored with wrong values.
     let started = Instant::now();
-    if let Err(e) = runtime.restore(&bytes) {
-        return reset(handover, format!("the core refused the snapshot: {e}"));
-    }
+    let report = match runtime.restore_with_report(&bytes) {
+        Ok(report) => report,
+        Err(e) => return reset(handover, format!("the core refused the snapshot: {e}")),
+    };
     let micros = started.elapsed().as_micros();
+    // A store type the rebuild removed was left out: its handles are stale, like a plain object's.
+    for dropped in &report.dropped {
+        for handle in &dropped.handles {
+            stores.remove(handle);
+        }
+    }
+    let restored = stores.len();
     // Objects that are not stores (and query handles) do not survive a restore: their handles
     // are stale and the app re-creates them.
     let (kept, lost): (Vec<u64>, Vec<u64>) = handles.into_iter().partition(|h| stores.contains(h));
     let mut text = "Reloaded, state kept".to_owned();
     let mut caveats = Vec::new();
+    if old_hash != ours {
+        caveats.push(if report.migrated.is_empty() {
+            "the schema changed".to_owned()
+        } else {
+            format!("the schema changed: {} migrated", report.migrated.join(", "))
+        });
+    }
     if !lost.is_empty() {
         caveats.push(format!("{} not carried over", plural(lost.len(), "object", "objects")));
     }
@@ -262,7 +304,7 @@ fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
         window: NOTICE_WINDOW,
         ..AttachNotices::default()
     };
-    say(&format!("restored {} {} {} {micros}", stores.len(), lost.len(), bytes.len()));
+    say(&format!("restored {restored} {} {} {micros}", lost.len(), bytes.len()));
 }
 
 /// Binds `addr` and serves `runtime`, holding the handed-over session and telling the clients what
@@ -273,6 +315,7 @@ fn listen(
     bridge: &std::sync::Arc<Bridge>,
     handover: Handover,
     tap: Option<FrameTap>,
+    devtools: Option<&DevtoolsConfig>,
 ) -> Server {
     // A client that drops (a phone that slept, an app the OS suspended) finds its objects again
     // for ten minutes if it comes back with its session token (ADR-051).
@@ -281,6 +324,7 @@ fn listen(
         inherited_session: handover.session,
         attach_notices: handover.notices,
         tap,
+        devtools: devtools.cloned(),
         ..ServerConfig::default()
     };
     match Server::bind(addr, runtime.clone(), bridge.clone(), config) {
@@ -336,12 +380,14 @@ fn main() {
     let mut log_level = 1_u8;
     let mut print_schema = false;
     let mut standby = false;
+    let mut with_devtools = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--print-schema" => print_schema = true,
             "--standby" => standby = true,
             "--record" => record = args.next(),
+            "--devtools" => with_devtools = true,
             "--log-level" => {
                 log_level = args.next().and_then(|v| v.parse().ok()).unwrap_or(log_level);
             }
@@ -408,12 +454,19 @@ fn main() {
         (stop, handle)
     });
 
+    // The devtools page is served only when `undra dev` asked for it and gave this run's token (an
+    // environment variable, not an argument: arguments show in the process list).
+    let devtools = with_devtools
+        .then(|| std::env::var("UNDRA_DEVTOOLS_TOKEN").ok())
+        .flatten()
+        .map(|token| DevtoolsConfig::new(token, &DEVTOOLS_PAGE));
+
     let mut handover = Handover::default();
     let mut server = None;
     if standby {
         say(&format!("standby {:#018x}", runtime.schema_hash()));
     } else {
-        server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover), tap.clone()));
+        server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover), tap.clone(), devtools.as_ref()));
     }
 
     // Commands until stdin closes: `undra dev` holds the other end, so this process ends when it does.
@@ -425,7 +478,7 @@ fn main() {
             ("state", None) => restore_state(&runtime, rest, &mut handover),
             ("reset", None) => handover.reset(rest),
             ("listen", None) => {
-                server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover), tap.clone()));
+                server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover), tap.clone(), devtools.as_ref()));
             }
             _ => print_log(3, "undra-dev-runner", &format!("ignoring a command it cannot run now: {verb}")),
         }

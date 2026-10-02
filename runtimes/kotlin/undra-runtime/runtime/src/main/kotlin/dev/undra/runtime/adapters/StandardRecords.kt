@@ -9,10 +9,11 @@ import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.WireException
 
-// Hand-written codecs for the records of the standard ports (SPEC section 8). They are what generated code
-// for `undra-ports` would contain; the runtime carries its own so that the default adapters (and the
-// `android-adapters` module) do not depend on generated code. Enum and error variants are numbered in the
-// order SPEC section 8 lists them.
+// Hand-written codecs for the nine records, enums and errors of the standard ports (SPEC section 8): HttpMethod,
+// Header, HttpRequest, HttpResponse, HttpError, FsError, StorageError (ADR-049), NetKind and AppState. They are
+// what generated code for `undra-ports` would contain; the runtime carries its own so that the default adapters
+// (and the `android-adapters` module) do not depend on generated code. Enum and error variants are numbered as
+// `undra-ports` declares them (`crates/undra-ports/tests/encoding.rs` checks this file against it).
 
 private val headerList: UndraCodec<List<Header>> = Codecs.vec(Header)
 private val optionBytes: UndraCodec<ByteArray?> = Codecs.option(Codecs.bytes)
@@ -181,7 +182,12 @@ public sealed class HttpError(message: String) : UndraException(message) {
     }
 }
 
-/** `FsError { NotFound, Denied, Io(String) }`: why a file operation failed. */
+/**
+ * `FsError { NotFound, Denied, Io(String), Full, Unavailable(String) }`: why a file operation failed.
+ *
+ * An `Fs` adapter throws it from its methods, and its port answers the core with it (port status 1), so the core
+ * receives the typed error instead of `unavailable`.
+ */
 public sealed class FsError(message: String) : UndraException(message) {
     /** The file or directory does not exist. */
     public data object NotFound : FsError("not found")
@@ -189,8 +195,14 @@ public sealed class FsError(message: String) : UndraException(message) {
     /** Access is not allowed: a permission error, or a path that leaves the file root. */
     public data object Denied : FsError("access denied")
 
-    /** Any other I/O failure. */
+    /** Any other I/O failure; [reason] is the platform's description. */
     public data class Io(val reason: String) : FsError("I/O error: $reason")
+
+    /** The disk or the storage quota is exhausted (`ENOSPC`, `EDQUOT`; ADR-049). */
+    public data object Full : FsError("the disk is full")
+
+    /** No file system in this context, or no adapter registered; [reason] says which (ADR-049). */
+    public data class Unavailable(val reason: String) : FsError("the file system is unavailable: $reason")
 
     /** The wire codec of [FsError]. */
     public companion object : UndraCodec<FsError> {
@@ -202,6 +214,11 @@ public sealed class FsError(message: String) : UndraException(message) {
                     w.writeU16(2u)
                     w.writeStr(v.reason)
                 }
+                Full -> w.writeU16(3u)
+                is Unavailable -> {
+                    w.writeU16(4u)
+                    w.writeStr(v.reason)
+                }
             }
         }
 
@@ -211,9 +228,107 @@ public sealed class FsError(message: String) : UndraException(message) {
                 0 -> NotFound
                 1 -> Denied
                 2 -> Io(r.readStr())
+                3 -> Full
+                4 -> Unavailable(r.readStr())
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "FsError")
             }
         }
+    }
+}
+
+/**
+ * `StorageError { Unavailable(String), Full, Locked, Corrupt(String), Io(String) }`: why a `Kv` or `SecureStore`
+ * operation failed (ADR-049).
+ *
+ * Storage is not infallible: a quota runs out, a key that needs the user's authentication cannot be used, a stored
+ * file is damaged. Every method of the two storage ports reports those as one of these variants, never as a crash of
+ * the core:
+ *
+ * | Variant | Meaning |
+ * |---|---|
+ * | [Unavailable] | no adapter, or no backend in this context (no Android Keystore) |
+ * | [Full] | the quota or the disk is exhausted |
+ * | [Locked] | protected data cannot be read now (a Keystore key that needs the user to authenticate) |
+ * | [Corrupt] | stored bytes or ciphertext that cannot be read back; the key is still there |
+ * | [Io] | anything else, with the platform's message |
+ *
+ * A storage adapter throws it from its methods ([KeyValueBackend]); [StoragePort] turns it into the port's typed
+ * reply (status 1, this error encoded), which the core receives as its own `StorageError`. Anything else an adapter
+ * throws is a bug in the adapter: the core is answered `unavailable` and the runtime logs it at error level.
+ *
+ * ```kotlin
+ * override suspend fun set(key: String, value: ByteArray) {
+ *     try {
+ *         database.put(key, value)
+ *     } catch (e: IOException) {
+ *         throw StorageError.of(e) // Full for ENOSPC or EDQUOT, Io otherwise
+ *     }
+ * }
+ * ```
+ */
+public sealed class StorageError(message: String) : UndraException(message) {
+    /** No adapter is registered, or the platform has no backend in this context; [reason] says which. */
+    public data class Unavailable(val reason: String) : StorageError("storage is unavailable: $reason")
+
+    /** The quota or the disk is exhausted. */
+    public data object Full : StorageError("the storage is full")
+
+    /** Protected data cannot be read now (before the device's first unlock, or a key that needs the user to authenticate). */
+    public data object Locked : StorageError("the storage is locked")
+
+    /** The stored bytes (or ciphertext) cannot be read back; the key is still there. [reason] says why. */
+    public data class Corrupt(val reason: String) : StorageError("stored data is corrupt: $reason")
+
+    /** Any other failure; [reason] is the platform's description. */
+    public data class Io(val reason: String) : StorageError("storage I/O error: $reason")
+
+    /**
+     * Whether retrying later can succeed without anything changing in the stored data: [Unavailable], [Locked] and
+     * [Io] are about the moment, [Full] and [Corrupt] about the store (the core's `StorageError::is_transient`).
+     */
+    public val isTransient: Boolean
+        get() = this is Unavailable || this is Locked || this is Io
+
+    /** The wire codec of [StorageError], and the mapping of platform I/O failures onto it. */
+    public companion object : UndraCodec<StorageError> {
+        override fun encode(w: UndraWriter, v: StorageError) {
+            when (v) {
+                is Unavailable -> {
+                    w.writeU16(0u)
+                    w.writeStr(v.reason)
+                }
+                Full -> w.writeU16(1u)
+                Locked -> w.writeU16(2u)
+                is Corrupt -> {
+                    w.writeU16(3u)
+                    w.writeStr(v.reason)
+                }
+                is Io -> {
+                    w.writeU16(4u)
+                    w.writeStr(v.reason)
+                }
+            }
+        }
+
+        override fun decode(r: UndraReader): StorageError {
+            val at = r.position
+            return when (val tag = r.readU16().toInt()) {
+                0 -> Unavailable(r.readStr())
+                1 -> Full
+                2 -> Locked
+                3 -> Corrupt(r.readStr())
+                4 -> Io(r.readStr())
+                else -> throw WireException.InvalidTag(tag.toUInt(), at, "StorageError")
+            }
+        }
+
+        /**
+         * The [StorageError] an I/O failure of a storage backend stands for: [Full] when the disk or the quota is
+         * exhausted (`ENOSPC` or `EDQUOT`, however the platform spells it: the JVM's `No space left on device`,
+         * Android's `ENOSPC (No space left on device)`, anywhere in the cause chain), [Io] with the platform's
+         * description otherwise.
+         */
+        public fun of(error: java.io.IOException): StorageError = if (StorageFailures.isOutOfSpace(error)) Full else Io(StorageFailures.describe(error))
     }
 }
 

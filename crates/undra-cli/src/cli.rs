@@ -141,7 +141,10 @@ process's memory, never on disk) and the new core is restored from it, so the ap
 they were on; a changed schema, or --no-keep-state, starts the new core fresh and says so.\n\n\
 Logs, including the development records of docs/SPEC.md 5.10 (a line per transaction commit, port call and \
 panic), are printed here, with a line for each client that connects, reconnects or leaves. Clocks, randomness and \
-logging are answered by this machine because a remote client cannot answer a synchronous port.",
+logging are answered by this machine because a remote client cannot answer a synchronous port.\n\n\
+The banner also prints the address of the devtools page (behind a per-run token, on a loopback address): the \
+stores and their live values, a timeline of every change-set with its diff, a scrubber that restores the core to \
+an earlier step (the app follows), the port-call and query-cache logs and the counters. docs/DEV_LOOP.md has it.",
         after_long_help = "\
 EXAMPLES
     undra dev                               listen on 127.0.0.1:7443
@@ -150,6 +153,7 @@ EXAMPLES
     undra dev --no-watch                    build once and serve
     undra dev --no-keep-state               every rebuilt core starts fresh, as before the state was carried over
     undra dev --record session.json         also write the session as an undra.recording, to preview or test with (docs/TESTING.md)
+    undra dev --devtools off                do not serve the devtools page (auto: loopback addresses only)
 
 CONNECTING
     web       UndraCore.load({ mode: \"remote\", url: \"ws://127.0.0.1:7443\", expectedSchemaHash })   (or ?undra=ws://... in the page URL)
@@ -344,6 +348,21 @@ pub struct DevArgs {
     /// `undra.recording` (docs/TESTING.md). A reload starts a new core and so a new file: FILE, then `NAME-2.json`, `NAME-3.json`.
     #[arg(long, value_name = "FILE")]
     pub record: Option<PathBuf>,
+
+    /// Serve the devtools page (store viewer, change-set timeline with time travel, port and query logs, counters) at /devtools: `auto` on a loopback address only, `on` always, `off` never. Every request needs the token in the printed address.
+    #[arg(long, value_enum, value_name = "MODE", default_value = "auto")]
+    pub devtools: DevtoolsMode,
+}
+
+/// When `undra dev` serves its devtools page (`--devtools`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum DevtoolsMode {
+    /// On a loopback address only.
+    Auto,
+    /// Always, whatever the address: the token is still required.
+    On,
+    /// Never.
+    Off,
 }
 
 /// Arguments of `undra doctor`.

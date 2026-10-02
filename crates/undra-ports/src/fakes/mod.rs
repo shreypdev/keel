@@ -3,7 +3,8 @@
 //! | Fake | Port(s) | Behaviour |
 //! |---|---|---|
 //! | [`FakeHttp`] | [`Http`] | scripted replies chosen by [`Matcher`], every request recorded |
-//! | [`MemKv`] | [`Kv`] | in-memory ordered map, operations recorded |
+//! | [`MemKv`] | [`Kv`] | in-memory ordered map, operations recorded, failures injectable ([`MemStore::fail`]) |
+//! | [`FailingKv`] | [`Kv`] | every operation fails with one [`StorageError`](crate::StorageError) |
 //! | [`MemSecureStore`] | [`SecureStore`] | same, under its own port id |
 //! | [`MemFs`] | [`Fs`] | in-memory tree with the platform adapters' error semantics |
 //! | [`FakeClock`] | [`Clock`] + [`Timer`] | settable time; `advance` fires due timers |
@@ -47,7 +48,7 @@ pub use fs::MemFs;
 pub use http::{FakeHttp, Matcher};
 pub use log::{CaptureLog, LogEntry};
 pub use rng::SeededRng;
-pub use store::{MemKv, MemSecureStore, MemStore, StoreOp};
+pub use store::{FailOn, FailingKv, MemKv, MemSecureStore, MemStore, StoreOp};
 
 use crate::{Clock, Connectivity, Fs, Http, Kv, Lifecycle, Log, Rng, SecureStore, Timer};
 
@@ -113,17 +114,48 @@ impl Fakes {
     /// Calling it again with another runtime binds the same fakes there too. To let the fake clock
     /// serve `ctx.sleep` on a [`TestRuntime`], use [`Fakes::install_test`] or [`install`].
     pub fn install(&self, rt: &Arc<Runtime>) {
-        rt.bind_dyn_port::<dyn Clock>(<dyn Clock as Port>::PORT_ID, self.clock.clone());
-        rt.bind_dyn_port::<dyn Timer>(<dyn Timer as Port>::PORT_ID, self.clock.clone());
-        rt.bind_dyn_port::<dyn Rng>(<dyn Rng as Port>::PORT_ID, self.rng.clone());
-        rt.bind_dyn_port::<dyn Log>(<dyn Log as Port>::PORT_ID, self.log.clone());
-        rt.bind_dyn_port::<dyn Http>(<dyn Http as Port>::PORT_ID, self.http.clone());
-        rt.bind_dyn_port::<dyn Kv>(<dyn Kv as Port>::PORT_ID, self.kv.clone());
-        rt.bind_dyn_port::<dyn SecureStore>(
+        // With their dispatchers, so a raw port call (a generated proxy) reaches them too; the
+        // standard ports' dispatchers are linked only where they are bound like this (ADR-052).
+        rt.bind_dyn_port_with::<dyn Clock>(
+            <dyn Clock as Port>::PORT_ID,
+            self.clock.clone(),
+            &crate::CLOCK_DISPATCHER,
+        );
+        rt.bind_dyn_port_with::<dyn Timer>(
+            <dyn Timer as Port>::PORT_ID,
+            self.clock.clone(),
+            &crate::TIMER_DISPATCHER,
+        );
+        rt.bind_dyn_port_with::<dyn Rng>(
+            <dyn Rng as Port>::PORT_ID,
+            self.rng.clone(),
+            &crate::RNG_DISPATCHER,
+        );
+        rt.bind_dyn_port_with::<dyn Log>(
+            <dyn Log as Port>::PORT_ID,
+            self.log.clone(),
+            &crate::LOG_DISPATCHER,
+        );
+        rt.bind_dyn_port_with::<dyn Http>(
+            <dyn Http as Port>::PORT_ID,
+            self.http.clone(),
+            &crate::HTTP_DISPATCHER,
+        );
+        rt.bind_dyn_port_with::<dyn Kv>(
+            <dyn Kv as Port>::PORT_ID,
+            self.kv.clone(),
+            &crate::KV_DISPATCHER,
+        );
+        rt.bind_dyn_port_with::<dyn SecureStore>(
             <dyn SecureStore as Port>::PORT_ID,
             self.secure_store.clone(),
+            &crate::SECURE_STORE_DISPATCHER,
         );
-        rt.bind_dyn_port::<dyn Fs>(<dyn Fs as Port>::PORT_ID, self.fs.clone());
+        rt.bind_dyn_port_with::<dyn Fs>(
+            <dyn Fs as Port>::PORT_ID,
+            self.fs.clone(),
+            &crate::FS_DISPATCHER,
+        );
         // Event ports flow host to core; binding the source only makes it discoverable with
         // `Ctx::rust_port`.
         rt.bind_dyn_port::<dyn Connectivity>(

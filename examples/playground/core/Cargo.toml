@@ -9,6 +9,11 @@ description = "The Undra playground core: one Rust core shared by the web, iOS a
 
 # A plain library, like every Undra core: `undra build` links it with the C ABI into the library each
 # platform loads, and `undra dev` serves it over a WebSocket (see ../undra.toml).
+[features]
+# Build B of the migration scenarios (ADR-037; `src/updates.rs`). The contract runners build it
+# through `undra build` with `UNDRA_PLAYGROUND_V2=1`, which `build.rs` turns into the same cfg.
+migration-v2 = []
+
 [dependencies]
 undra = { workspace = true }
 serde = { workspace = true }

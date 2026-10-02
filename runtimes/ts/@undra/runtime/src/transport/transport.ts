@@ -1,3 +1,5 @@
+import type { PortImpl } from "../port.js";
+import type { RestartResult } from "../recovery.js";
 import type { HelloPayload, Kind, PortCallPayload } from "../wire/index.js";
 
 /*
@@ -47,6 +49,11 @@ export interface TransportHandler {
   reconnected?(hello: HelloPayload): void;
   /** Only for a transport that reconnects: whether the host holds objects it expects the core to still have (it asks the server to resume them). */
   holdsObjects?(): boolean;
+  /**
+   * The ports the host serves. A transport whose core runs elsewhere (`wasm-worker`) reads them when it starts: it
+   * forwards their calls to the host, and refuses a synchronous one, which the core could not wait for (ADR-049).
+   */
+  ports?(): ReadonlyMap<number, PortImpl>;
 }
 
 /**
@@ -98,4 +105,18 @@ export interface Transport {
   restore?(bytes: Uint8Array): Promise<void>;
   /** Releases the channel. Idempotent; the handler's `closed` is not called. */
   close(): void;
+  /**
+   * The host registers `impl` for `portId` (`registerPort`), before it does. Throws `UndraError("options")` for a port
+   * this transport cannot serve: a synchronous one in `wasm-worker`, whose core cannot wait for the host's thread
+   * (ADR-049); otherwise a started worker is told to forward the port's calls.
+   */
+  portAdded?(portId: number, impl: PortImpl): void;
+  /**
+   * Only for a wasm transport loaded with recovery (ADR-049): after the handler heard of a trap (`closed` with an
+   * `UndraTransportError("trap")`), brings the core back: the same compiled module instantiated again, initialised,
+   * and the last snapshot restored with its generation floor raised to `generationFloor`. Rejects with an
+   * `UndraTransportError` (`"trap"` when the new instance traps too). A transport the host does not restart is
+   * closed with `close()`.
+   */
+  restart?(generationFloor: number): Promise<RestartResult>;
 }

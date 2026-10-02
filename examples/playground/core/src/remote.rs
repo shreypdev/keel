@@ -95,7 +95,7 @@ pub fn configure_remote(ctx: &Ctx, config: RemoteConfig) {
 }
 
 /// The URL of `path` on the configured server.
-fn endpoint(ctx: &Ctx, path: &str) -> Result<String, RemoteError> {
+pub(crate) fn endpoint(ctx: &Ctx, path: &str) -> Result<String, RemoteError> {
     let base = state(ctx)
         .base_url
         .lock()
@@ -108,7 +108,7 @@ fn endpoint(ctx: &Ctx, path: &str) -> Result<String, RemoteError> {
 }
 
 /// Sends `request` through the `Http` port and returns the body of a successful answer.
-async fn send(ctx: &Ctx, request: HttpRequest) -> Result<Vec<u8>, RemoteError> {
+pub(crate) async fn send(ctx: &Ctx, request: HttpRequest) -> Result<Vec<u8>, RemoteError> {
     let response = ctx.http().request(request).await?;
     if response.is_success() {
         Ok(response.body.0)

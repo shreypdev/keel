@@ -1,6 +1,10 @@
 package dev.undra.android
 
+import android.security.keystore.UserNotAuthenticatedException
+import dev.undra.runtime.UndraPortException
 import dev.undra.runtime.adapters.StandardPorts
+import dev.undra.runtime.adapters.StorageError
+import dev.undra.runtime.wire.encodeToByteArray
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.decodeAll
 import java.io.File
@@ -19,7 +23,8 @@ import org.junit.Test
 
 /**
  * The SecureStore adapter's storage and sealing with a software key in place of the Keystore's (the instrumented tests
- * cover the real Keystore): what lands on disk is sealed, names list, and a damaged file is an error, not a missing value.
+ * cover the real Keystore): what lands on disk is sealed, names list, and a damaged file is a typed error
+ * ([StorageError.Corrupt]), not a missing value. `StorageFailureTests` covers every failure the port can answer.
  */
 class AndroidSecureStoreAdapterTest {
     private lateinit var dir: File
@@ -91,10 +96,10 @@ class AndroidSecureStoreAdapterTest {
         val e = try {
             AndroidSecureStoreAdapter(dir) { other }.get("k")
             null
-        } catch (e: SecureStoreException) {
+        } catch (e: StorageError.Corrupt) {
             e
         }
-        assertTrue(e!!.message, e.message!!.contains("failed authentication"))
+        assertTrue(e!!.message, e.reason.contains("failed authentication"))
     }
 
     @Test
@@ -104,17 +109,20 @@ class AndroidSecureStoreAdapterTest {
         val bytes = file.readBytes()
         bytes[bytes.size - 1] = (bytes[bytes.size - 1].toInt() xor 1).toByte()
         file.writeBytes(bytes)
-        assertThrows(SecureStoreException::class.java) { runBlocking { secure.get("k") } }
-        Unit
+        assertThrows(StorageError.Corrupt::class.java) { runBlocking { secure.get("k") } }
+        // The file is still there: a damaged value is reported, never deleted or read as missing.
+        assertEquals(listOf("k"), secure.list(""))
     }
 
     @Test
-    fun a_key_that_cannot_be_obtained_is_an_error_on_set_and_get() = runBlocking {
+    fun a_key_that_needs_the_user_to_authenticate_is_locked_on_set_and_get() = runBlocking {
         secure.set("k", secret)
-        val broken = AndroidSecureStoreAdapter(dir) { throw SecureStoreException("the Keystore is locked") }
-        assertThrows(SecureStoreException::class.java) { runBlocking { broken.set("x", secret) } }
-        assertThrows(SecureStoreException::class.java) { runBlocking { broken.get("k") } }
-        Unit
+        val locked = AndroidSecureStoreAdapter(dir) { throw UserNotAuthenticatedException() }
+        assertThrows(StorageError.Locked::class.java) { runBlocking { locked.set("x", secret) } }
+        assertThrows(StorageError.Locked::class.java) { runBlocking { locked.get("k") } }
+        // Names are not secret: listing and deleting need no key.
+        assertEquals(listOf("k"), locked.list(""))
+        assertNull(locked.get("absent"))
     }
 
     @Test
@@ -133,8 +141,9 @@ class AndroidSecureStoreAdapterTest {
     }
 
     @Test
-    fun a_failing_key_makes_the_port_method_throw_for_the_runtime_to_answer_unavailable() {
-        val impl = AndroidSecureStoreAdapter(dir) { throw SecureStoreException("the Keystore is locked") }.portImpl()
-        assertThrows(SecureStoreException::class.java) { call(impl, StandardPorts.SecureStore.SET, argsOf("k", secret)) }
+    fun a_failing_key_makes_the_port_answer_the_typed_error() {
+        val impl = AndroidSecureStoreAdapter(dir) { throw UserNotAuthenticatedException() }.portImpl()
+        val e = assertThrows(UndraPortException::class.java) { call(impl, StandardPorts.SecureStore.SET, argsOf("k", secret)) }
+        assertArrayEquals(StorageError.encodeToByteArray(StorageError.Locked), e.body)
     }
 }

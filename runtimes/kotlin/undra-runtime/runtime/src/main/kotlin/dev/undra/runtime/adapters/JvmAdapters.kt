@@ -12,14 +12,21 @@ import java.nio.file.Paths
  * | Port | Implementation |
  * |---|---|
  * | `Http` | [HttpAdapter] over `java.net.http.HttpClient` |
- * | `Kv`, `SecureStore` | [FileKv] over files in `<dataDir>/kv` and `<dataDir>/secure` |
- * | `Fs` | [FsAdapter] over `<dataDir>/fs` |
+ * | `Kv`, `SecureStore` | [FileKv] over files in `<dataDir>/kv` and `<dataDir>/secure`; failures are [StorageError]s |
+ * | `Fs` | [FsAdapter] over `<dataDir>/fs`; failures are [FsError]s |
  * | `Clock`, `Rng`, `Log` | [ClockAdapter], [RngAdapter] (`SecureRandom`), [LogAdapter] (`java.util.logging`) |
  * | `Timer` | [TimerAdapter] over a scheduled executor |
  * | `Connectivity`, `Lifecycle` | none: they are event ports; see [ConnectivityEvents] and [LifecycleEvents] |
  *
  * `UndraCore.load` installs these itself unless `LoadOptions.defaultAdapters` is `false`; use this object to
  * pick another data directory or to mix them with your own.
+ *
+ * On Android `UndraCore.load` installs only [portable] (SPEC section 11): the other six come from the
+ * `android-adapters` module (`AndroidPlatformDefaults.install(core, context)`, right after the load). Until then a
+ * storage call of the core is unanswered by any adapter, which the core reads as `StorageError::Unavailable`, never a
+ * crash (ADR-049); the query layer's hydration keeps asking for a few seconds, which is why installing after `load`
+ * is enough. Nothing is registered in their place on purpose: a stand-in answering `Unavailable` as a typed error
+ * would end that wait at once.
  */
 public object JvmAdapters {
     /** System property naming the directory of the file-backed adapters. */
@@ -48,7 +55,7 @@ public object JvmAdapters {
 
     /**
      * Only the adapters that need nothing from the platform beyond the JDK's core classes: Clock, Rng, Log
-     * and Timer. Used where the rest must come from elsewhere (Android).
+     * and Timer. Used where the rest must come from elsewhere (Android, where `android-adapters` installs them).
      */
     public fun portable(timerFired: (UInt) -> Unit): Map<UInt, PortImpl> =
         linkedMapOf(

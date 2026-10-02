@@ -420,6 +420,39 @@ final class CoreCallTests: XCTestCase {
         }
     }
 
+    func testARestoreTheCoreCannotMigrateIsRefusedAsIncompatible() throws {
+        let transport = FakeTransport()
+        let core = try makeCore(transport)
+        transport.restoreCode = 7
+        XCTAssertThrowsError(try core.restore([1])) { error in
+            guard let refusal = error as? UndraRestoreError else {
+                return XCTFail("expected UndraRestoreError, got \(error)")
+            }
+            XCTAssertEqual(refusal, .incompatible)
+            XCTAssertEqual(refusal.code, 7)
+            XCTAssertTrue(refusal.description.contains("code 7"), refusal.description)
+            XCTAssertTrue(refusal.description.contains("cannot become this build's types"), refusal.description)
+        }
+    }
+
+    func testTheRestoreCodesHaveNames() {
+        // `restore_code` in crates/undra-ffi/src/api.rs.
+        XCTAssertEqual(UndraRestoreError.panicked.code, 2)
+        XCTAssertEqual(UndraRestoreError.badSnapshot.code, 5)
+        XCTAssertEqual(UndraRestoreError.unavailable.code, 6)
+        XCTAssertEqual(UndraRestoreError.incompatible.code, 7)
+        XCTAssertEqual(UndraRestoreError(code: 7), .incompatible)
+        XCTAssertNotEqual(UndraRestoreError(code: 5), .incompatible)
+        XCTAssertTrue(UndraRestoreError.badSnapshot.description.contains("malformed"))
+        XCTAssertTrue(UndraRestoreError.unavailable.description.contains("not running"))
+        XCTAssertTrue(UndraRestoreError.panicked.description.contains("panicked"))
+        XCTAssertTrue(UndraRestoreError(code: 99).description.contains("code 99: unknown code"))
+        // Every description says the core is unchanged.
+        for refusal in [UndraRestoreError.panicked, .badSnapshot, .unavailable, .incompatible, UndraRestoreError(code: 42)] {
+            XCTAssertTrue(refusal.description.hasSuffix("a rejected restore leaves the core unchanged"))
+        }
+    }
+
     func testStatsCombineTheCoresDocumentWithHostCounters() throws {
         let transport = FakeTransport()
         transport.statsDocument = "{\"live_handles\":3,\"live_stores\":1,\"tasks\":2,\"transactions\":7,\"panics\":0,\"crossings\":{\"calls\":11}}"

@@ -24,7 +24,8 @@ import wabt from "wabt";
  *
  * With `StubOptions.snapshot` the stub also exports `undra_snapshot` and `undra_restore` (see SNAPSHOT_WAT):
  * the snapshot is the canned bytes STUB.SNAPSHOT; a restore whose bytes start with 0xff is refused with code 5,
- * one that starts with 0xfe with code 6, one shorter than 4 bytes with code 5 (nothing changes); any other
+ * one that starts with 0xfe with code 6, one that starts with 0xfd with code 7 (INCOMPATIBLE, ADR-037), one shorter
+ * than 4 bytes with code 5 (nothing changes); any other
  * answers the calls waiting in the stub (an ECHO_ASYNC or PORT call) with status 3 (cancelled) and delivers one
  * change-set for HANDLE signal 0 whose value is the little-endian u32 at the start of the bytes. The globals
  * `restore_count` and `restore_len` record what the host asked.
@@ -381,6 +382,7 @@ const SNAPSHOT_WAT = `
     (if (i32.lt_u (local.get $len) (i32.const 4)) (then (return (i32.const 5))))
     (if (i32.eq (i32.load8_u (local.get $ptr)) (i32.const 0xff)) (then (return (i32.const 5))))
     (if (i32.eq (i32.load8_u (local.get $ptr)) (i32.const 0xfe)) (then (return (i32.const 6))))
+    (if (i32.eq (i32.load8_u (local.get $ptr)) (i32.const 0xfd)) (then (return (i32.const 7))))
     (if (i32.ne (global.get $async_call) (i32.const 0))
       (then
         (call $send_reply (global.get $async_call) (i32.const 3) (i32.const 0) (i32.const 0))

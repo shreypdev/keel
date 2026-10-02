@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shipping an update · Undra docs</title>
+<meta name="description" content="Snapshots, cached queries and queued mutations across an app update: what migrates by name for free, how to write a hook, what is refused.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/updates.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Shipping an update · Undra docs">
+<meta property="og:description" content="Snapshots, cached queries and queued mutations across an app update: what migrates by name for free, how to write a hook, what is refused.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/updates.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Shipping an update · Undra docs">
+<meta name="twitter:description" content="Snapshots, cached queries and queued mutations across an app update: what migrates by name for free, how to write a hook, what is refused.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/updates.html#article","headline":"Shipping an update · Undra docs","description":"Snapshots, cached queries and queued mutations across an app update: what migrates by name for free, how to write a hook, what is refused.","url":"https://shreypdev.github.io/undra/docs/updates.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Shipping an update","item":"https://shreypdev.github.io/undra/docs/updates.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html" aria-current="page">Shipping an update</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html" aria-current="page">Shipping an update</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1>Shipping an update</h1>
+    <p class="lede">An app update changes the core's types while the device still holds data the old version wrote. Undra reads it by name, converts what it can, and refuses the rest out loud.</p>
+<h2 id="what-outlives-a-build">What outlives a build<a class="anchor" href="#what-outlives-a-build" aria-label="Link to this section">#</a></h2>
+<p>Three things an app writes can be read by the next version of the app: a <strong>snapshot</strong> of its stores (crash recovery on the web, <code>undra dev</code>'s reload, an app that saves one), the <strong>cached results</strong> of <code>persist</code> queries, and the <strong>offline queue</strong> of idempotent mutations. Each records the <em>fingerprint</em> of its types: a hash of exactly the records, enums and fields it holds. A change elsewhere in the core (a new method, a new query, a doc comment) does not move it, so the data is used as it is, with no work at all.</p>
+<p>When a fingerprint did change, Undra reads the old bytes with the description that was stored next to them and converts them to the new types <strong>by name</strong>. It never guesses: data that cannot be converted is refused with a typed outcome you can show, never decoded into the wrong values.</p>
+<h2 id="what-migrates-for-free">What migrates for free<a class="anchor" href="#what-migrates-for-free" aria-label="Link to this section">#</a></h2>
+<p>These changes need no code. They are the ones most updates are made of:</p><div class="table-wrap"><table><thead><tr><th>Change</th><th>What the old data becomes</th></tr></thead><tbody><tr><td>Fields or signals reordered</td><td>matched by name; order is irrelevant</td></tr><tr><td>A field added as an <code>Option</code></td><td><code>None</code></td></tr><tr><td>A field added with <code>#[undra(default)]</code></td><td>its zero value: <code>false</code>, <code>0</code>, <code>""</code>, empty, the nil UUID, the epoch</td></tr><tr><td>A store signal added with <code>#[undra(default)]</code></td><td><code>T::default()</code></td></tr><tr><td>A field, variant or signal removed</td><td>dropped</td></tr><tr><td>Enum variants added or renumbered</td><td>matched by name</td></tr><tr><td>An integer widened (<code>i32</code> to <code>i64</code>, <code>u8</code> to <code>u32</code>, <code>u16</code> to <code>i32</code>), <code>f32</code> to <code>f64</code></td><td>the same value</td></tr><tr><td><code>T</code> to <code>Option&lt;T&gt;</code>, <code>Bytes</code> to <code>Vec&lt;u8&gt;</code> or back</td><td>the same value</td></tr><tr><td>Any of these inside a <code>Vec</code>, an <code>Option</code> or a map</td><td>applied to every item</td></tr></tbody></table></div><p>Anything else is not structural: a narrowing (<code>i64</code> to <code>i32</code>), a type change (<code>i32</code> to <code>String</code>), a renamed field, variant or signal, a variant the new type no longer has, or a new field with no default. Those need a hook.</p>
+<h2 id="writing-a-hook">Writing a hook<a class="anchor" href="#writing-a-hook" aria-label="Link to this section">#</a></h2>
+<p>A hook is a plain function marked <code>#[undra::migrate]</code>. It receives the old value as a <code>DynValue</code> (fields and variants by name) and returns the new one, or a <code>MigrateError</code> to refuse it. There are three kinds:</p><div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">use undra::prelude::*;
+
+// Any persisted `Todo` whose structure changed, wherever it is.
+#[undra::migrate(ty = "Todo")]
+fn todo_from_name(old: &amp;DynValue) -&gt; Result&lt;Todo, MigrateError&gt; {
+    let title = old.field("name").and_then(DynValue::as_str)
+        .ok_or_else(|| MigrateError::new("a todo without a name"))?;
+    Ok(Todo { title: title.to_owned(), done: false })
+}
+
+// One signal of one store in a snapshot (`None`: the snapshot has no such signal).
+#[undra::migrate(store = "Profile", signal = "age")]
+fn age(old: Option&lt;&amp;DynValue&gt;) -&gt; Result&lt;f32, MigrateError&gt; {
+    match old.and_then(DynValue::as_i64) {
+        Some(age) if age &gt;= 0 =&gt; Ok(age as f32),
+        Some(age) =&gt; Err(MigrateError::new(format!("{age} is not an age"))),
+        None =&gt; Ok(18.0),
+    }
+}
+
+// The queued input of one mutation, by parameter name.
+#[undra::migrate(mutation = "add_todo")]
+fn add_todo(old: &amp;DynRecord) -&gt; Result&lt;DynRecord, MigrateError&gt; {
+    let mut new = old.clone();
+    new.rename("name", "title");
+    Ok(new)
+}</code></pre></div><p>Structural migration is tried first, then the hook. Hooks run in the core, under the panic guard: a hook that panics is a failed migration, logged with its name. <code>from = "0x…"</code> restricts a hook to one old fingerprint, when you need to tell two older versions apart. A target that does not exist, or a function of the wrong shape, is <a href="errors.html#E0066">E0066</a>.</p>
+<h2 id="when-nothing-converts">When nothing converts<a class="anchor" href="#when-nothing-converts" aria-label="Link to this section">#</a></h2>
+<p>Each kind of data has its own refusal, and none of them loses data silently:</p><div class="table-wrap"><table><thead><tr><th>Data</th><th>Outcome</th></tr></thead><tbody><tr><td>A snapshot</td><td>the restore fails as a whole with <code>RestoreError::Incompatible { store, signal, reason }</code> (restore code 7 on the platforms: <code>UndraRestoreError</code> / <code>UndraRestoreException</code>), the core is unchanged, and the reason is logged. One exception: a store <em>type</em> the new build removed is left out (its handles go stale) and reported.</td></tr><tr><td>A cached query result</td><td>deleted, because it can be fetched again; a WARN names the query and the reason</td></tr><tr><td>A queued mutation</td><td>never deleted: it moves to the dead letters, and the rest of the queue replays</td></tr></tbody></table></div><p>The dead letters are yours to show, export or settle:</p><div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">let query = ctx.query();
+for letter in query.dead_letters() {
+    log::warn!("{} could not be sent: {}", letter.mutation, letter.reason);
+    // letter.params: the input by parameter name; letter.raw: the bytes as stored
+}
+query.retry_dead_letter(key)?;   // after an update that added a hook
+query.discard_dead_letter(key);  // for good</code></pre></div><p><code>ctx.query().persist_stats()</code> counts what was migrated, dropped and dead-lettered, and the runtime's statistics carry the same numbers under <code>query.persist</code>.</p>
+<h2 id="testing-an-update">Testing an update<a class="anchor" href="#testing-an-update" aria-label="Link to this section">#</a></h2>
+<p>Build the old and the new core, write the data with one and read it with the other. The playground does exactly this in its contract scenarios: <code>UNDRA_PLAYGROUND_V2=1 undra build</code> builds a second core whose stores, records and mutations changed the way an update does, and every platform checks that a snapshot and a queue written by the first are read by name by the second, and that an incompatible change is refused or dead-lettered. In Rust, a <code>TestRuntime</code> restores a snapshot you build from an edited <code>Schema</code> (its <code>stores_closure</code> is the description an older build would have written).</p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="web.html"><span>Previous</span><b>Workers &amp; crash recovery</b></a>
+    <a class="next" href="several-cores.html"><span>Next</span><b>One core or several</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#what-outlives-a-build">What outlives a build</a></li><li><a href="#what-migrates-for-free">What migrates for free</a></li><li><a href="#writing-a-hook">Writing a hook</a></li><li><a href="#when-nothing-converts">When nothing converts</a></li><li><a href="#testing-an-update">Testing an update</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

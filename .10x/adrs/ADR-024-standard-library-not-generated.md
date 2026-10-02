@@ -166,3 +166,14 @@ nothing, as the Kotlin data class does), and doc comments from the Rust docs.
   refers to all eight types and declares none) against the real runtime, and
   `PublicStandardTypesTests` is a plain `import`, not `@testable`, so either stops compiling if one
   of the types or what generated code needs of it stops being public.
+
+## Amendment (2026-10-01, ADR-049): the standard surface gains `StorageError`
+
+ADR-049 decision 1 changes the standard surface this ADR lists, once (the "one standard-surface
+revision" of Amendment D of the v1.x plan): `Kv` and `SecureStore` methods return
+`Result<_, StorageError>`, the new `#[undra::error] enum StorageError { Unavailable(String), Full,
+Locked, Corrupt(String), Io(String) }` is the ninth standard type (type id `0x3d40_b010`), and
+`FsError` gains `Full = 3` and `Unavailable(String) = 4`. `undra-bindgen`'s `stdlib` table, its
+golden and the three runtimes' standard types follow; every core's schema hash moves (the standard
+surface alone is now `0xbbf6_f70d_0c56_7f47`). What this ADR decides is unchanged: the standard
+types are in every schema and in no app's generated bindings.

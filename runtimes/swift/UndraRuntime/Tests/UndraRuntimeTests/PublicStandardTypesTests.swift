@@ -75,6 +75,25 @@ final class PublicStandardTypesTests: XCTestCase {
         XCTAssertEqual(HttpError.timeout.localizedDescription, "the request timed out")
         XCTAssertEqual(FsError.io("disk full").localizedDescription, "I/O error: disk full")
         XCTAssertEqual((FsError.denied as any Error).localizedDescription, "access denied")
+        // ADR-049's additions.
+        XCTAssertEqual(FsError.full.description, "the disk is full")
+        XCTAssertEqual(FsError.unavailable("no root").description, "the file system is unavailable: no root")
+        XCTAssertEqual(StorageError.unavailable("needs IndexedDB").description, "storage is unavailable: needs IndexedDB")
+        XCTAssertEqual(StorageError.full.description, "the storage is full")
+        XCTAssertEqual(StorageError.locked.description, "the storage is locked")
+        XCTAssertEqual(StorageError.corrupt("bad header").description, "stored data is corrupt: bad header")
+        XCTAssertEqual(StorageError.io("EIO").description, "storage I/O error: EIO")
+        XCTAssertEqual((StorageError.locked as any Error).localizedDescription, "the storage is locked")
+    }
+
+    func testAnAppAnswersAStorageFailureWithAPortError() throws {
+        // How an app's own `Kv` or `SecureStore` implementation reports a failure: the encoded
+        // `StorageError` in an `UndraPortError`, which the runtime answers with port status 1.
+        let failure = UndraPortError(body: StorageError.full.undraEncoded())
+        XCTAssertEqual(try StorageError.undraDecoded(from: failure.body), .full)
+        for error in [StorageError.unavailable("u"), .full, .locked, .corrupt("c"), .io("i")] {
+            XCTAssertEqual(try StorageError.undraDecoded(from: error.undraEncoded()), error)
+        }
     }
 
     func testTheErrorsAreTheDomainOfAGeneratedCall() {
@@ -86,6 +105,11 @@ final class PublicStandardTypesTests: XCTestCase {
         XCTAssertEqual(mapped as? HttpError, .invalidUrl("nope"))
         let fs = UndraCallError.mapped(UndraReplyError(status: .error, body: FsError.notFound.undraEncoded()), domain: FsError.self)
         XCTAssertEqual(fs as? FsError, .notFound)
+        let storage = UndraCallError.mapped(
+            UndraReplyError(status: .error, body: StorageError.corrupt("x").undraEncoded()),
+            domain: StorageError.self
+        )
+        XCTAssertEqual(storage as? StorageError, .corrupt("x"))
     }
 
     // MARK: Conformances generated code relies on
@@ -115,7 +139,10 @@ final class PublicStandardTypesTests: XCTestCase {
         XCTAssertEqual(failure, .timeout)
         XCTAssertEqual(Set([HttpMethod.get, .get, .post]).count, 2)
         XCTAssertEqual(Set([Header(name: "a", value: "1"), Header(name: "a", value: "1")]).count, 1)
-        XCTAssertEqual(Set([FsError.notFound, .notFound, .denied]).count, 2)
+        XCTAssertEqual(Set([FsError.notFound, .notFound, .denied, .full, .unavailable("a")]).count, 4)
+        XCTAssertEqual(Set([StorageError.full, .full, .locked, .io("a"), .io("a"), .io("b")]).count, 4)
+        let locked = await Task.detached { StorageError.locked }.value
+        XCTAssertEqual(locked, .locked)
     }
 
     func testAnAppCanDeclareItsOwnTypeWithAStandardName() {

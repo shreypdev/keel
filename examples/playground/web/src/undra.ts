@@ -1,10 +1,19 @@
-import { UndraSessionLostError, type UndraUnhandledError, emitConnectivity } from "@undra/runtime";
+import {
+  type UndraCore,
+  UndraCoreRestarted,
+  crashRecovery,
+  type UndraPanicReport,
+  UndraSessionLostError,
+  type UndraUnhandledError,
+  emitConnectivity,
+} from "@undra/runtime";
 import { BigList, RemoteTodosQueryHandle, Todos, UndraPlaygroundCore, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
 import wasmUrl from "../../build/web/playground_core.wasm?url";
 import { onDevNotice, showDevConnection } from "./dev-banner";
 import { memoryKv } from "./memory-kv";
 import { INBOX, PlaygroundServer, REMOTE_BASE_URL } from "./playground-server";
+import { RECOVERY, RestartLog } from "./recovery-log";
 
 /**
  * What the views share: the one core's long-lived stores, and the server behind its `Http` port.
@@ -19,6 +28,10 @@ export interface Playground {
   readonly inbox: RemoteTodosQueryHandle;
   /** The app's own in-memory server: the Remote tab's offline switch is its `offline` flag. */
   readonly server: PlaygroundServer;
+  /** The restarts of the wasm core after a crash (ADR-049), for the debug panel. */
+  readonly restarts: RestartLog;
+  /** The core itself (`UndraPlaygroundCore.core` becomes a closed placeholder if it goes down for good; this does not). */
+  readonly core: UndraCore;
 }
 
 /**
@@ -27,7 +40,17 @@ export interface Playground {
  * error reporter. The runtime has already logged it at error level.
  */
 function onError(unhandled: UndraUnhandledError): void {
-  console.warn(`${unhandled.operation} failed: ${unhandled.error.message}`);
+  // A restart after a crash (ADR-049) is reported here too; the debug panel lists it.
+  if (unhandled instanceof UndraCoreRestarted) console.warn(unhandled.message);
+  else console.warn(`${unhandled.operation} failed: ${unhandled.error.message}`);
+}
+
+/**
+ * What a panic of the wasm core is handed to (ADR-046): the core's own panic record and the trap's frames, before the
+ * runtime restarts the core. Where an app would call its crash reporter.
+ */
+function onPanic(report: UndraPanicReport): void {
+  console.error(`the Undra core panicked: ${report.message}`, report.frames);
 }
 
 /**
@@ -41,24 +64,28 @@ function onError(unhandled: UndraUnhandledError): void {
  *
  * The app supplies its own `Http` port (an in-memory server, so the playground needs no backend)
  * and `Kv` port (in memory, so a reload starts from the server's seed again); the other ports are
- * the browser's defaults.
+ * the browser's defaults. The wasm core runs with crash recovery on (ADR-049): a panic restarts it
+ * from its last snapshot, and the debug panel lists the restarts.
  */
 export async function startUndra(): Promise<Playground> {
   const server = new PlaygroundServer();
+  const restarts = new RestartLog();
+  let inbox: RemoteTodosQueryHandle | undefined;
   const adapters = { http: server, kv: memoryKv() };
   // Development builds only (`vite dev`): a production page that took its core's address from a link would hand
   // whoever wrote the link its ports (Kv, Http, SecureStore) and its screen. Android and iOS gate it the same way.
   const devUrl = import.meta.env.DEV
     ? (new URLSearchParams(location.search).get("undra") ?? import.meta.env["VITE_UNDRA_DEV_URL"])
     : undefined;
+  let core: UndraCore;
   if (typeof devUrl === "string" && devUrl.length > 0) {
-    const core = await UndraPlaygroundCore.load({
+    core = await UndraPlaygroundCore.load({
       mode: "remote",
       url: devUrl,
       adapters,
       onError,
       // `undra dev` carries the core's state across a rebuild and the runtime reconnects by itself, so the page
-      // usually stays where it is. When the state could not be carried (a schema change, a state too big), the
+      // usually stays where it is. When the state could not be carried (a change the stores cannot follow, a state too big), the
       // runtime finds a new core and says so: reload the page onto it.
       onClose: (error) => {
         if (error instanceof UndraSessionLostError) location.reload();
@@ -68,21 +95,31 @@ export async function startUndra(): Promise<Playground> {
     });
     showDevConnection(core, devUrl);
   } else {
-    await UndraPlaygroundCore.load({
+    core = await UndraPlaygroundCore.load({
       mode: "wasm-main",
       wasm: new URL(wasmUrl, location.href),
       adapters,
       onError,
+      onPanic,
+      // A panic traps a wasm core: restart it from its last snapshot instead of leaving the page dead (ADR-049).
+      recovery: crashRecovery(RECOVERY),
+      onCoreRestarted: (event) => {
+        restarts.record(event);
+        // The stores came back from the snapshot, but what the core held outside them did not: tell the new instance
+        // where the server is again, then fetch the re-created query (it tried before it knew).
+        void configureRemote({ baseUrl: REMOTE_BASE_URL }).then(() => inbox?.refetch());
+      },
     });
   }
   // Tell the core where the server is before anything observes the query.
   await configureRemote({ baseUrl: REMOTE_BASE_URL });
-  const [todos, bigList, inbox] = await Promise.all([
+  const [todos, bigList, inboxQuery] = await Promise.all([
     Todos.create(),
     BigList.create(),
     RemoteTodosQueryHandle.create(INBOX),
   ]);
-  return { todos, bigList, inbox, server };
+  inbox = inboxQuery;
+  return { todos, bigList, inbox: inboxQuery, server, restarts, core };
 }
 
 /**

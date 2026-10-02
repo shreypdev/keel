@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workers & crash recovery · Undra docs</title>
+<meta name="description" content="The web core in a Web Worker: where synchronous ports run, the worker.ports module, and restarting a trapped wasm core from its last snapshot.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/web.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Workers & crash recovery · Undra docs">
+<meta property="og:description" content="The web core in a Web Worker: where synchronous ports run, the worker.ports module, and restarting a trapped wasm core from its last snapshot.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/web.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Workers & crash recovery · Undra docs">
+<meta name="twitter:description" content="The web core in a Web Worker: where synchronous ports run, the worker.ports module, and restarting a trapped wasm core from its last snapshot.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/web.html#article","headline":"Workers & crash recovery · Undra docs","description":"The web core in a Web Worker: where synchronous ports run, the worker.ports module, and restarting a trapped wasm core from its last snapshot.","url":"https://shreypdev.github.io/undra/docs/web.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Workers & crash recovery","item":"https://shreypdev.github.io/undra/docs/web.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="web.html" aria-current="page">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="web.html" aria-current="page">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1>Workers &amp; crash recovery</h1>
+    <p class="lede">On the web the core is a wasm module. It can run off the main thread, and when a panic traps it, it can come back from its last snapshot.</p>
+<h2 id="worker-mode">Worker mode<a class="anchor" href="#worker-mode" aria-label="Link to this section">#</a></h2>
+<p><code>mode: "wasm-worker"</code> runs the core in a Web Worker, so a heavy call never blocks the UI. The core calls some ports synchronously (Clock, Rng, Log and any <code>#[undra::port(sync)]</code>) and cannot wait for the main thread, so those are answered <strong>in the worker</strong>. Clock, Rng and Log need nothing from you. Ports with asynchronous methods (Http, Kv, SecureStore, Fs and your own async ports) run on the main thread, exactly as in <code>wasm-main</code>.</p>
+<h2 id="worker-ports">Your own synchronous ports<a class="anchor" href="#worker-ports" aria-label="Link to this section">#</a></h2>
+<p>Put them in a small module the worker imports before the core starts, and pass its URL. The same module overrides Clock, Rng or the core's timers in this mode:</p><div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">// main.ts
+const core = await UndraCore.load({
+  mode: "wasm-worker", wasm, expectedSchemaHash: UndraIds.schemaHash,
+  worker: { ports: new URL("./worker-ports.js", import.meta.url) },
+});
+
+// worker-ports.ts: runs inside the worker
+export default {
+  [UndraIds.Ports.Locale.portId]: localePortImpl({ hello: () =&gt; "Bonjour" }),
+};
+export const adapters = { timer: myTimer }; // optional: clock, rng, timer</code></pre></div><p>A synchronous port registered on the main thread in this mode is refused when the core loads (<code>UndraError("options")</code>, naming the port), not at its first call. With a bundler, make the module a worker entry.</p>
+<h2 id="recovering-from-a-crash">Recovering from a crash<a class="anchor" href="#recovering-from-a-crash" aria-label="Link to this section">#</a></h2>
+<p>A native core contains a panic and keeps going. A wasm core cannot: the panic traps the instance. With <code>recovery: crashRecovery()</code> (imported from <code>@undra/runtime</code>, so an app without it ships none of this code), the runtime keeps a snapshot of your stores (at most once a second while they change, in an idle moment, in the worker in worker mode) and restarts from it:</p><div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">import { UndraCore, crashRecovery } from "@undra/runtime";
+
+const core = await UndraCore.load({
+  mode: "wasm-main", wasm, expectedSchemaHash: UndraIds.schemaHash,
+  recovery: crashRecovery(), // or crashRecovery({ snapshotEveryMs, maxSnapshotBytes, maxRestarts, perMs })
+  onPanic: (report) =&gt; crashReporter.send(report),
+  onCoreRestarted: (e) =&gt; configureRemote(core, settings), // re-apply core state that is not in a store
+});</code></pre></div><div class="table-wrap"><table><thead><tr><th>On a trap</th><th>What your app sees</th></tr></thead><tbody><tr><td>Calls and streams in flight</td><td>fail with <code>UndraCallError.Unavailable</code>, reason <code>restarted</code>; they may or may not have run and are never retried for you</td></tr><tr><td>Stores</td><td>keep their handles and show the snapshot's values</td></tr><tr><td>Query handles</td><td>are created again behind the same objects, and refetch</td></tr><tr><td>Other objects</td><td>go stale: calls on them are refused</td></tr><tr><td>Store writes after the last snapshot, running tasks and timers, configuration a call set</td><td>lost; re-apply configuration in <code>onCoreRestarted</code></td></tr></tbody></table></div><p>Persisted queries and the offline queue live in <code>Kv</code> and are not affected. Past <code>maxRestarts</code> within <code>perMs</code> (default 3 a minute) the core stays down and <code>onClose</code> reports the crash, so a panic that recurs on every restart cannot loop. Recovery is off by default: it costs a snapshot up to once a second (about 0.04 ms for 100 KB of state; a restart takes about 1.6 ms).</p>
+<h2 id="randomness">Randomness<a class="anchor" href="#randomness" aria-label="Link to this section">#</a></h2>
+<p>A wasm core needs WebCrypto. Without <code>crypto.getRandomValues</code>, <code>load</code> rejects with <code>UndraTransportError("unsupported")</code> rather than run with predictable idempotency keys.</p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="ports.html"><span>Previous</span><b>Ports &amp; adapters</b></a>
+    <a class="next" href="updates.html"><span>Next</span><b>Shipping an update</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#worker-mode">Worker mode</a></li><li><a href="#worker-ports">Your own synchronous ports</a></li><li><a href="#recovering-from-a-crash">Recovering from a crash</a></li><li><a href="#randomness">Randomness</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

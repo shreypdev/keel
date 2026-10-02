@@ -9,6 +9,8 @@ const channel = process.env["UNDRA_BROWSER_CHANNEL"];
 
 export default defineConfig({
   testDir: "bench",
+  // The recovery rows (ADR-049) have their own command, `npm run bench:recovery`; the device bench is this spec alone.
+  testIgnore: process.env["UNDRA_BENCH_RECOVERY"] === "1" ? "bench.spec.ts" : "recovery.spec.ts",
   outputDir: "node_modules/.playwright-bench-results",
   reporter: "list",
   timeout: 300_000,

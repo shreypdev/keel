@@ -9,6 +9,8 @@ pub mod ids;
 pub mod keys;
 
 mod canonical;
+mod closure;
+mod closure_json;
 mod def;
 mod meta;
 mod registry;
@@ -19,6 +21,11 @@ mod validate;
 #[cfg(test)]
 mod fixtures;
 
+pub use closure::{
+    ClosureEnum, ClosureField, ClosureRecord, ClosureRoot, ClosureSignal, ClosureVariant,
+    DescribedStore, StoresClosure, TypeClosure,
+};
+pub use closure_json::ClosureJsonError;
 pub use def::{
     EnumDef, FieldDef, FunctionDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind, QueryDef,
     QueryKind, RecordDef, Schema, SignalDef, StoreDef, UNDRA_VERSION, VariantDef,

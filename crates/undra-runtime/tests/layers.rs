@@ -242,15 +242,18 @@ fn transient_stores_are_left_out_of_snapshots_so_restore_still_works() {
 }
 
 #[test]
-fn a_store_that_is_not_transient_is_snapshotted_and_needs_a_restorer() {
+fn a_store_that_is_not_transient_is_snapshotted_and_without_a_restorer_is_left_out() {
     let t = TestRuntime::new();
     let kept = construct(&t, false);
     assert_eq!(snapshot_store_count(&t), 1);
-    // Nothing registered a `StoreRestorer` for the gadget, which is why query handles are
-    // transient: restore would otherwise fail as a whole.
+    // Nothing registered a `StoreRestorer` for the gadget: to a restore it is a store type this
+    // build does not have, which since ADR-037 is left out and reported instead of failing the
+    // restore as a whole (query handles are transient so they are not even written).
     let snapshot = t.runtime().snapshot();
-    assert!(t.runtime().restore(&snapshot).is_err());
-    // The failed restore changed nothing.
+    let report = t.runtime().restore_with_report(&snapshot).unwrap();
+    assert_eq!(report.restored, 0);
+    assert_eq!(report.dropped.len(), 1);
+    assert_eq!(report.dropped[0].handles, [kept.0]);
     let read = t.call_sync(
         CallTarget::Method {
             handle: kept,
@@ -259,7 +262,7 @@ fn a_store_that_is_not_transient_is_snapshotted_and_needs_a_restorer() {
         2,
         &[],
     );
-    assert_eq!(read.status, ReplyStatus::Ok);
+    assert_eq!(read.status, ReplyStatus::BadRequest, "its handle is stale");
 }
 
 #[test]

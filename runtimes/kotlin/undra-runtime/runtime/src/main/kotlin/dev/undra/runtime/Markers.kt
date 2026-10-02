@@ -31,7 +31,10 @@ public interface UndraPort
  *   return without suspending and must never call back into Undra.
  * @property methods maps a port method id (`fnv1a32("<Trait>.<method>")`) to a function from the
  *   encoded arguments to the encoded reply body. Throwing [UndraPortException] answers with the port's
- *   typed error; any other exception answers `unavailable` (the core sees `PortError::Unavailable`).
+ *   typed error (status 1), and so does a standard port's own error type thrown by one of its methods
+ *   (`StorageError` from `Kv` and `SecureStore`, `FsError` from `Fs`, `HttpError` from `Http`). Any other
+ *   exception is logged at error level, passed to `LoadOptions.onError` and answers `unavailable` (the core
+ *   sees `PortError::Unavailable`).
  */
 public class PortImpl(
     public val sync: Boolean,

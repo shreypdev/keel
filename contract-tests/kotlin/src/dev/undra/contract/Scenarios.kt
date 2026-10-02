@@ -14,7 +14,8 @@ private fun scenario(id: String, title: String, body: (World) -> Unit): Scenario
  * The nineteen scenarios in the order they run. S16 is first because it is the one that loads the core:
  * its failing load has to come before the load the others use (`UndraCore.load` leaves nothing behind when
  * it fails), and the others need the core it loads. S17 is last because its last steps shut that core down
- * (S17.6) and load and close a fresh one (S17.7), so S18 and S19 run before it.
+ * (S17.6) and load and close a fresh one (S17.7), so S18, S19 and S20 run before it. The build-B steps of S14 and S15
+ * run in a second JVM ([migrationBuildB]).
  */
 val SCENARIOS: List<Scenario> = listOf(
     Scenario("S16", "schema mismatch rejection", ::s16SchemaMismatch),
@@ -35,6 +36,7 @@ val SCENARIOS: List<Scenario> = listOf(
     scenario("S15", "snapshot and restore", ::s15Snapshot),
     scenario("S18", "coalesced burst", ::s18CoalescedBurst),
     scenario("S19", "derived keyed list", ::s19DerivedKeyedList),
+    scenario("S20", "storage failures are typed", ::s20Storage),
     // S26 loads two other cores (other namespaces) next to the playground core, and closes them again.
     scenario("S26", "two cores", ::s26TwoCores),
     scenario("S17", "panic containment", ::s17Panic),

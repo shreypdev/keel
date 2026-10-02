@@ -11,8 +11,8 @@ use proptest::prelude::*;
 use undra_wire::payload::{
     Call, CallOwned, CallTarget, Cancel, ChangeEntry, ChangeOp, ChangeSet, ChangeSetBuilder,
     ChangeSetRef, Event, Hello, Log, Observe, PortCall, PortReply, PortStatus, Release, Reply,
-    ReplyStatus, Snapshot, StoreSnapshot, StreamCredit, StreamFailure, StreamFlag, StreamItem,
-    TimerFired,
+    ReplyStatus, Snapshot, SnapshotType, StoreSnapshot, StreamCredit, StreamFailure, StreamFlag,
+    StreamItem, TimerFired,
 };
 use undra_wire::{
     Decode, Encode, Envelope, Handle, KeyedPatch, Kind, PatchOp, Reader, WireError, Writer,
@@ -236,13 +236,26 @@ proptest! {
     #[test]
     fn snapshot(
         generation_floor in any::<u32>(),
+        schema_hash in any::<u64>(),
+        description in ".{0,40}",
         stores in vec(
-            (handle(), any::<u32>(), vec((any::<u32>(), body()), 0..5)),
+            (handle(), 0_u32..4, vec((any::<u32>(), body()), 0..5)),
             0..6,
         )
     ) {
+        // Store types are drawn from a small set so that several stores share one; each type in
+        // use is listed once, as a runtime writes it.
+        let mut types: Vec<SnapshotType> = Vec::new();
+        for (_, type_id, _) in &stores {
+            if !types.iter().any(|t| t.type_id == *type_id) {
+                types.push(SnapshotType { type_id: *type_id, fingerprint: u64::from(*type_id) * 31 });
+            }
+        }
         let snap = Snapshot {
             generation_floor,
+            schema_hash,
+            types,
+            description,
             stores: stores
                 .into_iter()
                 .map(|(handle, type_id, signals)| StoreSnapshot { handle, type_id, signals })

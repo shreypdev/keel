@@ -366,6 +366,40 @@
    },
    "hex": "0900000003050c0000007374616c652068616e646c6500000000",
    "note": "flag 3, status 5 = refused: message is the reason, as in a status 5 reply; statuses other than 2, 3 and 5 are invalid; ADR-036"
+  },
+  {
+   "name": "snapshot_v2",
+   "type": "snapshot payload",
+   "value": {
+    "generation_floor": 3,
+    "schema_hash": "1311768467463790320",
+    "types": [
+     {
+      "type_id": "3735928559",
+      "fingerprint": "18364758544493064720"
+     }
+    ],
+    "description": "{\"stores\":[{\"type_id\":3735928559,\"name\":\"Counter\",\"signals\":[{\"name\":\"count\",\"signal_id\":0,\"ty\":{\"kind\":\"i32\"}}]}],\"records\":[],\"enums\":[]}",
+    "stores": [
+     {
+      "handle": "4294967297",
+      "type_id": "3735928559",
+      "signals": [
+       {
+        "signal_id": 0,
+        "value": [
+         7,
+         0,
+         0,
+         0
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "hex": "0100000003000000f0debc9a7856341201000000efbeadde1032547698badcfe8b0000007b2273746f726573223a5b7b22747970655f6964223a333733353932383535392c226e616d65223a22436f756e746572222c227369676e616c73223a5b7b226e616d65223a22636f756e74222c227369676e616c5f6964223a302c227479223a7b226b696e64223a22693332227d7d5d7d5d2c227265636f726473223a5b5d2c22656e756d73223a5b5d7d0100000001000000efbeadde01000000000000000400000007000000",
+   "note": "SPEC 5.9 layout 2 (ADR-037): count, generation_floor, schema_hash, types x {type_id, fingerprint}, description (UTF-8 JSON, opaque to hosts), stores; signal values are raw bytes (here an i32 7)"
   }
  ]
 }

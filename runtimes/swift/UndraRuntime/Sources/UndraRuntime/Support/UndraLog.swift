@@ -6,12 +6,52 @@ import os
 enum UndraLog {
     private static let logger = Logger(subsystem: "dev.undra.runtime", category: "runtime")
 
+    /// The level of one of the runtime's own records.
+    enum Level: Sendable, Equatable {
+        case warning
+        case error
+    }
+
+    /// Receives every record the runtime writes with ``warning(_:)`` or ``error(_:)``, besides
+    /// the unified log. Tests observe the runtime's diagnostics through it.
+    typealias Observer = @Sendable (Level, String) -> Void
+
+    private static let observers = Guarded<(next: Int, all: [Int: Observer])>((next: 0, all: [:]))
+
+    /// Adds `observer` and returns the token that removes it.
+    static func addObserver(_ observer: @escaping Observer) -> Int {
+        return observers.withLock { (current: inout (next: Int, all: [Int: Observer])) -> Int in
+            let token = current.next
+            current.next += 1
+            current.all[token] = observer
+            return token
+        }
+    }
+
+    /// Removes the observer `addObserver(_:)` returned `token` for.
+    static func removeObserver(_ token: Int) {
+        observers.withLock { (current: inout (next: Int, all: [Int: Observer])) -> Void in
+            current.all[token] = nil
+        }
+    }
+
     static func warning(_ message: String) {
         logger.warning("\(message, privacy: .public)")
+        notify(.warning, message)
     }
 
     static func error(_ message: String) {
         logger.error("\(message, privacy: .public)")
+        notify(.error, message)
+    }
+
+    private static func notify(_ level: Level, _ message: String) {
+        let current = observers.withLock { (current: inout (next: Int, all: [Int: Observer])) -> [Observer] in
+            return Array(current.all.values)
+        }
+        for observer in current {
+            observer(level, message)
+        }
     }
 
     /// Forwards a log record the core produced (remote transport `Log` messages when no `Log`

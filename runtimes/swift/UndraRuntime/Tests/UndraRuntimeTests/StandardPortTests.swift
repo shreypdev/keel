@@ -97,8 +97,58 @@ final class StandardPortTests: XCTestCase {
         assertCodec(FsError.notFound, hex: "0000")
         assertCodec(FsError.denied, hex: "0100")
         assertCodec(FsError.io("e"), hex: "0200 01000000 65")
-        expectWireError(.invalidTag(tag: 3, at: 0, type: "FsError")) {
-            _ = try FsError.undraDecoded(from: [3, 0])
+        // ADR-049's two variants follow `Io`.
+        assertCodec(FsError.full, hex: "0300")
+        assertCodec(FsError.unavailable("x"), hex: "0400 01000000 78")
+        expectWireError(.invalidTag(tag: 5, at: 0, type: "FsError")) {
+            _ = try FsError.undraDecoded(from: [5, 0])
+        }
+    }
+
+    // MARK: Storage
+
+    func testStorageErrorEncoding() {
+        // `Unavailable(String)=0, Full=1, Locked=2, Corrupt(String)=3, Io(String)=4` (ADR-049).
+        assertCodec(StorageError.unavailable("u"), hex: "0000 01000000 75")
+        assertCodec(StorageError.full, hex: "0100")
+        assertCodec(StorageError.locked, hex: "0200")
+        assertCodec(StorageError.corrupt("c"), hex: "0300 01000000 63")
+        assertCodec(StorageError.io("e"), hex: "0400 01000000 65")
+        assertCodec(StorageError.io(""), hex: "0400 00000000")
+        expectWireError(.invalidTag(tag: 5, at: 0, type: "StorageError")) {
+            _ = try StorageError.undraDecoded(from: [5, 0])
+        }
+        expectWireError(.invalidTag(tag: 0xFFFF, at: 0, type: "StorageError")) {
+            _ = try StorageError.undraDecoded(from: [0xFF, 0xFF])
+        }
+    }
+
+    func testStorageAndFsErrorsRoundTripAndRejectTruncation() throws {
+        let storage: [StorageError] = [
+            .unavailable("needs a backend \u{1F30A}"), .full, .locked, .corrupt("bad header"), .io(""),
+        ]
+        for error in storage {
+            XCTAssertEqual(try StorageError.undraDecoded(from: error.undraEncoded()), error)
+            let bytes = error.undraEncoded()
+            for cut in 0 ..< bytes.count {
+                XCTAssertThrowsError(try StorageError.undraDecoded(from: Array(bytes[0 ..< cut])), "\(error) cut \(cut)") { thrown in
+                    XCTAssertTrue(thrown is WireError, "\(thrown)")
+                }
+            }
+            // Trailing bytes are not part of the value.
+            XCTAssertThrowsError(try StorageError.undraDecoded(from: bytes + [0]))
+        }
+        let fs: [FsError] = [.notFound, .denied, .io("x"), .full, .unavailable("no file system")]
+        for error in fs {
+            XCTAssertEqual(try FsError.undraDecoded(from: error.undraEncoded()), error)
+            let bytes = error.undraEncoded()
+            for cut in 0 ..< bytes.count {
+                XCTAssertThrowsError(try FsError.undraDecoded(from: Array(bytes[0 ..< cut])), "\(error) cut \(cut)")
+            }
+        }
+        // A malformed string inside a variant is a wire error, not a crash.
+        expectWireError(.invalidUTF8(at: 6)) {
+            _ = try StorageError.undraDecoded(from: [3, 0, 1, 0, 0, 0, 0xFF])
         }
     }
 

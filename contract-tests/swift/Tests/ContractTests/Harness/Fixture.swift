@@ -28,7 +28,12 @@ final class Fixture {
 
     private var loaded: UndraCore?
 
-    private init() {}
+    /// The harness fails the first read of the offline queue with `Locked`, as the Keychain or a
+    /// data-protected file answers an app launched before the device's first unlock (scenarios.md,
+    /// "Adapters"; S20 step 4 checks what the core did with it, S14 waits until the queue is read).
+    private init() {
+        kv.fail(.get, key: Persisted.queueKey, with: .locked, times: 1)
+    }
 
     /// The adapters of the harness: the fakes above and the platform defaults for `Rng` and `Timer`
     /// (a real `DispatchQueue` timer), each counting its calls in `portCalls`. `Connectivity` has no

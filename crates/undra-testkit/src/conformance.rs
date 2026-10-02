@@ -52,6 +52,8 @@ fn fs_result(r: Result<String, FsError>) -> String {
         Err(FsError::NotFound) => obj(&[("error", q("not_found"))]),
         Err(FsError::Denied) => obj(&[("error", q("denied"))]),
         Err(FsError::Io(m)) => obj(&[("error", q("io")), ("message", q(&m))]),
+        Err(FsError::Full) => obj(&[("error", q("full"))]),
+        Err(FsError::Unavailable(m)) => obj(&[("error", q("unavailable")), ("message", q(&m))]),
     }
 }
 
@@ -141,7 +143,8 @@ fn store_cases() -> Vec<String> {
     let kv = MemKv::new();
     let mut steps = Vec::new();
     let set = |key: &str, value: &[u8], steps: &mut Vec<String>| {
-        t.run_until(kv.set(key.to_owned(), Bytes(value.to_vec())));
+        t.run_until(kv.set(key.to_owned(), Bytes(value.to_vec())))
+            .expect("the in-memory Kv does not fail");
         steps.push(obj(&[
             ("op", q("set")),
             ("key", q(key)),
@@ -155,7 +158,9 @@ fn store_cases() -> Vec<String> {
     set("\u{1f600}", b"e", &mut steps);
     set("\u{ff5e}", b"w", &mut steps);
     for prefix in ["", "a", "a/", "\u{ff}"] {
-        let keys = t.run_until(kv.list(prefix.to_owned()));
+        let keys = t
+            .run_until(kv.list(prefix.to_owned()))
+            .expect("the in-memory Kv does not fail");
         steps.push(obj(&[
             ("op", q("list")),
             ("prefix", q(prefix)),
@@ -163,7 +168,9 @@ fn store_cases() -> Vec<String> {
         ]));
     }
     for key in ["a", "zz"] {
-        let value = t.run_until(kv.get(key.to_owned()));
+        let value = t
+            .run_until(kv.get(key.to_owned()))
+            .expect("the in-memory Kv does not fail");
         steps.push(obj(&[
             ("op", q("get")),
             ("key", q(key)),
@@ -174,10 +181,13 @@ fn store_cases() -> Vec<String> {
         ]));
     }
     for key in ["a", "missing"] {
-        t.run_until(kv.delete(key.to_owned()));
+        t.run_until(kv.delete(key.to_owned()))
+            .expect("the in-memory Kv does not fail");
         steps.push(obj(&[("op", q("delete")), ("key", q(key))]));
     }
-    let after = t.run_until(kv.get("a".to_owned()));
+    let after = t
+        .run_until(kv.get("a".to_owned()))
+        .expect("the in-memory Kv does not fail");
     steps.push(obj(&[
         ("op", q("get")),
         ("key", q("a")),

@@ -420,39 +420,169 @@ final class PayloadTests: XCTestCase {
         assertCodec(Wire.TimerFired(timerId: 42), hex: "2a000000")
     }
 
-    // MARK: Snapshot
+    // MARK: Snapshot (layout 2, ADR-037)
 
-    func testSnapshot() {
-        let snapshot = Wire.Snapshot(generationFloor: 0x0102_0304, stores: [
-            Wire.SnapshotStore(handle: handle, typeId: 0x0A0B_0C0D, signals: [
-                Wire.SnapshotSignal(signalId: 0, value: slice("010203")),
-                Wire.SnapshotSignal(signalId: 1, value: []),
-            ]),
-        ])
-        assertCodec(snapshot, hex: "01000000" + "04030201" + "01000000" + "01000000" + "0d0c0b0a" + "02000000" + "00000000" + "03000000" + "010203" + "01000000" + "00000000")
-        assertCodec(Wire.Snapshot(generationFloor: 0, stores: []), hex: "0000000000000000")
-        assertRoundTrip(Wire.Snapshot(generationFloor: 7, stores: [
-            Wire.SnapshotStore(handle: handle, typeId: 1, signals: []),
-            Wire.SnapshotStore(handle: UndraHandle(rawValue: 9), typeId: 2, signals: [Wire.SnapshotSignal(signalId: 5, value: slice("ff"))]),
-        ]))
+    /// Two store types, two stores: the sample of the Rust codec's tests.
+    private func sampleSnapshot() -> Wire.Snapshot {
+        return Wire.Snapshot(
+            generationFloor: 5,
+            schemaHash: 0xFEED_BEEF_0000_0001,
+            types: [Wire.SnapshotType(typeId: 7, fingerprint: 0x11), Wire.SnapshotType(typeId: 8, fingerprint: 0x22)],
+            description: "{\"stores\":[]}",
+            stores: [
+                Wire.SnapshotStore(handle: handle, typeId: 7, signals: [
+                    Wire.SnapshotSignal(signalId: 0, value: slice("010203")),
+                    Wire.SnapshotSignal(signalId: 2, value: []),
+                ]),
+                Wire.SnapshotStore(handle: UndraHandle(rawValue: 0x0000_0005_0000_0002), typeId: 8, signals: []),
+            ]
+        )
     }
 
-    func testSnapshotMalformed() {
-        // Store count larger than the remaining bytes.
+    /// The layout of ADR-022 (`count u32, generation_floor u32, stores`), which ADR-037 replaced.
+    private func layout1(_ stores: [Wire.SnapshotStore], floor: UInt32) -> [UInt8] {
+        var writer = UndraWriter()
+        writer.writeLen(stores.count)
+        writer.writeU32(floor)
+        for store in stores {
+            writer.writeU64(store.handle.rawValue)
+            writer.writeU32(store.typeId)
+            writer.writeLen(store.signals.count)
+            for signal in store.signals {
+                writer.writeU32(signal.signalId)
+                writer.writeLen(signal.value.count)
+                writer.writeRaw(slice: signal.value)
+            }
+        }
+        return writer.finish()
+    }
+
+    func testSnapshotLayoutMatchesTheSpec() {
+        // The bytes `layout_matches_the_spec` asserts in undra-wire.
+        let snapshot = Wire.Snapshot(
+            generationFloor: 0x0102_0304,
+            schemaHash: 0x0807_0605_0403_0201,
+            types: [Wire.SnapshotType(typeId: 7, fingerprint: 0x0A)],
+            description: "{}",
+            stores: [Wire.SnapshotStore(handle: handle, typeId: 7, signals: [Wire.SnapshotSignal(signalId: 2, value: slice("09"))])]
+        )
+        assertCodec(snapshot, hex:
+            "01000000" // store count
+            + "04030201" // generation_floor
+            + "0102030405060708" // schema_hash
+            + "01000000" // type_count
+            + "07000000" + "0a00000000000000" // type_id, fingerprint
+            + "02000000" + "7b7d" // description
+            + "0100000001000000" // handle
+            + "07000000" // type_id
+            + "01000000" // signal_count
+            + "02000000" // signal_id
+            + "01000000" + "09") // len + value
+        // An empty snapshot is 24 zero bytes.
+        assertCodec(Wire.Snapshot(generationFloor: 0, schemaHash: 0, types: [], description: "", stores: []), hex: String(repeating: "00", count: 24))
+    }
+
+    func testSnapshotRoundTripsAndFindsFingerprints() throws {
+        let snapshot = sampleSnapshot()
+        assertRoundTrip(snapshot)
+        XCTAssertEqual(try Wire.Snapshot.decode(snapshot.encode()), snapshot)
+        XCTAssertEqual(snapshot.fingerprint(typeId: 8), 0x22)
+        XCTAssertNil(snapshot.fingerprint(typeId: 9))
+        // A type may be listed without a store of it (its stores were all closed).
+        var spare = snapshot
+        spare.types.append(Wire.SnapshotType(typeId: 0xC0FFEE, fingerprint: UInt64.max))
+        spare.description = "{\"name\":\"caf\u{E9} \u{1F30A}\"}"
+        assertRoundTrip(spare)
+    }
+
+    func testSnapshotHostileCountsAreRejected() {
+        // Store count larger than the input could hold (16 bytes a store at least).
         expectWireError(.lengthTooLarge(len: 5, at: 0)) {
             _ = try Wire.Snapshot.decode(hexToBytes("05000000" + "00000000"))
         }
-        // A snapshot in the layout before the generation floor ends where the floor should be.
+        expectWireError(.lengthTooLarge(len: 2, at: 0)) {
+            _ = try Wire.Snapshot.decode(hexToBytes("02000000" + String(repeating: "00", count: 28)))
+        }
+        // Type count larger than the input could hold (12 bytes a type).
+        expectWireError(.lengthTooLarge(len: UInt32.max, at: 16)) {
+            _ = try Wire.Snapshot.decode(hexToBytes("00000000" + "00000000" + "0000000000000000" + "ffffffff"))
+        }
+        expectWireError(.lengthTooLarge(len: 1, at: 16)) {
+            _ = try Wire.Snapshot.decode(hexToBytes("00000000" + "00000000" + "0000000000000000" + "01000000" + "0000000000000000"))
+        }
+        // Signal count larger than the input could hold (8 bytes a signal).
+        var oneStore = sampleSnapshot()
+        oneStore.stores = [Wire.SnapshotStore(handle: handle, typeId: 7, signals: [])]
+        var bytes = oneStore.encode()
+        bytes.replaceSubrange((bytes.count - 4) ..< bytes.count, with: [0xFF, 0xFF, 0xFF, 0xFF])
+        expectWireError(.lengthTooLarge(len: UInt32.max, at: bytes.count - 4)) {
+            _ = try Wire.Snapshot.decode(bytes)
+        }
+        // Signal value length larger than the remaining bytes.
+        var oneSignal = oneStore
+        oneSignal.stores[0].signals = [Wire.SnapshotSignal(signalId: 0, value: [])]
+        var valueBytes = oneSignal.encode()
+        valueBytes.replaceSubrange((valueBytes.count - 4) ..< valueBytes.count, with: [9, 0, 0, 0])
+        expectWireError(.lengthTooLarge(len: 9, at: valueBytes.count - 4)) {
+            _ = try Wire.Snapshot.decode(valueBytes)
+        }
+    }
+
+    func testSnapshotRefusesAStoreOfAnUnlistedTypeAndATypeListedTwice() {
+        var unlisted = sampleSnapshot()
+        unlisted.types.removeLast()
+        let unlistedBytes = unlisted.encode()
+        // The second store starts after the first: 8 + 4 + 4 + (4 + 4 + 3) + (4 + 4 + 0) bytes.
+        let secondStore = unlistedBytes.count - 16
+        expectWireError(.invalidTag(tag: 8, at: secondStore, type: "Snapshot store type (not in the type table)")) {
+            _ = try Wire.Snapshot.decode(unlistedBytes)
+        }
+        var twice = sampleSnapshot()
+        twice.types[1].typeId = 7
+        // The second type entry starts after the counts, the floor, the hash and the first entry.
+        expectWireError(.duplicateKey(at: 4 + 4 + 8 + 4 + 12)) {
+            _ = try Wire.Snapshot.decode(twice.encode())
+        }
+    }
+
+    func testSnapshotRefusesADescriptionThatIsNotUTF8() {
+        var bytes = Wire.Snapshot(generationFloor: 0, schemaHash: 0, types: [], description: "ab", stores: []).encode()
+        bytes[bytes.count - 2] = 0xFF
+        expectWireError(.invalidUTF8(at: bytes.count - 2)) {
+            _ = try Wire.Snapshot.decode(bytes)
+        }
+    }
+
+    func testASnapshotInTheLayoutBeforeADR037IsRefused() {
+        // The layout before ADR-022 (`count u32, stores`): four bytes end where the floor should be.
         expectWireError(.unexpectedEOF(needed: 4, at: 4)) {
             _ = try Wire.Snapshot.decode(hexToBytes("00000000"))
         }
-        // Signal count larger than the remaining bytes.
-        expectWireError(.lengthTooLarge(len: 99, at: 20)) {
-            _ = try Wire.Snapshot.decode(hexToBytes("01000000" + "00000000" + "0100000001000000" + "0d0c0b0a" + "63000000"))
+        // Layout 1, empty: eight bytes end where the schema hash should be.
+        expectWireError(.unexpectedEOF(needed: 8, at: 8)) {
+            _ = try Wire.Snapshot.decode(layout1([], floor: 0))
         }
-        // Signal value length larger than the remaining bytes.
-        expectWireError(.lengthTooLarge(len: 9, at: 28)) {
-            _ = try Wire.Snapshot.decode(hexToBytes("01000000" + "00000000" + "0100000001000000" + "0d0c0b0a" + "01000000" + "00000000" + "09000000"))
+        // Layout 1 with stores: the first handle reads as the hash and the type id as the type
+        // count, and the type table does not fit or names nothing the stores use.
+        XCTAssertThrowsError(try Wire.Snapshot.decode(layout1(sampleSnapshot().stores, floor: 5)))
+        for typeId: UInt32 in [1, 7, 0x00C0_FFEE, UInt32.max] {
+            let stores = [Wire.SnapshotStore(handle: handle, typeId: typeId, signals: [Wire.SnapshotSignal(signalId: 0, value: slice("01020304"))])]
+            XCTAssertThrowsError(try Wire.Snapshot.decode(layout1(stores, floor: 1)), "type id \(typeId)") { error in
+                XCTAssertTrue(error is WireError, "\(error)")
+            }
+        }
+    }
+
+    func testSnapshotTruncationIsAnErrorAtEveryLength() {
+        let bytes = sampleSnapshot().encode()
+        for cut in 0 ..< bytes.count {
+            XCTAssertThrowsError(try Wire.Snapshot.decode(Array(bytes[0 ..< cut])), "cut \(cut)") { error in
+                XCTAssertTrue(error is WireError, "\(error)")
+            }
+        }
+        // And a byte too many is trailing.
+        expectWireError(.trailingBytes(count: 1)) {
+            _ = try Wire.Snapshot.decode(bytes + [0])
         }
     }
 

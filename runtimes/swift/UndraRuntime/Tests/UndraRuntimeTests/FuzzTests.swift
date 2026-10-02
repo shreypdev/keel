@@ -245,9 +245,15 @@ final class FuzzTests: XCTestCase {
             Wire.ChangeEntry(handle: handle, signalId: 1, op: .lazyListInvalidated),
         ])
         seeds.append(changeSet.encode())
-        let snapshot = Wire.Snapshot(generationFloor: 1, stores: [
-            Wire.SnapshotStore(handle: handle, typeId: 5, signals: [Wire.SnapshotSignal(signalId: 0, value: ArraySlice(value))]),
-        ])
+        let snapshot = Wire.Snapshot(
+            generationFloor: 1,
+            schemaHash: 0x0102_0304_0506_0708,
+            types: [Wire.SnapshotType(typeId: 5, fingerprint: 0xF00D), Wire.SnapshotType(typeId: 6, fingerprint: 1)],
+            description: "{\"stores\":[]}",
+            stores: [
+                Wire.SnapshotStore(handle: handle, typeId: 5, signals: [Wire.SnapshotSignal(signalId: 0, value: ArraySlice(value))]),
+            ]
+        )
         seeds.append(snapshot.encode())
         seeds.append(encodeEnvelope(kind: .changeSet, seq: 3, schemaHash: 0x0102_0304_0506_0708, payload: changeSet.encode()))
         return seeds

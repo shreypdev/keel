@@ -383,33 +383,67 @@ class PayloadTests : Suite() {
 
         // ---- Snapshot ---------------------------------------------------------------------------------------
 
-        case("Snapshot is a count of stores and a generation floor, then each store with its persisted signals") {
+        case("Snapshot is layout 2: count, floor, schema hash, the type table, the description, then each store (ADR-037)") {
+            // The bytes of the Rust codec's `layout_matches_the_spec` (crates/undra-wire/src/payload/snapshot.rs).
             val snapshot = Payloads.Snapshot(
-                0x01020304u,
-                listOf(
-                    Payloads.Snapshot.Store(
-                        Handle.make(1u, 1u),
-                        0x1234u,
-                        listOf(Payloads.Snapshot.Signal(0u, bytesOf(1, 2, 3)), Payloads.Snapshot.Signal(1u, ByteArray(0))),
-                    ),
-                ),
+                generationFloor = 0x01020304u,
+                schemaHash = 0x0807060504030201uL,
+                types = listOf(Payloads.Snapshot.StoreType(7u, 0x0auL)),
+                description = "{}",
+                stores = listOf(Payloads.Snapshot.Store(Handle.make(1u, 1u), 7u, listOf(Payloads.Snapshot.Signal(2u, bytesOf(9))))),
             )
             check(
-                "01000000" + "04030201" + "0100000001000000" + "34120000" + "02000000" + "00000000" + "03000000" + "010203" + "01000000" + "00000000",
+                "01000000" + "04030201" + "0102030405060708" + // count, generation_floor, schema_hash
+                    "01000000" + "07000000" + "0a00000000000000" + // type_count, type_id, fingerprint
+                    "02000000" + "7b7d" + // description
+                    "0100000001000000" + "07000000" + "01000000" + // handle, type_id, signal_count
+                    "02000000" + "01000000" + "09", // signal_id, len, value
                 snapshot, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) },
             )
+            assertEq(0x0auL, snapshot.fingerprint(7u))
+            assertEq(null, snapshot.fingerprint(8u))
         }
 
-        case("Snapshot edge cases: no stores, a store with no signals, several stores") {
-            check("00000000" + "00000000", Payloads.Snapshot(0u, emptyList()), { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
-            val bare = Payloads.Snapshot(7u, listOf(Payloads.Snapshot.Store(Handle(5), 9u, emptyList())))
-            check("01000000" + "07000000" + "0500000000000000" + "09000000" + "00000000", bare, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
+        case("Snapshot round-trips several types and stores, signals of any length and a non-ASCII description") {
+            val snapshot = Payloads.Snapshot(
+                generationFloor = 5u,
+                schemaHash = 0xfeedbeef00000001uL,
+                types = listOf(Payloads.Snapshot.StoreType(7u, 0x11uL), Payloads.Snapshot.StoreType(8u, ULong.MAX_VALUE)),
+                description = "{\"stores\":[],\"note\":\"h${cp(0xe9)}llo ${cp(0x1F30A)}\"}",
+                stores = listOf(
+                    Payloads.Snapshot.Store(Handle.make(1u, 1u), 7u, listOf(Payloads.Snapshot.Signal(0u, bytesOf(1, 2, 3)), Payloads.Snapshot.Signal(2u, ByteArray(0)))),
+                    Payloads.Snapshot.Store(Handle.make(2u, 5u), 8u, emptyList()),
+                    Payloads.Snapshot.Store(Handle.make(3u, 1u), 7u, listOf(Payloads.Snapshot.Signal(UInt.MAX_VALUE, ByteArray(700) { it.toByte() }))),
+                ),
+            )
+            check(hex(snapshot.toByteArray()), snapshot, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
+            assertEq(ULong.MAX_VALUE, Payloads.Snapshot.decode(snapshot.toByteArray()).fingerprint(8u))
+        }
+
+        case("Snapshot edge cases: nothing at all, a type without stores, a store with no signals, many stores") {
+            // The empty snapshot is 24 zero bytes, as in Rust's `empty_snapshot`.
+            val empty = Payloads.Snapshot(0u, 0uL, emptyList(), "", emptyList())
+            check("00".repeat(24), empty, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
+            val typeOnly = Payloads.Snapshot(1u, 2uL, listOf(Payloads.Snapshot.StoreType(9u, 3uL)), "", emptyList())
+            check(
+                "00000000" + "01000000" + "0200000000000000" + "01000000" + "09000000" + "0300000000000000" + "00000000",
+                typeOnly, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) },
+            )
+            val bare = Payloads.Snapshot(7u, 0uL, listOf(Payloads.Snapshot.StoreType(9u, 0uL)), "", listOf(Payloads.Snapshot.Store(Handle(5), 9u, emptyList())))
+            check(
+                "01000000" + "07000000" + "0000000000000000" + "01000000" + "09000000" + "0000000000000000" + "00000000" +
+                    "0500000000000000" + "09000000" + "00000000",
+                bare, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) },
+            )
             val many = Payloads.Snapshot(
                 20u,
+                42uL,
+                List(4) { Payloads.Snapshot.StoreType(it.toUInt() * 1000u, it.toULong() + 100uL) },
+                "{}",
                 List(20) { i ->
                     Payloads.Snapshot.Store(
                         Handle.make(i.toUInt(), 1u),
-                        i.toUInt() * 1000u,
+                        (i % 4).toUInt() * 1000u,
                         List(i % 4) { j -> Payloads.Snapshot.Signal(j.toUInt(), ByteArray(i + j) { (it + i).toByte() }) },
                     )
                 },
@@ -417,13 +451,89 @@ class PayloadTests : Suite() {
             check(hex(many.toByteArray()), many, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
         }
 
+        case("Snapshot: random snapshots round-trip and every strict prefix of them fails") {
+            val random = java.util.Random(0x5eed)
+            repeat(40) { n ->
+                val types = List(random.nextInt(4)) { Payloads.Snapshot.StoreType(it.toUInt() * 7u + 1u, random.nextLong().toULong()) }
+                val stores = if (types.isEmpty()) emptyList() else List(random.nextInt(5)) { i ->
+                    Payloads.Snapshot.Store(
+                        Handle.make(i.toUInt() + 1u, random.nextInt(9).toUInt() + 1u),
+                        types[random.nextInt(types.size)].typeId,
+                        List(random.nextInt(4)) { j -> Payloads.Snapshot.Signal(j.toUInt(), ByteArray(random.nextInt(9)) { random.nextInt().toByte() }) },
+                    )
+                }
+                val snapshot = Payloads.Snapshot(random.nextInt().toUInt(), random.nextLong().toULong(), types, "{\"n\":$n}", stores)
+                val bytes = snapshot.toByteArray()
+                assertEq(snapshot, Payloads.Snapshot.decode(bytes), "snapshot #$n")
+                for (cut in bytes.indices) assertWire<WireException>("snapshot #$n cut at $cut") { Payloads.Snapshot.decode(bytes.copyOf(cut)) }
+            }
+        }
+
         case("Snapshot decoding rejects impossible counts before allocating") {
             assertEq(UInt.MAX_VALUE, assertWire<WireException.LengthTooLarge> { Payloads.Snapshot.decode(unhex("ffffffff" + "00000000")) }.len)
             // One store needs at least 16 bytes (the generation floor is not one of them).
             assertEq(1u, assertWire<WireException.LengthTooLarge> { Payloads.Snapshot.decode(unhex("01000000" + "00000000" + "00".repeat(11))) }.len)
+            // A type table claiming 2^32-1 entries (12 bytes each) with nothing behind it.
+            val types = assertWire<WireException.LengthTooLarge> { Payloads.Snapshot.decode(unhex("00000000" + "00000000" + "00".repeat(8) + "ffffffff")) }
+            assertEq(UInt.MAX_VALUE, types.len)
+            assertEq(16, types.at, "the type count's offset")
+            // A description longer than the input.
+            assertEq(9u, assertWire<WireException.LengthTooLarge> { Payloads.Snapshot.decode(unhex("00000000" + "00000000" + "00".repeat(8) + "00000000" + "09000000" + "7b7d")) }.len)
             // A store claiming 2^32-1 signals with nothing behind it.
-            val hostile = "01000000" + "00000000" + "0100000001000000" + "01000000" + "ffffffff"
+            val hostile = "01000000" + "00000000" + "00".repeat(8) + "01000000" + "01000000" + "0000000000000000" + "00000000" +
+                "0100000001000000" + "01000000" + "ffffffff"
             assertEq(UInt.MAX_VALUE, assertWire<WireException.LengthTooLarge> { Payloads.Snapshot.decode(unhex(hostile)) }.len)
+        }
+
+        case("Snapshot refuses a store whose type is not listed, a type listed twice and a description that is not UTF-8") {
+            val header = "02000000" + "05000000" + "0100feedbeeffeed" // two stores, floor, schema hash
+            val store7 = "0100000001000000" + "07000000" + "00000000"
+            val store8 = "0200000001000000" + "08000000" + "00000000"
+            // Type 8 is not in the table: refused at the second store's offset, naming the type id.
+            val unlistedHex = header + "01000000" + "07000000" + "1100000000000000" + "00000000" + store7 + store8
+            val unlisted = assertWire<WireException.InvalidTag> { Payloads.Snapshot.decode(unhex(unlistedHex)) }
+            assertEq(8u, unlisted.tag)
+            assertEq(Payloads.Snapshot.UNLISTED_TYPE, unlisted.type)
+            assertEq(unhex(unlistedHex).size - 16, unlisted.at, "the offset of the second store")
+            // Type 7 listed twice: refused at the second entry's offset.
+            val twiceHex = header + "02000000" + "07000000" + "1100000000000000" + "07000000" + "2200000000000000" + "00000000" + store7 + store7
+            assertEq(16 + 4 + 12, assertWire<WireException.DuplicateKey> { Payloads.Snapshot.decode(unhex(twiceHex)) }.at)
+            // The same bytes with both types listed decode.
+            val fineHex = header + "02000000" + "07000000" + "1100000000000000" + "08000000" + "2200000000000000" + "00000000" + store7 + store8
+            assertEq(listOf(7u, 8u), Payloads.Snapshot.decode(unhex(fineHex)).stores.map { it.typeId })
+            // A description that is not UTF-8.
+            val badText = "00000000" + "00000000" + "00".repeat(8) + "00000000" + "02000000" + "c328"
+            assertWire<WireException.InvalidUtf8> { Payloads.Snapshot.decode(unhex(badText)) }
+        }
+
+        case("Snapshot: a snapshot in the layout before ADR-037 (count, floor, stores) never decodes") {
+            fun layout1(floor: UInt, stores: List<Payloads.Snapshot.Store>): ByteArray {
+                val w = UndraWriter()
+                w.writeLen(stores.size)
+                w.writeU32(floor)
+                for (s in stores) {
+                    w.writeI64(s.handle.raw)
+                    w.writeU32(s.typeId)
+                    w.writeLen(s.signals.size)
+                    for (sig in s.signals) {
+                        w.writeU32(sig.signalId)
+                        w.writeBytes(sig.value)
+                    }
+                }
+                return w.toByteArray()
+            }
+            // Empty: eight bytes, which end where the schema hash should be.
+            assertWire<WireException.UnexpectedEof> { Payloads.Snapshot.decode(layout1(0u, emptyList())) }
+            // With stores: the first handle reads as the hash and the type id as the type count, and the rest does not fit.
+            val two = listOf(
+                Payloads.Snapshot.Store(Handle.make(1u, 1u), 7u, listOf(Payloads.Snapshot.Signal(0u, bytesOf(1, 2, 3)), Payloads.Snapshot.Signal(2u, ByteArray(0)))),
+                Payloads.Snapshot.Store(Handle.make(2u, 5u), 8u, emptyList()),
+            )
+            assertWire<WireException>("two stores") { Payloads.Snapshot.decode(layout1(5u, two)) }
+            for (typeId in listOf(1u, 7u, 0x00c0ffeeu, UInt.MAX_VALUE)) {
+                val one = listOf(Payloads.Snapshot.Store(Handle.make(1u, 1u), typeId, listOf(Payloads.Snapshot.Signal(0u, bytesOf(1, 2, 3, 4)))))
+                assertWire<WireException>("type id $typeId") { Payloads.Snapshot.decode(layout1(1u, one)) }
+            }
         }
 
         case("every payload's decode(bytes) rejects the empty input") {

@@ -344,6 +344,14 @@ measured_ns = 13839.8
 budget_ns = 140000
 measured_ns = 26530.6
 
+# ADR-037: the same 100 KB written by an older build (every store's fingerprint differs): each
+# store is migrated by name before it is rebuilt (streamed, a widening of every row's id). The ADR
+# sets the budget at 10x the fast path (`snapshot/restore_100kb`, 27 us here), not the usual 5x of
+# its own number; the ratio `migrated_vs_fast_restore` below holds the same bound in one run.
+[bench."snapshot/restore_100kb_migrated"]
+budget_ns = 280000
+measured_ns = 85208.4
+
 [bench."snapshot/restore_1mb"]
 budget_ns = 1400000
 measured_ns = 260625.0
@@ -612,6 +620,15 @@ den = "stress/firehose/call_set"
 max = 54
 measured = 39.5
 
+# ADR-037: restoring a snapshot an older build wrote (every store migrated structurally) costs at
+# most 10x restoring one of this build (the fast path: one fingerprint comparison per store type).
+# The bound is the ADR's, not 1.15x a sample; measured 3.1 on the reference host.
+[ratio."migrated_vs_fast_restore"]
+num = "snapshot/restore_100kb_migrated"
+den = "snapshot/restore_100kb"
+max = 10
+measured = 3.12
+
 # A sorted derived view's sort-key change at 100,000 rows against 10,000: O(log n) per change keeps
 # this near 1 through the runtime (healthy 1.04-1.12 on the reference host, loaded and quiet). It is
 # cache-bound (a 2.4 MB index against one in L2), so, as the fan-out ratio, its bound is what it
@@ -650,10 +667,15 @@ measured = 1.43
 # The hello-world web core: the `undra init` template (a store with a keyed list and two computeds,
 # a record, an enum, an error, a function; no query) built by `undra build --platform web`
 # (release-wasm: opt-level z, LTO fat, panic abort; then wasm-opt -Oz, binaryen 133). The wasm module
-# alone: Undra's Rust runtime, the C/wasm ABI shim and the core. The blueprint's 120 KB.
+# alone: Undra's Rust runtime, the C/wasm ABI shim and the core. The blueprint's 120 KB. Re-recorded by
+# persistence-v2 (ADR-037, ADR-049): snapshot layout 2 and the migrating restore (closures, the canonical
+# description, the streamed converter) are in every core, since `undra_restore` is; 102,722 -> 119,565.
+# Hooks, the value decoder and the E0066 check are linked only by a core that has a `#[undra::migrate]`.
+# After main's ABI table (ADR-044) the merged core measured 120,188, over the budget; the persistence-v2 review
+# links the standard ports' Rust dispatchers by use (ADR-052 note): 116,731; 116,800 with devtools' inspector seam.
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 102722
+measured_gzip_bytes = 116800
 tolerance = 0.05
 
 # What a hello-world app ships of the JavaScript runtime: `@undra/runtime` as the template's
@@ -662,8 +684,11 @@ tolerance = 0.05
 # worker script are not in it. The blueprint's 8 KB predates the transports, reconnect, coalescing
 # and worker mode: ADR-052's decision 2 (2026-10-01) restated it at 24 KB, and after the merge with
 # the parity failure model (its error channel added the bytes) at 26 KB; the follow-up piece
-# `ts-runtime-size` targets 16 KB. Gated like the wasm.
+# `ts-runtime-size` targets 16 KB. Gated like the wasm. Re-recorded by persistence-v2 (ADR-049: typed storage
+# errors, worker protocol 3, the snapshot layout-2 codec; crash recovery is `crashRecovery()`, which only an app
+# that imports it ships): 24,841 -> 25,906; after main's ABI table and the review's worker refusal, 25,984
+# (16 bytes under the budget: the next change to the hello runtime pays for itself, or `ts-runtime-size` lands).
 [size."web/hello-runtime-js"]
 budget_gzip_bytes = 26000
-measured_gzip_bytes = 24841
+measured_gzip_bytes = 25984
 tolerance = 0.05

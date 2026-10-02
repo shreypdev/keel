@@ -15,6 +15,8 @@ use parking_lot::{Condvar, Mutex};
 
 use crate::bridge::Bridge;
 use crate::conn::Conn;
+use crate::devtools::DevtoolsConfig;
+use crate::devtools::hub::Hub;
 use crate::error::ServeError;
 use crate::notice::{AttachNotices, Notices};
 use crate::origin::OriginPolicy;
@@ -85,6 +87,10 @@ pub struct ServerConfig {
     /// Sees every envelope in both directions, read-only: `undra dev --record` writes a recording
     /// from it (ADR-055). Default: none.
     pub tap: Option<FrameTap>,
+    /// Serve the devtools page at `/devtools` and its socket at `/devtools/ws` (ADR-054). Only the
+    /// dev runner `undra dev` generates sets this; with `None` (the default) every `/devtools`
+    /// request is a `404`. A token that is not valid disables devtools and the server says so.
+    pub devtools: Option<DevtoolsConfig>,
 }
 
 impl Default for ServerConfig {
@@ -104,6 +110,7 @@ impl Default for ServerConfig {
             inherited_session: None,
             attach_notices: AttachNotices::default(),
             tap: None,
+            devtools: None,
         }
     }
 }
@@ -147,6 +154,8 @@ pub(crate) struct Shared {
     pub(crate) config: ServerConfig,
     pub(crate) resume: Arc<Resume>,
     pub(crate) hooks: Hooks,
+    /// The devtools hub, when [`ServerConfig::devtools`] is set and valid.
+    pub(crate) hub: Option<Arc<Hub>>,
     stopping: AtomicBool,
     next_id: AtomicU64,
     registry: Mutex<Registry>,
@@ -384,12 +393,29 @@ impl Server {
             notices: Arc::new(Notices::new(config.attach_notices.clone())),
             tap: config.tap.clone(),
         };
+        let hub = match &config.devtools {
+            Some(devtools) if devtools.token_is_valid() => {
+                let hub = Hub::new(runtime.clone(), &bridge, devtools.clone());
+                bridge.set_hub(Some(hub.clone()));
+                Some(hub)
+            }
+            Some(_) => {
+                runtime.log(
+                    WARN,
+                    TARGET,
+                    "devtools are off: the token is missing or invalid (16 or more letters and digits)",
+                );
+                None
+            }
+            None => None,
+        };
         let shared = Arc::new(Shared {
             rt: runtime,
             bridge,
             config,
             resume,
             hooks,
+            hub,
             stopping: AtomicBool::new(false),
             next_id: AtomicU64::new(1),
             registry: Mutex::new(Registry::default()),
@@ -514,6 +540,11 @@ impl Server {
         } else {
             "the server is shutting down"
         };
+        // The devtools stop first: no page, no worker and no extra observation is left when the
+        // core's state is read (a suspend is followed by a snapshot, ADR-053).
+        if let Some(hub) = &shared.hub {
+            hub.shutdown(reason);
+        }
         shared.close_all(false, reason);
         let grace = shared.config.close_timeout + Duration::from_secs(1);
         if !shared.wait_drained(grace) {
@@ -557,6 +588,7 @@ impl Server {
         if let Some(handle) = self.reaper.lock().take() {
             let _ = handle.join();
         }
+        shared.bridge.set_hub(None);
         *done = true;
         Suspended {
             session,

@@ -554,6 +554,7 @@ mod tests {
                     computed: false,
                     key: None,
                     no_coalesce: false,
+                    default: false,
                 }],
             });
             s.objects.push(store);
@@ -718,6 +719,7 @@ mod tests {
                     computed: false,
                     key: None,
                     no_coalesce: false,
+                    default: false,
                 }],
             });
             s.objects.push(obj);

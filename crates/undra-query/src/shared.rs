@@ -28,21 +28,18 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
+use undra_meta::TypeClosure;
 use undra_meta::ids::fnv1a64;
-use undra_ports::{CtxPorts, Kv};
 use undra_runtime::executor::TaskId;
-use undra_runtime::log::{DEBUG, ERROR, WARN};
-use undra_runtime::{Ctx, Port, PortError, Runtime, WeakCtx};
-use undra_wire::{Bytes, Decode, Encode};
+use undra_runtime::log::ERROR;
+use undra_runtime::{Ctx, Runtime, WeakCtx};
 
 use crate::erased::{Erased, Failure, Outcome, QueryVTable};
 use crate::key::{Invalidate, QueryKey};
-use crate::persist::{
-    CACHE_KEY_PREFIX, Persisted, cache_key, decode_persisted, encode_persisted, parse_cache_key,
-};
 use crate::queue::QueueState;
 use crate::retry::{now_ms, with_retries};
 use crate::status::QueryStatus;
+use crate::storage::{Counters, Current, Persisted, StorageState};
 use crate::walk::KeyPlan;
 
 /// How long an unobserved entry stays cached: 5 minutes (SPEC 9).
@@ -208,7 +205,8 @@ impl Entry {
         self.inflight.is_none() && self.is_stale(now)
     }
 
-    /// Starts showing a persisted entry. `false` if its bytes no longer decode.
+    /// Starts showing a persisted entry (in the current form). `false` if its bytes no longer
+    /// decode.
     fn seed(&mut self, persisted: &Persisted) -> bool {
         match (self.vt.decode_data)(&persisted.data) {
             Ok(data) => {
@@ -433,6 +431,8 @@ pub(crate) struct State {
     /// Compiled key templates by query or mutation id.
     pub(crate) plans: HashMap<u32, Arc<KeyPlan>>,
     pub(crate) queue: QueueState,
+    /// What the client knows about the `Kv` store (`storage`).
+    pub(crate) storage: StorageState,
 }
 
 /// The per-runtime query client state: what `ctx.query()` shares.
@@ -452,6 +452,12 @@ pub(crate) struct Shared {
     next_stamp: AtomicU64,
     /// The last time read from the `Clock` port, used if the port fails.
     last_now: AtomicI64,
+    /// The persistence counters (`stats_json`'s `query.persist`).
+    pub(crate) counters: Counters,
+    /// Closures read from the store or written by this build, by fingerprint.
+    pub(crate) closures: Mutex<HashMap<u64, Arc<TypeClosure>>>,
+    /// The current closures of queries and mutations, by id.
+    pub(crate) current: Mutex<HashMap<u32, Current>>,
 }
 
 impl Shared {
@@ -465,6 +471,9 @@ impl Shared {
             next_sink: AtomicU64::new(0),
             next_stamp: AtomicU64::new(0),
             last_now: AtomicI64::new(0),
+            counters: Counters::default(),
+            closures: Mutex::new(HashMap::new()),
+            current: Mutex::new(HashMap::new()),
         }
     }
 
@@ -739,9 +748,12 @@ impl Shared {
         }
     }
 
-    /// The app became active: observed entries that went stale while it was away refetch.
+    /// The app became active: observed entries that went stale while it was away refetch, and a
+    /// queue that could not be read (an app launched before the device's first unlock) is read
+    /// again (ADR-049 decision 1.4).
     pub(crate) fn on_active(self: &Arc<Self>, ctx: &Ctx) {
         self.refetch_observed(ctx, true);
+        self.retry_unreadable_queue(ctx);
     }
 
     /// Subscribes to the `Connectivity` and `Lifecycle` events, once per runtime, and hydrates
@@ -760,16 +772,29 @@ impl Shared {
         }
         // The subscribers use the `Ctx` they are given (ADR-034): the runtime owns them, so one
         // they captured would keep it alive. (`Shared` holds no `Ctx`.)
+        // The devtools page of `undra dev` reads the cache through the runtime (ADR-054). The
+        // inspector holds the client weakly, like everything the runtime owns (ADR-034).
+        let weak_shared = Arc::downgrade(self);
+        ctx.runtime().register_inspector(
+            "queries",
+            Arc::new(move || {
+                weak_shared.upgrade().map_or_else(
+                    || "{\"entries\":[]}".to_owned(),
+                    |s| crate::inspect::describe(&s),
+                )
+            }),
+        );
         let shared = self.clone();
         undra_ports::on_connectivity_changed(ctx, move |ctx, online, _kind| {
             shared.on_connectivity(ctx, online);
         })
         .detach();
         let shared = self.clone();
-        undra_ports::on_lifecycle_changed(ctx, move |ctx, state| {
-            if state == undra_ports::AppState::Active {
-                shared.on_active(ctx);
-            }
+        undra_ports::on_lifecycle_changed(ctx, move |ctx, state| match state {
+            undra_ports::AppState::Active => shared.on_active(ctx),
+            // A background run is another chance to read a queue that was unreadable.
+            undra_ports::AppState::Background => shared.retry_unreadable_queue(ctx),
+            undra_ports::AppState::Inactive => {}
         })
         .detach();
     }
@@ -823,52 +848,25 @@ impl Shared {
             Some(ctx.spawn(run_persist(self.clone(), ctx.downgrade(), key.clone())));
     }
 
-    /// Reads the persisted cache entries and the offline queue from the `Kv` port
-    /// (SPEC 9's `QueryClient::hydrate`).
-    ///
-    /// An entry written under another schema hash is deleted; one whose query has not been
-    /// observed yet waits in memory until it is. A queue written under another schema hash
-    /// is deleted; otherwise its mutations are replayed at once if the client is online.
+    /// Reads the persisted cache entries, the offline queue and its dead letters from the `Kv`
+    /// port (SPEC 9's `QueryClient::hydrate`), migrating what an older build wrote (ADR-037),
+    /// then deletes the stored type descriptions nothing references any more, if everything
+    /// could be read.
     pub(crate) async fn hydrate(self: &Arc<Self>, weak: &WeakCtx) {
         // Every step upgrades the weak context and lets go of it before waiting again
         // (ADR-034): hydration, with its retries for a late `Kv`, must not keep a runtime alive
         // that its owner has dropped.
-        let Some(keys) = list_when_available(weak, CACHE_KEY_PREFIX).await else {
-            return;
-        };
-        for key in keys {
-            let Some((query_id, params_hash)) = parse_cache_key(&key) else {
-                continue;
-            };
-            let Ok(ctx) = weak.upgrade() else {
-                return;
-            };
-            let kv = ctx.kv();
-            let schema_hash = ctx.runtime().schema_hash();
-            let Some(Bytes(raw)) = kv.get(key.clone()).await else {
-                continue;
-            };
-            match decode_persisted(&raw) {
-                Ok(persisted) if persisted.schema_hash == schema_hash => {
-                    self.adopt_persisted(&ctx, query_id, params_hash, persisted);
-                }
-                _ => {
-                    Shared::log(
-                        &ctx,
-                        DEBUG,
-                        &format!("dropping the stale cache entry `{key}`"),
-                    );
-                    kv.delete(key).await;
-                }
-            }
+        let cache = self.hydrate_cache(weak).await;
+        let queue = self.hydrate_queue(weak).await;
+        if cache && queue {
+            self.collect_types(weak).await;
         }
-        self.hydrate_queue(weak).await;
     }
 
     /// Keeps a persisted entry for its query, or shows it right away if the query is already
     /// being observed and has nothing to show yet.
-    fn adopt_persisted(
-        self: &Arc<Self>,
+    pub(crate) fn adopt_persisted(
+        &self,
         ctx: &Ctx,
         query_id: u32,
         params_hash: u64,
@@ -1051,43 +1049,6 @@ impl Shared {
 // Tasks
 // -------------------------------------------------------------------------------------------
 
-/// How many times hydration asks for the `Kv` port before giving up, and how long it waits
-/// between asks.
-const KV_ATTEMPTS: u32 = 50;
-const KV_RETRY_MS: u64 = 100;
-
-/// The keys under `prefix`, asked of the `Kv` port with a raw call so that a port that is not
-/// there *yet* is an answer, not a panic. Hydration runs at start-up, possibly before the
-/// platform has registered its adapters (a native host registers them right after
-/// `undra_init`, while the core thread is already running), so `Unavailable` is retried for a
-/// few seconds. `None` if the port never appears (the cache then simply starts empty).
-async fn list_when_available(weak: &WeakCtx, prefix: &str) -> Option<Vec<String>> {
-    let args = prefix.to_owned().encode_to_vec();
-    for _ in 0..KV_ATTEMPTS {
-        let call = {
-            let ctx = weak.upgrade().ok()?;
-            ctx.port_call(<dyn Kv as Port>::PORT_ID, KV_LIST_ID, args.clone())
-        };
-        match call.await {
-            Ok(body) => return Vec::<String>::decode_exact(&body).ok(),
-            Err(PortError::Unavailable) => {
-                weak.sleep(Duration::from_millis(KV_RETRY_MS)).await.ok()?;
-            }
-            Err(_) => return None,
-        }
-    }
-    let ctx = weak.upgrade().ok()?;
-    Shared::log(
-        &ctx,
-        WARN,
-        "the Kv port never became available; the query cache starts empty",
-    );
-    None
-}
-
-/// The `Kv.list` method id (`fnv1a32("Kv.list")`).
-const KV_LIST_ID: u32 = undra_meta::ids::port_method_id("Kv", "list");
-
 /// Clears the in-flight marker of a fetch whose task was dropped before it finished.
 struct FetchGuard {
     shared: Arc<Shared>,
@@ -1180,19 +1141,13 @@ async fn run_persist(shared: Arc<Shared>, weak: WeakCtx, key: QueryKey) {
                 return;
             };
             entry.persist_dirty = false;
-            match (&entry.data, entry.updated_at) {
-                (Some(data), Some(updated_at)) => Some((data.bytes.clone(), updated_at)),
-                _ => None,
-            }
+            entry.data.is_some() && entry.updated_at.is_some()
         };
-        if let Some((bytes, updated_at)) = write {
+        if write {
             let Ok(ctx) = weak.upgrade() else {
                 return;
             };
-            let value = encode_persisted(ctx.runtime().schema_hash(), updated_at, &bytes);
-            ctx.kv()
-                .set(cache_key(key.query_id, &key.params), Bytes(value))
-                .await;
+            shared.persist_entry(&ctx, &key).await;
         }
         let mut state = shared.state.lock();
         match state.entries.get_mut(&key) {
@@ -1210,6 +1165,9 @@ async fn run_persist(shared: Arc<Shared>, weak: WeakCtx, key: QueryKey) {
     }
 }
 
+/// How the client lives on a runtime (an extension slot).
+struct Ext(Arc<Shared>);
+
 /// Whether this program links the start-up hook that hydrates the cache, which it does when the
 /// core declares a query or a mutation with the macros (ADR-052). When it does, the runtime (or
 /// the test, for a `TestRuntime`) runs it; when it does not, [`Shared::start`] hydrates.
@@ -1219,13 +1177,26 @@ fn hydrate_hook_linked() -> bool {
         .any(|hook| hook.name == crate::__private::HYDRATE.name)
 }
 
-/// The `Shared` of `ctx`'s runtime, created on first use.
+/// The `Shared` of `ctx`'s runtime, created on first use. Creating it also adds the client's
+/// section to the runtime's `stats_json` ([`crate::stats_section`]): registered here, at run time,
+/// rather than through `inventory`, so a core that never uses the client does not link it.
 pub(crate) fn shared_of(runtime: &Runtime) -> Arc<Shared> {
-    struct Ext(Arc<Shared>);
+    if let Some(ext) = runtime.try_extension::<Ext>() {
+        return ext.0.clone();
+    }
+    runtime.add_stats_section(undra_runtime::StatsSection {
+        name: "query",
+        json: crate::stats_section,
+    });
     runtime
         .extension_with(|| Ext(Arc::new(Shared::new())))
         .0
         .clone()
+}
+
+/// The `Shared` of a runtime, if one was created.
+pub(crate) fn existing(runtime: &Runtime) -> Option<Arc<Shared>> {
+    runtime.try_extension::<Ext>().map(|ext| ext.0.clone())
 }
 
 #[cfg(test)]

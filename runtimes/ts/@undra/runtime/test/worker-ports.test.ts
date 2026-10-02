@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PortIds } from "../src/adapters/ids.js";
 import { UndraCore } from "../src/core.js";
-import { UndraReplyError, UndraSchemaMismatchError } from "../src/errors.js";
+import { UndraError, UndraReplyError, UndraSchemaMismatchError } from "../src/errors.js";
 import type { PortImpl } from "../src/port.js";
 import { WasmWorkerTransport, type WorkerLike } from "../src/transport/wasm-worker.js";
 import { runWorker, type WorkerScope } from "../src/worker.js";
@@ -11,6 +11,7 @@ import {
   PortStatus,
   ReplyStatus,
   decodeEnvelope,
+  decodeLog,
   decodePortCall,
   decodeReply,
   encodeCall,
@@ -23,12 +24,15 @@ import { channelWorker } from "./support/worker.js";
 import { u32 } from "./support/store.js";
 
 /*
- * The ports of `wasm-worker` mode (docs/SPEC.md sections 7 and 17.1). The core calls Clock, Rng and Log
- * synchronously and cannot wait for the main thread, so the worker must answer "unavailable" to the
- * `port_call` import for them (the wasm shell then answers from its built-in bindings over the `now_ms`,
- * `random` and `log` imports); answering "async" left `port_call_sync` without an answer and the infallible
- * proxy panicked, which on wasm is a trap that kills the core (gap PO-4). Every other port crosses to the
- * main thread. The real core in a real worker thread is covered by crates/undra-ffi/tests/wasm.
+ * The ports of `wasm-worker` mode (docs/SPEC.md sections 7 and 17.1, ADR-049). The core calls synchronous ports
+ * while it runs and cannot wait for the main thread, so the worker answers what it can itself: a port implemented
+ * in the worker (the module of `LoadOptions.worker.ports`) there; a port the host serves asynchronously (worker
+ * protocol 3's `asyncPorts`) crosses to the main thread; anything else is "unavailable" to the `port_call` import,
+ * which makes the wasm shell answer Clock, Rng and Log from its built-in bindings over the `now_ms`, `random` and
+ * `log` imports. A worker that answered "async" for those left `port_call_sync` without an answer and the infallible
+ * proxy panicked, which on wasm is a trap that kills the core (gap PO-4). A host before protocol 3 sends no
+ * `asyncPorts`, and every port but those three crosses. The real core in a real worker thread is covered by
+ * crates/undra-ffi/tests/wasm.
  */
 
 const SCHEMA = STUB.SCHEMA_HASH;
@@ -40,7 +44,7 @@ interface Posted {
 }
 
 /** A worker scope driven by hand: the test delivers messages and reads the envelopes the worker posted. */
-async function driven(stub: Parameters<typeof compileStub>[0] = {}) {
+async function driven(stub: Parameters<typeof compileStub>[0] = {}, init: { protocol?: number; asyncPorts?: number[]; portsModule?: string } = { protocol: 2 }) {
   const module = await WebAssembly.compile((await compileStub(stub)) as Uint8Array<ArrayBuffer>);
   const listeners: Array<(event: Event) => void> = [];
   const messages: Array<{ t: string; data?: unknown }> = [];
@@ -57,8 +61,10 @@ async function driven(stub: Parameters<typeof compileStub>[0] = {}) {
     for (const fn of listeners) fn({ data: message } as MessageEvent);
   };
   const stop = runWorker(scope);
-  deliver({ t: "init", wasm: { kind: "module", module }, expectedSchemaHash: SCHEMA, platform: "test", devtools: false, logLevel: 2, protocol: 2 });
-  for (let i = 0; i < 100 && !messages.some((m) => m.t === "ready"); i++) await new Promise((resolve) => setTimeout(resolve, 1));
+  deliver({ t: "init", wasm: { kind: "module", module }, expectedSchemaHash: SCHEMA, platform: "test", devtools: false, logLevel: 2, ...init });
+  for (let i = 0; i < 200 && !messages.some((m) => m.t === "ready" || m.t === "failed"); i++) await new Promise((resolve) => setTimeout(resolve, 1));
+  const failed = messages.find((m) => m.t === "failed") as { failure?: { message?: string } } | undefined;
+  expect(failed?.failure?.message).toBeUndefined();
   expect(messages.some((m) => m.t === "ready")).toBe(true);
   messages.length = 0;
 
@@ -97,7 +103,7 @@ const CROSSING = [
   ["Timer", PortIds.Timer.portId],
 ] as const;
 
-describe("the worker answers the built-in sync ports itself", () => {
+describe("a host before protocol 3: the worker answers the built-in sync ports itself, every other port crosses", () => {
   it.each(STANDARD)("%s: 'unavailable' to the core at once (so its built-in binding answers), nothing posted to the main thread", async (_name, portId) => {
     const w = await driven({ portId });
     w.deliver({ t: "envelope", data: portCall() });
@@ -126,6 +132,139 @@ describe("the worker answers the built-in sync ports itself", () => {
     expect(after.map((p) => p.kind)).toEqual([Kind.Reply]);
     expect(decodeReply((after[0] as Posted).payload).status).toBe(ReplyStatus.Ok);
     w.stop();
+  });
+});
+
+/** The URL of one of the test modules of `LoadOptions.worker.ports` (test/support/worker-ports). */
+const portsModule = (name: string): string => new URL(`./support/worker-ports/${name}.mjs`, import.meta.url).href;
+
+/** The PortReply the stub replied with: `port_call_id u32, status u8, body`. */
+function stubReply(posted: Posted[]): { status: number; port: { status: number; body: number[] } } {
+  const reply = decodeReply((posted.find((p) => p.kind === Kind.Reply) as Posted).payload);
+  const body = reply.status === ReplyStatus.Ok ? [...(reply as { body: Uint8Array }).body] : [];
+  return { status: reply.status, port: { status: body[4] ?? -1, body: body.slice(5) } };
+}
+
+describe("protocol 3: the worker answers a port where it is implemented (ADR-049)", () => {
+  it.each([...STANDARD, ["a custom port", STUB.PORT_ID], ["Timer", PortIds.Timer.portId], ["Http", PortIds.Http.portId]] as const)(
+    "%s, which the host does not serve asynchronously: 'unavailable' at once, nothing posted",
+    async (_name, portId) => {
+      const w = await driven({ portId }, { protocol: 3, asyncPorts: [PortIds.Kv.portId] });
+      w.deliver({ t: "envelope", data: portCall() });
+      const posted = await w.envelopes();
+      expect(posted.map((p) => p.kind)).toEqual([Kind.Reply]);
+      expect(decodeReply((posted[0] as Posted).payload).status, "the stub's status for an unavailable port").toBe(ReplyStatus.BadRequest);
+      w.stop();
+    },
+  );
+
+  it.each([["Kv", PortIds.Kv.portId], ["a custom async port", STUB.PORT_ID]] as const)(
+    "%s, served by the host asynchronously: crosses to the main thread",
+    async (_name, portId) => {
+      const w = await driven({ portId }, { protocol: 3, asyncPorts: [portId] });
+      w.deliver({ t: "envelope", data: portCall() });
+      const posted = await w.envelopes();
+      expect(posted.map((p) => p.kind)).toEqual([Kind.PortCall]);
+      expect(decodePortCall((posted[0] as Posted).payload).portId).toBe(portId);
+      w.stop();
+    },
+  );
+
+  it("a `ports` message keeps the set current: a port registered after load crosses from then on", async () => {
+    const w = await driven({}, { protocol: 3, asyncPorts: [] });
+    w.deliver({ t: "envelope", data: portCall() });
+    expect((await w.envelopes()).map((p) => p.kind)).toEqual([Kind.Reply]);
+    w.deliver({ t: "ports", asyncPorts: [STUB.PORT_ID] });
+    w.deliver({ t: "envelope", data: portCall() });
+    expect((await w.envelopes()).map((p) => p.kind)).toEqual([Kind.PortCall]);
+    w.stop();
+  });
+
+  it("a synchronous port of the worker ports module is answered in the worker, synchronously, and nothing crosses", async () => {
+    const module = (await import(portsModule("sync"))) as { asked: string[] };
+    module.asked.length = 0;
+    const w = await driven({}, { protocol: 3, asyncPorts: [STUB.PORT_ID], portsModule: portsModule("sync") });
+    w.deliver({ t: "envelope", data: portCall() });
+    const posted = await w.envelopes();
+    expect(posted.map((p) => p.kind), "answered inside the worker: the stub replied at once").toEqual([Kind.Reply]);
+    expect(stubReply(posted)).toEqual({ status: ReplyStatus.Ok, port: { status: PortStatus.Ok, body: [9, 0, 0, 0, ...u32(5)] } });
+    expect(module.asked).toEqual(["custom"]);
+    w.stop();
+  });
+
+  it("the worker ports module overrides Clock: the core's Clock call is answered by it, not by the built-in", async () => {
+    const module = (await import(portsModule("sync"))) as { asked: string[] };
+    module.asked.length = 0;
+    const w = await driven({ portId: PortIds.Clock.portId }, { protocol: 3, asyncPorts: [], portsModule: portsModule("sync") });
+    w.deliver({ t: "envelope", data: portCall() });
+    const posted = await w.envelopes();
+    expect(stubReply(posted).port).toEqual({ status: PortStatus.Ok, body: [4, 0, 0, 0, ...u32(5)] });
+    expect(module.asked).toEqual(["clock"]);
+    w.stop();
+  });
+
+  it("the module's adapters back the now_ms and random imports in the worker", async () => {
+    const w = await driven({}, { protocol: 3, asyncPorts: [], portsModule: portsModule("sync") });
+    w.deliver({
+      t: "envelope",
+      data: encodeEnvelope(Kind.Call, 0, SCHEMA, encodeCall({ target: CallTarget.FreeFunction, methodId: STUB.RANDOM_NOW, callId: 4, args: new Uint8Array(0) })).buffer,
+    });
+    const reply = decodeReply(((await w.envelopes()).find((p) => p.kind === Kind.Reply) as Posted).payload);
+    expect(reply.status).toBe(ReplyStatus.Ok);
+    const body = (reply as { body: Uint8Array }).body;
+    expect([...body.subarray(0, 8)]).toEqual([7, 7, 7, 7, 7, 7, 7, 7]);
+    expect(new DataView(body.buffer, body.byteOffset + 8, 8).getFloat64(0, true)).toBe(4321.5);
+    w.stop();
+  });
+
+  it("an asynchronous port of the module answers later, inside the worker", async () => {
+    const w = await driven({}, { protocol: 3, asyncPorts: [], portsModule: portsModule("async") });
+    w.deliver({ t: "envelope", data: portCall() });
+    expect((await w.envelopes()).map((p) => p.kind), "the core waits").toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const posted = await w.envelopes();
+    expect(stubReply(posted).port).toEqual({ status: PortStatus.Ok, body: [3, 0, 0, 0, ...u32(5)] });
+    w.stop();
+  });
+
+  it("a module port's typed failure is status 1; an untyped one is status 2 with an error-level log naming the port", async () => {
+    const w = await driven({}, { protocol: 3, asyncPorts: [], portsModule: portsModule("failing") });
+    w.deliver({ t: "envelope", data: portCall() });
+    expect(stubReply(await w.envelopes()).port).toEqual({ status: PortStatus.Error, body: [1, 0] });
+    w.deliver({ t: "envelope", data: portCall() });
+    const posted = await w.envelopes();
+    expect(stubReply(posted).port.status).toBe(PortStatus.Unavailable);
+    const logs = posted.filter((p) => p.kind === Kind.Log).map((p) => decodeLog(p.payload));
+    expect(logs.some((l) => l.level === 4 && l.message.includes("port 0xc0dec0de method 0xdeadbeef") && l.message.includes("a bug in the worker's port"))).toBe(true);
+    w.stop();
+  });
+
+  it.each([
+    ["does not exist", "./support/worker-ports/missing.mjs", /could not import the ports module/],
+    ["does not export port implementations", "./support/worker-ports/broken.mjs", /not a port implementation/],
+  ])("a ports module that %s fails the start, naming it", async (_name, path, message) => {
+    const module = await WebAssembly.compile((await compileStub()) as Uint8Array<ArrayBuffer>);
+    const posted: Array<{ t: string; failure?: { kind: string; reason?: string; message: string } }> = [];
+    const listeners: Array<(event: Event) => void> = [];
+    const stop = runWorker({
+      addEventListener: (_type: string, fn: EventListenerOrEventListenerObject | null) => {
+        listeners.push(fn as (event: Event) => void);
+      },
+      removeEventListener: () => {},
+      postMessage: (message: unknown) => {
+        posted.push(message as (typeof posted)[number]);
+      },
+    });
+    const url = new URL(path, import.meta.url).href;
+    for (const fn of listeners) {
+      fn({ data: { t: "init", wasm: { kind: "module", module }, expectedSchemaHash: SCHEMA, platform: "test", devtools: false, logLevel: 2, protocol: 3, asyncPorts: [], portsModule: url } } as MessageEvent);
+    }
+    for (let i = 0; i < 200 && !posted.some((m) => m.t === "failed"); i++) await new Promise((resolve) => setTimeout(resolve, 1));
+    const failed = posted.find((m) => m.t === "failed");
+    expect(failed?.failure).toMatchObject({ kind: "transport", reason: "handshake" });
+    expect(failed?.failure?.message).toMatch(message);
+    expect(failed?.failure?.message).toContain(url);
+    stop();
   });
 });
 
@@ -263,24 +402,6 @@ describe("over a real channel, with UndraCore on the main thread", () => {
 
   const call = (core: UndraCore) => core.call(CallTarget.FreeFunction, STUB.PORT, u32(5));
 
-  it("a Clock the main thread registered is not asked: the worker's built-in binding serves the core", async () => {
-    let asked = 0;
-    const clock: PortImpl = {
-      sync: true,
-      methods: {
-        [STUB.PORT_METHOD]: () => {
-          asked++;
-          return u32(1);
-        },
-      },
-    };
-    const w = await overChannel({ portId: PortIds.Clock.portId }, { [PortIds.Clock.portId]: clock });
-    // The stub turns "unavailable" into status 5; the main-thread Clock was never consulted.
-    await expect(call(w.core)).rejects.toSatisfy((e: unknown) => e instanceof UndraReplyError && e.status === ReplyStatus.BadRequest);
-    expect(asked).toBe(0);
-    w.close();
-  });
-
   it("an async port crosses to the main thread and answers there", async () => {
     let asked = 0;
     const echo: PortImpl = {
@@ -302,16 +423,77 @@ describe("over a real channel, with UndraCore on the main thread", () => {
     w.close();
   });
 
-  it("a port declared sync cannot serve the core in worker mode: a warning names it once", async () => {
-    const sum: PortImpl = { sync: true, methods: { [STUB.PORT_METHOD]: (args) => args } };
-    const w = await overChannel({}, { [STUB.PORT_ID]: sum });
-    await call(w.core);
-    await call(w.core);
-    const warnings = w.log.records.filter((r) => r.level === 3 && r.target === "undra::worker");
-    expect(warnings, "once per port, however often it is called").toHaveLength(1);
-    expect(warnings[0]?.message).toContain("0xc0dec0de");
-    expect(warnings[0]?.message).toContain("wasm-worker");
-    expect(warnings[0]?.message).toContain("wasm-main");
+  it.each([
+    ["an app's sync port without a name", STUB.PORT_ID, "port 0xc0dec0de", undefined],
+    ["a Clock (clockPort names it)", PortIds.Clock.portId, "Clock port 0xcd99c48e", "Clock"],
+  ] as const)("%s registered on the main thread is a load-time error that names it and the fix", async (_name, portId, named, portName) => {
+    const module = await WebAssembly.compile((await compileStub({})) as Uint8Array<ArrayBuffer>);
+    const worker = channelWorker();
+    let started = false;
+    const host: WorkerLike = { ...worker.host, postMessage: (m, t) => ((started = true), worker.host.postMessage(m, t)) };
+    const sync: PortImpl = { ...(portName !== undefined && { name: portName }), sync: true, methods: { [STUB.PORT_METHOD]: (args) => args } };
+    const failure = await UndraCore.attach(new WasmWorkerTransport({ wasm: module, expectedSchemaHash: SCHEMA, worker: host }), {
+      expectedSchemaHash: SCHEMA,
+      shared: false,
+      adapters: { log: captureLog(), http: null, timer: null },
+      ports: { [portId]: sync },
+    }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(failure).toBeInstanceOf(UndraError);
+    expect((failure as UndraError).kind).toBe("options");
+    expect((failure as UndraError).message).toContain(named);
+    expect((failure as UndraError).message).toContain("LoadOptions.worker.ports");
+    expect(started, "the worker was never sent anything").toBe(false);
+    worker.close();
+  });
+
+  it("the refusal uses the port's name when its adapter carries one (generated adapters do)", async () => {
+    const w = await overChannel({}, {});
+    expect(() => w.core.registerPort(STUB.PORT_ID, { name: "Locale", sync: true, methods: {} })).toThrow(
+      "Locale port 0xc0dec0de is synchronous",
+    );
     w.close();
+  });
+
+  it("registerPort of a sync port after load throws, naming it; an async one is announced to the worker and crosses", async () => {
+    const w = await overChannel({}, {});
+    expect(() => w.core.registerPort(STUB.PORT_ID, { sync: true, methods: { [STUB.PORT_METHOD]: (args) => args } })).toThrow(/worker\.ports/);
+    // Not registered: the core still finds the port unavailable.
+    await expect(call(w.core)).rejects.toSatisfy((e: unknown) => e instanceof UndraReplyError && e.status === ReplyStatus.BadRequest);
+    let asked = 0;
+    w.core.registerPort(STUB.PORT_ID, {
+      sync: false,
+      methods: {
+        [STUB.PORT_METHOD]: async (args) => {
+          asked++;
+          return args;
+        },
+      },
+    });
+    const reply = await call(w.core);
+    expect(asked).toBe(1);
+    expect([...reply.subarray(4)]).toEqual([PortStatus.Ok, ...u32(5)]);
+    w.close();
+  });
+
+  it("an explicit Clock, Rng or Timer adapter is said, once, not to reach the worker", async () => {
+    const module = await WebAssembly.compile((await compileStub({})) as Uint8Array<ArrayBuffer>);
+    const worker = channelWorker();
+    const log = captureLog();
+    const core = track(
+      await UndraCore.attach(new WasmWorkerTransport({ wasm: module, expectedSchemaHash: SCHEMA, worker: worker.host }), {
+        expectedSchemaHash: SCHEMA,
+        shared: false,
+        adapters: { log, http: null, clock: { nowMs: () => 1, monotonicNs: () => 1n }, timer: { set() {} } },
+      }),
+    );
+    const warnings = log.records.filter((r) => r.target === "undra::worker" && r.level === 3);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain("adapters.clock, adapters.timer");
+    expect(warnings[0]?.message).toContain("LoadOptions.worker.ports");
+    core.close();
+    worker.close();
   });
 });

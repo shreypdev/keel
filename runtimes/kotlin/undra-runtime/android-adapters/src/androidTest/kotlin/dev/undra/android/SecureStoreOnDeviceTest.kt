@@ -6,6 +6,10 @@ import android.security.keystore.KeyInfo
 import android.os.Process
 import android.util.Log
 import androidx.test.core.app.ApplicationProvider
+import dev.undra.runtime.UndraPortException
+import dev.undra.runtime.adapters.StandardPorts
+import dev.undra.runtime.adapters.StorageError
+import dev.undra.runtime.wire.decodeAll
 import java.io.File
 import java.security.KeyStore
 import javax.crypto.SecretKey
@@ -111,8 +115,9 @@ class SecureStoreOnDeviceTest {
         try {
             secure.get("session.token")
             throw AssertionError("a damaged file must not open")
-        } catch (e: SecureStoreException) {
-            Log.w("UndraTest", "async port 3 method 0 failed (as the runtime logs it)", e)
+        } catch (e: StorageError.Corrupt) {
+            // The port answers the core with this error (status 1); log it the way an app's error report would carry it.
+            Log.w("UndraTest", "SecureStore.get failed: ${e.message}", e)
         }
         val log = ownLogcat()
         assertTrue("the scan sees this process's lines", log.contains(marker))
@@ -139,11 +144,20 @@ class SecureStoreOnDeviceTest {
         val other = AndroidSecureStoreAdapter(secureDir, "dev.undra.test.alias-b")
         val failed = try {
             other.get("k")
-            false
-        } catch (e: SecureStoreException) {
-            true
+            null
+        } catch (e: StorageError.Corrupt) {
+            e
         }
-        assertTrue("another key must not open it (and must not read it as missing)", failed)
+        assertTrue("another key must not open it (and must not read it as missing)", failed != null)
+        assertTrue(failed!!.reason, failed.reason.contains("failed authentication"))
+        // Through the port, the real Keystore's failure is the typed reply the core receives (status 1, Corrupt).
+        val reply = try {
+            call(other.portImpl(), StandardPorts.SecureStore.GET, argsOf("k"))
+            null
+        } catch (e: UndraPortException) {
+            e.body
+        }
+        assertTrue(StorageError.decodeAll(reply!!) is StorageError.Corrupt)
     }
 
     @Test

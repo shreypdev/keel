@@ -55,13 +55,13 @@
   </div>
 </header>
 <div class="wrap docs">
-  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/several-cores.html">One core or several</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
-  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/several-cores.html">One core or several</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/web.html">Workers &amp; crash recovery</a></li><li><a href="../docs/updates.html">Shipping an update</a></li><li><a href="../docs/several-cores.html">One core or several</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/web.html">Workers &amp; crash recovery</a></li><li><a href="../docs/updates.html">Shipping an update</a></li><li><a href="../docs/several-cores.html">One core or several</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
   <main id="main" class="prose">
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Swift reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xc5f05c376fde398c</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xfa536b9ac6f06149</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="core">The core<a class="anchor" href="#core" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another.</p>
@@ -92,8 +92,8 @@ public enum UndraPlaygroundCore {
 </details>
 <h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A struct for each record, an enum for each enum, with the wire codec beside it.</p>
-<p class="ref-names"><code>Composite</code> <code>Item</code> <code>Primitives</code> <code>ProbeCounters</code> <code>RemoteConfig</code> <code>RemoteTodo</code> <code>Todo</code> <code>Figure</code> <code>Filter</code> <code>Parity</code> <code>StressMode</code> <code>QueryStatus</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>240 lines</span></summary>
+<p class="ref-names"><code>Composite</code> <code>Item</code> <code>Primitives</code> <code>ProbeCounters</code> <code>RemoteConfig</code> <code>RemoteTodo</code> <code>StorageStatus</code> <code>Todo</code> <code>Figure</code> <code>Filter</code> <code>Parity</code> <code>StressMode</code> <code>QueryStatus</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>273 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Types.swift" rel="noopener">Types.swift</a></span></div><pre><code data-lang="swift">/// A record that nests the other kinds: lists, options, maps, enums with data and a map with
 /// integer keys.
 public struct Composite: UndraRecord, Sendable, Hashable {
@@ -245,6 +245,39 @@ public struct RemoteTodo: UndraRecord, Sendable, Hashable, Codable {
     public init(id: UInt32, title: String, done: Bool)
 
     public static func undraDecode(_ r: inout UndraReader) throws -&gt; RemoteTodo
+
+    public func undraEncode(_ w: inout UndraWriter)
+}
+
+/// What the query client's persistence did so far: [`storage_status`].
+public struct StorageStatus: UndraRecord, Sendable, Hashable, Codable {
+    /// Mutations waiting in the offline queue.
+    public var pending: UInt32
+    /// The dead letters, as `"&lt;mutation&gt;: &lt;reason&gt;"`.
+    public var deadLetters: [String]
+    /// Whether the stored offline queue has been read (`false` while the store cannot be read:
+    /// the queue is then neither replayed nor written).
+    public var queueReadable: Bool
+    /// Writes to the `Kv` store that failed.
+    public var writeFailed: UInt64
+    /// Persisted cache entries dropped because they could not be migrated.
+    public var dropped: UInt64
+    /// Cache entries and queued mutations an older build wrote that were migrated.
+    public var migrated: UInt64
+    /// Queued mutations moved to the dead-letter queue.
+    public var deadLettered: UInt64
+
+    public init(
+        pending: UInt32,
+        deadLetters: [String],
+        queueReadable: Bool,
+        writeFailed: UInt64,
+        dropped: UInt64,
+        migrated: UInt64,
+        deadLettered: UInt64
+    )
+
+    public static func undraDecode(_ r: inout UndraReader) throws -&gt; StorageStatus
 
     public func undraEncode(_ w: inout UndraWriter)
 }
@@ -435,8 +468,8 @@ extension TodoError: CustomStringConvertible, LocalizedError {
 </details>
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
-<p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>parseCount</code> <code>ping</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>version</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>228 lines</span></summary>
+<p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>localizedGreeting</code> <code>parseCount</code> <code>ping</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>storageStatus</code> <code>version</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>240 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Objects.swift" rel="noopener">Objects.swift</a></span></div><pre><code data-lang="swift">public final class Probe: UndraObject, @unchecked Sendable {
     /// A probe with every counter at zero.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
@@ -596,18 +629,18 @@ public func httpGet(
 ) async throws -&gt; HttpResponse
 
 /// The value the `Kv` port has under `key`, if any.
-/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+/// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func kvGet(key: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws -&gt; [UInt8]?
 
 /// The keys of the `Kv` port that start with `prefix`, in ascending order.
-/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+/// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func kvKeys(
     prefix: String,
     ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; [String]
 
 /// Stores `value` under `key` in the `Kv` port.
-/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+/// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func kvPut(
     key: String,
     value: [UInt8],
@@ -615,8 +648,15 @@ public func kvPut(
 ) async throws
 
 /// Removes `key` from the `Kv` port; a missing key is not an error.
-/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+/// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func kvRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws
+
+/// Greets `name` in the user's language, through the [`Locale`] port.
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func localizedGreeting(
+    name: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) throws -&gt; String
 
 /// Reads an unsigned number of at most nine digits.
 /// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
@@ -627,21 +667,21 @@ public func parseCount(text: String, ctx: UndraCore = UndraPlaygroundCore.core) 
 public func ping(ctx: UndraCore = UndraPlaygroundCore.core)
 
 /// The value the `SecureStore` port has under `key`, if any.
-/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+/// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func secretGet(
     key: String,
     ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; [UInt8]?
 
 /// The keys of the `SecureStore` port that start with `prefix`, in ascending order.
-/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+/// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func secretKeys(
     prefix: String,
     ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; [String]
 
 /// Stores `value` under `key` in the `SecureStore` port (the Keychain, the Android Keystore).
-/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+/// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func secretPut(
     key: String,
     value: [UInt8],
@@ -649,7 +689,7 @@ public func secretPut(
 ) async throws
 
 /// Removes `key` from the `SecureStore` port; a missing key is not an error.
-/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+/// - Throws: ``StorageError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func secretRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws
 
 /// Marks an item of `list` finished or not, showing the change at once and taking it back if the server
@@ -662,6 +702,11 @@ public func setRemoteDone(
     ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; RemoteTodo
 
+/// What the query client's persistence did: the offline queue, its dead letters and the
+/// persistence counters.
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func storageStatus(ctx: UndraCore = UndraPlaygroundCore.core) throws -&gt; StorageStatus
+
 /// The name and version of the core.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
 public func version(ctx: UndraCore = UndraPlaygroundCore.core) throws -&gt; String
@@ -669,8 +714,8 @@ public func version(ctx: UndraCore = UndraPlaygroundCore.core) throws -&gt; Stri
 </details>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">An <code>@Observable</code> class for each <code>#[undra::store]</code>: its signals, then its methods.</p>
-<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Stress</code> <code>Todos</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>204 lines</span></summary>
+<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Legacy</code> <code>Profile</code> <code>Stress</code> <code>Todos</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>237 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Stores.swift" rel="noopener">Stores.swift</a></span></div><pre><code data-lang="swift">/// The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
 /// exercise the boundary.
 @MainActor @Observable
@@ -803,6 +848,39 @@ public final class Device: UndraStore, @unchecked Sendable {
     public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws
 }
 
+/// A store whose one signal build B changes incompatibly.
+@MainActor @Observable
+public final class Legacy: UndraStore, @unchecked Sendable {
+    public private(set) var score: Int32
+
+    /// A score of `score`.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public convenience init(score: Int32, ctx: UndraCore = UndraPlaygroundCore.core) throws
+
+    /// `score=..`.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func describe() throws -&gt; String
+}
+
+/// A user profile: build A's signals are `name`, then `visits`.
+@MainActor @Observable
+public final class Profile: UndraStore, @unchecked Sendable {
+    public private(set) var name: String
+    public private(set) var visits: UInt32
+
+    /// A profile called `name`, never visited.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public convenience init(name: String, ctx: UndraCore = UndraPlaygroundCore.core) throws
+
+    /// `name=..;visits=..`: what both builds can be compared by.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func describe() throws -&gt; String
+
+    /// Counts one visit.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func visit()
+}
+
 /// A store that commits many transactions, for the coalesced-delivery scenarios and the
 /// playground's stress screen.
 @MainActor @Observable
@@ -878,11 +956,25 @@ public final class Todos: UndraStore, @unchecked Sendable {
 </code></pre></div>
 </details>
 <h2 id="ports">Ports<a class="anchor" href="#ports" aria-label="Link to this section">#</a></h2>
-<p class="ref-blurb">The playground declares no port of its own, so <code>Ports.swift</code> holds none. Your own port becomes a protocol that your app implements; the ten standard ports are implemented by <code>UndraRuntime</code>. <a href="../docs/ports.html">Ports &amp; adapters</a> shows both.</p>
+<p class="ref-blurb">A protocol for each port the core declares, and an adapter that registers your implementation.</p>
+<p class="ref-names"><code>Locale</code> <code>localePortImpl</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>10 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ports.swift" rel="noopener">Ports.swift</a></span></div><pre><code data-lang="swift">/// The app's own synchronous port (ADR-049 decision 2): how the platform says hello in the
+/// user's language. In the TypeScript `wasm-worker` mode a synchronous port is answered in the
+/// worker, so the web app registers it in `worker.ports`.
+public protocol Locale: UndraPort, Sendable {
+    /// "Hello" in the user's language.
+    func hello() -&gt; String
+}
+
+/// Adapts an implementation of ``Locale`` to `UndraCore.registerPort(UndraIds.Ports.Locale.portId, _:)`.
+public func localePortImpl(_ impl: any Locale) -&gt; PortImpl
+</code></pre></div>
+</details>
 <h2 id="queries">Queries<a class="anchor" href="#queries" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.</p>
-<p class="ref-names"><code>RemoteTodosQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>43 lines</span></summary>
+<p class="ref-names"><code>RemoteTodosQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code> <code>saveNote</code> <code>tagNote</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>59 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Queries.swift" rel="noopener">Queries.swift</a></span></div><pre><code data-lang="swift">/// Observes the `remote_todos` query (cache key `remote-todos:{list}`).
 /// Constructing it registers an observer and fetches when the data is stale or missing.
 @MainActor @Observable
@@ -926,16 +1018,32 @@ public func postRemoteTodo(
     title: String,
     ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; RemoteTodo
+
+/// Runs the `save_note` mutation.
+/// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func saveNote(
+    list: String,
+    text: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -&gt; Bool
+
+/// Runs the `tag_note` mutation.
+/// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func tagNote(
+    list: String,
+    id: UInt32,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -&gt; Bool
 </code></pre></div>
 </details>
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>113 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>133 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift" rel="noopener">Ids.swift</a></span></div><pre><code data-lang="swift">/// Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
 /// hash and the namespace of the core these bindings belong to.
 public enum UndraIds {
-    public static let schemaHash: UInt64 = 0xc5f05c376fde398c
+    public static let schemaHash: UInt64 = 0xfa536b9ac6f06149
     public static let namespace = "playground_core"
 
     public enum Objects {
@@ -979,6 +1087,17 @@ public enum UndraIds {
         public enum Device {
             public static let typeId: UInt32 = 0xbdcbb413
             public static let new: UInt32 = 0x3f6646a7
+        }
+        public enum Legacy {
+            public static let typeId: UInt32 = 0x055b887e
+            public static let new: UInt32 = 0x14d6ac0e
+            public static let describe: UInt32 = 0x642670b9
+        }
+        public enum Profile {
+            public static let typeId: UInt32 = 0xcd17328e
+            public static let new: UInt32 = 0xed94ae7e
+            public static let describe: UInt32 = 0xa05219a9
+            public static let visit: UInt32 = 0xa008fdab
         }
         public enum Stress {
             public static let typeId: UInt32 = 0xafa58985
@@ -1027,6 +1146,7 @@ public enum UndraIds {
         public static let kvKeys: UInt32 = 0x4be5264d
         public static let kvPut: UInt32 = 0x1b33766e
         public static let kvRemove: UInt32 = 0xe4402f7d
+        public static let localizedGreeting: UInt32 = 0x247f9a6c
         public static let parseCount: UInt32 = 0x1c438944
         public static let ping: UInt32 = 0x60e670d5
         public static let secretGet: UInt32 = 0x3f96f35a
@@ -1034,15 +1154,23 @@ public enum UndraIds {
         public static let secretPut: UInt32 = 0x2c60b7cb
         public static let secretRemove: UInt32 = 0x83a7330a
         public static let setRemoteDone: UInt32 = 0xa1e08a5f
+        public static let storageStatus: UInt32 = 0x79205099
         public static let version: UInt32 = 0xceb9168b
     }
 
-    public enum Ports {}
+    public enum Ports {
+        public enum Locale {
+            public static let portId: UInt32 = 0xcc469822
+            public static let hello: UInt32 = 0x9e2a48e9
+        }
+    }
 
     public enum Queries {
         public static let patchRemoteTodo: UInt32 = 0x77fe653e
         public static let postRemoteTodo: UInt32 = 0x5c84eed2
         public static let remoteTodos: UInt32 = 0x2a794167
+        public static let saveNote: UInt32 = 0xaef633c6
+        public static let tagNote: UInt32 = 0xb9224861
     }
 }
 </code></pre></div>

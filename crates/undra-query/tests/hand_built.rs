@@ -7,11 +7,17 @@
 //! * a platform reaches a registration submitted by hand (`QueryRegistration::of`) only through
 //!   the layer, which it must submit next to it, as the macros and `bench/benches/query.rs` do.
 //!
-//! This binary declares no query with the macros and submits the layer but not the hook.
+//! This binary declares no query with the macros and submits the layer but not the hook. It
+//! describes the query in the schema by hand too (`Registration::Query`): a persisted entry carries
+//! the closure of its query's type (ADR-037), so a query the schema does not describe is not
+//! persisted at all.
 #![forbid(unsafe_code)]
 
+use undra_meta::{ParamMeta, QueryKind, QueryMeta, Registration, TypeRefMeta, ids::fnv1a64};
 use undra_ports::fakes::{FakeClock, Fakes, StoreOp};
-use undra_query::{BoxFuture, CACHE_KEY_PREFIX, CtxQuery, QueryDef, QueryRegistration, cache_key};
+use undra_query::{
+    BoxFuture, CACHE_KEY_PREFIX, CACHE_KEY_PREFIX_V1, CtxQuery, QueryDef, QueryRegistration,
+};
 use undra_runtime::testing::TestRuntime;
 use undra_runtime::{Ctx, InitHook, inventory};
 use undra_wire::payload::{CallTarget, ReplyStatus};
@@ -38,9 +44,25 @@ impl QueryDef for Count {
 
 // What the macros would have submitted, minus the start-up hook.
 inventory::submit! { QueryRegistration::of::<Count>() }
+static COUNT_META: QueryMeta = QueryMeta {
+    name: "count",
+    query_id: Count::ID,
+    kind: QueryKind::Query,
+    key: Count::KEY,
+    params: &[ParamMeta {
+        name: "n",
+        ty: TypeRefMeta::U32,
+    }],
+    returns: TypeRefMeta::U32,
+    stale_ms: Count::STALE_MS,
+    persist: true,
+    idempotent: false,
+};
+inventory::submit! { Registration::Query(&COUNT_META) }
 inventory::submit! { undra_query::__private::LAYER }
 
-/// A runtime started like an app's, with `Count((7,))` persisted as 41 by an earlier run.
+/// A runtime started like an app's, with `Count((7,))` persisted as 41 by an earlier run of this
+/// very build (format 1, which hydration reads once and rewrites in format 2).
 fn started_with_a_persisted_entry() -> (TestRuntime, Fakes) {
     let t = TestRuntime::new();
     let fakes = Fakes::new();
@@ -49,8 +71,9 @@ fn started_with_a_persisted_entry() -> (TestRuntime, Fakes) {
     stored.write_u64(t.runtime().schema_hash());
     stored.write_i64(FakeClock::DEFAULT_NOW_MS);
     stored.write_bytes(&41_u32.encode_to_vec());
+    let params = fnv1a64(&(7_u32,).encode_to_vec());
     fakes.kv.insert(
-        cache_key(Count::ID, &(7_u32,).encode_to_vec()),
+        format!("{CACHE_KEY_PREFIX_V1}{:08x}.{params:016x}", Count::ID),
         stored.into_vec(),
     );
     t.run_init_hooks();

@@ -14,4 +14,18 @@ export { WasmMainTransport, type WasmMainOptions, type WasmSource } from "./tran
 export { WasmWorkerTransport, type WasmWorkerOptions, type WorkerLike } from "./transport/wasm-worker.js";
 export { RemoteTransport, reconnectDelayMs, type ReconnectOptions, type RemoteOptions, type WebSocketFactory, type WebSocketLike } from "./transport/remote.js";
 export * from "./adapters/index.js";
+export {
+  DEFAULT_RECOVERY,
+  UndraCoreRestarted,
+  crashRecovery,
+  type CoreRestartInfo,
+  type CrashRecovery,
+  type KeptSnapshot,
+  type RecoveryOptions,
+  type ResolvedRecovery,
+  type RestartResult,
+  type SnapshotPolicy,
+} from "./recovery.js";
+export type { UndraPanicReport } from "./panic.js";
+export type { WorkerPortsModule } from "./worker.js";
 export type { UndraClass } from "./lifetime.js";

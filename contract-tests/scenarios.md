@@ -1,8 +1,10 @@
 # Contract scenarios
 
-This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): twenty
-scenarios (S01 to S19, and S26), each run by every platform runtime against the **real playground core**
-(`examples/playground/core`, the same Rust crate the apps run), through the real boundary:
+This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): twenty-three
+scenarios against the **real playground core** (`examples/playground/core`, the same Rust crate the
+apps run), through the real boundary. S01 to S20 and S26 run on every platform; S21 and S22 are about the
+web host (worker mode and crash recovery, ADR-049) and run on TypeScript only. S23 to S25 are held by other
+ADRs (the boundary-surface plan numbers them); S26 is ADR-044's:
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
@@ -11,9 +13,9 @@ scenarios (S01 to S19, and S26), each run by every platform runtime against the 
 | Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI table of the real core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless all twenty ids are `PASS` (a `SKIP` needs its reason here,
-in the platform notes of the scenario). S20 to S25 are held by other ADRs (the boundary-surface plan
-numbers them); S26 is ADR-044's.
+`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S26, plus S21
+and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 65
+cells: 21 on Swift, 21 on Kotlin, 23 on TypeScript.
 
 ## The harness (the same on every platform)
 
@@ -31,7 +33,13 @@ everything a UI would use and the runtime's own API (`UndraCore`) for what bindi
   * `Http`: an **in-memory server** (`FakeServer`): routes by method and exact URL, records every
     request (method, url, headers, body), can delay a reply by N ms and can answer with a network
     error (`HttpError.Network("offline")`). Default reply for an unknown route: status 404.
-  * `Kv`: in-memory. `Log`: captures `(level, target, message)`. `Rng`, `Timer`: the platform
+  * `Kv`: in-memory, recording every operation (`get`, `set`, `delete`, `list` with the key or
+    prefix, in order), with **injectable failures** (ADR-049): the test can make the next `n`
+    operations, or every operation until it heals the store, of one kind (or of one key) fail with a
+    `StorageError` (`Full`, `Locked`, `Io(..)`, ...), which the adapter answers as the port's typed
+    error (reply status 1), exactly like the platform's own adapters do. On Swift and Kotlin the first
+    `get` of `undra.query.queue2` fails `Locked` (S20 step 4: what an app launched before the device's
+    first unlock reads). `Log`: captures `(level, target, message)`. `Rng`, `Timer`: the platform
     defaults (real timers; a real `setTimeout` / Rust timer thread).
   * `Connectivity`: the test emits events itself (`core.event(Connectivity.changed, online, kind)`;
     each runtime has a helper or the raw call).
@@ -40,6 +48,19 @@ everything a UI would use and the runtime's own API (`UndraCore`) for what bindi
   /lists/L/todos` (body `{"title":..}`, answer 201 with the created object) and `PATCH
   /lists/L/todos/ID` (body `{"done":..}`, answer 200 with the object). `Idempotency-Key` is sent on
   POST.
+* **Two builds** (S14 steps 7 to 9, S15 steps 11 to 14; ADR-037). The runner also builds the
+  playground core a second time, as **build B**: `UNDRA_PLAYGROUND_V2=1 undra build ...` (the core's
+  `build.rs` turns it into `cfg(playground_v2)`; see `examples/playground/core/src/updates.rs` for what
+  changes), and keeps that artefact apart from build A's. Build B has no generated bindings: the runner
+  loads it with the hash the core reports (`undra_schema_hash`) and drives it through the raw API with
+  the ids it knows (`Profile.new` / `Profile.describe` / `Legacy.new`, the mutation ids of `save_note` and
+  `tag_note`, the function `storage_status`, whose `StorageStatus` record has the same layout in both
+  builds). TypeScript loads build B in the same process; Swift and Kotlin load one core per process, so
+  they run the build-B steps in a **second process** (Swift: the same test bundle relaunched with build
+  B's library in place of build A's; Kotlin: a second JVM with build B's library), handing over the `Kv`
+  contents and the snapshots in a file. The build-B process prints only `SCENARIO S14 FAIL ...` /
+  `SCENARIO S15 FAIL ...` lines (never `PASS`), so `check.sh`, which reads the last line of an id, fails
+  the scenario if build B fails and keeps build A's `PASS` otherwise.
 * **Waiting.** Anything asynchronous is awaited with a **5 second timeout** (polling every 10 ms or
   using the runtime's own wait), never with a bare sleep, except where a scenario says "for 200 ms
   nothing happens".
@@ -284,7 +305,9 @@ handle observes and **records every value of `data`**.
 
 ### S14 offline queue replay
 
-List `s14`; the server serves `[]`. A handle observes it.
+List `s14`; the server serves `[]`. A handle observes it. Before step 1 the runner waits until
+`storage_status().queue_readable` is `true` (on Swift and Kotlin the harness failed the first read of the
+queue, S20 step 4; the client reads it again after a backoff of about a second).
 
 1. The test emits `Connectivity.changed(online=false, kind=None)` and waits 50 ms.
 2. POST `/lists/s14/todos` is scripted to fail with `HttpError.Network("offline")`.
@@ -296,8 +319,27 @@ List `s14`; the server serves `[]`. A handle observes it.
    route to `[{"id":9,...}]`. The test emits `Connectivity.changed(online=true, kind=Wifi)`.
 5. The pending `create_remote_todo` **resolves** to `RemoteTodo(9,"Offline item",false)`; the server saw
    exactly 2 POSTs; both carry the **same** `Idempotency-Key`; the handle ends with `data == [id 9]`.
-6. The Kv port saw a write of the key `undra.query.queue` while offline (the queue is persisted) and the
-   queue was emptied after the replay (last write is an empty queue).
+6. The Kv port saw a write of the key `undra.query.queue2` while offline (the queue is persisted, format 2
+   of ADR-037: `format u16 = 2, schema_hash u64, count u32, items`, each item with its mutation's
+   fingerprint) and the queue was emptied after the replay (the last operation on the key is a `delete`, or
+   a `set` of a queue whose count, the `u32` at offset 10, is 0). A key `undra.types.<16 hex digits>` holds
+   the description of `create`'s input (written before the queue that needs it).
+7. **Build A queues what build B changes.** Offline again; POST `/lists/s14m/notes` fails with
+   `HttpError.Network("offline")`. `save_note("s14m", "a")` and `tag_note("s14m", 7)` are started and stay
+   pending (`storage_status().pending == 2`). The runner keeps the `Kv` contents (every key and value) and the
+   `Idempotency-Key` header of the failed `save_note` POST, and stops build A (Swift and Kotlin: at the end of
+   the run, see "Two builds").
+8. **Build B reads it.** A core of build B is loaded with a `Kv` holding exactly those contents, offline: the
+   runner emits `Connectivity.changed(false, None)` and calls `configure_remote` **before the queue is read**
+   (configuration is not persisted, and a replay that started first would fail on an unconfigured endpoint;
+   the TypeScript runner holds build B's first `get` of `undra.query.queue2` until then). Within 5 s `storage_status()` says
+   `queue_readable`, `pending == 1` (`save_note` gained `pinned: Option<bool>`: migrated by parameter name),
+   `migrated == 1`, `dead_lettered == 1`, and `dead_letters == ["tag_note: <reason>"]` with a reason that says
+   its input does not migrate (`id` became a `String`); nothing was replayed (no request reached the server).
+9. **Replay in build B.** POST `/lists/s14m/notes` answers 201; online: within 5 s the server saw exactly one
+   POST with body `save:a` (build B's `save_note` with `pinned == None`) carrying the **same**
+   `Idempotency-Key` as build A's attempt; `pending == 0`; the dead letter is still there (never lost, never
+   replayed) and so is the key `undra.query.queue.dead` in the `Kv`.
 
 ### S15 snapshot and restore
 
@@ -332,6 +374,22 @@ List `s14`; the server serves `[]`. A handle observes it.
     three spellings as step 9), not with a decoding failure and not as a platform cancellation. (Kotlin and
     TypeScript used to read that String as a typed error; the stream mapping is one function per runtime now.)
     Close the probe.
+11. **Build A's snapshots.** `Profile.new("ada")`, `visit()` twice; `describe() == "name=ada;visits=2"`; snapshot
+    `P` (no `Legacy` exists yet). Then `Legacy.new(5)`; snapshot `L`. The runner keeps `P`, `L` and the
+    `Profile` handle (Swift and Kotlin: for the build-B process). Release the `Legacy`.
+12. **Build B restores `P` by name.** In a core of build B, `restore(P)` succeeds; the same `Profile` handle answers
+    `describe() == "name=ada;visits=2;theme="`: build B reordered `visits` before `name` and added `theme` with
+    `#[undra(default)]`, and the values arrived by name (SPEC 5.9, layout 2). A store type both builds share and
+    did not change (the other stores of `P`, if the runner made any) takes the fast path.
+13. **Build B refuses `L`.** `restore(L)` fails with the restore error whose code is **7** (`incompatible`:
+    Swift `UndraRestoreError` code 7 / `.incompatible`, Kotlin `UndraRestoreException` code 7, TypeScript
+    `UndraRestoreError` code 7), because `Legacy.score` changed from `i32` to `String` and no hook converts it;
+    the core's Log port received an ERROR record naming `Legacy` and `score`; the core is unchanged (the
+    `Profile` still describes as in step 12) and the next call works.
+14. **A snapshot from before layout 2 is refused** (R7: what an older host kept is checked when it is
+    loaded): the 8 bytes `00000000 00000000` (ADR-022's empty snapshot, `count, floor`) fail with code **5**
+    (malformed) in either build, and the core is unchanged. (Live peers with different schema hashes still
+    refuse each other at load: S16.)
 
 ### S16 schema mismatch rejection
 
@@ -466,6 +524,79 @@ applier and mirror (ADR-031) apply them unchanged.
    one. (TypeScript also feeds the change-sets through a `Mirror`, drained at seeded points, and checks
    at every drain: what ADR-031 merges per drain applies to the same views.)
 
+### S20 storage failures are typed (ADR-049)
+
+The storage ports have an error channel: an adapter that cannot store answers `StorageError`, and the core
+neither panics nor traps (a wasm core would have trapped before ADR-049). List `s20`; the server serves one item.
+
+1. The harness `Kv` fails every `set` with `StorageError.Full`. `remote_todos("s20")` is observed; it shows the
+   item. After 300 ms (the write is debounced 250 ms) no key `undra.query.cache2.<query id>.*` of the `s20`
+   entry is in the `Kv`; `storage_status().write_failed` grew by at least 1; the `Log` port received a WARN
+   record of target `undra::query` whose message contains `storage is full`, exactly once however many writes
+   failed; `stats().panics` did not grow and the core answers the next call. (In a core that has not yet
+   stored the description of the query's type, the first failing write is the key `undra.types.<fingerprint>`,
+   written before the entry, and the entry's own write is not attempted: either way no entry key is stored.)
+2. The `Kv` heals. `invalidate()` on the handle refetches; within 5 s the `Kv` holds the `s20` entry, a value
+   whose first two bytes are `02 00` (format 2) and whose fingerprint (bytes 10 to 18) is the one of the key
+   `undra.types.<fingerprint>` it also holds. The data still shows.
+3. A failed read of a cache entry starts it empty: (TypeScript) a fresh core whose `Kv` holds that entry and
+   fails one `get` with `StorageError.Io("busy")` shows no data for `s20` until it fetched, and the entry's key
+   is still in the `Kv` afterwards; (Swift, Kotlin) not run, the core is not reloaded.
+4. An unreadable queue is never overwritten (ADR-049 decision 1.4).
+   * TypeScript: a fresh core is loaded with a `Kv` whose `get` of `undra.query.queue2` fails `Locked`, and is
+     told it is offline. `storage_status().queue_readable == false`. `save_note("s20", "late")` (POST failing
+     with `HttpError.Network("offline")`) stays pending in memory: for 500 ms the `Kv` sees **no** `set` of
+     `undra.query.queue2` and `pending == 1`. The `Kv` heals; `Lifecycle.changed(Active)`: within 5 s
+     `queue_readable`, a `set` of `undra.query.queue2` (count 1); online: counted from the online event, the note
+     replays exactly once (body `save:late`; its first attempt, made while offline, is not counted) and
+     `pending == 0`.
+   * Swift and Kotlin: the harness failed the first `get` of `undra.query.queue2` with `Locked` at load. Now
+     `queue_readable == true`, the `Kv`'s operation log shows the failed `get`, then a successful `get` of the
+     key, and no `set` of the key between the two.
+5. No step of this scenario panicked or trapped (`stats().panics` unchanged), and the core is the one loaded
+   at the start (TypeScript: the fresh cores of steps 3 and 4 are closed).
+
+### S21 worker mode answers synchronous ports in the worker (ADR-049; TypeScript only)
+
+The playground core in `wasm-worker` mode, loaded with `worker.ports` pointing at a module that registers the
+playground's `Locale` port (`hello()` answers `"Hola"`).
+
+1. `remote_todos("s21")` observed: it shows the server's data and `updated_at` is within a minute of `Date.now()`
+   (the core read the `Clock` in the worker); `create_remote_todo("s21", "x")` reaches the server with an
+   `Idempotency-Key` that is a UUID v4 made from the worker's `crypto.getRandomValues` (two calls carry
+   different keys); a log record the core wrote reaches the main thread's `Log` adapter. Nothing trapped.
+2. `localized_greeting("Ada") == "Hola, Ada"`: the app's synchronous port answered in the worker.
+3. A second load in `wasm-worker` mode that registers `Locale` on the **main thread** (`adapters` or
+   `registerPort` before load) fails at load with an error that names `Locale` (a generated adapter carries its
+   port's name; a hand-written `PortImpl` without one is named by its id) and says to register it in
+   `worker.ports`; no core is left running.
+4. The worker protocol is version 3: the `init` message carries `asyncPorts` (the host's asynchronous ports, `Http`
+   and `Kv` among them) and the `portsModule` URL.
+
+### S22 a trapped web core restarts from its last snapshot (ADR-049; TypeScript only)
+
+`wasm-main`, loaded with `recovery: { snapshotEveryMs: 50, maxRestarts: 3, perMs: 60_000 }`, `onCoreRestarted`,
+`onError` and `onClose` recorded.
+
+1. `Counter` observed, `add(5)`; `remote_todos("s22")` observed through its generated handle, showing the server's
+   one item. Wait until the `s22` entry is persisted in the `Kv` (its write is debounced 250 ms; the re-created
+   handle of step 4 reads it back) and a snapshot was taken.
+2. A call is started and left in flight (`add_later(1, 2)` with a delay, or a `Probe.hang()`), then
+   `explode("kaboom")` is called: it rejects as a failed call, the in-flight call rejects with
+   `UndraTransportError("restarted")` (through generated code: `UndraCallError.Unavailable` whose transport reason is
+   `"restarted"`), never retried.
+3. Within 5 s `onCoreRestarted` was called once with the panic report (message containing `kaboom`), a
+   `restoredFromAgeMs` under a few seconds, `rejectedCalls >= 1` and the stale objects; `onError` received an
+   `UndraCoreRestarted` with the same.
+4. The same `Counter` wrapper shows `count == 5` (restored, same handle) and `add(1)` makes it 6; the
+   `remote_todos("s22")` handle was re-created (its wrapper still shows the item and, after the runner calls
+   `configure_remote` again, since configuration is core state outside stores and is lost with the instance
+   that trapped, `invalidate()` refetches through it); the `Probe` (not a store) is stale and fails with a typed
+   refusal.
+5. Three more `explode` calls within the minute: the third restart is the last; the fourth trap leaves the core
+   dead: `onClose` reports the trap, `onCoreRestarted` was called 3 times in all, and calls fail as unavailable
+   (`closed`).
+
 ### S26 two cores
 
 ADR-044: a process can hold several cores, each its own image reached through its own table
@@ -523,3 +654,10 @@ harness adapters.
   signals crate. Only TypeScript's mirror is public; Kotlin and Swift apply change-set by change-set.
 * Timing constants (50 ms delays, 200 ms quiet windows) are chosen for a loaded CI machine; do not
   shrink them.
+* S14 steps 7 to 9 and S15 steps 11 to 14 need build B (see "Two builds"). TypeScript loads both wasm
+  modules in one process; Swift and Kotlin run build B's steps in a second process after the main run.
+* S20 step 4 differs by platform: a fresh TypeScript core can be loaded with a `Kv` whose queue reads fail, so
+  the TypeScript column walks the whole "unreadable, then readable on `Active`" path; Swift and Kotlin load one
+  core per process, so their harness fails the first read of the queue at load and S20 checks what that did.
+* S21 and S22 are TypeScript-only: worker mode and crash recovery are web features (ADR-049; a native core
+  contains a panic without trapping, SPEC 5.6). `check.sh` does not expect them from Swift or Kotlin.

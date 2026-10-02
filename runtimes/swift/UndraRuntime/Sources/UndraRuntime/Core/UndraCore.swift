@@ -39,6 +39,9 @@ public final class UndraCore: @unchecked Sendable {
         var nextCallId: UInt32 = 0
         var pending: [UInt32: PendingCall] = [:]
         var ports: [UInt32: PortImpl] = [:]
+        /// The type of the adapter that registered each port from `LoadOptions.adapters`, for the
+        /// log line of an adapter bug. A port registered with `registerPort(_:_:)` has none.
+        var portAdapters: [UInt32: String] = [:]
         var adapters: [any UndraAdapter] = []
         var liveObjects = 0
         var isShutDown = false
@@ -278,7 +281,7 @@ public final class UndraCore: @unchecked Sendable {
     private func install(_ adapters: Adapters) {
         for adapter in adapters.all {
             if let impl = adapter.makePortImpl(core: self) {
-                registerPort(adapter.portId, impl)
+                register(adapter.portId, impl, adapter: String(describing: type(of: adapter)))
             }
             state.withLock { (current: inout State) -> Void in
                 current.adapters.append(adapter)
@@ -724,12 +727,18 @@ public final class UndraCore: @unchecked Sendable {
     /// shut-down core (or the placeholder `shared` returns before a core is loaded) ignores the
     /// call and logs a warning: register ports on the core `load(_:)` returned.
     public func registerPort(_ id: UInt32, _ impl: PortImpl) {
+        register(id, impl, adapter: nil)
+    }
+
+    /// `registerPort(_:_:)`, remembering which adapter type (if any) the implementation came from.
+    private func register(_ id: UInt32, _ impl: PortImpl, adapter: String?) {
         if isShutDown {
             UndraLog.warning("registerPort(\(id)) on a shut-down UndraCore is ignored; register ports on the core UndraCore.load(_:) returned")
             return
         }
         state.withLock { (current: inout State) -> Void in
             current.ports[id] = impl
+            current.portAdapters[id] = adapter
         }
         transport.registerPort(id)
     }
@@ -747,8 +756,12 @@ public final class UndraCore: @unchecked Sendable {
     /// snapshot leaves the core unchanged. Called on the main thread, it applies the restored
     /// values to the stores before it returns, like any synchronous call (docs/SPEC.md section 11).
     ///
-    /// - Throws: `UndraRestoreError` if the core rejects it; `UndraModeError` over the remote
-    ///   transport.
+    /// A snapshot taken by another build restores when its stores' types are unchanged or migrate
+    /// by name (ADR-037); one that cannot is refused as a whole with
+    /// ``UndraRestoreError/incompatible``, and a store type this build no longer has is left out.
+    ///
+    /// - Throws: `UndraRestoreError` if the core rejects it (``UndraRestoreError/badSnapshot``,
+    ///   ``UndraRestoreError/incompatible``, ...); `UndraModeError` over the remote transport.
     public func restore(_ snapshot: [UInt8]) throws {
         try mirror.withImmediateDrain {
             try transport.restore(snapshot)
@@ -1116,7 +1129,7 @@ extension UndraCore: UndraInbound {
             } catch let error as UndraPortError {
                 reply = Wire.PortReply(portCallId: portCallId, status: .error, body: ArraySlice(error.body))
             } catch {
-                UndraLog.warning("sync port \(portId) method \(methodId) failed: \(error)")
+                logUntypedPortFailure(portId: portId, methodId: methodId, error: error)
                 reply = Wire.PortReply(portCallId: portCallId, status: .unavailable)
             }
             return .sync(reply: reply.encode())
@@ -1132,7 +1145,7 @@ extension UndraCore: UndraInbound {
                 } catch let error as UndraPortError {
                     reply = Wire.PortReply(portCallId: portCallId, status: .error, body: ArraySlice(error.body))
                 } catch {
-                    UndraLog.warning("async port \(portId) method \(methodId) failed: \(error)")
+                    self.logUntypedPortFailure(portId: portId, methodId: methodId, error: error)
                     reply = Wire.PortReply(portCallId: portCallId, status: .unavailable)
                 }
                 if !self.isShutDown {
@@ -1141,6 +1154,24 @@ extension UndraCore: UndraInbound {
             }
             return .async
         }
+    }
+
+    /// A port method threw something other than `UndraPortError`: the bridge answers "unavailable"
+    /// (port status 2), as it always has, and says so at ERROR level, naming the port, the method
+    /// and the adapter, because a port reports its failures as typed errors (status 1, ADR-049)
+    /// and anything else is a bug in the adapter (or arguments it could not decode).
+    func logUntypedPortFailure(portId: UInt32, methodId: UInt32, error: any Error) {
+        let adapter = state.withLock { (current: inout State) -> String? in
+            return current.portAdapters[portId]
+        }
+        let port = StandardPorts.describe(portId: portId)
+        let method = StandardPorts.describe(methodId: methodId)
+        let source = adapter.map { "adapter \($0) (\(port))" } ?? "the \(port) implementation registered with registerPort"
+        UndraLog.error(
+            "\(source) failed \(method) with an untyped error (\(type(of: error)): \(error)); "
+                + "answered \"unavailable\" (port status 2). A port method reports a failure by throwing "
+                + "UndraPortError carrying the encoded error of its signature; anything else is a bug in the adapter."
+        )
     }
 
     package func onLog(level: UInt8, target: String, message: String) {

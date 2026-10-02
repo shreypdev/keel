@@ -1,7 +1,7 @@
 {
   "format": "undra.recording",
   "version": 1,
-  "schema_hash": "0xc5f05c376fde398c",
+  "schema_hash": "0xfa536b9ac6f06149",
   "source": "test",
   "events": [
     {"t":100,"kind":"call","target":"constructor","type":4125302698,"method":898850282,"call":1,"args":""},

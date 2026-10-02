@@ -191,6 +191,13 @@ void testKv(KvNaming naming, const char *label) {
   // A damaged entry at the key's own name is a failure, never "missing".
   writeFile(dir + "/" + kvFileName(naming, "damaged"), "\x09\x00");
   check(!kv.get("damaged", value, error) && error.find("damaged") != std::string::npos, "a damaged entry is an error: " + error);
+  // ADR-049: and that error is `Corrupt` (the key is there, its bytes do not read back).
+  StorageErrorKind kind = StorageErrorKind::Io;
+  check(!kv.get("damaged", value, error, &kind) && kind == StorageErrorKind::Corrupt, "a damaged entry is StorageError::Corrupt");
+  check(storageErrorOf(ENOSPC) == StorageErrorKind::Full && storageErrorOf(EDQUOT) == StorageErrorKind::Full,
+      "a full disk or quota is StorageError::Full");
+  check(storageErrorOf(EPERM) == StorageErrorKind::Locked && storageErrorOf(EIO) == StorageErrorKind::Io,
+      "EPERM (before first unlock) is Locked, the rest Io");
   check(kv.remove("b.key", error) && kv.get("b.key", value, error) && !value, "remove");
   ok((std::string(label) + ": Kv collisions never read or remove another key; a damaged entry is an error").c_str());
 }

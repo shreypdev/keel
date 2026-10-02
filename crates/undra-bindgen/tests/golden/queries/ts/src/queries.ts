@@ -40,8 +40,14 @@ export class TodoByIdQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint) {
-    super(core, handle);
+  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
+    super(core, handle, {
+      recreate: {
+        typeId: UndraIds.Objects.TodoByIdQueryHandle.typeId,
+        methodId: UndraIds.Objects.TodoByIdQueryHandle.new,
+        args,
+      },
+    });
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
@@ -54,17 +60,18 @@ export class TodoByIdQueryHandle extends UndraStore {
     const w = new UndraWriter();
     w.writeUuid(id);
     w.writeBool(fresh);
+    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.TodoByIdQueryHandle.typeId,
         UndraIds.Objects.TodoByIdQueryHandle.new,
-        w.finish(),
+        args,
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new TodoByIdQueryHandle(core, handle);
+    const store = new TodoByIdQueryHandle(core, handle, args);
     await store._observeAll();
     return store;
   }
@@ -154,24 +161,31 @@ export class TodoCountQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint) {
-    super(core, handle);
+  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
+    super(core, handle, {
+      recreate: {
+        typeId: UndraIds.Objects.TodoCountQueryHandle.typeId,
+        methodId: UndraIds.Objects.TodoCountQueryHandle.new,
+        args,
+      },
+    });
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
   static async create(core: UndraCore = UndraGoldenQueries.core): Promise<TodoCountQueryHandle> {
+    const args = new Uint8Array(0);
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.TodoCountQueryHandle.typeId,
         UndraIds.Objects.TodoCountQueryHandle.new,
-        new Uint8Array(0),
+        args,
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new TodoCountQueryHandle(core, handle);
+    const store = new TodoCountQueryHandle(core, handle, args);
     await store._observeAll();
     return store;
   }
@@ -261,8 +275,14 @@ export class TodosQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint) {
-    super(core, handle);
+  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
+    super(core, handle, {
+      recreate: {
+        typeId: UndraIds.Objects.TodosQueryHandle.typeId,
+        methodId: UndraIds.Objects.TodosQueryHandle.new,
+        args,
+      },
+    });
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
@@ -273,17 +293,18 @@ export class TodosQueryHandle extends UndraStore {
   ): Promise<TodosQueryHandle> {
     const w = new UndraWriter();
     w.writeU32(page);
+    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.TodosQueryHandle.typeId,
         UndraIds.Objects.TodosQueryHandle.new,
-        w.finish(),
+        args,
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new TodosQueryHandle(core, handle);
+    const store = new TodosQueryHandle(core, handle, args);
     await store._observeAll();
     return store;
   }

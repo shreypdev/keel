@@ -1,8 +1,8 @@
 # Notes on the TypeScript column
 
-`run.sh` runs S01..S19 and S26 of `../scenarios.md` against the real wasm build of the playground core
+`run.sh` runs S01..S22 and S26 of `../scenarios.md` against the real wasm build of the playground core
 (`examples/playground/build/web/playground_core.wasm`, built by `undra build -C examples/playground --platform web`)
-through `@undra/runtime` in `wasm-main` mode (S17 step 6 in `wasm-worker` mode), on Node, under vitest. `src/reporter.ts` prints one
+through `@undra/runtime` in `wasm-main` mode (S17 step 6 and S21 in `wasm-worker` mode), on Node, under vitest. `src/reporter.ts` prints one
 `SCENARIO Sxx PASS|FAIL|SKIP <title>` line per scenario; `../check.sh ts` grades them. `NOTE` lines carry
 measurements (S03: ns per sync call; S07: how far the producer ran).
 
@@ -29,6 +29,18 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
 * `RawStore` is a store without its generated class: `core.construct`, `core.mirror.register`, `core.observe`,
   the entries the core delivered, op codes and all. S08, S09 and S10 count entries with it.
 
+* **Two builds** (S14 steps 7 to 9, S15 steps 11 to 14; ADR-037). `run.sh` builds build B first
+  (`UNDRA_PLAYGROUND_V2=1 undra build ... --platform web`), copies its wasm to `build/b/undra_core.wasm` (ignored by
+  git), builds build A again so the default wasm stays A, and stops if the two are byte-identical (the variable did
+  not reach the core). Vitest reads build B from `UNDRA_PLAYGROUND_WASM_B`. Both are loaded **in this one process**:
+  `boot({ build: "B" })` loads build B with the hash it reports (`undra_schema_hash`, read off an instance before
+  `undra_init`), since build B has no generated bindings. Build B is driven through build A's generated free functions
+  with `core` passed (`configureRemote`, `storageStatus`, `add`: their ids and layouts are the same in both builds) and,
+  for `Profile.describe` on a restored handle, the raw `core.call` (build A's `Profile` class has build A's signals).
+* `MemoryKv` (ADR-049) records every operation with the `StorageError` it was failed with, fails on demand
+  (`fail(kind, error, { key, times })`, `heal()`), starts from given entries (build B over build A's contents) and can
+  `hold(kind, key)` an operation until the test releases it. `Persisted` holds the persisted keys and layouts.
+
 ## Where a scenario is read, not copied
 
 * S01: `span` is the TypeScript `Duration` (milliseconds; 1.500000123 s is `1500.000123`), compared as the
@@ -54,9 +66,31 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
 * S13: "records every value of `data`" subscribes to `handle.data`; a value that arrives twice in a row counts
   once and the `null` before the first fetch is not a list. A `Signal` announces once per mirror flush, and every
   step of S13 is at least 50 ms from the next, so no value is coalesced away.
-* S14.6: the core deletes `undra.query.queue` when the queue empties, it does not write an empty queue; "the last
-  write is an empty queue" accepts either a `delete` or a `set` whose queue has zero entries. The queue written
-  while offline is decoded, and its `Idempotency-Key` is the one both POSTs carried.
+* S14.6: the core deletes `undra.query.queue2` when the queue empties, it does not write an empty queue; "the last
+  write is an empty queue" accepts either a `delete` or a `set` whose count (offset 10) is 0. The queue written while
+  offline is decoded (format 2: its item's fingerprint names the `undra.types.<fingerprint>` key written before it),
+  and its `Idempotency-Key` is the one both POSTs carried.
+* S14.7: build A's notes stay pending in build A, whose core is closed after the scenario (Swift and Kotlin replay
+  them there, because their later scenarios share the core; here nothing does). S14.8: build B's `Kv` holds back its
+  first read of `undra.query.queue2` until the scenario has emitted `Connectivity.changed(false)` and called
+  `configure_remote` (`MemoryKv.hold`): that is the order "offline right after load" means, and a replay that started
+  before `configure_remote` would fail on an unconfigured endpoint instead of the network. (It passed without the hold
+  in three runs; the hold makes the order certain.)
+* S15.11 to S15.14 run at the end of S15 in the same build-A core; snapshot `P` holds the stores of steps 1 to 10 as
+  well, which build B restores on the fast path. Step 14 refuses the 8 zero bytes in both cores.
+* S20.1: in a fresh core the description of the entry's type (`undra.types.<fingerprint>`) is written before the
+  entry and fails first, so the entry's own write never starts; the step checks that a write failed `Full`, that the
+  entry is not in the `Kv`, the counter and the one WARN (Swift and Kotlin share a core whose description was stored by
+  an earlier scenario, so there the entry's write is the one that fails). S20.3: "no data until it fetched" is the
+  first non-empty `data` coming no sooner than the delayed reply of the fetch (300 ms); a hydrated entry would show at
+  once and would not be fetched (it is fresh). S20.4: the replay after `Active` and the online event is counted from
+  the online event (the attempt made while offline came before).
+* S21 loads `src/locale-ports.ts` as `worker.ports` (the runtime's worker imports it through vitest's module loader;
+  a real worker imports it as an ES module). Step 3's refusal happens before anything is posted to the worker. Step 4
+  reads the `init` message the harness recorded (`bootWorker`'s `posted`).
+* S22.4: the core's configuration (`configure_remote`, not store state) went with the instance that trapped (ADR-049
+  3.5); the scenario configures the new one before `invalidate()` refetches through the re-created handle. The query's
+  entry is persisted (the scenario waits for it after step 1's 200 ms) so the re-created handle shows the item again.
 * S15.5: the `Uuid` ids of `Todos` count up in their leading bytes, so "above `b`'s" is the string order of the
   canonical form. S15.7: a released handle answers a bad request (stale handle).
 * S16.1: "before the core is initialised" is checked through what initialisation does: a core that ran
