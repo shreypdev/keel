@@ -1,6 +1,7 @@
 package dev.undra.android
 
 import android.content.Context
+import dev.undra.runtime.CoreNamespace
 import dev.undra.runtime.PortImpl
 import dev.undra.runtime.UndraPortException
 import dev.undra.runtime.adapters.FsAdapter
@@ -118,7 +119,7 @@ public class AndroidFsAdapter internal constructor(root: Path) {
     public companion object {
         /** `<filesDir>/undra/<namespace>/fs`: the root of [context]'s application for the core [namespace]. */
         public fun rootOf(context: Context, namespace: String): File =
-            File(context.applicationContext.filesDir, "undra/$namespace/fs")
+            File(context.applicationContext.filesDir, "undra/${CoreNamespace.requireForStores(namespace)}/fs")
 
         /**
          * The non-empty components of [path] (`.` and empty ones dropped), after the leading separators that [FsAdapter]

@@ -286,3 +286,95 @@ describe("Db", () => {
     }
   });
 });
+
+/** What an app can hand `load` or `attach` as a namespace, and no core has (review of ns-storage): each becomes a path component. */
+const BAD_NAMESPACES: ReadonlyArray<readonly [string, string]> = [
+  ["..", ".."],
+  [".", "."],
+  ["a/b", "a/b"],
+  ["a\\b", "a\\b"],
+  ["../escape", "../escape"],
+  ["", "(empty)"],
+  ["a".repeat(33), "33 characters"],
+  ["Upper", "uppercase"],
+  ["1abc", "starts with a digit"],
+  ["_", "an explicit `_` (the fallback is not a namespace)"],
+  ["_hidden", "starts with `_`"],
+  ["café", "unicode"],
+  ["a\u0000b", "a NUL byte"],
+  ["with space", "a space"],
+  ["with-dash", "a dash (the Android database file's separator)"],
+  ["a.b", "a dot"],
+];
+
+describe("a namespace an app supplies", () => {
+  it("of 32 lowercase letters, digits and `_` is accepted, as is none", async () => {
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    for (const namespace of ["a", "playground_core", "a".repeat(32), "a1_b2"]) {
+      const core = track(await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA, shared: false, namespace }));
+      expect(core.namespace).toBe(namespace);
+    }
+  });
+
+  for (const [namespace, why] of BAD_NAMESPACES) {
+    it(`is refused typed at attach before it names a store: ${why}`, async () => {
+      const factory = new IDBFactory();
+      vi.stubGlobal("indexedDB", factory);
+      const transport = new FakeCoreTransport();
+      await expect(UndraCore.attach(transport, { expectedSchemaHash: SCHEMA, shared: false, namespace })).rejects.toMatchObject({
+        name: "UndraError",
+        kind: "options",
+        message: expect.stringContaining("namespace"),
+      });
+      expect(transport.sent ?? [], "the transport was not touched").toEqual([]);
+      expect(await factory.databases(), "no database was created").toEqual([]);
+    });
+
+    it(`is refused typed at load before anything is created: ${why}`, async () => {
+      const factory = new IDBFactory();
+      vi.stubGlobal("indexedDB", factory);
+      await expect(
+        UndraCore.load({ mode: "remote", url: "ws://localhost:1", expectedSchemaHash: SCHEMA, namespace }),
+      ).rejects.toMatchObject({ kind: "options", message: expect.stringContaining("namespace") });
+      expect(await factory.databases()).toEqual([]);
+    });
+
+    it(`never becomes a store name through an adapter either: ${why}`, () => {
+      // `_` is the fallback's own name, which the adapters take for a core without a namespace; `load` and `attach` refuse it.
+      if (namespace === UNNAMED_NAMESPACE) return;
+      expect(() => storeName(namespace, "kv")).toThrow(/namespace/);
+      expect(() => storePath(namespace, "fs")).toThrow(/namespace/);
+      expect(() => indexedDbKv({ namespace })).toThrow(/namespace/);
+      expect(() => webCryptoSecureStore({ namespace })).toThrow(/namespace/);
+      expect(() => browserAdapters({ namespace })).toThrow(/namespace/);
+      expect(() => opfsFs({ namespace })).toThrow(/namespace/);
+    });
+  }
+
+  it("is refused when it is not a string at all", async () => {
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    for (const namespace of [42, null, {}, ["a"], 1n]) {
+      await expect(
+        UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA, shared: false, namespace: namespace as unknown as string }),
+      ).rejects.toMatchObject({ kind: "options" });
+    }
+  });
+
+  it("is refused by the database worker's adapter as a typed Unavailable, not a path", async () => {
+    const { waSqliteAdapter } = await import("../src/db-worker.js");
+    const adapter = waSqliteAdapter({ storage: "opfs" });
+    for (const namespace of ["..", "a/b", ""]) {
+      await expect(adapter.open("notes", { namespace })).rejects.toMatchObject({ kind: "unavailable" });
+    }
+  });
+
+  it("a long, odd one is shown shortened in the message", async () => {
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    const error = await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA, shared: false, namespace: "x".repeat(5000) }).then(
+      () => new Error("accepted"),
+      (e: unknown) => e as Error,
+    );
+    expect(error.message).toContain("cannot name a core");
+    expect(error.message.length).toBeLessThan(600);
+  });
+});

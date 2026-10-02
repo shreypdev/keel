@@ -1,6 +1,7 @@
 package dev.undra.android
 
 import android.content.Context
+import dev.undra.runtime.CoreNamespace
 import dev.undra.runtime.PortImpl
 import dev.undra.runtime.adapters.FileKv
 import dev.undra.runtime.adapters.KeyValueBackend
@@ -77,6 +78,6 @@ public class AndroidKvAdapter internal constructor(directory: Path) : KeyValueBa
     public companion object {
         /** `<filesDir>/undra/<namespace>/kv`: the directory of [context]'s application for the core [namespace]. */
         public fun directoryOf(context: Context, namespace: String): File =
-            File(context.applicationContext.filesDir, "undra/$namespace/kv")
+            File(context.applicationContext.filesDir, "undra/${CoreNamespace.requireForStores(namespace)}/kv")
     }
 }

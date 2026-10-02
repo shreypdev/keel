@@ -103,11 +103,19 @@ export function waSqliteAdapter(options: WaSqliteAdapterOptions = {}): DbAdapter
   return {
     async open(name, scope) {
       const namespace = scope?.namespace ?? UNNAMED_NAMESPACE;
+      let wanted: string;
+      try {
+        // A namespace is a path component of the pool's directory: a bad one (this entry is public, and the worker is
+        // told it by a message) is a typed refusal, never a path.
+        wanted = options.directory ?? storePath(namespace, "db");
+      } catch (error) {
+        throw new DbError.Unavailable(error instanceof Error ? error.message : String(error));
+      }
       if (engine === null) {
         // The pool of the first core to ask: one worker serves one core's directory (the pool holds it open), and
         // every core of a page has a worker of its own (`waSqliteDb()` makes one per core).
         served = namespace;
-        engine = load(options.directory ?? storePath(namespace, "db"));
+        engine = load(wanted);
       } else if (options.directory === undefined && storage === "opfs" && served !== namespace) {
         throw new DbError.Unavailable(
           `this database worker keeps the databases of the core \`${served}\` (${storePath(served ?? undefined, "db")}), not those of \`${namespace}\`: give each core its own waSqliteDb(), or set \`directory\``,

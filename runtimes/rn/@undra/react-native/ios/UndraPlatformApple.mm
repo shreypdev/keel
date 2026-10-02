@@ -263,7 +263,11 @@ class ApplePlatform final : public Platform {
 
 } // namespace
 
-std::unique_ptr<Platform> makePlatform(const std::string &name_space, std::string & /*error*/) {
+std::unique_ptr<Platform> makePlatform(const std::string &name_space, std::string &error) {
+  if (!validStorageNamespace(name_space)) {
+    error = invalidStorageNamespace(name_space);
+    return nullptr;
+  }
   return std::make_unique<ApplePlatform>(name_space);
 }
 

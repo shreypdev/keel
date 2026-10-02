@@ -3,6 +3,7 @@ package dev.undra.android
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import dev.undra.runtime.CoreNamespace
 import dev.undra.runtime.PortImpl
 import dev.undra.runtime.adapters.FileKv
 import dev.undra.runtime.adapters.KeyValueBackend
@@ -189,11 +190,11 @@ public class AndroidSecureStoreAdapter internal constructor(
         public const val DEFAULT_KEY_ALIAS: String = "dev.undra.securestore"
 
         /** The default Keystore alias of the core [namespace]: `<namespace>.dev.undra.securestore`. */
-        public fun keyAliasOf(namespace: String): String = "$namespace.$DEFAULT_KEY_ALIAS"
+        public fun keyAliasOf(namespace: String): String = "${CoreNamespace.requireForStores(namespace)}.$DEFAULT_KEY_ALIAS"
 
         /** `<noBackupFilesDir>/undra/<namespace>/secure`: the directory of [context]'s application for the core [namespace]. */
         public fun directoryOf(context: Context, namespace: String): File =
-            File(context.applicationContext.noBackupFilesDir, "undra/$namespace/secure")
+            File(context.applicationContext.noBackupFilesDir, "undra/${CoreNamespace.requireForStores(namespace)}/secure")
 
         private const val KEY_LOCK_FILE = ".keystore.lock"
         private const val KEYSTORE = "AndroidKeyStore"

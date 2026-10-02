@@ -1,5 +1,6 @@
 package dev.undra.runtime.adapters
 
+import dev.undra.runtime.CoreNamespace
 import dev.undra.runtime.PortImpl
 import dev.undra.runtime.Platform
 import java.nio.file.Path
@@ -54,7 +55,7 @@ public object JvmAdapters {
      * The data directory of the core [namespace]: `<dataDir>/<namespace>`, [defaultDataDir] being `<dataDir>`. What
      * `UndraCore.load` keeps that core's `kv`, `secure`, `fs` and `db` under, so that two cores never share them.
      */
-    public fun defaultDataDir(namespace: String): Path = defaultDataDir().resolve(namespace)
+    public fun defaultDataDir(namespace: String): Path = defaultDataDir().resolve(CoreNamespace.requireForStores(namespace))
 
     /**
      * Every adapter of the table above, with file-backed ones under [dataDir] (`<dataDir>/kv`, `<dataDir>/secure`,

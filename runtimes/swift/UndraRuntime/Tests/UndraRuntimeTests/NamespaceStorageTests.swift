@@ -161,4 +161,66 @@ final class NamespaceStorageTests: XCTestCase {
         XCTAssertEqual(db.fileURL(forDatabase: "x", namespace: a).path, directory.appendingPathComponent("x.sqlite").path)
         XCTAssertTrue(db.scoped(toNamespace: b) as AnyObject === db)
     }
+
+    // MARK: A namespace from outside the table is a path component
+
+    /// What an app can hand `LoadOptions.namespace`, and no core has: each would become a directory name.
+    private let badNamespaces: [(String, String)] = [
+        ("..", "dot dot"), (".", "dot"), ("a/b", "slash"), ("a\\b", "backslash"), ("../escape", "traversal"), ("", "empty"),
+        (String(repeating: "a", count: 33), "33 bytes"), ("Upper", "uppercase"), ("1abc", "starts with a digit"), ("_", "an explicit underscore"),
+        ("caf\u{e9}", "unicode"), ("a\u{0}b", "a NUL byte"), ("with space", "a space"), ("with-dash", "a dash"), ("a.b", "a dot"),
+    ]
+
+    func testAGoodNamespaceIsAccepted() {
+        for namespace in ["a", "playground_core", String(repeating: "a", count: 32), "a1_b2"] {
+            XCTAssertNil(CoreNamespace.problem(namespace), namespace)
+        }
+    }
+
+    func testABadNamespaceIsRefusedTypedBeforeAnythingIsStarted() {
+        for (namespace, why) in badNamespaces {
+            var options = LoadOptions.inproc(adapters: Adapters.none, expectedSchemaHash: 0x1234)
+            options.namespace = namespace
+            let transport = FakeTransport()
+            XCTAssertThrowsError(try UndraCore.connect(transport: transport, options: options), why) { error in
+                guard case .invalidNamespace(let reason)? = error as? UndraLoadError else {
+                    return XCTFail("\(why): \(error)")
+                }
+                XCTAssertTrue(reason.contains("namespace"), reason)
+                XCTAssertLessThan(reason.count, 400, "a long one is shown shortened")
+            }
+            XCTAssertFalse(transport.wasStarted, "\(why): the transport was not started")
+            XCTAssertThrowsError(try UndraCore.load(options), why) { error in
+                XCTAssertTrue(error is UndraLoadError, "\(why): \(error)")
+            }
+        }
+    }
+
+    func testATablesBadNamespaceIsRefusedBeforeInitAndTheClaim() throws {
+        FakeCore.reset()
+        for (namespace, why) in badNamespaces where !namespace.contains("\u{0}") && !namespace.isEmpty {
+            let table = FakeCoreTable(namespace: namespace)
+            XCTAssertThrowsError(try UndraCore.load(.inproc(api: table.pointer, adapters: Adapters.none, expectedSchemaHash: 0xFA4E_C0DE_0000_0001)), why) { error in
+                guard case .invalidNamespace? = error as? UndraLoadError else {
+                    return XCTFail("\(why): \(error)")
+                }
+            }
+            XCTAssertFalse(FakeCore.initialised, "\(why): init did not run")
+            XCTAssertFalse(InprocTransport.isClaimed(namespace), "\(why): nothing was claimed")
+        }
+    }
+
+    // MARK: The layout one namespace has on Apple, as the React Native module spells it
+
+    func testTheLayoutOfOneNamespaceIsTheLiteralTheReactNativeModuleChecks() {
+        // `cpp/test/apple_platform_test.mm` asserts these same suffixes of the React Native module's paths: the two shells of an app
+        // keep a core's data in one place, whichever of them wrote it.
+        let tail = { (store: String) in StorageLocations.directory(namespace: "playground_a", store: store).path }
+        XCTAssertTrue(tail("kv").hasSuffix("/Undra/playground_a/kv"), tail("kv"))
+        XCTAssertTrue(tail("fs").hasSuffix("/Undra/playground_a/fs"), tail("fs"))
+        XCTAssertTrue(tail("db").hasSuffix("/Undra/playground_a/db"), tail("db"))
+        XCTAssertEqual(StorageLocations.keychainService(namespace: "playground_a"), "playground_a.dev.undra.securestore")
+        XCTAssertTrue(KvAdapter.defaultDirectory(namespace: "playground_a", named: "kv").path.hasSuffix("/Undra/playground_a/kv"))
+        XCTAssertTrue(SQLiteDbAdapter.defaultDirectory(namespace: "playground_a").path.hasSuffix("/Undra/playground_a/db"))
+    }
 }

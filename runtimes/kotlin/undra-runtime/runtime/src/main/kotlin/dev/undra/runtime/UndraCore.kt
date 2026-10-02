@@ -47,7 +47,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
         /**
          * The [namespace] of a core that was loaded without one (a test double, a [Mode.REMOTE] core loaded without its
          * generated entry): `_`, which no real namespace is (a namespace starts with a lowercase letter), so it never
-         * collides with a core's.
+         * collides with a core's. Two cores loaded without one share the stores of `_`; a generated entry always sets one.
          */
         public const val UNNAMED_NAMESPACE: String = "_"
 
@@ -122,7 +122,8 @@ public open class UndraCore protected constructor() : AutoCloseable {
          * handshake, and [native] is not used; see [Mode.REMOTE] for its limits.
          *
          * @throws UndraSchemaMismatchException if the core's schema hash differs.
-         * @throws UndraModeException if [LoadOptions.expectedSchemaHash] is not set, or [options] contradict each other.
+         * @throws UndraModeException if [LoadOptions.expectedSchemaHash] is not set, [options] contradict each other, or
+         *   [LoadOptions.namespace] (or the natives') is not a core namespace ([CoreNamespace]): it names the default stores.
          * @throws UndraException if the core cannot be started or reached (its library is missing, it speaks another
          *   ABI version, or a core with its namespace is already loaded).
          */
@@ -134,6 +135,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
          */
         internal fun start(options: LoadOptions, native: (() -> NativeApi)?): UndraCore {
             checkModeOptions(options)
+            checkNamespace(options.namespace)
             if (options.expectedSchemaHash == null) throw missingSchemaHash()
             val transport = createTransport(options, native)
             // The namespace the default stores are kept under: the entry's, else the natives' own.
@@ -159,6 +161,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
          * schema hash and compares it with [LoadOptions.expectedSchemaHash].
          */
         internal fun attach(transport: Transport, options: LoadOptions, makeShared: Boolean): UndraCore {
+            checkNamespace(options.namespace)
             val core = ConnectedCore(
                 transport,
                 options.remoteTimeout,
@@ -205,6 +208,16 @@ public open class UndraCore protected constructor() : AutoCloseable {
                     throw UndraModeException("Mode.INPROC does not use remoteUrl (${options.remoteUrl}); did you mean Mode.REMOTE?")
                 }
                 Mode.REMOTE -> remoteUri(options)
+            }
+        }
+
+        /** The namespace names the default stores' directories (ADR-044 amendment A): refused before anything starts. */
+        private fun checkNamespace(namespace: String?) {
+            if (namespace == null) return
+            try {
+                CoreNamespace.require(namespace)
+            } catch (e: IllegalArgumentException) {
+                throw UndraModeException("LoadOptions.namespace: ${e.message}")
             }
         }
 

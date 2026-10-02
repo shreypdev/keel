@@ -183,7 +183,9 @@ run adb_ shell am force-stop "$APP"
 launch notes
 wait_for 20 "the note came back from SQLite after the restart" note_kept || failed=1
 echo "database files (run-as $APP ls databases): $(adb_ shell run-as "$APP" ls databases 2>/dev/null | tr '\n' ' ')"
-adb_ shell run-as "$APP" ls databases 2>/dev/null | grep -q "undra-playground.sqlite" || { echo "no undra-playground.sqlite"; failed=1; }
+# Per core namespace (ADR-044 amendment A): undra-<namespace>-<database>.sqlite, the core being playground_core.
+DB_FILE="undra-playground_core-playground.sqlite"
+adb_ shell run-as "$APP" ls databases 2>/dev/null | grep -qF "$DB_FILE" || { echo "no $DB_FILE"; failed=1; }
 screenshot notes-restarted
 
 # ---- 3. the offline story on the Remote tab -----------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { browserAdapters } from "./adapters/browser.js";
-import { UNNAMED_NAMESPACE } from "./adapters/names.js";
+import { UNNAMED_NAMESPACE, checkNamespace } from "./adapters/names.js";
 import { standardPorts, startEventSources, timerPort } from "./adapters/ports.js";
 import { PortIds } from "./adapters/ids.js";
 import { WEB_CRYPTO_REQUIRED, consoleLog, hasCryptoRandom } from "./adapters/system.js";
@@ -111,8 +111,10 @@ export interface AttachOptions {
    * The namespace of the core (`UndraIds.namespace`, `[core] namespace` in undra.toml), which the default `Kv`, `SecureStore`,
    * `Fs` and `Db` stores are kept under: IndexedDB `undra.<namespace>.kv`, the origin-private-file-system directory
    * `undra/<namespace>/fs`, and so on (SPEC 8, ADR-044 amendment A), so two cores of one page never share a store. The
-   * generated entry (`Undra<Namespace>.load`, `.attach`) fills it in. Default `"_"`. An adapter you give (`adapters`,
-   * `ports`) keeps its own location.
+   * generated entry (`Undra<Namespace>.load`, `.attach`) fills it in. Default `"_"`, which two cores that are loaded without one
+   * share, and a generated entry always sets one. It is the rule of `undra.toml`: lowercase letters, digits and `_`, starting
+   * with a letter, at most 32; anything else (`..`, `a/b`, an empty one) is refused with `UndraError("options")` by `load` and
+   * `attach`. An adapter you give (`adapters`, `ports`) keeps its own location.
    */
   readonly namespace?: string;
   /**
@@ -368,9 +370,13 @@ export class UndraCore {
    * The wasm modes need WebCrypto (`crypto.getRandomValues`): without it `load`
    * rejects with `UndraTransportError("unsupported", "WebCrypto is required ...")`
    * before anything is instantiated (ADR-049), unless `adapters.rng` supplies the
-   * random source (`wasm-main` only).
+   * random source (`wasm-main` only). A `namespace` that is not a core namespace (lowercase letters, digits and `_`, starting
+   * with a letter, at most 32: `..`, `a/b`, an empty or a long one) rejects with `UndraError("options")` before anything is
+   * created, because it names the default stores.
    */
   static async load(options: LoadOptions): Promise<UndraCore> {
+    // The namespace is a path component of the default stores: refused before anything is created (ADR-044 amendment A).
+    checkNamespace(options.namespace);
     const adapters = mergeAdapters(browserAdapters({ namespace: options.namespace }), options.adapters);
     // The worker keeps the snapshots of a core in `wasm-worker` mode: it is told the policy (data, not code).
     const recovery = options.recovery?.options;
@@ -440,10 +446,16 @@ export class UndraCore {
    * Runs a core over a transport you provide (an embedder's IPC channel, a
    * test double) instead of one of the built-in modes. Everything else is as
    * for {@link UndraCore.load}, including the schema check on the transport's
-   * `Hello`.
+   * `Hello`; a `namespace` that is not a core namespace rejects as it does for {@link UndraCore.load}.
    */
   static attach(transport: Transport, options: AttachOptions): Promise<UndraCore> {
-    return UndraCore.#attach(transport, options, mergeAdapters(browserAdapters({ namespace: options.namespace }), options.adapters));
+    try {
+      // Refused (the promise rejects, the transport is not touched) before it can reach a store name.
+      checkNamespace(options.namespace);
+      return UndraCore.#attach(transport, options, mergeAdapters(browserAdapters({ namespace: options.namespace }), options.adapters));
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   static async #attach(transport: Transport, options: AttachOptions, adapters: Partial<Adapters>): Promise<UndraCore> {

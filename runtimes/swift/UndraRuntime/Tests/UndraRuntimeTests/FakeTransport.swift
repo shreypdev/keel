@@ -237,6 +237,12 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
 
     // MARK: Observations
 
+    var wasStarted: Bool {
+        return state.withLock { (current: inout State) -> Bool in
+            return current.started
+        }
+    }
+
     var wasShutDown: Bool {
         return state.withLock { (current: inout State) -> Bool in
             return current.shutDown

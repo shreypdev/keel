@@ -15,6 +15,7 @@ import android.database.sqlite.SQLiteException
 import android.database.sqlite.SQLiteFullException
 import android.database.sqlite.SQLiteProgram
 import android.database.sqlite.SQLiteReadOnlyDatabaseException
+import dev.undra.runtime.CoreNamespace
 import dev.undra.runtime.adapters.DbAdapter
 import dev.undra.runtime.adapters.DbConnection
 import dev.undra.runtime.adapters.DbConstraint
@@ -60,7 +61,7 @@ public class AndroidDbAdapter private constructor(private val fileOf: (String) -
      * [namespace] being the core's (`UndraCore.namespace`).
      */
     public constructor(context: Context, namespace: String) :
-        this({ name -> context.applicationContext.getDatabasePath(fileNameOf(namespace, name)) })
+        this(databaseFiles(context.applicationContext, CoreNamespace.requireForStores(namespace)))
 
     /** Databases in [directory] (`<directory>/undra-<name>.sqlite`), for tests. */
     public constructor(directory: File) : this({ name -> File(directory, "undra-$name.sqlite") })
@@ -104,7 +105,11 @@ public class AndroidDbAdapter private constructor(private val fileOf: (String) -
     /** Where the default adapter keeps a core's databases. */
     public companion object {
         /** The file name of database [name] of the core [namespace] in the app's database directory: `undra-<namespace>-<name>.sqlite`. */
-        public fun fileNameOf(namespace: String, name: String): String = "undra-$namespace-$name.sqlite"
+        public fun fileNameOf(namespace: String, name: String): String =
+            "undra-${CoreNamespace.requireForStores(namespace)}-$name.sqlite"
+
+        private fun databaseFiles(context: Context, namespace: String): (String) -> File =
+            { name -> context.getDatabasePath(fileNameOf(namespace, name)) }
 
         private val threadIds = AtomicInteger(1)
     }

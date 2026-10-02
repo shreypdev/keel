@@ -152,6 +152,34 @@ public final class PureTest {
         String file = StoreNames.databaseFileName("a", "b-c");
         check("a".equals(file.substring("undra-".length(), file.indexOf('-', "undra-".length()))), "a namespace has no '-': the first one after undra- ends it, whatever the database is called");
         ok("the store names carry the core's namespace: Keystore alias, secure directory, database file");
+
+        // A namespace that is not one never becomes a path, an alias or a file name (review of ns-storage).
+        String[] bad = {"..", ".", "a/b", "a\\b", "../x", "", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "Upper", "1abc", "_", "_x", "caf\u00e9", "a\u0000b", "with space", "with-dash", "a.b"};
+        for (String namespace : bad) {
+            boolean refused = false;
+            try {
+                StoreNames.keyAlias(namespace);
+            } catch (IllegalArgumentException refusal) {
+                refused = true;
+            }
+            check(refused, "the Keystore alias refuses the namespace " + Arrays.toString(namespace.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            refused = false;
+            try {
+                StoreNames.securePath(namespace);
+            } catch (IllegalArgumentException refusal) {
+                refused = true;
+            }
+            check(refused, "the secure directory refuses it");
+            refused = false;
+            try {
+                StoreNames.databaseFileName(namespace, "notes");
+            } catch (IllegalArgumentException refusal) {
+                refused = true;
+            }
+            check(refused, "the database file refuses it");
+        }
+        check("a1_b2".equals(StoreNames.checked("a1_b2")) && StoreNames.checked("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").length() == 32, "32 lowercase letters, digits and '_' are accepted");
+        ok("a namespace that is not a core namespace is refused before it names a store");
         System.out.println("# " + checks + " checks passed");
     }
 }

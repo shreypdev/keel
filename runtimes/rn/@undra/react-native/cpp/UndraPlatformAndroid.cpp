@@ -648,6 +648,10 @@ thread_local bool AndroidPlatform::attached_ = false;
 } // namespace
 
 std::unique_ptr<Platform> makePlatform(const std::string &name_space, std::string &error) {
+  if (!validStorageNamespace(name_space)) {
+    error = invalidStorageNamespace(name_space);
+    return nullptr;
+  }
   try {
     if (!resolveJava(error)) return nullptr;
     JNIEnv *env = facebook::jni::Environment::current();

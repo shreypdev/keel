@@ -76,6 +76,19 @@ int main() {
   check(dbB->describe().find("/Undra/playground_b/db") != std::string::npos && dbA->describe() != dbB->describe(), "the other core's databases are its own");
   ok("Db: .../Undra/<namespace>/db/<name>.sqlite, one per core");
 
+  // A namespace that is not a core's is refused before a path is made from it (review of ns-storage): `..` and `/` would
+  // leave the app's directory, an upper case one differs from another only in case on Apple's file systems.
+  const std::string tooLong(33, 'a');
+  const std::string withNul("a\0b", 3);
+  for (const std::string &bad : {std::string(".."), std::string("."), std::string("a/b"), std::string("a\\b"), std::string("../x"), std::string(""),
+           tooLong, std::string("Upper"), std::string("1abc"), std::string("_"), std::string("_x"), std::string("caf\xc3\xa9"), withNul,
+           std::string("with space"), std::string("with-dash"), std::string("a.b")}) {
+    std::string refused;
+    check(makePlatform(bad, refused) == nullptr && !refused.empty(), "a namespace of `" + bad + "` is refused with a message");
+  }
+  check(makePlatform(std::string(32, 'a'), error) != nullptr && makePlatform("a1_b2", error) != nullptr, "32 lowercase letters, digits and `_` are accepted");
+  ok("the namespace is checked before it becomes a path or a service name");
+
   std::printf("# %d checks\n", g_checks);
   return 0;
 }
