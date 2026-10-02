@@ -1,9 +1,10 @@
-import { UndraTransportError, UndraModeError } from "./errors.js";
+import { UndraModeError, UndraReplyError, UndraTransportError } from "./errors.js";
 import type { UndraCore } from "./core.js";
 import { Signal, batch } from "./signal.js";
 import {
   CallTarget,
   type Codec,
+  ReplyStatus,
   type Handle,
   type LazyPage,
   decodeLazyPage,
@@ -79,10 +80,11 @@ function asPositiveInt(name: string, value: number, max: number): number {
  * at a newer version raises the list's version (the change that follows then says nothing new). When the core
  * restarts the list under a new handle the cache is dropped.
  *
- * **Failing.** A reply that cannot be decoded, a page call the core refuses, a transport that is down: each is
- * reported through the core's error channel (`UndraCore.report`, so `onError`), never thrown into the reader. The
- * page stays absent (`get` returns `undefined`) and is not requested again until the list changes or `prefetch`
- * asks for it.
+ * **Failing.** A reply that cannot be decoded, a transport that is down, a core that panics: each is reported through
+ * the core's error channel (`UndraCore.report`, so `onError`), never thrown into the reader. The page stays absent
+ * (`get` returns `undefined`) and is not requested again until the list changes or `prefetch` asks for it. A page
+ * call the core refuses as a bad request means its page server is gone (the store was closed while a page was asked
+ * for, or the core restarted): that is not reported, the list stops asking, and the next value names a new server.
  */
 export class LazyList<T> {
   /** The number of rows, as of the last value or change the core sent. */
@@ -121,6 +123,8 @@ export class LazyList<T> {
   private _last = -1;
   /** Whether the transport answers `callSync` (`undefined` until the first request finds out). */
   private _sync: boolean | undefined = undefined;
+  /** Set when the core refused a page call (its page server is gone: the store was closed, the core restarted); a value revives it. */
+  private _gone = false;
 
   /**
    * @param core The core the list's page server lives in.
@@ -161,6 +165,14 @@ export class LazyList<T> {
     batch(() => {
       if (this._evict()) this._bump();
     });
+  }
+
+  /**
+   * The version of the list the host has seen: that of the last value, invalidation or page reply that raised it (0
+   * before the first value). It increases with every change of the list; tests and tools read it, a view has no use for it.
+   */
+  get version(): bigint {
+    return this._version;
   }
 
   /**
@@ -224,6 +236,7 @@ export class LazyList<T> {
     const value = readLazyValue(reader);
     reader.finish();
     batch(() => {
+      this._gone = false;
       if (value.handle !== this._handle) {
         this._handle = value.handle;
         this._len = value.len;
@@ -307,7 +320,7 @@ export class LazyList<T> {
 
   /** Queues a request for page `at` unless it is queued, in flight or failed; the next microtask sends the queue. */
   private _want(at: number): void {
-    if (this._queued.has(at) || this._inflight.has(at) || this._failed.has(at)) return;
+    if (this._gone || this._queued.has(at) || this._inflight.has(at) || this._failed.has(at)) return;
     this._queued.add(at);
     if (!this._scheduled) {
       this._scheduled = true;
@@ -381,6 +394,13 @@ export class LazyList<T> {
     if (generation !== this._generation) return;
     this._inflight.delete(at);
     this._failed.add(at);
+    // A refusal means the page server is gone, which is what closing the store (a view unmounting while a page was asked for) does:
+    // the list stops asking, quietly, until a value names a page server again. Anything else is a failure somebody should hear of.
+    if (error instanceof UndraReplyError && error.status === ReplyStatus.BadRequest) {
+      this._gone = true;
+      this._queued.clear();
+      return;
+    }
     this._report(error);
   }
 
