@@ -111,8 +111,7 @@ public final class FeedQueryHandle: UndraStore, @unchecked Sendable {
     /// next page.
     public func loadMore(ifNeededFor item: Post, threshold: Int = 5) {
         guard hasNextPage, !fetchingNextPage,
-              let index = data.lastIndex(where: { $0.id == item.id }),
-              index >= data.count - threshold
+              data.suffix(max(threshold, 0)).contains(where: { $0.id == item.id })
         else { return }
         fetchNextPage()
     }
@@ -470,8 +469,7 @@ public final class SearchQueryHandle: UndraStore, @unchecked Sendable {
     /// next page.
     public func loadMore(ifNeededFor item: Hit, threshold: Int = 5) {
         guard hasNextPage, !fetchingNextPage,
-              let index = data.lastIndex(where: { $0.slug == item.slug }),
-              index >= data.count - threshold
+              data.suffix(max(threshold, 0)).contains(where: { $0.slug == item.slug })
         else { return }
         fetchNextPage()
     }

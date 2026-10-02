@@ -1229,16 +1229,14 @@ impl<'a> Checker<'a> {
                         why: "Kotlin and TypeScript cannot tell `Some(None)` from `None`".to_owned(),
                         help: "wrap the inner option in a record or an enum that names the two cases".to_owned(),
                     });
-                } else if self.is_newtype_of_option(inner) {
-                    // A newtype is its inner type on the wire and a wrapper on the platforms, but
-                    // TypeScript brands only what is there: a branded `T | null` cannot say
-                    // `null` apart from "absent", and Kotlin's `Name?` of a `Name(String?)`
-                    // reads as an option of an option.
+                } else if let (true, TypeRef::Named(newtype)) =
+                    (self.is_newtype_of_option(inner), &**inner)
+                {
                     self.errors.push(BindgenError::Unsupported {
                         at: at.to_owned(),
-                        what: format!("the option `{ty}` of a newtype that wraps an option"),
-                        why: "that is a nested option on the wire, and TypeScript cannot tell `Some(None)` from `None` there".to_owned(),
-                        help: "make the newtype wrap the value instead of an `Option`, or wrap the option in a record or an enum that names the two cases".to_owned(),
+                        what: format!("`Option<{newtype}>`, an option of a newtype that wraps an option"),
+                        why: "that is an option of an option on the wire, and Kotlin and TypeScript cannot tell `Some(None)` from `None`".to_owned(),
+                        help: format!("make `{newtype}` wrap the value instead of an `Option`, or wrap the option in a record or an enum that names the two cases"),
                     });
                 }
                 self.check_value_type(inner, at);

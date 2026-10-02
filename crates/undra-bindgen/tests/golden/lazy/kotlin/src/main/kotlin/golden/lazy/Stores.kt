@@ -125,6 +125,13 @@ class Library internal constructor(core: UndraCore, handle: Long) : UndraStore(c
         core.observe(handle, signalId, true)
     }
 
+    /** Stops the lazy lists from paging, then releases the store. */
+    override fun close() {
+        books.close()
+        recent.close()
+        super.close()
+    }
+
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         operator fun invoke(ctx: UndraCore = UndraGoldenLazy.core): Library = create(ctx)

@@ -1442,9 +1442,8 @@ impl SwiftGen<'_> {
             |w| {
                 w.line("guard hasNextPage, !fetchingNextPage,");
                 w.line(format!(
-                    "      let index = data.lastIndex(where: {{ $0.{key} == item.{key} }}),"
+                    "      data.suffix(max(threshold, 0)).contains(where: {{ $0.{key} == item.{key} }})"
                 ));
-                w.line("      index >= data.count - threshold");
                 w.line("else { return }");
                 w.line("fetchNextPage()");
             },

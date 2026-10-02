@@ -62,6 +62,22 @@
       "docs": "A length: it has an order."
     },
     {
+      "name": "Span",
+      "type_id": 2879928289,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "named",
+            "of": "Meters"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "A newtype of a newtype with an order is ordered too."
+    },
+    {
       "name": "Timeout",
       "type_id": 2195291688,
       "fields": [
@@ -421,6 +437,14 @@
           "ty": {
             "kind": "named",
             "of": "Maybe"
+          },
+          "default": false
+        },
+        {
+          "name": "reach",
+          "ty": {
+            "kind": "named",
+            "of": "Span"
           },
           "default": false
         }

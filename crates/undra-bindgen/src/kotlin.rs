@@ -1605,6 +1605,26 @@ impl<'a> Ctx<'a> {
                     w.blank();
                     self.store_apply(w, &o.name, &signals);
                 }
+                // The lazy lists page through the core: they stop with the store.
+                let lazy: Vec<String> = signals
+                    .iter()
+                    .filter(|g| matches!(g.ty, TypeRef::Lazy(_)))
+                    .map(|g| ident(&g.name))
+                    .collect();
+                if !lazy.is_empty() {
+                    w.blank();
+                    kdoc(
+                        w,
+                        "Stops the lazy lists from paging, then releases the store.",
+                        &[],
+                    );
+                    w.block("override fun close()", |w| {
+                        for name in &lazy {
+                            w.line(format!("{name}.close()"));
+                        }
+                        w.line("super.close()");
+                    });
+                }
                 if o.constructors.is_empty() {
                     // Only the core makes it: a method returns it (ADR-040).
                     return;

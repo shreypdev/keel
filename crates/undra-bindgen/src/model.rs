@@ -913,7 +913,7 @@ pub fn doc_lines(docs: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use undra_meta::FieldDef;
+    use undra_meta::{FieldDef, InfiniteDef};
 
     use super::*;
 
@@ -991,10 +991,242 @@ mod tests {
         assert_eq!(parse_message(&named, "").unwrap(), vec![]);
     }
 
+    fn newtype(name: &str, inner: TypeRef) -> RecordDef {
+        RecordDef {
+            name: name.into(),
+            type_id: ids::type_id(name),
+            fields: vec![FieldDef {
+                name: "value".into(),
+                ty: inner,
+                default: false,
+                docs: String::new(),
+            }],
+            transparent: true,
+            docs: String::new(),
+        }
+    }
+
+    fn model_of(records: Vec<RecordDef>) -> Model {
+        let mut schema = Schema::new("t");
+        schema.records = records;
+        Model::new(&schema, Lang::Swift, false)
+    }
+
+    #[test]
+    fn a_newtype_resolves_to_the_innermost_type_and_is_ordered_when_that_is() {
+        let model = model_of(vec![
+            newtype("UserId", TypeRef::Uuid),
+            newtype("Owner", TypeRef::named("UserId")),
+            newtype("Meters", TypeRef::F64),
+            newtype("Span", TypeRef::named("Meters")),
+            newtype("Tags", TypeRef::vec(TypeRef::String)),
+            RecordDef {
+                transparent: false,
+                ..newtype("Plain", TypeRef::U8)
+            },
+        ]);
+        assert_eq!(
+            model.resolve_newtypes(&TypeRef::named("Owner")),
+            &TypeRef::Uuid
+        );
+        assert_eq!(model.resolve_newtypes(&TypeRef::U8), &TypeRef::U8);
+        // A record that is not a newtype is not peeled, and neither is what a newtype holds in a list.
+        assert_eq!(
+            model.resolve_newtypes(&TypeRef::named("Plain")),
+            &TypeRef::named("Plain")
+        );
+        assert_eq!(
+            model.resolve_newtypes(&TypeRef::named("Tags")),
+            &TypeRef::vec(TypeRef::String)
+        );
+        for ordered in ["Meters", "Span"] {
+            assert!(model.is_ordered(&TypeRef::named(ordered)), "{ordered}");
+        }
+        for unordered in ["UserId", "Owner", "Tags", "Plain"] {
+            assert!(!model.is_ordered(&TypeRef::named(unordered)), "{unordered}");
+        }
+        // The scalars of ADR-042's list, and only those.
+        for ty in [
+            TypeRef::I8,
+            TypeRef::U64,
+            TypeRef::F32,
+            TypeRef::String,
+            TypeRef::Timestamp,
+            TypeRef::Duration,
+            TypeRef::Decimal,
+        ] {
+            assert!(model.is_ordered(&ty), "{ty}");
+        }
+        for ty in [TypeRef::Bool, TypeRef::Uuid, TypeRef::Bytes] {
+            assert!(!model.is_ordered(&ty), "{ty}");
+        }
+    }
+
+    #[test]
+    fn a_cycle_of_newtypes_resolves_in_bounded_time() {
+        let model = model_of(vec![
+            newtype("A", TypeRef::named("B")),
+            newtype("B", TypeRef::named("A")),
+        ]);
+        let _ = model.resolve_newtypes(&TypeRef::named("A"));
+        assert!(!model.is_ordered(&TypeRef::named("A")));
+    }
+
+    fn infinite_schema() -> Schema {
+        let mut schema = Schema::new("t");
+        schema.records.push(RecordDef {
+            name: "Post".into(),
+            type_id: ids::type_id("Post"),
+            fields: vec![FieldDef {
+                name: "id".into(),
+                ty: TypeRef::U64,
+                default: false,
+                docs: String::new(),
+            }],
+            transparent: false,
+            docs: String::new(),
+        });
+        schema.queries.push(QueryDef {
+            name: "feed".into(),
+            query_id: ids::query_id("feed"),
+            kind: QueryKind::Query,
+            key: "feed".into(),
+            params: Vec::new(),
+            returns: TypeRef::vec(TypeRef::named("Post")),
+            stale_ms: None,
+            persist: false,
+            idempotent: false,
+            interval_ms: None,
+            poll_in_background: false,
+            infinite: Some(InfiniteDef {
+                cursor: TypeRef::String,
+                item_key: "id".into(),
+            }),
+        });
+        schema
+    }
+
+    #[test]
+    fn every_handle_gets_the_poll_method_and_an_infinite_one_its_paging() {
+        let mut schema = infinite_schema();
+        let mut plain = schema.queries[0].clone();
+        plain.name = "latest".into();
+        plain.query_id = ids::query_id("latest");
+        plain.infinite = None;
+        plain.returns = TypeRef::named("Post");
+        schema.queries.push(plain);
+        let model = Model::new(&schema, Lang::Kotlin, false);
+        let handle = |name: &str| {
+            model
+                .query_handles
+                .iter()
+                .find(|h| h.name == name)
+                .unwrap_or_else(|| panic!("no handle {name}"))
+        };
+        let methods = |h: &ObjectDef| -> Vec<(String, u32)> {
+            h.methods
+                .iter()
+                .map(|m| (m.name.clone(), m.method_id))
+                .collect()
+        };
+        let signals = |h: &ObjectDef| -> Vec<(u32, String, Option<String>)> {
+            h.store
+                .iter()
+                .flat_map(|s| s.signals.iter())
+                .map(|g| (g.signal_id, g.name.clone(), g.key.clone()))
+                .collect()
+        };
+        let poll = (
+            "set_poll_interval".to_owned(),
+            ids::SET_POLL_INTERVAL_METHOD_ID,
+        );
+        let latest = handle("LatestQueryHandle");
+        assert_eq!(
+            methods(latest),
+            [
+                ("refetch".to_owned(), QUERY_REFETCH_ID),
+                ("invalidate".to_owned(), QUERY_INVALIDATE_ID),
+                poll.clone()
+            ]
+        );
+        assert_eq!(
+            latest.methods[2].params,
+            [ParamDef {
+                name: "interval".into(),
+                ty: TypeRef::option(TypeRef::Duration)
+            }]
+        );
+        assert_eq!(signals(latest).len(), 5);
+        assert!(signals(latest).iter().all(|(_, _, key)| key.is_none()));
+        assert!(model.infinite("LatestQueryHandle").is_none());
+
+        let feed = handle("FeedQueryHandle");
+        assert_eq!(
+            methods(feed),
+            [
+                ("fetch_next_page".to_owned(), ids::FETCH_NEXT_PAGE_METHOD_ID),
+                ("refetch".to_owned(), QUERY_REFETCH_ID),
+                ("invalidate".to_owned(), QUERY_INVALIDATE_ID),
+                poll
+            ]
+        );
+        assert_eq!(
+            signals(feed),
+            [
+                (0, "data".to_owned(), Some("id".to_owned())),
+                (1, "status".to_owned(), None),
+                (2, "error".to_owned(), None),
+                (3, "fetching".to_owned(), None),
+                (4, "updated_at".to_owned(), None),
+                (5, "has_next_page".to_owned(), None),
+                (6, "fetching_next_page".to_owned(), None),
+            ]
+        );
+        // `data` is the list itself, not an option of one.
+        let data = &feed.store.as_ref().unwrap().signals[0];
+        assert_eq!(data.ty, TypeRef::vec(TypeRef::named("Post")));
+        let infinite = model.infinite("FeedQueryHandle").unwrap();
+        assert_eq!((infinite.item.name.as_str(), infinite.key), ("Post", "id"));
+        assert_eq!(model.identifiable_items(), ["Post"]);
+    }
+
+    #[test]
+    fn an_infinite_query_that_can_fail_keeps_its_typed_error() {
+        // `Result<Vec<T>, E>`: the error type is the handle's, as for any query.
+        let mut schema = infinite_schema();
+        schema.queries[0].returns = TypeRef::result(
+            TypeRef::vec(TypeRef::named("Post")),
+            TypeRef::named("FeedError"),
+        );
+        let model = Model::new(&schema, Lang::Swift, false);
+        let handle = &model.query_handles[0];
+        let error = &handle.store.as_ref().unwrap().signals[2];
+        assert_eq!(error.ty, TypeRef::option(TypeRef::named("FeedError")));
+        assert!(model.infinite(&handle.name).is_some());
+    }
+
+    #[test]
+    fn only_a_key_called_id_makes_the_rows_identifiable() {
+        let mut schema = infinite_schema();
+        schema.records[0].fields[0].name = "slug".into();
+        schema.queries[0].infinite.as_mut().unwrap().item_key = "slug".into();
+        let model = Model::new(&schema, Lang::Swift, false);
+        assert!(model.infinite("FeedQueryHandle").is_some());
+        assert!(model.identifiable_items().is_empty());
+    }
+
     #[test]
     fn query_status_ids_are_the_documented_hashes() {
         assert_eq!(QUERY_REFETCH_ID, ids::fnv1a32("query.refetch"));
         assert_eq!(QUERY_INVALIDATE_ID, ids::fnv1a32("query.invalidate"));
         assert_ne!(QUERY_REFETCH_ID, QUERY_INVALIDATE_ID);
+        assert_eq!(
+            QUERY_SET_POLL_INTERVAL_ID,
+            ids::fnv1a32("QueryHandle.set_poll_interval")
+        );
+        assert_eq!(
+            QUERY_FETCH_NEXT_PAGE_ID,
+            ids::fnv1a32("QueryHandle.fetch_next_page")
+        );
     }
 }

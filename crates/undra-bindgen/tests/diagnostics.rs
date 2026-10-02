@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use common::*;
 use undra_bindgen::{BindgenError, Generator, SwiftObservation, validate};
-use undra_meta::{PortKind, Schema, TypeRef};
+use undra_meta::{InfiniteDef, PortKind, QueryKind, RecordDef, Schema, TypeRef};
 
 type Case = (&'static str, fn() -> Schema);
 
@@ -128,12 +128,18 @@ fn unknown_type() -> Schema {
     s
 }
 
-fn lazy_signal() -> Schema {
+/// `Option<Nickname>` where `struct Nickname(Option<String>)`: an option of an option on the wire.
+fn option_of_a_newtype_of_an_option() -> Schema {
     let mut s = Schema::new("t");
-    s.records.push(record("Item", "", vec![]));
-    s.objects.push(store(
-        object("Feed", "", vec![ctor("Feed", "new", vec![], false)], vec![]),
-        vec![("archive", TypeRef::lazy(named("Item")), false, None)],
+    s.records.push(newtype_record(
+        "Nickname",
+        "",
+        TypeRef::option(TypeRef::String),
+    ));
+    s.records.push(record(
+        "Account",
+        "",
+        vec![field("nickname", TypeRef::option(named("Nickname")))],
     ));
     s
 }
@@ -307,6 +313,82 @@ fn float_map_key() -> Schema {
     s
 }
 
+fn decimal_map_key() -> Schema {
+    let mut s = Schema::new("t");
+    s.records.push(record(
+        "Prices",
+        "",
+        vec![field(
+            "by_amount",
+            TypeRef::map(TypeRef::Decimal, TypeRef::U8),
+        )],
+    ));
+    s
+}
+
+fn newtype_of_a_float_as_a_map_key() -> Schema {
+    let mut s = Schema::new("t");
+    s.records.push(newtype_record("Meters", "", TypeRef::F64));
+    s.records.push(record(
+        "Routes",
+        "",
+        vec![field(
+            "by_length",
+            TypeRef::map(named("Meters"), TypeRef::U8),
+        )],
+    ));
+    s
+}
+
+fn newtype_with_two_fields() -> Schema {
+    let mut s = Schema::new("t");
+    s.records.push(RecordDef {
+        transparent: true,
+        ..record(
+            "UserId",
+            "",
+            vec![field("value", TypeRef::Uuid), field("tenant", TypeRef::U32)],
+        )
+    });
+    s
+}
+
+fn newtype_whose_field_is_not_called_value() -> Schema {
+    let mut s = Schema::new("t");
+    s.records.push(RecordDef {
+        transparent: true,
+        ..record("UserId", "", vec![field("inner", TypeRef::Uuid)])
+    });
+    s
+}
+
+fn infinite_query(returns: TypeRef, item_key: &str) -> Schema {
+    let mut s = Schema::new("t");
+    s.records
+        .push(record("Post", "", vec![field("id", TypeRef::U64)]));
+    let mut feed = query("feed", QueryKind::Query, "feed", vec![], returns, None);
+    feed.infinite = Some(InfiniteDef {
+        cursor: TypeRef::String,
+        item_key: item_key.into(),
+    });
+    s.queries.push(feed);
+    s
+}
+
+fn infinite_query_that_returns_one_record() -> Schema {
+    infinite_query(named("Post"), "id")
+}
+
+fn infinite_query_with_a_key_that_is_not_a_field() -> Schema {
+    infinite_query(TypeRef::vec(named("Post")), "slug")
+}
+
+fn infinite_mutation() -> Schema {
+    let mut s = infinite_query(TypeRef::vec(named("Post")), "id");
+    s.queries[0].kind = QueryKind::Mutation;
+    s
+}
+
 fn error_variant_without_a_message() -> Schema {
     let mut s = Schema::new("t");
     s.enums
@@ -362,7 +444,10 @@ const CASES: &[(&str, &[Case])] = &[
         "E0001",
         &[
             ("an unknown type", unknown_type),
-            ("a lazy signal", lazy_signal),
+            (
+                "an option of a newtype of an option",
+                option_of_a_newtype_of_an_option,
+            ),
             ("a unit field", unit_as_a_field),
         ],
     ),
@@ -377,7 +462,27 @@ const CASES: &[(&str, &[Case])] = &[
         ],
     ),
     ("E0005", &[("a Result in a field", result_in_a_field)]),
-    ("E0006", &[("a float map key", float_map_key)]),
+    (
+        "E0006",
+        &[
+            ("a float map key", float_map_key),
+            ("a decimal map key", decimal_map_key),
+            (
+                "a newtype of a float as a map key",
+                newtype_of_a_float_as_a_map_key,
+            ),
+        ],
+    ),
+    (
+        "E0007",
+        &[
+            ("a newtype with two fields", newtype_with_two_fields),
+            (
+                "a newtype whose field is not called value",
+                newtype_whose_field_is_not_called_value,
+            ),
+        ],
+    ),
     (
         "E0010",
         &[(
@@ -408,6 +513,20 @@ const CASES: &[(&str, &[Case])] = &[
             "callback methods that break the shape",
             callback_method_shapes,
         )],
+    ),
+    (
+        "E0073",
+        &[
+            (
+                "an infinite query that returns one record",
+                infinite_query_that_returns_one_record,
+            ),
+            (
+                "an infinite query whose item_key is not a field",
+                infinite_query_with_a_key_that_is_not_a_field,
+            ),
+            ("an infinite mutation", infinite_mutation),
+        ],
     ),
     (
         "E0050",

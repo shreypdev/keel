@@ -3,9 +3,9 @@ error[undra::E0001]: unknown type `User` referenced at record Todo, field owner
   = help: declare `User` with `#[undra::api]`, or fix the name where it is used
   = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
 
-error[undra::E0001]: a Lazy<T> signal at object Feed, signal archive
-  = note: a lazy list needs a runtime API that SPEC section 17 does not define yet, so no platform could observe it
-  = help: expose the items as a `Vec<T>` signal, or as a method that takes an offset and a limit
+error[undra::E0001]: `Option<Nickname>`, an option of a newtype that wraps an option at record Account, field nickname
+  = note: that is an option of an option on the wire, and Kotlin and TypeScript cannot tell `Some(None)` from `None`
+  = help: make `Nickname` wrap the value instead of an `Option`, or wrap the option in a record or an enum that names the two cases
   = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
 
 error[undra::E0001]: `unit` at record Todo, field marker: Unit is only allowed as a return type or as a variant with no fields, not as a field, parameter or signal type, nor inside option, vec, map or lazy

@@ -269,16 +269,115 @@ fn names_that_are_not_identifiers_are_e0051() {
 
 // ----- E0001 --------------------------------------------------------------------
 
-#[test]
-fn lazy_signals_are_an_explicit_limitation() {
+fn library(signals: Vec<(&str, TypeRef, bool, Option<&str>)>) -> Schema {
     let mut s = Schema::new("t");
-    s.records.push(record("Item", "", vec![]));
+    s.records
+        .push(record("Item", "", vec![field("id", TypeRef::U64)]));
     s.objects.push(store(
         object("S", "", vec![ctor("S", "new", vec![], false)], vec![]),
-        vec![("archive", TypeRef::lazy(named("Item")), false, None)],
+        signals,
+    ));
+    s
+}
+
+#[test]
+fn lazy_signals_are_legal_and_may_be_keyed_or_derived() {
+    // A `Lazy<T>` is a runtime list the platform pages through (ADR-043).
+    let lazy = TypeRef::lazy(named("Item"));
+    let s = library(vec![
+        ("archive", lazy.clone(), false, None),
+        ("keyed", lazy.clone(), false, Some("id")),
+        ("derived", lazy, true, None),
+    ]);
+    assert_eq!(codes(&s), Vec::<&str>::new(), "{}", messages(&s));
+}
+
+#[test]
+fn a_lazy_of_unit_is_still_rejected_and_a_key_needs_a_list() {
+    // The item of a lazy list is a value like any other.
+    let s = library(vec![("archive", TypeRef::lazy(TypeRef::Unit), false, None)]);
+    assert!(!codes(&s).is_empty());
+    // Only a `Vec<T>` or a `Lazy<T>` has a key.
+    let s = library(vec![("one", named("Item"), false, Some("id"))]);
+    assert_eq!(codes(&s), ["E0001"]);
+    assert!(messages(&s).contains("Lazy<T>"), "{}", messages(&s));
+}
+
+#[test]
+fn an_option_of_a_newtype_that_wraps_an_option_is_a_nested_option() {
+    let build = |inner: TypeRef, outer: TypeRef| {
+        let mut s = Schema::new("t");
+        s.records.push(newtype_record("Wraps", "", inner));
+        s.records.push(newtype_record("Again", "", named("Wraps")));
+        s.records.push(record("R", "", vec![field("f", outer)]));
+        s
+    };
+    // `Option<Wraps>` and `Option<Again>` (a newtype of the newtype) where `Wraps(Option<String>)`.
+    for outer in ["Wraps", "Again"] {
+        let s = build(
+            TypeRef::option(TypeRef::String),
+            TypeRef::option(named(outer)),
+        );
+        assert_eq!(codes(&s), ["E0001"], "{outer}");
+        assert!(messages(&s).contains(outer), "{}", messages(&s));
+    }
+    // A newtype of a value is fine in an option, and an option fine inside a list or a map.
+    for (inner, outer) in [
+        (TypeRef::String, TypeRef::option(named("Wraps"))),
+        (
+            TypeRef::option(TypeRef::String),
+            TypeRef::vec(named("Wraps")),
+        ),
+        (
+            TypeRef::option(TypeRef::String),
+            TypeRef::map(TypeRef::U8, named("Wraps")),
+        ),
+        (TypeRef::option(TypeRef::String), named("Wraps")),
+    ] {
+        let s = build(inner, outer);
+        assert_eq!(codes(&s), Vec::<&str>::new(), "{}", messages(&s));
+    }
+    // The same holds for what a query hands to its optional `data`.
+    let mut s = build(TypeRef::option(TypeRef::String), TypeRef::U8);
+    s.queries.push(query(
+        "wrapped",
+        QueryKind::Query,
+        "wrapped",
+        vec![],
+        named("Wraps"),
+        None,
     ));
     assert_eq!(codes(&s), ["E0001"]);
-    assert!(messages(&s).contains("Lazy"));
+}
+
+#[test]
+fn a_newtype_cycle_does_not_hang_validation() {
+    let mut s = Schema::new("t");
+    s.records.push(newtype_record("A", "", named("B")));
+    s.records.push(newtype_record("B", "", named("A")));
+    s.records.push(record(
+        "R",
+        "",
+        vec![field("f", TypeRef::option(named("A")))],
+    ));
+    // Not a shape any Rust type has; all that matters is that this returns.
+    let _ = validate(&s);
+}
+
+#[test]
+fn the_names_of_the_lazy_and_infinite_runtime_types_are_taken() {
+    for name in [
+        "UndraLazyList",
+        "UndraLazyListObject",
+        "LazyList",
+        "InfiniteQuery",
+        "Decimal",
+        "BigDecimal",
+    ] {
+        let mut s = Schema::new("t");
+        s.records.push(record(name, "", vec![]));
+        assert_eq!(codes(&s), ["E0050"], "{name}");
+    }
 }
 
 #[test]

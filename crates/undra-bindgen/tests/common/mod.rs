@@ -2160,6 +2160,11 @@ fn newtypes() -> Schema {
         "A length: it has an order.",
         TypeRef::F64,
     ));
+    s.records.push(newtype_record(
+        "Span",
+        "A newtype of a newtype with an order is ordered too.",
+        named("Meters"),
+    ));
     s.records
         .push(newtype_record("Timeout", "", TypeRef::Duration));
     s.records
@@ -2225,6 +2230,7 @@ fn newtypes() -> Schema {
             field("blob", named("Blob")),
             field("flag", named("Flag")),
             field("maybe", named("Maybe")),
+            field("reach", named("Span")),
         ],
     ));
     s.enums.push(error_def(
