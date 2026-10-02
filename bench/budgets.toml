@@ -836,7 +836,7 @@ tolerance = 0.05
 # background window with its `pagehide` and `freeze` listeners and the stats fields; `runInBackground`, the report builder
 # and the Diagnostics port with its registration and codecs are lazy chunks. The item-by-item verdict, with both pieces'
 # bytes, is ADR-052's prod-ops review note.
-# ts-runtime-16k (ADR-057) restates it at 16,000 (15,679 recorded, from 22,100: -6,421) without removing behaviour:
+# ts-runtime-16k (ADR-057) restates it at 16,000 (15,680 recorded, from 22,100: -6,420) without removing behaviour:
 # what a `wasm-main` hello page cannot run, or does not run until asked, loads with the thing that needs it (the
 # stream support, the waiters behind `observe`, what only a core outside this thread needs, `stats`/`snapshot`/
 # `restore`/`runInBackground`, the per-mode `load()` mapping, two rarely thrown error classes, the codecs a schema
@@ -847,24 +847,24 @@ tolerance = 0.05
 # chunk has an `import()`, is its own chunk and is reported as `bundler_gzipped` (691): not the runtime's code. The record
 # lists the runtime modules that hold code in the chunk (`modules`), and a run whose list differs from it fails and names
 # the module. `web/hello-runtime-js-with-helper` is the same page with the helper left in the chunk (the other reading of
-# the number: 16,193), gated at 16,600 so the target holds either way. `web/all-features-runtime-js` is the page that
+# the number: 16,191), gated at 16,600 so the target holds either way. `web/all-features-runtime-js` is the page that
 # uses everything (the playground's bindings with recovery, a panic handler, stats, snapshot, restore and a background
-# run): its first chunk plus every chunk of the runtime it loads on demand, 40,010 (27,345 + 12,665) from 42,385; its
+# run): its first chunk plus every chunk of the runtime it loads on demand, 40,100 (27,355 + 12,745) from 42,385; its
 # budget is the old figure, 42,400: the first chunk may shed bytes to chunks a page loads on demand, a page that uses
 # everything may not load more.
 [size."web/hello-runtime-js"]
 budget_gzip_bytes = 16000
-measured_gzip_bytes = 15679
+measured_gzip_bytes = 15680
 tolerance = 0.05
 
 [size."web/hello-runtime-js-with-helper"]
 budget_gzip_bytes = 16600
-measured_gzip_bytes = 16193
+measured_gzip_bytes = 16191
 tolerance = 0.05
 
 [size."web/all-features-runtime-js"]
 budget_gzip_bytes = 42400
-measured_gzip_bytes = 40010
+measured_gzip_bytes = 40100
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------
