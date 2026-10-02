@@ -125,7 +125,7 @@ const MESSAGES: Readonly<Record<number, string | null>> = {
   105: "handle {0} is already registered with the mirror", // mirror.ts: UndraError("state")
   106: "the mirror applied {0} rounds of change-sets in one flush: a signal subscriber keeps causing changes to a store it observes", // mirror.ts: UndraError("state")
   107: "a keyed patch for signal {0} of handle {1} has no operation count; the signal is re-observed", // mirror.ts: UndraError("state")
-  108: "this mirror has no observe waiters: the core installs them for a transport that answers later (mirrorWaiters)", // mirror.ts: UndraError("state")
+  108: "this mirror has no observe waiters: a core installs them for a transport that answers later; for any other mirror call mirrorWaiters(mirror) (from @undra/runtime) once, before whenObserved", // mirror.ts: UndraError("state")
   109: "{0} needs Node; this is not Node", // node-builtin.ts: ConditionalExpression
   110: "{0} needs Node 20.16 or 22.3 or later (process.getBuiltinModule); this is Node {1}", // node-builtin.ts: ConditionalExpression
   111: "this Node has no {0}", // node-builtin.ts: Error

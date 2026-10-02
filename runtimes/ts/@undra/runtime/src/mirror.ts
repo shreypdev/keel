@@ -804,7 +804,9 @@ export class Mirror {
    * without waiting for a frame.
    *
    * The waiters are a module of their own that a core installs with a transport that answers later
-   * (`mirrorWaiters` of `mirror-waiters.ts`); a mirror without them rejects with `UndraError("state")`.
+   * (`mirrorWaiters` of `mirror-waiters.ts`); a mirror without them (one made on its own, or an in-process core's, whose
+   * `UndraCore.observe` resolves after the values are applied) rejects with `UndraError("state")` saying the fix:
+   * `mirrorWaiters(mirror)`, exported by the package, installs them once, and this then waits as it always did.
    */
   whenObserved(handle: Handle, signalId: number, timeoutMs = 0): Promise<void> {
     if (this._waiters === undefined) {

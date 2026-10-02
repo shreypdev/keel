@@ -341,6 +341,31 @@ function withWaiters(): Mirror {
   return mirror;
 }
 
+describe("Mirror.whenObserved on a mirror without waiters (ADR-057; SPEC 17.1)", () => {
+  it("refuses typed and says the fix, and the fix is exported by the package: mirrorWaiters(mirror), after which it waits as before", async () => {
+    const runtime = await import("../src/index.js");
+    const mirror = new runtime.Mirror();
+    const refusal = await mirror.whenObserved(1n, 0).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(refusal).toBeInstanceOf(runtime.UndraError);
+    expect((refusal as { kind: string }).kind).toBe("state");
+    expect((refusal as Error).message).toContain("mirrorWaiters(mirror)");
+    expect(typeof (runtime as Record<string, unknown>)["mirrorWaiters"], "the fix the message names is a public export").toBe("function");
+    (runtime as unknown as { mirrorWaiters: (m: Mirror) => void }).mirrorWaiters(mirror);
+    const seen: number[] = [];
+    mirror.register(1n, (_i, _o, v) => seen.push(v[0] as number));
+    let resolved = false;
+    const waiting = mirror.whenObserved(1n, 0).then(() => {
+      resolved = true;
+    });
+    mirror.enqueue(encodeChangeSet({ txnId: 1n, entries: [{ handle: 1n, signalId: 0, op: ChangeOp.FullValue, value: Uint8Array.of(4) }] }));
+    await waiting;
+    expect([resolved, seen]).toEqual([true, [4]]);
+  });
+});
+
 describe("Mirror.whenObserved", () => {
   it("rejects with UndraError('state') on a mirror whose core installed no waiters (an in-process core delivers inside observe)", async () => {
     const mirror = new Mirror();

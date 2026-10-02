@@ -5,6 +5,8 @@ export * from "./call-error.js";
 export * from "./errors.js";
 export * from "./errors-rare.js";
 export * from "./mirror.js";
+// The observe waiters (ADR-057): a mirror used on its own, or an in-process core's, gets `whenObserved` by installing them.
+export { mirrorWaiters } from "./mirror-waiters.js";
 export * from "./object.js";
 export * from "./identity.js";
 export * from "./callbacks.js";

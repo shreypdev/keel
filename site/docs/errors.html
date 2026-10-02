@@ -633,7 +633,7 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <tr id="T0105"><td><a href="#T0105"><code>T0105</code></a></td><td>handle {0} is already registered with the mirror</td><td>mirror.ts: UndraError(&quot;state&quot;)</td></tr>
 <tr id="T0106"><td><a href="#T0106"><code>T0106</code></a></td><td>the mirror applied {0} rounds of change-sets in one flush: a signal subscriber keeps causing changes to a store it observes</td><td>mirror.ts: UndraError(&quot;state&quot;)</td></tr>
 <tr id="T0107"><td><a href="#T0107"><code>T0107</code></a></td><td>a keyed patch for signal {0} of handle {1} has no operation count; the signal is re-observed</td><td>mirror.ts: UndraError(&quot;state&quot;)</td></tr>
-<tr id="T0108"><td><a href="#T0108"><code>T0108</code></a></td><td>this mirror has no observe waiters: the core installs them for a transport that answers later (mirrorWaiters)</td><td>mirror.ts: UndraError(&quot;state&quot;)</td></tr>
+<tr id="T0108"><td><a href="#T0108"><code>T0108</code></a></td><td>this mirror has no observe waiters: a core installs them for a transport that answers later; for any other mirror call mirrorWaiters(mirror) (from @undra/runtime) once, before whenObserved</td><td>mirror.ts: UndraError(&quot;state&quot;)</td></tr>
 <tr id="T0109"><td><a href="#T0109"><code>T0109</code></a></td><td>{0} needs Node; this is not Node</td><td>node-builtin.ts: ConditionalExpression</td></tr>
 <tr id="T0110"><td><a href="#T0110"><code>T0110</code></a></td><td>{0} needs Node 20.16 or 22.3 or later (process.getBuiltinModule); this is Node {1}</td><td>node-builtin.ts: ConditionalExpression</td></tr>
 <tr id="T0111"><td><a href="#T0111"><code>T0111</code></a></td><td>this Node has no {0}</td><td>node-builtin.ts: Error</td></tr>

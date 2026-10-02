@@ -8,7 +8,8 @@ import { msg } from "./messages.js";
  * `observe` that settles when an entry of its signal was applied by a drain (`Mirror.whenObserved`). A core in this thread
  * delivers the values inside `observe` and has none of this (ADR-057): the core installs it for a transport that is not
  * synchronous (`transport/framed.ts` re-exports `mirrorWaiters`, so it arrives with the transport that needs it), and a
- * `Mirror` used on its own installs it by calling `mirrorWaiters(mirror)`.
+ * `Mirror` used on its own (or an in-process core's) installs it by calling `mirrorWaiters(mirror)`, which the package root
+ * re-exports from its pure barrel (so a page that does not import it does not load it).
  */
 
 interface Waiter {
