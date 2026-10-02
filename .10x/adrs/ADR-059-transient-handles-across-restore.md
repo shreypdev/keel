@@ -1,7 +1,7 @@
 # ADR-059: transient handles across a restore: the snapshot keeps what a query handle is made of, a restore re-issues the handle, and the object is built again when the host first uses it
 
-Status: **Proposed** (2026-10-02, `wt/reload-handles`; the architect's record is
-`.10x/decisions/architect/reload-handles.md`, with the decisions asked of the integrator). Touches `undra-wire`
+Status: **Accepted** (2026-10-02; implemented in `wt/reload-handles`: see "Implementation note" at the end for what differs from
+the text above it, which is left as the architect wrote it). Touches `undra-wire`
 (one reserved field id and a reader helper; **no layout change**), `undra-runtime` (the object table, `snapshot`,
 `restore`, `observe`, dispatch, `RestoreReport`), `undra-query` (the record and what builds a handle again),
 `undra-transport` (the devtools hub's store list), `undra-cli` (the dev runner's counts and one terminal phrase),
@@ -487,3 +487,50 @@ Order with pieces in flight: steps 1 to 6 are independent of `ts-runtime-16k`; s
 `object.ts`, which that piece also edits, so whichever lands second cross-merges (the removal only deletes).
 `cold-restore-regression` should land before step 2 or cross-merge it (`Runtime::restore`). Nothing here waits for
 an ABI or wire revision.
+
+## Implementation note (2026-10-02, `wt/reload-handles`)
+
+Implemented as decided: the integrator's nine decisions are the Decision section as written (the in-band record, build at
+first use, same-runtime restores leave live handles alone, no cache hand-over, user objects deferred, the TypeScript replay
+removed, the reviver reachable only through `add_reviver`, the wording, S35 in ten steps). The record is
+`.10x/decisions/sde/reload-handles.md`. What differs from the text above, and why:
+
+1. **A failed build answers the plain stale-handle refusal.** Decision 1.4 says the use that triggered a failed build is
+   "answered as for any stale handle (status 5 with that reason)". `BadHandle` is `Copy` and its reasons are an enum; a
+   variant that carries a string would change a public type, and one without it adds nothing a stale handle does not say.
+   The reply is status 5 with the ordinary `stale handle ..` text; the reason (handle, reviver, why) is the ERROR record and
+   `stats_json`'s `revive_failed`.
+2. **A restore registers a store's page servers after it has placed everything the snapshot names** (`ObjectTable::
+   insert_at_deferring_lazy`, `enter_lazy`). A page server takes the lowest free slot; with recreation records placed after
+   the stores, the servers of the `Library` store took the slot of the ticker's handle and the record was skipped as
+   "slot reused" (found by the dev reload test of the Remote tab). The same hazard existed between two stores and is
+   closed too. No wire, ABI or generated change.
+3. **`Runtime::dormant_handles` is not public**; the count is `stats_json`'s `dormant_handles` (the ADR lists no such
+   method). `RestoreReport::displaced` is `Vec<u64>` (handle values) and `RefusedHandle` is `{ handle: u64, type_id: u32,
+   reason: String }`; the refusal wording is `this build has nothing that builds it again`, `the types it was made from
+   changed`, or the reviver's own reason; the WARN is `restore: Handle(index=<i>, gen=<g>) (0x..) is not re-issued:
+   <reason>`.
+4. **The runner protocol gained a field.** `snapshot ok .. <stores> <query handles> <bytes> ..` and `restored <stores>
+   <query handles> <lost objects> <bytes> <microseconds>`; a core whose only state is query handles still has something to
+   carry (`NothingToKeep` needs neither stores nor handles). The terminal omits the handle part when there is none.
+5. **S35 has the `RosterQueryHandle(7)` of the changed query in step 1** (needed by step 10; `roster` is a new query of
+   `examples/playground/core/src/updates.rs`, so the playground's schema hash and the bindings of the playground and the two
+   two-cores apps moved once, and the testkit fixtures' recorded hash with them), step 3's `live_handles` is the reading
+   before the restore **less the `Probe`** (the one object the restore makes stale), and step 10 runs on a **new core** of
+   build B in the build-B process of Swift and Kotlin (S14's and S15's build-B steps leave stores in the first). The site's
+   `build-trust.mjs` accepts a gap in the scenario numbers (S34 is held by `generics-fn-obj`).
+6. **Devtools.** A step is also taken when a query handle appears or goes (the snapshot's bytes differ although no store
+   changed); history is only longer. `stores_of` leaves recreation records out as decided; the count of stores built since a
+   step adds `displaced`.
+7. **The fingerprint of a query the schema does not describe** (a hand-written `QueryDef`) is `0` in both builds, so only a
+   record that no longer decodes is refused for it; the reviver of a core with only such queries exists from the client's
+   first use, and a snapshot restored before that is the "store type this build does not have" case (`QueryRegistration`'s
+   docs, tested both ways).
+8. **Sizes** (`scripts/wasm-size.sh`, this machine): the hello-world wasm 117,750 bytes gzipped against a record of 116,690
+   (+1,060, under the +1.3 KB the decision allows and the 120,000 gate); the up-front JS 22,100 -> 22,067. The TypeScript
+   replay's removal measured on `crashRecovery()` as 82,006 raw / 25,838 gzipped bytes against 83,389 / 26,209 (-1,383 /
+   -371; the Consequences' 1,979 / 530 were the unminified source). `snapshot/encode_100_handles` 15.6 us,
+   `snapshot/restore_100_handles` 19.6 us (fresh runtime), `snapshot/restore_100_handles_live` 38.3 us (the same runtime).
+9. **A wrongly typed use builds.** `Runtime::object::<T>` of a dormant handle builds the object before it can tell the type
+   is wrong for `T` (a `LazyPage` call aimed at a query handle, say): the handle is the host's own, the cost is one build,
+   and the answer is the ordinary wrong-type refusal.
