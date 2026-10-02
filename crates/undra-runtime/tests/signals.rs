@@ -700,7 +700,7 @@ fn restore_reentrancy_is_refused_not_deadlocked() {
     impl Host for Restoring {
         fn reply(&self, _: u32, _: &[u8]) {
             if let Some(rt) = self.rt.get().and_then(std::sync::Weak::upgrade) {
-                *self.result.lock() = Some(rt.restore(&[0; 24]));
+                *self.result.lock() = Some(rt.restore(&[0; 28]));
             }
         }
         fn change_set(&self, _: &[u8]) {}
