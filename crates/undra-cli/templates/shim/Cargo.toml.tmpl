@@ -45,13 +45,18 @@ incremental = false
 
 # The profiles match the workspace's (docs/SPEC.md 7): a panic on native targets must unwind so
 # the boundary can report it (constitution R6); only wasm aborts.
+#
+# A release build keeps the line tables of the core (ADR-046): `file:line` for every frame of a crash
+# report, at no cost in the shipped code (optimisation and LTO are the same). There is no `strip` here
+# on purpose: `undra build --release` strips the copies it ships and keeps the unstripped ones as the
+# symbol files in build/symbols, so both are the same code. On Apple targets the build also passes
+# `split-debuginfo = "unpacked"` (a profile key cannot depend on the target).
 [profile.release]
 lto = "fat"
 codegen-units = 1
 opt-level = 3
 panic = "unwind"
-strip = "symbols"
-debug = false
+debug = "line-tables-only"
 
 [profile.release-wasm]
 inherits = "release"

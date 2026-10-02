@@ -270,10 +270,71 @@ pub fn reconcile(
     })
 }
 
+/// The Gradle statement that keeps the debug info of the core's library in the debug variant's APK
+/// (ADR-046 decision 2): Gradle strips native libraries by default, and Android Studio's native
+/// debugger (and LLDB) need the line tables of `lib<namespace>.so` to stop at `lab.rs:222`.
+#[must_use]
+pub fn keep_debug_symbols_line(library: &str) -> String {
+    format!(
+        "androidComponents {{ onVariants(selector().withBuildType(\"debug\")) {{ variant -> variant.packaging.jniLibs.keepDebugSymbols.add(\"**/{library}\") }} }}"
+    )
+}
+
+/// Whether a Gradle script keeps the debug symbols of `library` (or of every library).
+#[must_use]
+pub fn keeps_debug_symbols(script: &str, library: &str) -> bool {
+    script
+        .lines()
+        .map(|l| l.split("//").next().unwrap_or_default())
+        .any(|l| {
+            l.contains("keepDebugSymbols")
+                && (l.contains(library) || l.contains("**/*.so") || l.contains("\"**\""))
+        })
+}
+
+/// For an app whose Gradle script does not keep the debug symbols of `library`: the script and the
+/// statement to add. `None` when the project has no Android app, the script cannot be read, or it
+/// already keeps them.
+#[must_use]
+pub fn missing_debug_symbols(project_root: &Path, library: &str) -> Option<(PathBuf, String)> {
+    let app = detect::detect(project_root).android?;
+    let module = app.app_module?;
+    let script = module.join(if app.kotlin_dsl {
+        "build.gradle.kts"
+    } else {
+        "build.gradle"
+    });
+    let text = std::fs::read_to_string(&script).ok()?;
+    if keeps_debug_symbols(&text, library) {
+        return None;
+    }
+    Some((script, keep_debug_symbols_line(library)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fsutil::unique_temp_dir;
+
+    #[test]
+    fn the_debug_variant_keeps_the_symbols_of_the_core_and_only_that_library() {
+        let line = keep_debug_symbols_line("libacme_pay.so");
+        assert_eq!(
+            line,
+            "androidComponents { onVariants(selector().withBuildType(\"debug\")) { variant -> variant.packaging.jniLibs.keepDebugSymbols.add(\"**/libacme_pay.so\") } }"
+        );
+        assert!(keeps_debug_symbols(&line, "libacme_pay.so"));
+        assert!(!keeps_debug_symbols(&line, "libother.so"));
+        assert!(keeps_debug_symbols(
+            "packaging.jniLibs.keepDebugSymbols += \"**/*.so\"",
+            "libx.so"
+        ));
+        assert!(!keeps_debug_symbols(
+            "// keepDebugSymbols libx.so\nandroid { }",
+            "libx.so"
+        ));
+        assert!(!keeps_debug_symbols("android { }", "libx.so"));
+    }
 
     const MODULE: &str = "/p/android/app";
     const ROOT: &str = "/p/android";
