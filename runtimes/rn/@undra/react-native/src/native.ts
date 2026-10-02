@@ -20,7 +20,7 @@ export interface UndraNativeModule {
    * Registers the ports, then `undra_init`s the core with an encoded `RuntimeConfig`. `ports` are
    * the schema's non-event port ids; `syncMethods` holds `(portId, methodId)` pairs of its
    * synchronous methods; `nativePorts` are the standard ports the module answers itself (ADR-038
-   * amendment B: ids of `Kv`, `SecureStore`, `Fs` and `Connectivity` from {@link platformDefaults};
+   * amendment B: ids of `Kv`, `SecureStore`, `Fs`, `Connectivity` and `Db` from {@link platformDefaults};
    * the module keeps those this platform has, and starts the `Connectivity` source after `undra_init`).
    * Returns 0, an `undra_init` code (1 to 5) or a host code (`0x100` this core is running for another
    * JavaScript runtime of this process, `0x101` ABI mismatch, `0x102` already started).
@@ -86,7 +86,7 @@ export interface UndraNativeModule {
 
 /** What {@link UndraNativeModule.platformDefaults} reports. */
 export interface NativePlatformDefaults {
-  /** Ids of the standard ports the module can answer natively on this platform (`Kv`, `SecureStore`, `Fs`, `Connectivity`). */
+  /** Ids of the standard ports the module can answer natively on this platform (`Kv`, `SecureStore`, `Fs`, `Connectivity`, `Db`). */
   readonly ports: readonly number[];
   /** The `Kv` directory. */
   readonly kv?: string;
@@ -94,6 +94,11 @@ export interface NativePlatformDefaults {
   readonly fs?: string;
   /** Where `SecureStore` keeps its values (a Keychain service, a Keystore key and a directory). */
   readonly secureStore?: string;
+  /**
+   * Where `Db` keeps its databases (ADR-048): `<Application Support>/<bundle id>/Undra/db/<name>.sqlite` on iOS (the
+   * Swift runtime's), `getDatabasePath("undra-<name>.sqlite")` on Android (`android-adapters`').
+   */
+  readonly db?: string;
   /** Why the platform has no native defaults (Android: the package's Java library or its context is missing). */
   readonly error?: string;
 }
@@ -108,7 +113,7 @@ export interface NativeHostCounters {
   readonly wakes: number;
   /** Records lost to memory exhaustion. */
   readonly dropped: number;
-  /** Clock, Rng and Log calls answered natively, and calls of the native default ports (Kv, SecureStore, Fs). */
+  /** Clock, Rng and Log calls answered natively, and calls of the native default ports (Kv, SecureStore, Fs, Db). */
   readonly nativePortCalls: number;
   /** JavaScript sync port calls answered on the JS thread. */
   readonly jsSyncPortCalls: number;

@@ -7,6 +7,9 @@
     "paths": {
       "@undra/runtime": [
         "../../../ts/@undra/runtime/dist/index.d.ts"
+      ],
+      "@undra/runtime/realtime": [
+        "../../../ts/@undra/runtime/dist/realtime.d.ts"
       ]
     }
   },

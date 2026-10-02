@@ -33,6 +33,8 @@ Undra is open source (MIT OR Apache-2.0) and ships an `undra` CLI (`undra init`,
 - [API overview, Swift · Undra docs](https://shreypdev.github.io/undra/docs/api-swift.html): What Undra's generated Swift looks like: records, enums, errors, objects, stores, query handles and ports, and how the UndraRuntime package loads the core.
 - [API overview, Kotlin · Undra docs](https://shreypdev.github.io/undra/docs/api-kotlin.html): What Undra's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.
 - [API overview, TypeScript · Undra docs](https://shreypdev.github.io/undra/docs/api-typescript.html): What Undra's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.
+- [Local database · Undra docs](https://shreypdev.github.io/undra/docs/db.html): SQL in the core over the platform's SQLite: an opt-in Db port with migrations, bound parameters, transactions and typed errors.
+- [WebSocket & server-sent events · Undra docs](https://shreypdev.github.io/undra/docs/realtime.html): Real-time from the core: an opt-in WebSocket port with backpressure, server-sent events that resume, typed ends, reconnection under your control.
 
 ## Reference
 

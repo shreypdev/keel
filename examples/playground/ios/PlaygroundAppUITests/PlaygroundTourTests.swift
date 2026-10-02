@@ -1,6 +1,6 @@
 import XCTest
 
-/// Taps through the four screens of the playground against the real core and checks what the stores
+/// Taps through the five screens of the playground against the real core and checks what the stores
 /// show. Each test starts on its own tab (`-tab`), like a screenshot run would.
 ///
 /// When the environment variable `TEST_RUNNER_PROOF_DIR` is set, every test also saves the screen
@@ -207,6 +207,32 @@ final class PlaygroundTourTests: XCTestCase {
         wait(for: app.staticTexts["remote-status"], toEndWith: "Success")
     }
 
+    // MARK: Notes
+
+    func testNotes() {
+        let app = launch(tab: "notes")
+        // Opening ran the two migrations (or found them done by an earlier launch).
+        wait(for: app.staticTexts["notes-version"], toEndWith: "schema version 2")
+        let rows = app.buttons.matching(identifier: "note-row")
+        let before = rows.count
+        let title = "Note \(Int(Date().timeIntervalSince1970))"
+        let input = app.textFields["note-input"]
+        input.tap()
+        input.typeText(title)
+        app.buttons["note-add"].tap()
+        wait(for: app.buttons[title], "the new note")
+        wait(for: app.staticTexts["notes-count"], toRead: "\(before + 1) notes")
+        // Ticking it is an UPDATE in SQLite, then the mirror; the row stays.
+        app.buttons[title].tap()
+        XCTAssertTrue(app.buttons[title].waitForExistence(timeout: 5))
+        keepScreenshot(named: "notes-tour")
+        // Swipe to remove: a DELETE, then the row goes.
+        app.buttons[title].swipeLeft()
+        app.buttons["Delete"].tap()
+        wait(for: app.staticTexts["notes-count"], toRead: "\(before) notes")
+        XCTAssertFalse(app.buttons[title].exists)
+    }
+
     private func wait(for expectation: XCTNSPredicateExpectation, timeout: TimeInterval) {
         XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: timeout), .completed, "timed out waiting for \(expectation)")
     }
@@ -215,7 +241,7 @@ final class PlaygroundTourTests: XCTestCase {
 
     func testTabBarSwitchesScreens() {
         let app = launch(tab: "todos")
-        for (id, marker) in [("counter", "counter-value"), ("biglist", "biglist-count"), ("remote", "remote-status"), ("todos", "remaining")] {
+        for (id, marker) in [("counter", "counter-value"), ("biglist", "biglist-count"), ("remote", "remote-status"), ("notes", "notes-count"), ("todos", "remaining")] {
             app.tabBars.buttons["tab-\(id)"].tap()
             wait(for: app.staticTexts[marker], "the \(id) screen")
         }

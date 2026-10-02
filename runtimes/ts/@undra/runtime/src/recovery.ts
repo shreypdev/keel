@@ -375,6 +375,12 @@ export interface RecoveryHost {
   deliver(error: UndraUnhandledError): void;
   /** Builds the panic report of `trap` and hands it to `onPanic`. */
   panicked(trap: Error): UndraPanicReport;
+  /**
+   * The registered ports. Each one releases at a restart what the instance that trapped held through it
+   * (`PortImpl.dispose`: its WebSocket connections, its databases and their open transactions), which nobody would
+   * close or roll back otherwise; the ports then serve the new instance.
+   */
+  readonly ports: ReadonlyMap<number, PortImpl>;
 }
 
 /**
@@ -413,7 +419,9 @@ export interface CrashRecovery {
  * The runtime keeps a snapshot of the stores, at most once per `snapshotEveryMs` while they change (none larger than
  * `maxSnapshotBytes`, in the worker in `wasm-worker` mode). When the core traps: `onPanic` hears the panic; every call and
  * stream in flight fails with `UndraTransportError("restarted")` (generated calls: `UndraCallError.Unavailable`; it may or
- * may not have run, and it is not retried); the same compiled module is instantiated again and the snapshot restored
+ * may not have run, and it is not retried); the registered ports release what the instance held through them
+ * (`PortImpl.dispose`: WebSocket connections and event streams close, open transactions roll back, databases close);
+ * the same compiled module is instantiated again and the snapshot restored
  * (stores keep their handles); every observed store is observed again; query handles are re-created behind the same
  * objects; then `onCoreRestarted` and `onError` hear an {@link UndraCoreRestarted}. Lost: store writes after the last
  * snapshot, objects that are not stores (query handles excepted), the core's running tasks and timers, and whatever the
@@ -677,6 +685,14 @@ class Recovering implements Transport {
     for (;;) {
       this.#times.push(Date.now());
       this.#trappedWhileRestarting = null;
+      // What the instance that trapped held through the ports (connections, a transaction) goes with it.
+      for (const impl of new Set(host.ports.values())) {
+        try {
+          impl.dispose?.();
+        } catch (error) {
+          host.core.report(error, "port dispose");
+        }
+      }
       try {
         result = await this.#restart(this.#floor());
         const late = this.#trappedWhileRestarting as UndraTransportError | null;

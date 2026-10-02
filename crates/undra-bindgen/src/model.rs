@@ -266,10 +266,14 @@ impl Model {
             external_records.push(record);
         }
         for (standard, en) in standard_enums {
+            // The opt-in standard library has enums with data (`WsMessage`, `DbValue`): a
+            // standard enum is classified by its shape like any other.
             let kind = if en.is_error {
                 NamedKind::Error
-            } else {
+            } else if is_unit_enum(&en) {
                 NamedKind::UnitEnum
+            } else {
+                NamedKind::DataEnum
             };
             externals.insert(
                 en.name.clone(),

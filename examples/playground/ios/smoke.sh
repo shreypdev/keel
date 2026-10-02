@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the playground for the iOS simulator and proves it runs: the four screens launched one by
+# Builds the playground for the iOS simulator and proves it runs: the five screens launched one by
 # one (`-tab`), a screenshot of each in ../.proof/ios-<view>.png, the process checked alive with no
 # crash in the log, and the XCUITest tour run on top.
 #
@@ -60,7 +60,7 @@ run xcrun simctl install "$UDID" "$APP"
 
 # 4. Each screen: launch, wait, screenshot, alive, no crash in the log.
 failed=0
-for view in todos counter biglist remote; do
+for view in todos counter biglist remote notes; do
   step "xcrun simctl launch $UDID $BUNDLE -tab $view"
   xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
   xcrun simctl launch "$UDID" "$BUNDLE" -tab "$view"
@@ -95,7 +95,7 @@ else
 fi
 ls -l "$PROOF"/ios-*.png | awk '{print $5 "  " $9}'
 
-# 5. The XCUITest tour (taps through all four screens; saves its own screenshots next to the others).
+# 5. The XCUITest tour (taps through all five screens; saves its own screenshots next to the others).
 step "xcodebuild test -project PlaygroundApp.xcodeproj -scheme PlaygroundApp -destination 'platform=iOS Simulator,name=$SIMULATOR' -parallel-testing-enabled NO"
 TEST_RUNNER_PROOF_DIR="$PROOF" xcodebuild test -project "$HERE/PlaygroundApp.xcodeproj" -scheme PlaygroundApp -configuration Debug \
   -destination "platform=iOS Simulator,name=$SIMULATOR" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO 2>&1 \

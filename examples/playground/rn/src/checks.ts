@@ -1,27 +1,38 @@
 import {
   CallTarget,
+  DbError,
   FsError,
   HttpError,
   PortIds,
+  SseError,
   UndraCallError,
   UndraSchemaMismatchError,
   UndraTransportError,
   UndraWriter,
+  WsError,
+  type WsMessage,
   codecs,
   decodeValue,
   type UndraCore,
 } from '@undra/runtime';
+import { OptInPortIds } from '@undra/runtime/realtime';
 import { NativeTransport, installNative, nativePlatformDefaults } from '@undra/react-native';
+import { Platform } from 'react-native';
 import {
   BigList,
   Counter,
   LabError,
+  Live,
+  Notes,
   Probe,
   Stress,
   UndraIds,
   UndraPlaygroundCore,
   add,
   addLater,
+  dbCells,
+  dbMigrate,
+  dbRun,
   explode,
   fileDelete,
   fileList,
@@ -38,6 +49,8 @@ import {
   secretKeys,
   secretPut,
   secretRemove,
+  sseFollow,
+  wsEcho,
 } from '@playground/core';
 import { PLAYGROUND_HEADER, nativeCounters, type Log, type Playground } from './undra';
 
@@ -71,8 +84,18 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
 const fromUtf8 = (bytes: Uint8Array | null): string | null => (bytes === null ? null : new TextDecoder().decode(bytes));
 
-/** The loopback server `scripts/rn-device-checks.sh` runs (the simulator shares the Mac's loopback; Android reaches it through `adb reverse`). */
+/**
+ * The loopback server `scripts/rn-device-checks.sh` runs, `contract-tests/servers/realtime-server.mjs` (the simulator
+ * shares the Mac's loopback; Android reaches it through `adb reverse`): HTTP, WebSocket and server-sent events.
+ */
 const LOOPBACK = 'http://127.0.0.1:8737';
+const LOOPBACK_WS = 'ws://127.0.0.1:8737';
+
+const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
+
+/** The messages as one line, for a check's detail. */
+const shown = (messages: readonly WsMessage[]): string =>
+  messages.map(m => (m.kind === 'text' ? JSON.stringify(m.value) : `binary(${(m.value as Uint8Array).length})`)).join(', ');
 
 /** Whether the module answers `portId` natively on this device (ADR-038 amendment B). */
 function native(portId: number): boolean {
@@ -347,6 +370,200 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
       expect(await eventually(() => device.lifecycleReports.get() >= 1, 5000), 'at least one report within 5 s');
       expect(device.appState.get() === 'active', `active, got ${device.appState.get()}`);
       return `state=${device.appState.get()} after ${device.lifecycleReports.get()} report(s)`;
+    },
+  ],
+  [
+    'RN17',
+    'Db default: Notes in SQLite through the core (open with migrations, add, count, close, reopen), answered natively',
+    async (core, playground) => {
+      expect(native(OptInPortIds.Db.portId), 'the module answers Db natively on this device');
+      const before = nativeCounters(core)?.nativePortCalls ?? 0;
+      const notes = await Notes.create(core);
+      try {
+        expect((await notes.open('rn-checks')) === 2, 'open migrates to version 2');
+        const start = await notes.count();
+        const added = await notes.add(`note ${playground.nonce}`);
+        await notes.add('and another');
+        expect((await notes.count()) === start + 2, 'count reads the two new rows from the database');
+        expect(notes.notes.get().some(n => n.id === added.id && n.title === `note ${playground.nonce}`), 'the mirror shows the new note');
+        const taken = await rejects(() => notes.addWithId(added.id, 'duplicate'));
+        expect(taken instanceof DbError.Constraint && taken.message.includes('UNIQUE'), `an id in use is DbError.Constraint (unique), got ${String(taken)}`);
+        await notes.closeDatabase();
+        const closed = await rejects(() => notes.count());
+        expect(closed instanceof DbError.Unavailable, `after close: DbError.Unavailable, got ${String(closed)}`);
+        expect((await notes.open('rn-checks')) === 2, 'reopened at version 2');
+        expect((await notes.count()) === start + 2, 'the rows are in the file');
+        await notes.closeDatabase();
+      } finally {
+        notes.close();
+      }
+      const calls = (nativeCounters(core)?.nativePortCalls ?? 0) - before;
+      expect(calls >= 10, `the core's Db calls were answered by the module (${calls})`);
+      return `notes kept across close and reopen in ${nativePlatformDefaults(UndraPlaygroundCore.namespace).db ?? '?'}; unique id refused; ${calls} native port calls`;
+    },
+  ],
+  [
+    'RN18',
+    'Db typed cells: every storage class through the platform\'s SQLite (i64 extremes, empty text and blob, NULL, U+0000, a 2 MiB row)',
+    async core => {
+      const min = -(2n ** 63n);
+      const max = 2n ** 63n - 1n;
+      const blob = new Uint8Array([0, 1, 254, 255]);
+      const a = await dbCells(min, 1.5, 'héllo \u{1F30D}\n', blob, null, core);
+      expect(a.int === min && a.real === 1.5 && a.text === 'héllo \u{1F30D}\n' && sameBytes(a.blob, blob) && a.none === null, `round trip 1: ${String(a.int)} ${a.real} ${JSON.stringify(a.text)} ${a.none}`);
+      expect(a.types.join(',') === 'integer,real,text,blob,null', `storage classes ${a.types.join(',')}`);
+      const b = await dbCells(max, -0.25, '', new Uint8Array(0), 'x', core);
+      expect(b.int === max && b.real === -0.25 && b.text === '' && b.blob.length === 0 && b.none === 'x', `round trip 2: ${String(b.int)} ${b.real} ${b.blob.length} ${b.none}`);
+      expect(b.types.join(',') === 'integer,real,text,blob,text', `an empty text is text and an empty blob is a blob, got ${b.types.join(',')}`);
+      // What JNI and Java strings trip on (Android crosses every value through Java): U+0000, a supplementary
+      // character, U+FFFF; and SQL in a value, which stays a value (parameters are bound, never formatted into SQL).
+      const tricky = "a\u0000b \u{1F30D} ￿ '; DROP TABLE cells; --";
+      const zeros = new Uint8Array([0, 0, 0]);
+      const c = await dbCells(0n, 0, tricky, zeros, tricky, core);
+      expect(c.text === tricky && c.none === tricky && sameBytes(c.blob, zeros), `U+0000, an emoji and SQL in a value come back as they were, got ${JSON.stringify(c.text)}`);
+      // A 2 MiB row: the system SQLite returns it; Android's CursorWindow (2 MiB) cannot hold it, which must be a typed
+      // DbError, never a crash.
+      const big = new Uint8Array(2 * 1024 * 1024).fill(7);
+      let bigRow: string;
+      try {
+        const d = await dbCells(1n, 1, 'big', big, null, core);
+        expect(sameBytes(d.blob, big), 'the 2 MiB blob came back whole');
+        bigRow = 'a 2 MiB row round-trips';
+      } catch (error) {
+        expect(error instanceof DbError.Sql || error instanceof DbError.Full, `a 2 MiB row is a typed DbError (Sql or Full), got ${String(error)}`);
+        bigRow = `a 2 MiB row is ${String(error)}`;
+      }
+      return `i64 ${String(min)}..${String(max)}, reals, text, blobs (empty too) and NULL come back by storage class; U+0000, an emoji and SQL text intact; ${bigRow}`;
+    },
+  ],
+  [
+    'RN19',
+    'Db migrations and transactions: a failed migration or a refused commit rolls everything back; typed SQL errors',
+    async core => {
+      const name = 'rn-checks-migrate';
+      // From scratch: what an earlier launch left goes (one statement per call; no migrations, so no downgrade check).
+      await dbRun(name, 'DROP TABLE IF EXISTS a', core);
+      await dbRun(name, 'DROP TABLE IF EXISTS b', core);
+      await dbRun(name, 'PRAGMA user_version = 0', core);
+      const failed = await rejects(() => dbMigrate(name, true, core));
+      expect(failed instanceof DbError.Migration && failed.version === 2 && failed.message.includes('nowhere'), `the broken second migration: ${String(failed)}`);
+      const gone = await rejects(() => dbRun(name, 'INSERT INTO a VALUES (1)', core));
+      expect(gone instanceof DbError.Sql && gone.message.includes('no such table'), `migration 1 was rolled back with it, got ${String(gone)}`);
+      expect((await dbMigrate(name, false, core)) === 2, 'the good pair then runs from version 0 to 2');
+      expect((await dbRun(name, 'INSERT INTO a VALUES (1)', core)) === 1n, 'and its table exists');
+      const two = await rejects(() => dbRun(name, 'INSERT INTO a VALUES (2); INSERT INTO a VALUES (3)', core));
+      expect(two instanceof DbError.Sql && two.message.includes('only one statement'), `two statements in one call, got ${String(two)}`);
+      // A commit the database refuses (a deferred foreign key, checked only at COMMIT) rolls the transaction back and
+      // ends it: nothing of it is kept, and the next transaction begins and commits.
+      const deferred = 'rn-checks-deferred';
+      const notes = await Notes.create(core);
+      try {
+        await notes.open(deferred);
+        await dbRun(deferred, 'CREATE TABLE IF NOT EXISTS parent (id INTEGER PRIMARY KEY)', core);
+        await dbRun(deferred, 'CREATE TABLE IF NOT EXISTS child (pid INTEGER REFERENCES parent (id) DEFERRABLE INITIALLY DEFERRED)', core);
+        await dbRun(deferred, "CREATE TRIGGER IF NOT EXISTS orphan AFTER INSERT ON notes WHEN NEW.title = 'orphan' BEGIN INSERT INTO child VALUES (-1); END", core);
+        const before = await notes.count();
+        const refused = await rejects(() => notes.addAll(['orphan']));
+        expect(refused instanceof DbError.Constraint && refused.kind_ === 'foreignKey', `the refused commit is DbError.Constraint(foreignKey), got ${String(refused)}`);
+        const next = await notes.addAll(['kept']).catch((error: unknown) => `failed: ${String(error)}`);
+        expect(next === 1, `after the refused commit the next transaction begins and commits, got ${String(next)}`);
+        expect((await notes.count()) === before + 1, 'only the second transaction\'s row is there');
+        await notes.closeDatabase();
+        await notes.open(deferred);
+        expect((await notes.count()) === before + 1, 'and it is in the file after a reopen');
+        await notes.closeDatabase();
+      } finally {
+        notes.close();
+      }
+      return `Migration { version: 2 } and nothing of it kept; then version 2; one statement per call; a commit refused by a deferred foreign key is Constraint(foreignKey) and rolled back, the next transaction commits`;
+    },
+  ],
+  [
+    'RN20',
+    'WebSocket default: an echo through the core to the loopback server; headers, the peer\'s close, a drop, a stalled flood and a refusal typed',
+    async (core, playground) => {
+      let floodDetail = '';
+      const sent: WsMessage[] = [
+        { kind: 'text', value: `hello ${playground.nonce}` },
+        { kind: 'binary', value: new Uint8Array([1, 2, 0, 255]) },
+      ];
+      const back = await wsEcho(`${LOOPBACK_WS}/ws/echo`, sent, core);
+      expect(back.length === 2 && back[0]?.kind === 'text' && back[0].value === sent[0]?.value, `the text came back, got ${shown(back)}`);
+      expect(back[1]?.kind === 'binary' && sameBytes(back[1].value as Uint8Array, sent[1]?.value as Uint8Array), `the binary came back, got ${shown(back)}`);
+      // Headers ride React Native's third constructor argument; the server echoes the upgrade's headers.
+      const live = await Live.create(core);
+      try {
+        await live.connect(`${LOOPBACK_WS}/ws/headers`, [], [{ name: 'x-undra-token', value: playground.nonce }]);
+        const [headers] = await live.read(1);
+        const seen = headers?.kind === 'text' ? (JSON.parse(headers.value) as Record<string, string>)['x-undra-token'] : undefined;
+        expect(seen === playground.nonce, `the upgrade carried the header, the server saw ${String(seen)}`);
+        await live.disconnect(1000, 'done');
+        await live.connect(`${LOOPBACK_WS}/ws/close?code=4000&reason=bye`, [], []);
+        const [hello] = await live.read(1);
+        expect(hello?.kind === 'text' && hello.value === 'hello', 'the message before the close frame');
+        const closed = await rejects(() => live.read(1));
+        expect(closed instanceof WsError.Closed && closed.code === 4000 && closed.reason === 'bye', `the peer's close is WsError.Closed(4000, bye), got ${String(closed)}`);
+        // A normal close frame (1000) is Closed too; a connection that drops without one is Network.
+        await live.connect(`${LOOPBACK_WS}/ws/close?code=1000&reason=done`, [], []);
+        await live.read(1);
+        const normal = await rejects(() => live.read(1));
+        expect(normal instanceof WsError.Closed && normal.code === 1000 && normal.reason === 'done', `the peer's 1000 is WsError.Closed(1000, done), got ${String(normal)}`);
+        await live.connect(`${LOOPBACK_WS}/ws/drop`, [], []);
+        await live.read(1);
+        const dropped = await rejects(() => live.read(1));
+        // React Native forwards no `wasClean`: Android's OkHttp reports a drop as a failure (Network), iOS as the end of
+        // its stream (Closed 1001 "Stream end encountered"); both are typed ends, documented in docs/REACT_NATIVE.md.
+        expect(
+          dropped instanceof WsError.Network || (dropped instanceof WsError.Closed && Platform.OS === 'ios'),
+          `a drop is a typed end (Network; on iOS Closed), got ${String(dropped)}`,
+        );
+        // A flood the core does not read: React Native's WebSocket cannot pause, so what arrives waits in JavaScript up
+        // to 4,096 messages (plus the 16 the binding reads ahead), then the connection is given up with 1008.
+        await live.connect(`${LOOPBACK_WS}/ws/flood?n=6000&size=16`, [], []);
+        await sleep(1500);
+        let flooded = 0;
+        let floodEnd: unknown = null;
+        while (floodEnd === null && flooded < 7000) {
+          try {
+            flooded += (await live.read(16)).length;
+          } catch (error) {
+            floodEnd = error;
+          }
+        }
+        expect(
+          floodEnd instanceof WsError.Closed && floodEnd.code === 1008 && floodEnd.reason === 'the core did not keep up',
+          `a stalled flood ends with WsError.Closed(1008, "the core did not keep up"), got ${String(floodEnd)} after ${flooded}`,
+        );
+        expect(flooded >= 4096 && flooded <= 4096 + 32, `bounded: ${flooded} of 6000 messages were kept for the core`);
+        floodDetail = `a stalled flood of 6000 kept ${flooded} then Closed(1008)`;
+      } finally {
+        live.close();
+      }
+      const refused = await rejects(() => wsEcho(`${LOOPBACK_WS}/ws/deny?status=401`, [], core));
+      expect(refused instanceof WsError.Refused, `a refused upgrade is WsError.Refused, got ${String(refused)}`);
+      return `echo of ${shown(back)}; a header on the upgrade; Closed(4000, "bye"), Closed(1000, "done"); a drop is Network; ${floodDetail}; /ws/deny is Refused`;
+    },
+  ],
+  [
+    'RN21',
+    'Sse default: server-sent events through the core from the loopback server (parse, resume, end, refusal)',
+    async core => {
+      const feed = `${LOOPBACK}/sse/feed`;
+      const all = await sseFollow(feed, null, 10, core);
+      const summary = all.events.map(e => `${e.id ?? '-'}:${e.event}:${JSON.stringify(e.data)}`).join(' ');
+      expect(all.ended, 'the server ended the stream (SseError.Ended)');
+      expect(
+        summary === '1:message:"one" 2:tick:"two\\nlines" 2:message:"three" 4:message:"four"',
+        `the feed parses as the HTML standard says, got ${summary}`,
+      );
+      expect(all.events[0]?.retryMs === 1500, 'retry: 1500');
+      const resumed = await sseFollow(feed, '2', 10, core);
+      expect(resumed.events.map(e => e.data).join(',') === 'three,four' && resumed.ended, 'resumed after Last-Event-ID 2');
+      const refused = await rejects(() => sseFollow(`${LOOPBACK}/sse/status?code=500`, null, 10, core));
+      expect(refused instanceof SseError.Refused && refused.status === 500, `a 500 is SseError.Refused(500), got ${String(refused)}`);
+      const html = await rejects(() => sseFollow(`${LOOPBACK}/sse/html`, null, 10, core));
+      expect(html instanceof SseError.Protocol, `text/html is SseError.Protocol, got ${String(html)}`);
+      return `${all.events.length} events then Ended; resumed after id 2; 500 Refused; text/html Protocol`;
     },
   ],
 ];

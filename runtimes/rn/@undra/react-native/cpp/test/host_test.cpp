@@ -16,6 +16,7 @@
 //
 // Prints `ok - <name>` per check and exits non-zero on the first failure.
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -1232,6 +1233,188 @@ void testsWithNativeDefaultsAcrossAReload(const Api *api) {
   if (std::system(cmd.c_str()) != 0) std::printf("# could not remove %s\n", base);
 }
 
+#if defined(UNDRA_RN_TEST_SQLITE)
+
+// ----- the native Db port through the core (ADR-048) --------------------------------------------
+
+const uint32_t kDbPort = fnv1a32("port.Db");
+const uint32_t kDbCells = fnv1a32("fn.db_cells");
+const uint32_t kDbMigrate = fnv1a32("fn.db_migrate");
+const uint32_t kNotes = fnv1a32("Notes");
+const uint32_t kNotesNew = fnv1a32("Notes.new");
+const uint32_t kNotesOpen = fnv1a32("Notes.open");
+const uint32_t kNotesAdd = fnv1a32("Notes.add");
+const uint32_t kNotesAddWithId = fnv1a32("Notes.add_with_id");
+const uint32_t kNotesCount = fnv1a32("Notes.count");
+const uint32_t kNotesCloseDatabase = fnv1a32("Notes.close_database");
+
+/// A platform whose only native default is `Db`, over the system SQLite in a directory.
+struct DbTestPlatform final : Platform {
+  explicit DbTestPlatform(std::string dir) : dir(std::move(dir)) {}
+  std::string kvDirectory() override { return {}; }
+  KvNaming kvNaming() override { return KvNaming::Fnv; }
+  std::string fsRoot() override { return {}; }
+  std::unique_ptr<SecretStore> makeSecretStore() override { return nullptr; }
+  std::unique_ptr<ConnectivitySource> makeConnectivity() override { return nullptr; }
+  std::unique_ptr<DbBackend> makeDbBackend() override { return makeSqliteDbBackend(dir); }
+  void workerStarted(const char *) noexcept override { started++; }
+  void workerEnded() noexcept override { ended++; }
+  std::string dir;
+  std::atomic<int> started{0};
+  std::atomic<int> ended{0};
+};
+
+/// Reads the body of a reply after its 5-byte header.
+struct BodyReader {
+  const std::vector<uint8_t> &bytes;
+  std::size_t at = 5;
+  uint8_t u8() { check(at + 1 <= bytes.size(), "body u8"); return bytes[at++]; }
+  uint32_t u32() { check(at + 4 <= bytes.size(), "body u32"); const uint32_t v = getU32(&bytes[at]); at += 4; return v; }
+  uint64_t u64() { check(at + 8 <= bytes.size(), "body u64"); const uint64_t v = getU64(&bytes[at]); at += 8; return v; }
+  std::string str() {
+    const uint32_t n = u32();
+    check(at + n <= bytes.size(), "body string");
+    std::string s(bytes.begin() + at, bytes.begin() + at + n);
+    at += n;
+    return s;
+  }
+  bool done() const { return at == bytes.size(); }
+};
+
+void testsWithNativeDb(const Api *api) {
+  char pattern[] = "/tmp/undra-rn-db-core.XXXXXX";
+  const char *base = ::mkdtemp(pattern);
+  check(base != nullptr, "a temporary directory");
+  auto platform = std::make_shared<DbTestPlatform>(std::string(base) + "/db");
+  const std::vector<uint32_t> native = nativePortsOf(*platform);
+  check(native == std::vector<uint32_t>{kDbPort}, "the platform offers Db (port 0x559eda82) natively");
+
+  Fixture f(api);
+  StartOptions options;
+  options.nativePorts = native;
+  options.platform = platform;
+  const std::vector<uint8_t> cfg = config();
+  {
+    CallScope scope(*f.host, nullptr);
+    const uint32_t code = f.host->start(cfg.data(), static_cast<uint32_t>(cfg.size()), {{kHttp, {}}, {kKv, {}}, {kDbPort, {}}}, options);
+    check(code == 0, "the core starts with the native Db, got " + std::to_string(code));
+  }
+  f.settle();
+  auto await = [&](const std::vector<uint8_t> &payload, uint32_t id) -> const Record * {
+    check(f.call(payload) == 0, "the call is accepted");
+    check(f.waitFor([&] { return f.replied(id); }), "it replies within 5 s");
+    return f.reply(id);
+  };
+  auto function = [&](uint32_t fn, const std::vector<uint8_t> &args) {
+    const uint32_t id = f.nextCall++;
+    return await(freeCall(fn, id, args), id);
+  };
+  auto method = [&](uint64_t handle, uint32_t m, const std::vector<uint8_t> &args) {
+    const uint32_t id = f.nextCall++;
+    return await(methodCall(handle, m, id, args), id);
+  };
+  auto dbError = [](const Record *r) {
+    check(r->payload[4] == 1, "a typed error");
+    BodyReader b{r->payload};
+    const uint8_t low = b.u8();
+    const uint8_t high = b.u8();
+    return static_cast<uint16_t>(low | (high << 8));
+  };
+
+  // db_cells: every storage class through the core, the port answered natively.
+  auto cells = [&](int64_t i, double real, const std::string &text, const std::vector<uint8_t> &blob, const std::optional<std::string> &none) {
+    Writer w;
+    w.u64(static_cast<uint64_t>(i));
+    uint64_t bits = 0;
+    std::memcpy(&bits, &real, sizeof(bits));
+    w.u64(bits).str(text).u32(static_cast<uint32_t>(blob.size()));
+    w.bytes.insert(w.bytes.end(), blob.begin(), blob.end());
+    if (none) w.u8(1).str(*none);
+    else w.u8(0);
+    const Record *r = function(kDbCells, w.bytes);
+    check(r->payload[4] == 0, "db_cells answers ok, status " + std::to_string(r->payload[4]));
+    BodyReader b{r->payload};
+    check(static_cast<int64_t>(b.u64()) == i, "the integer comes back");
+    const uint64_t realBits = b.u64();
+    double back = 0;
+    std::memcpy(&back, &realBits, sizeof(back));
+    check(back == real, "the real comes back");
+    check(b.str() == text, "the text comes back");
+    const uint32_t n = b.u32();
+    check(n == blob.size() && std::equal(blob.begin(), blob.end(), r->payload.begin() + static_cast<long>(b.at)), "the blob comes back");
+    b.at += n;
+    if (b.u8() == 1) check(none && b.str() == *none, "the optional text comes back");
+    else check(!none, "NULL comes back as None");
+    check(b.u32() == 5, "five typeof() names");
+    const std::string types[] = {b.str(), b.str(), b.str(), b.str(), b.str()};
+    check(types[0] == "integer" && types[1] == "real" && types[2] == "text" && types[3] == "blob" && types[4] == (none ? "text" : "null"),
+        "SQLite's storage classes: " + types[0] + " " + types[1] + " " + types[2] + " " + types[3] + " " + types[4]);
+    check(b.done(), "nothing left over");
+  };
+  cells(INT64_MIN, 1.5, "h\xc3\xa9llo", {0, 1, 0xff}, std::nullopt);
+  cells(INT64_MAX, -0.25, "", {}, std::string("x"));
+  ok("Db through the core: db_cells round-trips every storage class (i64 extremes, empty text and blob) natively");
+
+  // Notes: open (two migrations), add, count, close, reopen: the rows and the version are in the file.
+  const uint64_t notes = constructStore(f, kNotes, kNotesNew);
+  Writer name;
+  name.str("notes");
+  for (int round = 0; round < 2; ++round) {
+    const Record *opened = method(notes, kNotesOpen, name.bytes);
+    check(opened->payload[4] == 0 && getU32(&opened->payload[5]) == 2, "Notes.open reaches version 2 (round " + std::to_string(round) + ")");
+    if (round == 0) {
+      for (const char *title : {"milk", "bread"}) {
+        Writer add;
+        add.str(title);
+        const Record *added = method(notes, kNotesAdd, add.bytes);
+        check(added->payload[4] == 0, "Notes.add answers a note");
+        BodyReader b{added->payload};
+        const int64_t id = static_cast<int64_t>(b.u64());
+        check(id >= 1 && b.str() == title && b.u8() == 0, "with its row id, title and done = false");
+      }
+      Writer dup;
+      dup.u64(1).str("dup");
+      check(dbError(method(notes, kNotesAddWithId, dup.bytes)) == 1, "an id in use is DbError.Constraint");
+    }
+    const Record *count = method(notes, kNotesCount, {});
+    check(count->payload[4] == 0 && getU32(&count->payload[5]) == 2, "Notes.count reads 2 rows from the database");
+    check(method(notes, kNotesCloseDatabase, {})->payload[4] == 0, "Notes.close_database");
+  }
+  struct stat st{};
+  check(::stat((platform->dir + "/notes.sqlite").c_str(), &st) == 0, "the database is <dir>/notes.sqlite");
+  ok("Db through the core: Notes open/add/count/close and reopen keep their rows in the file");
+
+  // db_migrate: a broken second migration rolls the first back too; the good pair reaches 2.
+  Writer broken;
+  broken.str("mig").u8(1);
+  const Record *failed = function(kDbMigrate, broken.bytes);
+  check(dbError(failed) == 6, "a broken migration is DbError.Migration");
+  BodyReader b{failed->payload};
+  b.at = 7;
+  check(b.u32() == 2 && b.str() == "SQL error: no such table: nowhere", "of version 2, with SQLite's error");
+  Writer good;
+  good.str("mig").u8(0);
+  const Record *migrated = function(kDbMigrate, good.bytes);
+  check(migrated->payload[4] == 0 && getU32(&migrated->payload[5]) == 2, "the good pair runs from version 0 (nothing was kept): version 2");
+  for (const Record &r : f.seen) {
+    check(!(r.kind == RecordKind::PortCall && getU32(r.payload.data()) == kDbPort), "no Db port call reached JavaScript");
+  }
+  ok("Db through the core: a failed migration rolls back; no Db call reaches JavaScript");
+
+  // Shutdown with a database open: its thread is joined before the slot is released.
+  const Record *reopened = method(notes, kNotesOpen, name.bytes);
+  check(reopened->payload[4] == 0, "a database open at shutdown");
+  f.host->shutdown();
+  check(Host::runningHost(api->name_space) == nullptr, "the slot is released");
+  check(platform->started.load() >= 1 && platform->started.load() == platform->ended.load(),
+      "every database thread ended (" + std::to_string(platform->started.load()) + " started)");
+  ok("shutdown joins the database threads before the slot is released");
+  std::string cmd = std::string("rm -rf '") + base + "'";
+  if (std::system(cmd.c_str()) != 0) std::printf("# could not remove %s\n", base);
+}
+
+#endif
+
 } // namespace
 
 int main() {
@@ -1251,6 +1434,11 @@ int main() {
   testsWithTwoCores(api, second);
   testsWithNativeDefaults(api);
   testsWithNativeDefaultsAcrossAReload(api);
+#if defined(UNDRA_RN_TEST_SQLITE)
+  testsWithNativeDb(api);
+#else
+  std::printf("# skipped the Db checks through the core: built without the system SQLite (UNDRA_RN_TEST_SQLITE)\n");
+#endif
   std::printf("# %d checks passed\n", g_checks);
   return 0;
 }

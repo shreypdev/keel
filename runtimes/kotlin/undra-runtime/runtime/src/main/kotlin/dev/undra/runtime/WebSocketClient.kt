@@ -11,12 +11,18 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.net.URI
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLSocket
@@ -28,6 +34,18 @@ import javax.net.ssl.SSLSocketFactory
  * (1002, or 1009 for a message that is too big) before dropping the connection.
  */
 internal class WebSocketProtocolException(val code: Int, message: String) : IOException(message)
+
+/**
+ * The server answered the upgrade request with something other than `101 Switching Protocols`: [status] is its HTTP
+ * status (401, 403, 404, ...), or -1 when the status line could not be read. The connection was never established.
+ */
+internal class WebSocketUpgradeException(val status: Int, message: String) : IOException(message)
+
+/**
+ * The server answered `101` but its handshake broke RFC 6455 section 4.1 (a wrong `Sec-WebSocket-Accept`, an extension
+ * or a subprotocol the client did not offer, a missing `Upgrade` header). The connection was never established.
+ */
+internal class WebSocketHandshakeException(message: String) : IOException(message)
 
 /**
  * A small WebSocket client (RFC 6455) over `java.net.Socket`: the handshake, masked client frames,
@@ -44,6 +62,11 @@ internal class WebSocketProtocolException(val code: Int, message: String) : IOEx
  * ping, and when it stays silent for as long again the connection is declared dead through
  * [Listener.onError] (a server that vanished without a FIN would otherwise be noticed by the operating
  * system after minutes).
+ *
+ * Two owners use it: the remote transport (binary envelopes, no subprotocol) and the `WebSocket` port's
+ * default adapter (ADR-047: text messages checked to be UTF-8, subprotocols, extra upgrade headers, a refused
+ * upgrade's status in [WebSocketUpgradeException], and a [ReadGate] that pauses the reader while the
+ * consumer's buffer is full, so TCP pushes back on the server).
  */
 internal class WebSocketClient private constructor(
     private val socket: Socket,
@@ -52,6 +75,9 @@ internal class WebSocketClient private constructor(
     private val listener: Listener,
     private val maxMessageBytes: Int,
     private val pingAfterMillis: Long,
+    private val readGate: ReadGate?,
+    /** The subprotocol the server selected from the ones offered, or `""`. */
+    val protocol: String,
 ) {
     /**
      * What the connection tells its owner. Called on the reader thread (an [onError] for a failed write on the
@@ -65,6 +91,15 @@ internal class WebSocketClient private constructor(
         /** A text message: Undra speaks binary, so the owner treats it as a protocol error. */
         fun onText()
 
+        /**
+         * A whole text message, already checked to be UTF-8 (a text message that is not is a protocol violation: the
+         * client closes with 1007 and reports a [WebSocketProtocolException] through [onError]). The default hands it to
+         * [onText]; owners that speak text (the `WebSocket` port's adapter) override this one.
+         */
+        fun onText(message: String) {
+            onText()
+        }
+
         /** The server closed the connection (the client has echoed the close). */
         fun onClose(code: Int, reason: String)
 
@@ -75,6 +110,16 @@ internal class WebSocketClient private constructor(
         fun onError(cause: Throwable)
     }
 
+    /**
+     * Lets the owner pause reading (ADR-047 §3: a consumer that stopped taking messages stops the socket, and TCP pushes
+     * back on the server). [awaitOpen] is called on the reader thread before every frame is read and blocks while the
+     * owner cannot take more; it must return once the owner closes or aborts the connection.
+     */
+    fun interface ReadGate {
+        /** Returns when the reader may read the next frame. */
+        fun awaitOpen()
+    }
+
     private sealed interface Outgoing {
         class Frame(val bytes: ByteArray) : Outgoing
 
@@ -82,6 +127,8 @@ internal class WebSocketClient private constructor(
     }
 
     private val queue = LinkedBlockingQueue<Outgoing>()
+    private val queuedBytes = AtomicLong(0)
+    private val finishedLatch = CountDownLatch(1)
     private val finished = AtomicBoolean(false)
     private val closedByUs = AtomicBoolean(false)
     private val closeSent = AtomicBoolean(false)
@@ -101,6 +148,15 @@ internal class WebSocketClient private constructor(
     /** `false` once the connection is over, whoever ended it. */
     val isOpen: Boolean get() = !finished.get() && !closedByUs.get()
 
+    /** The bytes of the frames queued for the writer that it has not written yet (the outbound buffer). */
+    val bufferedAmount: Long get() = queuedBytes.get()
+
+    /**
+     * Waits up to [millis] for the connection to be over (after [close]: the server echoed the close, or did not within
+     * two seconds; after [abort] or a failure: at once). Blocks: call it off the main thread. `true` if it is over.
+     */
+    fun awaitFinished(millis: Long): Boolean = finishedLatch.await(millis, TimeUnit.MILLISECONDS)
+
     private fun start() {
         writer = Thread(::writeLoop, "undra-ws-writer").also {
             it.isDaemon = true
@@ -114,7 +170,18 @@ internal class WebSocketClient private constructor(
     /** Queues [message] as one binary message. The write happens on the writer thread. */
     fun sendBinary(message: ByteArray) {
         if (!isOpen) throw IOException("the WebSocket is closed")
-        queue.add(Outgoing.Frame(frame(OP_BINARY, message)))
+        enqueue(frame(OP_BINARY, message))
+    }
+
+    /** Queues [message] as one text message (its UTF-8). The write happens on the writer thread. */
+    fun sendText(message: String) {
+        if (!isOpen) throw IOException("the WebSocket is closed")
+        enqueue(frame(OP_TEXT, message.toByteArray(StandardCharsets.UTF_8)))
+    }
+
+    private fun enqueue(bytes: ByteArray) {
+        queuedBytes.addAndGet(bytes.size.toLong())
+        queue.add(Outgoing.Frame(bytes))
     }
 
     /** Starts the closing handshake: a close frame is sent, then the socket is released once the server answers (or after two seconds). */
@@ -141,7 +208,7 @@ internal class WebSocketClient private constructor(
         payload[0] = (code shr 8).toByte()
         payload[1] = code.toByte()
         System.arraycopy(text, 0, payload, 2, text.size)
-        queue.add(Outgoing.Frame(frame(OP_CLOSE, payload)))
+        enqueue(frame(OP_CLOSE, payload))
     }
 
     /** Waits a moment for the writer to put out what is queued (a close frame) before the socket goes. */
@@ -163,6 +230,7 @@ internal class WebSocketClient private constructor(
                         output.write(item.bytes)
                         // Several queued frames go out in one flush.
                         if (queue.isEmpty()) output.flush()
+                        queuedBytes.addAndGet(-item.bytes.size.toLong())
                     }
                     Outgoing.Stop -> {
                         output.flush()
@@ -193,6 +261,11 @@ internal class WebSocketClient private constructor(
         var messageOpcode = -1
         try {
             while (true) {
+                if (readGate != null && !closedByUs.get()) {
+                    readGate.awaitOpen()
+                    // A pause is the owner's, not the server's silence: the ping watchdog starts again from now.
+                    noteReceived()
+                }
                 val b0 = readByte()
                 val fin = b0 and 0x80 != 0
                 if (b0 and 0x70 != 0) throw ProtocolViolation("the server set a reserved bit")
@@ -239,7 +312,12 @@ internal class WebSocketClient private constructor(
                             val kind = messageOpcode
                             messageOpcode = -1
                             if (closedByUs.get()) continue
-                            tell { if (kind == OP_BINARY) listener.onBinary(whole) else listener.onText() }
+                            if (kind == OP_BINARY) {
+                                tell { listener.onBinary(whole) }
+                            } else {
+                                val text = strictUtf8(whole) ?: throw ProtocolViolation("the server sent a text message that is not UTF-8", INVALID_PAYLOAD)
+                                tell { listener.onText(text) }
+                            }
                         }
                     }
                     OP_CLOSE -> {
@@ -256,7 +334,7 @@ internal class WebSocketClient private constructor(
                         finish()
                         return
                     }
-                    OP_PING -> if (!closedByUs.get()) queue.add(Outgoing.Frame(frame(OP_PONG, payload)))
+                    OP_PING -> if (!closedByUs.get()) enqueue(frame(OP_PONG, payload))
                     else -> Unit // OP_PONG
                 }
             }
@@ -333,7 +411,7 @@ internal class WebSocketClient private constructor(
             return
         }
         pinged = true
-        queue.add(Outgoing.Frame(frame(OP_PING, ByteArray(0))))
+        enqueue(frame(OP_PING, ByteArray(0)))
     }
 
     private class ProtocolViolation(message: String, val code: Int = PROTOCOL_ERROR) : Exception(message)
@@ -357,9 +435,13 @@ internal class WebSocketClient private constructor(
         if (!finished.compareAndSet(false, true)) return false
         queue.add(Outgoing.Stop)
         if (onOwnThread) {
-            Thread(::closeSocket, "undra-ws-close").also { it.isDaemon = true }.start()
+            Thread({
+                closeSocket()
+                finishedLatch.countDown()
+            }, "undra-ws-close").also { it.isDaemon = true }.start()
         } else {
             closeSocket()
+            finishedLatch.countDown()
         }
         return true
     }
@@ -418,6 +500,7 @@ internal class WebSocketClient private constructor(
         private const val NORMAL_CLOSURE = 1000
         private const val PROTOCOL_ERROR = 1002
         private const val NO_STATUS = 1005
+        private const val INVALID_PAYLOAD = 1007
         private const val MESSAGE_TOO_BIG = 1009
         private const val NANOS_PER_MILLI = 1_000_000L
         private const val CLOSE_GRACE_MILLIS = 2_000L
@@ -434,6 +517,12 @@ internal class WebSocketClient private constructor(
          * `wss` uses [sslSocketFactory] (the platform's default when `null`) with host name verification on: a
          * certificate that does not name the host is refused like an untrusted one.
          *
+         * [protocols] are offered in `Sec-WebSocket-Protocol` (the server may choose one of them: [protocol]), [headers]
+         * are sent with the upgrade request as they are (the caller checks them: [checkHeader]), and [readGate], when
+         * given, can pause the reader.
+         *
+         * @throws WebSocketUpgradeException if the server answers the upgrade with another status than 101.
+         * @throws WebSocketHandshakeException if the server's 101 breaks RFC 6455 section 4.1.
          * @throws IOException if the server cannot be reached or does not complete the handshake.
          */
         fun connect(
@@ -443,6 +532,9 @@ internal class WebSocketClient private constructor(
             maxMessageBytes: Int = 64 * 1024 * 1024,
             pingAfterMillis: Long = 10_000L,
             sslSocketFactory: SSLSocketFactory? = null,
+            protocols: List<String> = emptyList(),
+            headers: List<Pair<String, String>> = emptyList(),
+            readGate: ReadGate? = null,
         ): WebSocketClient {
             val secure = uri.scheme.equals("wss", ignoreCase = true)
             val host = uri.host ?: throw IOException("the URL has no host")
@@ -454,14 +546,14 @@ internal class WebSocketClient private constructor(
                 val handshakeDeadline = System.nanoTime() + timeoutMillis.coerceAtLeast(1) * NANOS_PER_MILLI
                 val key = Base64.getEncoder().encodeToString(ByteArray(16).also { RANDOM.nextBytes(it) })
                 val output = socket.getOutputStream()
-                output.write(request(uri, host, port, secure, key).toByteArray(StandardCharsets.US_ASCII))
+                output.write(request(uri, host, port, secure, key, protocols, headers).toByteArray(StandardCharsets.UTF_8))
                 output.flush()
                 val input = BufferedInputStream(socket.getInputStream(), 16 * 1024)
                 val head = readHead(input, handshakeDeadline)
-                checkResponse(head, key)
+                val protocol = checkResponse(head, key, protocols)
                 // The handshake is done; from now on reads poll, so a quiet server can be pinged.
                 socket.soTimeout = pollMillis
-                val client = WebSocketClient(socket, input, output, listener, maxMessageBytes, pingAfterMillis)
+                val client = WebSocketClient(socket, input, output, listener, maxMessageBytes, pingAfterMillis, readGate, protocol)
                 client.start()
                 return client
             } catch (e: Throwable) {
@@ -526,18 +618,59 @@ internal class WebSocketClient private constructor(
             throw failure ?: IOException("timed out connecting to $host:$port")
         }
 
-        private fun request(uri: URI, host: String, port: Int, secure: Boolean, key: String): String {
+        private fun request(
+            uri: URI,
+            host: String,
+            port: Int,
+            secure: Boolean,
+            key: String,
+            protocols: List<String>,
+            headers: List<Pair<String, String>>,
+        ): String {
             val path = (uri.rawPath?.takeIf { it.isNotEmpty() } ?: "/") + (uri.rawQuery?.let { "?$it" } ?: "")
             val shownHost = if (host.contains(':')) "[$host]" else host
             val defaultPort = if (secure) 443 else 80
             val authority = if (port == defaultPort) shownHost else "$shownHost:$port"
-            return "GET $path HTTP/1.1\r\n" +
-                "Host: $authority\r\n" +
-                "Upgrade: websocket\r\n" +
-                "Connection: Upgrade\r\n" +
-                "Sec-WebSocket-Key: $key\r\n" +
-                "Sec-WebSocket-Version: 13\r\n\r\n"
+            val out = StringBuilder()
+            out.append("GET ").append(path).append(" HTTP/1.1\r\n")
+                .append("Host: ").append(authority).append("\r\n")
+                .append("Upgrade: websocket\r\n")
+                .append("Connection: Upgrade\r\n")
+                .append("Sec-WebSocket-Key: ").append(key).append("\r\n")
+                .append("Sec-WebSocket-Version: 13\r\n")
+            if (protocols.isNotEmpty()) out.append("Sec-WebSocket-Protocol: ").append(protocols.joinToString(", ")).append("\r\n")
+            for ((name, value) in headers) {
+                checkHeader(name, value)?.let { throw IllegalArgumentException(it) }
+                out.append(name).append(": ").append(value).append("\r\n")
+            }
+            return out.append("\r\n").toString()
         }
+
+        /** Headers the client writes itself; a caller may not send them (subprotocols go through `protocols`). */
+        private val RESERVED_HEADERS = setOf(
+            "host", "upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions",
+            "sec-websocket-protocol", "sec-websocket-accept", "content-length", "transfer-encoding",
+        )
+
+        /**
+         * Why the header [name]: [value] cannot go into an upgrade request (a name that is not an HTTP token, a value with
+         * a line break or a NUL, a header the client writes itself), or `null` when it can.
+         */
+        fun checkHeader(name: String, value: String): String? = when {
+            name.isEmpty() || name.any { it.code > 0x7e || it.code <= 0x20 || it in "()<>@,;:\\\"/[]?={}" } ->
+                "the header name '$name' is not an HTTP token"
+            value.any { it == '\r' || it == '\n' || it == '\u0000' } -> "the value of header '$name' contains a line break or a NUL"
+            name.lowercase() in RESERVED_HEADERS -> "the header '$name' is set by the WebSocket client itself"
+            else -> null
+        }
+
+        /** Why [protocol] cannot be offered (empty, not an HTTP token), or `null` when it can. */
+        fun checkProtocol(protocol: String): String? =
+            if (protocol.isEmpty() || protocol.any { it.code > 0x7e || it.code <= 0x20 || it in "()<>@,;:\\\"/[]?={}" }) {
+                "the subprotocol '$protocol' is not an HTTP token"
+            } else {
+                null
+            }
 
         /**
          * The response head, up to and including the blank line; nothing after it is consumed. A server that
@@ -555,22 +688,45 @@ internal class WebSocketClient private constructor(
             return head.toString()
         }
 
-        /** RFC 6455 section 4.1: the checks a client must make of the server's answer to its upgrade request. */
-        private fun checkResponse(head: String, key: String) {
+        /**
+         * RFC 6455 section 4.1: the checks a client must make of the server's answer to its upgrade request. Returns the
+         * subprotocol the server chose from [offered] (`""` for none).
+         */
+        private fun checkResponse(head: String, key: String, offered: List<String>): String {
             val lines = head.split("\r\n")
             val status = lines.first()
-            if (!status.startsWith("HTTP/1.1 101")) throw IOException("the server did not upgrade the connection: ${status.take(80)}")
+            if (!status.startsWith("HTTP/1.1 101")) {
+                val code = STATUS_LINE.find(status)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+                throw WebSocketUpgradeException(code, "the server did not upgrade the connection: ${status.take(80)}")
+            }
             fun header(name: String): String? =
                 lines.drop(1).firstOrNull { it.startsWith("$name:", ignoreCase = true) }?.substringAfter(':')?.trim()
-            if (!header("Upgrade").equals("websocket", ignoreCase = true)) throw IOException("the server's upgrade response has no Upgrade: websocket")
+            if (!header("Upgrade").equals("websocket", ignoreCase = true)) throw WebSocketHandshakeException("the server's upgrade response has no Upgrade: websocket")
             val connection = header("Connection")?.split(',')?.map { it.trim() }.orEmpty()
-            if (connection.none { it.equals("upgrade", ignoreCase = true) }) throw IOException("the server's upgrade response has no Connection: Upgrade")
+            if (connection.none { it.equals("upgrade", ignoreCase = true) }) throw WebSocketHandshakeException("the server's upgrade response has no Connection: Upgrade")
             val expected = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-1").digest((key + GUID).toByteArray(StandardCharsets.US_ASCII)))
-            if (header("Sec-WebSocket-Accept") != expected) throw IOException("the server's Sec-WebSocket-Accept is wrong")
-            // This client asks for no extension and no subprotocol, so the server may not pick one.
-            if (!header("Sec-WebSocket-Extensions").isNullOrEmpty()) throw IOException("the server chose a WebSocket extension this client did not offer")
-            if (!header("Sec-WebSocket-Protocol").isNullOrEmpty()) throw IOException("the server chose a WebSocket subprotocol this client did not offer")
+            if (header("Sec-WebSocket-Accept") != expected) throw WebSocketHandshakeException("the server's Sec-WebSocket-Accept is wrong")
+            // This client asks for no extension, so the server may not pick one; a subprotocol must be one it offered.
+            if (!header("Sec-WebSocket-Extensions").isNullOrEmpty()) throw WebSocketHandshakeException("the server chose a WebSocket extension this client did not offer")
+            val chosen = header("Sec-WebSocket-Protocol").orEmpty()
+            if (chosen.isNotEmpty() && chosen !in offered) throw WebSocketHandshakeException("the server chose a WebSocket subprotocol this client did not offer")
+            return chosen
         }
+
+        /** The status code of an HTTP status line. */
+        private val STATUS_LINE = Regex("^HTTP/\\d(?:\\.\\d)? (\\d{3})")
+
+        /** [bytes] decoded as UTF-8, or `null` when they are not valid UTF-8 (overlong forms and surrogates included). */
+        private fun strictUtf8(bytes: ByteArray): String? =
+            try {
+                StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString()
+            } catch (e: CharacterCodingException) {
+                null
+            }
 
         /** Whether a close frame may carry [code] (RFC 6455 section 7.4 and the IANA registry). */
         private fun isValidCloseCode(code: Int): Boolean =

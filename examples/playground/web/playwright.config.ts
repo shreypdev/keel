@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 /**
  * The smoke test drives the production build (`npm run build`, served by `vite preview`) in a real
- * headless Chromium. `npx playwright install chromium` fetches the browser once; to use an installed
+ * headless Chromium, with the realtime server of the contract tests on port 4180 for the Live view. `npx playwright install chromium` fetches the browser once; to use an installed
  * Chrome instead, set UNDRA_BROWSER_CHANNEL=chrome.
  */
 const channel = process.env["UNDRA_BROWSER_CHANNEL"];
@@ -16,10 +16,19 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   use: { baseURL: "http://127.0.0.1:4173" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], ...(channel === undefined ? {} : { channel }) } }],
-  webServer: {
-    command: "npm run preview -- --host 127.0.0.1 --port 4173 --strictPort",
-    url: "http://127.0.0.1:4173",
-    reuseExistingServer: false,
-    timeout: 30_000,
-  },
+  webServer: [
+    {
+      command: "npm run preview -- --host 127.0.0.1 --port 4173 --strictPort",
+      url: "http://127.0.0.1:4173",
+      reuseExistingServer: false,
+      timeout: 30_000,
+    },
+    {
+      // The shared realtime server of the contract tests (ADR-047), on the port the Live view connects to by default.
+      command: "node ../../../contract-tests/servers/realtime-server.mjs --port 4180",
+      url: "http://127.0.0.1:4180/stats",
+      reuseExistingServer: false,
+      timeout: 30_000,
+    },
+  ],
 });

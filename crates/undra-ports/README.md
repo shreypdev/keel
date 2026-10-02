@@ -90,8 +90,33 @@ assert_eq!(fakes.http.call_count(), 1);
 | `SeededRng` | `Rng` | xorshift64\*: the same seed gives the same bytes |
 | `CaptureLog` | `Log` | keeps every record |
 | `ScriptedConnectivity`, `ScriptedLifecycle` | `Connectivity`, `Lifecycle` | push scripted events into a runtime |
+| `FakeWebSocket` | `WebSocket` (feature `websocket`) | a scripted server: accept or refuse, push, close, drop, echo; records sends and every pull |
+| `FakeSse` | `Sse` (feature `sse`) | a scripted event stream: push, end, fail; records each open's `Last-Event-ID` |
+| `FakeDb` | `Db` (feature `db`) | replies scripted by SQL, `fail_next`, migrations and transactions tracked |
 
 All fakes are `Send + Sync`.
+
+## Opt-in ports: WebSocket, Sse, Db
+
+`WebSocket` and `Sse` (ADR-047) and `Db` (ADR-048) are behind the features `websocket`, `sse` and
+`db` (of this crate and of `undra`), off by default: a core that does not enable them keeps its
+schema, schema hash and size. Inbound messages and events are pulled with the core's credit
+(16 per pull), so a core that stops reading stops the socket; reconnecting is the core's job
+(`Backoff`, `WeakCtx::sleep`). SQL takes its values as parameters only:
+
+```rust,ignore
+use undra_ports::db::{Database, Migration};
+use undra_ports::params;
+
+const MIGRATIONS: &[Migration] = &[Migration::new(1, "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL)")];
+
+let db = Database::open(&ctx, "app", MIGRATIONS).await?;
+let id = db.transaction(|tx| async move {
+    Ok(tx.execute("INSERT INTO notes (title) VALUES (?)", params!["milk"]).await?.last_insert_id)
+}).await?;
+let rows = db.query("SELECT title FROM notes WHERE id = ?", params![id]).await?;
+let title: String = rows.row(0).unwrap().get("title")?;
+```
 
 ## Unavailable ports
 
@@ -115,4 +140,5 @@ it uses (`Clock`, `Rng` and `Log` have built-in wasm bindings).
 
 `#[undra::port]`, `#[undra::api]` and `#[undra::error]` register everything in this crate with the
 schema, so any core that links `undra-ports` describes the ten ports and their records to
-`undra-bindgen` and includes them in its schema hash.
+`undra-bindgen` and includes them in its schema hash; the opt-in ports join them only when their
+features are on.

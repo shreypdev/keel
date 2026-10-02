@@ -18,6 +18,7 @@ export default defineConfig({
     alias: [
       { find: /^\.\.\/src\/harness\.js$/, replacement: at("./test/contract/harness.ts") },
       { find: /^\.\.\/src\/wasm-exports\.js$/, replacement: at("./test/contract/wasm-exports.ts") },
+      { find: "@undra/runtime/realtime", replacement: at("../../../ts/@undra/runtime/src/realtime.ts") },
       { find: "@undra/runtime", replacement: at("../../../ts/@undra/runtime/src/index.ts") },
       { find: "@playground/core", replacement: at("../../../../examples/playground/generated/ts/src/index.ts") },
       { find: /^vitest$/, replacement: at("./node_modules/vitest/dist/index.js") },

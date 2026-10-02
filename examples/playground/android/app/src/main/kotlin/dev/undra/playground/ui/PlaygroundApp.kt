@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
@@ -21,7 +22,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 
-/** The four screens, in the order of the navigation bar. [id] is what the `tab` launch extra names. */
+/** The five screens, in the order of the navigation bar. [id] is what the `tab` launch extra names. */
 enum class Tab(val id: String, val label: String, val icon: ImageVector) {
     /** The to-do list: a store with a filter and two computed values. */
     TODOS("todos", "Todos", Icons.Filled.CheckCircle),
@@ -34,6 +35,9 @@ enum class Tab(val id: String, val label: String, val icon: ImageVector) {
 
     /** A cached server list with optimistic updates and an offline queue. */
     REMOTE("remote", "Remote", Icons.Filled.Refresh),
+
+    /** Notes kept in SQLite through the opt-in `Db` port (ADR-048). */
+    NOTES("notes", "Notes", Icons.Filled.Edit),
     ;
 
     /** Finds tabs by the name in the launch extra. */
@@ -43,7 +47,7 @@ enum class Tab(val id: String, val label: String, val icon: ImageVector) {
     }
 }
 
-/** The app: a bottom navigation bar over the four screens. Every screen keeps its store while another tab is shown. */
+/** The app: a bottom navigation bar over the five screens. Every screen keeps its store while another tab is shown. */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun PlaygroundApp(tab: Tab, onTab: (Tab) -> Unit) {
@@ -70,6 +74,7 @@ fun PlaygroundApp(tab: Tab, onTab: (Tab) -> Unit) {
                 Tab.COUNTER -> CounterScreen()
                 Tab.BIGLIST -> BigListScreen()
                 Tab.REMOTE -> RemoteScreen()
+                Tab.NOTES -> NotesScreen()
             }
         }
     }

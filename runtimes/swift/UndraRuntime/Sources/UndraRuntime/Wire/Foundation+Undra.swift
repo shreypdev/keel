@@ -114,3 +114,24 @@ extension StorageError: LocalizedError {
         return description
     }
 }
+
+/// `WsError` is a `LocalizedError` whose description is its message.
+extension WsError: LocalizedError {
+    public var errorDescription: String? {
+        return description
+    }
+}
+
+/// `SseError` is a `LocalizedError` whose description is its message.
+extension SseError: LocalizedError {
+    public var errorDescription: String? {
+        return description
+    }
+}
+
+/// `DbError` is a `LocalizedError` whose description is its message.
+extension DbError: LocalizedError {
+    public var errorDescription: String? {
+        return description
+    }
+}

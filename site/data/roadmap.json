@@ -129,6 +129,10 @@
         {
           "title": "A testing kit for apps (ADR-055)",
           "text": "Previews run the real core in process with scripted ports and a manual clock; a session recorded once with undra dev --record replays deterministically in tests on every platform."
+        },
+        {
+          "title": "WebSocket, SSE and Db ports (ADR-047, ADR-048)",
+          "text": "Real-time streams with the core's credit as backpressure, and SQL over SQLite on every platform with the same deterministic fake; opt-in, so nothing grows for apps that do not use them."
         }
       ]
     },
@@ -164,10 +168,6 @@
       "when": "planned",
       "intro": "Planned for the releases after v1.0. The order may change with what the benchmarks show.",
       "items": [
-        {
-          "title": "Db and WebSocket ports",
-          "text": "SQL over SQLite on every platform with the same deterministic fake; bidirectional backpressured streams."
-        },
         {
           "title": "Objects as parameters, host callbacks, generics and Decimal (ADR-040 to 042)",
           "text": "The boundary types a production app reaches for, each with a schema description and generated code that reads as native."

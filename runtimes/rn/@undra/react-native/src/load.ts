@@ -1,6 +1,6 @@
 import { type AdapterOverrides, type AttachOptions, type Transport, UndraCore, UndraTransportError } from "@undra/runtime";
 import { AppState, Platform, TurboModuleRegistry } from "react-native";
-import { nativeAdapterNames, nativeDefaultPorts, reactNativeAdapters } from "./adapters.js";
+import { nativeAdapterNames, nativeDefaultPorts, reactNativeAdapters, realtimePorts } from "./adapters.js";
 import { nativeFrameScheduler } from "./frame.js";
 import type { NativePlatformDefaults, UndraNativeModule } from "./native.js";
 import type { Spec } from "./specs/NativeUndra.js";
@@ -107,11 +107,14 @@ function platformDefaultsOf(native: UndraNativeModule): NativePlatformDefaults {
  * may load several cores, one per namespace (ADR-044); loading a namespace again while its core is open
  * (or still loading) resolves with the same core, and after `close()` starts a new one.
  *
- * Every standard port has a default (ADR-038 amendment B): `Kv`, `SecureStore`, `Fs` and the
- * `Connectivity` source are the module's, native and off the JS thread (files in the app's private
- * storage, the Keychain or the Android Keystore, `NWPathMonitor` or `ConnectivityManager`); `Http` is
- * React Native's `fetch` and `Lifecycle` its `AppState`; `Clock`, `Rng`, `Log` and `Timer` are native.
- * A value in `adapters` (or an implementation in `ports`) replaces a default, and `null` removes it.
+ * Every standard port has a default (ADR-038 amendment B): `Kv`, `SecureStore`, `Fs`, `Db` (ADR-048) and
+ * the `Connectivity` source are the module's, native and off the JS thread (files in the app's private
+ * storage, the Keychain or the Android Keystore, the platform's SQLite, `NWPathMonitor` or
+ * `ConnectivityManager`); `Http` is React Native's `fetch` and `Lifecycle` its `AppState`; the opt-in
+ * `WebSocket` and `Sse` ports (ADR-047) are React Native's `WebSocket` and `fetch` or `XMLHttpRequest`
+ * through `@undra/runtime/realtime`; `Clock`, `Rng`, `Log` and `Timer` are native. A value in `adapters`
+ * (or an implementation in `ports`, the way to replace `Db`, `WebSocket` and `Sse`) replaces a default,
+ * and `null` in `adapters` removes it.
  * Replace a native default here: `core.registerPort` after the load does not reach a port the module
  * answers itself. The native defaults keep their data in one place per app, shared by its cores.
  *
@@ -142,7 +145,8 @@ function start(entry: NativeCoreEntry, options: NativeLoadOptions): Promise<Undr
   } catch (error) {
     return Promise.reject(error);
   }
-  const adapters = { ...reactNativeAdapters(), ...options.adapters };
+  const { webSocket, sse, ...defaults } = reactNativeAdapters();
+  const adapters: AdapterOverrides = { ...defaults, ...options.adapters };
   let core: UndraCore | undefined;
   // What the module and the frame scheduler find wrong has no caller to reject: it is the runtime's to report
   // (ADR-032, amendment A), which logs it at error level and hands `onError` an `UndraUnhandledError`. Before
@@ -183,6 +187,8 @@ function start(entry: NativeCoreEntry, options: NativeLoadOptions): Promise<Undr
   const attach: Omit<AttachOptions, "expectedSchemaHash"> = {
     ...options,
     adapters: attachAdapters,
+    // The opt-in WebSocket and Sse ports (ADR-047) for a core that declares them; the app's `ports` win.
+    ports: { ...realtimePorts({ webSocket, sse }), ...options.ports },
     mirror: { schedule, ...options.mirror },
   };
   const attached =

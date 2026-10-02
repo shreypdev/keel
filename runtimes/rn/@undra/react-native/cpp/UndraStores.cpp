@@ -437,11 +437,26 @@ uint8_t WireReader::u8() noexcept {
   return data_[at_++];
 }
 
+uint16_t WireReader::u16() noexcept {
+  if (!need(2)) return 0;
+  const auto v = static_cast<uint16_t>(data_[at_] | (data_[at_ + 1] << 8));
+  at_ += 2;
+  return v;
+}
+
 uint32_t WireReader::u32() noexcept {
   if (!need(4)) return 0;
   const uint32_t v = static_cast<uint32_t>(data_[at_]) | (static_cast<uint32_t>(data_[at_ + 1]) << 8) |
       (static_cast<uint32_t>(data_[at_ + 2]) << 16) | (static_cast<uint32_t>(data_[at_ + 3]) << 24);
   at_ += 4;
+  return v;
+}
+
+uint64_t WireReader::u64() noexcept {
+  if (!need(8)) return 0;
+  uint64_t v = 0;
+  for (int i = 0; i < 8; ++i) v |= static_cast<uint64_t>(data_[at_ + i]) << (8 * i);
+  at_ += 8;
   return v;
 }
 
@@ -478,6 +493,11 @@ WireWriter &WireWriter::u16(uint16_t v) {
 
 WireWriter &WireWriter::u32(uint32_t v) {
   for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+  return *this;
+}
+
+WireWriter &WireWriter::u64(uint64_t v) {
+  for (int i = 0; i < 8; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i)));
   return *this;
 }
 

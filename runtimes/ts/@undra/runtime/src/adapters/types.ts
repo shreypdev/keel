@@ -50,6 +50,93 @@ export const APP_STATES = ["active", "inactive", "background"] as const;
 export type AppState = (typeof APP_STATES)[number];
 
 // ---------------------------------------------------------------------------
+// The opt-in ports' records and enums (ADR-047 WebSocket and Sse, ADR-048 Db)
+// ---------------------------------------------------------------------------
+
+/** What `WebSocket.connect` answers: the connection's id and the subprotocol the server chose. */
+export interface WsOpened {
+  /** The connection's id, chosen by the adapter; never reused by it. */
+  readonly conn: number;
+  /** The subprotocol the server selected, or `""` when none was negotiated. */
+  readonly protocol: string;
+}
+
+/** One WebSocket message. Control frames (ping, pong, close) never surface as messages. */
+export type WsMessage =
+  /** A text message (valid UTF-8 by RFC 6455). */
+  | { readonly kind: "text"; readonly value: string }
+  /** A binary message. */
+  | { readonly kind: "binary"; readonly value: Uint8Array };
+
+/** One server-sent event. */
+export interface SseEvent {
+  /**
+   * The event's `id` field, if the event (or an earlier one, per the standard's last-event-id
+   * buffer) set one. Send it back as `lastEventId` to resume.
+   */
+  readonly id: string | null;
+  /** The event type: the `event` field, `"message"` when absent. */
+  readonly event: string;
+  /** The `data` lines, joined with `\n`. */
+  readonly data: string;
+  /** The `retry` field in milliseconds, when this event carried one: how long the server asks clients to wait before reconnecting. */
+  readonly retryMs: number | null;
+}
+
+/** One schema migration, as the `Db` port carries it. */
+export interface DbMigration {
+  /** The version this migration brings the database to; versions strictly increase from 1. */
+  readonly version: number;
+  /** The SQL, possibly several statements. */
+  readonly sql: string;
+}
+
+/** What `Db.open` answers: the database's id and its version after migrating. */
+export interface DbOpened {
+  /** The database's id, chosen by the adapter; never reused by it. */
+  readonly db: number;
+  /** `PRAGMA user_version` after the migrations ran (0 for a database without any). */
+  readonly version: number;
+}
+
+/** One SQLite value: the five storage classes. An `INTEGER` is a `bigint`, so every 64-bit value crosses exactly. */
+export type DbValue =
+  /** `NULL`. */
+  | { readonly kind: "null" }
+  /** A 64-bit signed integer. */
+  | { readonly kind: "integer"; readonly value: bigint }
+  /** A 64-bit float. */
+  | { readonly kind: "real"; readonly value: number }
+  /** UTF-8 text. */
+  | { readonly kind: "text"; readonly value: string }
+  /** Bytes. */
+  | { readonly kind: "blob"; readonly value: Uint8Array };
+
+/** What `Db.execute` answers. */
+export interface DbExecuted {
+  /** Rows inserted, updated or deleted by the statement (`sqlite3_changes64`). */
+  readonly changes: bigint;
+  /** The rowid of the last insert on the connection (`sqlite3_last_insert_rowid`). */
+  readonly lastInsertId: bigint;
+}
+
+/** What `Db.query` answers: the column names and the rows, each a cell per column. */
+export interface DbRows {
+  /** The result's column names, in order. */
+  readonly columns: string[];
+  /** The rows, each with one value per column. */
+  readonly rows: DbValue[][];
+}
+
+/** `DbConstraint`, a unit enum; the wire index is the position in this list. */
+export const DB_CONSTRAINTS = ["unique", "notNull", "foreignKey", "check", "other"] as const;
+/**
+ * Which constraint a statement broke: `unique` (`UNIQUE` or `PRIMARY KEY`), `notNull`, `foreignKey`
+ * (enforced: every database opens with `foreign_keys = ON`), `check`, or `other` (a trigger's `RAISE`, ...).
+ */
+export type DbConstraint = (typeof DB_CONSTRAINTS)[number];
+
+// ---------------------------------------------------------------------------
 // Typed errors
 // ---------------------------------------------------------------------------
 
@@ -258,6 +345,300 @@ export function fsErrorFrom(error: unknown): FsError {
       : name === "NotAllowedError" || name === "SecurityError" || name === "EACCES" || name === "EPERM"
         ? new FsError.Denied()
         : new FsError.Io(describe(error));
+}
+
+/** Discriminants of {@link WsError}. */
+export type WsErrorKind = "refused" | "network" | "protocol" | "closed";
+
+/**
+ * Why a WebSocket could not be opened, or how it ended (ADR-047 §5). A `WebSocketAdapter` rejects
+ * with one of the variants (`WsError.Refused`, ...); `webSocketPort` (`@undra/runtime/realtime`)
+ * sends it to the core.
+ *
+ * | What happened | Variant |
+ * |---|---|
+ * | the upgrade was answered non-101, the URL is unusable, headers the platform cannot send | `Refused` |
+ * | the connection dropped without a close frame (DNS, reset, TLS, timeout) | `Network` |
+ * | the peer broke RFC 6455, or a reply did not decode | `Protocol` |
+ * | the peer sent a close frame (1000 included), or the adapter closed past its backlog limit (1008) | `Closed` |
+ */
+export abstract class WsError extends UndraError {
+  declare readonly kind: WsErrorKind;
+
+  /** The connection was not established. `status` is the HTTP status of the refused upgrade where the platform reports it (browsers do not). */
+  static get Refused(): typeof WsErrorRefused {
+    return WsErrorRefused;
+  }
+
+  /** The connection failed or dropped without a closing handshake; the text is the platform's. */
+  static get Network(): typeof WsErrorNetwork {
+    return WsErrorNetwork;
+  }
+
+  /** The peer broke the protocol (or a port reply did not decode); the text says how. */
+  static get Protocol(): typeof WsErrorProtocol {
+    return WsErrorProtocol;
+  }
+
+  /** The connection was closed with a close frame: `code` and `reason` are the frame's. */
+  static get Closed(): typeof WsErrorClosed {
+    return WsErrorClosed;
+  }
+}
+
+/** The variants of {@link WsError}, as types (`WsError.Refused`). */
+export declare namespace WsError {
+  /** The connection was not established. `status` is the HTTP status of the refused upgrade where the platform reports it (browsers do not). */
+  type Refused = WsErrorRefused;
+  /** The connection failed or dropped without a closing handshake; the text is the platform's. */
+  type Network = WsErrorNetwork;
+  /** The peer broke the protocol (or a port reply did not decode); the text says how. */
+  type Protocol = WsErrorProtocol;
+  /** The connection was closed with a close frame: `code` and `reason` are the frame's. */
+  type Closed = WsErrorClosed;
+}
+
+/** `WsError.Refused`: the connection was not established. `status` is the HTTP status of the refused upgrade where the platform reports it (browsers do not). Construct and test it as `WsError.Refused`. */
+export class WsErrorRefused extends WsError {
+  declare readonly kind: "refused";
+  constructor(
+    readonly status: number | null,
+    readonly message_: string,
+  ) {
+    super("refused", `the WebSocket was refused: ${message_}`);
+  }
+}
+
+/** `WsError.Network`: the connection failed or dropped without a closing handshake; the text is the platform's. Construct and test it as `WsError.Network`. */
+export class WsErrorNetwork extends WsError {
+  declare readonly kind: "network";
+  constructor(readonly value: string) {
+    super("network", `WebSocket network error: ${value}`);
+  }
+}
+
+/** `WsError.Protocol`: the peer broke the protocol (or a port reply did not decode); the text says how. Construct and test it as `WsError.Protocol`. */
+export class WsErrorProtocol extends WsError {
+  declare readonly kind: "protocol";
+  constructor(readonly value: string) {
+    super("protocol", `WebSocket protocol error: ${value}`);
+  }
+}
+
+/** `WsError.Closed`: the connection was closed with a close frame: `code` and `reason` are the frame's. Construct and test it as `WsError.Closed`. */
+export class WsErrorClosed extends WsError {
+  declare readonly kind: "closed";
+  constructor(
+    readonly code: number,
+    readonly reason: string,
+  ) {
+    super("closed", `the WebSocket was closed (${code}): ${reason}`);
+  }
+}
+
+/** Discriminants of {@link SseError}. */
+export type SseErrorKind = "refused" | "network" | "protocol" | "ended";
+
+/**
+ * Why a server-sent event stream could not be opened, or how it ended (ADR-047 §5). An
+ * `SseAdapter` rejects with one of the variants (`SseError.Refused`, ...).
+ */
+export abstract class SseError extends UndraError {
+  declare readonly kind: SseErrorKind;
+
+  /** The request was answered with a status other than 2xx (a 204 means "stop"), or the URL is unusable. `status` is `null` when there was no HTTP answer. */
+  static get Refused(): typeof SseErrorRefused {
+    return SseErrorRefused;
+  }
+
+  /** The connection failed or dropped; the text is the platform's. */
+  static get Network(): typeof SseErrorNetwork {
+    return SseErrorNetwork;
+  }
+
+  /** The answer was not `text/event-stream`, was not UTF-8, or a port reply did not decode. */
+  static get Protocol(): typeof SseErrorProtocol {
+    return SseErrorProtocol;
+  }
+
+  /** The server ended the response. Reconnect with the last event id to resume. */
+  static get Ended(): typeof SseErrorEnded {
+    return SseErrorEnded;
+  }
+}
+
+/** The variants of {@link SseError}, as types (`SseError.Refused`). */
+export declare namespace SseError {
+  /** The request was answered with a status other than 2xx (a 204 means "stop"), or the URL is unusable. `status` is `null` when there was no HTTP answer. */
+  type Refused = SseErrorRefused;
+  /** The connection failed or dropped; the text is the platform's. */
+  type Network = SseErrorNetwork;
+  /** The answer was not `text/event-stream`, was not UTF-8, or a port reply did not decode. */
+  type Protocol = SseErrorProtocol;
+  /** The server ended the response. Reconnect with the last event id to resume. */
+  type Ended = SseErrorEnded;
+}
+
+/** `SseError.Refused`: the request was answered with a status other than 2xx (a 204 means "stop"), or the URL is unusable. `status` is `null` when there was no HTTP answer. Construct and test it as `SseError.Refused`. */
+export class SseErrorRefused extends SseError {
+  declare readonly kind: "refused";
+  constructor(
+    readonly status: number | null,
+    readonly message_: string,
+  ) {
+    super("refused", `the event stream was refused: ${message_}`);
+  }
+}
+
+/** `SseError.Network`: the connection failed or dropped; the text is the platform's. Construct and test it as `SseError.Network`. */
+export class SseErrorNetwork extends SseError {
+  declare readonly kind: "network";
+  constructor(readonly value: string) {
+    super("network", `event stream network error: ${value}`);
+  }
+}
+
+/** `SseError.Protocol`: the answer was not `text/event-stream`, was not UTF-8, or a port reply did not decode. Construct and test it as `SseError.Protocol`. */
+export class SseErrorProtocol extends SseError {
+  declare readonly kind: "protocol";
+  constructor(readonly value: string) {
+    super("protocol", `event stream protocol error: ${value}`);
+  }
+}
+
+/** `SseError.Ended`: the server ended the response. Reconnect with the last event id to resume. Construct and test it as `SseError.Ended`. */
+export class SseErrorEnded extends SseError {
+  declare readonly kind: "ended";
+  constructor() {
+    super("ended", "the server ended the event stream");
+  }
+}
+
+/** Discriminants of {@link DbError}. */
+export type DbErrorKind = "busy" | "constraint" | "corrupt" | "full" | "unavailable" | "sql" | "migration";
+
+/**
+ * Why a database operation failed (ADR-048). The variant follows SQLite's result code, never the
+ * message text. A `DbAdapter` rejects with one of the variants (`DbError.Busy`, ...); `dbPort`
+ * (`@undra/runtime/db`) sends it to the core.
+ */
+export abstract class DbError extends UndraError {
+  declare readonly kind: DbErrorKind;
+
+  /** The database stayed locked past the busy timeout (5 s): another connection, or a statement made outside a running transaction on the same database. */
+  static get Busy(): typeof DbErrorBusy {
+    return DbErrorBusy;
+  }
+
+  /** The statement broke a constraint of kind `kind_`; `message_` is SQLite's (it names the columns). */
+  static get Constraint(): typeof DbErrorConstraint {
+    return DbErrorConstraint;
+  }
+
+  /** The file is not a database or is damaged. */
+  static get Corrupt(): typeof DbErrorCorrupt {
+    return DbErrorCorrupt;
+  }
+
+  /** The disk or the storage quota is full. */
+  static get Full(): typeof DbErrorFull {
+    return DbErrorFull;
+  }
+
+  /** No adapter, a database or transaction that is closed or unknown, an invalid name, a file that cannot be opened. */
+  static get Unavailable(): typeof DbErrorUnavailable {
+    return DbErrorUnavailable;
+  }
+
+  /** Anything else SQLite refused: a syntax error, a missing table, more than one statement where one is expected. */
+  static get Sql(): typeof DbErrorSql {
+    return DbErrorSql;
+  }
+
+  /** A migration failed (everything the open migrated is rolled back), or the database is newer than the newest migration. */
+  static get Migration(): typeof DbErrorMigration {
+    return DbErrorMigration;
+  }
+}
+
+/** The variants of {@link DbError}, as types (`DbError.Busy`). */
+export declare namespace DbError {
+  /** The database stayed locked past the busy timeout (5 s): another connection, or a statement made outside a running transaction on the same database. */
+  type Busy = DbErrorBusy;
+  /** The statement broke a constraint of kind `kind_`; `message_` is SQLite's (it names the columns). */
+  type Constraint = DbErrorConstraint;
+  /** The file is not a database or is damaged. */
+  type Corrupt = DbErrorCorrupt;
+  /** The disk or the storage quota is full. */
+  type Full = DbErrorFull;
+  /** No adapter, a database or transaction that is closed or unknown, an invalid name, a file that cannot be opened. */
+  type Unavailable = DbErrorUnavailable;
+  /** Anything else SQLite refused: a syntax error, a missing table, more than one statement where one is expected. */
+  type Sql = DbErrorSql;
+  /** A migration failed (everything the open migrated is rolled back), or the database is newer than the newest migration. */
+  type Migration = DbErrorMigration;
+}
+
+/** `DbError.Busy`: the database stayed locked past the busy timeout (5 s): another connection, or a statement made outside a running transaction on the same database. Construct and test it as `DbError.Busy`. */
+export class DbErrorBusy extends DbError {
+  declare readonly kind: "busy";
+  constructor() {
+    super("busy", "the database is busy");
+  }
+}
+
+/** `DbError.Constraint`: the statement broke a constraint of kind `kind_`; `message_` is SQLite's (it names the columns). Construct and test it as `DbError.Constraint`. */
+export class DbErrorConstraint extends DbError {
+  declare readonly kind: "constraint";
+  constructor(
+    readonly kind_: DbConstraint,
+    readonly message_: string,
+  ) {
+    super("constraint", `constraint failed: ${message_}`);
+  }
+}
+
+/** `DbError.Corrupt`: the file is not a database or is damaged. Construct and test it as `DbError.Corrupt`. */
+export class DbErrorCorrupt extends DbError {
+  declare readonly kind: "corrupt";
+  constructor(readonly value: string) {
+    super("corrupt", `the database is corrupt: ${value}`);
+  }
+}
+
+/** `DbError.Full`: the disk or the storage quota is full. Construct and test it as `DbError.Full`. */
+export class DbErrorFull extends DbError {
+  declare readonly kind: "full";
+  constructor() {
+    super("full", "the database is full");
+  }
+}
+
+/** `DbError.Unavailable`: no adapter, a database or transaction that is closed or unknown, an invalid name, a file that cannot be opened. Construct and test it as `DbError.Unavailable`. */
+export class DbErrorUnavailable extends DbError {
+  declare readonly kind: "unavailable";
+  constructor(readonly value: string) {
+    super("unavailable", `the database is unavailable: ${value}`);
+  }
+}
+
+/** `DbError.Sql`: anything else SQLite refused: a syntax error, a missing table, more than one statement where one is expected. Construct and test it as `DbError.Sql`. */
+export class DbErrorSql extends DbError {
+  declare readonly kind: "sql";
+  constructor(readonly message_: string) {
+    super("sql", `SQL error: ${message_}`);
+  }
+}
+
+/** `DbError.Migration`: a migration failed (everything the open migrated is rolled back), or the database is newer than the newest migration. Construct and test it as `DbError.Migration`. */
+export class DbErrorMigration extends DbError {
+  declare readonly kind: "migration";
+  constructor(
+    readonly version: number,
+    readonly message_: string,
+  ) {
+    super("migration", `migration ${version} failed: ${message_}`);
+  }
 }
 
 // ---------------------------------------------------------------------------

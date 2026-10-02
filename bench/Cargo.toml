@@ -6,7 +6,8 @@ publish = false
 description = "Undra's benchmark harness: criterion benches for humans, the budgets test for CI (constitution R9)."
 
 [dependencies]
-undra = { workspace = true }
+# The opt-in ports are benchmarked too (`ports/*`, `db/*`).
+undra = { workspace = true, features = ["websocket", "sse", "db", "db-fake"] }
 undra-ports = { workspace = true }
 undra-query = { workspace = true }
 undra-runtime = { workspace = true }
@@ -43,4 +44,8 @@ harness = false
 
 [[bench]]
 name = "boundary"
+harness = false
+
+[[bench]]
+name = "ports"
 harness = false

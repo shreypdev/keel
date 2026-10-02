@@ -26,7 +26,12 @@ final class Fixture {
     /// Every call the core made to one of the adapters below, per port, across reloads (S17.7).
     let portCalls = PortCallCounter()
 
+    /// Where S25's databases live: a fresh temporary directory, deleted when S25 ends.
+    let databases = FileManager.default.temporaryDirectory
+        .appendingPathComponent("undra-contract-s25-\(UUID().uuidString)", isDirectory: true)
+
     private var loaded: UndraCore?
+    private var realtimeServer: RealtimeServer?
 
     /// The harness fails the first read of the offline queue with `Locked`, as the Keychain or a
     /// data-protected file answers an app launched before the device's first unlock (scenarios.md,
@@ -35,11 +40,27 @@ final class Fixture {
         kv.fail(.get, key: Persisted.queueKey, with: .locked, times: 1)
     }
 
-    /// The adapters of the harness: the fakes above and the platform defaults for `Rng` and `Timer`
-    /// (a real `DispatchQueue` timer), each counting its calls in `portCalls`. `Connectivity` has no
-    /// adapter: the scenarios emit its events.
+    /// The shared local server of S23 and S24 (`contract-tests/servers/realtime-server.mjs`),
+    /// started on first use and left running until the process ends (it exits with its stdin).
+    func realtime() throws -> RealtimeServer {
+        if let running = realtimeServer {
+            return running
+        }
+        let started = try RealtimeServer.start()
+        realtimeServer = started
+        return started
+    }
+
+    /// The adapters of the harness: the fakes above, the platform defaults for `Rng` and `Timer`
+    /// (a real `DispatchQueue` timer), and the default adapters of the opt-in ports (ADR-047,
+    /// ADR-048): `URLSessionWebSocketAdapter` and `URLSessionSseAdapter` (S23, S24 run them against
+    /// the shared local server) and `SQLiteDbAdapter` rooted in `databases` (S25), each counting its
+    /// calls in `portCalls`. `Connectivity` has no adapter: the scenarios emit its events.
     func makeAdapters() -> Adapters {
-        let adapters: [any UndraAdapter] = [clock, server, kv, log, RngAdapter(), TimerAdapter()]
+        let adapters: [any UndraAdapter] = [
+            clock, server, kv, log, RngAdapter(), TimerAdapter(),
+            URLSessionWebSocketAdapter(), URLSessionSseAdapter(), SQLiteDbAdapter(directory: databases),
+        ]
         var all = Adapters.none
         for adapter in adapters {
             all = all.replacing(CountingAdapter(inner: adapter, counter: portCalls))

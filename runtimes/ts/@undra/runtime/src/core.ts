@@ -496,6 +496,7 @@ export class UndraCore {
             this.#hand(error);
           },
           panicked: (trap) => this.#panicReport(trap),
+          ports: this.#ports,
         },
         options.onCoreRestarted,
       ) ?? transport;
@@ -870,6 +871,8 @@ export class UndraCore {
     this.#failInFlight(reason ?? new UndraTransportError("closed", "the core is closed"));
     this.#setConnection(reason === null || why === "requested" ? { kind: "closed", reason: why } : { kind: "closed", reason: why, error: reason });
     this.#transport.close();
+    // Ports that hold platform resources for the core (the opt-in bindings) release them; `dispose` must not throw.
+    for (const impl of this.#ports.values()) impl.dispose?.();
   }
 
   /** Fails every call, stream and `observe` that waits for the core with `failure`; returns how many calls and streams there were. */

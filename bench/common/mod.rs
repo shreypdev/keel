@@ -7,6 +7,7 @@
 
 pub mod fixtures;
 pub mod host;
+pub mod ports;
 pub mod stress;
 pub mod workloads;
 

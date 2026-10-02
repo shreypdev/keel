@@ -404,7 +404,7 @@ uint8_t Host::defaultPortTrampoline(
     uint32_t portCallId,
     const uint8_t *ptr,
     uint32_t len,
-    UndraBuf * /*outReply*/) noexcept {
+    UndraBuf *outReply) noexcept {
   auto *host = static_cast<Host *>(user);
   if (host == nullptr || host->defaults_ == nullptr || !host->running()) {
     return 2;
@@ -413,8 +413,9 @@ uint8_t Host::defaultPortTrampoline(
     std::lock_guard<std::mutex> lock(host->inboxMutex_);
     host->counters_.nativePortCalls++;
   }
-  // Queued on the port's worker; the answer comes later through `undra_port_reply` (1).
-  return host->defaults_->post(portId, methodId, portCallId, ptr, len);
+  // Queued on the port's worker; the answer comes later through `undra_port_reply` (1). `Db` answers
+  // a call that names nothing open at once, into `outReply` (0).
+  return host->defaults_->post(portId, methodId, portCallId, ptr, len, outReply);
 }
 
 uint8_t Host::jsPortTrampoline(

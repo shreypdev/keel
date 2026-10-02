@@ -1,10 +1,10 @@
 # Contract scenarios
 
-This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): twenty-five
+This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): twenty-eight
 scenarios against the **real playground core** (`examples/playground/core`, the same Rust crate the
-apps run), through the real boundary. S01 to S20, S26, S27 and S28 run on every platform; S21 and S22 are about the
-web host (worker mode and crash recovery, ADR-049) and run on TypeScript only. S23 to S25 are held by other
-ADRs (the boundary-surface plan numbers them); S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's:
+apps run), through the real boundary. S01 to S20 and S23 to S28 run on every platform; S21 and S22 are about
+the web host (worker mode and crash recovery, ADR-049) and run on TypeScript only. S23 to S25 are the opt-in
+ports of ADR-047 and ADR-048; S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's:
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
@@ -13,9 +13,9 @@ ADRs (the boundary-surface plan numbers them); S26 is ADR-044's, S27 ADR-040's a
 | Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI table of the real core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S26, plus S21
-and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 65
-cells: 21 on Swift, 21 on Kotlin, 23 on TypeScript.
+`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S23 to S28, plus
+S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 80
+cells: 26 on Swift, 26 on Kotlin, 28 on TypeScript.
 
 ## The harness (the same on every platform)
 
@@ -597,6 +597,75 @@ playground's `Locale` port (`hello()` answers `"Hola"`).
    dead: `onClose` reports the trap, `onCoreRestarted` was called 3 times in all, and calls fail as unavailable
    (`closed`).
 
+### S23 WebSocket (ADR-047)
+
+The opt-in `WebSocket` port through the **platform's default adapter** (Swift `URLSessionWebSocketTask`, Kotlin
+the runtime's own client, TypeScript `nodeWebSocket()`: Node's `http` upgrade with the runtime's own framing, because
+Node's global `WebSocket` hides a refusal's status, `ts/NOTES.md`) against the shared local server
+`contract-tests/servers/realtime-server.mjs` (started once per run; `WS` is its `ws://127.0.0.1:<port>`). The
+core's side is `ws_echo` and the `Live` object of `examples/playground/core/src/live.rs`.
+
+1. Echo: `wsEcho("WS/ws/echo", [Text "a", Binary [1, 2, 3], Text "é"])` returns the same three messages in
+   order; the server's `/stats` shows that connection closed by the client with `(1000, "done")`.
+2. Subprotocol and headers: `live.connect("WS/ws/headers", ["v2", "v1"], [Header("X-Token", "t")])` returns
+   `"v2"`; `live.read(1)` is one text message, the JSON of the upgrade's headers, with `"x-token": "t"`;
+   `live.send(Text "ping")`, `live.read(1)` is `[Text "ping"]`; `live.disconnect(4000, "bye")`: the server
+   saw `(4000, "bye")`.
+3. Credit (SPEC 3.7, ADR-047 §3): `live.connect("WS/ws/flood?n=1000", [], [])`; `live.read(5)` is `"0"`..`"4"`;
+   for 200 ms nothing is read; then `live.pulls()` is **at most 2** (one pull of 16 answered what the core holds;
+   a core that stopped reading pulls no more). `live.read(995)` is `"5"`..`"999"` in order, and `live.read(1)`
+   fails with `WsError.Closed(code 1000, reason "end")`.
+4. Typed ends: `wsEcho("WS/ws/deny?status=401", [Text "x"])` fails with `WsError.Refused` (status 401 where the
+   platform reports it: Swift, Kotlin and Node do); `live.connect("WS/ws/close?code=4001&reason=kicked")`,
+   `read(1)` is `["hello"]`, `read(1)` fails with `Closed(4001, "kicked")`; `live.connect("WS/ws/drop")`,
+   `read(1)` is `["hello"]`, `read(1)` fails with `WsError.Network`.
+5. A connection nobody closes: `live.connect("WS/ws/stall")`, `live.abandon()`: within 1 s the server saw the
+   client close with **1001** (going away).
+
+### S24 server-sent events (ADR-047)
+
+The opt-in `Sse` port through the platform's default adapter (Swift `URLSession.bytes`, Kotlin
+`java.net.http` on the JVM, TypeScript `fetch` with a body stream) against the same server (`HTTP` is its
+`http://127.0.0.1:<port>`); the core's side is `sse_follow`.
+
+1. `sseFollow("HTTP/sse/feed", null, 10)` returns `ended = true` and four events, parsed as the HTML standard
+   says: `{id "1", event "message", data "one", retry 1500}`, `{id "2", event "tick", data "two\nlines"}`,
+   `{id "2", event "message", data "three"}` (an event without `id` keeps the last one), `{id "4", event
+   "message", data "four"}` (CRLF line ends); the comment and the event without data are not events. The
+   server saw no `Last-Event-ID`.
+2. Resume: `sseFollow("HTTP/sse/feed", "2", 10)` returns `ended = true` and the events after id 2 (`three` with
+   id `"2"`, `four` with id `"4"`); the server saw `Last-Event-ID: 2`.
+3. A reader that stops: `sseFollow("HTTP/sse/feed", null, 2)` returns two events and `ended = false`;
+   `sseFollow("HTTP/sse/hang", null, 0)` returns no event and `ended = false`, and within 1 s the server saw the
+   client leave.
+4. Typed failures: `HTTP/sse/status?code=204` and `?code=500` fail with `SseError.Refused` with that status;
+   `HTTP/sse/html` fails with `SseError.Protocol`.
+
+### S25 Db (ADR-048)
+
+The opt-in `Db` port through the platform's **real SQLite adapter** (Swift the SQLite3 C API, Kotlin JDBC on the
+JVM, TypeScript `node:sqlite`), each rooted in a fresh temporary directory; the core's side is `Notes`,
+`db_cells`, `db_run` and `db_migrate` of `examples/playground/core/src/notes.rs`.
+
+1. `Notes.create()`; `notes.open("contract-s25")` returns 2 (two migrations ran); `notes` is empty.
+2. `add("milk")`, `add("eggs")` return ids 1 and 2 and the mirror holds both (the second arrives as a keyed
+   patch; the first, onto an empty list, as a full value: no key overlaps, SPEC 3.8);
+   `toggle(1)`: note 1 is done; `count()` is 2.
+3. Every storage class there and back: `dbCells(-9007199254740993, 1.5, "é😀", [0, 255, 7], null)` returns the
+   same five values (the integer is outside JavaScript's safe range: it crosses as `i64`/`bigint`) and the types
+   `["integer", "real", "text", "blob", "null"]`.
+4. Constraints, typed: `addWithId(1, "dup")` fails `DbError.Constraint` with kind `Unique`; `addAll(["a", null])`
+   fails `Constraint` with kind `NotNull`, and afterwards `count()` is still 2 and the mirror still holds two
+   notes (the transaction rolled back); `addAll(["a", "b"])` returns 2 and `count()` is 4.
+5. SQL errors, typed: `dbRun(":memory:", "INSERT INTO missing VALUES (1)")` and `dbRun(":memory:", "SELEC 1")`
+   fail with `DbError.Sql`.
+6. Migrations run in one transaction: `dbMigrate("contract-s25-m", true)` fails with `DbError.Migration` of
+   version 2; `dbMigrate("contract-s25-m", false)` then returns 2 (had migration 1 survived the failed open,
+   its `CREATE TABLE a` would now fail).
+7. Persistence: `notes.closeDatabase()`; a new `Notes` store `open("contract-s25")` returns 2 and its mirror
+   holds the four notes, note 1 done.
+8. `open("../escape")` on a third store fails with `DbError.Unavailable`.
+
 ### S26 two cores
 
 ADR-044: a process can hold several cores, each its own image reached through its own table
@@ -748,3 +817,6 @@ with the stores' state as seen at each call. `UndraCore.callbacks` (the registry
   core per process, so their harness fails the first read of the queue at load and S20 checks what that did.
 * S21 and S22 are TypeScript-only: worker mode and crash recovery are web features (ADR-049; a native core
   contains a panic without trapping, SPEC 5.6). `check.sh` does not expect them from Swift or Kotlin.
+* S23 and S24 start `contract-tests/servers/realtime-server.mjs` with Node (every runner's machine has Node:
+  the TypeScript runner needs it) and read its `READY <port>` line; S25 roots its adapter in a temporary
+  directory the runner deletes afterwards.

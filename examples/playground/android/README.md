@@ -1,6 +1,6 @@
 # Playground, Android
 
-The Compose app of the playground: four screens over the one Rust core (`../core`), through the Kotlin
+The Compose app of the playground: five screens over the one Rust core (`../core`), through the Kotlin
 bindings `undra bindgen` generated (`../generated/kotlin`, package `dev.undra.playground.core`).
 
 | Tab | Store | What it shows |
@@ -9,6 +9,7 @@ bindings `undra bindgen` generated (`../generated/kotlin`, package `dev.undra.pl
 | Counter | `Counter` | one tap is one transaction: `count`, `changes` and the computed `parity` arrive in one change-set |
 | 10k list | `BigList` | 10,000 keyed rows in a `LazyColumn`; insert, update, move and remove cross as one-operation patches; "Stream updates" sends ten a second |
 | Remote | `RemoteTodosQueryHandle` | a cached server list (`inbox`) with status, fetching, updated-at and error; optimistic add and toggle; an Offline switch that queues your additions and replays them |
+| Notes | `Notes` | notes kept in SQLite through the opt-in `Db` port (ADR-048): the platform's `android.database.sqlite` (`AndroidDbAdapter`, file `undra-playground.sqlite`), migrated on open; add, toggle and remove change the database first, then the keyed list; they survive a restart |
 
 Every screen reads its store with `collectAsState()` on the store's `StateFlow`s. A `ViewModel` owns each
 store, so the state (which lives in the core) survives switching tabs and rotating the device.
@@ -19,7 +20,7 @@ store, so the state (which lives in the core) survives switching tabs and rotati
 undra build -C .. --platform android --release   # ../build/android/jniLibs/<abi>/libplayground_core.so (1.5 MB each)
 ./gradlew :app:assembleDebug                    # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -n dev.undra.playground/.MainActivity --es tab remote   # todos | counter | biglist | remote
+adb shell am start -n dev.undra.playground/.MainActivity --es tab remote   # todos | counter | biglist | remote | notes
 ```
 
 `--release` is the packaging path: without it `undra build` makes a debug core, 42 MB per ABI, which is right for

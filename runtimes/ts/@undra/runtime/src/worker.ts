@@ -201,6 +201,20 @@ export function runWorker(scope: WorkerScope): () => void {
 
   const crossesToHost = (portId: number): boolean => (hostPorts === null ? !BUILT_IN_PORTS.has(portId) : hostPorts.has(portId));
 
+  /** Lets the ports of the module release what the core instance held through them (`PortImpl.dispose`): a restart, or the end. */
+  const disposeWorkerPorts = (): void => {
+    const done = new Set<PortImpl>();
+    for (const [portId, impl] of workerPorts) {
+      if (impl.dispose === undefined || done.has(impl)) continue;
+      done.add(impl);
+      try {
+        impl.dispose();
+      } catch (error) {
+        handler.log(4, "undra::worker", `${impl.name ?? "the"} port 0x${portId.toString(16)} could not release what it held: ${errorMessage(error)}`);
+      }
+    }
+  };
+
   const handler: TransportHandler = {
     reply: (payload) => {
       postEnvelope(Kind.Reply, payload);
@@ -365,6 +379,7 @@ export function runWorker(scope: WorkerScope): () => void {
         restartable = null;
         keeper?.stop();
         keeper = null;
+        disposeWorkerPorts();
         break;
     }
   };
@@ -379,6 +394,8 @@ export function runWorker(scope: WorkerScope): () => void {
       // A twin of the transport that trapped becomes the transport first: the new instance's own port calls are answered.
       const twin = restartable.twin();
       restartable.close();
+      // What the instance that trapped held through the module's ports (connections, a transaction) goes with it.
+      disposeWorkerPorts();
       restartable = twin;
       transport = twin;
       const result = await restartHere(twin, handler, keeper, generationFloor, (level, target, message) => {
@@ -419,8 +436,10 @@ export function runWorker(scope: WorkerScope): () => void {
   scope.addEventListener("message", onMessage);
   return () => {
     scope.removeEventListener("message", onMessage);
+    const running = transport !== null;
     transport?.close();
     transport = null;
+    if (running) disposeWorkerPorts();
   };
 }
 
