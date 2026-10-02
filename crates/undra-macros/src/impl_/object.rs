@@ -1034,7 +1034,14 @@ fn constructor_result(
         .any(|p| matches!(p.plan, ParamPlan::Callback { .. }));
     let refuse = |reason: TokenStream| {
         if took_callbacks {
-            quote!(__undra_out(#runtime::DispatchResult::Failed(#reason)))
+            // The host words status 2 as a panic ("the core panicked: ..."), so the message says what
+            // it is: the call failed, the core kept nothing, and the references the host lent are its
+            // own to forget (not given back by it a second time).
+            quote!(__undra_out(#runtime::DispatchResult::Failed(::std::format!(
+                "the constructor failed after it took its callbacks (not a panic; the core released \
+                 them and the host must not): {}",
+                #reason
+            ))))
         } else {
             quote!(__undra_bad_request(#reason))
         }

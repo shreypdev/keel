@@ -646,6 +646,12 @@ fn a_constructor_that_fails_after_making_its_proxies_is_not_a_refusal() {
             && reason.contains("already attached"),
         "{reason}"
     );
+    // The host words status 2 as "the core panicked: <this>": the text must say what happened.
+    assert!(
+        reason.contains("the constructor failed after it took its callbacks")
+            && reason.contains("not a panic"),
+        "{reason}"
+    );
     let calls = rt.port_calls();
     assert_eq!(
         calls.len(),
