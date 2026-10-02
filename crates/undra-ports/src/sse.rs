@@ -165,13 +165,26 @@ pub fn subscribe(
     last_event_id: Option<String>,
 ) -> SseEvents {
     let port = crate::sse(ctx);
-    let opener = port.clone();
+    let (opener, closer) = (port.clone(), port.clone());
     let url = url.to_owned();
+    let weak = ctx.downgrade();
+    let spawner = weak.clone();
     SseEvents {
         port,
-        weak: Some(ctx.downgrade()),
+        weak: Some(weak),
+        // In a task of its own once polled: a stream dropped while `open` crosses must not leave
+        // the stream the platform opened open until shutdown.
         state: State::Opening(Box::pin(async move {
-            opener.open(url, headers, last_event_id).await
+            crate::owned::owned(
+                Some(&spawner),
+                async move { opener.open(url, headers, last_event_id).await },
+                move |stream: u32| {
+                    Box::pin(async move {
+                        let _ = closer.close(stream).await;
+                    })
+                },
+            )
+            .await
         })),
         buffered: VecDeque::new(),
         pending: None,

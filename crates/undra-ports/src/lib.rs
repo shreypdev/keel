@@ -60,6 +60,8 @@ mod ctx_ext;
 pub mod db;
 pub mod fakes;
 mod next;
+#[cfg(any(feature = "websocket", feature = "sse", feature = "db"))]
+mod owned;
 mod ports;
 mod records;
 #[cfg(feature = "sse")]

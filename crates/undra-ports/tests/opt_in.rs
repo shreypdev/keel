@@ -12,13 +12,14 @@ use proptest::prelude::*;
 use undra_bindgen::Generator;
 use undra_meta::{Schema, TypeRef, collect_schema, ids};
 use undra_ports::db::{
-    Database, DbConstraint, DbError, DbExecuted, DbMigration, DbRows, DbValue, Migration,
+    Database, DbConstraint, DbError, DbExecuted, DbMigration, DbOpened, DbRows, DbValue, Migration,
 };
 use undra_ports::fakes::{self, DbCallKind, Fakes};
 use undra_ports::sse::{self, SseError, SseEvent};
 use undra_ports::ws::{self, WsConnection, WsError, WsMessage, WsOpened, WsOptions};
 use undra_ports::{Db, DbProxy, Header, Sse, SseProxy, WebSocket, WebSocketProxy, params};
-use undra_runtime::testing::TestRuntime;
+use undra_runtime::testing::{TestRuntime, port_reply};
+use undra_wire::payload::PortStatus;
 use undra_wire::{Bytes, Decode, Encode};
 
 /// `Schema::hash()` of the standard ports with all three opt-in ports.
@@ -752,6 +753,194 @@ fn db_transactions_commit_roll_back_and_roll_back_when_dropped() {
         "the dropped transaction was rolled back"
     );
     assert_eq!(fakes.db.calls().last().unwrap().kind, DbCallKind::Rollback);
+}
+
+/// The `Db` port and the methods these tests answer by hand (ADR-048's pinned ids).
+const DB_PORT: u32 = 0x559e_da82;
+const DB_OPEN: u32 = 0xee6f_26db;
+const DB_BEGIN: u32 = 0xae2b_a428;
+const DB_COMMIT: u32 = 0xf866_d5ae;
+const DB_ROLLBACK: u32 = 0x3e7b_24b3;
+
+/// A platform `Db` (no Rust binding: every call crosses the port table) that opens database 1 at
+/// once, answers `begin` only when the test says so, and acknowledges `commit` and `rollback`.
+fn platform_db() -> (TestRuntime, Database) {
+    let t = TestRuntime::new();
+    let opened = DbOpened { db: 1, version: 0 };
+    t.host()
+        .script_port_ok(DB_PORT, DB_OPEN, opened.encode_to_vec());
+    t.host().script_port_async(DB_PORT, DB_BEGIN);
+    t.host().script_port_ok(DB_PORT, DB_COMMIT, Vec::new());
+    t.host().script_port_ok(DB_PORT, DB_ROLLBACK, Vec::new());
+    let ctx = t.ctx();
+    let db = t.run_until(async move { Database::open(&ctx, "app", &[]).await.unwrap() });
+    (t, db)
+}
+
+/// The `(method, args)` of the calls the platform received for `method`.
+fn db_calls(t: &TestRuntime, method: u32) -> Vec<Vec<u8>> {
+    t.host()
+        .port_calls()
+        .into_iter()
+        .filter(|c| c.port_id == DB_PORT && c.method_id == method)
+        .map(|c| c.args)
+        .collect()
+}
+
+#[test]
+fn a_transaction_cancelled_while_begin_crosses_is_rolled_back_when_the_platform_answers() {
+    // ADR-048 §5: a transaction dropped mid-way is rolled back. The platform runs `BEGIN IMMEDIATE`
+    // whether or not the core still waits for the reply (a cancelled port call is abandoned, the
+    // host is not told, SPEC 5.1), so a task cancelled during `begin` must not leave the
+    // transaction it started open: every later statement on the database would be `Busy`.
+    let (t, db) = platform_db();
+    let d = db.clone();
+    let task = t.ctx().spawn(async move {
+        let _ = d.transaction(|_tx| async move { Ok(()) }).await;
+    });
+    t.run_pending();
+    let begin = t
+        .host()
+        .port_calls()
+        .into_iter()
+        .find(|c| c.method_id == DB_BEGIN)
+        .expect("begin crossed to the platform");
+    t.runtime().cancel_task(task);
+    t.run_pending();
+    // The platform began transaction 7 anyway; its answer arrives after the core stopped waiting.
+    t.runtime().port_reply(&port_reply(
+        begin.port_call_id,
+        PortStatus::Ok,
+        &7u32.to_le_bytes(),
+    ));
+    t.run_pending();
+    assert_eq!(
+        db_calls(&t, DB_ROLLBACK),
+        [7u32.to_le_bytes().to_vec()],
+        "the transaction the platform began for a cancelled task is rolled back"
+    );
+    assert!(db_calls(&t, DB_COMMIT).is_empty());
+}
+
+#[test]
+fn a_connect_or_open_cancelled_while_it_crosses_closes_what_the_platform_opened() {
+    // ADR-047 §7 / ADR-048 §5: dropping without closing closes. The platform opens whether or not
+    // the core still waits (an abandoned port call is not reported to the host), so a task
+    // cancelled while `connect` / `open` crosses must close what the late answer names.
+    const WS: u32 = 0x7388_b95f;
+    const WS_CONNECT: u32 = 0x8347_7638;
+    const WS_CLOSE: u32 = 0x6015_4b86;
+    const SSE: u32 = 0x75d2_ef19;
+    const SSE_OPEN: u32 = 0xc003_3c14;
+    const SSE_CLOSE: u32 = 0x5bfe_2c88;
+    const DB_CLOSE: u32 = 0xde3d_c7ed;
+    let t = TestRuntime::new();
+    t.host().script_port_async(WS, WS_CONNECT);
+    t.host().script_port_ok(WS, WS_CLOSE, Vec::new());
+    t.host().script_port_async(SSE, SSE_OPEN);
+    t.host().script_port_ok(SSE, SSE_CLOSE, Vec::new());
+    t.host().script_port_async(DB_PORT, DB_OPEN);
+    t.host().script_port_ok(DB_PORT, DB_CLOSE, Vec::new());
+    let ctx = t.ctx();
+    let ws_task = t.ctx().spawn(async move {
+        let _ = WsConnection::connect(&ctx, "wss://x", WsOptions::default()).await;
+    });
+    let ctx = t.ctx();
+    let sse_task = t.ctx().spawn(async move {
+        let mut events = sse::subscribe(&ctx, "https://x", Vec::new(), None);
+        let _ = undra_ports::next(&mut events).await;
+    });
+    let ctx = t.ctx();
+    let db_task = t.ctx().spawn(async move {
+        let _ = Database::open(&ctx, "app", &[]).await;
+    });
+    t.run_pending();
+    let call = |port: u32, method: u32| {
+        t.host()
+            .port_calls()
+            .into_iter()
+            .find(|c| c.port_id == port && c.method_id == method)
+            .unwrap_or_else(|| panic!("{method:#x} crossed"))
+            .port_call_id
+    };
+    let (connect, open, db_open) = (
+        call(WS, WS_CONNECT),
+        call(SSE, SSE_OPEN),
+        call(DB_PORT, DB_OPEN),
+    );
+    for task in [ws_task, sse_task, db_task] {
+        t.runtime().cancel_task(task);
+    }
+    t.run_pending();
+    let opened = WsOpened {
+        conn: 3,
+        protocol: String::new(),
+    };
+    t.runtime().port_reply(&port_reply(
+        connect,
+        PortStatus::Ok,
+        &opened.encode_to_vec(),
+    ));
+    t.runtime()
+        .port_reply(&port_reply(open, PortStatus::Ok, &4u32.to_le_bytes()));
+    let db = DbOpened { db: 5, version: 0 };
+    t.runtime()
+        .port_reply(&port_reply(db_open, PortStatus::Ok, &db.encode_to_vec()));
+    t.run_pending();
+    let args = |port: u32, method: u32| -> Vec<Vec<u8>> {
+        t.host()
+            .port_calls()
+            .into_iter()
+            .filter(|c| c.port_id == port && c.method_id == method)
+            .map(|c| c.args)
+            .collect()
+    };
+    let mut going_away = 3u32.to_le_bytes().to_vec();
+    going_away.extend(1001u16.to_le_bytes());
+    going_away.extend(String::new().encode_to_vec());
+    assert_eq!(
+        args(WS, WS_CLOSE),
+        [going_away],
+        "the orphaned connection is closed with 1001"
+    );
+    assert_eq!(
+        args(SSE, SSE_CLOSE),
+        [4u32.to_le_bytes().to_vec()],
+        "the orphaned stream is closed"
+    );
+    assert_eq!(
+        args(DB_PORT, DB_CLOSE),
+        [5u32.to_le_bytes().to_vec()],
+        "the orphaned database is closed"
+    );
+}
+
+#[test]
+fn a_transaction_whose_begin_answers_in_time_runs_and_commits_once() {
+    let (t, db) = platform_db();
+    let d = db.clone();
+    let slot: Arc<Mutex<Option<Result<u32, DbError>>>> = Arc::default();
+    let sink = slot.clone();
+    t.ctx().spawn(async move {
+        let r = d.transaction(|tx| async move { Ok(tx.id()) }).await;
+        *sink.lock().unwrap() = Some(r);
+    });
+    t.run_pending();
+    let begin = t
+        .host()
+        .port_calls()
+        .into_iter()
+        .find(|c| c.method_id == DB_BEGIN)
+        .expect("begin crossed");
+    t.runtime().port_reply(&port_reply(
+        begin.port_call_id,
+        PortStatus::Ok,
+        &9u32.to_le_bytes(),
+    ));
+    t.run_pending();
+    assert_eq!(slot.lock().unwrap().take(), Some(Ok(9)));
+    assert_eq!(db_calls(&t, DB_COMMIT), [9u32.to_le_bytes().to_vec()]);
+    assert!(db_calls(&t, DB_ROLLBACK).is_empty());
 }
 
 #[test]

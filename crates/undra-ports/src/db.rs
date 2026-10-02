@@ -51,6 +51,8 @@ use core::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::owned::owned;
+
 use undra_runtime::{Ctx, PortError, WeakCtx};
 use undra_wire::{Bytes, Decode};
 
@@ -358,7 +360,19 @@ impl Database {
     ) -> Result<Database, DbError> {
         validate_name(name)?;
         validate_migrations(&migrations)?;
-        let opened = port.open(name.to_owned(), migrations).await?;
+        // In a task of its own: a caller cancelled while `open` crosses must not leave the
+        // database the platform opened open until shutdown.
+        let (opener, closer, name) = (port.clone(), port.clone(), name.to_owned());
+        let opened = owned(
+            weak.as_ref(),
+            async move { opener.open(name, migrations).await },
+            move |opened: DbOpened| {
+                Box::pin(async move {
+                    let _ = closer.close(opened.db).await;
+                })
+            },
+        )
+        .await?;
         Ok(Database {
             shared: Arc::new(Shared {
                 port,
@@ -424,7 +438,19 @@ impl Database {
         R: Send,
     {
         let port = self.shared.port.clone();
-        let id = port.begin(self.shared.db).await?;
+        // In a task of its own: a caller cancelled while `begin` crosses must not leave the
+        // transaction the platform began open (every later statement would be `Busy`).
+        let (begin, undo, db) = (port.clone(), port.clone(), self.shared.db);
+        let id = owned(
+            self.shared.weak.as_ref(),
+            async move { begin.begin(db).await },
+            move |tx| {
+                Box::pin(async move {
+                    let _ = undo.rollback(tx).await;
+                })
+            },
+        )
+        .await?;
         let mut guard = RollbackOnDrop {
             port: port.clone(),
             tx: id,

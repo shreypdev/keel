@@ -314,14 +314,25 @@ impl WsConnection {
         options: WsOptions,
     ) -> Result<WsConnection, WsError> {
         let port = crate::web_socket(ctx);
-        let opened = port
-            .connect(url.to_owned(), options.protocols, options.headers)
-            .await?;
-        Ok(WsConnection::from_parts(
-            port,
-            opened,
-            Some(ctx.downgrade()),
-        ))
+        let weak = ctx.downgrade();
+        // In a task of its own: a caller cancelled while `connect` crosses must not leave the
+        // connection the platform opened open until shutdown; it is closed going away (1001).
+        let (connector, closer, url) = (port.clone(), port.clone(), url.to_owned());
+        let opened = crate::owned::owned(
+            Some(&weak),
+            async move {
+                connector
+                    .connect(url, options.protocols, options.headers)
+                    .await
+            },
+            move |opened: WsOpened| {
+                Box::pin(async move {
+                    let _ = closer.close(opened.conn, GOING_AWAY, String::new()).await;
+                })
+            },
+        )
+        .await?;
+        Ok(WsConnection::from_parts(port, opened, Some(weak)))
     }
 
     /// Wraps a connection `port` already opened. `weak` is where a dropped connection is closed
