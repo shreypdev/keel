@@ -548,11 +548,12 @@ app gets at load. The amendment above, item by item (its ablation's numbers, gzi
 | `runInBackground` | 112 | **Lazy** (`background.js`, 281 bytes on demand). A hello core has no background task, so `background.pending` is 0 and the window never calls it. The window fetches the chunk at the first hide with work pending; `visibilitychange` to hidden precedes `pagehide` and `freeze` (a page is frozen only when hidden), and the debounced persistence is flushed by the core on `Lifecycle.Background` itself, not by the run. The amendment's objection (a fetch at `pagehide` is unreliable) holds only for a browser that fires `pagehide` without hiding first, where the page is going away and the replay's network calls could not finish either. A failed chunk fetch rejects the call with an `UndraCallError` (to `onError` in the window), like the other lazy chunks. |
 | The `Diagnostics` registration | 56 | **Lazy** (`serveDiagnostics` in the `ports` chunk). Only a native core runs it, and that chunk is already fetched before the transport starts; a wasm page ships none of it. |
 
-On `prod-ops` alone that took the chunk from 21,756 to 21,666 (-90). On the merged tree: **22,001** bytes gzipped, against
-**21,672** for `main` (objects-callbacks' record): this piece is **+329**, the four kept items. The budget is **22,100**, the
+On `prod-ops` alone that took the chunk from 21,756 to 21,666 (-90). On the merged tree: **22,005** bytes gzipped, against
+**21,672** for `main` (objects-callbacks' record): this piece is **+333**, the four kept items, and 4 bytes for `load` waiting for the module's hash when the app set `onPanic` (the review's fix of
+S29: a trap right after load had no `imageId`). The budget is **22,100**, the
 record rounded up to the next hundred (the 5% tolerance stays); 22,000 would already fail. Both pieces' bytes, for the
 integrator: `main` before either 21,336; objects-callbacks +336 (21,672, its note above: the identity map, the mirror's
-callback entries, the handle layout); prod-ops +329 (22,001: the trap-report trigger, the page window with
+callback entries, the handle layout); prod-ops +333 (22,005: the trap-report trigger, the page window with
 `pagehide`/`freeze`, the stats fields). `up-front.test.ts` also fails if `core.ts` statically reaches `background.ts`.
 
 **The wasm (a finding of the review, fixed).** Merged with `main`, the hello wasm measured **121,164** gzipped, 1,164 over
