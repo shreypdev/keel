@@ -177,8 +177,8 @@ code gives its references back itself".
   `Release` through the in-process fake transport.
 * **Size** (`scripts/wasm-size.sh`, on the tree after merging `main` with ts-size-e4 and ns-storage, whose gate counts what a
   page loads up front): `web/hello-wasm` 118,929 gzipped (gate 120,000: ok; the committed record is 116,706, so the core
-  grew 2,223 bytes: the object table's references and origins, the issue scope, the callback proxies, the
-  `Arc`/`dyn` dispatch). `web/hello-runtime-js` **21,677 gzipped against a gate of 21,500 (record 21,173): 504 bytes of growth,
+  grew 2,223 bytes; not itemised, but the runtime crate is where this piece's core code went: the table's references and
+  origins, the issue scope, the callback proxies). `web/hello-runtime-js` **21,677 gzipped against a gate of 21,500 (record 21,173): 504 bytes of growth,
   177 over**. Before the merge with ts-size-e4 the same code measured 317 bytes over the old record (26,313 of 26,000 against
   25,996); the merge adds what the new up-front chunk keeps of the new code. What is in the chunk (unminified, `UNDRA_SIZE_MODULES=exports`):
   `identity.ts` 963 bytes (`adopt` and `collected`: every generated constructor adopts, hello's `Todos.create` included),
