@@ -22,6 +22,8 @@ const DOUBLE: u32 = ids::function_id("layer_double");
 const BOOM: u32 = ids::function_id("layer_boom");
 /// A function the layer refuses with a reason.
 const REFUSE: u32 = ids::function_id("layer_refuse");
+/// A function the layer answers with a failure after it took its arguments (no unwinding).
+const FAIL: u32 = ids::function_id("layer_fail");
 /// The type id of the object the layer constructs (nothing registers it statically).
 const GADGET: u32 = ids::type_id("LayerGadget");
 /// A method of the gadget: reads its counter.
@@ -76,6 +78,7 @@ fn serve(rt: &Runtime, call: DispatchCall<'_>) -> DispatchResult {
         },
         (0, BOOM) => panic!("the layer panicked"),
         (0, REFUSE) => DispatchResult::BadRequest("the layer refuses".to_owned()),
+        (0, FAIL) => DispatchResult::Failed("the layer took its arguments and failed".to_owned()),
         // The constructor: one argument, whether the gadget is transient.
         (0, GADGET) => {
             let Ok(transient) = bool::decode_exact(call.args) else {
@@ -155,6 +158,29 @@ fn an_id_no_layer_claims_is_still_unknown() {
         &[],
     );
     assert_eq!(reply.status, ReplyStatus::BadRequest);
+}
+
+/// `DispatchResult::Failed` is status 2 with the reason as the message and no unwinding: the call
+/// took what it was handed (a refusal, status 5, says it owns nothing), on both reply paths.
+#[test]
+fn a_failed_call_is_status_two_with_its_reason_and_the_runtime_carries_on() {
+    let t = TestRuntime::new();
+    let sync = t.call_sync(CallTarget::Function { method_id: FAIL }, 1, &[]);
+    assert_eq!(sync.status, ReplyStatus::Panic);
+    assert_eq!(
+        Reader::new(&sync.body).read_str().unwrap(),
+        "the layer took its arguments and failed"
+    );
+    assert_eq!(t.call(CallTarget::Function { method_id: FAIL }, 2, &[]), 0);
+    let replies = t.take_replies();
+    assert_eq!(replies.len(), 1);
+    assert_eq!((replies[0].call_id, replies[0].status), (2, ReplyStatus::Panic));
+    assert_eq!(
+        Reader::new(&replies[0].body).read_str().unwrap(),
+        "the layer took its arguments and failed"
+    );
+    let ok = t.call_sync(CallTarget::Function { method_id: DOUBLE }, 3, &1_u32.encode_to_vec());
+    assert_eq!(ok.status, ReplyStatus::Ok);
 }
 
 #[test]

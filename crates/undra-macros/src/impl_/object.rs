@@ -1022,7 +1022,23 @@ fn constructor_result(
     call: &TokenStream,
 ) -> TokenStream {
     let wire = root.wire();
+    let runtime = root.runtime();
     let ok = quote!(__rt.sync_ok(&__handle, #wire::Encode::encode));
+    // A constructor that took callbacks has made their proxies by the time it can fail to publish
+    // what it built; dropping the unpublished value releases them, so the call must not answer
+    // status 5 ("refused: owns nothing"), which makes the host give its references back as well
+    // (a double release). It answers a failure of the call (status 2) instead, which keeps them.
+    let took_callbacks = m
+        .params
+        .iter()
+        .any(|p| matches!(p.plan, ParamPlan::Callback { .. }));
+    let refuse = |reason: TokenStream| {
+        if took_callbacks {
+            quote!(__undra_out(#runtime::DispatchResult::Failed(#reason)))
+        } else {
+            quote!(__undra_bad_request(#reason))
+        }
+    };
     // What to do with the constructed `__value`: publish it and answer its handle. A store
     // first attaches its signals; if that fails the store is never published and the caller
     // gets a bad request carrying the reason (nothing panics). A constructor that returns an
@@ -1030,6 +1046,7 @@ fn constructor_result(
     // signals and keeps the entry in snapshots, as a constructed object is.
     let finish = if m.ctor_shared {
         let type_name = target.self_ty.map(ty_string).unwrap_or_default();
+        let refused = refuse(quote!(::std::format!("`{}`: {}", #type_name, __why)));
         quote! {{
             let mut __scope = __rt.issue_scope();
             match __scope.issue_constructed(__value) {
@@ -1038,13 +1055,16 @@ fn constructor_result(
                     __scope.commit();
                     __outcome
                 }
-                ::core::result::Result::Err(__why) => __undra_bad_request(
-                    ::std::format!("`{}`: {}", #type_name, __why),
-                ),
+                ::core::result::Result::Err(__why) => #refused,
             }
         }}
     } else if target.store {
         let type_name = target.self_ty.map(ty_string).unwrap_or_default();
+        let refused = refuse(quote!(::std::format!(
+            "store `{}` could not attach its signals: {}",
+            #type_name,
+            __why
+        )));
         quote! {
             match __value.__undra_attach_all() {
                 ::core::result::Result::Ok(()) => {
@@ -1053,9 +1073,7 @@ fn constructor_result(
                     (*__arc).__undra_set_handle(__handle.0);
                     #ok
                 }
-                ::core::result::Result::Err(__why) => __undra_bad_request(
-                    ::std::format!("store `{}` could not attach its signals: {}", #type_name, __why),
-                ),
+                ::core::result::Result::Err(__why) => #refused,
             }
         }
     } else {

@@ -433,6 +433,8 @@ enum Dispatched {
     Written,
     Panicked(PanicReport, Handle),
     Bad(String),
+    /// Failed after taking what the host handed over, without unwinding: status 2 (`DispatchResult::Failed`).
+    Failed(String),
 }
 
 /// The reply of a synchronous call: the armed slot holding it, or an owned payload.
@@ -492,6 +494,14 @@ pub struct Runtime {
     origins: Origins,
     /// The live proxies of the host's callback instances, for interning (ADR-041).
     callbacks: CallbackRegistry,
+}
+
+/// The report of a call that failed in the core without a panic: its reason, no backtrace.
+fn failed_report(reason: &str) -> PanicReport {
+    PanicReport {
+        message: reason.to_owned(),
+        backtrace: "not a panic: the call failed after it took its arguments".to_owned(),
+    }
 }
 
 /// Where an object lives: equal addresses are the same object.
@@ -1427,6 +1437,7 @@ impl Runtime {
         match dispatched {
             Dispatched::Bad(reason) => self.reply_bad(call_id, &reason),
             Dispatched::Panicked(report, handle) => self.reply_panic(call_id, handle, &report),
+            Dispatched::Failed(reason) => self.reply_failed(call_id, &reason),
             Dispatched::Done(result, handle) => match result {
                 DispatchResult::Sync(Ok(body)) => self.send_reply(call_id, ReplyStatus::Ok, &body),
                 DispatchResult::Sync(Err(body)) => {
@@ -1444,9 +1455,13 @@ impl Runtime {
                         );
                     }
                 }
-                DispatchResult::Stream(stream) => self.open_stream(call_id, handle, stream),
-                DispatchResult::Unknown | DispatchResult::BadRequest(_) => {
-                    // `dispatch` maps both to `Dispatched::Bad`.
+                DispatchResult::Stream(stream) => {
+                    self.open_stream(call_id, handle, params, stream);
+                }
+                DispatchResult::Unknown
+                | DispatchResult::BadRequest(_)
+                | DispatchResult::Failed(_) => {
+                    // `dispatch` maps these to `Dispatched::Bad` and `Dispatched::Failed`.
                     self.reply_bad(call_id, "internal: unmapped dispatch result");
                 }
             },
@@ -1539,6 +1554,15 @@ impl Runtime {
                 None => bad("internal: a dispatcher wrote a reply nobody asked for"),
             },
             Dispatched::Bad(reason) => bad(&reason),
+            Dispatched::Failed(reason) => {
+                let report = failed_report(&reason);
+                self.log(ERROR, "undra::runtime", &format!("call_sync failed: {reason}"));
+                SyncReply::Owned(reply_payload(
+                    call_id,
+                    ReplyStatus::Panic,
+                    &encode_panic_body(&report),
+                ))
+            }
             Dispatched::Panicked(report, handle) => {
                 self.note_panic("call_sync", handle, &report);
                 SyncReply::Owned(reply_payload(
@@ -1738,6 +1762,7 @@ impl Runtime {
     ) -> Option<Dispatched> {
         match outcome.downcast::<DispatchResult>() {
             Ok(DispatchResult::BadRequest(reason)) => Some(Dispatched::Bad(reason)),
+            Ok(DispatchResult::Failed(reason)) => Some(Dispatched::Failed(reason)),
             Ok(DispatchResult::Unknown) if layered => None,
             Ok(DispatchResult::Unknown) => Some(Dispatched::Bad(format!(
                 "unknown method {:#010x}, or its arguments or receiver were not valid",
@@ -1796,6 +1821,13 @@ impl Runtime {
         }
     }
 
+    /// A call that took what it was handed and then failed without unwinding (status 2).
+    fn reply_failed(&self, call_id: u32, reason: &str) {
+        let report = failed_report(reason);
+        self.log(ERROR, "undra::runtime", &format!("call failed: {reason}"));
+        self.send_reply(call_id, ReplyStatus::Panic, &encode_panic_body(&report));
+    }
+
     fn reply_panic(&self, call_id: u32, handle: Handle, report: &PanicReport) {
         self.note_panic("call", handle, report);
         self.send_reply(call_id, ReplyStatus::Panic, &encode_panic_body(report));
@@ -1805,6 +1837,7 @@ impl Runtime {
         &self,
         call_id: u32,
         handle: Handle,
+        params: Vec<Handle>,
         future: Pin<Box<dyn Future<Output = DispatchBytes> + Send>>,
     ) {
         // The task holds the runtime weakly (ADR-034): the executor owns the task, so a strong
@@ -1836,8 +1869,8 @@ impl Runtime {
             CallEntry {
                 task,
                 receiver: handle,
+                params,
                 stream: None,
-        params: Vec<Handle>,
             },
         );
     }
@@ -1864,12 +1897,12 @@ impl Runtime {
         &self,
         call_id: u32,
         handle: Handle,
+        params: Vec<Handle>,
         stream: Pin<Box<dyn futures_core::Stream<Item = DispatchBytes> + Send>>,
     ) {
         let state = Arc::new(StreamState::default());
         let spawned = self.exec.try_spawn(
             Box::pin(drive_stream(
-                params,
                 self.weak.clone(),
                 call_id,
                 stream,
@@ -1894,10 +1927,10 @@ impl Runtime {
             CallEntry {
                 task,
                 receiver: handle,
+                params,
                 stream: Some(state),
             },
         );
-        params: Vec<Handle>,
         self.send_reply(call_id, ReplyStatus::StreamOpened, &[]);
     }
 
@@ -1928,12 +1961,21 @@ impl Runtime {
     /// object parameter), and calls whose objects are still the ones their handles name, go on.
     ///
     /// `before` maps every handle that was live before the restore to its object's address.
-                params,
     /// A call is affected when its handle was live before or is live now and does not name the
     /// same object in both (after a restore that is every call on a store, since each one is
     /// rebuilt); a call on an object that had already been released, whose handle the restore did
     /// not touch, is not.
     fn cancel_calls_replaced_by_restore(&self, before: &HashMap<u64, usize>) {
+        // Whether the object `handle` names is not the one it named before the restore.
+        let replaced = |handle: Handle| {
+            let was = before.get(&handle.0).copied();
+            let now = self
+                .objects
+                .get_dyn(handle)
+                .ok()
+                .map(|object| object_address(&object));
+            (was.is_some() || now.is_some()) && was != now
+        };
         let affected: Vec<u32> = {
             let calls = self.calls.lock();
             calls
@@ -1962,16 +2004,6 @@ impl Runtime {
         for call_id in ids {
             self.abort_call(call_id, why);
         }
-        // Whether the object `handle` names is not the one it named before the restore.
-        let replaced = |handle: Handle| {
-            let was = before.get(&handle.0).copied();
-            let now = self
-                .objects
-                .get_dyn(handle)
-                .ok()
-                .map(|object| object_address(&object));
-            (was.is_some() || now.is_some()) && was != now
-        };
     }
 
     /// Ends in-flight call `call_id` from the runtime's side: drops its task and tells the host,

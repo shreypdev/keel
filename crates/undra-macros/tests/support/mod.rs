@@ -271,6 +271,14 @@ impl Dispatched {
         matches!(self.0, DispatchResult::Unknown)
     }
 
+    /// The reason of a call that took its arguments and then failed (status 2 without a panic).
+    pub fn failed(self) -> String {
+        match self.0 {
+            DispatchResult::Failed(reason) => reason,
+            other => panic!("expected a failed call, got {other:?}"),
+        }
+    }
+
     /// The reason of a bad request (undecodable arguments, stale handle, failed attach).
     pub fn bad_request(self) -> String {
         match self.0 {

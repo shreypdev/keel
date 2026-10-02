@@ -121,6 +121,28 @@ impl Uploader {
     }
 }
 
+/// A store whose constructor takes a callback and hands out a signal that already belongs to
+/// another store the second time it runs: it fails after its body, with the proxy made.
+#[k::store]
+pub struct Gauge {
+    level: undra::signals::Signal<u32>,
+}
+
+static GAUGE_SIGNAL: std::sync::OnceLock<undra::signals::Signal<u32>> = std::sync::OnceLock::new();
+
+#[k::api(store)]
+impl Gauge {
+    pub fn new(listener: Arc<dyn UploadListener>) -> Self {
+        // The proxy is made before the body runs and dropped when it returns: released by the core.
+        let _ = listener;
+        Gauge {
+            level: GAUGE_SIGNAL
+                .get_or_init(|| undra::signals::Signal::new(0))
+                .clone(),
+        }
+    }
+}
+
 const PORT: u32 = ids::port_id("UploadListener");
 
 fn method(name: &str) -> u32 {
@@ -561,4 +583,33 @@ fn objects_and_callbacks_mix_in_one_signature() {
         rt.port_calls().iter().all(|c| !is_release(c, 52)),
         "no reference to give back"
     );
+}
+
+/// Objects-followups O6: a constructor that took a callback and then failed after its body made the
+/// proxy, which is released with the unpublished value. Status 5 would say "refused: owns nothing"
+/// and make the host give its reference back as well (a double release); a failed call keeps it.
+#[test]
+fn a_constructor_that_fails_after_making_its_proxies_is_not_a_refusal() {
+    let rt = Runtime::new();
+    let first = rt
+        .call_object("Gauge", "new", 0, &args(|w| 31_u64.encode(w)))
+        .sync_ok();
+    assert!(u64::decode_exact(&first).unwrap() > 0, "the first Gauge is published");
+    rt.port_calls();
+
+    // The second one reuses the first one's signal, which belongs to a store already.
+    let reason = rt
+        .call_object("Gauge", "new", 0, &args(|w| 32_u64.encode(w)))
+        .failed();
+    assert!(
+        reason.contains("store `Gauge` could not attach its signals") && reason.contains("already attached"),
+        "{reason}"
+    );
+    let calls = rt.port_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "the core released the proxy it made, once: {calls:?}"
+    );
+    assert!(is_release(&calls[0], 32), "{:?}", calls[0]);
 }
