@@ -94,11 +94,20 @@ internal class CallbackHost(
         return PortOutcome.Async
     }
 
-    /** Drops everything: the core is closed, or the connection to it was lost (its proxies answer unavailable). */
-    fun clear() {
+    /**
+     * The connection the core's calls came over was lost: what runs for them is cancelled (the server answered those
+     * port calls unavailable), and the registry keeps its entries, because a session that resumes finds its objects,
+     * and the proxies of the instances lent, where it left them (ADR-051).
+     */
+    fun connectionLost() {
         for (id in calls.keys.toList()) calls.remove(id)?.let { call -> synchronized(call) { call.cancelled = true; call.job }?.cancel() }
-        registry.clear()
         serial.clear()
+    }
+
+    /** Drops everything: the core is closed, and the references to its proxies went with it. */
+    fun clear() {
+        connectionLost()
+        registry.clear()
     }
 
     private fun queue(

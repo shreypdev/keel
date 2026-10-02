@@ -1389,6 +1389,9 @@ extension UndraCore: UndraInbound {
         }
         if attempt == 1 {
             failAllPending(UndraTransportError.connectionLost(reason: "\(error); reconnecting"))
+            // What ran for the lost connection's callback calls is cancelled; the registry keeps its entries for the
+            // session's return (ADR-041, ADR-051): they go with the core's closing.
+            callbacks.connectionLost()
         }
         setConnectionState(.reconnecting(attempt: attempt))
     }

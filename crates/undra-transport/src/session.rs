@@ -35,7 +35,7 @@ use undra_wire::payload::{
     Call, CallTarget, Cancel, Event, Hello, Observe, PortReply, PortStatus, Release, StreamCredit,
     TimerFired,
 };
-use undra_wire::{Envelope, Kind, Reader, WireError, Writer};
+use undra_wire::{Envelope, Handle, Kind, Reader, WireError, Writer};
 use tungstenite::Message;
 use tungstenite::error::{Error, ProtocolError};
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
@@ -263,6 +263,8 @@ impl Session {
                 noted: true,
             });
         }
+        // The slot is ours: the callbacks this client lends are the ones the core delivers.
+        self.rt.set_client_origin(self.origin());
         self.settle_session(&info)
     }
 
@@ -374,8 +376,19 @@ impl Session {
             }
             Kind::Release => {
                 let release = decode(payload, "Release", Release::decode)?;
-                self.conn.release(release.handle.0);
-                self.rt.release_from(self.origin(), release.handle.0);
+                let handle = release.handle.0;
+                // One reference of the client's, whichever kind: a constructor's first (counted by
+                // this connection), else one a call returned (counted for the session's origin).
+                // Each ledger gives back exactly what the client gave back, so a store the client
+                // constructed and also had returned is neither released twice nor leaked.
+                if self.conn.release(handle) {
+                    self.rt.release(handle);
+                } else {
+                    self.rt.release_from(self.origin(), handle);
+                }
+                if self.rt.objects().host_refs_of(Handle(handle)).is_none() {
+                    self.conn.forget_observed(handle);
+                }
             }
             Kind::PortReply => {
                 let reply = decode(payload, "PortReply", PortReply::decode)?;
@@ -498,6 +511,12 @@ impl Session {
     pub(crate) fn teardown(&self) {
         let had_client = self.conn.client().is_some();
         let session = self.conn.session().cloned();
+        // This client's callbacks are no longer delivered (they are not the next client's): cleared
+        // before anything below drops a proxy of theirs, and before the slot is vacated, so a client
+        // that attaches next (the same session coming back included) sets its own afterwards.
+        if self.bridge.is_attached(self.conn.id) {
+            self.rt.clear_client_origin(self.origin());
+        }
         let left = self.conn.drain();
         for call_id in &left.calls {
             self.rt.cancel(*call_id);

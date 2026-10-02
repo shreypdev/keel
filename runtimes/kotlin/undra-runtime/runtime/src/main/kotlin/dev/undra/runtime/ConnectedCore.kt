@@ -703,8 +703,9 @@ internal class ConnectedCore(
                     cause,
                 ),
             )
-            // The core's proxies answer unavailable from now on (ADR-041): the host keeps nothing for them.
-            callbackHost.clear()
+            // What the core asked of the callbacks over this connection is cancelled; the registry keeps its entries
+            // for the session's return (ADR-041, ADR-051): they go with the core's closing.
+            callbackHost.connectionLost()
         }
         setConnection(ConnectionState.Reconnecting(attempt, cause))
     }

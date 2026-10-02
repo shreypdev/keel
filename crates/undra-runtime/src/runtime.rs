@@ -39,7 +39,7 @@ use crate::executor::{
 use crate::ext::{Extensions, InitHook, InspectFn, Inspectors};
 use crate::guard::{self, PanicReport, drop_guarded, encode_panic_body};
 use crate::host::{Host, PortCallOutcome};
-use crate::issue::{IssueScope, OriginScope, Origins, WithOrigin};
+use crate::issue::{CallOrigin, IssueScope, OriginScope, Origins, WithOrigin};
 use crate::lazy::LazyList;
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
 use crate::object::{AnyObject, StoreObject, StoreRestorer, UndraObject, erased, store};
@@ -494,6 +494,9 @@ pub struct Runtime {
     origins: Origins,
     /// The live proxies of the host's callback instances, for interning (ADR-041).
     callbacks: CallbackRegistry,
+    /// The client origin whose callbacks are delivered (`0`: none is attached): see
+    /// [`set_client_origin`](Runtime::set_client_origin).
+    client_origin: AtomicU64,
 }
 
 /// The report of a call that failed in the core without a panic: its reason, no backtrace.
@@ -874,6 +877,7 @@ impl Runtime {
             poisoned_signals: Mutex::new(HashSet::new()),
             origins: Origins::default(),
             callbacks: CallbackRegistry::default(),
+            client_origin: AtomicU64::new(0),
         });
 
         register_runtime(rt.id, Arc::downgrade(&rt));
@@ -1382,11 +1386,13 @@ impl Runtime {
     /// [`call`](Runtime::call) on behalf of a client that is not in this process (an `undra dev`
     /// session): `origin` (non-zero) names it, so that the references the call hands out
     /// (ADR-040) are recorded against it and [`release_origin`](Runtime::release_origin) can
-    /// give them back when the client disconnects. `origin` 0 is the process's own embedder.
+    /// give them back when the client disconnects, and the callback instances it lends are its
+    /// own ([`set_client_origin`](Runtime::set_client_origin)). What a *constructor* returns is
+    /// not recorded: it is the one reference its client made, which the caller counts (the
+    /// transport's session). `origin` 0 is the process's own embedder.
     pub fn call_from(&self, origin: u64, payload: &[u8]) -> u32 {
         // Set for the dispatch of a synchronous method and, through the spawned future, for every
         // poll of an asynchronous one.
-        let _origin = (origin != 0).then(|| OriginScope::enter(origin));
         Stats::inc(&self.stats.calls);
         let call = match Call::decode(&mut Reader::new(payload)) {
             Ok(call) => call,
@@ -1400,6 +1406,14 @@ impl Runtime {
                 return 5;
             }
         };
+        // A constructor's reply is the one reference its client made, counted by the session that
+        // knows which constructor call it answers; the origin's ledger records what other calls
+        // return, so that a reference is in exactly one of them.
+        let origin = CallOrigin {
+            origin,
+            ledger: !matches!(call.target, CallTarget::Constructor { .. }),
+        };
+        let _origin = (origin.origin != 0).then(|| OriginScope::enter(origin));
         let call_id = call.call_id;
         if call_id == 0 {
             Stats::inc(&self.stats.bad_requests);
@@ -1444,7 +1458,7 @@ impl Runtime {
                     self.send_reply(call_id, ReplyStatus::Error, &body);
                 }
                 DispatchResult::Async(future) => {
-                    if origin == 0 {
+                    if origin.origin == 0 {
                         self.spawn_call(call_id, handle, params, future);
                     } else {
                         self.spawn_call(
@@ -2176,6 +2190,29 @@ impl Runtime {
 
     pub(crate) fn callbacks(&self) -> &CallbackRegistry {
         &self.callbacks
+    }
+
+    /// Names the remote client that is attached (`undra dev`, `origin` as for
+    /// [`call_from`](Runtime::call_from)): the calls the core makes to the callback instances that
+    /// client lent are delivered, and those of any other origin are not. Every client numbers its
+    /// instances from 1, so what a session that left lent (objects kept for its return, or held by
+    /// something that outlived it) must never reach the instance of the same number in another.
+    pub fn set_client_origin(&self, origin: u64) {
+        self.client_origin.store(origin, Ordering::Release);
+    }
+
+    /// The client `origin` left: its callbacks are not delivered to whoever attaches next. A
+    /// client that has attached since is left alone.
+    pub fn clear_client_origin(&self, origin: u64) {
+        let _ = self
+            .client_origin
+            .compare_exchange(origin, 0, Ordering::AcqRel, Ordering::Acquire);
+    }
+
+    /// Whether a callback instance lent by `origin` can be called: the process's own embedder
+    /// (`0`) always, a remote client while it is the attached one.
+    pub(crate) fn callback_deliverable(&self, origin: u64) -> bool {
+        origin == 0 || self.client_origin.load(Ordering::Acquire) == origin
     }
 
     /// Calls a fire-and-forget method of a host callback instance: a port call with

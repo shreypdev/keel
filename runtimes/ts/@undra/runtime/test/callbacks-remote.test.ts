@@ -58,7 +58,7 @@ afterEach(() => {
 });
 
 describe("host callbacks over a remote core", () => {
-  it("answer PortCall envelopes, never answer a fire-and-forget call, and are dropped with the connection", async () => {
+  it("answer PortCall envelopes, never answer a fire-and-forget call, survive a lost connection and are dropped with the core", async () => {
     const server = new FakeServer();
     const loading = UndraCore.load({
       mode: "remote",
@@ -90,6 +90,11 @@ describe("host callbacks over a remote core", () => {
 
     server.current.serverClose(1006);
     expect(core.connection.peek().kind).toBe("reconnecting");
-    expect(callbacks(core).liveCount, "the core that held them is out of reach").toBe(0);
+    // The session may come back (ADR-051): the server keeps its objects, and with them the proxies of the
+    // instances lent, so the registry keeps its entries until the core is closed for good.
+    expect(callbacks(core).liveCount, "kept for the session's return").toBe(1);
+    expect(callbacks(core).count(listener)).toBe(1);
+    core.close();
+    expect(callbacks(core).liveCount, "dropped with the core").toBe(0);
   });
 });

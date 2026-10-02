@@ -6,6 +6,12 @@
 //! `Arc<dyn UploadListener>` whose methods are port calls (SPEC 3.6) on the trait's port id,
 //! with the instance as the first argument.
 //!
+//! * **A client's proxies are its own.** A remote client (`undra dev`) numbers its instances from 1,
+//!   as every other client does, so the core keys the proxies it interns by the client's *origin* as
+//!   well (`Runtime::call_from`), and delivers a proxy's calls only while its client is the one
+//!   attached ([`Runtime::set_client_origin`]): the proxies of a session that left (its objects kept
+//!   for its return, or still held by something that outlived it) never reach another session's
+//!   instance of the same number.
 //! * **One crossing, one reference.** Every instance handle in a call's arguments is one
 //!   reference the core now owns. The core **interns**: decoding an instance it already has a
 //!   live proxy for returns that proxy (so `Arc::ptr_eq` holds for one host listener) and gives
@@ -60,15 +66,24 @@ pub struct CallbackHandle {
     port_id: u32,
     name: &'static str,
     instance: u64,
+    /// The client whose instance this is (`0`: the process's own embedder).
+    origin: u64,
 }
 
 impl CallbackHandle {
-    fn new(ctx: WeakCtx, port_id: u32, name: &'static str, instance: u64) -> CallbackHandle {
+    fn new(
+        ctx: WeakCtx,
+        port_id: u32,
+        name: &'static str,
+        instance: u64,
+        origin: u64,
+    ) -> CallbackHandle {
         CallbackHandle {
             ctx,
             port_id,
             name,
             instance,
+            origin,
         }
     }
 
@@ -83,6 +98,9 @@ impl CallbackHandle {
         let Ok(ctx) = self.ctx.upgrade() else {
             return;
         };
+        if !ctx.runtime().callback_deliverable(self.origin) {
+            return;
+        }
         let mut w = Writer::new();
         w.write_u64(self.instance);
         args(&mut w);
@@ -101,6 +119,14 @@ impl CallbackHandle {
                 cancel: None,
             };
         };
+        if !ctx.runtime().callback_deliverable(self.origin) {
+            // The client these calls belong to is not the attached one: nobody to ask.
+            return CallbackCall {
+                future: None,
+                gone: true,
+                cancel: None,
+            };
+        }
         let mut w = Writer::new();
         w.write_u64(self.instance);
         args(&mut w);
@@ -119,6 +145,7 @@ impl CallbackHandle {
                 method_id: callback_cancel_id(self.name),
                 instance: self.instance,
                 port_call_id: id,
+                origin: self.origin,
             }),
         }
     }
@@ -139,13 +166,18 @@ impl Drop for CallbackHandle {
             return;
         };
         let rt = ctx.runtime();
-        rt.callbacks().prune(self.port_id, self.instance);
-        release(rt, self.port_id, self.name, self.instance);
+        rt.callbacks()
+            .prune(self.origin, self.port_id, self.instance);
+        release(rt, self.origin, self.port_id, self.name, self.instance);
     }
 }
 
-/// Gives one reference to `instance` back to the host.
-fn release(rt: &Runtime, port_id: u32, name: &str, instance: u64) {
+/// Gives one reference to `instance` of the client `origin` back to the host: nothing when that
+/// client is not the one attached (its numbers mean nothing to another client).
+fn release(rt: &Runtime, origin: u64, port_id: u32, name: &str, instance: u64) {
+    if !rt.callback_deliverable(origin) {
+        return;
+    }
     rt.port_notify(
         port_id,
         callback_release_id(name),
@@ -159,6 +191,7 @@ struct Cancel {
     method_id: u32,
     instance: u64,
     port_call_id: u32,
+    origin: u64,
 }
 
 /// The future of an `async` callback method: resolves to the encoded reply, like a
@@ -199,6 +232,9 @@ impl Drop for CallbackCall {
         let Ok(ctx) = cancel.ctx.upgrade() else {
             return;
         };
+        if !ctx.runtime().callback_deliverable(cancel.origin) {
+            return;
+        }
         let mut w = Writer::new();
         w.write_u64(cancel.instance);
         w.write_u32(cancel.port_call_id);
@@ -226,23 +262,24 @@ impl<P: ?Sized + Send + Sync + 'static> ErasedWeak for Weak<P> {
     }
 }
 
-/// The live proxies of one runtime, by `(port id, instance)`: how the core interns the host's
-/// instances (ADR-041 decision 5).
+/// The live proxies of one runtime, by `(origin, port id, instance)`: how the core interns the
+/// host's instances (ADR-041 decision 5). The origin is the client that lent the instance, which
+/// numbers its instances from 1 like every other client.
 #[derive(Default)]
 pub(crate) struct CallbackRegistry {
-    live: Mutex<HashMap<(u32, u64), Box<dyn ErasedWeak>>>,
+    live: Mutex<HashMap<(u64, u32, u64), Box<dyn ErasedWeak>>>,
 }
 
 impl CallbackRegistry {
-    /// Forgets `(port_id, instance)` if its proxy is gone (a newer proxy of the same instance
-    /// may have taken the entry meanwhile, and stays).
-    pub(crate) fn prune(&self, port_id: u32, instance: u64) {
+    /// Forgets `(origin, port_id, instance)` if its proxy is gone (a newer proxy of the same
+    /// instance may have taken the entry meanwhile, and stays).
+    pub(crate) fn prune(&self, origin: u64, port_id: u32, instance: u64) {
         let mut live = self.live.lock();
         if live
-            .get(&(port_id, instance))
+            .get(&(origin, port_id, instance))
             .is_some_and(|weak| !weak.alive())
         {
-            live.remove(&(port_id, instance));
+            live.remove(&(origin, port_id, instance));
         }
     }
 
@@ -290,7 +327,9 @@ impl Runtime {
     /// assert_eq!(t.host().port_calls().len(), 1);
     /// ```
     pub fn callback<P: ?Sized + CallbackInterface>(&self, instance: u64) -> Arc<P> {
-        let key = (P::PORT_ID, instance);
+        // The client this call is served for: its instance 1 is not another client's.
+        let origin = crate::issue::current_origin();
+        let key = (origin, P::PORT_ID, instance);
         {
             let live = self.callbacks().live.lock();
             if let Some(existing) = live
@@ -299,11 +338,17 @@ impl Runtime {
                 .and_then(Weak::upgrade)
             {
                 drop(live);
-                release(self, P::PORT_ID, P::NAME, instance);
+                release(self, origin, P::PORT_ID, P::NAME, instance);
                 return existing;
             }
         }
-        let handle = CallbackHandle::new(self.ctx().downgrade(), P::PORT_ID, P::NAME, instance);
+        let handle = CallbackHandle::new(
+            self.ctx().downgrade(),
+            P::PORT_ID,
+            P::NAME,
+            instance,
+            origin,
+        );
         let proxy = P::proxy(handle);
         self.callbacks()
             .live

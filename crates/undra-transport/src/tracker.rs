@@ -24,7 +24,11 @@ enum CallState {
 pub(crate) struct Tracker {
     calls: HashMap<u32, CallState>,
     observed: HashSet<(u64, u32)>,
-    constructed: HashSet<u64>,
+    /// The references this connection's constructors made and nobody released, per handle: a
+    /// constructor that returns an interned object (an `Arc<Self>` singleton) makes one more of
+    /// the same handle each time it is called. (What the client's other calls returned is the
+    /// runtime's to count, per origin.)
+    constructed: HashMap<u64, u32>,
     port_calls: HashSet<u32>,
 }
 
@@ -36,7 +40,8 @@ pub(crate) struct Leftovers {
     pub calls: Vec<u32>,
     /// `(handle, signal_id)` pairs still observed.
     pub observed: Vec<(u64, u32)>,
-    /// Handles this connection's constructors returned and nobody released.
+    /// The references this connection's constructors made and nobody released: a handle once per
+    /// reference.
     pub constructed: Vec<u64>,
     /// Port calls the core is still waiting on.
     pub port_calls: Vec<u32>,
@@ -79,7 +84,10 @@ impl Tracker {
         let state = self.calls.remove(&call_id);
         if state == Some(CallState::Pending { constructor: true }) && status == ReplyStatus::Ok {
             if let Some(handle) = body.first_chunk::<8>() {
-                self.constructed.insert(u64::from_le_bytes(*handle));
+                *self
+                    .constructed
+                    .entry(u64::from_le_bytes(*handle))
+                    .or_insert(0) += 1;
             }
         }
     }
@@ -119,15 +127,32 @@ impl Tracker {
         signals
     }
 
-    /// The client released `handle`: nothing about it is left to clean up.
-    pub(crate) fn release(&mut self, handle: u64) {
-        self.observed.retain(|&(h, _)| h != handle);
-        self.constructed.remove(&handle);
+    /// The client released one reference to `handle`. Returns whether it was one of the
+    /// references this connection's constructors made (counted here); `false` means it was one a
+    /// call returned, which the runtime counts for the session's origin.
+    pub(crate) fn release(&mut self, handle: u64) -> bool {
+        let Some(count) = self.constructed.get_mut(&handle) else {
+            return false;
+        };
+        *count -= 1;
+        if *count == 0 {
+            self.constructed.remove(&handle);
+        }
+        true
     }
 
-    /// Takes over objects another connection of the same session left (a resumed session).
+    /// The client's observation of `handle` ends with the object (the last reference to it is
+    /// gone): there is nothing left to stop at a disconnect.
+    pub(crate) fn forget_observed(&mut self, handle: u64) {
+        self.observed.retain(|&(h, _)| h != handle);
+    }
+
+    /// Takes over references another connection of the same session left (a resumed session): a
+    /// handle once per reference.
     pub(crate) fn adopt(&mut self, handles: &[u64]) {
-        self.constructed.extend(handles.iter().copied());
+        for handle in handles {
+            *self.constructed.entry(*handle).or_insert(0) += 1;
+        }
     }
 
     /// The core issued port call `id` to this client.
@@ -150,7 +175,11 @@ impl Tracker {
         Leftovers {
             calls: sorted(self.calls.drain().map(|(id, _)| id)),
             observed: sorted(self.observed.drain()),
-            constructed: sorted(self.constructed.drain()),
+            constructed: sorted(
+                self.constructed
+                    .drain()
+                    .flat_map(|(handle, count)| std::iter::repeat_n(handle, count as usize)),
+            ),
             port_calls: sorted(self.port_calls.drain()),
         }
     }
@@ -236,26 +265,48 @@ mod tests {
     }
 
     #[test]
-    fn release_forgets_everything_about_the_handle() {
+    fn a_release_gives_back_one_constructor_reference_and_says_whether_there_was_one() {
         let mut t = Tracker::default();
-        t.begin_call(1, true);
-        t.on_reply(1, ReplyStatus::Ok, &5_u64.to_le_bytes());
+        // The same handle constructed twice (an interned singleton): two references.
+        for id in [1, 2] {
+            t.begin_call(id, true);
+            t.on_reply(id, ReplyStatus::Ok, &5_u64.to_le_bytes());
+        }
         t.observe(5, 0, true);
         t.observe(6, 0, true);
-        t.release(5);
+        assert!(t.release(5), "the first constructor reference");
+        assert_eq!(t.constructed.get(&5), Some(&1), "one reference is left");
+        assert!(t.release(5));
+        assert!(
+            !t.release(5),
+            "nothing is left here: a reference a call returned is the runtime's"
+        );
+        assert!(!t.release(77), "a handle this connection never constructed");
+        // Observations end with the object, not with a release (another reference may remain).
+        t.forget_observed(5);
         let left = t.drain();
         assert!(left.constructed.is_empty());
         assert_eq!(left.observed, [(6, 0)]);
     }
 
     #[test]
+    fn a_reference_per_constructor_call_is_given_back_at_a_disconnect() {
+        let mut t = Tracker::default();
+        for id in [1, 2] {
+            t.begin_call(id, true);
+            t.on_reply(id, ReplyStatus::Ok, &5_u64.to_le_bytes());
+        }
+        assert_eq!(t.drain().constructed, [5, 5], "once per reference, not once per handle");
+    }
+
+    #[test]
     fn adopted_objects_are_this_connections_to_give_back() {
         let mut t = Tracker::default();
-        t.adopt(&[7, 3]);
+        t.adopt(&[7, 3, 7]);
         t.begin_call(1, true);
         t.on_reply(1, ReplyStatus::Ok, &9_u64.to_le_bytes());
-        t.release(3);
-        assert_eq!(t.drain().constructed, [7, 9]);
+        assert!(t.release(3));
+        assert_eq!(t.drain().constructed, [7, 7, 9]);
     }
 
     #[test]

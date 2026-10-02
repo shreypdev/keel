@@ -401,9 +401,15 @@ impl Conn {
         self.state.lock().tracker.observe(handle, signal_id, on);
     }
 
-    /// Records a release.
-    pub(crate) fn release(&self, handle: u64) {
-        self.state.lock().tracker.release(handle);
+    /// Records a release; whether it gave back one of the references this connection's
+    /// constructors made (see [`Tracker::release`]).
+    pub(crate) fn release(&self, handle: u64) -> bool {
+        self.state.lock().tracker.release(handle)
+    }
+
+    /// The object behind `handle` is gone: the client's observation of it ends with it.
+    pub(crate) fn forget_observed(&self, handle: u64) {
+        self.state.lock().tracker.forget_observed(handle);
     }
 
     /// The client answered a port call.

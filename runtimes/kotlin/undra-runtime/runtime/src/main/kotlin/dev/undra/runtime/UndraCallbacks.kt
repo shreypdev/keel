@@ -91,7 +91,7 @@ public class UndraCallbacks internal constructor() {
     /** The implementation lent as [instance], or `null` when the core holds no reference to it. */
     internal fun implementation(instance: ULong): Any? = synchronized(lock) { entries[instance.toLong()]?.implementation }
 
-    /** Drops every entry: the core that held them is gone (closed, or the connection to `undra dev` was lost). */
+    /** Drops every entry: the core that held them is gone (closed). A lost connection to `undra dev` keeps them, for the session's return. */
     internal fun clear() {
         val gone = synchronized(lock) {
             val out = entries.keys.toList()

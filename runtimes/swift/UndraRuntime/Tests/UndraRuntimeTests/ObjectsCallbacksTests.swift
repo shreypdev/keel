@@ -617,6 +617,31 @@ final class CallbackTests: XCTestCase {
         XCTAssertEqual(core.callbacks.liveCount, 0)
     }
 
+    /// Objects-followups O5: a lost connection keeps what the core holds for the session's return (the server keeps
+    /// the objects, and with them the proxies of the instances lent, ADR-051); only closing the core drops it.
+    func testALostConnectionKeepsTheRegistryAndClosingTheCoreDropsIt() async throws {
+        let rep = Recorder()
+        rep.waitForCancel = true
+        let instance = core.callbacks.lend(rep)
+        // A call the lost connection asked for is running: it is cancelled (the server answered it unavailable).
+        _ = call(ListenerIds.ask, id: 9, args(instance) { $0.writeString("running") })
+        frames.fire()
+        await waitFor("the call to start") { rep.started == 1 }
+        transport.drop()
+        await waitFor("the running call to see its cancellation") { rep.sawCancellation }
+        XCTAssertEqual(core.callbacks.liveCount, 1, "kept while reconnecting")
+        XCTAssertEqual(core.callbacks.count(of: rep), 1)
+        transport.reconnect()
+        XCTAssertEqual(core.callbacks.count(of: rep), 1, "and still there once the connection is back")
+        XCTAssertEqual(call(ListenerIds.releaseInstance, args(instance)), .async, "the session's proxy gives its reference back")
+        frames.fire()
+        XCTAssertEqual(core.callbacks.liveCount, 0)
+        let kept = Recorder()
+        _ = core.callbacks.lend(kept)
+        core.shutdown()
+        XCTAssertEqual(core.callbacks.liveCount, 0, "dropped with the core")
+    }
+
     func testCallsRunAtTheDrainInOrderAfterTheChangeSetsBeforeThem() {
         let store = core.adopt(handle(1)) { CountStore(adopting: $0, core: $1) }
         let rep = Recorder()

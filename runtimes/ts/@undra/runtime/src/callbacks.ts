@@ -115,9 +115,12 @@ export class UndraCallbacks {
   /** @param core The core whose callbacks these are. Use {@link callbacks}. */
   constructor(core: UndraCore) {
     this.#core = core;
-    // A core whose connection is lost (a remote one reconnecting, any one closed) holds none of them any more.
+    // A core that is closed holds none of them any more. One that lost its connection and reconnects (a remote core)
+    // keeps its session, and with it the proxies of the instances lent: the entries stay for the session's return, and
+    // only what the lost connection left running is aborted (its port calls were answered unavailable at the server).
     core.connection.subscribe((state) => {
-      if (state.kind === "reconnecting" || state.kind === "closed") this.#drop();
+      if (state.kind === "closed") this.#drop();
+      else if (state.kind === "reconnecting") this.#abandonRunning();
     });
   }
 
@@ -180,15 +183,20 @@ export class UndraCallbacks {
     this.#instances.get(lent.callback)?.delete(lent.impl);
   }
 
-  /** Forgets every entry and aborts what runs: the core that held them is gone (or the connection to it). */
-  #drop(): void {
-    this.#droppedThrough = this.#next;
-    this.#lent.clear();
-    this.#instances.clear();
+  /** Aborts what runs and drops what waits to be coalesced: the connection its port calls came over is gone. */
+  #abandonRunning(): void {
     for (const running of this.#running.values()) running.controller.abort();
     this.#running.clear();
     for (const pending of this.#coalesced.values()) pending.superseded = true;
     this.#coalesced.clear();
+  }
+
+  /** Forgets every entry and aborts what runs: the core that held them is gone. */
+  #drop(): void {
+    this.#droppedThrough = this.#next;
+    this.#lent.clear();
+    this.#instances.clear();
+    this.#abandonRunning();
   }
 
   /** Runs `task` as the interface delivers: through the mirror's drain (`main`), or from a microtask (`background`). */

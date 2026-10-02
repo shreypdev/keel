@@ -285,6 +285,25 @@ public final class UndraCallbacks: @unchecked Sendable {
         }
     }
 
+    /// The connection the core's calls came over was lost: what runs for them is cancelled (the server answered those
+    /// port calls unavailable), and the registry keeps its entries, because a session that resumes finds its objects,
+    /// and the proxies of the instances lent, where it left them (ADR-051). ``close()`` drops them.
+    func connectionLost() {
+        let running = state.withLock { (current: inout State) -> [Task<Void, Never>] in
+            var tasks: [Task<Void, Never>] = []
+            for call in current.calls.values {
+                if case .running(let task) = call {
+                    tasks.append(task)
+                }
+            }
+            current.calls = [:]
+            return tasks
+        }
+        for task in running {
+            task.cancel()
+        }
+    }
+
     /// Lets every implementation go and cancels what runs: the core shut down or its connection is gone
     /// for good (its proxies answer unavailable until they are dropped).
     func close() {
