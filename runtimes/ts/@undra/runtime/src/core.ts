@@ -244,17 +244,56 @@ function abortReason(signal: AbortSignal): unknown {
   return error;
 }
 
+/** The 32-bit halves of the last few handles used by calls: BigInt arithmetic allocates, and a store calls with the same handle again and again. */
+const HANDLE_HALVES = 4;
+const handleKeys: bigint[] = [];
+const handleLo: number[] = [];
+const handleHi: number[] = [];
+let handleNext = 0;
+
+/** Writes the `u64` `handle` at `out[at..at+8]` (little-endian): from the cache of recent handles, or after splitting it. */
+function putHandle(out: Uint8Array, at: number, handle: Handle): void {
+  let i = handleKeys.length;
+  while (i-- > 0) if (handleKeys[i] === handle) break;
+  if (i < 0) {
+    if (BigInt.asUintN(64, handle) !== handle) throw new RangeError(`u64 out of range: ${String(handle)}`);
+    i = handleNext;
+    handleNext = (handleNext + 1) % HANDLE_HALVES;
+    handleKeys[i] = handle;
+    handleLo[i] = Number(handle & 0xffff_ffffn);
+    handleHi[i] = Number(handle >> 32n);
+  }
+  put32(out, at, handleLo[i] as number);
+  put32(out, at + 4, handleHi[i] as number);
+}
+
+function put32(out: Uint8Array, at: number, v: number): void {
+  out[at] = v;
+  out[at + 1] = v >>> 8;
+  out[at + 2] = v >>> 16;
+  out[at + 3] = v >>> 24;
+}
+
+/** A `Call` payload (SPEC 3.3) for a free function or a method, laid out in one allocation: `encodeCall` without its writer. */
 function encodeTarget(target: CallTargetArg, methodId: number, callId: number, args: Uint8Array): Uint8Array {
+  let handle: Handle | undefined;
   if (typeof target === "number") {
     if (target !== CallTarget.FreeFunction) {
       throw new TypeError("a bare CallTarget must be FreeFunction; pass { target, handle } for a method");
     }
-    return encodeCall({ target: CallTarget.FreeFunction, methodId, callId, args });
+  } else if (target.target === CallTarget.ObjectMethod) {
+    handle = target.handle;
   }
-  if (target.target === CallTarget.ObjectMethod) {
-    return encodeCall({ target: CallTarget.ObjectMethod, handle: target.handle, methodId, callId, args });
+  if (methodId >>> 0 !== methodId) throw new RangeError(`u32 out of range: ${String(methodId)}`);
+  const out = new Uint8Array(17 + args.length);
+  if (handle !== undefined) {
+    out[0] = CallTarget.ObjectMethod;
+    putHandle(out, 1, handle);
   }
-  return encodeCall({ target: CallTarget.FreeFunction, methodId, callId, args });
+  put32(out, 9, methodId);
+  put32(out, 13, callId);
+  if (args.length > 0) out.set(args, 17);
+  return out;
 }
 
 /** Overlays `overrides` on `base`: a value replaces, `null` removes. */
@@ -1127,7 +1166,7 @@ export class UndraCore {
       this.#reportError("reply", new UndraTransportError("protocol", "the core sent a truncated reply"));
       return;
     }
-    const callId = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint32(0, true);
+    const callId = ((payload[0] as number) | ((payload[1] as number) << 8) | ((payload[2] as number) << 16) | ((payload[3] as number) << 24)) >>> 0;
     const status = payload[4] as number;
     const body = payload.subarray(5);
     const entry = this.#pending.get(callId);
