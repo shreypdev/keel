@@ -1499,12 +1499,7 @@ impl<'a> Ctx<'a> {
                 for g in &signals {
                     self.signal_property(w, o, g);
                 }
-                let simple_new = o.constructors.iter().find(|c| {
-                    c.name == "new"
-                        && c.params.is_empty()
-                        && !c.is_async
-                        && Ret::classify(&c.returns).is_some_and(|r| r.error().is_none())
-                });
+                let new_constructor = o.constructors.iter().find(|c| c.name == "new");
                 for m in &o.methods {
                     w.blank();
                     let ids = format!("UndraIds.Objects.{}", o.name);
@@ -1527,14 +1522,10 @@ impl<'a> Ctx<'a> {
                 }
                 w.blank();
                 w.block("companion object", |w| {
-                    if let Some(c) = simple_new {
-                        // `Account()` reads like a constructor and still goes through `adopt`.
-                        kdoc(w, &c.docs, &[THROWS_CALL.to_owned()]);
-                        w.line(format!(
-                            "operator fun invoke(ctx: UndraCore = {}): {} = create(ctx)",
-                            self.g.default_core(),
-                            o.name
-                        ));
+                    if let Some(c) = new_constructor {
+                        // `Account(id)` reads like a constructor and still goes through `adopt`, for every
+                        // `new`: with or without parameters, suspending or not, failing or not.
+                        self.constructor_invoke(w, o, c);
                         w.blank();
                     }
                     for (i, c) in o.constructors.iter().enumerate() {
@@ -1566,6 +1557,35 @@ impl<'a> Ctx<'a> {
         w.line(format!(
             "val {name}: StateFlow<{ty}> = {backing}.asStateFlow()"
         ));
+    }
+
+    /// `operator fun invoke(..)` of the object's `new`: the call syntax of a constructor over the factory `create`.
+    fn constructor_invoke(&mut self, w: &mut CodeWriter, o: &ObjectDef, c: &MethodDef) {
+        let ret = Ret::classify(&c.returns);
+        let err = ret.as_ref().and_then(Ret::error).map(str::to_owned);
+        let taken: Vec<String> = c.params.iter().map(|p| ident(&p.name)).collect();
+        let taken_refs: Vec<&str> = taken.iter().map(String::as_str).collect();
+        let ctx = naming::avoid("ctx", &taken_refs);
+        let mut params = self.param_list(&c.params);
+        params.push(format!("{ctx}: UndraCore = {}", self.g.default_core()));
+        let mut extra = Vec::new();
+        if let Some(err) = &err {
+            extra.push(format!("@throws {err}"));
+        }
+        extra.push(THROWS_CALL.to_owned());
+        if c.is_async {
+            extra.push(THROWS_CANCELLED.to_owned());
+        }
+        kdoc(w, &c.docs, &extra);
+        let suspend = if c.is_async { "suspend " } else { "" };
+        let mut args = taken.clone();
+        args.push(ctx);
+        w.call(
+            format!("{suspend}operator fun invoke"),
+            &params,
+            format!(": {} = create({})", o.name, args.join(", ")),
+            true,
+        );
     }
 
     fn constructor(&mut self, w: &mut CodeWriter, o: &ObjectDef, c: &MethodDef) {

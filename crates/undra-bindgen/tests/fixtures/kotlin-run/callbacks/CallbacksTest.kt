@@ -252,5 +252,11 @@ fun main() {
     weak.finished("f")
     expectEq(listener.heard.last(), "finished f", "the weak wrapper forwards")
     expect(UndraCallbackGoneException("UploadListener").message!!.contains("UploadListener"), "the gone exception names the interface")
+    // `new` has a call syntax for every signature (objects-followups O8): `Uploader(listener, core)` is `create`.
+    val invoked = Listener()
+    Uploader(invoked, core)
+    expectEq(core.callbacks.count(invoked), 1, "Uploader(listener, core) lends like Uploader.create")
+    Uploader(null, core)
+    expectEq(core.constructed.last(), "00", "Uploader(null, core) writes no instance")
     println("ok")
 }

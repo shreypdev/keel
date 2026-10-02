@@ -119,7 +119,7 @@ public final class WeakUploadListener: UploadListener, UndraWeakMainCallback {
 
     public func confirmReplace(name: String) async throws(PromptError) -> Bool {
         guard let target = target else {
-            return await UndraCallbacks.targetGone()
+            throw PromptError.unavailable("WeakUploadListener's target is gone")
         }
         return try await target.confirmReplace(name: name)
     }

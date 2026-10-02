@@ -313,6 +313,53 @@
       "docs": "An account that hands out its mailboxes."
     },
     {
+      "name": "Vault",
+      "type_id": 3560083791,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 1403906307,
+          "params": [
+            {
+              "name": "name",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "Vault"
+              },
+              {
+                "kind": "named",
+                "of": "MailError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "size",
+          "method_id": 949940082,
+          "params": [],
+          "returns": {
+            "kind": "u32"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "store": null,
+      "docs": "Opens asynchronously, and can fail to: its `new` takes parameters."
+    },
+    {
       "name": "Mailbox",
       "type_id": 2987480683,
       "constructors": [],

@@ -118,6 +118,13 @@ class TodoByIdQueryHandle internal constructor(core: UndraCore, handle: Long) : 
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            id: UUID,
+            fresh: Boolean,
+            ctx: UndraCore = UndraGoldenQueries.core,
+        ): TodoByIdQueryHandle = create(id, fresh, ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(
             id: UUID,
             fresh: Boolean,
@@ -232,7 +239,9 @@ class TodoCountQueryHandle internal constructor(core: UndraCore, handle: Long) :
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        operator fun invoke(ctx: UndraCore = UndraGoldenQueries.core): TodoCountQueryHandle = create(ctx)
+        operator fun invoke(
+            ctx: UndraCore = UndraGoldenQueries.core,
+        ): TodoCountQueryHandle = create(ctx)
 
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraGoldenQueries.core): TodoCountQueryHandle {
@@ -341,6 +350,12 @@ class TodosQueryHandle internal constructor(core: UndraCore, handle: Long) : Und
     }
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            page: UInt,
+            ctx: UndraCore = UndraGoldenQueries.core,
+        ): TodosQueryHandle = create(page, ctx)
+
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(page: UInt, ctx: UndraCore = UndraGoldenQueries.core): TodosQueryHandle {
             val w = UndraWriter()

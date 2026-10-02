@@ -1927,6 +1927,18 @@ fn object_graph() -> Schema {
         ],
     ));
     s.objects.push(object(
+        "Vault",
+        "Opens asynchronously, and can fail to: its `new` takes parameters.",
+        vec![fallible_ctor(
+            "Vault",
+            "new",
+            vec![param("name", TypeRef::String)],
+            "MailError",
+            true,
+        )],
+        vec![method("Vault", "size", "", vec![], TypeRef::U32, false)],
+    ));
+    s.objects.push(object(
         "Mailbox",
         "A folder.",
         vec![],

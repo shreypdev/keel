@@ -1773,6 +1773,15 @@ class Legacy internal constructor(core: UndraCore, handle: Long) : UndraStore(co
          * A score of `score`.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
+        operator fun invoke(
+            score: Int,
+            ctx: UndraCore = UndraPlaygroundA.core,
+        ): Legacy = create(score, ctx)
+
+        /**
+         * A score of `score`.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun create(score: Int, ctx: UndraCore = UndraPlaygroundA.core): Legacy {
             val w = UndraWriter()
             w.writeI32(score)
@@ -2075,6 +2084,15 @@ class Profile internal constructor(core: UndraCore, handle: Long) : UndraStore(c
     }
 
     companion object {
+        /**
+         * A profile called `name`, never visited.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        operator fun invoke(
+            name: String,
+            ctx: UndraCore = UndraPlaygroundA.core,
+        ): Profile = create(name, ctx)
+
         /**
          * A profile called `name`, never visited.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.

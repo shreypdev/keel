@@ -41,7 +41,7 @@ public final class WeakReporter: Reporter, UndraWeakMainCallback {
 
     public func confirm(question: String) async throws(ReportError) -> Bool {
         guard let target = target else {
-            return await UndraCallbacks.targetGone()
+            throw ReportError.unavailable("WeakReporter's target is gone")
         }
         return try await target.confirm(question: question)
     }

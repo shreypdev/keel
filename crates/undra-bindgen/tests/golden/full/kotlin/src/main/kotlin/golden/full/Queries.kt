@@ -117,6 +117,12 @@ class TodosQueryHandle internal constructor(core: UndraCore, handle: Long) : Und
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            page: UInt,
+            ctx: UndraCore = UndraPlaygroundCore.core,
+        ): TodosQueryHandle = create(page, ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(page: UInt, ctx: UndraCore = UndraPlaygroundCore.core): TodosQueryHandle {
             val w = UndraWriter()
             w.writeU32(page)

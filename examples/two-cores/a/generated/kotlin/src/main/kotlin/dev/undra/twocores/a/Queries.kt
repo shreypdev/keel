@@ -117,6 +117,12 @@ class RemoteTodosQueryHandle internal constructor(core: UndraCore, handle: Long)
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            list: String,
+            ctx: UndraCore = UndraPlaygroundA.core,
+        ): RemoteTodosQueryHandle = create(list, ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(list: String, ctx: UndraCore = UndraPlaygroundA.core): RemoteTodosQueryHandle {
             val w = UndraWriter()
             w.writeStr(list)

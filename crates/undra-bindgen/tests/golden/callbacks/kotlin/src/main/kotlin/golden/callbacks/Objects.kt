@@ -174,6 +174,12 @@ class Uploader internal constructor(core: UndraCore, handle: Long) : UndraObject
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            listener: UploadListener?,
+            ctx: UndraCore = UndraGoldenCallbacks.core,
+        ): Uploader = create(listener, ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(
             listener: UploadListener?,
             ctx: UndraCore = UndraGoldenCallbacks.core,

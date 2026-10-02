@@ -117,6 +117,12 @@ class NotesQueryHandle internal constructor(core: UndraCore, handle: Long) : Und
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            list: String,
+            ctx: UndraCore = UndraCookbook.core,
+        ): NotesQueryHandle = create(list, ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(list: String, ctx: UndraCore = UndraCookbook.core): NotesQueryHandle {
             val w = UndraWriter()
             w.writeStr(list)
@@ -225,6 +231,12 @@ class ProfileQueryHandle internal constructor(core: UndraCore, handle: Long) : U
     }
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            user: String,
+            ctx: UndraCore = UndraCookbook.core,
+        ): ProfileQueryHandle = create(user, ctx)
+
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(user: String, ctx: UndraCore = UndraCookbook.core): ProfileQueryHandle {
             val w = UndraWriter()

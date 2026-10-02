@@ -120,7 +120,9 @@ class LatestResponseQueryHandle internal constructor(core: UndraCore, handle: Lo
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        operator fun invoke(ctx: UndraCore = UndraGoldenStdlib.core): LatestResponseQueryHandle = create(ctx)
+        operator fun invoke(
+            ctx: UndraCore = UndraGoldenStdlib.core,
+        ): LatestResponseQueryHandle = create(ctx)
 
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraGoldenStdlib.core): LatestResponseQueryHandle {

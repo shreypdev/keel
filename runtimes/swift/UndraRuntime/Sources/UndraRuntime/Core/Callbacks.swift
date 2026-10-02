@@ -597,12 +597,14 @@ public final class UndraCallbacks: @unchecked Sendable {
         return implementation
     }
 
-    /// What a generated weak wrapper's asynchronous method does when it is called itself after its
-    /// target is gone: the core never calls it then (the runtime answers unavailable for it), and there
-    /// is no value to return, so it does not return.
+    /// What a generated weak wrapper's asynchronous method does when app code calls it after its target is
+    /// gone and its error type has no `Unavailable` variant to throw (typed throws can throw nothing else):
+    /// there is no value to return and no error to throw, so it stops the process with a message instead of
+    /// never returning (a task that waits for ever, unnoticed). The core never calls it in that state: the
+    /// runtime resolves the target first and answers unavailable for a gone one.
     public static func targetGone<Value>() async -> Value {
-        UndraLog.error("a weak callback wrapper was called after its target was gone; the call never returns (the core's calls are answered as unavailable without calling it)")
-        return await withUnsafeContinuation { (_: UnsafeContinuation<Value, Never>) in }
+        UndraLog.error("a weak callback wrapper was called after its target was gone (the core's calls are answered as unavailable without calling it)")
+        fatalError("a weak callback wrapper's asynchronous method was called after its target was gone, and its error type has no `Unavailable` variant to throw; keep the target alive, or give the error type one")
     }
 }
 

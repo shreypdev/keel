@@ -48,6 +48,12 @@ class Clock internal constructor(core: UndraCore, handle: Long) : UndraStore(cor
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            zone: String,
+            ctx: UndraCore = UndraGoldenStores.core,
+        ): Clock = create(zone, ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(zone: String, ctx: UndraCore = UndraGoldenStores.core): Clock {
             val w = UndraWriter()
             w.writeStr(zone)

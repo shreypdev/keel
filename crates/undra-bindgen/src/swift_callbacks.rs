@@ -201,21 +201,50 @@ impl SwiftGen<'_> {
                         w.line(format!("target?.{call}"));
                         return;
                     }
+                    let ret = Ret::classify(&m.returns).unwrap_or(Ret::Plain(&m.returns));
                     w.block(format!("guard let {target} = target else"), |w| {
                         if self.typed() {
-                            w.line("return await UndraCallbacks.targetGone()");
+                            // Typed throws can only throw the method's own error type. The conventional
+                            // `Unavailable` variant (what `From<PortError>` maps to in the core) is that
+                            // failure; an error type without one cannot say it, and the method stops the
+                            // process with a message rather than never returning.
+                            match ret
+                                .error()
+                                .and_then(|err| self.unavailable_error(err, &format!("{weak}'s target is gone")))
+                            {
+                                Some(error) => w.line(format!("throw {error}")),
+                                None => w.line("return await UndraCallbacks.targetGone()"),
+                            }
                         } else {
                             w.line(format!(
                                 "throw UndraCallError.unavailable(.closed) // {weak}'s target is gone"
                             ));
                         }
                     });
-                    let ret = Ret::classify(&m.returns).unwrap_or(Ret::Plain(&m.returns));
                     let tried = if ret.error().is_some() { "try " } else { "" };
                     w.line(format!("return {tried}await {target}.{call}"));
                 });
             }
         });
+    }
+
+    /// The expression of the error `err` that says "unavailable", for a weak wrapper whose target is gone:
+    /// the variant named `Unavailable` (any case) when it is a unit variant or carries one `String`. `None`
+    /// when the error type has no such variant.
+    fn unavailable_error(&self, err: &str, reason: &str) -> Option<String> {
+        let def = self.model.errors.iter().find(|e| e.name == err)?;
+        let variant = def
+            .variants
+            .iter()
+            .find(|v| v.name.eq_ignore_ascii_case("unavailable"))?;
+        let case = format!("{err}.{}", id(&variant.name));
+        match variant.fields.as_slice() {
+            [] => Some(case),
+            [field] if field.ty == TypeRef::String => {
+                Some(format!("{case}({})", swift_string(reason)))
+            }
+            _ => None,
+        }
     }
 
     fn callback_bridge(&self, w: &mut CodeWriter, p: &PortDef) {
