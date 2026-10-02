@@ -206,7 +206,8 @@ Added since, each with its page:
 * **React Native** — the same bindings and TypeScript mirror over a TurboModule on the C ABI, with the ten
   default adapters: [docs/REACT_NATIVE.md](docs/REACT_NATIVE.md).
 * **Devtools with time travel** — a page served by `undra dev`: live stores, a change-set timeline you can scrub,
-  port and query logs, behind a per-run token; state is kept across a rebuild: [docs/DEV_LOOP.md](docs/DEV_LOOP.md).
+  port and query logs, behind a per-run token; state, and the query handles on screen, are kept across a rebuild:
+  [docs/DEV_LOOP.md](docs/DEV_LOOP.md).
 * **Derived lists** — a filtered or sorted view of a keyed list costs what changed (158 bytes, not 353 KB, for one
   edited row in 10,000): [docs](https://shreypdev.github.io/undra/docs/concepts.html#derived-lists).
 * **WebSocket, SSE and Db ports** — opt-in real-time streams and SQL over SQLite with deterministic fakes on every
@@ -230,7 +231,6 @@ Open, with the work done around it (the same list as the [roadmap](https://shrey
 * The JavaScript runtime at 16 KB (it sits at its 22.1 KB gate).
 * Generic functions and objects across the boundary (a generic record or enum crosses as one named type per
   instantiation).
-* Query handles across an `undra dev` reload (stores survive; query handles need a decision record).
 * The `undra-compose` and `android-adapters` tests in CI (they pass locally and on the emulator).
 
 Waiting on a release, an account or a decision: the `v1.0.0` tag and its channels (brew, npm, curl; the
