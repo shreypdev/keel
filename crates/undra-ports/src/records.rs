@@ -447,17 +447,17 @@ pub enum AppState {
 #[undra(crate = "crate::root")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct PanicFrame {
-    /// The instruction address minus the load address of the image (the offset a symbolicator takes), 0 if unknown.
+    /// Offset of the instruction into its image; 0 if unknown.
     pub address: u64,
-    /// The function, when this build can name it (debug builds).
+    /// The function, in builds that name it.
     pub symbol: Option<String>,
-    /// The source file, when this build knows it (debug builds).
+    /// The source file.
     pub file: Option<String>,
     /// The line in `file`.
     pub line: Option<u32>,
 }
 
-/// A panic the core contained: what a crash reporter needs.
+/// A panic the core contained.
 #[undra_macros::api]
 #[undra(crate = "crate::root")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
@@ -466,11 +466,11 @@ pub struct PanicReport {
     pub message: String,
     /// `file:line:column` of the panic.
     pub location: String,
-    /// What was running: `Todos.add`, `task`, `computed Todos.visible`.
+    /// What was running.
     pub operation: String,
-    /// The name of the thread that panicked.
+    /// The panicking thread.
     pub thread: String,
-    /// The backtrace, innermost frame first.
+    /// The backtrace.
     pub frames: Vec<PanicFrame>,
     /// The core's namespace.
     pub namespace: String,
@@ -478,7 +478,7 @@ pub struct PanicReport {
     pub core_version: String,
     /// The core's schema hash.
     pub schema_hash: u64,
-    /// The identity of the image the addresses belong to: Mach-O UUID, ELF build id or wasm SHA-256, in hex.
+    /// The image the addresses belong to, in hex.
     pub image_id: String,
 }
 
@@ -487,13 +487,13 @@ pub struct PanicReport {
 #[undra(crate = "crate::root")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct BackgroundReport {
-    /// Every background task ran to completion before the deadline.
+    /// Everything ran to completion.
     pub finished: bool,
-    /// Queued mutations that were sent.
+    /// Mutations sent.
     pub replayed: u32,
-    /// Queries that were fetched again.
+    /// Queries fetched again.
     pub refetched: u32,
-    /// Work that is still waiting: queued mutations and unfinished fetches.
+    /// Work still waiting.
     pub still_pending: u32,
 }
 

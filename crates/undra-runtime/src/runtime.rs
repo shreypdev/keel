@@ -435,7 +435,7 @@ pub struct Runtime {
     exec: Executor,
     pub(crate) ports: Arc<PortTable>,
     events: Events,
-    timers: Arc<Timers>,
+    pub(crate) timers: Arc<Timers>,
     blocking: Blocking,
     table: DispatchTable,
     restorers: HashMap<u32, &'static StoreRestorer>,
@@ -1860,16 +1860,19 @@ impl Runtime {
                  delivered) and evaluated again when its inputs change"
             ),
         );
-        let signal = self
-            .schema
-            .objects
-            .iter()
-            .find(|o| o.name == store)
-            .and_then(|o| o.store.as_ref())
-            .and_then(|s| s.signals.iter().find(|s| s.signal_id == signal_id))
-            .map_or_else(|| signal_id.to_string(), |s| s.name.clone());
-        let report = guard::caught_elsewhere(message);
-        self.emit_report(&format!("computed {store}.{signal}"), &report);
+        // (A wasm core never gets here: nothing catches a panic there, and the report is not built.)
+        if !cfg!(target_family = "wasm") {
+            let signal = self
+                .schema
+                .objects
+                .iter()
+                .find(|o| o.name == store)
+                .and_then(|o| o.store.as_ref())
+                .and_then(|s| s.signals.iter().find(|s| s.signal_id == signal_id))
+                .map_or_else(|| signal_id.to_string(), |s| s.name.clone());
+            let report = guard::caught_elsewhere(message);
+            self.emit_report(&format!("computed {store}.{signal}"), &report);
+        }
     }
 
     /// A held-back computed evaluated again and was delivered.
@@ -3153,18 +3156,11 @@ impl Runtime {
             Stats::get(&s.bad_requests),
             Stats::get(&s.cancelled),
         ));
-        // ADR-046: the reports delivered to `Diagnostics`, and the background tasks: how many,
-        // how much work they say is waiting (what a platform reads to decide whether to ask the OS
-        // for a window), and what the runs did.
+        // ADR-046: the reports delivered to `Diagnostics`. (The background tasks have a section of
+        // their own, added when the first is registered: `background::stats_section`.)
         out.push_str(&format!(
-            ",\"panic_reports\":{},\"background\":{{\"tasks\":{},\"pending\":{},\"runs\":{},\"finished\":{},\"replayed\":{},\"refetched\":{}}}}}",
-            Stats::get(&s.panic_reports),
-            self.background.count(),
-            self.background.pending(&self.ctx()),
-            Stats::get(&s.background_runs),
-            Stats::get(&s.background_finished),
-            Stats::get(&s.background_replayed),
-            Stats::get(&s.background_refetched),
+            ",\"panic_reports\":{}}}",
+            Stats::get(&s.panic_reports)
         ));
         // Sections of layered crates (`undra-query`'s persistence counters), before the closing
         // brace of the document.

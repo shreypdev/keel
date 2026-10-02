@@ -148,10 +148,10 @@ pub trait Lifecycle {
     fn changed(&self, state: AppState);
 }
 
-/// Where the reports of contained panics go (ADR-046): forward them to the app's crash reporter.
+/// Receives the reports of contained panics.
 #[undra_macros::port(sync, dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait Diagnostics {
-    /// The core contained a panic. Fire and forget: the core does not wait, so never throw.
+    /// A panic was contained.
     fn panicked(&self, report: PanicReport);
 }

@@ -684,6 +684,18 @@ impl Shared {
                 Woke::Expired => break false,
             }
         };
+        // The queue is the replay's: it is done when what it replayed is persisted too, not while
+        // the writer is still storing the emptied queue.
+        let mut done = done;
+        while done {
+            let epoch = self.idle.epoch();
+            if !self.state.lock().queue.writer_busy() {
+                break;
+            }
+            if matches!(wait(self, epoch, weak, deadline).await, Woke::Expired) {
+                done = false;
+            }
+        }
         outcome(done)
     }
 

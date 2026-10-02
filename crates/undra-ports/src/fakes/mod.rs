@@ -298,6 +298,9 @@ impl Fakes {
                 .next_due_in()
                 .map_or(remaining, |due| due.min(remaining));
             fired += self.clock.advance(step).len();
+            // The runtime's own monotonic clock (what a background window is measured by) moves
+            // with the fake one; its heap is empty here (the fake clock owns the timers).
+            t.advance(step);
             assert!(
                 fired <= MAX_TIMERS_PER_ADVANCE,
                 "Fakes::advance fired {fired} timers: a task that sleeps again without time passing never ends (the cap is {MAX_TIMERS_PER_ADVANCE})"

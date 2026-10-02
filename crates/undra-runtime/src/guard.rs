@@ -100,11 +100,18 @@ fn capture_backtrace() -> String {
     "unavailable".to_owned()
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn thread_name() -> String {
     std::thread::current()
         .name()
         .unwrap_or("unnamed")
         .to_owned()
+}
+
+/// A wasm core has one thread (and `std::thread::current` costs bytes there).
+#[cfg(target_family = "wasm")]
+fn thread_name() -> String {
+    "main".to_owned()
 }
 
 /// The frames of a panic that is being reported now, from the backtrace `text` and the addresses

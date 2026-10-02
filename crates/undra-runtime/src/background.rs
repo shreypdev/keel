@@ -3,32 +3,39 @@
 //! A *background task* is a unit of work worth finishing while the app is not on screen: replay the
 //! offline queue, refetch stale queries, flush what is waiting to be persisted. Layered crates
 //! register theirs on the runtime ([`Runtime::add_background_task`], what `undra-query` does when it
-//! starts); an app registers its own with [`Runtime::add_background_task`] or, for a plain function,
-//! by submitting a [`BackgroundTask`] with `inventory`.
+//! starts); an app registers its own the same way (from an [`InitHook`](crate::InitHook), or any
+//! time it has a [`Ctx`]).
 //!
-//! [`run`] is what the standard function `run_background(deadline_ms)` of `undra-ports` calls: it
+//! **Linked by use** (ADR-052): the run machinery below, with the timer path it needs, is reachable
+//! only through [`Runtime::add_background_task`], which is what installs it as the runtime's
+//! runner. A core with no background task (a hello world) links none of it, and the standard
+//! function answers an idle run (`finished`, nothing done).
+//!
+//! The runner ([`run`]) is what the standard function `run_background(deadline_ms)` of `undra-ports` calls: it
 //! starts every task at once and returns when they are all done or when the window is nearly over
 //! (`deadline - `[`MARGIN`], so the host still has time to tell the OS it finished), whichever comes
 //! first. Work a task did stays done (the offline queue persists per item, ADR-037), so a run that
 //! is cut short, by the deadline or by the host cancelling the call, loses nothing; the report says
 //! how much is still pending.
 //!
-//! The clock is a parameter ([`run`]'s `now`), not read here: `undra-ports` passes the `Clock`
-//! port's monotonic reading, so a fake clock decides what a deadline means in a test (R12).
+//! Time is the runtime's own (the monotonic clock its timers keep: the system's on native, the
+//! test runtime's manual one in tests), and the window is enforced by a sleep on the `Timer` port,
+//! so a fake clock decides what a deadline means in a test (R12). Nothing here calls the `Clock`
+//! port: a core that never uses it does not link its proxy.
 
 use core::future::Future;
 use core::pin::Pin;
-use core::task::{Context, Poll, Waker};
+use core::task::{Context, Poll};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
 
-use crate::ctx::{Ctx, WeakCtx};
-use crate::executor::TaskId;
+use crate::ctx::Ctx;
 use crate::runtime::Runtime;
 use crate::stats::Stats;
+use crate::timer::Timers;
 
 /// How much of the window a run leaves to the host: it returns this long before the deadline.
 pub const MARGIN: Duration = Duration::from_millis(500);
@@ -52,18 +59,20 @@ pub struct Deadline {
 }
 
 struct Window {
-    now: Arc<dyn Fn() -> u64 + Send + Sync>,
+    timers: Arc<Timers>,
     at_ns: u64,
     replayed: AtomicU32,
     refetched: AtomicU32,
 }
 
 impl Deadline {
-    fn new(now: Arc<dyn Fn() -> u64 + Send + Sync>, budget: Duration) -> Deadline {
-        let at_ns = now().saturating_add(u64::try_from(budget.as_nanos()).unwrap_or(u64::MAX));
+    fn new(timers: Arc<Timers>, budget: Duration) -> Deadline {
+        let at_ns = timers
+            .now_ns()
+            .saturating_add(u64::try_from(budget.as_nanos()).unwrap_or(u64::MAX));
         Deadline {
             window: Arc::new(Window {
-                now,
+                timers,
                 at_ns,
                 replayed: AtomicU32::new(0),
                 refetched: AtomicU32::new(0),
@@ -71,10 +80,14 @@ impl Deadline {
         }
     }
 
-    /// How long the run still has, by the `Clock` port's reading.
+    /// How long the run still has, by the runtime's monotonic clock.
     #[must_use]
     pub fn remaining(&self) -> Duration {
-        Duration::from_nanos(self.window.at_ns.saturating_sub((self.window.now)()))
+        Duration::from_nanos(
+            self.window
+                .at_ns
+                .saturating_sub(self.window.timers.now_ns()),
+        )
     }
 
     /// Whether the run has no time left.
@@ -95,21 +108,6 @@ impl Deadline {
     }
 }
 
-/// A background task a plain function can be: submit it with `inventory::submit!`. Tasks that need
-/// state register a closure with [`Runtime::add_background_task`] instead.
-#[derive(Clone, Copy)]
-pub struct BackgroundTask {
-    /// A name, unique among the tasks (a second with the same name is ignored).
-    pub name: &'static str,
-    /// How much work is waiting, cheaply: `0` when there is none.
-    pub pending: fn(&Ctx) -> u32,
-    /// Starts the task. It must hold the runtime weakly across awaits, as `ctx.downgrade()`
-    /// (ADR-034); it stops when `deadline` is [expired](Deadline::expired) or the future is dropped.
-    pub run: fn(&Ctx, Deadline) -> BackgroundFuture,
-}
-
-inventory::collect!(BackgroundTask);
-
 type PendingFn = Arc<dyn Fn(&Ctx) -> u32 + Send + Sync>;
 type RunFn = Arc<dyn Fn(&Ctx, Deadline) -> BackgroundFuture + Send + Sync>;
 
@@ -121,40 +119,35 @@ pub(crate) struct Registered {
     run: RunFn,
 }
 
+/// What runs the registered tasks (set when the first is registered).
+pub type Runner =
+    for<'a> fn(&'a Ctx, Duration) -> Pin<Box<dyn Future<Output = BackgroundTotals> + Send + 'a>>;
+
 /// The tasks of one runtime, in registration order.
 #[derive(Default)]
 pub(crate) struct Registry {
     tasks: Mutex<Vec<Registered>>,
+    runner: std::sync::OnceLock<Runner>,
 }
 
 impl Registry {
     /// Registers a task unless one of that name exists.
     pub(crate) fn add(&self, name: &'static str, pending: PendingFn, run: RunFn) {
+        let _ = self.runner.set(run_boxed);
         let mut tasks = self.tasks.lock();
         if tasks.iter().all(|t| t.name != name) {
             tasks.push(Registered { name, pending, run });
         }
     }
 
-    /// The registered tasks, then the submitted ones that no registered task shadows.
+    /// The registered tasks.
     fn all(&self) -> Vec<Registered> {
-        let mut out = self.tasks.lock().clone();
-        for task in inventory::iter::<BackgroundTask> {
-            if out.iter().all(|t| t.name != task.name) {
-                let (pending, run) = (task.pending, task.run);
-                out.push(Registered {
-                    name: task.name,
-                    pending: Arc::new(pending),
-                    run: Arc::new(run),
-                });
-            }
-        }
-        out
+        self.tasks.lock().clone()
     }
 
     /// How many tasks there are.
     pub(crate) fn count(&self) -> usize {
-        self.all().len()
+        self.tasks.lock().len()
     }
 
     /// The work waiting across every task (a panicking probe counts as none).
@@ -179,133 +172,94 @@ pub struct BackgroundTotals {
     pub still_pending: u32,
 }
 
-/// Where a task leaves its outcome.
-struct Slot {
-    state: Mutex<(Option<BackgroundOutcome>, Option<Waker>)>,
+impl BackgroundTotals {
+    /// A run of a runtime that has no background task: nothing to do, so it is finished.
+    pub const IDLE: BackgroundTotals = BackgroundTotals {
+        finished: true,
+        replayed: 0,
+        refetched: 0,
+        still_pending: 0,
+    };
 }
 
-impl Slot {
-    fn complete(&self, outcome: BackgroundOutcome) {
-        let waker = {
-            let mut state = self.state.lock();
-            if state.0.is_none() {
-                state.0 = Some(outcome);
-            }
-            state.1.take()
-        };
-        if let Some(waker) = waker {
-            waker.wake();
-        }
-    }
+/// Every task's future, polled together under the panic guard until each has an outcome. A task
+/// that panics is contained, reported (operation `task`) and stays incomplete; the others go on.
+struct Tasks {
+    futures: Vec<Option<BackgroundFuture>>,
+    outcomes: Vec<BackgroundOutcome>,
 }
 
-/// Completes the slot as incomplete if the task ended without an outcome (it panicked, or was
-/// cancelled).
-struct SlotGuard(Arc<Slot>);
+impl Future for Tasks {
+    type Output = ();
 
-impl Drop for SlotGuard {
-    fn drop(&mut self) {
-        self.0.complete(BackgroundOutcome::Incomplete);
-    }
-}
-
-/// Resolves to `true` when every slot has an outcome, `false` when the budget's sleep ends first.
-struct Race {
-    slots: Vec<Arc<Slot>>,
-    sleep: Pin<Box<dyn Future<Output = ()> + Send>>,
-}
-
-impl Future for Race {
-    type Output = bool;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<bool> {
-        let mut all = true;
-        for slot in &self.slots {
-            let mut state = slot.state.lock();
-            if state.0.is_none() {
-                all = false;
-                state.1 = Some(cx.waker().clone());
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let this = &mut *self;
+        let mut pending = false;
+        for (slot, outcome) in this.futures.iter_mut().zip(this.outcomes.iter_mut()) {
+            let Some(future) = slot else { continue };
+            match crate::guard::guarded(|| future.as_mut().poll(cx)) {
+                Ok(Poll::Pending) => pending = true,
+                Ok(Poll::Ready(done)) => {
+                    *outcome = done;
+                    *slot = None;
+                }
+                Err(report) => {
+                    crate::runtime::report_current("a background task panicked", "task", &report);
+                    *slot = None;
+                }
             }
         }
-        if all {
-            return Poll::Ready(true);
-        }
-        if self.sleep.as_mut().poll(cx).is_ready() {
-            return Poll::Ready(false);
-        }
-        Poll::Pending
-    }
-}
-
-/// Cancels the tasks a run started when the run ends or is dropped (the host cancelled the call).
-struct CancelOnDrop {
-    ctx: WeakCtx,
-    tasks: Vec<TaskId>,
-}
-
-impl Drop for CancelOnDrop {
-    fn drop(&mut self) {
-        if let Ok(ctx) = self.ctx.upgrade() {
-            for id in self.tasks.drain(..) {
-                ctx.cancel_task(id);
-            }
+        if pending {
+            Poll::Pending
+        } else {
+            Poll::Ready(())
         }
     }
 }
 
 /// Runs every registered background task of `ctx`'s runtime inside `deadline` (less the
-/// [`MARGIN`]), reading time from `now` (nanoseconds, monotonic: the `Clock` port's).
+/// [`MARGIN`]).
 ///
 /// Never panics: a task that panics is contained, reported like any panic (operation `task`) and
 /// counts as incomplete.
-pub async fn run(
-    ctx: &Ctx,
-    deadline: Duration,
-    now: Arc<dyn Fn() -> u64 + Send + Sync>,
-) -> BackgroundTotals {
+pub async fn run(ctx: &Ctx, deadline: Duration) -> BackgroundTotals {
     let runtime: &Runtime = ctx.runtime();
     Stats::inc(&runtime.stats.background_runs);
     let budget = deadline.saturating_sub(MARGIN);
-    let window = Deadline::new(now, budget);
-    let tasks = runtime.background.all();
-    let mut slots = Vec::with_capacity(tasks.len());
-    let mut cancel = CancelOnDrop {
-        ctx: ctx.downgrade(),
-        tasks: Vec::with_capacity(tasks.len()),
-    };
-    if !budget.is_zero() {
-        for task in &tasks {
-            let slot = Arc::new(Slot {
-                state: Mutex::new((None, None)),
-            });
-            slots.push(slot.clone());
-            // Built under the guard: a task whose `run` panics before it returns a future is
-            // incomplete, like one that panics while it runs.
-            let Ok(future) = crate::guard::guarded(|| (task.run)(ctx, window.clone())) else {
-                slot.complete(BackgroundOutcome::Incomplete);
-                continue;
-            };
-            let guard = SlotGuard(slot);
-            cancel.tasks.push(ctx.spawn(async move {
-                let outcome = future.await;
-                guard.0.complete(outcome);
-            }));
-        }
-    }
-    let sleep = ctx.sleep(budget);
-    let in_time = Race {
-        slots: slots.clone(),
-        sleep: Box::pin(sleep),
-    }
-    .await;
-    drop(cancel);
-    let all_done = in_time
-        && slots
+    let window = Deadline::new(runtime.timers.clone(), budget);
+    let registered = runtime.background.all();
+    // Built under the guard: a task whose `run` panics before it returns a future is incomplete,
+    // like one that panics while it runs. Nothing is started when no time is left.
+    let futures: Vec<Option<BackgroundFuture>> = if budget.is_zero() {
+        Vec::new()
+    } else {
+        registered
             .iter()
-            .all(|s| s.state.lock().0 == Some(BackgroundOutcome::Done));
+            .map(|task| crate::guard::guarded(|| (task.run)(ctx, window.clone())).ok())
+            .collect()
+    };
+    let mut tasks = Tasks {
+        outcomes: vec![BackgroundOutcome::Incomplete; futures.len()],
+        futures,
+    };
+    // The tasks race the window; losing drops them (dropping `tasks` is what cancels them, also
+    // when the host cancels the call and this future is dropped).
+    let mut sleep = core::pin::pin!(ctx.sleep(budget));
+    let in_time = core::future::poll_fn(|cx| {
+        if Pin::new(&mut tasks).poll(cx).is_ready() {
+            return Poll::Ready(true);
+        }
+        if sleep.as_mut().poll(cx).is_ready() {
+            return Poll::Ready(false);
+        }
+        Poll::Pending
+    })
+    .await;
+    let all_done = in_time && tasks.outcomes.iter().all(|o| *o == BackgroundOutcome::Done);
+    drop(tasks);
     let pending = runtime.background.pending(ctx);
     let totals = BackgroundTotals {
-        finished: pending == 0 && (tasks.is_empty() || (!budget.is_zero() && all_done)),
+        finished: pending == 0 && (registered.is_empty() || (!budget.is_zero() && all_done)),
         replayed: window.window.replayed.load(Ordering::Relaxed),
         refetched: window.window.refetched.load(Ordering::Relaxed),
         still_pending: pending,
@@ -324,11 +278,43 @@ pub async fn run(
     totals
 }
 
+/// The `background` section of `stats_json`: how many tasks there are, how much work they say is
+/// waiting (what a platform reads to decide whether to ask the OS for a window) and what the runs
+/// did.
+fn stats_section(runtime: &Runtime) -> Option<String> {
+    let s = &runtime.stats;
+    Some(format!(
+        "{{\"tasks\":{},\"pending\":{},\"runs\":{},\"finished\":{},\"replayed\":{},\"refetched\":{}}}",
+        runtime.background.count(),
+        runtime.background.pending(&runtime.ctx()),
+        Stats::get(&s.background_runs),
+        Stats::get(&s.background_finished),
+        Stats::get(&s.background_replayed),
+        Stats::get(&s.background_refetched),
+    ))
+}
+
+/// [`run`] as a [`Runner`].
+fn run_boxed<'a>(
+    ctx: &'a Ctx,
+    deadline: Duration,
+) -> Pin<Box<dyn Future<Output = BackgroundTotals> + Send + 'a>> {
+    Box::pin(run(ctx, deadline))
+}
+
 impl Runtime {
+    /// The runner of this runtime's background tasks, `None` while none is registered: what the
+    /// standard function `run_background` runs.
+    #[must_use]
+    pub fn background_runner(&self) -> Option<Runner> {
+        self.background.runner.get().copied()
+    }
+
     /// Registers a background task on this runtime (a second of the same `name` is ignored).
     /// `pending` says cheaply how much work is waiting (`0` for none): the runtimes read it through
     /// `stats_json`'s `background.pending` to decide whether to ask the OS for a window. `run`
-    /// starts one run of the task (see [`BackgroundTask::run`]).
+    /// starts one run of the task: it must hold the runtime weakly across awaits, as `ctx.downgrade()`
+    /// (ADR-034), and stop when its [`Deadline`] is expired or its future is dropped.
     pub fn add_background_task(
         &self,
         name: &'static str,
@@ -336,6 +322,10 @@ impl Runtime {
         run: impl Fn(&Ctx, Deadline) -> BackgroundFuture + Send + Sync + 'static,
     ) {
         self.background.add(name, Arc::new(pending), Arc::new(run));
+        self.add_stats_section(crate::StatsSection {
+            name: "background",
+            json: stats_section,
+        });
     }
 
     /// The work the background tasks say is waiting.
@@ -349,23 +339,17 @@ impl Runtime {
 mod tests {
     use super::*;
     use crate::testing::TestRuntime;
-    use std::sync::atomic::AtomicU64;
-
-    fn fixed_clock() -> (Arc<AtomicU64>, Arc<dyn Fn() -> u64 + Send + Sync>) {
-        let time = Arc::new(AtomicU64::new(0));
-        let reader = time.clone();
-        (time, Arc::new(move || reader.load(Ordering::SeqCst)))
-    }
 
     #[test]
-    fn a_window_counts_down_by_the_clock_it_is_given() {
-        let (time, now) = fixed_clock();
-        let deadline = Deadline::new(now, Duration::from_millis(100));
+    fn a_window_counts_down_by_the_runtimes_clock() {
+        let t = TestRuntime::new();
+        let timers = t.runtime().timers.clone();
+        let deadline = Deadline::new(timers, Duration::from_millis(100));
         assert_eq!(deadline.remaining(), Duration::from_millis(100));
-        time.store(60_000_000, Ordering::SeqCst);
+        t.advance(Duration::from_millis(60));
         assert_eq!(deadline.remaining(), Duration::from_millis(40));
         assert!(!deadline.expired());
-        time.store(500_000_000, Ordering::SeqCst);
+        t.advance(Duration::from_millis(500));
         assert!(deadline.expired());
         deadline.note_replayed(2);
         deadline.note_refetched(1);

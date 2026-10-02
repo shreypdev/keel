@@ -56,10 +56,11 @@ fn nanos(d: Duration) -> u64 {
 }
 
 /// Rounds a delay up to whole milliseconds (the granularity of the Timer port), at least 1.
+/// (Without a 128-bit division: a core that sleeps nowhere else need not link one.)
 pub(crate) fn delay_ms(d: Duration) -> u64 {
-    let ns = d.as_nanos();
-    u64::try_from(ns.div_ceil(1_000_000))
-        .unwrap_or(u64::MAX)
+    d.as_secs()
+        .saturating_mul(1000)
+        .saturating_add(u64::from(d.subsec_nanos().div_ceil(1_000_000)))
         .max(1)
 }
 

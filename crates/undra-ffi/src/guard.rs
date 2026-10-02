@@ -50,7 +50,9 @@ fn report(entry: &str, message: &str) {
         if let Some(rt) = Runtime::global() {
             rt.log(FATAL, TARGET, &format!("{entry} panicked: {message}"));
             // The app's crash reporter hears of it too (ADR-046): the boundary is a containment site.
-            rt.report_boundary_panic(entry, message);
+            if !cfg!(target_family = "wasm") {
+                rt.report_boundary_panic(entry, message);
+            }
         }
     }));
 }
