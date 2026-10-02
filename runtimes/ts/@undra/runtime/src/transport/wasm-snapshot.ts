@@ -1,6 +1,7 @@
 // PROTOTYPE (ADR-057 lever d7): snapshot, restore and the twin of the in-process host, as functions: a page that never
 // snapshots ships none of it. `UndraCore.snapshot` / `restore` and crash recovery load this module.
-import { UndraRestoreError, UndraTransportError } from "../errors.js";
+import { UndraTransportError } from "../errors.js";
+import { UndraRestoreError } from "../errors-rare.js";
 import type { WasmHost, WasmMainOptions } from "./wasm-main.js";
 
 /** `undra_snapshot`, copied out of wasm memory, at once; throws `UndraTransportError` when the core cannot be asked. */
