@@ -124,7 +124,7 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       expect(quoted, "a ? in a string, an identifier or a comment is not a parameter").toEqual({ columns: ["a?", "b?"], rows: [cells("?", 5n)] });
     });
 
-    it("a statement on the database during a transaction waits, then fails Busy past the (shortened) timeout", async () => {
+    it("a statement on the database during a transaction fails Busy past the (shortened) timeout", async () => {
       const api = open({ busyTimeoutMs: 100 });
       const { db } = ok(await api.open(":memory:"));
       ok(await api.execute(db, "CREATE TABLE x (v INTEGER)"));
@@ -133,6 +133,14 @@ export function dbSuite(title: string, target: () => DbSuiteTarget): void {
       expect(err(await api.execute(db, "INSERT INTO x VALUES (2)"))).toEqual(new DbError.Busy());
       ok(await api.rollback(tx));
       expect(ok(await api.query(db, "SELECT COUNT(*) FROM x")).rows, "the rollback undid the insert").toEqual([cells(0n)]);
+    });
+
+    // A busy timeout that never elapses here (60 s: a hang detector, not a speed): with the 100 ms of the test above, a machine that took that long between this
+    // statement and the commit made it Busy, and the test failed for the machine's speed.
+    it("a statement on the database during a transaction waits for it, however long that takes, and runs after the commit", async () => {
+      const api = open({ busyTimeoutMs: 60_000 });
+      const { db } = ok(await api.open(":memory:"));
+      ok(await api.execute(db, "CREATE TABLE x (v INTEGER)"));
       const tx2 = ok(await api.begin(db));
       ok(await api.execute(tx2, "INSERT INTO x VALUES (3)"));
       const outside = api.query(db, "SELECT COUNT(*) FROM x");
