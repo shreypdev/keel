@@ -1100,9 +1100,13 @@ fn shipped_artefacts_do_not_grow_and_no_symbols_writes_none() {
         let b = plain.root.join("build/web/playground_core.wasm");
         // `wasm-opt` breaks ties between functions by name, so the run that keeps the names (it makes the
         // function map the shipped module's frames resolve with) orders them differently from the nameless
-        // one: ±0.1% (the playground is smaller, the hello world 90 bytes gzipped larger). A quarter of a
-        // percent is the margin; more would be growth.
-        let margin = |bytes: u64| bytes / 400;
+        // one, and it folds about twenty functions fewer (3,098 against 3,079 on main at `a309e9f`, 3,072
+        // against 3,052 after wt/cold-restore-regression; rustc 1.99.0, binaryen 133). That is 0.22% of the
+        // playground's module on main and 0.26% after that piece, which changed no build step and no symbol
+        // code: one function more or less folded is 0.04%. Half a percent is the margin (it was a quarter,
+        // set when the playground measured smaller with names); names or line tables left in the shipped
+        // module would be several percent.
+        let margin = |bytes: u64| bytes / 200;
         before_after("web wasm", size(&b) + margin(size(&b)), size(&a));
         before_after(
             "web wasm gzip",
