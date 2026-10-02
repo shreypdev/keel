@@ -40,12 +40,12 @@ package's test target is built by SwiftPM at macOS 14 whatever the package floor
 | Check | Result |
 |---|---|
 | `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings` | clean |
-| `cargo test --workspace --no-fail-fast` | 3,012 pass, 15 ignored, 0 fail. The first full run had 21 environmental failures, none in this change: 19 TypeScript-toolchain tests (`run_ts`, `typecheck_ts`: this worktree has no `runtimes/ts/@undra/runtime/node_modules`; they pass with the main checkout's linked in) and 2 `dev_reload` tests that time out when other agents' builds saturate the machine (all 9 pass with `--test-threads=1`) |
+| `cargo test --workspace --no-fail-fast` | 3,073 pass, 16 ignored, 0 fail after merging `main` (ports). The first full runs had 21 environmental failures, none in this change: 19 TypeScript-toolchain tests (`run_ts`, `typecheck_ts`: this worktree has no `runtimes/ts/@undra/runtime/node_modules`; they pass with the main checkout's linked in) and 2 to 3 different `dev_reload` tests per run that time out when other agents' builds saturate the machine (all 9 pass with `--test-threads=1`, twice) |
 | `cargo test -p undra-bindgen --test typecheck_swift` (default mode on macOS 14; ObservableObject mode for the iOS 15.0 and 16.0 simulators, all 10 golden cases each; `-target arm64-apple-ios15.0-simulator` confirmed with `-v`) | 4 pass |
 | golden: `swift-observable-object/` for `stores`, `queries`, `full`; generator tests (8 new); E0051 case | pass |
-| `swift test` in `runtimes/swift/UndraRuntime` | 584 pass (3 new: the `@Published` store through the mirror, `UndraDuration` on its own, `connectionObject`) |
-| `bash contract-tests/run-all.sh swift` (default mode) | 21/21 pass (S01–S20, S26) |
-| `bash contract-tests/swift/run.sh --floor` (S01–S20, S26 against playground + two-cores bindings generated for iOS 15: `ObservableObject` stores, `UndraDuration`; then the testing kit) | 21/21 pass, `TestKitTests` 4 pass |
+| `swift test` in `runtimes/swift/UndraRuntime` | 671 pass after the ports merge (584 before it; 3 new: the `@Published` store through the mirror, `UndraDuration` on its own, `connectionObject`) |
+| `bash contract-tests/run-all.sh swift` (default mode) | 24/24 pass (all the Swift column's scenarios, after the ports merge) |
+| `bash contract-tests/swift/run.sh --floor` (the whole Swift column against playground + two-cores bindings generated for iOS 15: `ObservableObject` stores, `UndraDuration`; then the testing kit) | 24/24 pass (21/21 before the ports merge), `TestKitTests` pass |
 | `undra bindgen --check --docs` playground, Fieldbook, cookbook; `--check` two-cores a/b, ios15-sample | all up to date (playground `0xfa536b9ac6f06149`, Fieldbook `0x7bfb0229a00c20ed`, cookbook `0x88127919dcf53b11`, two-cores a and b, ios15-sample `0x5eb5bc24931c586b`; two-cores need `--docs`, as before) |
 | `xcodebuild` playground and Fieldbook (target 17.0, Debug, generic simulator) | both build (Debug, generic iOS Simulator) |
 | `xcodebuild` `examples/ios15-sample` (target 15.0; `minos 15.0`, `MinimumOSVersion 15.0`); `UNDRA_TEST_IOS_APP=1 cargo test -p undra-cli --test platforms an_ios_15_app_builds…` (an `undra init --ios-deployment-target 15.0` app) | both build |
@@ -69,6 +69,7 @@ package's test target is built by SwiftPM at macOS 14 whatever the package floor
    is only in the non-default mode (no churn).
 5. `UndraLazyList` (ADR-043) has not landed; the twin rule is ready for it.
 6. The reserved-entry list (`naming.rs`) gained `UndraConnectionObject`; found by the existing test over the runtime's public types.
+7. Merging `main` (ports, ADR-047/048) brought `SQLiteDbAdapter` with `sqlite3_changes64` (SQLite 3.37: iOS 15.4 / macOS 12.3, above the floor): it uses `sqlite3_changes` now. The floor build is what caught it, which is the point of the `ios-floor` job.
 
 ## Where things are
 
