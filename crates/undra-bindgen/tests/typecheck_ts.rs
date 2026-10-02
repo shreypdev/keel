@@ -72,7 +72,9 @@ ts_cases!(
     decimal,
     polling,
     infinite,
-    lazy
+    lazy,
+    generic_functions,
+    generic_objects
 );
 
 #[test]
