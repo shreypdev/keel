@@ -36,12 +36,13 @@ pub fn all() -> Vec<Workload> {
     all.extend(signals());
     all.extend(snapshot());
     all.extend(super::stress::workloads());
+    all.extend(super::query_rows::rows_group());
     all.extend(super::ports::ports());
     all.extend(super::ports::db());
     all
 }
 
-/// The operations of one group (`wire`, `dispatch`, `signals`, `snapshot`, `stress`, `ports`, `db`).
+/// The operations of one group (`wire`, `dispatch`, `signals`, `snapshot`, `stress`, `query`, `ports`, `db`).
 pub fn group(name: &str) -> Vec<Workload> {
     match name {
         "wire" => wire(),
@@ -50,6 +51,7 @@ pub fn group(name: &str) -> Vec<Workload> {
         "signals" => signals(),
         "snapshot" => snapshot(),
         "stress" => super::stress::workloads(),
+        "query" => super::query_rows::rows_group(),
         "ports" => super::ports::ports(),
         "db" => super::ports::db(),
         other => panic!("no benchmark group `{other}`"),

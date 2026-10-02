@@ -410,7 +410,7 @@ fn signal_ids(set: &ChangeSet) -> Vec<u32> {
     set.entries.iter().map(|e| e.signal_id).collect()
 }
 
-fn entry<'a>(set: &'a ChangeSet, signal_id: u32) -> &'a undra::wire::payload::ChangeEntry {
+fn entry(set: &ChangeSet, signal_id: u32) -> &undra::wire::payload::ChangeEntry {
     set.entries
         .iter()
         .find(|e| e.signal_id == signal_id)
@@ -514,6 +514,40 @@ fn a_next_page_arrives_as_a_keyed_patch_of_the_appended_rows_and_nothing_else() 
         "the head was not confirmed again"
     );
     assert_eq!(ids(&p.mirror()), (6..=25).rev().collect::<Vec<_>>());
+}
+
+#[test]
+fn the_patch_of_a_page_is_the_same_size_however_long_the_list_is() {
+    let patch_after = |pages: usize| {
+        let p = Platform::new();
+        serve(&p.h, 5_000, 10);
+        let handle = p.construct::<FeedQuery>(&("rust".to_owned(),));
+        p.observe(handle);
+        p.t().run_pending();
+        for _ in 1..pages {
+            p.method(handle, FETCH_NEXT_PAGE_METHOD_ID, &[]);
+            p.t().run_pending();
+        }
+        p.take(handle);
+        p.method(handle, FETCH_NEXT_PAGE_METHOD_ID, &[]);
+        p.t().run_pending();
+        let sets = p.take(handle);
+        let data = sets
+            .iter()
+            .flat_map(|s| s.entries.iter())
+            .find(|e| e.signal_id == DATA)
+            .expect("the page was sent");
+        assert_eq!(data.op, ChangeOp::KeyedPatch);
+        (decode_patch(&data.value).ops.len(), data.value.len())
+    };
+    let (short_ops, short_bytes) = patch_after(2);
+    let (long_ops, long_bytes) = patch_after(400);
+    assert_eq!((short_ops, long_ops), (10, 10), "ten rows, ten ops");
+    // The titles gain a digit or two over 4,000 rows; the patch does not grow with the list.
+    assert!(
+        long_bytes.abs_diff(short_bytes) < 40,
+        "{short_bytes} bytes against {long_bytes}"
+    );
 }
 
 #[test]
@@ -1275,5 +1309,233 @@ mod persisted {
         assert!(saved.data().get().is_empty(), "nothing usable was stored");
         h.t.run_pending();
         assert_eq!(saved.data().get().len(), 5);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// A model of pages
+// ---------------------------------------------------------------------------------------------
+
+mod model {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// What the server does and what the app asks of the cache, in any order.
+    #[derive(Clone, Debug)]
+    enum Op {
+        /// `fetch_next_page()` on both handles.
+        Next,
+        /// `refetch()`.
+        Refetch,
+        /// `invalidate()`.
+        Invalidate,
+        /// The server gets `n` new posts at the top.
+        ServerPush(u8),
+        /// The server deletes the post at an index (modulo its length).
+        ServerDrop(u8),
+        /// The server renames the post at an index.
+        ServerRename(u8),
+        /// The app edits the cached list: removes the row at an index.
+        Remove(u8),
+        /// The app writes a list: the first `n` posts of the server's.
+        Set(u8),
+    }
+
+    fn ops() -> impl Strategy<Value = Vec<Op>> {
+        proptest::collection::vec(
+            prop_oneof![
+                4 => Just(Op::Next),
+                2 => Just(Op::Refetch),
+                1 => Just(Op::Invalidate),
+                2 => (1_u8..4).prop_map(Op::ServerPush),
+                2 => any::<u8>().prop_map(Op::ServerDrop),
+                2 => any::<u8>().prop_map(Op::ServerRename),
+                2 => any::<u8>().prop_map(Op::Remove),
+                1 => (0_u8..12).prop_map(Op::Set),
+            ],
+            1..24,
+        )
+    }
+
+    /// The naive model of an entry: the rows as one list, how many each page held, the cursor each
+    /// page's response returned.
+    #[derive(Default)]
+    struct Model {
+        flat: Vec<Post>,
+        lens: Vec<usize>,
+        nexts: Vec<Option<String>>,
+    }
+
+    /// The server's page after `after` (keyset), and the cursor that follows it.
+    fn page_of(server: &Server, after: Option<u64>) -> (Vec<Post>, Option<String>) {
+        let rest: Vec<Post> = server
+            .posts
+            .iter()
+            .filter(|p| after.is_none_or(|id| p.id < id))
+            .cloned()
+            .collect();
+        let items: Vec<Post> = rest.iter().take(server.page).cloned().collect();
+        let next = (rest.len() > items.len())
+            .then(|| items.last().map(|p| p.id.to_string()))
+            .flatten();
+        (items, next)
+    }
+
+    impl Model {
+        fn has_next(&self) -> bool {
+            self.nexts.last().is_some_and(Option::is_some)
+        }
+
+        fn next_page(&mut self, server: &Server) {
+            let Some(Some(cursor)) = self.nexts.last().cloned() else {
+                return;
+            };
+            let (items, next) = page_of(server, cursor.parse().ok());
+            self.lens.push(items.len());
+            self.flat.extend(items);
+            self.nexts.push(next);
+        }
+
+        fn refetch(&mut self, server: &Server) {
+            let wanted = self.lens.len().max(1);
+            *self = Model::default();
+            let mut cursor: Option<u64> = None;
+            for _ in 0..wanted {
+                let (items, next) = page_of(server, cursor);
+                self.lens.push(items.len());
+                self.flat.extend(items);
+                cursor = next.as_ref().and_then(|c| c.parse().ok());
+                self.nexts.push(next);
+                if cursor.is_none() {
+                    break;
+                }
+            }
+        }
+
+        /// A write of the whole list: the pages keep their sizes and cursors, the last one takes the
+        /// difference.
+        fn write(&mut self, rows: Vec<Post>) {
+            if self.lens.is_empty() {
+                self.lens = vec![rows.len()];
+                self.nexts = vec![None];
+            } else {
+                let mut left = rows.len();
+                let last = self.lens.len() - 1;
+                for len in &mut self.lens[..last] {
+                    *len = (*len).min(left);
+                    left -= *len;
+                }
+                self.lens[last] = left;
+            }
+            self.flat = rows;
+        }
+    }
+
+    fn run(page: usize, posts: u64, ops: &[Op]) {
+        let p = Platform::new();
+        let server = serve(&p.h, posts, page);
+        let feed = feed_handle(&p.h, "rust");
+        let handle = p.construct::<FeedQuery>(&("rust".to_owned(),));
+        p.observe(handle);
+        p.t().run_pending();
+        p.take(handle);
+        let mut model = Model::default();
+        model.refetch(&server.lock());
+        let mut next_id = posts + 1;
+
+        let check = |when: &str, model: &Model| {
+            assert_eq!(
+                feed.data().get(),
+                model.flat,
+                "the Rust handle after {when}"
+            );
+            assert_eq!(p.mirror(), model.flat, "the platform mirror after {when}");
+            assert_eq!(
+                feed.has_next_page().get(),
+                model.has_next(),
+                "has_next after {when}"
+            );
+            assert!(
+                !feed.fetching().get() && !feed.fetching_next_page().get(),
+                "{when}"
+            );
+        };
+        check("the first page", &model);
+
+        for (n, op) in ops.iter().enumerate() {
+            let when = format!("op {n}: {op:?}");
+            match op {
+                Op::Next => {
+                    feed.fetch_next_page();
+                    model.next_page(&server.lock());
+                }
+                Op::Refetch => {
+                    feed.refetch();
+                    model.refetch(&server.lock());
+                }
+                Op::Invalidate => {
+                    feed.invalidate();
+                    model.refetch(&server.lock());
+                }
+                Op::ServerPush(k) => {
+                    let mut server = server.lock();
+                    for _ in 0..*k {
+                        server.posts.insert(0, post(next_id));
+                        next_id += 1;
+                    }
+                }
+                Op::ServerDrop(i) => {
+                    let mut server = server.lock();
+                    if !server.posts.is_empty() {
+                        let at = usize::from(*i) % server.posts.len();
+                        server.posts.remove(at);
+                    }
+                }
+                Op::ServerRename(i) => {
+                    let mut server = server.lock();
+                    if !server.posts.is_empty() {
+                        let at = usize::from(*i) % server.posts.len();
+                        server.posts[at].title = format!("renamed at {n}");
+                    }
+                }
+                Op::Remove(i) => {
+                    let mut rows = model.flat.clone();
+                    if !rows.is_empty() {
+                        rows.remove(usize::from(*i) % rows.len());
+                    }
+                    p.h.query()
+                        .set::<FeedQuery>(("rust".to_owned(),), rows.clone());
+                    model.write(rows);
+                }
+                Op::Set(count) => {
+                    let rows: Vec<Post> = server
+                        .lock()
+                        .posts
+                        .iter()
+                        .take(usize::from(*count))
+                        .cloned()
+                        .collect();
+                    p.h.query()
+                        .set::<FeedQuery>(("rust".to_owned(),), rows.clone());
+                    model.write(rows);
+                }
+            }
+            p.t().run_pending();
+            p.take(handle);
+            check(&when, &model);
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(96))]
+
+        #[test]
+        fn the_handles_and_the_patches_follow_a_naive_model_of_pages(
+            page in 1_usize..6,
+            posts in 0_u64..30,
+            ops in ops(),
+        ) {
+            run(page, posts, &ops);
+        }
     }
 }

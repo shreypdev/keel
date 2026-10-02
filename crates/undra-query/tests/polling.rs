@@ -25,6 +25,11 @@ use undra_query::{
 };
 use undra_wire::{Decode, Encode, Handle};
 
+/// Reads a constant at run time (clippy rejects asserting on constants).
+fn flag(value: bool) -> bool {
+    value
+}
+
 async fn ping(ctx: &Ctx, path: &str) -> Result<u32, TodoError> {
     let response = ctx
         .http()
@@ -104,9 +109,9 @@ fn observe<Q: QueryDef>(h: &Harness, params: Q::Params) -> QueryHandle<Q> {
 #[test]
 fn the_attribute_is_in_the_schema_and_the_constants() {
     assert_eq!(TickQuery::INTERVAL_MS, Some(5_000));
-    assert!(!TickQuery::POLL_IN_BACKGROUND);
+    assert!(!flag(TickQuery::POLL_IN_BACKGROUND));
     assert_eq!(BgTickQuery::INTERVAL_MS, Some(5_000));
-    assert!(BgTickQuery::POLL_IN_BACKGROUND);
+    assert!(flag(BgTickQuery::POLL_IN_BACKGROUND));
     assert_eq!(PlainQuery::INTERVAL_MS, None);
     assert_eq!(<TickQuery as QueryDef>::INTERVAL_MS, Some(5_000));
     let schema = collect_schema("t");

@@ -23,6 +23,14 @@
 //!   cursors and the page count are unchanged; the next fetch of the entry puts the server's
 //!   answer in their place.
 //!
+//! # Keys
+//!
+//! `item_key` identifies a row, and the list is keyed on it: two rows of one entry must not share
+//! a key. A server that pages by offset can repeat a row when its list shifts between two requests;
+//! page by a cursor that does not move (the id the last page ended at) or drop the repeats in the
+//! query function. The recorded append does not look at keys (ADR-027), so a repeat is not noticed
+//! when a page is appended; a host that applies the patch shows it twice.
+//!
 //! # Persistence
 //!
 //! A `persist` entry stores its first `persist_pages` pages (default 1) and the cursor after the
@@ -42,8 +50,10 @@ use core::time::Duration;
 use std::sync::{Arc, OnceLock, Weak};
 
 use parking_lot::Mutex;
+use undra_meta::{ParamDef, QueryKind, Schema, TypeClosure, TypeRef};
 use undra_runtime::executor::TaskId;
 use undra_runtime::log::ERROR;
+use undra_runtime::persist::{self, RegisteredHooks};
 use undra_runtime::{Ctx, WeakCtx};
 use undra_signals::{Signal, SignalsError, StoreCell};
 use undra_wire::{Decode, Encode, Reader, Timestamp, Writer};
@@ -70,15 +80,14 @@ pub(crate) struct PageRec {
     pub(crate) len: usize,
     /// The cursor of the next page (`C`), if there is one.
     pub(crate) next: Option<Erased>,
-    /// The encoding of `items`, made when something needs it (a comparison, persistence).
-    bytes: OnceLock<Arc<[u8]>>,
 }
 
 impl PageRec {
-    /// The encoding of the rows (a `Vec<T>`), made once.
-    pub(crate) fn bytes(&self) -> &Arc<[u8]> {
-        self.bytes
-            .get_or_init(|| Arc::from((self.ops.encode_items)(&*self.items)))
+    /// The encoding of the rows (a `Vec<T>`). Made when asked for and not kept: a refetch compares
+    /// pages, persistence stores a few, and nothing else needs the bytes, so a long list does not
+    /// hold its encoding next to its rows.
+    pub(crate) fn bytes(&self) -> Vec<u8> {
+        (self.ops.encode_items)(&*self.items)
     }
 
     /// A page of `items` (a `Vec<T>` of `len` rows) followed by `next`.
@@ -93,7 +102,6 @@ impl PageRec {
             items,
             len,
             next,
-            bytes: OnceLock::new(),
         }
     }
 }
@@ -192,7 +200,7 @@ fn same_pages(old: &[PageRec], new: &[PageRec]) -> bool {
     old.len() == new.len()
         && old.iter().zip(new).all(|(a, b)| {
             a.len == b.len
-                && a.bytes() == b.bytes()
+                && (Arc::ptr_eq(&a.items, &b.items) || a.bytes() == b.bytes())
                 && match (&a.next, &b.next) {
                     (None, None) => true,
                     (Some(x), Some(y)) => x.bytes == y.bytes,
@@ -205,13 +213,50 @@ fn same_pages(old: &[PageRec], new: &[PageRec]) -> bool {
 // The type-erased half
 // -------------------------------------------------------------------------------------------
 
+/// The closure of an infinite query's persisted entry: `{ next: Option<C>, pages: Vec<Vec<T>> }`
+/// (ADR-043 decision 2.5), its fields migrated by name like a mutation's parameters. `None` for a
+/// query that is not infinite.
+fn closure_of(schema: &Schema, query_id: u32) -> Option<TypeClosure> {
+    let query = schema
+        .queries
+        .iter()
+        .find(|q| q.query_id == query_id && q.kind == QueryKind::Query)?;
+    let infinite = query.infinite.as_ref()?;
+    let rows = match &query.returns {
+        TypeRef::Result(ok, _) => (**ok).clone(),
+        other => other.clone(),
+    };
+    Some(schema.closure_of_params(&[
+        ParamDef {
+            name: "next".to_owned(),
+            ty: TypeRef::option(infinite.cursor.clone()),
+        },
+        ParamDef {
+            name: "pages".to_owned(),
+            ty: TypeRef::vec(rows),
+        },
+    ]))
+}
+
+/// An entry stored with the closure `old`, as bytes of the closure `new`: field by field.
+fn migrate_entry(data: &[u8], old: &TypeClosure, new: &TypeClosure) -> Result<Vec<u8>, String> {
+    let record = persist::decode_params(data, "pages", old).map_err(|e| e.to_string())?;
+    persist::migrate_params(&record, old, new, &RegisteredHooks).map_err(|e| e.to_string())
+}
+
+/// Migrates an entry's bytes from the closure they were written with to the current one.
+type MigrateFn = fn(&[u8], &TypeClosure, &TypeClosure) -> Result<Vec<u8>, String>;
+
+/// Fetches one page: the encoded parameters and the cursor (`None`: the first page).
+type FetchPageFn = fn(Ctx, &[u8], Option<&Erased>) -> BoxFuture<Result<PageRec, Failure>>;
+
 /// The type-erased half of one infinite query: what the engine does with its pages without
 /// knowing `T` or `C`. Built with [`paged_vtable`]; the fields are the engine's business.
 pub struct PagedVTable {
     pub(crate) refetch_pages: Option<u32>,
     pub(crate) persist_pages: u32,
     /// Fetches one page: the encoded parameters and the cursor (`None`: the first page).
-    pub(crate) fetch_page: fn(Ctx, &[u8], Option<&Erased>) -> BoxFuture<Result<PageRec, Failure>>,
+    pub(crate) fetch_page: FetchPageFn,
     /// The flattened list (a `Vec<T>`).
     pub(crate) flatten: fn(&[PageRec]) -> Erased,
     /// The pages laid out again for a new flattened list, with the old page sizes and cursors.
@@ -224,6 +269,10 @@ pub struct PagedVTable {
     pub(crate) decode: fn(&[u8]) -> Result<Erased, undra_wire::WireError>,
     /// Observes the query for a platform: an infinite handle.
     pub(crate) open: OpenFn,
+    /// The closure that identifies a persisted entry of the query (see [`closure_of`]).
+    pub(crate) closure: fn(&Schema, u32) -> Option<TypeClosure>,
+    /// Migrates a persisted entry written with another closure (see [`migrate_entry`]).
+    pub(crate) migrate: MigrateFn,
     /// Starts the task that fetches the loaded pages again.
     pub(crate) spawn_refresh:
         fn(&Arc<Shared>, &Ctx, &QueryKey, &'static QueryVTable, u64, usize) -> TaskId,
@@ -249,6 +298,8 @@ impl<Q: InfiniteQueryDef> PagedHolder<Q> {
         encode_items: encode_items_erased::<Q>,
         decode: decode_erased::<Q>,
         open: open_erased::<Q>,
+        closure: closure_of,
+        migrate: migrate_entry,
         spawn_refresh,
         spawn_next,
     };
@@ -377,7 +428,7 @@ fn encode_erased<Q: InfiniteQueryDef>(pages: &[PageRec], n: usize) -> Vec<u8> {
     next.encode(&mut w);
     w.write_len(u32::try_from(n).unwrap_or(u32::MAX));
     for page in &pages[..n] {
-        w.write_raw(page.bytes());
+        w.write_raw(&page.bytes());
     }
     w.into_vec()
 }

@@ -403,6 +403,9 @@ fn every_snapshot_file_has_a_test() {
         "port_event",
         "port_impl",
         "query",
+        // The polling and paging expansions, compared by the tests of `impl_/query.rs`.
+        "query_polling",
+        "query_infinite",
         "mutation",
         "migrate",
     ];

@@ -7,12 +7,13 @@
 //! | Item | What |
 //! |---|---|
 //! | [`QueryDef`], [`MutationDef`], [`CacheValue`], [`BoxFuture`] | the contract `#[undra::query]` and `#[undra::mutation]` implement |
+//! | [`InfiniteQueryDef`], [`Page`] | the extra contract of `#[undra::query(infinite)]`, and the page a paged query returns |
 //! | [`CtxQuery`], [`QueryClient`] | `ctx.query()` and `ctx.mutate(..)`: the cache and its operations |
-//! | [`QueryHandle`], [`QueryStatus`] | the observable a query is watched through, and its five signals |
+//! | [`QueryHandle`], [`InfiniteHandle`], [`QueryStatus`] | the observables a query is watched through: five signals, or seven with paging |
 //! | [`MutationBuilder`], [`CacheView`], [`Invalidate`] | mutations, optimistic updates and invalidation targets |
 //! | [`idempotency_key`] | the key of the idempotent mutation being run |
 //! | [`QueryRegistration`], [`MutationRegistration`] | what the macros submit so platforms can find queries by id |
-//! | [`REFETCH_METHOD_ID`], [`INVALIDATE_METHOD_ID`], [`cache_key`], [`QUEUE_KEY`] | wire and storage names |
+//! | [`REFETCH_METHOD_ID`], [`INVALIDATE_METHOD_ID`], [`SET_POLL_INTERVAL_METHOD_ID`], [`FETCH_NEXT_PAGE_METHOD_ID`], [`cache_key`], [`QUEUE_KEY`] | wire and storage names |
 //!
 //! # How the pieces fit
 //!
@@ -32,14 +33,36 @@
 //!   the runtime's timers (see [`backoff_ms`]).
 //! * **Triggers.** Besides observing: `Lifecycle::Active` refetches observed stale entries,
 //!   `Connectivity` going online refetches all observed entries, `invalidate` refetches the
-//!   observed entries it matches. The spec also lists `interval_ms`; neither `QueryDef` nor the
-//!   schema carries an interval, so timed refetching is not in the v1 contract.
+//!   observed entries it matches, and a polling query (below) refetches on its interval.
+//! * **Polling** (`interval = "30s"`, `poll_in_background`, ADR-043). While an entry has an
+//!   observer, the client believes it is online and the app is `Active` (or the query polls in the
+//!   background), the next refetch is scheduled `interval` after the **end** of the previous fetch
+//!   (TanStack's `refetchInterval`, not `setInterval`: a slow fetch is never overlapped). Going to
+//!   the background or offline pauses it; `Active` and online resume it with the triggers above, and
+//!   releasing the last observer cancels it. Each handle can poll faster than the query does with
+//!   [`QueryHandle::set_poll_interval`]; the entry polls at the smallest interval among its
+//!   observers, so a query without `interval` can be polled by one observer. An interval is at least
+//!   one second ([`MIN_POLL_INTERVAL_MS`]) and at most a week ([`MAX_POLL_INTERVAL_MS`]). Timers are
+//!   the `Timer` port's, so under `undra_ports::fakes` a test advances time and sees each poll.
+//! * **Infinite queries** (`infinite`, `item_key = ".."`, ADR-043). A query that returns
+//!   [`Page<T, C>`] with a `#[undra(cursor)]` parameter is a list loaded a page at a time, observed
+//!   through an [`InfiniteHandle`] (`ctx.query().infinite::<Q>(params)`; a platform's constructor
+//!   call makes the same): `data` is the rows loaded so far as one keyed list (empty, never absent,
+//!   before the first page), next to `has_next_page` and `fetching_next_page`.
+//!   [`fetch_next_page`](InfiniteHandle::fetch_next_page) fetches the page after the last one and
+//!   **appends its rows with the recorded `push`**, so every observer's change-set is a keyed patch
+//!   of the new rows however long the list is; a refetch fetches the loaded pages again in order
+//!   from the first, each with the cursor the previous response returned, and sends only what
+//!   changed. See [`InfiniteHandle`] for the signals and [`CacheView::update_items`] for
+//!   optimistic edits of the list.
 //! * **Garbage collection.** When the last observer of an entry goes, its fetch is cancelled and
 //!   the entry is dropped after 5 minutes ([`QueryClient::set_gc_time`]) unless observed again.
 //! * **Persistence.** `persist` entries are written to the `Kv` port 250 ms after a successful
 //!   fetch, and read back when the runtime starts (see [`cache_key`]; the client waits a few
 //!   seconds for a platform that registers its `Kv` adapter late); entries written by another
-//!   schema are dropped. A garbage-collected entry leaves its persisted copy in the store.
+//!   schema are dropped. A garbage-collected entry leaves its persisted copy in the store. An
+//!   infinite entry stores its first `persist_pages` pages (default 1) and the cursor after them:
+//!   `{ next: Option<C>, pages: Vec<Vec<T>> }`, migrated by field name like any entry.
 //! * **Mutations** (`ctx.mutate(M, input)`, see [`MutationBuilder`]) run an optional
 //!   *optimistic* update inside one transaction, so observers see the result at once; on failure
 //!   the entries it wrote are restored exactly, in one more transaction, unless something else has
@@ -65,10 +88,12 @@
 //!   mutation are remembered in memory only: after a restart the replay invalidates just the
 //!   mutation's own key, and there is no optimistic update left to roll back.
 //! * **What a platform sees.** For each query a `<Name>QueryHandle` object: its constructor
-//!   (type id and method id are the query id) observes the entry, `refetch()` and `invalidate()`
-//!   have the same method ids on every handle ([`REFETCH_METHOD_ID`], [`INVALIDATE_METHOD_ID`]),
-//!   the five signals travel in ordinary change-sets, and releasing the object handle removes the
-//!   observer. For each mutation an async function whose method id is the mutation id. None of
+//!   (type id and method id are the query id) observes the entry, `refetch()`, `invalidate()` and
+//!   `set_poll_interval(Option<Duration>)` have the same method ids on every handle
+//!   ([`REFETCH_METHOD_ID`], [`INVALIDATE_METHOD_ID`], [`SET_POLL_INTERVAL_METHOD_ID`]) and an
+//!   infinite query's has `fetch_next_page()` ([`FETCH_NEXT_PAGE_METHOD_ID`]), the five signals (seven
+//!   with `has_next_page` and `fetching_next_page`) travel in ordinary change-sets, and releasing the
+//!   object handle removes the observer. For each mutation an async function whose method id is the mutation id. None of
 //!   this is in the runtime's static dispatch table (see `ADR-018` in `.10x/adrs`): the macros
 //!   submit a [`QueryRegistration`] / [`MutationRegistration`] per definition, and with it this
 //!   crate's `undra_runtime::DispatchLayer` and its start-up `undra_runtime::InitHook` (the runtime
@@ -97,8 +122,9 @@
 //!   (see [`QueryStatus`]).
 //! * The persisted queue starts with the schema hash, so arguments encoded by another schema are
 //!   never replayed (SPEC 9 lists only `mutation_id`, params and the key per item).
-//! * `interval_ms` is listed among the refetch triggers but neither `QueryDef` nor `QueryMeta`
-//!   carries an interval, so timed refetching is not part of the v1 contract.
+//! * An infinite query's `QueryDef` has `Output = Vec<T>` (the rows loaded, flattened), and
+//!   the schema records `returns` as `Result<Vec<T>, E>` next to `infinite` (ADR-043 writes `Vec<T>`;
+//!   the error type must stay in the schema for the generated handle's `error` signal).
 //! * The client assumes it is **online** until the platform says otherwise (platforms report the
 //!   real state right after start-up), so a mutation made before the first connectivity event is
 //!   attempted rather than parked.
@@ -131,7 +157,8 @@ mod walk;
 
 pub use client::{CtxQuery, PersistStats, QueryClient};
 pub use defs::{
-    BoxFuture, CacheValue, InfiniteQueryDef, MutationDef, Page, QueryDef, fetch_first_page,
+    BoxFuture, CacheValue, InfiniteQueryDef, MutationDef, Page, PageResult, QueryDef,
+    fetch_first_page,
 };
 pub use dispatch::{
     FETCH_NEXT_PAGE_METHOD_ID, INVALIDATE_METHOD_ID, REFETCH_METHOD_ID, SET_POLL_INTERVAL_METHOD_ID,

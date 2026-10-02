@@ -107,8 +107,8 @@ impl Polling {
         }
     }
 
-    /// Whether anything about this entry polls or has polled (so the entry has something to
-    /// reschedule).
+    /// Nothing is overridden and no timer is armed: an entry whose query declares no interval has
+    /// nothing to reschedule.
     fn idle(&self) -> bool {
         self.overrides.is_empty() && self.timer.is_none()
     }

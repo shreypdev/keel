@@ -90,6 +90,9 @@ impl<T, C> Page<T, C> {
     }
 }
 
+/// What fetching one page of an infinite query resolves to: the page, or the query's error.
+pub type PageResult<T, C, E> = Result<Page<T, C>, E>;
+
 /// A `#[undra::query(infinite, ..)]` function (ADR-043): a query whose result is a list loaded
 /// one page at a time, shown to the platforms as one keyed list that grows.
 ///
@@ -111,7 +114,7 @@ pub trait InfiniteQueryDef: QueryDef<Output = Vec<<Self as InfiniteQueryDef>::It
         ctx: Ctx,
         params: Self::Params,
         cursor: Option<Self::Cursor>,
-    ) -> BoxFuture<Result<Page<Self::Item, Self::Cursor>, Self::Error>>;
+    ) -> BoxFuture<PageResult<Self::Item, Self::Cursor, Self::Error>>;
     /// The key of a row: the FNV-1a hash of its encoded `item_key` field, what the keyed list of
     /// the handle's `data` identifies rows by (SPEC 3.8).
     fn item_key(item: &Self::Item) -> u64;

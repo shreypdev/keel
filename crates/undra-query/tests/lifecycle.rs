@@ -31,6 +31,24 @@ impl QueryDef for Answer {
     }
 }
 
+/// A query that polls every minute (ADR-043).
+struct Poller;
+
+impl QueryDef for Poller {
+    const ID: u32 = 0x5157_0002;
+    const KEY: &'static str = "lifecycle:poller";
+    const STALE_MS: Option<u64> = Some(60_000);
+    const PERSIST: bool = false;
+    const RETRY: u32 = 0;
+    const INTERVAL_MS: Option<u64> = Some(60_000);
+    type Params = ();
+    type Output = u32;
+    type Error = String;
+    fn fetch(_: Ctx, _: ()) -> BoxFuture<Result<u32, String>> {
+        Box::pin(async { Ok(7) })
+    }
+}
+
 /// A threaded runtime with no ports at all: `Kv` is unavailable, so hydration keeps retrying.
 fn threaded() -> Arc<Runtime> {
     Runtime::new(
@@ -107,5 +125,26 @@ fn a_query_handle_keeps_working_while_the_runtime_lives_and_goes_quiet_after() {
     // After shutdown the handle holds no runtime to reach: these are quiet no-ops.
     handle.refetch();
     handle.invalidate();
+    drop(handle);
+}
+
+#[test]
+fn a_poll_timer_does_not_pin_the_runtime_while_a_handle_still_observes() {
+    let _serial = SERIAL.lock();
+    let threads_before = live_threads();
+    let rt = threaded();
+    let handle = rt.ctx().query().observe::<Poller>(());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while handle.data().get().is_none() {
+        assert!(Instant::now() < deadline, "the fetch never landed");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // Observed, so the next poll is armed a minute from now, by a task that sleeps: it holds the
+    // runtime weakly (ADR-034), as the handle does.
+    handle.set_poll_interval(Some(Duration::from_secs(1)));
+    drop_owner_and_expect_release(rt, threads_before);
+    // The handle outlived the runtime: its calls are quiet no-ops.
+    handle.set_poll_interval(None);
+    handle.refetch();
     drop(handle);
 }

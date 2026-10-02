@@ -668,6 +668,17 @@ No row of its own in section 14; kept so regressions in the hot paths are visibl
 | `query/refetch_published_to_100_observers` | 6.90 µs | 6.82 µs .. 6.98 µs |
 | `query/platform_construct_and_release` | 1.19 µs | 1.18 µs .. 1.22 µs |
 | `query/platform_refetch_call` | 586.1 ns | 585.0 ns .. 587.4 ns |
+| `query/infinite_append_page_50` | 7.29 µs | 7.07 µs .. 7.59 µs |
+| `query/keyed_push_50` | 5.41 µs | 5.32 µs .. 5.51 µs |
+
+The last two are budgets-test rows (ADR-043, `bench/common/query_rows.rs`; 2026-10-01, the reference host while other pieces
+built, so the ratio is the number to read). `query/infinite_append_page_50` is a platform's `fetch_next_page()` call on an infinite
+query whose list holds 10,000 rows: the call, the fetch task, 50 rows appended with the recorded `push`, and the change-set
+(asserted, when the row is built, to be a keyed patch of exactly those 50 rows) delivered to the host; every run appends a page, so
+the list keeps growing and the cost does not. `query/keyed_push_50` is the same 50 rows appended to a keyed list of 10,000 by a store
+method (`call_sync`, one transaction): the "50-op keyed patch" ADR-043 compares with. Budgets 38 µs and 28 µs (5x the best budgets-test
+p50, 7.4 µs and 5.5 µs); `[ratio."infinite_append_vs_keyed_push_50"]` holds the first at no more than twice the second (1.34 to 1.46
+measured, ADR-043 requires at most 2): the fetch machinery on top of a 50-op keyed patch, however long the list.
 
 ### Opt-in ports (`bench/benches/ports.rs`, ADR-047, ADR-048)
 

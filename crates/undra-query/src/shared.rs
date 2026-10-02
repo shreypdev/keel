@@ -789,6 +789,17 @@ impl Shared {
     /// The fetch task of `serial` was dropped before it finished (it panicked). The entry shows
     /// an error and can be fetched again.
     pub(crate) fn abort(self: &Arc<Self>, ctx: &Ctx, key: &QueryKey, serial: u64) {
+        // A fetch that was cancelled (its observers went, a write replaced it) arrives here too and
+        // has nothing to do: no clock reading for it.
+        let current = self
+            .state
+            .lock()
+            .entries
+            .get(key)
+            .is_some_and(|entry| entry.inflight.as_ref().map(|i| i.serial) == Some(serial));
+        if !current {
+            return;
+        }
         let now = self.now(ctx);
         let mut fx = Fx::default();
         {

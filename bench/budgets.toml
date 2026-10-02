@@ -487,6 +487,19 @@ measured_ns = 1292417.0
 budget_ns = 9000000
 measured_ns = 1784542.0
 
+# The query client's next page (ADR-043): a platform's `fetch_next_page()` call on an infinite query whose
+# list holds 10,000 rows, through the fetch task to the host's change-set (a keyed patch of exactly the 50
+# rows, asserted when the row is built), and the same 50 rows appended by a store method as the baseline
+# it is compared with (`[ratio."infinite_append_vs_keyed_push_50"]`). Every run appends a page, so the list
+# keeps growing: the cost must not (O(page), ADR-027).
+[bench."query/infinite_append_page_50"]
+budget_ns = 38000
+measured_ns = 7400.8
+
+[bench."query/keyed_push_50"]
+budget_ns = 28000
+measured_ns = 5513.8
+
 # ---------------------------------------------------------------------------------------------
 # Harsh conditions, layer B: sustained runs (`cargo test -p undra-bench --test stress --release`).
 # Rules in the header. Measured with UNDRA_STRESS_SECONDS=10, best of three runs.
@@ -714,6 +727,17 @@ num = "signals/derived_10k/update_visible"
 den = "signals/keyed_10k/update"
 max = 2.5
 measured = 1.43
+
+# ADR-043: a page appended by the query client (the call, the fetch task, 50 recorded pushes, the keyed
+# patch, delivery) against the same 50 recorded pushes as one store method (call, patch, delivery): the
+# fetch machinery on top of a 50-op keyed patch, however long the list. 1.34 on the reference host. The
+# maximum is the ADR's own bound (at most twice a 50-op keyed patch), not 1.15x of the one sample: a page
+# that cost O(list) (a flattened list rebuilt or encoded per page) would be 10 to 100 here.
+[ratio."infinite_append_vs_keyed_push_50"]
+num = "query/infinite_append_page_50"
+den = "query/keyed_push_50"
+max = 2.0
+measured = 1.34
 
 # ---------------------------------------------------------------------------------------------
 # Sizes of shipped artefacts (ADR-052): measured by `scripts/wasm-size.sh`, not by the budgets test,
