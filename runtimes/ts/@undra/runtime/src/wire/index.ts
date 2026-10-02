@@ -4,5 +4,6 @@ export * from "./envelope.js";
 export * from "./errors.js";
 export * from "./payloads.js";
 export * from "./reader.js";
+export * from "./session.js";
 export * from "./types.js";
 export * from "./writer.js";

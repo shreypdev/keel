@@ -4,18 +4,6 @@ import { UndraReader } from "./reader.js";
 import type { Handle } from "./types.js";
 import { UndraWriter } from "./writer.js";
 
-export {
-  type HelloPayload,
-  type LogPayload,
-  type PortCallPayload,
-  decodeHello,
-  decodeLog,
-  decodePortCall,
-  encodeHello,
-  encodeLog,
-  encodePortCall,
-} from "./session.js";
-
 /*
  * Typed encoders and decoders for every envelope payload (docs/SPEC.md
  * sections 3.3 to 3.8 and 5.9). `encodeX` produces exactly the payload bytes
