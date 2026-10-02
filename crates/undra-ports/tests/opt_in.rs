@@ -947,7 +947,7 @@ fn a_transaction_whose_begin_answers_in_time_runs_and_commits_once() {
 fn db_checks_names_and_migrations_before_crossing() {
     let (t, fakes) = rig();
     let ctx = t.ctx();
-    let (name, order) = t.run_until(async move {
+    let (name, order, wide) = t.run_until(async move {
         let name = Database::open(&ctx, "../etc", &[]).await.map(|_| ());
         let order = Database::open(
             &ctx,
@@ -956,10 +956,31 @@ fn db_checks_names_and_migrations_before_crossing() {
         )
         .await
         .map(|_| ());
-        (name, order)
+        // SQLite keeps the version in `PRAGMA user_version`, a signed 32-bit integer: a larger one
+        // would be stored as 0 and every later open would run the migrations again.
+        let wide = Database::open(
+            &ctx,
+            "ok",
+            &[Migration::new(1, "a"), Migration::new(3_000_000_000, "b")],
+        )
+        .await
+        .map(|_| ());
+        (name, order, wide)
     });
     assert!(matches!(name, Err(DbError::Unavailable(_))));
     assert!(matches!(order, Err(DbError::Migration { version: 1, .. })));
+    assert!(
+        matches!(wide, Err(DbError::Migration { version: 3_000_000_000, ref message }) if message.contains("2147483647")),
+        "{wide:?}"
+    );
+    assert_eq!(
+        undra_ports::db::validate_migrations(&[DbMigration {
+            version: i32::MAX as u32,
+            sql: String::new(),
+        }]),
+        Ok(()),
+        "the largest version that fits is kept"
+    );
     assert!(fakes.db.calls().is_empty(), "nothing crossed the boundary");
     let proxy = DbProxy::new(t.ctx());
     let migrated = t.run_until(async move {

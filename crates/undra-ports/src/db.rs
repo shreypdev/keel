@@ -279,7 +279,12 @@ pub fn validate_name(name: &str) -> Result<(), DbError> {
     }
 }
 
-/// Checks that migration versions strictly increase from 1 (what every adapter checks again).
+/// The largest migration version: SQLite keeps the version in `PRAGMA user_version`, a signed
+/// 32-bit integer, and would store a larger one as 0 (every later open would migrate again).
+pub const MAX_MIGRATION_VERSION: u32 = i32::MAX as u32;
+
+/// Checks that migration versions strictly increase from 1 and are at most
+/// [`MAX_MIGRATION_VERSION`] (what every adapter checks again).
 pub fn validate_migrations(migrations: &[DbMigration]) -> Result<(), DbError> {
     let mut last = 0u32;
     for migration in migrations {
@@ -287,6 +292,14 @@ pub fn validate_migrations(migrations: &[DbMigration]) -> Result<(), DbError> {
             return Err(DbError::Migration {
                 version: migration.version,
                 message: "migration versions must strictly increase, starting at 1".to_owned(),
+            });
+        }
+        if migration.version > MAX_MIGRATION_VERSION {
+            return Err(DbError::Migration {
+                version: migration.version,
+                message: format!(
+                    "migration versions must be at most {MAX_MIGRATION_VERSION}: SQLite keeps the version in a signed 32-bit integer (PRAGMA user_version)"
+                ),
             });
         }
         last = migration.version;
