@@ -8,7 +8,7 @@ import { WasmWorkerTransport, type WorkerLike } from "../src/transport/wasm-work
 import type { Transport, TransportHandler } from "../src/transport/transport.js";
 import { ALL_SIGNALS, CallTarget, Kind, ReplyStatus, decodeReply, encodeCall } from "../src/wire/index.js";
 import { FakeCoreTransport } from "./support/fake-core.js";
-import { track } from "./support/harness.js";
+import { track, waitFor } from "./support/harness.js";
 import { STUB, compileStub, stubGlobals } from "./support/stub-core.js";
 import { u32 } from "./support/store.js";
 import { channelWorker } from "./support/worker.js";
@@ -499,7 +499,7 @@ describe("the envelope kinds", () => {
       closed: () => {},
     });
     transport.send(Kind.Restore, snapshotOf(6));
-    for (let i = 0; i < 100 && events.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor("the restore's change-set", () => events.length > 0);
     expect(events).toEqual(["changeSet"]);
     transport.close();
     worker.close();

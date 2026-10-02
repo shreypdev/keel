@@ -107,7 +107,10 @@ fun s07Stream(w: World) {
     check(outcome is UndraCallError.CancelledByCore) {
         "the stream the restore cancelled ended with $outcome, not UndraCallError.CancelledByCore"
     }
-    check(tookMs < 1_000L) { "the stream the restore cancelled took $tookMs ms to end" }
+    // Bounded by WAIT_MS, a hang detector: the restore ends the stream while it runs, on no timer, so a core that did not would
+    // leave it open (or end it at item 999,999 with its own error, which the checks above refuse); how soon after the restore
+    // the failure is seen is the machine's.
+    check(tookMs < WAIT_MS) { "the stream the restore cancelled took $tookMs ms to end, past the $WAIT_MS ms wait" }
     awaitEq("open_streams after the core cancelled the stream", streamsBeforeRestore) { w.stats().openStreams }
     probe.close()
 }

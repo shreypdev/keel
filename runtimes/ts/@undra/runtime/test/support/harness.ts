@@ -39,6 +39,18 @@ export function macrotask(): Promise<void> {
   });
 }
 
+/**
+ * Waits until `probe` holds. The deadline only detects a hang: it is not a bound on how fast anything runs, and it is
+ * kept inside the 5 s a test is given so that this message, not the test's timeout, says what was waited for.
+ */
+export async function waitFor(what: string, probe: () => boolean | Promise<boolean>, ms = 4_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!(await probe())) {
+    if (Date.now() > deadline) throw new Error(`timed out after ${ms} ms waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
 /** Waits for the microtask queue to drain a few times. */
 export async function microtasks(rounds = 4): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();

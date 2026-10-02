@@ -40,12 +40,15 @@ describe("two cores, one database name", () => {
     const tx = ok(await a.begin(da.db));
     ok(await a.execute(tx, "INSERT INTO t (id, v) VALUES (?, ?)", cells(2n, "b")));
     expect(ok(await b.query(db.db, "SELECT count(*) FROM t")).rows, "not the other core's uncommitted row").toEqual([cells(1n)]);
+    expect(ok(await b.query(db.db, "PRAGMA busy_timeout")).rows, "the timeout the wait below is made of").toEqual([cells(5_000n)]);
     const started = Date.now();
     const busy = err(await b.execute(db.db, "INSERT INTO t (id, v) VALUES (?, ?)", cells(3n, "c")));
     const waited = Date.now() - started;
     expect(busy).toBeInstanceOf(DbError.Busy);
     expect(waited, "SQLite's busy timeout (5 s), not at once").toBeGreaterThanOrEqual(4_500);
-    expect(waited).toBeLessThan(8_000);
+    // No upper bound on `waited`: SQLite's busy handler sleeps in steps and adds up the sleeps it asked for, not the time that passed, so under load the
+    // wait is as long as the machine makes it (13.7 s for this 5 s, on a throttled run). That the timeout is 5 s and not more is the pragma above; the
+    // explicit timeout of the test (a hang detector, well past that) is what fails a wait that never ends.
 
     ok(await a.commit(tx));
     expect(ok(await b.query(db.db, "SELECT count(*) FROM t")).rows).toEqual([cells(2n)]);
@@ -53,7 +56,7 @@ describe("two cores, one database name", () => {
     expect(ok(await a.query(da.db, "SELECT count(*) FROM t")).rows).toEqual([cells(3n)]);
     ok(await a.close(da.db));
     ok(await b.close(db.db));
-  }, 20_000);
+  }, 120_000);
 
   it("opening one new database from both at once migrates it once: both open at the newest version", async () => {
     const a = dbCalls(dbPort(nodeSqliteDb({ directory })));

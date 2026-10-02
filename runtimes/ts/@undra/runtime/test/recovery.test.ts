@@ -176,12 +176,14 @@ async function recovering(options: { recovery?: false | Parameters<typeof crashR
 const giveBack = (core: UndraCore, handle: bigint): void => method<[bigint], void>(core, "_giveBack")(handle);
 const eraOf = (core: UndraCore): number => internalValue<number>(core, "_era");
 
+// A hang detector: the wait is for a condition, and a count of macrotasks (200 of them, which a slow machine runs in the time a restart needs) was a bound on speed.
+// It stays under the 5 s a test is given.
 const until = async (what: string, probe: () => boolean): Promise<void> => {
-  for (let i = 0; i < 200; i++) {
-    if (probe()) return;
+  const deadline = Date.now() + 4_000;
+  while (!probe()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     await macrotask();
   }
-  throw new Error(`timed out waiting for ${what}`);
 };
 
 describe("crashRecovery (LoadOptions.recovery)", () => {
@@ -668,7 +670,9 @@ describe("ports that hold platform resources across a restart (ADR-047, ADR-048)
       const started = Date.now();
       const begun = await t.fake.callPort(db.portId, db.begin, args((w) => w.writeU32(again.db)));
       expect(begun.status === PortStatus.Ok ? "ok" : decodeValue(DbErrorCodec, begun.body), "BEGIN IMMEDIATE got the write lock").toBe("ok");
-      expect(Date.now() - started, "at once, not after SQLite's busy timeout").toBeLessThan(1000);
+      // Not after SQLite's busy timeout (5 s): under half of it. A wait for the lock that the rollback should have freed ends in Busy at 5 s (the status check
+      // above), so this only has to tell "got it" from "waited for it"; how fast a slow machine runs the rest is not what it asks.
+      expect(Date.now() - started, "at once, not after SQLite's busy timeout").toBeLessThan(2_500);
       const tx2 = decodeValue(codecs.u32, begun.body);
       const rows = decodeValue(DbRowsCodec, (await t.fake.callPort(db.portId, db.query, statementArgs(tx2, "SELECT COUNT(*) FROM t"))).body);
       expect(rows.rows, "the uncommitted row is gone").toEqual([[{ kind: "integer", value: 0n }]]);

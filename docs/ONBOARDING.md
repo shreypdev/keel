@@ -287,12 +287,16 @@ scripts/ci-local.sh --only ci/ts,ci/contracts     # some jobs (<workflow>/<job i
 scripts/ci-local.sh --here --only ci/ts           # quick, in this checkout (dirty trees allowed: not a proof)
 ```
 
-The slow-runner pass is what finds the failures that only a slower machine shows: the timing-sensitive suites (the Rust
-workspace, the TypeScript runtime, the Swift and Kotlin runtimes, the contract grid, the React Native model) run three rounds
-under `taskpolicy -b` (macOS background QoS: efficiency cores, lowest priority) with 16 CPU burners (`yes`, started and killed
-by the script for the length of each step, your own processes only), four test threads (`RUST_TEST_THREADS=4`: a hosted runner
-has four vCPUs) and four build jobs. It reuses what a normal pass built and installed in the same clone, so run that first:
-what is throttled is the tests, not the compiler. A test that fails only there depends on the machine's speed: fix it at its cause (pace by the consumer, scale a
+The slow-runner pass is what finds the failures that only a slower machine shows: the timing-sensitive suites (the TypeScript
+runtime, the Swift and Kotlin runtimes, the contract grid, the React Native model, the real-time recipe, and the Rust workspace's
+tests but those of the three packages that drive a compiler (`undra-bindgen`, `undra-macros`, `undra-cli`: starved, those are a
+build and say nothing about timing; `bench/tests` and the dev-reload tests of `undra-cli` run on their own))
+run three rounds with 8 CPU burners (`yes` at normal priority, `--burners N`; started and killed by the script for the length of
+each step, your own processes only, and they stop within a second of the script whatever happens to it), four test threads
+(`RUST_TEST_THREADS=4`: a hosted runner has four vCPUs) and four build jobs. Every `cargo test` runs with `--no-fail-fast`, so one
+pass lists every failing test binary. Nothing runs under `taskpolicy -b`: that QoS next to burners leaves a test no CPU at all.
+It reuses what a normal pass built and installed in the same clone, so run that first:
+what is slowed is the tests, not the compiler. A test that fails only there depends on the machine's speed: fix it at its cause (pace by the consumer, scale a
 budget by `UNDRA_BENCH_SCALE`, a deadline that covers a slow machine and reports the elapsed time, wait on the condition and
 not on a fixed sleep), never by loosening an assertion about behaviour. It needs `ruby` (macOS ships it); logs of every step
 are kept (`--logs DIR`).

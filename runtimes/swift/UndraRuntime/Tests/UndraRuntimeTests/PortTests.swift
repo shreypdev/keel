@@ -161,15 +161,40 @@ final class PortTests: XCTestCase {
         XCTAssertEqual(transport.portReplies[0], Wire.PortReply(portCallId: 13, status: .unavailable))
     }
 
+    /// The port of the two tests below: method 4 begins (`begun`) and then waits for `open`, however long that takes.
+    private func gatedPort(begun: Locked<Int>, open: Locked<Bool>) -> PortImpl {
+        return .async([
+            4: { _ in
+                begun.withLock { $0 += 1 }
+                // The gate is the test's to open; the 10 s are a hang detector (a callback that waited for this work would never return, and the test would end
+                // here with replies it should not have, not at the CI job's timeout).
+                let giveUp = DispatchTime.now().uptimeNanoseconds + 10_000_000_000
+                while !open.withLock({ $0 }), DispatchTime.now().uptimeNanoseconds < giveUp {
+                    try await Task.sleep(nanoseconds: 1_000_000)
+                }
+                return [1]
+            },
+        ])
+    }
+
+    /// The callback returns before its calls are answered, and the calls run together. Both are shown with the calls held at a gate the test opens
+    /// (a `Task.sleep` of 60 ms in the port and "six calls in under 50 ms" were a bet on the machine: a stall of 50 ms failed it): no reply exists when the
+    /// six calls have returned, and all six have begun while none can have ended.
     func testAnAsyncPortDoesNotBlockTheCallerAndSeveralCallsOverlap() async throws {
         let transport = FakeTransport()
         let core = try makeCore(transport)
-        core.registerPort(portId, asyncPort())
-        let started = Date()
+        let begun = Locked(0)
+        let open = Locked(false)
+        core.registerPort(portId, gatedPort(begun: begun, open: open))
+        defer { open.withLock { $0 = true } }
         for id in 20 ..< 26 {
             XCTAssertEqual(transport.callPort(portId: portId, methodId: 4, portCallId: UInt32(id), args: []), .async)
         }
-        XCTAssertLessThan(Date().timeIntervalSince(started), 0.05, "the callback returned without waiting")
+        XCTAssertEqual(transport.portReplies.count, 0, "the callback returned before any call was answered: it did not wait for them")
+        let overlapping = await waitUntil { begun.withLock { $0 } == 6 }
+        XCTAssertTrue(overlapping, "all six calls were running at once")
+        XCTAssertEqual(transport.portReplies.count, 0, "and none could end")
+        open.withLock { $0 = true }
         let answered = await waitUntil { transport.portReplies.count == 6 }
         XCTAssertTrue(answered)
         let ids = Set(transport.portReplies.map { $0.portCallId })

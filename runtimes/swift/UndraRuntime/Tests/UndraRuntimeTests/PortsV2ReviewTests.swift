@@ -9,6 +9,15 @@ import XCTest
 
 // MARK: - Helpers
 
+/// A sleep of `milliseconds`, started now: the instant it ended. What a bound on the binding's own timer is measured against: a machine that is slow or
+/// busy runs it as late as the timer of the binding it was armed beside, so how much later than it the binding finished is the binding's, not the machine's.
+private func referenceSleep(milliseconds: UInt64) -> Task<UInt64, Never> {
+    Task { () async -> UInt64 in
+        try? await Task.sleep(nanoseconds: milliseconds * 1_000_000)
+        return DispatchTime.now().uptimeNanoseconds
+    }
+}
+
 /// Wraps a WebSocket adapter and counts how many messages the binding's pump took from each
 /// connection's stream (what the platform delivered into the binding's memory).
 final class CountingWebSocket: WebSocketAdapter, @unchecked Sendable {
@@ -180,6 +189,9 @@ final class RealtimeReviewTests: XCTestCase {
         let socket = try XCTUnwrap(adapter.sockets.first)
         var waited: [Double] = []
         var late: [Double] = []
+        // And not before the burst gap, in every round: the binding cannot know a message is alone until the gap passed without another, and a
+        // slow machine only makes that later (the TypeScript runtime's clock-driven test asserts the same: nothing at 1 ms, the answer at 2).
+        var soonest = UInt64.max
         for round in 0 ..< 40 {
             // The pull waits; the message arrives.
             let pull = Task { () async -> (Result<[WsMessage], WsError>, UInt64) in
@@ -188,19 +200,24 @@ final class RealtimeReviewTests: XCTestCase {
             }
             try await Task.sleep(nanoseconds: 5_000_000)
             var reference = referenceTimer()
+            let pushed = DispatchTime.now().uptimeNanoseconds
             socket.push(.text("w\(round)"))
             let (result, at) = await pull.value
             XCTAssertEqual(try result.get(), [.text("w\(round)")])
             waited.append((Double(at) - Double(await reference.value)) / 1e6)
+            soonest = min(soonest, at - pushed)
             // The message is there before the pull.
             socket.push(.text("l\(round)"))
             await eventually("the read-ahead") { socket.pulled == 2 * (round + 1) }
             reference = referenceTimer()
+            let pulled = DispatchTime.now().uptimeNanoseconds
             let early = try await binding.receive(conn: conn, max: 16)
             let answered = DispatchTime.now().uptimeNanoseconds
             XCTAssertEqual(early, [.text("l\(round)")])
             late.append((Double(answered) - Double(await reference.value)) / 1e6)
+            soonest = min(soonest, answered - pulled)
         }
+        XCTAssertGreaterThanOrEqual(soonest, 2_000_000, "a lone message was answered \(Double(soonest) / 1e6) ms after it arrived or was asked for: before the 2 ms burst gap")
         waited.sort()
         late.sort()
         XCTAssertLessThan(waited[20], 5, "a lone message was answered \(waited[20]) ms (the median of 40) after a burst-gap timer armed at its arrival")
@@ -286,8 +303,7 @@ final class RealtimeReviewTests: XCTestCase {
         let binding = WebSocketBinding(adapter: URLSessionWebSocketAdapter())
         defer { binding.detach() }
         let conn = try await binding.connect(url: "\(server.ws)/ws/echo", protocols: [], headers: []).conn
-        let first = Task { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 16) } }
-        try await Task.sleep(nanoseconds: 50_000_000)
+        let first = await running { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 16) } }
         await expectThrows(WsError.protocol("a receive is already pending on connection \(conn)")) { () async throws(WsError) -> [WsMessage] in
             try await binding.receive(conn: conn, max: 16)
         }
@@ -329,8 +345,7 @@ final class RealtimeReviewTests: XCTestCase {
         let server = try sharedServer()
         let binding = WebSocketBinding(adapter: URLSessionWebSocketAdapter())
         let conn = try await binding.connect(url: "\(server.ws)/ws/stall", protocols: [], headers: []).conn
-        let pull = Task { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 16) } }
-        try await Task.sleep(nanoseconds: 50_000_000)
+        let pull = await running { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 16) } }
         binding.detach()
         let answered = try await pull.value.get()
         XCTAssertEqual(answered, [])
@@ -452,12 +467,14 @@ final class DbReviewTests: XCTestCase {
     }
 
     /// 2a: an outer statement during a transaction fails `busy` at the busy timeout (not much
-    /// earlier, not much later), and the transaction's own statements are not blocked meanwhile.
+    /// earlier, not much later), and the transaction goes on meanwhile (that its statements are not
+    /// queued behind the waiting one is the next test's, by order).
     func testAnOuterStatementIsBusyAtTheDeadlineAndTheTransactionKeepsGoing() async throws {
         let db = binding(busyTimeoutMs: 400)
         let id = try await db.open(name: "deadline", migrations: notesMigrations).db
         let tx = try await db.begin(id)
         let started = DispatchTime.now().uptimeNanoseconds
+        let reference = referenceSleep(milliseconds: 400) // armed as the statement is: the busy timeout's own clock
         let outer = Task { () async -> (Result<DbExecuted, DbError>, UInt64) in
             let result = await capture { () async throws(DbError) -> DbExecuted in
                 try await db.execute(id, "INSERT INTO notes (title) VALUES ('outer')", [])
@@ -465,11 +482,8 @@ final class DbReviewTests: XCTestCase {
             return (result, DispatchTime.now().uptimeNanoseconds)
         }
         try await Task.sleep(nanoseconds: 20_000_000)
-        var slowest: UInt64 = 0
         for index in 0 ..< 20 {
-            let before = DispatchTime.now().uptimeNanoseconds
             _ = try await db.execute(tx, "INSERT INTO notes (title) VALUES (?)", [.text("in tx \(index)")])
-            slowest = max(slowest, DispatchTime.now().uptimeNanoseconds - before)
             try await Task.sleep(nanoseconds: 5_000_000)
         }
         let (result, ended) = await outer.value
@@ -478,13 +492,47 @@ final class DbReviewTests: XCTestCase {
             return XCTFail("expected busy, got \(result)")
         }
         XCTAssertGreaterThanOrEqual(waited, 395, "busy came before the timeout")
-        XCTAssertLessThan(waited, 600, "busy came well after the timeout")
-        // Blocked by the waiting statement, one of them takes what is left of its 400 ms; 200 is far from both that
-        // and a statement that a busy machine held up.
-        XCTAssertLessThan(Double(slowest) / 1e6, 200, "a transaction statement was blocked by the waiting one")
+        // "Well after the timeout" is not 200 ms of wall clock (a stalled machine made it 600 and more): it is more than half the timeout after a sleep of
+        // the timeout's own length that was started beside the statement, which a slow machine ends as late as it ends the binding's.
+        let late = (Double(ended) - Double(await reference.value)) / 1e6
+        XCTAssertLessThan(late, 200, "busy came \(late) ms after a sleep of the timeout's length started beside the statement")
         try await db.finish(tx, commit: true)
         let rows = try await db.query(id, "SELECT COUNT(*) FROM notes", [])
         XCTAssertEqual(rows.rows, [[.integer(20)]], "the outer statement never ran")
+    }
+
+    /// 2a: the transaction's own statements are not queued behind an outer statement that waits for
+    /// the transaction. Shown by order, with a busy timeout that never elapses here (60 s, a hang
+    /// detector): the outer statement is still waiting after each of them, on any machine. Queued
+    /// behind it, the first would wait for it and it for the transaction, until its timeout. (The
+    /// test above bounded the slowest of them by 200 ms of wall clock, which a machine that stalled
+    /// that long failed; the TypeScript runtime's test of the same claim is by order too.)
+    func testTheTransactionsOwnStatementsAreNotQueuedBehindAWaitingOuterStatement() async throws {
+        let db = binding(busyTimeoutMs: 60_000)
+        let id = try await db.open(name: "queue", migrations: notesMigrations).db
+        let tx = try await db.begin(id)
+        let started = Locked(false)
+        let settled = Locked(false)
+        let outer = Task { () async -> Result<DbExecuted, DbError> in
+            started.withLock { $0 = true }
+            let result = await capture { () async throws(DbError) -> DbExecuted in
+                try await db.execute(id, "INSERT INTO notes (title) VALUES ('outer')", [])
+            }
+            settled.withLock { $0 = true }
+            return result
+        }
+        // The outer statement's task registers it as a waiter as soon as it runs, without suspending first. Waited for, so that
+        // the statements below come after it (a task that had not run would make them prove nothing, never fail).
+        await eventually("the outer statement's task to run") { started.withLock { $0 } }
+        for index in 0 ..< 5 {
+            _ = try await db.execute(tx, "INSERT INTO notes (title) VALUES (?)", [.text("in tx \(index)")])
+            XCTAssertFalse(settled.withLock { $0 }, "statement \(index) of the transaction waited for the outer statement")
+        }
+        try await db.finish(tx, commit: true)
+        let executed = try await outer.value.get()
+        XCTAssertEqual(executed.lastInsertId, 6, "the outer statement ran once the transaction ended")
+        let rows = try await db.query(id, "SELECT COUNT(*) FROM notes", [])
+        XCTAssertEqual(rows.rows, [[.integer(6)]])
     }
 
     /// 2b: a transaction left open when the core shuts down (the binding detaches) is rolled back
@@ -640,12 +688,16 @@ final class DbReviewTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(started), 0.055, "the open waited for the lock")
         recorder.fail("PRAGMA journal_mode = WAL", with: .busy)
         let again = Date()
+        let reference = referenceSleep(milliseconds: 300) // the busy timeout's own length, armed as the open is
         await expectThrows(DbError.busy) { () async throws(DbError) -> DbOpened in
             try await db.open(name: "wal", migrations: notesMigrations)
         }
+        let ended = DispatchTime.now().uptimeNanoseconds
         let waited = Date().timeIntervalSince(again)
         XCTAssertGreaterThanOrEqual(waited, 0.29, "busy before the busy timeout")
-        XCTAssertLessThan(waited, 0.6, "busy well after the busy timeout")
+        // As above: not a wall-clock ceiling, but half the timeout after a sleep of its length started beside the open.
+        let late = (Double(ended) - Double(await reference.value)) / 1e6
+        XCTAssertLessThan(late, 150, "busy came \(late) ms after a sleep of the timeout's length started beside the open")
         XCTAssertEqual(recorder.ran(2).last, "close", "the connection of a failed open is closed")
     }
 

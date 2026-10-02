@@ -81,10 +81,12 @@ extension ContractScenarios {
                 throw ScenarioFailure(description: "read(1) after the drop is \(dropped), not WsError.network")
             }
 
-            // 5. A connection nobody closes is closed going away (1001), within a second.
+            // 5. A connection nobody closes is closed going away (1001). Bounded by waitLimit, a hang detector: the port closes a
+            // dropped connection fire and forget, on no timer, so a port that did not would leave it open; how soon the close
+            // frame reaches the local server is the machine's.
             _ = try await live.connect(url: "\(ws)/ws/stall", protocols: [], headers: [])
             live.abandon()
-            let stalled = try await server.waitFor("/ws/stall", "the 1001 close of an abandoned connection", timeout: .seconds(1)) {
+            let stalled = try await server.waitFor("/ws/stall", "the 1001 close of an abandoned connection", timeout: waitLimit) {
                 $0.closeCode != nil
             }
             try checkEqual(stalled.closeCode, 1001, "the close code of an abandoned connection")
@@ -128,7 +130,9 @@ extension ContractScenarios {
             let hang = try await sseFollow(url: "\(http)/sse/hang", lastEventId: nil, max: 0, ctx: core)
             try checkEqual(hang.events, [], "sse_follow(hang, nil, 0).events")
             try checkEqual(hang.ended, false, "sse_follow(hang, nil, 0).ended")
-            _ = try await server.waitFor("/sse/hang", "the client leaving /sse/hang", timeout: .seconds(1)) { $0.clientClosed }
+            // Bounded by waitLimit, a hang detector: the server never ends /sse/hang, and the port leaves it when the core closes
+            // the subscription, on no timer, so a port that did not would stay; how soon the server sees it is the machine's.
+            _ = try await server.waitFor("/sse/hang", "the client leaving /sse/hang", timeout: waitLimit) { $0.clientClosed }
 
             // 4. Typed failures.
             for code in [204, 500] {

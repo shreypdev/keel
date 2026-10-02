@@ -117,7 +117,10 @@ extension ContractScenarios {
                 try check(!(error is CancellationError), "a stream cancelled by the core failed as a CancellationError")
                 try checkEqual(error as? UndraCallError, .cancelledByCore, "the error of ticksThenFail across a restore")
             }
-            try check(tookToFail < .seconds(1), "the stream took \(tookToFail) to fail after the restore")
+            // Bounded by waitLimit, a hang detector: the restore ends the stream while it runs, on no timer, so a core that did
+            // not would leave it open (or end it at item 999,999 with its own error, which the checks above refuse); how soon
+            // after the restore the failure is read is the machine's.
+            try check(tookToFail < waitLimit, "the stream took \(tookToFail) to fail after the restore, past the \(waitLimit) wait")
             try checkEqual(afterRestore, Array(2 ..< 2 + UInt32(afterRestore.count)), "the items read after the restore")
             try await waitUntil("open_streams to return to \(openBeforeRestore)") {
                 core.stat("open_streams") == openBeforeRestore

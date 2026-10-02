@@ -3,7 +3,7 @@ import { UndraCallError, WireError } from "@undra/runtime";
 import { LabError, Probe } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { counters } from "../src/stats.js";
-import { sleep, step, waitFor } from "../src/wait.js";
+import { WAIT_TIMEOUT_MS, sleep, step, waitFor } from "../src/wait.js";
 
 // S07 stream with backpressure: the core produces items only against credit the consumer grants
 // (16 at subscribe, topped up as the consumer drains), so a consumer that stops reading stops the
@@ -87,7 +87,9 @@ test("S07 stream with backpressure", async ({ task }) => {
       if (seen.length === 3) break;
     }
     expect(seen).toEqual([0, 1, 2]);
-    await waitFor("the core to close the stream", async () => (await counters(core)).openStreams === before.openStreams, { timeoutMs: 1_000 });
+    // The default wait (WAIT_TIMEOUT_MS), a hang detector as on Swift and Kotlin: a stream that was not cancelled stays open,
+    // on no timer; how soon the close is counted is the machine's. The claim about the producer is the count below.
+    await waitFor("the core to close the stream", async () => (await counters(core)).openStreams === before.openStreams);
     const produced = (await probe.counters()).produced - producedBefore;
     expect(produced, "items the core produced for the abandoned stream").toBeLessThan(200);
     expect((await core.stats()).openStreams, "the runtime forgot the stream too").toBe(0);
@@ -126,14 +128,18 @@ test("S07 stream with backpressure", async ({ task }) => {
     expect(await read(iterator, 2)).toEqual([0, 1]);
     // The probe is not a store: the restore invalidates it and ends its stream.
     await core.restore(bytes);
-    const { items, error } = await failureOf(iterator, 1_000);
+    // Bounded by WAIT_TIMEOUT_MS, a hang detector: the restore ends the stream while it runs, on no timer, so a core that did not
+    // would leave it open (or end it at item 999,999 with its own error, which the checks below refuse); how soon after the
+    // restore the failure is read is the machine's.
+    const { items, error } = await failureOf(iterator, WAIT_TIMEOUT_MS);
     // What the core had already sent against credit is still delivered first, in order.
     expect(items, "the items delivered before the failure").toEqual(Array.from({ length: items.length }, (_, i) => i + 2));
     expect(items.length).toBeLessThanOrEqual(64);
     expect(error, "not a wire decode error").not.toBeInstanceOf(WireError);
     expect(error, "not the stream's own error").not.toBeInstanceOf(LabError);
     expect(error).toBeInstanceOf(UndraCallError.CancelledByCore);
-    await waitFor("the core to close the stream", async () => (await counters(core)).openStreams === before.openStreams, { timeoutMs: 1_000 });
+    // The default wait (WAIT_TIMEOUT_MS), as on Swift and Kotlin: a hang detector, for the same reason as the failure above.
+    await waitFor("the core to close the stream", async () => (await counters(core)).openStreams === before.openStreams);
     expect((await core.stats()).openStreams, "the runtime forgot the stream too").toBe(0);
   });
 

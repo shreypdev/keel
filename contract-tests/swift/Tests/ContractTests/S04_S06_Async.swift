@@ -10,13 +10,15 @@ extension ContractScenarios {
         await scenario("S04", "async call") {
             let core = try self.core
 
-            // 1. One call: 42, after at least 45 ms and less than 2 s.
+            // 1. One call: 42, after at least 45 ms.
             let started = ContinuousClock.now
             let sum = try await addLater(a: 20, b: 22, delayMs: 50, ctx: core)
             let elapsed = ContinuousClock.now - started
             try checkEqual(sum, 42, "add_later(20, 22, 50)")
             try check(elapsed >= .milliseconds(45), "add_later(.., 50) returned after only \(elapsed)")
-            try check(elapsed < waitLimit, "add_later(.., 50) took \(elapsed)")  // waitLimit, not a tight bound: CI runners stall
+            // The upper bound is waitLimit, a hang detector: a timer that never fires is what it catches. How long after 50 ms
+            // the answer comes is the machine's (CI runners stall); step 2's order is the claim that the delays are honoured.
+            try check(elapsed < waitLimit, "add_later(.., 50) took \(elapsed), past the \(waitLimit) wait")
 
             // 2. Three concurrent calls resolve in the order of their delays, with the right values.
             let finished = Locked<[Int32]>([])
@@ -238,7 +240,10 @@ extension ContractScenarios {
             case .failure(let error):
                 try check(error is CancellationError, "a cancelled fail_later failed with \(error), not CancellationError")
             }
-            try check(ContinuousClock.now - cancelRequested < .seconds(1), "the cancelled fail_later took \(ContinuousClock.now - cancelRequested) to end")
+            // Relative to the call's own 5 s delay, not to a second of wall clock: a cancel that waited for the core's answer
+            // would end 4.9 s after it, so under half the delay (2.5 s) tells the two apart on a machine that stalls.
+            let cancelTook = ContinuousClock.now - cancelRequested
+            try check(cancelTook < .milliseconds(2_500), "the cancelled fail_later took \(cancelTook) to end, not under half of its own 5 s delay")
             try await waitUntil("crossings.cancelled to grow by the typed call") {
                 core.stat("crossings.cancelled") - cancelledBeforeTyped == 1
             }

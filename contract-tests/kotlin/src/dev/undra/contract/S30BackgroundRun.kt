@@ -20,7 +20,9 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
@@ -60,11 +62,12 @@ fun s30BackgroundRun(w: World) {
         check(core.stats().background.hasPendingWork) { "hasPendingWork is false with pending ${core.stats().background.pending}" }
         backgroundFlushesAtOnce(w, handle, url, list)
 
-        // 2. Still offline: the run says so and does not wait.
+        // 2. Still offline: the run says so and does not wait. A run that waited would return at its deadline less the half second it keeps
+        // for the host (4.5 s); under half the deadline tells the two apart on a machine that stalls for a second.
         val offlineStarted = System.nanoTime()
         val offline = runBlocking { core.runInBackground(5_000L) }
         val offlineMs = (System.nanoTime() - offlineStarted) / 1_000_000L
-        check(offlineMs < 1_000L) { "runInBackground(5 s) offline took $offlineMs ms, not under 1 s" }
+        check(offlineMs < 2_500L) { "runInBackground(5 s) offline took $offlineMs ms, not under half its deadline" }
         expectEq("finished of a run offline", false, offline.finished)
         expectEq("replayed of a run offline", 0, offline.replayed)
         check(offline.stillPending >= 1) {
@@ -97,10 +100,16 @@ fun s30BackgroundRun(w: World) {
         awaitEq("storage_status().pending with the slow creation queued", 1u) { storageStatus().pending }
         w.server.respond(HttpMethod.POST, url, 201, """{"id":10,"title":"Slow","done":false}""", delayMs = 5_000)
         w.connectivity.changed(online = true, kind = NetKind.WIFI)
+        // The run is cut at its deadline less the half second it keeps for the host: measured against a timer of that length armed beside it,
+        // which a slow machine fires as late as the core's, and not against 900 ms of wall clock. A run that kept no half second, or waited for
+        // the POST, ends 500 ms or more after the timer.
         val cutStarted = System.nanoTime()
+        val reference = scope.async { delay(500L); System.nanoTime() }
         val cut = runBlocking { core.runInBackground(1_000L) }
-        val cutMs = (System.nanoTime() - cutStarted) / 1_000_000L
-        check(cutMs <= 900L) { "runInBackground(1 s) returned after $cutMs ms, not within 900 ms (the deadline less the half second kept for the host)" }
+        val cutEnded = System.nanoTime()
+        val cutMs = (cutEnded - cutStarted) / 1_000_000L
+        val lateMs = (cutEnded - runBlocking { reference.await() }) / 1_000_000L
+        check(lateMs < 400L) { "runInBackground(1 s) returned $lateMs ms after a 500 ms timer armed beside it (it took $cutMs ms)" }
         check(cutMs >= 300L) { "runInBackground(1 s) returned after $cutMs ms: it did not use its window" }
         expectEq("finished of the run cut at its deadline", false, cut.finished)
         expectEq("replayed of the run cut at its deadline", 0, cut.replayed)
@@ -137,9 +146,12 @@ fun s30BackgroundRun(w: World) {
         val cancelStarted = System.nanoTime()
         runBlocking { run.cancelAndJoin() }
         val cancelMs = (System.nanoTime() - cancelStarted) / 1_000_000L
+        // The cancel did not wait for the replay the run had started: its POST answers 3 s after it was sent, and the creation is still
+        // waiting for it. (An order, not the 1 s of wall clock this was: a machine that stalls that long does not make the cancel wait.)
+        val replayStillOut = !held.isDone
         val outcome = ended.get(WAIT_MS, TimeUnit.MILLISECONDS)
         check(outcome is CancellationException) { "the cancelled run ended with $outcome, not a CancellationException" }
-        check(cancelMs < 1_000L) { "cancelling the run took $cancelMs ms" }
+        check(replayStillOut) { "cancelling the run waited $cancelMs ms, until the replay it had started answered" }
         expectEq("add(1, 2) after the run was cancelled", 3, add(1, 2))
         expectEq("the queue is intact after the cancel", 1u, storageStatus().pending)
         awaitEq("storage_status().pending once the held POST answers", 0u, timeoutMs = 10_000L) { storageStatus().pending }
@@ -160,22 +172,49 @@ fun s30BackgroundRun(w: World) {
 }
 
 /**
- * Step 1, the second half: going to the background writes what waits out its debounce at once. The list is fetched again with new contents,
- * which makes its cache entry dirty (written 250 ms later), and `Lifecycle.changed(Background)` must have it in the `Kv` within 100 ms.
+ * Step 1, the second half: going to the background writes a cache entry that waits out its 250 ms persistence debounce at once, rather than
+ * leaving it to the debounce. Shown against the debounce's own clock, not a deadline of the machine's (100 ms was one, and a hosted runner
+ * stalled past it): the list is fetched again with new contents, which makes its cache entry dirty and arms a debounce only after `armed` was
+ * read, so a write of it seen less than 240 ms after `armed` (10 ms short, for the clocks' granularity) cannot be that debounce's. (The first fetch's own debounce is waited out first, so
+ * it cannot be either.) A trial in which the machine stalled past that (the entry written before Background, or seen 240 ms or more after
+ * `armed`) says nothing and is repeated with new contents, up to five times; a core that leaves the entry to its debounce writes it only once
+ * the debounce could have fired, and fails all five.
  */
 private fun backgroundFlushesAtOnce(w: World, handle: RemoteTodosQueryHandle, url: String, list: String) {
     val key = Persisted.cacheKey(UndraIds.Queries.REMOTE_TODOS, Codecs.string.encodeToByteArray(list))
     val writes = { w.kv.operations.count { it.isSet && it.key == key } }
-    w.server.respond(HttpMethod.GET, url, 200, """[{"id":1,"title":"Server","done":false}]""")
-    handle.refetch()
-    awaitUntil("the refetched list") { handle.data.value?.any { it.title == "Server" } == true }
-    val before = writes()
-    LifecycleEvents(w.core).changed(AppState.BACKGROUND)
-    try {
-        awaitUntil("the cache entry of the list to be written within 100 ms of Background, not 250 ms later", timeoutMs = 100L) { writes() > before }
-    } finally {
-        // Back to where the scenario's steps expect the app to be.
-        LifecycleEvents(w.core).changed(AppState.ACTIVE)
+    awaitUntil("the first fetch's cache entry to be written by its debounce") { writes() > 0 }
+    val seen = ArrayList<String>()
+    for (trial in 1..5) {
+        val title = "Server $trial"
+        w.server.respond(HttpMethod.GET, url, 200, """[{"id":1,"title":"$title","done":false}]""")
+        val armed = System.nanoTime()
+        val atArmed = writes()
+        handle.refetch()
+        awaitUntil("the refetched list") { handle.data.value?.any { it.title == title } == true }
+        val before = writes()
+        if (before > atArmed) {
+            // Its debounce wrote it already: the machine stalled 250 ms between the refetch and here.
+            seen.add("before Background, ${(System.nanoTime() - armed) / 1_000_000L} ms")
+            continue
+        }
+        LifecycleEvents(w.core).changed(AppState.BACKGROUND)
+        val atMs = try {
+            awaitUntil("the cache entry of the list to be written after Background") { writes() > before }
+            (System.nanoTime() - armed) / 1_000_000L
+        } finally {
+            // Back to where the scenario's steps expect the app to be.
+            LifecycleEvents(w.core).changed(AppState.ACTIVE)
+        }
+        // 10 ms short of the debounce: the clocks the core's timer and this read can disagree by their granularity (a millisecond).
+        if (atMs < 240L) {
+            w.server.respond(HttpMethod.GET, url, 200, "[]")
+            return
+        }
+        seen.add("$atMs ms")
     }
-    w.server.respond(HttpMethod.GET, url, 200, "[]")
+    fail(
+        "in five trials the cache entry was written only after the refetch that made it dirty ($seen), when its 250 ms debounce could have " +
+            "fired: Background did not write it at once",
+    )
 }

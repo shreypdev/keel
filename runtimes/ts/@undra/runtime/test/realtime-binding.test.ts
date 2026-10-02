@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { HeaderCodec, WsOpenedCodec } from "../src/adapters/codecs.js";
 import { OptInPortIds } from "../src/adapters/opt-in-ids.js";
 import { type Header, SseError, type SseEvent, WsError, type WsMessage } from "../src/adapters/types.js";
@@ -109,30 +109,52 @@ describe("webSocketPort: the pull is the credit", () => {
     expect(await api.receive(conn, 20)).toEqual({ ok: texts(25, 45) });
   });
 
-  it("answers a waiting receive with a lone message after 2 ms of quiet", async () => {
-    const { api, conn, connection } = await opened();
-    const waiting = api.receive(conn, 16);
-    await settle();
-    const pushed = performance.now();
-    connection.source.push(text("late"));
-    expect(await waiting).toEqual({ ok: [text("late")] });
-    expect(performance.now() - pushed).toBeLessThan(100);
+  // The two tests below run on a clock the test moves (`vi.useFakeTimers`): the 2 ms of quiet and the 8 ms cap are the binding's own timers, and what a test can say
+  // about them is where they fire in that clock, not how many real milliseconds a machine took to get there (a message every 1 ms of real time is more than
+  // 2 ms apart on a busy one, and 100 ms is not a bound on anything the binding does).
+  it("answers a waiting receive with a lone message after 2 ms of quiet: not at once, and not after the 8 ms cap", async () => {
+    vi.useFakeTimers();
+    try {
+      const { api, conn, connection } = await opened();
+      let answer: unknown;
+      void api.receive(conn, 16).then((got) => {
+        answer = got;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      connection.source.push(text("late"));
+      await vi.advanceTimersByTimeAsync(1);
+      expect(answer, "1 ms after it, more might follow").toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(answer, "2 ms after it, nothing else came").toEqual({ ok: [text("late")] });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("answers a burst that trickles in as one reply: up to max, or 8 ms after its first message", async () => {
-    const { api, conn, connection } = await opened();
-    const waiting = api.receive(conn, 16);
-    await settle();
-    // One message a millisecond: never 2 ms of quiet, so the 8 ms linger answers what came by then.
-    let sent = 0;
-    const timer = setInterval(() => connection.source.push(text(String(sent++))), 1);
-    const got = await waiting;
-    clearInterval(timer);
-    const first = "ok" in got ? got.ok : [];
-    expect(first.length, "more than one message per reply").toBeGreaterThan(1);
-    expect(first).toEqual(texts(0, first.length));
-    connection.source.push(...texts(sent, sent + 40));
-    expect(await api.receive(conn, 16), "a full burst answers at max").toMatchObject({ ok: { length: 16 } });
+    vi.useFakeTimers();
+    try {
+      const { api, conn, connection } = await opened();
+      let got: Awaited<ReturnType<typeof api.receive>> | undefined;
+      void api.receive(conn, 16).then((reply) => {
+        got = reply;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      // One message a millisecond: never 2 ms of quiet, so the 8 ms cap answers what came by then.
+      let sent = 0;
+      while (got === undefined && sent < 100) {
+        connection.source.push(text(String(sent++)));
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      const first = got !== undefined && "ok" in got ? got.ok : [];
+      expect(first.length, "more than one message per reply").toBeGreaterThan(1);
+      expect(first.length, "answered by the cap, 8 ms after the first message, not when the trickle ended").toBeLessThanOrEqual(9);
+      expect(first).toEqual(texts(0, first.length));
+      connection.source.push(...texts(sent, sent + 40));
+      expect(await api.receive(conn, 16), "a full burst answers at max").toMatchObject({ ok: { length: 16 } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("allows one waiting receive per connection", async () => {
