@@ -6,7 +6,8 @@ import { UndraTransportError } from "../src/errors.js";
 import { type PanicContext, panicSupport, parsePanicRecord, trapFrames, trapReport, wasmImageId } from "../src/panic-report.js";
 import { type UndraCoreRestarted, crashRecovery } from "../src/recovery.js";
 import type { WasmSource } from "../src/transport/wasm-main.js";
-import { CallTarget } from "../src/wire/index.js";
+import { PanicReportCodec } from "../src/adapters/codecs.js";
+import { CallTarget, decodeValue, encodeValue } from "../src/wire/index.js";
 import { captureLog, macrotask, track } from "./support/harness.js";
 import { STUB, compileStub } from "./support/stub-core.js";
 import { channelWorker } from "./support/worker.js";
@@ -122,6 +123,35 @@ describe("the report of a trap", () => {
     });
     // The same nine fields, and only those, as the report of a native core.
     expect(Object.keys(report).sort()).toEqual(["coreVersion", "frames", "imageId", "location", "message", "namespace", "operation", "schemaHash", "thread"]);
+  });
+
+  it("has the shape of the report a native core hands the Diagnostics port, field by field (prod-ops review)", () => {
+    // The native report, as the Rust runtime encodes it and the port decodes it; the wasm one, built from a trap.
+    const native = decodeValue(
+      PanicReportCodec,
+      encodeValue(PanicReportCodec, {
+        message: "kaboom",
+        location: "core/src/lab.rs:222:5",
+        operation: "explode",
+        thread: "undra-core",
+        frames: [{ address: 0x1234n, symbol: null, file: null, line: null }],
+        namespace: "playground_core",
+        coreVersion: "1.2.3",
+        schemaHash: 0xabcdn,
+        imageId: "0123456789abcdef0123456789abcdef",
+      }),
+    );
+    const wasm = trapReport("kaboom\n    at core/src/lab.rs:42:9\n    in explode", trapError(V8_STACK), CONTEXT);
+    const shape = (value: object): Array<[string, string]> =>
+      Object.entries(value)
+        .map(([key, field]): [string, string] => [key, field === null ? "null" : Array.isArray(field) ? "array" : typeof field])
+        .sort(([a], [b]) => a.localeCompare(b));
+    expect(shape(wasm)).toEqual(shape(native));
+    expect(wasm.frames.length).toBeGreaterThan(0);
+    for (const frame of wasm.frames) {
+      expect(Object.keys(frame).sort()).toEqual(Object.keys(native.frames[0] as object).sort());
+      expect(typeof frame.address).toBe("bigint");
+    }
   });
 
   it("puts the trap's own text in the message when the core logged none (a stack overflow, out of memory)", () => {

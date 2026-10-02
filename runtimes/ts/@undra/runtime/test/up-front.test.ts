@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 /*
  * What a page loads up front is what `UndraCore` reaches by static imports (ADR-052: the hello page's JavaScript is gated at
- * 21,500 bytes gzipped, `scripts/web-size-runtime.mjs`). The modules below are code a hello page never runs, so the core
+ * 21,700 bytes gzipped, `scripts/web-size-runtime.mjs`). The modules below are code a hello page never runs, so the core
  * fetches each by a dynamic `import()` when it needs it; one static import of any of them, from the core or from anything the
  * core reaches, puts it in the first chunk, whole. This test is the cheap guard of that (the gate itself needs a build).
  */
@@ -49,12 +49,13 @@ describe("what UndraCore loads up front", () => {
     }
   });
 
-  it("does not reach what loads on demand: the ports, their codecs, the report builder of a trap, the other transports, recovery", () => {
+  it("does not reach what loads on demand: the ports, their codecs, the report builder of a trap, the background run, the other transports, recovery", () => {
     for (const name of [
       "adapters/ports.ts", // the Diagnostics and Timer ports of a native core, and every port builder
       "adapters/codecs.ts",
       "adapters/standard.ts", // the default ports' implementations
       "panic-report.ts", // the report of a trap, for an app with `onPanic` or `crashRecovery`
+      "background.ts", // `runInBackground`, for a core with background work to drain (prod-ops review, ADR-052)
       "transport/remote.ts",
       "transport/wasm-worker.ts",
       "recovery.ts",

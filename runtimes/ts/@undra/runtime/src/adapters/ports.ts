@@ -3,6 +3,7 @@ import type { PortImpl } from "../port.js";
 import { UndraReader, UndraWriter, codecs, encodeValue } from "../wire/index.js";
 import { readHttpRequest, readPanicReport, writeFsError, writeHttpError, writeHttpResponse, writeStorageError } from "./codecs.js";
 import { PortIds } from "./ids.js";
+import { consoleLog } from "./system.js";
 import {
   type Adapters,
   type ClockAdapter,
@@ -258,6 +259,25 @@ export function diagnosticsPort(onPanic: ((report: UndraPanicReport) => void) | 
       },
     },
   };
+}
+
+/**
+ * Registers the {@link diagnosticsPort} of a native core in `ports` unless the app registered its own: what `UndraCore` does when it
+ * loads one (`remote`, React Native, a custom transport), before the transport starts. Without `onPanic` a report is logged through
+ * `log` (default: the console); a handler that throws is reported to `core.report` (`onError`). Here rather than in `UndraCore`, so
+ * that a page with a wasm core does not ship it (ADR-052).
+ *
+ * @internal Called by `UndraCore`.
+ */
+export function serveDiagnostics(
+  core: { report(error: unknown, operation: string): void },
+  ports: Map<number, PortImpl>,
+  onPanic: ((report: UndraPanicReport) => void) | undefined,
+  log: LogAdapter = consoleLog(),
+): void {
+  if (!ports.has(PortIds.Diagnostics.portId)) {
+    ports.set(PortIds.Diagnostics.portId, diagnosticsPort(onPanic, { log, fail: (error) => core.report(error, "onPanic") }));
+  }
 }
 
 /**

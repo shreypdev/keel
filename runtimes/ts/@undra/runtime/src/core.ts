@@ -39,7 +39,6 @@ import {
   StreamFlag,
   type PortCallPayload,
   type StreamFailure,
-  UndraReader,
   codecs,
   decodeStreamFailure,
   decodeValue,
@@ -50,7 +49,6 @@ import {
   encodeRelease,
   encodeStreamCredit,
   encodeTimerFired,
-  encodeValue,
   streamFailureReplyBody,
 } from "./wire/index.js";
 
@@ -92,8 +90,6 @@ export interface UndraStats {
   readonly background: UndraBackgroundStats;
 }
 
-/** The standard function `run_background` (`fnv1a32("fn.run_background")`, ADR-046): in every schema, called like any free async function. */
-const RUN_BACKGROUND = 0x0e5b14ff;
 /** How long the runtime lets the core drain its background work when a page goes to the background (ADR-046 decision 3.4), in ms. */
 const PAGE_BACKGROUND_MS = 1000;
 
@@ -966,14 +962,9 @@ export class UndraCore {
    * ```
    */
   async runInBackground(deadlineMs: number, options: { readonly signal?: AbortSignal } = {}): Promise<UndraBackgroundReport> {
-    const ms = Math.min(Math.max(0, Math.trunc(deadlineMs) || 0), Number.MAX_SAFE_INTEGER);
     try {
-      const body = await this.call(CallTarget.FreeFunction, RUN_BACKGROUND, encodeValue(codecs.u64, BigInt(ms)), options.signal);
-      // `BackgroundReportCodec.decode` (adapters/codecs.ts), spelled out: this module does not import the codecs, which load on demand.
-      const reader = new UndraReader(body);
-      const report = { finished: reader.readBool(), replayed: reader.readU32(), refetched: reader.readU32(), stillPending: reader.readU32() };
-      reader.finish();
-      return report;
+      // Loaded on demand (`background.ts`): a hello page, whose core has no background task, never runs it (ADR-052).
+      return await (await import("./background.js")).runInBackground(this, deadlineMs, options.signal);
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
@@ -1034,9 +1025,7 @@ export class UndraCore {
     // it reports each panic it contained (ADR-046 decision 4.2), and the Timer port of an explicit adapter. Fetched before the transport
     // starts, so that they are registered before the first message after the Hello can reach them. A wasm core needs neither: it traps.
     const ports = this._transport.mode.startsWith("wasm") ? undefined : await import("./adapters/ports.js");
-    if (ports !== undefined && !this._ports.has(PortIds.Diagnostics.portId)) {
-      this._ports.set(PortIds.Diagnostics.portId, ports.diagnosticsPort(this._options.onPanic, { log: this._adapters.log ?? consoleLog(), fail: (error) => this._reportError("onPanic", error) }));
-    }
+    ports?.serveDiagnostics(this, this._ports, this._options.onPanic, this._adapters.log);
     const hello = await this._transport.start(this._handler);
     if (hello.schemaHash !== this._options.expectedSchemaHash) {
       throw new UndraSchemaMismatchError(this._options.expectedSchemaHash, hello.schemaHash);

@@ -708,12 +708,12 @@ tolerance = 0.05
 # -> 24,335 by that change of what is measured alone) and cuts it to 21,159: the remote transport, the default
 # ports and the framed transports' wire code load on demand (-4,686), the call path's levers (ADR-056) cost 1,510.
 # The 16 KB the first restatement aimed at is not reached: what is left is the runtime itself (the amendment says
-# what). Gated like the wasm. prod-ops (ADR-046) raises the budget to 22,000: the hello world carries, up front, the
-# report loader of the wasm trap path, `runInBackground`, the page's background window with its `pagehide` and
-# `freeze` listeners, the stats fields and the Diagnostics registration, 420 bytes over main's 21,336 (the report
-# builder, the Diagnostics port and its codecs are lazy chunks). The ablation is in the ADR-046 amendment.
+# what). Gated like the wasm. prod-ops (ADR-046) raises the budget to 21,700: the hello world carries, up front, the
+# report loader of the wasm trap path, the page's background window with its `pagehide` and `freeze` listeners and the
+# stats fields, 330 bytes over main's 21,336; `runInBackground`, the report builder and the Diagnostics port with its
+# registration and codecs are lazy chunks. The item-by-item verdict is ADR-052's review note of 2026-10-02.
 [size."web/hello-runtime-js"]
-budget_gzip_bytes = 22000
+budget_gzip_bytes = 21700
 measured_gzip_bytes = 21756
 tolerance = 0.05
 

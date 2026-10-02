@@ -326,6 +326,8 @@ records, the fakes, scenarios, SPEC sections, docs. The decisions below are the 
     The hello-world JavaScript runtime, as the up-front chunk `main`'s ts-size-e4 gates, grew by 420 bytes gzipped (21,336 to
     21,756), over the 21,500 gate: `web/hello-runtime-js` is raised to 22,000 in `bench/budgets.toml` and recorded at 21,756
     (ADR-052's amendment of 2026-10-01 has the ablation); the report builder (853 bytes) and the `Diagnostics` port are lazy.
+    *Review (2026-10-02):* `runInBackground` and the `Diagnostics` registration load on demand too; 21,666 up front, gate
+    21,700 (ADR-052's review note has the item-by-item verdict).
 15. **The Android release build ignored ADR-052's home remap** (17 `/Users/<name>` strings in the baseline `.so`); fixed
     (`cargo ndk` gets the remap through `--config build.rustflags`).
 16. **`.lldbinit`**: Rust 1.98's sysroot has `lldb_lookup.py` and no `lldb_commands`, so the generated file is one `script` line

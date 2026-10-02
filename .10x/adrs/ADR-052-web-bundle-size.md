@@ -504,3 +504,27 @@ One behaviour change on `main`'s lazy design: a page that loads a native core ov
 stand-in) now fetches the `ports` chunk (about 2.3 KB gzipped) at load, because the `Diagnostics` port must be registered
 before the transport starts; `main` fetched it there only for an explicit Timer adapter. A failed fetch rejects `load`, as
 it already did in that case.
+
+## Review note (2026-10-02, `prod-ops` adversarial review): D1, the gate is 21,700
+
+The rule (R9): growth of `web/hello-runtime-js` is allowed only for behaviour a hello app gets at load. The review took the
+amendment above item by item (the ablation's numbers, gzipped, overlapping) and moved what a hello app never runs out of the
+first chunk:
+
+| Item | Bytes | Verdict |
+|---|---|---|
+| The `pagehide` and `freeze` listeners | 80 | **Kept up front.** Registered at load for every page; at `pagehide`/`freeze` a chunk fetch is unreliable. |
+| The page's background window (`_backgroundWindow`, its `stats()` read) | 80 | **Kept up front.** Runs at every hide, for every page. |
+| The `panicReports` and `background` stats fields | 76 | **Kept up front.** Specified surface of `stats()` on every platform; the window reads `background.pending`. |
+| The trap-report loader (`_loadPanics`) | 130 | **Kept up front.** The trigger must run at load: the builder and the module's SHA-256 (`imageId`) have to be there before a trap, and with `recovery` the report is built synchronously before the restart. The builder itself (`panic-report.js`) stays lazy. |
+| `runInBackground` | 112 | **Lazy** (`background.js`, 281 bytes on demand). A hello core has no background task, so `background.pending` is 0 and the window never calls it. The window fetches the chunk at the first hide with work pending; `visibilitychange` to hidden precedes `pagehide` and `freeze` (a page is frozen only when hidden), and the debounced persistence is flushed by the core on `Lifecycle.Background` itself, not by the run. The amendment's objection (a fetch at `pagehide` is unreliable) holds only for a browser that fires `pagehide` without hiding first, where the page is going away and the replay's network calls could not finish either. A failed chunk fetch rejects the call with an `UndraCallError` (to `onError` in the window), like the other lazy chunks. |
+| The `Diagnostics` registration | 56 | **Lazy** (`serveDiagnostics` in the `ports` chunk). Only a native core runs it, and that chunk is already fetched before the transport starts; a wasm page ships none of it. |
+
+Measured on the review's tree with the gate's own script: **21,666** bytes gzipped (was 21,756; -90), `lazy_gzipped` 24,246.
+`up-front.test.ts` now also fails if `core.ts` statically reaches `background.ts`. The budget is **21,700**, the record
+rounded up to the next hundred (the 5% tolerance stays): 22,000 would have left 334 bytes of unexplained room, which is not a
+test.
+
+For the integrator (the `objects-callbacks` review has the same question, with +504 measured against `main`'s 21,336): the
+two pieces' up-front costs are not additive (gzip), so the merged tree is measured once both are in, and the gate is that
+number rounded up to the next hundred, with each piece's items listed here or in that review's note.
