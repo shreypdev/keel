@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   BackgroundReportCodec,
   CallTarget,
@@ -198,12 +198,18 @@ describe("runInBackground and the stats through the native transport", () => {
   test("aborting the signal cancels the call in the native core", async () => {
     const { core, native } = await attach();
     opened.push(core);
-    native.onCall = () => 0; // never answered
+    let sent = 0;
+    native.onCall = () => {
+      sent += 1;
+      return 0; // never answered
+    };
     const abort = new AbortController();
     const run = core.runInBackground(30_000, { signal: abort.signal }).then(
       () => undefined,
       (e: unknown) => e,
     );
+    // `runInBackground` loads on demand (ADR-052, prod-ops review): the call reaches the core a few ticks later.
+    await vi.waitFor(() => expect(sent).toBe(1));
     abort.abort();
     const error = await run;
     expect((error as Error).name).toBe("AbortError");
