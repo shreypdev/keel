@@ -790,6 +790,34 @@ with the stores' state as seen at each call. `UndraCore.callbacks` (the registry
    interface in the playground only: none yet; the golden case `callbacks` and each runtime's own tests cover
    `background`.)
 
+### S31 newtypes, generic instantiations and leaf types (ADR-042)
+
+`ledger` (`examples/playground/core/src/ledger.rs`): free functions (`open_account`, `deposit`, `balances`, `statement`,
+`loadable_statement`, `echo_*`, `sample_receipt`) and the `Ledger` store. Every step goes through the **generated** API.
+
+1. **A newtype is its inner value on the wire.** The codec of `AccountId` writes the same 16 bytes as the `Uuid` codec of the same
+   value, `Cents(-5)` the same 8 bytes as an `i64`, `Price` the same 17 bytes as a `Decimal`; `echo_account(id)` returns an equal
+   `AccountId`, `echo_cents` an equal `Cents`, `echo_price` an equal `Price`. The platform type is a distinct type
+   (Swift `struct AccountId: RawRepresentable` with `rawValue: UUID`, Kotlin `@JvmInline value class`, TypeScript a branded
+   `string`/`number` that is `===` to its inner value at run time); `Cents` is `Comparable` on Swift and Kotlin
+   (`Cents(1) < Cents(2)`).
+2. **A newtype is a map key and the key of a keyed list.** After `open_account` twice, `balances()` is a dictionary/map with
+   exactly those two `AccountId` keys (Swift `[AccountId: Price]`, Kotlin `Map<AccountId, Price>`, TypeScript
+   `Map<AccountId, Price>`). `Ledger` (a store whose `accounts` list is keyed by an `AccountId`): `open("Ada")` delivers one
+   change-set whose `accounts` entry is a keyed patch of one `Insert` (value under 64 bytes), `rename` one `Update`,
+   `close_account` one `Remove`, and the mirrored list equals the model after each.
+3. **Generic instantiations are plain records and enums.** After five `deposit`s of `1.50` into one account: `statement(a, 0, 2)` is an
+   `EntrySlice` of 2 items with `next == 2`, `statement(a, 4, 10)` has 1 item and `next == nil`; `loadable_statement(a, false, 3)` is
+   `.loading`, `(a, true, 3)` is `.loaded(slice)` with 3 items, an unknown account `.failed("no such account")`.
+4. **Decimals are exact.** `deposit(0.1)` then `deposit(0.2)` returns a balance whose text is `0.3`; `echo_decimal` returns the
+   same mantissa and scale for `0`, `1.10`, `-1.50`, a scale of 38, the smallest and the largest 128-bit mantissa (Swift compares
+   the re-encoded bytes with the sent ones, Kotlin `BigDecimal.equals` and TypeScript `Decimal.equals` are scale-sensitive and hold);
+   a wire decimal with a scale of 39, sent through the raw API, is refused by the core as a bad request, never decoded; `deposit` of
+   an amount `rust_decimal` cannot hold fails with `LedgerError.OutOfRange`.
+5. **Leaf types of other crates cross as wire types.** `sample_receipt()` has `id` equal to the UUID `1ed9e400-0000-0000-0000-000000000007`,
+   `issued` the instant `2026-10-01T12:00:00.123Z` (1 790 856 000 123 ms), `valid_for` 90 s, `total` the decimal `19.990` (scale 3), `signature`
+   the bytes `[1, 2, 3, 255]`; `echo_receipt` of a receipt the platform builds returns an equal receipt.
+
 ## Platform notes
 
 * TypeScript: S03 runs only in `wasm-main` mode (the only one with `callSync`); S17 step 6 is the only

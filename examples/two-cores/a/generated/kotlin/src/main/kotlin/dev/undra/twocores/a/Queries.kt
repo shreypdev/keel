@@ -13,6 +13,7 @@ import dev.undra.runtime.wire.Timestamp
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.decodeAll
+import kotlin.time.Duration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -67,6 +68,25 @@ class RemoteTodosQueryHandle internal constructor(core: UndraCore, handle: Long)
             )
         } catch (e: Exception) {
             this.core.report(e, "RemoteTodosQueryHandle.invalidate")
+        }
+    }
+
+    /**
+     * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+     * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setPollInterval(interval: Duration?) {
+        try {
+            val w = UndraWriter()
+            codecOptionDuration.encode(w, interval)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.RemoteTodosQueryHandle.SET_POLL_INTERVAL),
+                UndraIds.Objects.RemoteTodosQueryHandle.SET_POLL_INTERVAL,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "RemoteTodosQueryHandle.setPollInterval")
         }
     }
 
@@ -224,6 +244,7 @@ suspend fun tagNote(list: String, id: UInt, ctx: UndraCore = UndraPlaygroundA.co
     }
 }
 
+private val codecOptionDuration = Codecs.option(Codecs.duration)
 private val codecVecRemoteTodo = Codecs.vec(RemoteTodo)
 private val codecOptionVecRemoteTodo = Codecs.option(codecVecRemoteTodo)
 private val codecOptionRemoteError = Codecs.option(RemoteError)

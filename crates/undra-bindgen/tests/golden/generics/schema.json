@@ -1,0 +1,369 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-generics",
+  "records": [
+    {
+      "name": "Todo",
+      "type_id": 2995082141,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ]
+    },
+    {
+      "name": "User",
+      "type_id": 3768991250,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        },
+        {
+          "name": "name",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ]
+    },
+    {
+      "name": "TodoPage",
+      "type_id": 3418294094,
+      "fields": [
+        {
+          "name": "items",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Todo"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "next",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false
+        }
+      ],
+      "docs": "A page of todos: `Page<Todo>`."
+    },
+    {
+      "name": "UserPage",
+      "type_id": 2080250009,
+      "fields": [
+        {
+          "name": "items",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "User"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "next",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false
+        }
+      ],
+      "docs": "A page of users: `Page<User>`."
+    }
+  ],
+  "enums": [
+    {
+      "name": "LoadableTodo",
+      "type_id": 1898951889,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Loading",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Loaded",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "named",
+                "of": "Todo"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Failed",
+          "index": 2,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        }
+      ],
+      "docs": "A todo on its way: `Loadable<Todo>`."
+    },
+    {
+      "name": "LoadableUser",
+      "type_id": 1657105094,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Loading",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Loaded",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "named",
+                "of": "User"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Failed",
+          "index": 2,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        }
+      ],
+      "docs": "A user on its way: `Loadable<User>`."
+    },
+    {
+      "name": "BrowseError",
+      "type_id": 3043536759,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Offline",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "offline"
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "name": "Browser",
+      "type_id": 2381677871,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 4250945635,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Browser"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "load_todos",
+          "method_id": 1119112173,
+          "params": [
+            {
+              "name": "cursor",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "string"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "TodoPage"
+              },
+              {
+                "kind": "named",
+                "of": "BrowseError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false
+        },
+        {
+          "name": "load_users",
+          "method_id": 752971996,
+          "params": [
+            {
+              "name": "cursor",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "string"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "UserPage"
+              },
+              {
+                "kind": "named",
+                "of": "BrowseError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false
+        },
+        {
+          "name": "select",
+          "method_id": 1704287363,
+          "params": [
+            {
+              "name": "todo",
+              "ty": {
+                "kind": "named",
+                "of": "LoadableTodo"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "store": {
+        "signals": [
+          {
+            "name": "todos",
+            "signal_id": 0,
+            "ty": {
+              "kind": "named",
+              "of": "TodoPage"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "users",
+            "signal_id": 1,
+            "ty": {
+              "kind": "named",
+              "of": "UserPage"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "selected",
+            "signal_id": 2,
+            "ty": {
+              "kind": "named",
+              "of": "LoadableTodo"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "owner",
+            "signal_id": 3,
+            "ty": {
+              "kind": "named",
+              "of": "LoadableUser"
+            },
+            "computed": false,
+            "key": null
+          }
+        ]
+      },
+      "docs": "Pages through todos and users."
+    }
+  ],
+  "functions": [
+    {
+      "name": "first_page",
+      "method_id": 2832513701,
+      "params": [],
+      "returns": {
+        "kind": "named",
+        "of": "TodoPage"
+      },
+      "is_async": false,
+      "takes_ctx": false
+    }
+  ],
+  "ports": [],
+  "queries": []
+}

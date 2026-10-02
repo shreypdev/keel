@@ -59,7 +59,10 @@ pub async fn todos(ctx: &Ctx, page: u32) -> Result<Vec<Todo>, HttpError> { /* ..
 | Macro | Generated (besides the item as written) |
 |---|---|
 | `api` on a struct | `impl Encode`, `impl Decode`, `UNDRA_TYPE_ID`, the hidden field-name list a keyed list looks its key up in (`__UNDRA_FIELDS`), `static __UNDRA_META_<T>: RecordMeta`, registration |
+| `api` on a tuple struct of one field | a **newtype** (ADR-042): the same, as a transparent record whose `Encode`/`Decode` delegate to `.0`, plus the hidden `Newtype` impl the `MapKey` check reads; no `From`, `Deref` or accessor |
 | `api` / `error` on an enum | the same with a `u16` variant index; `error` adds `Display`, `Error`, `From` for `#[from]` |
+| `api(generic)` on a struct or enum with type parameters | a **template** (ADR-042): the item, `impl<T: Encode> Encode` / `impl<T: Decode> Decode`, and a hidden `#[macro_export] macro_rules! __undra_template_<Name>` (re-exported as `<Name>`); registers nothing |
+| `api` on `type TodoPage = Page<Todo>;` | an **instantiation**: the alias, and the template's macro, which calls the hidden `undra::__instantiate!` to register `TodoPage` (`RecordMeta`/`EnumMeta`) and add `impl TodoPage { UNDRA_TYPE_ID, .. }` |
 | `api` on `impl T` | `impl UndraObject`, `fn __undra_dispatch_<T>` and `ObjectMeta` + registration (private to an anonymous `const _`, so a second block for the type does not define them twice) |
 | `api` on a `fn` | `fn __undra_dispatch_fn_<name>`, `FunctionMeta` + registration |
 | `store` on a struct | hidden `CellSlot` field, hidden `cell`/`restore` members (`impl StoreObject` is written by the `api(store)` impl block), a builder that attaches every signal (`attach`, `attach_keyed` with a typed key fn, `attach_computed`, `set_no_coalesce`), `StoreMeta`, `StoreRestorer` registration |
@@ -72,6 +75,32 @@ written in the code (`src/impl_/check.rs`): a user type called `Bytes`, an alias
 with its own wire layout. The proxy of a port method returning `Result<T, E>` reports an unavailable
 port as `E::from(PortError)` (E0033 if `E` lacks the impl) instead of panicking; a method without an
 error channel panics with a message that says how to bind the port (E0062). See ADR-025.
+
+The checks are of three kinds (ADR-042). Scalars and `String` and the `Vec`/`Option`/map constructors
+are compared with the canonical type (E0060). A wire leaf (`Bytes`, `Uuid`, `Timestamp`, `Duration`,
+`Decimal`) is a **membership** check, `Spelled: WireLeaf<kind>`: the canonical type qualifies, and so does
+the type of each opt-in `undra` feature (`uuid::Uuid`, `chrono::DateTime<Utc>`, `time::OffsetDateTime`,
+`rust_decimal::Decimal`, `bytes::Bytes`, ..). Every map key must be a `MapKey` (E0006): `String`, `bool`,
+the integers, `Uuid` and every newtype of one of those, which is how `HashMap<UserId, User>` compiles and
+`HashMap<Price, User>` with `struct Price(Decimal)` does not. A type of an opt-in crate that only that
+crate has (`DateTime<Utc>`, `OffsetDateTime`, `TimeDelta`) spelled without its feature is one E0001 that
+names the feature: this crate has a mirror of each feature (`uuid`, `chrono`, `time`, `rust_decimal`,
+`bytes`) that `undra` turns on together with its own, because a macro cannot ask a crate what it
+enabled. A bare `Uuid`, `Decimal`, `Bytes` or `Duration` may be the built-in type or the one of a crate, so
+without the feature that case is the compiler's three errors (E0060 and the two codec bounds), which agree
+on the fix.
+
+**Generic data types** (`#[undra::api(generic)]`, see `src/impl_/generic.rs`) keep names where they resolve:
+the template's own types are checked once, in the template's module, and an instantiation checks only its
+type arguments, because a `macro_rules!` resolves names at the place it is invoked. An alias of one
+instantiation twice, or outside the crate of its template, is E0070. The template's macro calls
+`<root>::__instantiate!`, so a `crate = ".."` path has to reach a crate that re-exports it (the `undra`
+facade does).
+
+**Persisted state.** A newtype has the bytes of its inner type, so wrapping an existing field in a newtype
+(`id: Uuid` becoming `id: UserId`), or unwrapping it, migrates without a hook (the structural step `T`
+<-> `Newtype(T)` of ADR-037/042); a generic instantiation is a record like any other, and renaming its
+alias is a rename of the type.
 
 Generated code names its dependencies as `::undra::{wire, meta, runtime, signals, query}`;
 `#[undra(crate = "path")]` on the item (or `crate = "path"` in the macro arguments) replaces
@@ -116,6 +145,11 @@ the fields there are. Everything else `rustc` reports about a type the user wrot
   constant, an emitter or a golden, and on a message without what, why, fix or the link of its code.
 * `--test ui_runtime`: compile-pass files written as a user writes a core
   (`tests/ui-runtime/`), checked against the real runtime and signals.
+* `--test newtypes_generics`: newtypes, named instantiations and `Decimal` compiled and run: codecs, the
+  schema they register, a keyed list whose key field is a newtype, map keys.
+* `tests/ui-leaf-off/` (in `compile_fail`, only while no leaf feature is on): the types of other crates
+  without their feature. With the features on, `cargo test -p undra --features
+  uuid,chrono,time,rust_decimal,bytes` runs `crates/undra/tests/leaf_types.rs`.
 
 `crates/undra/tests/e2e_todo.rs` drives generated code through `TestRuntime` and asserts on the
 decoded wire payloads.

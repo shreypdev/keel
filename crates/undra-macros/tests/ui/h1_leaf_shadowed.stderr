@@ -1,0 +1,157 @@
+error[E0277]: error[undra::E0001]: `Timestamp` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Timestamp` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/h1_leaf_shadowed.rs:13:9
+   |
+11 | #[k::api]
+   | --------- required by a bound introduced by this call
+12 | pub struct Reading {
+13 |     pub at: Timestamp,
+   |         ^^^^^^^^^^^^^ not a type that can cross the boundary
+   |
+help: the trait `Encode` is not implemented for `Timestamp`
+  --> tests/ui/h1_leaf_shadowed.rs:8:1
+   |
+ 8 | pub struct Timestamp(pub u64);
+   | ^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `Encode`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             AppState
+             Arc<T>
+           and $N others
+
+error[E0277]: error[undra::E0001]: `Decimal` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Decimal` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/h1_leaf_shadowed.rs:14:9
+   |
+11 | #[k::api]
+   | --------- required by a bound introduced by this call
+...
+14 |     pub amount: Decimal,
+   |         ^^^^^^^^^^^^^^^ not a type that can cross the boundary
+   |
+help: the trait `Encode` is not implemented for `Decimal`
+  --> tests/ui/h1_leaf_shadowed.rs:9:1
+   |
+ 9 | pub struct Decimal(pub String);
+   | ^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `Encode`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             AppState
+             Arc<T>
+           and $N others
+
+error[E0277]: error[undra::E0001]: `Timestamp` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Timestamp` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/h1_leaf_shadowed.rs:13:13
+   |
+13 |     pub at: Timestamp,
+   |             ^^^^^^^^^ not a type that can cross the boundary
+   |
+help: the trait `undra::undra_wire::Decode` is not implemented for `Timestamp`
+  --> tests/ui/h1_leaf_shadowed.rs:8:1
+   |
+ 8 | pub struct Timestamp(pub u64);
+   | ^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `undra::undra_wire::Decode`:
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             AppState
+             BTreeMap<K, V>
+             Box<T>
+           and $N others
+
+error[E0277]: error[undra::E0001]: `Decimal` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Decimal` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/h1_leaf_shadowed.rs:14:17
+   |
+14 |     pub amount: Decimal,
+   |                 ^^^^^^^ not a type that can cross the boundary
+   |
+help: the trait `undra::undra_wire::Decode` is not implemented for `Decimal`
+  --> tests/ui/h1_leaf_shadowed.rs:9:1
+   |
+ 9 | pub struct Decimal(pub String);
+   | ^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `undra::undra_wire::Decode`:
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             AppState
+             BTreeMap<K, V>
+             Box<T>
+           and $N others
+
+error[E0277]: error[undra::E0060]: `Timestamp` is spelled like a built-in Undra type, but it is not one
+                = note: the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Timestamp`
+                = help: rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0060
+  --> tests/ui/h1_leaf_shadowed.rs:13:13
+   |
+13 |     pub at: Timestamp,
+   |             ^^^^^^^^^ not a type that crosses as this leaf
+   |
+help: the trait `undra::undra_wire::leaf::WireLeaf<undra::undra_wire::leaf::kinds::Timestamp>` is not implemented for `Timestamp`
+  --> tests/ui/h1_leaf_shadowed.rs:8:1
+   |
+ 8 | pub struct Timestamp(pub u64);
+   | ^^^^^^^^^^^^^^^^^^^^
+help: the trait `undra::undra_wire::leaf::WireLeaf<undra::undra_wire::leaf::kinds::Timestamp>` is implemented for `undra::prelude::Timestamp`
+  --> $WORKSPACE/crates/undra-wire/src/leaf.rs
+   |
+   | impl WireLeaf<kinds::Timestamp> for Timestamp {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `__undra_leaf`
+  --> tests/ui/h1_leaf_shadowed.rs:11:1
+   |
+11 | #[k::api]
+   | ^^^^^^^^^ required by this bound in `__undra_leaf`
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: error[undra::E0060]: `Decimal` is spelled like a built-in Undra type, but it is not one
+                = note: the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Decimal`
+                = help: rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0060
+  --> tests/ui/h1_leaf_shadowed.rs:14:17
+   |
+14 |     pub amount: Decimal,
+   |                 ^^^^^^^ not a type that crosses as this leaf
+   |
+help: the trait `undra::undra_wire::leaf::WireLeaf<undra::undra_wire::leaf::kinds::Decimal>` is not implemented for `Decimal`
+  --> tests/ui/h1_leaf_shadowed.rs:9:1
+   |
+ 9 | pub struct Decimal(pub String);
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `undra::undra_wire::leaf::WireLeaf<undra::undra_wire::leaf::kinds::Decimal>` is implemented for `undra::prelude::Decimal`
+  --> $WORKSPACE/crates/undra-wire/src/leaf.rs
+   |
+   | impl WireLeaf<kinds::Decimal> for Decimal {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `__undra_leaf`
+  --> tests/ui/h1_leaf_shadowed.rs:11:1
+   |
+11 | #[k::api]
+   | ^^^^^^^^^ required by this bound in `__undra_leaf`
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

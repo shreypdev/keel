@@ -16,6 +16,7 @@ schema.records.push(RecordDef {
         FieldDef { name: "id".into(), ty: TypeRef::Uuid, default: false, docs: String::new() },
         FieldDef { name: "title".into(), ty: TypeRef::String, default: false, docs: String::new() },
     ],
+    transparent: false,
     docs: "A todo item.".into(),
 });
 
@@ -99,21 +100,66 @@ SPEC section 17 lists the base classes; these are the names generated code actua
 * `new Signal<T>(initial)`, `new UndraError(kind, message, options?)`, and `UndraStore` subclasses call `super(core, handle)`; the base class registers with the mirror and unregisters on `close()`.
 * `Sendable` on every generated port protocol (Swift 6 strict concurrency).
 
+## Newtypes, generic instantiations and `Decimal` (ADR-042)
+
+A schema record flagged `transparent` with the one field `value` is a **newtype** (`struct UserId(Uuid)`): it crosses as its inner value, byte for byte, and each language wraps it in its own idiom.
+
+| | `struct UserId(Uuid)` | `struct Meters(f64)` |
+|---|---|---|
+| Swift | `public struct UserId: RawRepresentable, UndraRecord, Sendable, Hashable, Codable` with `rawValue`, `init(rawValue:)`, `init(_:)` and a single-value `Codable` | the same plus `Comparable` |
+| Kotlin | `@JvmInline value class UserId(val value: UUID) : UndraRecord`, its companion the codec | the same plus `Comparable<Meters>` |
+| TypeScript | `export type UserId = string & { readonly __brand: "UserId" }`, a function `UserId(value)` that brands without a check, and `UserIdCodec` | the same over `number` |
+
+`Comparable` is generated where the inner type has an order that means something: integers, floats, `String`, `Timestamp`, `Duration`, `Decimal` and a newtype of one of those; not `Uuid` (Foundation's `UUID` is `Comparable` only from iOS 17), `bool`, bytes, records, enums or collections. There is no `ExpressibleBy*Literal` conformance: it would let any literal become a `UserId`. The inner type may be a scalar, a record, an enum, a `Vec<T>`, a map, an `Option<T>`, `Decimal` or another newtype; a newtype is a valid map key when the type it wraps is (`Schema::is_valid_map_key`), and a keyed list may be keyed on a newtype field (the patches are positional, so the generated code needs nothing).
+
+Where a language cannot express the wrapper as ADR-042 draws it, it does what the language can: a Kotlin newtype of bytes is an ordinary `class` with `equals` and `hashCode` over the content (`equals` and `hashCode` are reserved for value classes, and a `ByteArray` compares by identity); a TypeScript newtype of a newtype is branded on what the inner one wraps (a brand on a brand is two `__brand` literals in one intersection, which TypeScript reduces to `never`), its constructor taking the inner newtype; and a TypeScript newtype of an option brands the value inside (`(string & Brand) | null`). An `Option<N>` where `N` wraps an option is a nested option (E0001), because Kotlin and TypeScript cannot tell `Some(None)` from `None`.
+
+**Generic instantiations** need nothing in bindgen: `Page<Todo>` and `Loadable<User>` reach the schema as the plain records and enums `TodoPage` and `LoadableUser`, which generate like any others (the `generics` golden case shows them).
+
+**`Decimal`** is `Foundation.Decimal` in Swift, `java.math.BigDecimal` in Kotlin (`equals` is scale-sensitive, as Kotlin engineers expect) and the `Decimal` class of `@undra/runtime` in TypeScript. It is never a map key; a newtype of one is `Comparable` (`BigDecimal.compareTo` ignores the scale).
+
 ## Query handles
 
-Every `#[undra::query]` becomes a `<Name>QueryHandle` store with the five signals of SPEC section 9 (`data`, `status`, `error`, `fetching`, `updatedAt`; `error` is `String?` when the query has no error type), a `QueryStatus` unit enum, and two methods that `undra-query` must dispatch on handle objects:
+Every `#[undra::query]` becomes a `<Name>QueryHandle` store with the five signals of SPEC section 9 (`data`, `status`, `error`, `fetching`, `updatedAt`; `error` is `String?` when the query has no error type), a `QueryStatus` unit enum, and the methods that `undra-query` must dispatch on handle objects:
 
 | Method | Id |
 |---|---|
 | `refetch()` | `fnv1a32("query.refetch")` = `0x21d1b9e2` (`undra_bindgen::QUERY_REFETCH_ID`) |
 | `invalidate()` | `fnv1a32("query.invalidate")` = `0x44cec2fa` (`undra_bindgen::QUERY_INVALIDATE_ID`) |
+| `setPollInterval(interval)` | `fnv1a32("QueryHandle.set_poll_interval")` = `0xe327e53b` (`undra_meta::ids::SET_POLL_INTERVAL_METHOD_ID`); the argument is the wire `Option<Duration>`, and none clears this observer's override (ADR-043) |
+
+`setPollInterval` is `setPollInterval(_ interval: Duration?)` in Swift (`UndraDuration?` below iOS 16), `setPollInterval(interval: Duration?)` (`kotlin.time.Duration`) in Kotlin and `setPollInterval(ms: Duration | null)` in TypeScript, where a `Duration` is a number of milliseconds.
+
+An `infinite` query (ADR-043) is a **paged** list. Its `data` is the list of every row loaded, **keyed by the item key** (empty before the first page, never `nil`; the next page arrives as a keyed patch that appends), and its handle has two more signals and a command:
+
+| | |
+|---|---|
+| signals 5 and 6 | `hasNextPage`, `fetchingNextPage` (`bool`) |
+| `fetchNextPage()` | `fnv1a32("QueryHandle.fetch_next_page")` = `undra_meta::ids::FETCH_NEXT_PAGE_METHOD_ID`, no arguments |
+| Swift | `loadMore(ifNeededFor: item, threshold: 5)` fetches the next page when `item` is among the last `threshold` rows, a next page exists and none is loading; the row type is `Identifiable` when its key field is called `id` (otherwise a view passes `id: \.<key>`) |
+| Kotlin | the handle implements `dev.undra.runtime.InfiniteQuery` (`hasNextPage`, `fetchingNextPage` and `fetchNextPage()` are `override`s), what the Compose helper `LoadMoreWhenNearEnd` takes |
+| TypeScript | `hasNextPage: Signal<boolean>`, `fetchingNextPage: Signal<boolean>`, `fetchNextPage(): Promise<void>`, what `useLoadMore` takes |
+
+An infinite query's schema `returns` is `Vec<T>` (`E0073` otherwise); when it also carries an error type (`Result<Vec<T>, E>`) the handle's `error` signal is that `E`, as for any query.
 
 Constructing a handle is a constructor call whose `type_id` and `method_id` are both the query id. A `#[undra::mutation]` becomes an async function that calls the mutation id as a free function.
 
+## Lazy lists (ADR-043)
+
+A `Lazy<T>` store signal is not a value the store keeps but a list the platform **pages through**: a runtime class, made with the store and handed the signal's change-set entries, never generated code.
+
+| | Property | Made with |
+|---|---|---|
+| Swift | `public let books: UndraLazyList<Book>` (`UndraLazyListObject<Book>` in the `ObservableObject` mode) | `UndraLazyList(core: core)` before `super.init` |
+| Kotlin | `val books: UndraLazyList<Book>` | `UndraLazyList(core, Book)`; the store's `close()` closes its lists |
+| TypeScript | `readonly books: LazyList<Book>` | `new LazyList(this.core, BookCodec)` |
+
+`apply` hands the entry to the list: op `Full` to `applyFull(reader)`, op `LazyInvalidated` to `applyInvalidated(reader)` (each consumes the reader and checks it is complete); a keyed patch is not something a lazy list takes and is ignored. A lazy list is not a signal: it has no placeholder value, and TypeScript leaves it out of `_signals`. It may be keyed (`#[undra(key = "id")]`) or derived (`computed`).
+
 ## Limitations
 
-Rejected with a diagnostic instead of generating wrong code: `Lazy<T>` signals (no lazy-list runtime API exists yet), object handles used as values, `Option<Option<T>>` (not representable in Kotlin and TypeScript), a `Result` whose error type is not an error enum, `()` outside return position. Swift records and enums derive `Codable` only when every field is `Codable`, so a record holding a `Duration` (Codable only from the Swift 6.0 standard library) or a data enum does not. `Bytes` nested inside `Vec` or `Map` decode one byte at a time in Swift; direct and optional `Bytes` use the bulk path. `#[undra(js_number)]` does not exist in the schema yet, so `Generator::ts_js_number` switches `i64` and `u64` to `number` for the whole package.
+Rejected with a diagnostic instead of generating wrong code: object handles used as values, `Option<Option<T>>` and an option of a newtype that wraps an option (not representable in Kotlin and TypeScript), a `Result` whose error type is not an error enum, `()` outside return position. Swift records and enums derive `Codable` only when every field is `Codable`, so a record holding a `Duration` (Codable only from the Swift 6.0 standard library) or a data enum does not. `Bytes` nested inside `Vec` or `Map` decode one byte at a time in Swift; direct and optional `Bytes` use the bulk path. `#[undra(js_number)]` does not exist in the schema yet, so `Generator::ts_js_number` switches `i64` and `u64` to `number` for the whole package.
 
 ## Tests
 
-`cargo test -p undra-bindgen` runs the golden comparison of eight schemas (`tests/golden/<case>/schema.json` and the expected trees), the diagnostics tests, and, when the toolchains exist, type-checks and executes the TypeScript (`tsc` and `node`) and compiles and executes the Kotlin (`scripts/kotlinc.sh`) against the real runtimes' wire layers. Regenerate the goldens with `UPDATE_GOLDEN=1 cargo test -p undra-bindgen --test golden`. The messages that schema validation raises (E0001, E0005, E0006, E0010, E0011, E0031, E0050 to E0052: what, why, fix and the docs link of the code) are locked in `tests/golden/diagnostics/<code>.txt` by `tests/diagnostics.rs` (`UPDATE_GOLDEN=1 cargo test -p undra-bindgen --test diagnostics`); the error-codes page of the site shows them. Swift cannot be built where this crate is developed; it is verified on a developer Mac and in CI (see CLAUDE.md), and here only by desk-check and a bracket-balance test.
+`cargo test -p undra-bindgen` runs the golden comparison of every case (`tests/golden/<case>/schema.json` and the expected trees: `newtypes`, `generics`, `decimal`, `polling`, `infinite` and `lazy` are the cases of ADR-042 and ADR-043), the diagnostics tests, and, when the toolchains exist, type-checks and executes the TypeScript (`tsc` and `node`) and compiles and executes the Kotlin (`scripts/kotlinc.sh`) against the real runtimes' wire layers. Regenerate the goldens with `UPDATE_GOLDEN=1 cargo test -p undra-bindgen --test golden`. The messages that schema validation raises (E0001, E0005, E0006, E0007, E0010, E0011, E0031, E0050 to E0052 and E0073: what, why, fix and the docs link of the code) are locked in `tests/golden/diagnostics/<code>.txt` by `tests/diagnostics.rs` (`UPDATE_GOLDEN=1 cargo test -p undra-bindgen --test diagnostics`); the error-codes page of the site shows them. Swift cannot be built where this crate is developed; it is verified on a developer Mac and in CI (see CLAUDE.md), and here only by desk-check and a bracket-balance test.

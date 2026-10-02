@@ -179,7 +179,13 @@ golden_cases!(
     queries,
     full,
     stdlib,
-    recursive
+    recursive,
+    newtypes,
+    generics,
+    decimal,
+    polling,
+    infinite,
+    lazy
 );
 
 #[test]
@@ -200,7 +206,13 @@ fn every_case_has_a_test() {
             "queries",
             "full",
             "stdlib",
-            "recursive"
+            "recursive",
+            "newtypes",
+            "generics",
+            "decimal",
+            "polling",
+            "infinite",
+            "lazy"
         ]
     );
 }

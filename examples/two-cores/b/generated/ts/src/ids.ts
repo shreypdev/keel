@@ -130,6 +130,7 @@ export const UndraIds = {
       new: 0x2a794167,
       refetch: 0x21d1b9e2,
       invalidate: 0x44cec2fa,
+      setPollInterval: 0xe327e53b,
     },
   },
   Functions: {

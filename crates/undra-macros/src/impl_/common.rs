@@ -6,10 +6,69 @@ use quote::quote;
 use super::attrs::{Site, take};
 use super::diag::{Diag, Errors, code};
 use super::paths::Root;
-use super::types::KType;
+use super::types::{KType, ty_string};
 
-/// E0002 / E0003 for every generic parameter of an item.
+/// What carries the generic parameters, for the help of E0002 (ADR-042 decision 2.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GenericOn {
+    /// A struct or enum under `#[undra::api]` without `generic`: it may become a template.
+    Data,
+    /// A `#[undra::error]` enum: never generic.
+    Error,
+    /// An object, store, function, method, port, callback, query or mutation: never generic.
+    Other,
+    /// A struct or enum under `#[undra::api(generic)]`: type parameters are what it is for.
+    Template,
+}
+
+impl GenericOn {
+    fn why(self) -> &'static str {
+        match self {
+            GenericOn::Data => {
+                "the schema describes concrete types; every target language would need one instantiation per use"
+            }
+            GenericOn::Error => {
+                "the schema describes concrete types, and the platforms throw an error by name"
+            }
+            GenericOn::Other => {
+                "the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed"
+            }
+            GenericOn::Template => "only type parameters are supported by a generic data type",
+        }
+    }
+
+    fn help(self) -> &'static str {
+        match self {
+            GenericOn::Data => {
+                "mark the struct or enum `#[undra::api(generic)]` and declare each instantiation under a name: `#[undra::api] pub type TodoPage = Page<Todo>;`; or remove the parameter and declare one concrete `#[undra::api]` type per instantiation"
+            }
+            GenericOn::Error => {
+                "remove the parameter and declare one concrete `#[undra::error]` enum per use"
+            }
+            GenericOn::Other => {
+                "remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`)"
+            }
+            GenericOn::Template => "remove the parameter",
+        }
+    }
+}
+
+/// E0002 / E0003 for every generic parameter of an item that is not a data type (an object, a
+/// store, a function, a method, a port, a callback, a query, a mutation).
 pub(crate) fn check_generics(generics: &syn::Generics, item: &str, errors: &mut Errors) {
+    check_generics_on(generics, item, GenericOn::Other, errors);
+}
+
+/// E0002 / E0003 for every generic parameter of an item, with the help of what it is.
+///
+/// Only type parameters are supported by a template (ADR-042): a lifetime is E0003, a const
+/// parameter and a `where` clause E0002.
+pub(crate) fn check_generics_on(
+    generics: &syn::Generics,
+    item: &str,
+    on: GenericOn,
+    errors: &mut Errors,
+) {
     for param in &generics.params {
         match param {
             syn::GenericParam::Lifetime(lifetime) => errors.push(
@@ -21,12 +80,26 @@ pub(crate) fn check_generics(generics: &syn::Generics, item: &str, errors: &mut 
                 )
                 .on(param),
             ),
+            // A template exists to have them; only a default is refused.
+            syn::GenericParam::Type(ty) if on == GenericOn::Template => {
+                if let Some(default) = &ty.default {
+                    errors.push(
+                        Diag::new(
+                            code::E0002,
+                            format!("default type `{}` for the parameter `{}` of `{item}`", ty_string(default), ty.ident),
+                            "only type parameters are supported: an instantiation names every argument, so a default would only hide which type a signature means",
+                            "remove the default and write the argument in each alias, `pub type TodoPage = Page<Todo>;`",
+                        )
+                        .on(param),
+                    );
+                }
+            }
             syn::GenericParam::Type(ty) => errors.push(
                 Diag::new(
                     code::E0002,
                     format!("generic parameter `{}` on `{item}`", ty.ident),
-                    "the schema describes concrete types; every target language would need one instantiation per use",
-                    "remove the parameter, and declare one concrete `#[undra::api]` type per instantiation",
+                    on.why(),
+                    on.help(),
                 )
                 .on(param),
             ),
@@ -34,12 +107,23 @@ pub(crate) fn check_generics(generics: &syn::Generics, item: &str, errors: &mut 
                 Diag::new(
                     code::E0002,
                     format!("const generic `{}` on `{item}`", constant.ident),
-                    "the schema describes concrete types; every target language would need one instantiation per use",
-                    "remove the parameter, and declare one concrete `#[undra::api]` type per instantiation",
+                    "only type parameters are supported: a const parameter changes the layout of the type with its value, and the schema cannot name it",
+                    "remove the const parameter and write the number in the type, or declare one concrete `#[undra::api]` type per value",
                 )
                 .on(param),
             ),
         }
+    }
+    if let Some(clause) = &generics.where_clause {
+        errors.push(
+            Diag::new(
+                code::E0002,
+                format!("`where` clause on `{item}`"),
+                "only type parameters are supported: the schema records no bounds, and each instantiation is a plain named type",
+                "remove the `where` clause; write a bound on the parameter itself (`T: Clone`) if the type needs one",
+            )
+            .on(clause),
+        );
     }
 }
 
@@ -164,6 +248,44 @@ mod tests {
         assert!(messages[0].starts_with("error[undra::E0003]"));
         assert!(messages[1].starts_with("error[undra::E0002]: generic parameter `T`"));
         assert!(messages[2].starts_with("error[undra::E0002]: const generic `N`"));
+        assert!(messages[2].contains("only type parameters are supported"));
+    }
+
+    #[test]
+    fn the_help_depends_on_what_carries_the_parameter() {
+        let generics: syn::Generics = parse_quote!(<T>);
+        let help = |on| {
+            let mut errors = Errors::new();
+            check_generics_on(&generics, "Page", on, &mut errors);
+            errors.into_error().unwrap().to_string()
+        };
+        assert!(help(GenericOn::Data).contains("#[undra::api(generic)]"));
+        assert!(help(GenericOn::Data).contains("pub type TodoPage = Page<Todo>;"));
+        assert!(help(GenericOn::Other).contains("only data types can be generic"));
+        assert!(help(GenericOn::Error).contains("one concrete `#[undra::error]`"));
+    }
+
+    #[test]
+    fn a_where_clause_is_e0002() {
+        let item: syn::ItemStruct = parse_quote!(
+            struct S<T>
+            where
+                T: Clone,
+            {
+                a: T,
+            }
+        );
+        let mut errors = Errors::new();
+        check_generics_on(&item.generics, "S", GenericOn::Data, &mut errors);
+        let messages: Vec<String> = errors
+            .into_error()
+            .unwrap()
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect();
+        assert_eq!(messages.len(), 2);
+        assert!(messages[1].starts_with("error[undra::E0002]: `where` clause on `S`"));
+        assert!(messages[1].contains("only type parameters are supported"));
     }
 
     #[test]

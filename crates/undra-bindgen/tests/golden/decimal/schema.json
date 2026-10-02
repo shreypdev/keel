@@ -1,0 +1,300 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-decimal",
+  "records": [
+    {
+      "name": "Price",
+      "type_id": 3711879114,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "decimal"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "A price: a decimal with an order."
+    },
+    {
+      "name": "Invoice",
+      "type_id": 1911326640,
+      "fields": [
+        {
+          "name": "total",
+          "ty": {
+            "kind": "decimal"
+          },
+          "default": false
+        },
+        {
+          "name": "lines",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "decimal"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "discount",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "decimal"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "price",
+          "ty": {
+            "kind": "named",
+            "of": "Price"
+          },
+          "default": false
+        },
+        {
+          "name": "by_sku",
+          "ty": {
+            "kind": "map",
+            "of": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "decimal"
+              }
+            ]
+          },
+          "default": false
+        },
+        {
+          "name": "prices",
+          "ty": {
+            "kind": "map",
+            "of": [
+              {
+                "kind": "u32"
+              },
+              {
+                "kind": "named",
+                "of": "Price"
+              }
+            ]
+          },
+          "default": false
+        },
+        {
+          "name": "tax",
+          "ty": {
+            "kind": "decimal"
+          },
+          "default": true
+        }
+      ],
+      "docs": "Money amounts of every shape."
+    }
+  ],
+  "enums": [
+    {
+      "name": "PayError",
+      "type_id": 3781668429,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Declined",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "declined"
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "name": "Till",
+      "type_id": 4209065198,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 3855524702,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Till"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "charge",
+          "method_id": 908860204,
+          "params": [
+            {
+              "name": "amount",
+              "ty": {
+                "kind": "decimal"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "decimal"
+              },
+              {
+                "kind": "named",
+                "of": "PayError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Takes `amount` and returns the balance."
+        },
+        {
+          "name": "refund",
+          "method_id": 3297164338,
+          "params": [
+            {
+              "name": "amount",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "decimal"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "totals",
+          "method_id": 1630428555,
+          "params": [],
+          "returns": {
+            "kind": "stream",
+            "of": {
+              "kind": "decimal"
+            }
+          },
+          "is_async": true,
+          "takes_ctx": false
+        }
+      ],
+      "store": {
+        "signals": [
+          {
+            "name": "balance",
+            "signal_id": 0,
+            "ty": {
+              "kind": "decimal"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "last",
+            "signal_id": 1,
+            "ty": {
+              "kind": "option",
+              "of": {
+                "kind": "named",
+                "of": "Price"
+              }
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "history",
+            "signal_id": 2,
+            "ty": {
+              "kind": "vec",
+              "of": {
+                "kind": "decimal"
+              }
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "invoice",
+            "signal_id": 3,
+            "ty": {
+              "kind": "named",
+              "of": "Invoice"
+            },
+            "computed": false,
+            "key": null
+          }
+        ]
+      },
+      "docs": "Takes payments."
+    }
+  ],
+  "functions": [
+    {
+      "name": "quote",
+      "method_id": 3770300075,
+      "params": [
+        {
+          "name": "qty",
+          "ty": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "named",
+        "of": "Invoice"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "docs": "Prices `qty` items."
+    }
+  ],
+  "ports": [],
+  "queries": [
+    {
+      "name": "price_of",
+      "query_id": 224516304,
+      "kind": "query",
+      "key": "price/{sku}",
+      "params": [
+        {
+          "name": "sku",
+          "ty": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "decimal"
+          },
+          {
+            "kind": "named",
+            "of": "PayError"
+          }
+        ]
+      },
+      "stale_ms": 60000,
+      "persist": false,
+      "idempotent": false
+    }
+  ]
+}

@@ -403,7 +403,7 @@ fn snapshot_is_a_wire_snapshot_of_the_stores_only() {
 #[test]
 fn snapshot_of_an_empty_runtime_is_an_empty_snapshot() {
     let t = TestRuntime::new();
-    // Layout 2 (ADR-037): `count u32 = 0, generation_floor u32 = 0` (nothing was ever issued),
+    // Layout 2 (ADR-037): `count u32 = 0, generation_floor u64 = 0` (ADR-040; nothing was ever issued),
     // the schema hash, no types, and the description of no store types.
     let snapshot = snapshot_of(&t);
     assert_eq!(snapshot.generation_floor, 0);

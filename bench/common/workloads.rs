@@ -21,7 +21,9 @@ use undra::runtime::testing::{call_payload, drive_from_this_thread};
 use undra::runtime::{Runtime, RuntimeConfig};
 use undra::signals::{ALL_SIGNALS, ChangeSink, Computed, Signal, StoreCell, txn, with_sink};
 use undra::wire::payload::{CallTarget, ChangeSetRef};
-use undra::wire::{Bytes, Decode, Encode, Handle, KeyedPatch, Reader, Timestamp, Uuid, Writer};
+use undra::wire::{
+    Bytes, Decimal, Decode, Encode, Handle, KeyedPatch, Reader, Timestamp, Uuid, Writer,
+};
 use undra_bench::workload::{Bench, Workload, plain, with_reset};
 
 use super::fixtures::{self, Item, Shape};
@@ -110,6 +112,8 @@ fn wire_types(halves: bool) -> Vec<Workload> {
             0xde, 0xf0,
         ])
     });
+    // ADR-042: a money amount at the largest scale the wire holds (16 bytes of mantissa, 1 of scale).
+    add_wire(out, halves, "decimal", || Decimal::new(-1_999_999_999_999_999_999_i128, 38));
     add_wire(out, halves, "record5", fixtures::record5);
     add_wire(out, halves, "record1k", || {
         let record = fixtures::record1k();

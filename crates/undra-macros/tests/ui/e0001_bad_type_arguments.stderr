@@ -1,0 +1,49 @@
+error: error[undra::E0063]: nested option `Option<Option<u8>>` cannot cross the boundary
+         = note: Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null`
+         = help: wrap the inner option in a record or an enum that names the two cases
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0063
+  --> tests/ui/e0001_bad_type_arguments.rs:15:16
+   |
+15 |     pub value: Option<T>,
+   |                ^^^^^^^^^
+...
+39 | #[k::api]
+   | --------- in this attribute macro expansion
+   |
+   = note: this error originates in the macro `Maybe` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error[undra::E0003]: lifetime `'static` in `&'static str`
+         = note: everything crosses the boundary by value; a borrow cannot outlive the call that made it
+         = help: use an owned type such as `String` or `Vec<T>`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0003
+  --> tests/ui/e0001_bad_type_arguments.rs:37:26
+   |
+37 | pub type Borrowed = Page<&'static str>;
+   |                          ^^^^^^^^^^^^
+
+error: error[undra::E0001]: `()` cannot be used as a field
+         = note: `()` occupies zero bytes on the wire, so it is only legal as a return type or as a variant without fields; `Vec<()>`, `Option<()>` and maps of `()` defeat length validation
+         = help: remove the value, or use `bool` if you need a marker
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0001_bad_type_arguments.rs:34:23
+   |
+34 | pub type Units = Page<()>;
+   |                       ^^
+
+error[E0080]: evaluation panicked: error[undra::E0064]: `Calculator` is an object and cannot be used as a value
+                = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value
+                = help: return it as `Arc<Calculator>`, take it as `&Calculator` or `Arc<Calculator>` (a method, constructor or function parameter or return), or use a record with the data the platform needs
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064
+  --> tests/ui/e0001_bad_type_arguments.rs:43:25
+   |
+43 | pub type Objects = Page<Calculator>;
+   |                         ^^^^^^^^^^ evaluation of `_::_` failed here
+
+error[E0080]: evaluation panicked: error[undra::E0061]: `Plain` is not a type declared with `#[undra::api]`
+                = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate
+                = help: add `#[undra::api]` to `Plain`, or, if it is an alias, write the type it stands for where it is used
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061
+  --> tests/ui/e0001_bad_type_arguments.rs:46:26
+   |
+46 | pub type NotUndra = Page<Plain>;
+   |                          ^^^^^ evaluation of `_::_` failed here

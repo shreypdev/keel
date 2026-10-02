@@ -290,7 +290,7 @@ pub(crate) fn poll() {
     );
 }
 
-/// A snapshot of nothing: `count u32 = 0, generation_floor u32` (SPEC 5.9), the floor being the
+/// A snapshot of nothing: `count u32 = 0, generation_floor u64` (SPEC 5.9; ADR-040 widened it), the floor being the
 /// process-wide generation counter: it outlives `undra_shutdown`, so a host that snapshots
 /// between a shutdown and the next init keeps ADR-022's guarantee that a generation it may still
 /// hold is never issued again in this process.

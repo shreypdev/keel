@@ -106,8 +106,11 @@ export class UndraCallbacks {
   readonly #bridged = new Set<number>();
   readonly #running = new Map<number, Running>();
   readonly #coalesced = new Map<string, Pending>();
-  /** Whether a disconnect dropped the entries: a later `__release` of one of them is expected, not an over-release. */
-  #dropped = false;
+  /**
+   * The highest instance a drop forgot (a lost connection, a closed core, a restart after a trap): a later
+   * `__release` of one of those is expected, not an over-release. Instances lent after it are reported as usual.
+   */
+  #droppedThrough = 0n;
 
   /** @param core The core whose callbacks these are. Use {@link callbacks}. */
   constructor(core: UndraCore) {
@@ -169,7 +172,7 @@ export class UndraCallbacks {
     const lent = this.#lent.get(instance);
     if (lent === undefined) {
       // Never early: an over-release is a bug (of a raw host, or of Undra), reported and otherwise ignored.
-      if (!this.#dropped) this.#core.report(new UndraError("state", `callback instance ${String(instance)} was released more often than it was lent`), why);
+      if (instance > this.#droppedThrough) this.#core.report(new UndraError("state", `callback instance ${String(instance)} was released more often than it was lent`), why);
       return;
     }
     if (--lent.count > 0) return;
@@ -179,7 +182,7 @@ export class UndraCallbacks {
 
   /** Forgets every entry and aborts what runs: the core that held them is gone (or the connection to it). */
   #drop(): void {
-    if (this.#lent.size > 0) this.#dropped = true;
+    this.#droppedThrough = this.#next;
     this.#lent.clear();
     this.#instances.clear();
     for (const running of this.#running.values()) running.controller.abort();
@@ -225,7 +228,9 @@ export class UndraCallbacks {
     for (const [id, method] of Object.entries(spec.methods)) {
       methods[Number(id)] = (args, portCallId = 0) => this.#invoke(spec, Number(id), method, args, portCallId);
     }
-    return { name: spec.name, sync: false, methods };
+    // A wasm core that restarts after a trap (ADR-049) disposes its ports: the instance that held these references is
+    // gone, and the restored one holds none of them (a snapshot carries no callbacks).
+    return { name: spec.name, sync: false, methods, dispose: () => this.#drop() };
   }
 
   /** A call of the core into an instance: decoded now, queued, answered when the implementation is done. */
@@ -266,6 +271,8 @@ export class UndraCallbacks {
           if (pending.superseded) return false;
           this.#coalesced.delete(key);
         }
+        // Queued by a core that is gone since (a drop between the call and the drain): nobody holds the instance.
+        if (this.#lent.get(instance) !== lent) return false;
         try {
           const result = (run as CallbackNotify<object>)(impl);
           if (result instanceof Promise) {

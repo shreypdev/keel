@@ -581,6 +581,10 @@ impl<'a> Ctx<'a> {
                 let Some(record) = model.record(name) else {
                     return Some(String::new());
                 };
+                // A newtype wraps its one value (`UserId(UUID(0L, 0L))`).
+                if let (true, [only]) = (record.transparent, record.fields.as_slice()) {
+                    return Some(format!("{shown}({})", self.zero_in(&only.ty, state)?));
+                }
                 let mut args = Vec::new();
                 for f in &record.fields {
                     args.push(format!(
@@ -1106,11 +1110,64 @@ impl<'a> Ctx<'a> {
         });
     }
 
+    /// A newtype (ADR-042): a `value class` around its one value, which crosses as that value
+    /// alone. An inner `ByteArray` compares by identity and a value class cannot say otherwise
+    /// (`equals` and `hashCode` are reserved for it), so a newtype of bytes is an ordinary class.
+    fn newtype(&mut self, w: &mut CodeWriter, r: &RecordDef, inner: &TypeRef) {
+        let none = Shadow::new();
+        let ty = self.ty(inner, &none);
+        let ordered = self.model().is_ordered(inner);
+        kdoc(w, &r.docs, &[]);
+        let names = ["value".to_owned()];
+        if Self::is_bytes_like(inner) {
+            w.block(format!("class {}(val value: {ty}) : UndraRecord", r.name), |w| {
+                // `contentEquals` and friends take a missing array as an array of no identity.
+                w.line(format!(
+                    "override fun equals(other: Any?): Boolean = other is {} && value.contentEquals(other.value)",
+                    r.name
+                ));
+                w.blank();
+                w.line("override fun hashCode(): Int = value.contentHashCode()");
+                w.blank();
+                w.line(format!(
+                    "override fun toString(): String = \"{}(value=${{value.contentToString()}})\"",
+                    r.name
+                ));
+                w.blank();
+                self.record_codec(w, r, &names, &none);
+            });
+            return;
+        }
+        w.line("@JvmInline");
+        let interfaces = if ordered {
+            format!("UndraRecord, Comparable<{}>", r.name)
+        } else {
+            "UndraRecord".to_owned()
+        };
+        w.block(
+            format!("value class {}(val value: {ty}) : {interfaces}", r.name),
+            |w| {
+                if ordered {
+                    w.line(format!(
+                        "override fun compareTo(other: {}): Int = value.compareTo(other.value)",
+                        r.name
+                    ));
+                    w.blank();
+                }
+                self.record_codec(w, r, &names, &none);
+            },
+        );
+    }
+
     fn record(&mut self, w: &mut CodeWriter, r: &RecordDef) {
         self.import("dev.undra.runtime.UndraRecord");
         self.import("dev.undra.runtime.wire.UndraCodec");
         self.import("dev.undra.runtime.wire.UndraReader");
         self.import("dev.undra.runtime.wire.UndraWriter");
+        if let (true, [only]) = (r.transparent, r.fields.as_slice()) {
+            self.newtype(w, r, &only.ty);
+            return;
+        }
         let none = Shadow::new();
         kdoc(w, &r.docs, &[]);
         let names: Vec<String> = r.fields.iter().map(|f| ident(&f.name)).collect();
@@ -1174,7 +1231,15 @@ impl<'a> Ctx<'a> {
                     .fields
                     .iter()
                     .zip(names)
-                    .map(|(f, n)| format!("{n} = {}", self.read_expr(&f.ty, "r", sh)))
+                    .map(|(f, n)| {
+                        let read = self.read_expr(&f.ty, "r", sh);
+                        // A newtype wraps its one value, unnamed.
+                        if r.transparent {
+                            read
+                        } else {
+                            format!("{n} = {read}")
+                        }
+                    })
                     .collect();
                 w.call(
                     format!(
@@ -1495,12 +1560,21 @@ impl<'a> Ctx<'a> {
             let ids: Vec<String> = no_coalesce.iter().map(|id| format!("{id}u")).collect();
             format!("core, handle, noCoalesce = setOf({})", ids.join(", "))
         };
+        // The handle of an infinite query is an `InfiniteQuery`, what the Compose helper of the
+        // runtime takes (ADR-043).
+        let infinite = self.model().infinite(&o.name).is_some();
+        let interfaces = if infinite {
+            self.import("dev.undra.runtime.InfiniteQuery");
+            ", InfiniteQuery"
+        } else {
+            ""
+        };
         kdoc(w, &o.docs, &[]);
         // The constructor is the bindings' own: a wrapper is only made through the core's identity
         // map (`UndraCore.adopt`, ADR-040), by the companion's factories or a method's return.
         w.block(
             format!(
-                "class {} internal constructor(core: UndraCore, handle: Long) : {base}({super_args})",
+                "class {} internal constructor(core: UndraCore, handle: Long) : {base}({super_args}){interfaces}",
                 o.name
             ),
             |w| {
@@ -1516,9 +1590,11 @@ impl<'a> Ctx<'a> {
                 for m in &o.methods {
                     w.blank();
                     let ids = format!("UndraIds.Objects.{}", o.name);
+                    let mut callable = Callable::from_method(m);
+                    callable.overrides = infinite && m.method_id == model::QUERY_FETCH_NEXT_PAGE_ID;
                     self.callable(
                         w,
-                        &Callable::from_method(m),
+                        &callable,
                         &Site::Method {
                             id: format!("{ids}.{}", naming::upper_snake(&m.name)),
                             owner: o.name.clone(),
@@ -1528,6 +1604,26 @@ impl<'a> Ctx<'a> {
                 if is_store {
                     w.blank();
                     self.store_apply(w, &o.name, &signals);
+                }
+                // The lazy lists page through the core: they stop with the store.
+                let lazy: Vec<String> = signals
+                    .iter()
+                    .filter(|g| matches!(g.ty, TypeRef::Lazy(_)))
+                    .map(|g| ident(&g.name))
+                    .collect();
+                if !lazy.is_empty() {
+                    w.blank();
+                    kdoc(
+                        w,
+                        "Stops the lazy lists from paging, then releases the store.",
+                        &[],
+                    );
+                    w.block("override fun close()", |w| {
+                        for name in &lazy {
+                            w.line(format!("{name}.close()"));
+                        }
+                        w.line("super.close()");
+                    });
                 }
                 if o.constructors.is_empty() {
                     // Only the core makes it: a method returns it (ADR-040).
@@ -1557,13 +1653,27 @@ impl<'a> Ctx<'a> {
     }
 
     fn signal_property(&mut self, w: &mut CodeWriter, o: &ObjectDef, g: &SignalDef) {
+        let none = Shadow::new();
+        let name = ident(&g.name);
+        if let TypeRef::Lazy(item) = &g.ty {
+            // A lazy list is a runtime class the platform pages through (ADR-043), made with the
+            // store; the constructor's `core` is what it pages with.
+            self.import("dev.undra.runtime.UndraLazyList");
+            let ty = self.ty(item, &none);
+            let codec = self.codec(item, &none);
+            if let Some(doc) = self.model().signal_doc(o, g) {
+                kdoc(w, doc, &[]);
+            }
+            w.line(format!(
+                "val {name}: UndraLazyList<{ty}> = UndraLazyList(core, {codec})"
+            ));
+            return;
+        }
         self.import("kotlinx.coroutines.flow.MutableStateFlow");
         self.import("kotlinx.coroutines.flow.StateFlow");
         self.import("kotlinx.coroutines.flow.asStateFlow");
-        let none = Shadow::new();
         let ty = self.ty(&g.ty, &none);
         let zero = self.zero(&g.ty);
-        let name = ident(&g.name);
         let backing = format!("_{}", naming::camel(&g.name));
         w.line(format!(
             "private val {backing}: MutableStateFlow<{ty}> = signal({zero})"
@@ -1571,8 +1681,16 @@ impl<'a> Ctx<'a> {
         if let Some(doc) = self.model().signal_doc(o, g) {
             kdoc(w, doc, &[]);
         }
+        // The two signals `InfiniteQuery` declares are what the interface asks for.
+        let overrides = if self.model().infinite(&o.name).is_some()
+            && matches!(g.name.as_str(), "has_next_page" | "fetching_next_page")
+        {
+            "override "
+        } else {
+            ""
+        };
         w.line(format!(
-            "val {name}: StateFlow<{ty}> = {backing}.asStateFlow()"
+            "{overrides}val {name}: StateFlow<{ty}> = {backing}.asStateFlow()"
         ));
     }
 
@@ -1825,7 +1943,8 @@ impl<'a> Ctx<'a> {
         };
         debug_assert_eq!(is_unit, is_unit_ok);
         let suspend = if c.is_async { "suspend " } else { "" };
-        let prefix = format!("{suspend}fun {name}");
+        let overrides = if c.overrides { "override " } else { "" };
+        let prefix = format!("{overrides}{suspend}fun {name}");
         let suffix = if is_unit {
             String::new()
         } else {
@@ -1916,6 +2035,22 @@ impl<'a> Ctx<'a> {
                         for g in signals {
                             let backing = format!("_{}", naming::camel(&g.name));
                             w.line(format!("{}u -> {{", g.signal_id));
+                            if matches!(g.ty, TypeRef::Lazy(_)) {
+                                // A lazy list takes the entry's reader itself (a `LazyValue`, a
+                                // `LazyInvalidated`) and checks that it is complete.
+                                let name = ident(&g.name);
+                                w.indented(|w| {
+                                    w.line("if (op == ChangeOp.FULL) {");
+                                    w.indented(|w| w.line(format!("{name}.applyFull(reader)")));
+                                    w.line("} else if (op == ChangeOp.INVALIDATED) {");
+                                    w.indented(|w| {
+                                        w.line(format!("{name}.applyInvalidated(reader)"));
+                                    });
+                                    w.line("}");
+                                });
+                                w.line("}");
+                                continue;
+                            }
                             w.indented(|w| {
                                 let codec = self.codec(&g.ty, &Shadow::new());
                                 w.line("if (op == ChangeOp.FULL) {");
@@ -2157,6 +2292,9 @@ struct Callable<'a> {
     returns: &'a TypeRef,
     is_async: bool,
     docs: &'a str,
+    /// Whether the method implements a member of an interface of the runtime
+    /// (`InfiniteQuery.fetchNextPage`).
+    overrides: bool,
 }
 
 impl<'a> Callable<'a> {
@@ -2167,6 +2305,7 @@ impl<'a> Callable<'a> {
             returns: &m.returns,
             is_async: m.is_async,
             docs: &m.docs,
+            overrides: false,
         }
     }
 
@@ -2177,6 +2316,7 @@ impl<'a> Callable<'a> {
             returns: &f.returns,
             is_async: f.is_async,
             docs: &f.docs,
+            overrides: false,
         }
     }
 }

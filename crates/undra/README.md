@@ -135,7 +135,7 @@ fn main() {
 | Path | What |
 |---|---|
 | `undra::{api, error, store, port, query, mutation}` | the attribute macros |
-| `undra::prelude` | `Signal`, `Computed`, `Effect`, `txn`, `Ctx`, `Bytes`, `Uuid`, `Timestamp`, `Duration`, `Handle` and the macros |
+| `undra::prelude` | `Signal`, `Computed`, `Effect`, `txn`, `Ctx`, `Bytes`, `Uuid`, `Timestamp`, `Duration`, `Decimal`, `Handle` and the macros |
 | `undra::runtime` | `undra-runtime`: `Runtime`, `Ctx`, dispatch, ports, timers, snapshots, `testing::TestRuntime` |
 | `undra::signals` | `undra-signals`: `Signal`, `Computed`, `Effect`, `txn`, `StoreCell`, `CellSlot` |
 | `undra::wire` | `undra-wire`: the binary codec and the message payloads |

@@ -1414,3 +1414,423 @@ fn a_derived_list_is_declared_exactly_as_a_computed_list_and_also_applies_patche
         );
     }
 }
+
+// ----- newtypes, polling, infinite queries and lazy lists (ADR-042, ADR-043) --------------------
+
+/// The newtypes of the `newtypes` case whose inner type has an order that means something.
+const ORDERED: &[&str] = &["Created", "Meters", "OrderNo", "Span", "Timeout", "TodoId"];
+
+/// The others: `Uuid`, `bool`, bytes, an option, a list, a map, a record, an enum, and newtypes of those.
+const UNORDERED: &[&str] = &[
+    "Blob", "Boss", "Flag", "Level", "Maybe", "Nickname", "Owner", "Ratings", "Tags", "UserId",
+    "Wrapped",
+];
+
+/// The line that declares `head` (`public struct Meters`, `value class Meters(`, ...).
+fn declaring<'a>(text: &'a str, head: &str) -> &'a str {
+    text.lines()
+        .find(|l| l.contains(head))
+        .unwrap_or_else(|| panic!("no line declares `{head}`"))
+}
+
+#[test]
+fn newtypes_are_comparable_only_where_the_order_means_something() {
+    let out = all_files("newtypes", |_| {});
+    let swift = file(&out[0].1, "Types.swift");
+    let kotlin = file(&out[1].1, "Types.kt");
+    for name in ORDERED {
+        assert!(
+            declaring(swift, &format!("public struct {name}:")).ends_with(", Comparable {"),
+            "{name}"
+        );
+        assert!(
+            declaring(kotlin, &format!("value class {name}("))
+                .contains(&format!("Comparable<{name}>")),
+            "{name}"
+        );
+    }
+    for name in UNORDERED {
+        assert!(
+            !declaring(swift, &format!("public struct {name}:")).contains("Comparable"),
+            "{name}"
+        );
+        assert!(
+            !declaring(kotlin, &format!("class {name}(")).contains("Comparable"),
+            "{name}"
+        );
+    }
+    // No literal conformance: that would let any literal become a `UserId`.
+    assert!(!swift.contains("ExpressibleBy"));
+}
+
+#[test]
+fn swift_newtypes_wrap_their_value_and_cross_as_it() {
+    let out = all_files("newtypes", |_| {});
+    let swift = file(&out[0].1, "Types.swift");
+    let user = swift_decl(swift, "public struct UserId:");
+    assert!(
+        user.starts_with(
+            "public struct UserId: RawRepresentable, UndraRecord, Sendable, Hashable, Codable {"
+        ),
+        "{user}"
+    );
+    for part in [
+        "public var rawValue: UUID\n",
+        "public init(rawValue: UUID) {",
+        "public init(_ rawValue: UUID) {",
+        "rawValue = try decoder.singleValueContainer().decode(UUID.self)",
+        "try container.encode(rawValue)",
+        "return try UserId(UUID.undraDecode(&r))",
+        "self.rawValue.undraEncode(&w)",
+    ] {
+        assert!(user.contains(part), "`{part}` is missing from:\n{user}");
+    }
+    // The wire says nothing of the wrapper: no tag, no length.
+    assert!(!user.contains("writeU"));
+    // Bytes and options go through the same paths as everywhere else.
+    let blob = swift_decl(swift, "public struct Blob:");
+    assert!(
+        blob.contains("return try Blob(r.readBytes())")
+            && blob.contains("w.writeBytes(self.rawValue)")
+    );
+    let nick = swift_decl(swift, "public struct Nickname:");
+    assert!(nick.contains("decode(Optional<String>.self)"), "{nick}");
+    // A `Duration` is not `Codable` before Swift 6, and so neither is a newtype of it.
+    let timeout = swift_decl(swift, "public struct Timeout:");
+    assert!(
+        timeout
+            .lines()
+            .next()
+            .unwrap()
+            .ends_with("Hashable, Comparable {")
+            && !timeout.contains("Decoder"),
+        "{timeout}"
+    );
+}
+
+#[test]
+fn kotlin_newtypes_are_value_classes_except_bytes() {
+    let out = all_files("newtypes", |_| {});
+    let kotlin = file(&out[1].1, "Types.kt");
+    assert!(
+        kotlin.contains("@JvmInline\nvalue class UserId(val value: UUID) : UndraRecord {"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains(
+            "override fun decode(r: UndraReader): UserId = UserId(Codecs.uuid.decode(r))"
+        )
+    );
+    // A value class cannot override `equals`, and a `ByteArray` compares by identity.
+    let blob = declaring(kotlin, "class Blob(");
+    assert_eq!(blob, "class Blob(val value: ByteArray) : UndraRecord {");
+    assert!(kotlin.contains("other is Blob && value.contentEquals(other.value)"));
+    assert!(kotlin.contains("override fun hashCode(): Int = value.contentHashCode()"));
+    // Nested and optional newtypes keep their own types.
+    assert!(kotlin.contains("value class Boss(val value: Owner) : UndraRecord {"));
+    assert!(kotlin.contains("value class Nickname(val value: String?) : UndraRecord {"));
+}
+
+#[test]
+fn typescript_newtypes_are_branded_once_and_their_codecs_do_not_wait_for_each_other() {
+    let out = all_files("newtypes", |_| {});
+    let types = file(&out[2].1, "src/types.ts");
+    assert!(types.contains("export type UserId = string & { readonly __brand: \"UserId\" };"));
+    assert!(
+        types.contains(
+            "export function UserId(value: string): UserId {\n  return value as UserId;\n}"
+        )
+    );
+    assert!(
+        types.contains("export const UserIdCodec: Codec<UserId> = codecs.uuid as Codec<UserId>;")
+    );
+    // A brand on a branded type is two `__brand` literals in one intersection, which is `never`: a
+    // newtype of a newtype is branded on what the inner one wraps, and so is an option of one.
+    for line in types.lines().filter(|l| l.starts_with("export type ")) {
+        assert!(line.matches("__brand").count() <= 1, "{line}");
+    }
+    assert!(types.contains("export type Boss = string & { readonly __brand: \"Boss\" };"));
+    assert!(types.contains(
+        "export function Boss(value: Owner): Boss {\n  return value as string as Boss;\n}"
+    ));
+    assert!(
+        types.contains("export type Maybe = (string & { readonly __brand: \"Maybe\" }) | null;")
+    );
+    // An optional is branded inside (`null & brand` is `never`).
+    assert!(
+        types.contains(
+            "export type Nickname = (string & { readonly __brand: \"Nickname\" }) | null;"
+        )
+    );
+    // The codec of a composite or a named inner type is built when it runs: `ZedCodec` below a
+    // newtype of `Zed` would still be unassigned when a constant read it at module load.
+    assert!(types.contains(
+        "export const TagsCodec: Codec<Tags> = {\n  encode(w, v) {\n    vecString.encode(w, v);"
+    ));
+    assert!(types.contains("return TodoCodec.decode(r) as Wrapped;"));
+}
+
+#[test]
+fn newtypes_are_valid_map_keys_and_keyed_list_keys() {
+    let out = all_files("newtypes", |_| {});
+    let account = |text: &str, needle: &str| assert!(text.contains(needle), "`{needle}`");
+    account(
+        file(&out[0].1, "Types.swift"),
+        "public var scores: [UserId: Meters]",
+    );
+    account(
+        file(&out[1].1, "Types.kt"),
+        "val scores: Map<UserId, Meters>,",
+    );
+    account(
+        file(&out[2].1, "src/types.ts"),
+        "scores: Map<UserId, Meters>;",
+    );
+    // `Board.todos` is keyed on a newtype field: the patches are positional, so it applies like any list.
+    account(
+        file(&out[0].1, "Stores.swift"),
+        "try applyPatch(ops, to: &self.todos)",
+    );
+    account(
+        file(&out[1].1, "Stores.kt"),
+        "KeyedPatch.applyPatch(_todos.value, ops)",
+    );
+    account(
+        file(&out[2].1, "src/stores.ts"),
+        "this.todos._set(applyPatch(this.todos.peek(), ops));",
+    );
+}
+
+#[test]
+fn a_newtype_has_its_inner_types_zero_value_in_every_language() {
+    let out = all_files("newtypes", |_| {});
+    let stores = file(&out[0].1, "Stores.swift");
+    assert!(stores.contains("public private(set) var owner: UserId = UserId(UUID(uuid: (0, 0, 0"));
+    assert!(stores.contains("public private(set) var blob: Blob = Blob([])"));
+    assert!(stores.contains("public private(set) var nickname: Nickname = Nickname(nil)"));
+    let stores = file(&out[1].1, "Stores.kt");
+    assert!(stores.contains("signal(UserId(UUID(0L, 0L)))"));
+    assert!(stores.contains("signal(Blob(ByteArray(0)))"));
+    assert!(stores.contains("signal(Nickname(null))"));
+    let stores = file(&out[2].1, "src/stores.ts");
+    assert!(
+        stores.contains("new Signal<UserId>(UserId(\"00000000-0000-0000-0000-000000000000\"))")
+    );
+    assert!(stores.contains("new Signal<Blob>(Blob(new Uint8Array(0)))"));
+    assert!(stores.contains("new Signal<Nickname>(Nickname(null))"));
+    // The constructor function is a value import beside the type.
+    assert!(stores.contains("UserId,") || stores.contains(" UserId"));
+    assert!(!stores.contains("type UserId"), "UserId is used as a value");
+}
+
+#[test]
+fn every_query_handle_sets_its_poll_interval_in_the_native_spelling() {
+    let handles = |files: &[GeneratedFile], suffix: &str, class: &str| {
+        let text = file(files, suffix).to_owned();
+        (text.matches(class).count(), text)
+    };
+    for case in ["queries", "polling", "infinite"] {
+        let out = all_files(case, |_| {});
+        let (n, swift) = handles(&out[0].1, "Queries.swift", "QueryHandle: UndraStore");
+        assert_eq!(
+            swift
+                .matches("public func setPollInterval(_ interval: Duration?) {")
+                .count(),
+            n,
+            "{case}"
+        );
+        let (n, kotlin) = handles(&out[1].1, "Queries.kt", "QueryHandle internal constructor");
+        assert_eq!(
+            kotlin
+                .matches("fun setPollInterval(interval: Duration?) {")
+                .count(),
+            n,
+            "{case}"
+        );
+        let ts = file(&out[2].1, "src/queries.ts");
+        let n = ts.matches("export class ").count();
+        assert_eq!(
+            ts.matches("async setPollInterval(ms: Duration | null): Promise<void> {")
+                .count(),
+            n,
+            "{case}"
+        );
+        assert!(n > 0, "{case} has a query handle");
+    }
+    // Below iOS 16 the wire duration is the runtime's own.
+    let floor = swift_in("polling", SwiftObservation::ObservableObject, 15);
+    assert!(
+        file(&floor, "Queries.swift")
+            .contains("public func setPollInterval(_ interval: UndraDuration?) {")
+    );
+    // `None` clears the override: the argument is the optional duration, nothing else.
+    let ids = file(
+        &swift_in("polling", SwiftObservation::Observation, 17),
+        "Ids.swift",
+    )
+    .to_owned();
+    assert_eq!(
+        ids.matches("public static let setPollInterval: UInt32 = 0xe327e53b")
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn only_infinite_handles_page_and_their_data_is_a_keyed_list() {
+    let out = all_files("infinite", |_| {});
+    let swift = file(&out[0].1, "Queries.swift");
+    let feed = &swift[swift.find("public final class FeedQueryHandle").unwrap()
+        ..swift.find("public final class ProfileQueryHandle").unwrap()];
+    for part in [
+        "public private(set) var data: [Post] = []",
+        "public private(set) var hasNextPage: Bool = false",
+        "public private(set) var fetchingNextPage: Bool = false",
+        "public func fetchNextPage() {",
+        "public func loadMore(ifNeededFor item: Post, threshold: Int = 5) {",
+        "data.suffix(max(threshold, 0)).contains(where: { $0.id == item.id })",
+        "try applyPatch(ops, to: &self.data)",
+    ] {
+        assert!(
+            feed.contains(part),
+            "`{part}` is missing from the feed handle"
+        );
+    }
+    // The other handles are what they were.
+    let profile = &swift[swift.find("public final class ProfileQueryHandle").unwrap()
+        ..swift.find("/// Observes the `search` query").unwrap()];
+    assert!(profile.contains("public private(set) var data: String? = nil"));
+    assert!(!profile.contains("fetchNextPage") && !profile.contains("loadMore"));
+    // The key of a search result is `slug`: the row is not `Identifiable`, and its `loadMore` says so.
+    let types = file(&out[0].1, "Types.swift");
+    assert!(declaring(types, "public struct Post:").ends_with("Codable, Identifiable {"));
+    assert!(declaring(types, "public struct Hit:").ends_with("Hashable, Codable {"));
+    assert!(
+        swift.contains("data.suffix(max(threshold, 0)).contains(where: { $0.slug == item.slug })")
+    );
+
+    let kotlin = file(&out[1].1, "Queries.kt");
+    assert!(kotlin.contains("class FeedQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle), InfiniteQuery {"));
+    assert!(
+        kotlin
+            .contains("override val hasNextPage: StateFlow<Boolean> = _hasNextPage.asStateFlow()")
+    );
+    assert!(kotlin.contains(
+        "override val fetchingNextPage: StateFlow<Boolean> = _fetchingNextPage.asStateFlow()"
+    ));
+    assert!(kotlin.contains("override fun fetchNextPage() {"));
+    assert!(kotlin.contains("import dev.undra.runtime.InfiniteQuery"));
+    assert!(kotlin.contains("KeyedPatch.applyPatch(_data.value, ops)"));
+    assert_eq!(
+        kotlin.matches("override fun fetchNextPage()").count(),
+        2,
+        "feed and search"
+    );
+    assert!(kotlin.contains("class ProfileQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {"));
+
+    let ts = file(&out[2].1, "src/queries.ts");
+    assert!(ts.contains("readonly hasNextPage: Signal<boolean> = new Signal<boolean>(false);"));
+    assert!(
+        ts.contains("readonly fetchingNextPage: Signal<boolean> = new Signal<boolean>(false);")
+    );
+    assert!(ts.contains("async fetchNextPage(): Promise<void> {"));
+    assert!(ts.contains("this.data._set(applyPatch(this.data.peek(), ops));"));
+    // Two infinite handles page; the plain one does not.
+    assert_eq!(ts.matches("async fetchNextPage()").count(), 2);
+}
+
+#[test]
+fn a_lazy_signal_is_the_runtimes_lazy_list_made_with_its_store() {
+    let out = all_files("lazy", |_| {});
+    let swift = file(&out[0].1, "Stores.swift");
+    for part in [
+        "public let books: UndraLazyList<Book>\n",
+        "public let recent: UndraLazyList<Book>\n",
+        "self.books = UndraLazyList(core: core)\n        self.recent = UndraLazyList(core: core)\n        super.init(core: core, handle: handle)",
+        "try self.books.applyFull(&reader)",
+        "try self.books.applyInvalidated(&reader)",
+    ] {
+        assert!(swift.contains(part), "`{part}` is missing:\n{swift}");
+    }
+    // It is not a placeholder-valued property.
+    assert!(!swift.contains("var books") && !swift.contains("var recent"));
+    // The ordinary signals around it are what they were.
+    assert!(swift.contains("public private(set) var selected: Book? = nil"));
+
+    let floor = swift_in("lazy", SwiftObservation::ObservableObject, 15);
+    let swift = file(&floor, "Stores.swift");
+    assert!(swift.contains("public let books: UndraLazyListObject<Book>\n"));
+    assert!(swift.contains("self.books = UndraLazyListObject(core: core)"));
+    assert!(!swift.contains("@Published public let"));
+
+    let kotlin = file(&out[1].1, "Stores.kt");
+    assert!(kotlin.contains("val books: UndraLazyList<Book> = UndraLazyList(core, Book)"));
+    assert!(
+        kotlin.contains(
+            "if (op == ChangeOp.FULL) {\n                        books.applyFull(reader)"
+        )
+    );
+    assert!(kotlin.contains("} else if (op == ChangeOp.INVALIDATED) {\n                        books.applyInvalidated(reader)"));
+    assert!(kotlin.contains("override fun close() {\n        books.close()\n        recent.close()\n        super.close()"));
+
+    let ts = file(&out[2].1, "src/stores.ts");
+    assert!(ts.contains("readonly books: LazyList<Book> = new LazyList(this.core, BookCodec);"));
+    assert!(ts.contains("books.applyFull(new UndraReader(value));"));
+    assert!(ts.contains("books.applyInvalidated(new UndraReader(value));"));
+    // Only the signals are in the list of signals.
+    assert!(
+        ts.contains("this._signals = [this.shelves, this.selected, this.total];"),
+        "{ts}"
+    );
+    // A store without a lazy list has no `close` of its own.
+    let stores = file(&all_files("stores", |_| {})[1].1, "Stores.kt").to_owned();
+    assert!(!stores.contains("override fun close"));
+}
+
+#[test]
+fn generic_instantiations_are_the_plain_records_and_enums_they_stand_for() {
+    let out = all_files("generics", |_| {});
+    let swift = file(&out[0].1, "Types.swift");
+    assert!(swift.contains("public struct TodoPage: UndraRecord, Sendable, Hashable, Codable {"));
+    assert!(
+        swift.contains("public enum LoadableUser: UndraEnum, Sendable, Hashable {"),
+        "{swift}"
+    );
+    let ts = file(&out[2].1, "src/types.ts");
+    assert!(
+        ts.contains("export interface UserPage {\n  items: User[];\n  next: string | null;\n}")
+    );
+}
+
+#[test]
+fn decimal_maps_to_each_languages_exact_type() {
+    let out = all_files("decimal", |_| {});
+    let swift = file(&out[0].1, "Types.swift");
+    assert!(
+        swift.contains("public var total: Decimal\n")
+            && swift.contains("public var lines: [Decimal]\n")
+    );
+    assert!(swift.contains("public var discount: Decimal?\n"));
+    // A decimal has an order, and so does a newtype of one.
+    assert!(declaring(swift, "public struct Price:").ends_with("Codable, Comparable {"));
+    let kotlin = file(&out[1].1, "Types.kt");
+    assert!(
+        kotlin.contains("val total: BigDecimal,")
+            && kotlin.contains("val lines: List<BigDecimal>,")
+    );
+    assert!(
+        kotlin.contains(
+            "value class Price(val value: BigDecimal) : UndraRecord, Comparable<Price> {"
+        )
+    );
+    assert!(kotlin.contains("val tax: BigDecimal = BigDecimal.ZERO,"));
+    let ts = file(&out[2].1, "src/types.ts");
+    assert!(
+        ts.contains("total: Decimal;")
+            && ts.contains("lines: Decimal[];")
+            && ts.contains("discount: Decimal | null;")
+    );
+    assert!(ts.contains("export type Price = Decimal & { readonly __brand: \"Price\" };"));
+    assert!(ts.contains("export const PriceCodec: Codec<Price> = decimalCodec as Codec<Price>;"));
+    assert!(!ts.contains("Map<Decimal"), "a decimal is never a map key");
+}

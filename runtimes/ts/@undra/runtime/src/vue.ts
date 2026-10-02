@@ -25,6 +25,9 @@ export type { UndraClass } from "./lifetime.js";
  * ```
  *
  * The subscription ends with the component (or effect scope) the call is made in.
+ *
+ * A `LazyList` (ADR-043) needs nothing more: `useSignal(list.length)` is its row count and `useSignal(list.revision)`
+ * changes when rows arrive, so a template that reads `list.get(i)` next to them renders again with the rows.
  */
 export function useSignal<T>(signal: MaybeRefOrGetter<Signal<T>>): Readonly<ShallowRef<T>>;
 export function useSignal<T>(signal: MaybeRefOrGetter<Signal<T> | null | undefined>): Readonly<ShallowRef<T | undefined>>;

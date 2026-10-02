@@ -1,0 +1,26 @@
+error: error[undra::E0002]: generic type `Page<Todo>` cannot cross the boundary
+         = note: the schema has no way to name an instantiated generic type: every instantiation is a named type of its own, which the platforms generate
+         = help: declare `#[undra::api] pub type TodoPage = Page<Todo>;` (`Page` must be a struct or enum marked `#[undra::api(generic)]`) and write `TodoPage` here
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_spelled_directly.rs:27:16
+   |
+27 |     pub todos: Page<Todo>,
+   |                ^^^^^^^^^^
+
+error: error[undra::E0002]: generic type `Loadable<Vec<Todo>>` cannot cross the boundary
+         = note: the schema has no way to name an instantiated generic type: every instantiation is a named type of its own, which the platforms generate
+         = help: declare `#[undra::api] pub type VecTodoLoadable = Loadable<Vec<Todo>>;` (`Loadable` must be a struct or enum marked `#[undra::api(generic)]`) and write `VecTodoLoadable` here
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_spelled_directly.rs:28:33
+   |
+28 |     pub nested: HashMap<String, Loadable<Vec<Todo>>>,
+   |                                 ^^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0002]: generic type `Page<Todo>` cannot cross the boundary
+         = note: the schema has no way to name an instantiated generic type: every instantiation is a named type of its own, which the platforms generate
+         = help: declare `#[undra::api] pub type TodoPage = Page<Todo>;` (`Page` must be a struct or enum marked `#[undra::api(generic)]`) and write `TodoPage` here
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_spelled_directly.rs:32:24
+   |
+32 | pub fn first_page() -> Page<Todo> {
+   |                        ^^^^^^^^^^

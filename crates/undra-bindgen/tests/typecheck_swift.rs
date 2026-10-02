@@ -87,7 +87,10 @@ fn target_name(case: &str) -> String {
 
 /// The execution checks: a case and the `main.swift` (in `tests/fixtures/swift-run`) that is built
 /// against its generated module as the executable `<target>Check`.
-const CHECKS: &[(&str, &str)] = &[("recursive", "recursive.swift")];
+const CHECKS: &[(&str, &str)] = &[
+    ("recursive", "recursive.swift"),
+    ("newtypes", "newtypes.swift"),
+];
 
 /// The executable target of a check.
 fn check_name(case: &str) -> String {
