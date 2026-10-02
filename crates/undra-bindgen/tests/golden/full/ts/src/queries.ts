@@ -3,6 +3,7 @@
 import {
   CallTarget,
   ChangeOp,
+  type Duration,
   Signal,
   type Timestamp,
   UndraCallError,
@@ -106,6 +107,26 @@ export class TodosQueryHandle extends UndraStore {
     }
   }
 
+  /**
+   * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+   * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+   * An interval below 1 second or above 7 days is clamped to that range.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  async setPollInterval(ms: Duration | null): Promise<void> {
+    try {
+      const w = new UndraWriter();
+      optionDuration.encode(w, ms);
+      await this.core.call(
+        { target: CallTarget.ObjectMethod, handle: this.handle },
+        UndraIds.Objects.TodosQueryHandle.setPollInterval,
+        w.finish(),
+      );
+    } catch (error) {
+      this.core.report(error, "TodosQueryHandle.setPollInterval");
+    }
+  }
+
   protected override _apply(signalId: number, op: ChangeOp, value: Uint8Array): void {
     try {
       switch (signalId) {
@@ -169,6 +190,7 @@ export async function addTodo(
   }
 }
 
+const optionDuration = codecs.option(codecs.duration);
 const optionPage = codecs.option(PageCodec);
 const optionTodoError = codecs.option(TodoErrorCodec);
 const optionTimestamp = codecs.option(codecs.timestamp);

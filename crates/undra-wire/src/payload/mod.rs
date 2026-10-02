@@ -25,6 +25,7 @@
 
 mod call;
 mod changeset;
+mod lazy;
 mod snapshot;
 
 use crate::macros::wire_u8_enum;
@@ -34,6 +35,7 @@ pub use call::{Call, CallOwned, CallTarget};
 pub use changeset::{
     ChangeEntries, ChangeEntry, ChangeEntryRef, ChangeOp, ChangeSet, ChangeSetBuilder, ChangeSetRef,
 };
+pub use lazy::{LazyInvalidated, LazyPage, LazyValue};
 pub use snapshot::{Restore, Snapshot, SnapshotType, StoreSnapshot};
 
 wire_u8_enum! {

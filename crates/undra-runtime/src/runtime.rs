@@ -40,7 +40,7 @@ use crate::ext::{Extensions, InitHook, InspectFn, Inspectors};
 use crate::guard::{self, PanicReport, drop_guarded, encode_panic_body};
 use crate::host::{Host, PortCallOutcome};
 use crate::issue::{IssueScope, OriginScope, Origins, WithOrigin};
-use crate::lazy::LazyList;
+use crate::lazy::{LazyList, page_server};
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
 
 /// The `port_call_id` of a fire-and-forget port call: no answer is expected (SPEC 6, host contract 6).
@@ -1816,71 +1816,63 @@ impl Runtime {
         };
         // The route is the generated dispatcher the static table names, or, when the table has
         // no entry, the reason to report if no layer serves the call either.
-        let (route, method_id, handle): (Result<DispatchFn, String>, u32, Handle) = match call
-            .target
-        {
-            CallTarget::Function { method_id } => match self.table.functions.get(&method_id) {
-                Some(meta) => {
-                    if sync_only && needs_async(meta.is_async, &meta.returns) {
-                        return async_reason(meta.name);
-                    }
-                    (Ok(meta.dispatch), method_id, Handle::NULL)
-                }
-                None => (
-                    Err(format!("unknown function {method_id:#010x}")),
-                    method_id,
-                    Handle::NULL,
-                ),
-            },
-            CallTarget::Method { handle, method_id } => {
-                let (type_id, type_name) = match self.objects.type_of(handle) {
-                    Ok(found) => found,
-                    Err(e) => return Dispatched::Bad(e.to_string()),
-                };
-                match self.table.objects.get(&type_id) {
-                    Some(entry) => {
-                        if sync_only && entry.method_needs_async(method_id) {
-                            return async_reason(entry.name_of(method_id, false));
+        let (route, method_id, handle): (Result<DispatchFn, String>, u32, Handle) =
+            match call.target {
+                CallTarget::Function { method_id } => match self.table.functions.get(&method_id) {
+                    Some(meta) => {
+                        if sync_only && needs_async(meta.is_async, &meta.returns) {
+                            return async_reason(meta.name);
                         }
-                        (Ok(entry.meta.dispatch), method_id, handle)
+                        (Ok(meta.dispatch), method_id, Handle::NULL)
                     }
                     None => (
-                        Err(format!(
-                            "no dispatcher is registered for `{type_name}` ({type_id:#010x})"
-                        )),
-                        method_id,
-                        handle,
-                    ),
-                }
-            }
-            CallTarget::Constructor { type_id, method_id } => {
-                match self.table.objects.get(&type_id) {
-                    Some(entry) => {
-                        if sync_only && entry.constructor_needs_async(method_id) {
-                            return async_reason(entry.name_of(method_id, true));
-                        }
-                        (Ok(entry.meta.dispatch), method_id, Handle::NULL)
-                    }
-                    None => (
-                        Err(format!("unknown object type {type_id:#010x}")),
+                        Err(format!("unknown function {method_id:#010x}")),
                         method_id,
                         Handle::NULL,
                     ),
-                }
-            }
-            CallTarget::LazyPage {
-                handle,
-                offset,
-                limit,
-            } => {
-                return match self.objects.get::<LazyList>(handle) {
-                    Ok(list) => {
-                        Dispatched::Done(DispatchResult::Sync(Ok(list.page(offset, limit))), handle)
+                },
+                CallTarget::Method { handle, method_id } => {
+                    let (type_id, type_name) = match self.objects.type_of(handle) {
+                        Ok(found) => found,
+                        Err(e) => return Dispatched::Bad(e.to_string()),
+                    };
+                    match self.table.objects.get(&type_id) {
+                        Some(entry) => {
+                            if sync_only && entry.method_needs_async(method_id) {
+                                return async_reason(entry.name_of(method_id, false));
+                            }
+                            (Ok(entry.meta.dispatch), method_id, handle)
+                        }
+                        None => (
+                            Err(format!(
+                                "no dispatcher is registered for `{type_name}` ({type_id:#010x})"
+                            )),
+                            method_id,
+                            handle,
+                        ),
                     }
-                    Err(e) => Dispatched::Bad(e.to_string()),
-                };
-            }
-        };
+                }
+                CallTarget::Constructor { type_id, method_id } => {
+                    match self.table.objects.get(&type_id) {
+                        Some(entry) => {
+                            if sync_only && entry.constructor_needs_async(method_id) {
+                                return async_reason(entry.name_of(method_id, true));
+                            }
+                            (Ok(entry.meta.dispatch), method_id, Handle::NULL)
+                        }
+                        None => (
+                            Err(format!("unknown object type {type_id:#010x}")),
+                            method_id,
+                            Handle::NULL,
+                        ),
+                    }
+                }
+                CallTarget::LazyPage {
+                    handle,
+                    offset,
+                    limit,
+                } => return self.serve_page(handle, offset, limit),
+            };
         let dispatch_call = DispatchCall {
             method_id,
             call_id: call.call_id,
@@ -1902,6 +1894,29 @@ impl Runtime {
                 Dispatched::Bad(miss)
             }
         }
+    }
+
+    /// Answers a `LazyPage` call (SPEC 3.3, ADR-043) through the built-in dispatcher of the page
+    /// servers, so it runs under the same panic guard and is classified like any other call: the
+    /// source's encoders and a view's pipeline closures are user code.
+    fn serve_page(&self, handle: Handle, offset: u32, limit: u32) -> Dispatched {
+        let mut args = [0_u8; 8];
+        args[..4].copy_from_slice(&offset.to_le_bytes());
+        args[4..].copy_from_slice(&limit.to_le_bytes());
+        let call = DispatchCall {
+            method_id: 0,
+            call_id: 0,
+            handle: handle.0,
+            args: &args,
+        };
+        // Set by the first store with a `Lazy` field; without one nothing is served (and the core does
+        // not link the dispatcher, ADR-052).
+        let unserved = || Dispatched::Bad("not a lazy list".to_owned());
+        let Some(dispatch) = self.objects.lazy_dispatch() else {
+            return unserved();
+        };
+        self.run_dispatcher("lazy list", dispatch, call, handle, false)
+            .unwrap_or_else(unserved)
     }
 
     /// Runs one dispatcher under the panic guard and classifies what it answered. A layer
@@ -2435,7 +2450,16 @@ impl Runtime {
     /// Stores a [`LazyList`] (sharing its state) and returns its handle, which platforms page
     /// through with `LazyPage` calls.
     pub fn insert_lazy_list(&self, list: &LazyList) -> Handle {
-        self.insert_object(Arc::new(list.clone()))
+        self.insert_lazy_source(Arc::new(list.clone()))
+    }
+
+    /// Stores a page server for any [`LazySource`](undra_signals::LazySource) and returns its handle, which platforms page
+    /// through with `LazyPage` calls (the host owns one reference to it, as to any object it
+    /// constructs). A store's `Lazy<T>` signals are registered by the runtime when the store is
+    /// inserted; this is for a core that serves a list of its own.
+    pub fn insert_lazy_source(&self, source: Arc<dyn undra_signals::LazySource>) -> Handle {
+        self.objects.serve_page_calls();
+        self.objects.insert(page_server(source))
     }
 
     /// Resolves a raw handle to a `T`: what a generated dispatcher does for its receiver.
@@ -2974,7 +2998,7 @@ impl Runtime {
     /// does not change.
     fn snapshot_description(&self, type_ids: &[u32]) -> Arc<str> {
         let mut key = type_ids.to_vec();
-        key.sort_unstable();
+        undra_signals::sort_ids(&mut key);
         let mut cache = self.description.lock();
         if let Some((cached, text)) = cache.as_ref() {
             if *cached == key {

@@ -165,8 +165,12 @@ type Awaiting = Map<Handle, Map<number, boolean>>;
 
 /** One signal of one store as a drain or a compaction folds it (docs/SPEC.md section 11). */
 class Slot {
-  /** The last full value or lazy invalidation; everything that arrived before it is superseded. */
-  full: ChangeEntry | null = null;
+  /**
+   * What the signal's last full value left to deliver, in order: that value, or the last lazy invalidation, or both (an
+   * invalidation supersedes only earlier invalidations, never the value that carries the page server's handle). A full
+   * value supersedes everything that arrived before it.
+   */
+  full: ChangeEntry[] = [];
   /** The keyed patches that arrived after `full`, whole (count and ops), in arrival order. */
   patches: Uint8Array[] = [];
   /** Sum of the patches' op counts. */
@@ -182,7 +186,8 @@ class Slot {
   ) {}
 
   setFull(entry: ChangeEntry): void {
-    this.full = entry;
+    const [head] = this.full;
+    this.full = entry.op === ChangeOp.LazyInvalidated && head?.op === ChangeOp.FullValue ? [head, entry] : [entry];
     this.patches = [];
     this.ops = 0;
     this.opBytes = 0;
@@ -258,9 +263,12 @@ function own(value: Uint8Array): Uint8Array {
  *
  * A change-set is validated whole before any of it is queued (a change-set is
  * a transaction). A drain folds the queued entries per signal: a full value
- * supersedes everything before it, consecutive keyed patches become one patch,
- * so each signal is applied at most twice per drain (its last full value, then
- * its merged patch), signals in the order their first entry arrived, and the
+ * supersedes everything before it, a lazy invalidation only the invalidations
+ * before it (the full value before it stays: it carries the page server's
+ * handle), consecutive keyed patches become one patch, so each signal is
+ * applied at most three times per drain (its last full value, the last
+ * invalidation after it, then its merged patch), signals in the order their
+ * first entry arrived, and the
  * signals a drain touched are announced once at its end. Signals a store
  * declared `no_coalesce` are applied entry by entry, each announced on its
  * own. Entries for a handle nobody registered (a store closed while updates
@@ -572,8 +580,9 @@ export class Mirror {
         lastAwaiting = awaiting.size > 0 ? awaiting.get(entry.handle) : undefined;
       }
       if (lastAwaiting?.has(entry.signalId) === true) {
-        // Its patches are relative to a list this host never saw: wait for a full value.
-        if (entry.op === ChangeOp.KeyedPatch) continue;
+        // Its patches are relative to a list this host never saw, an invalidation to a page server it never saw:
+        // wait for a full value.
+        if (entry.op !== ChangeOp.FullValue) continue;
         lastAwaiting.delete(entry.signalId);
         if (lastAwaiting.size === 0) {
           awaiting.delete(entry.handle);
@@ -609,7 +618,7 @@ export class Mirror {
 
   /** Forgets what `slot` holds and waits for a full value of its signal (re-observed at the next drain). */
   private _markDropped(slot: Slot): void {
-    slot.full = null;
+    slot.full = [];
     slot.patches = [];
     slot.ops = 0;
     slot.opBytes = 0;
@@ -642,9 +651,9 @@ export class Mirror {
         this._markDropped(unit);
         continue;
       }
-      if (unit.full !== null) {
-        const value = own(unit.full.value);
-        queue.push({ handle: unit.handle, signalId: unit.signalId, op: unit.full.op, value });
+      for (const entry of unit.full) {
+        const value = own(entry.value);
+        queue.push({ handle: unit.handle, signalId: unit.signalId, op: entry.op, value });
         bytes += ENTRY_OVERHEAD + value.length;
       }
       if (unit.patches.length > 0) {
@@ -709,7 +718,7 @@ export class Mirror {
         older.push(typeof unit === "function" ? unit : unit.entry);
         continue;
       }
-      if (unit.full !== null) older.push(unit.full);
+      older.push(...unit.full);
       if (unit.patches.length > 0) {
         older.push({ handle: unit.handle, signalId: unit.signalId, op: ChangeOp.KeyedPatch, value: unit.mergedPatch() });
       }
@@ -724,8 +733,8 @@ export class Mirror {
       this._dropped += slot.entries;
       return;
     }
-    if (slot.full === null && slot.patches.length === 0) return; // dropped for a resync
-    if (slot.full !== null) this._call(registration, slot.signalId, slot.full.op, slot.full.value);
+    if (slot.full.length === 0 && slot.patches.length === 0) return; // dropped for a resync
+    for (const entry of slot.full) this._call(registration, slot.signalId, entry.op, entry.value);
     if (slot.patches.length > 0) this._call(registration, slot.signalId, ChangeOp.KeyedPatch, slot.mergedPatch());
     this._satisfy(slot.handle, slot.signalId, satisfied);
   }

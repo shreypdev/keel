@@ -38,6 +38,7 @@ static TODO: RecordMeta = RecordMeta {
             docs: "Tags by name.",
         },
     ],
+    transparent: false,
     docs: "A todo item.",
 };
 
@@ -172,6 +173,9 @@ static TODOS: QueryMeta = QueryMeta {
     stale_ms: Some(30_000),
     persist: true,
     idempotent: true,
+    interval_ms: None,
+    poll_in_background: false,
+    infinite: None,
 };
 
 static ADD_TODO: QueryMeta = QueryMeta {
@@ -190,6 +194,9 @@ static ADD_TODO: QueryMeta = QueryMeta {
     stale_ms: None,
     persist: false,
     idempotent: false,
+    interval_ms: None,
+    poll_in_background: false,
+    infinite: None,
 };
 
 undra_meta::inventory::submit! { Registration::Record(&TODO) }
@@ -325,6 +332,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
                 docs: "Tags by name.".into(),
             },
         ],
+        transparent: false,
         docs: "A todo item.".into(),
     });
     by_hand.enums.push(EnumDef {
@@ -442,6 +450,9 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
         stale_ms: None,
         persist: false,
         idempotent: false,
+        interval_ms: None,
+        poll_in_background: false,
+        infinite: None,
     });
     by_hand.queries.push(QueryDef {
         name: "todos".into(),
@@ -456,6 +467,9 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
         stale_ms: Some(30_000),
         persist: true,
         idempotent: true,
+        interval_ms: None,
+        poll_in_background: false,
+        infinite: None,
     });
 
     assert_eq!(collected, by_hand);

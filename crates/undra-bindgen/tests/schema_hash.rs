@@ -23,8 +23,20 @@ const HASHES_BEFORE_NO_COALESCE: &[(&str, u64)] = &[
 /// two `FsError` variants): it had `0x6b46_38c4_a5e3_4313` before, and no longer has a hash from
 /// before the field to compare with.
 /// `object_graph` and `callbacks` (ADR-040, ADR-041) are new: they use the types and port kind that
-/// no earlier schema had.
-const CASES_AFTER_NO_COALESCE: &[&str] = &["stdlib", "recursive", "object_graph", "callbacks"];
+/// no earlier schema had; so are the cases of ADR-042 and ADR-043 (`newtypes`, `generics`, `decimal`,
+/// `polling`, `infinite`, `lazy`).
+const CASES_AFTER_NO_COALESCE: &[&str] = &[
+    "stdlib",
+    "recursive",
+    "object_graph",
+    "callbacks",
+    "newtypes",
+    "generics",
+    "decimal",
+    "polling",
+    "infinite",
+    "lazy",
+];
 
 #[test]
 fn every_golden_case_is_listed() {

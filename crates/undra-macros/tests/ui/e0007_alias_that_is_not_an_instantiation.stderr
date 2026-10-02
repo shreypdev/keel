@@ -1,0 +1,25 @@
+error: error[undra::E0007]: `#[undra::api]` on the type alias `Id`, which does not name an instantiation
+         = note: a type alias is not a schema type of its own; the only alias that is names an instantiation of a generic data type declared with `#[undra::api(generic)]`, so it can be given a name the platforms generate a type for
+         = help: write `#[undra::api] pub type Id = Page<Todo>;` for a template `Page`, or remove `#[undra::api]` and write the aliased type where it is used
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+ --> tests/ui/e0007_alias_that_is_not_an_instantiation.rs:8:10
+  |
+8 | pub type Id = u64;
+  |          ^^
+
+error: error[undra::E0007]: `Vec<String>` is not a generic data type of yours: `#[undra::api]` on the alias `Names` cannot instantiate `Vec`
+         = note: `#[undra::api]` on a type alias instantiates a generic struct or enum declared with `#[undra::api(generic)]`; the standard types (`Vec`, `Option`, maps, ..) already cross the boundary, spelled as they are
+         = help: remove `#[undra::api]` from `Names` and write `Vec<String>` where it is used, or declare your own template: `#[undra::api(generic)] struct Page<T> { .. }`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/e0007_alias_that_is_not_an_instantiation.rs:11:18
+   |
+11 | pub type Names = Vec<String>;
+   |                  ^^^^^^^^^^^
+
+error: cannot find macro `Plain` in this scope
+  --> tests/ui/e0007_alias_that_is_not_an_instantiation.rs:16:21
+   |
+16 | pub type PlainInt = Plain<u32>;
+   |                     ^^^^^
+   |
+   = note: `Plain` is in scope, but it is a struct, not a macro

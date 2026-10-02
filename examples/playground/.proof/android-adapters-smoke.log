@@ -1,4 +1,4 @@
-# playground Android smoke run on the real platform adapters, 2026-10-01 12:08:31
+# playground Android smoke run on the real platform adapters, 2026-10-02 00:13:38
 
 $ adb shell getprop (device)
 sdk_gphone64_arm64
@@ -6,11 +6,11 @@ arm64-v8a
 35
 
 $ (cd examples/playground/android && ./gradlew :app:assembleDebug)
-14793992 bytes  /Users/shrey/Desktop/src/.work/android-adapters/examples/playground/android/app/build/outputs/apk/debug/app-debug.apk
+16006523 bytes  /Users/shrey/Desktop/src/.work/tp-kotlin/examples/playground/android/app/build/outputs/apk/debug/app-debug.apk
 
 $ adb_ shell cmd connectivity airplane-mode disable
 
-$ adb_ install -r /Users/shrey/Desktop/src/.work/android-adapters/examples/playground/android/app/build/outputs/apk/debug/app-debug.apk
+$ adb_ install -r /Users/shrey/Desktop/src/.work/tp-kotlin/examples/playground/android/app/build/outputs/apk/debug/app-debug.apk
 Performing Streamed Install
 Success
 
@@ -25,8 +25,8 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 4040
-WaitTime: 4086
+TotalTime: 814
+WaitTime: 816
 Complete
 screenshot .proof/android-adapters-tab-todos.png
 alive: todos
@@ -36,8 +36,8 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 1431
-WaitTime: 1435
+TotalTime: 836
+WaitTime: 838
 Complete
 screenshot .proof/android-adapters-tab-counter.png
 alive: counter
@@ -47,8 +47,8 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 1550
-WaitTime: 1559
+TotalTime: 884
+WaitTime: 885
 Complete
 screenshot .proof/android-adapters-tab-biglist.png
 alive: biglist
@@ -58,14 +58,166 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 1371
-WaitTime: 1376
+TotalTime: 996
+WaitTime: 998
 Complete
 screenshot .proof/android-adapters-tab-remote.png
 alive: remote
 
+$ adb_ shell am start -W -n dev.undra.playground/.MainActivity --es tab notes
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+Status: ok
+LaunchState: COLD
+Activity: dev.undra.playground/.MainActivity
+TotalTime: 2393
+WaitTime: 2395
+Complete
+screenshot .proof/android-adapters-tab-notes.png
+alive: notes
+
+$ adb_ shell am start -W -n dev.undra.playground/.MainActivity --es tab library
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+Status: ok
+LaunchState: COLD
+Activity: dev.undra.playground/.MainActivity
+TotalTime: 1989
+WaitTime: 1993
+Complete
+screenshot .proof/android-adapters-tab-library.png
+alive: library
+
+$ adb_ shell am start -W -n dev.undra.playground/.MainActivity --es tab feed
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+Status: ok
+LaunchState: COLD
+Activity: dev.undra.playground/.MainActivity
+TotalTime: 2342
+WaitTime: 2344
+Complete
+screenshot .proof/android-adapters-tab-feed.png
+alive: feed
+
+$ adb_ shell am start -W -n dev.undra.playground/.MainActivity --es tab ticker
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+Status: ok
+LaunchState: COLD
+Activity: dev.undra.playground/.MainActivity
+TotalTime: 2952
+WaitTime: 2955
+Complete
+screenshot .proof/android-adapters-tab-ticker.png
+alive: ticker
+
 $ the adapters the app installed (logcat, tag Undra)
-I/Undra   ( 4857): AndroidPlatformDefaults: registered Kv, SecureStore, Fs, Http, Clock, Rng, Log and Timer; reporting Connectivity and Lifecycle
+I/Undra   ( 6566): AndroidPlatformDefaults: registered Kv, SecureStore, Fs, Http, Clock, Rng, Log, Timer, WebSocket, Sse and Db; reporting Connectivity and Lifecycle
+
+## Notes: a note written to SQLite (AndroidDbAdapter) is still there after the process is killed
+
+$ adb_ shell am start -W -n dev.undra.playground/.MainActivity --es tab notes
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+Status: ok
+LaunchState: COLD
+Activity: dev.undra.playground/.MainActivity
+TotalTime: 1867
+WaitTime: 1868
+Complete
+ok: the database is open (migrated, empty)
+
+$ tap notes-input (433 406)
+
+$ type 'Milk from smoke'
+
+$ tap notes-add (942 407)
+ok: the note is in the list
+
+$ tap notes-toggle (106 568)
+screenshot .proof/android-adapters-notes-added.png
+
+$ kill the app; relaunch on the Notes tab
+
+$ adb_ shell am force-stop dev.undra.playground
+
+$ adb_ shell am start -W -n dev.undra.playground/.MainActivity --es tab notes
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+Status: ok
+LaunchState: COLD
+Activity: dev.undra.playground/.MainActivity
+TotalTime: 912
+WaitTime: 912
+Complete
+ok: the note came back from SQLite after the restart
+database files (run-as dev.undra.playground ls databases): undra-playground_core-playground.sqlite undra-playground_core-playground.sqlite-shm undra-playground_core-playground.sqlite-wal 
+screenshot .proof/android-adapters-notes-restarted.png
+
+## Library, Feed, Ticker: lazy lists, an infinite query and polling on the real core
+
+$ adb_ shell am start -W -n dev.undra.playground/.MainActivity --es tab library
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+Status: ok
+LaunchState: COLD
+Activity: dev.undra.playground/.MainActivity
+TotalTime: 1056
+WaitTime: 1058
+Complete
+ok: the library has 10,000 books and its first pages (rows, not placeholders)
+ok: the evens view has ten rows
+screenshot .proof/android-adapters-library-loaded.png
+
+$ tap library-add (173 365)
+ok: the library has 10,100 books
+
+$ tap library-end (479 502)
+ok: the last page was fetched: the last book is on screen
+screenshot .proof/android-adapters-library-end.png
+
+$ adb_ shell am start -W -n dev.undra.playground/.MainActivity --es tab feed
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+Status: ok
+LaunchState: COLD
+Activity: dev.undra.playground/.MainActivity
+TotalTime: 965
+WaitTime: 967
+Complete
+ok: the feed has its first page (50 rows)
+screenshot .proof/android-adapters-feed-first-page.png
+ok: scrolling to the end fetched the next page (100 rows or more)
+screenshot .proof/android-adapters-feed-scrolled.png
+
+$ tap feed-refresh (910 365)
+ok: the refresh ended (status Success)
+
+$ adb_ shell am start -W -n dev.undra.playground/.MainActivity --es tab ticker
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+Status: ok
+LaunchState: COLD
+Activity: dev.undra.playground/.MainActivity
+TotalTime: 829
+WaitTime: 831
+Complete
+ok: the ticker has a first value
+ok: the counter went up by itself (a poll, a second after each fetch)
+ticker-count: 4 -> 8
+
+$ tap ticker-failing (142 775)
+ok: a failing fetch shows its error and the polling goes on
+
+$ tap ticker-failing (142 849)
+ok: the error clears when a fetch succeeds again
+screenshot .proof/android-adapters-ticker.png
+
+$ the app goes to the background (the core stops polling) and comes back (it polls again)
+
+$ adb_ shell am start -W -n dev.undra.playground/.MainActivity --es tab ticker
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+Warning: Activity not started, its current task has been brought to the front
+Status: ok
+LaunchState: HOT
+Activity: dev.undra.playground/.MainActivity
+TotalTime: 159
+WaitTime: 187
+Complete
+ok: the ticker is on screen again
+ok: the counter goes up again after the app came back
 
 ## Remote: persisted query, offline toggle, queue, kill, real airplane mode, replay
 
@@ -74,28 +226,28 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 1204
-WaitTime: 1205
+TotalTime: 2722
+WaitTime: 2724
 Complete
 ok: the inbox list is fetched (3 rows, status Success)
-remote-updated: Updated 12:09:09
+remote-updated: Updated 00:15:51
 screenshot .proof/android-adapters-remote-fetched.png
-files in the Kv directory (run-as dev.undra.playground ls files/undra/kv): 1
+files in the Kv directory (run-as dev.undra.playground ls files/undra/playground_core/kv): 2
 
 $ 1. the Offline switch simulates losing the network; add an item
 
-$ tap remote-offline (142 605)
+$ tap remote-offline (142 543)
 
-$ tap remote-input (433 1047)
+$ tap remote-input (433 985)
 
 $ type 'Queued while offline'
 
-$ tap remote-add (942 1048)
+$ tap remote-add (942 986)
 ok: the item shows as queued
 screenshot .proof/android-adapters-remote-queued.png
-files in the Kv directory after queueing: 2  (the cache entry and the offline queue)
-Idempotency-Key of the dropped request: 3e44f0ec-2e81-4739-a761-2907d52f3058
-I/UndraDemoServer( 4961): POST /lists/inbox/todos dropped: the network is down (Idempotency-Key 3e44f0ec-2e81-4739-a761-2907d52f3058)
+files in the Kv directory after queueing: 4  (the cache entry and the offline queue)
+Idempotency-Key of the dropped request: ea4f7dae-6cd1-4fa9-b3ff-1b03aed7d281
+I/UndraDemoServer( 7679): POST /lists/inbox/todos dropped: the network is down (Idempotency-Key ea4f7dae-6cd1-4fa9-b3ff-1b03aed7d281)
 
 $ 2. kill the app with the queue unsent
 
@@ -112,30 +264,30 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 2564
-WaitTime: 2610
+TotalTime: 973
+WaitTime: 976
 Complete
 ok: the cached list is shown from Kv while offline (3 rows, the time of the fetch before the kill)
-remote-updated: Updated 12:09:09   (before the kill: Updated 12:09:09)
+remote-updated: Updated 00:15:51   (before the kill: Updated 00:15:51)
 POST requests sent while the Connectivity adapter says offline: 0  (the core holds the queue instead of retrying)
 
-$ tap remote-refresh (878 459)
+$ tap remote-refresh (878 397)
 ok: Refresh fails with the Http adapter's network error
 remote-error:   Last fetch failed: network: network error: Connection reset
 screenshot .proof/android-adapters-remote-restarted-offline.png
-I/UndraDemoServer( 5294): GET /lists/inbox/todos dropped: the network is down
-I/UndraDemoServer( 5294): GET /lists/inbox/todos dropped: the network is down
+I/UndraDemoServer( 7945): GET /lists/inbox/todos dropped: the network is down
+I/UndraDemoServer( 7945): GET /lists/inbox/todos dropped: the network is down
 
 $ 4. airplane mode off: the Connectivity adapter reports online and the core replays the queue
 
 $ adb_ shell cmd connectivity airplane-mode disable
 ok: the item is on the server and in the list (4 rows)
 screenshot .proof/android-adapters-remote-replayed.png
-I/UndraDemoServer( 5294): GET /lists/inbox/todos dropped: the network is down
-I/UndraDemoServer( 5294): GET /lists/inbox/todos dropped: the network is down
-I/UndraDemoServer( 5294): POST /lists/inbox/todos -> 201 (Idempotency-Key 3e44f0ec-2e81-4739-a761-2907d52f3058)
-I/UndraDemoServer( 5294): GET /lists/inbox/todos -> 200
-I/UndraDemoServer( 5294): GET /lists/inbox/todos -> 200
+I/UndraDemoServer( 7945): GET /lists/inbox/todos dropped: the network is down
+I/UndraDemoServer( 7945): GET /lists/inbox/todos dropped: the network is down
+I/UndraDemoServer( 7945): GET /lists/inbox/todos -> 200
+I/UndraDemoServer( 7945): POST /lists/inbox/todos -> 201 (Idempotency-Key ea4f7dae-6cd1-4fa9-b3ff-1b03aed7d281)
+I/UndraDemoServer( 7945): GET /lists/inbox/todos -> 200
 the server received the replayed request with the original Idempotency-Key
 
 $ process and log health
@@ -143,7 +295,9 @@ alive
 crash markers: 0
 
 $ files the app keeps (run-as)
-total 8
--rw------- 1 u0_a208 u0_a208 158 2026-10-01 12:09 7de49eda0951005e898663f3af23aa06036787a1b3dc1f22c2ab0ecd66251374
+total 24
+-rw------- 1 u0_a258 u0_a258 169 2026-10-02 00:16 6929263b29ca9e8b4a2908cfdb1c13c7a565c375bde47b78b50d602b6695610f
+-rw------- 1 u0_a258 u0_a258 283 2026-10-02 00:15 b7af798903e69b96f4a49f6e7e7b803167fe5acdc39580db9e193f3ffc3db67b
+-rw------- 1 u0_a258 u0_a258 172 2026-10-02 00:16 e95e46acff2dc027ba1b8a34bba0dd226512a735f45c52eee349d1c22ad8e0a9
 
 SMOKE PASSED

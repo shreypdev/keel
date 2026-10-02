@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 
 use undra_meta::{
-    EnumDef, FunctionDef, MethodDef, ObjectDef, PortDef, QueryDef, QueryKind, RecordDef, Schema,
-    SignalDef, StoreDef, TypeRef, VariantDef, ids,
+    EnumDef, FunctionDef, MethodDef, ObjectDef, ParamDef, PortDef, QueryDef, QueryKind, RecordDef,
+    Schema, SignalDef, StoreDef, TypeRef, VariantDef, ids,
 };
 
 use crate::naming;
@@ -27,6 +27,15 @@ pub const QUERY_REFETCH_ID: u32 = ids::fnv1a32("query.refetch");
 /// `fnv1a32("query.invalidate")`. `undra-query` must dispatch it on handle
 /// objects.
 pub const QUERY_INVALIDATE_ID: u32 = ids::fnv1a32("query.invalidate");
+
+/// Method id of `setPollInterval(_:)` on every generated query handle
+/// ([`ids::SET_POLL_INTERVAL_METHOD_ID`], ADR-043): its one argument is the wire
+/// `Option<Duration>`.
+pub const QUERY_SET_POLL_INTERVAL_ID: u32 = ids::SET_POLL_INTERVAL_METHOD_ID;
+
+/// Method id of `fetchNextPage()` on the handle of an infinite query
+/// ([`ids::FETCH_NEXT_PAGE_METHOD_ID`], ADR-043).
+pub const QUERY_FETCH_NEXT_PAGE_ID: u32 = ids::FETCH_NEXT_PAGE_METHOD_ID;
 
 /// What a `Named` type reference points at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -396,6 +405,110 @@ impl Model {
         self.externals.get(name).map_or(name, |e| e.spelling)
     }
 
+    /// The newtype called `name`: a record the schema marks `transparent` (ADR-042), which crosses
+    /// as its one field and is a wrapper type on the platforms.
+    #[must_use]
+    pub fn newtype(&self, name: &str) -> Option<&RecordDef> {
+        self.records
+            .iter()
+            .find(|r| r.transparent && r.name == name)
+    }
+
+    /// The type a newtype wraps, when `name` is one.
+    #[must_use]
+    pub fn newtype_inner(&self, name: &str) -> Option<&TypeRef> {
+        self.newtype(name)
+            .and_then(|r| r.fields.first())
+            .map(|f| &f.ty)
+    }
+
+    /// `ty` with the newtypes at its top peeled off: `UserId` of `Uuid` is `Uuid`, a newtype of a
+    /// newtype is the innermost type. A newtype and its inner type have the same bytes on the wire,
+    /// so this is also the type whose encoding `ty` has. (A reference cycle between newtypes, which
+    /// no Rust type can have, stops after a few steps.)
+    #[must_use]
+    pub fn resolve_newtypes<'a>(&'a self, ty: &'a TypeRef) -> &'a TypeRef {
+        let mut ty = ty;
+        for _ in 0..16 {
+            match ty {
+                TypeRef::Named(name) => match self.newtype_inner(name) {
+                    Some(inner) => ty = inner,
+                    None => return ty,
+                },
+                other => return other,
+            }
+        }
+        ty
+    }
+
+    /// Whether a newtype of `ty` is generated `Comparable` (ADR-042): the platform type has an
+    /// order that means something: integers, floats, `String`, `Timestamp`, `Duration`, `Decimal`,
+    /// and a newtype of one of those. Not `Uuid` (Foundation's `UUID` is `Comparable` only from
+    /// iOS 17), `bool`, bytes, records, enums or collections.
+    #[must_use]
+    pub fn is_ordered(&self, ty: &TypeRef) -> bool {
+        let ty = self.resolve_newtypes(ty);
+        ty.is_integer()
+            || matches!(
+                ty,
+                TypeRef::F32
+                    | TypeRef::F64
+                    | TypeRef::String
+                    | TypeRef::Timestamp
+                    | TypeRef::Duration
+                    | TypeRef::Decimal
+            )
+    }
+
+    /// Whether `name` is the generated handle of a query (not a mutation).
+    #[must_use]
+    pub fn is_query_handle(&self, name: &str) -> bool {
+        self.query_handles.iter().any(|h| h.name == name)
+    }
+
+    /// The `infinite` query whose handle is called `handle`, with what the generators need of it
+    /// (ADR-043).
+    #[must_use]
+    pub fn infinite(&self, handle: &str) -> Option<Infinite<'_>> {
+        let query = self.queries.iter().find(|q| {
+            q.kind == QueryKind::Query
+                && q.infinite.is_some()
+                && query_handle_name(&q.name) == handle
+        })?;
+        let infinite = query.infinite.as_ref()?;
+        let (TypeRef::Vec(item), _) = query_types(query) else {
+            return None;
+        };
+        let TypeRef::Named(item) = *item else {
+            return None;
+        };
+        let item_record = self.record(&item)?;
+        Some(Infinite {
+            item: item_record,
+            key: &item_record
+                .fields
+                .iter()
+                .find(|f| f.name == infinite.item_key)?
+                .name,
+        })
+    }
+
+    /// The names of the item records of every infinite query whose `item_key` field is called
+    /// `id`: Swift makes them `Identifiable` (ADR-043).
+    #[must_use]
+    pub fn identifiable_items(&self) -> Vec<&str> {
+        self.queries
+            .iter()
+            .filter(|q| q.kind == QueryKind::Query)
+            .filter_map(|q| {
+                let handle = query_handle_name(&q.name);
+                self.infinite(&handle)
+            })
+            .filter(|i| i.key == "id")
+            .map(|i| i.item.name.as_str())
+            .collect()
+    }
+
     /// All objects that own a native class: plain objects, stores, then query
     /// handles.
     pub fn all_objects(&self) -> impl Iterator<Item = &ObjectDef> {
@@ -410,13 +523,27 @@ impl Model {
     pub fn signal_doc(&self, object: &ObjectDef, signal: &SignalDef) -> Option<&'static str> {
         if self.query_handles.iter().any(|h| h.name == object.name) {
             return Some(match signal.name.as_str() {
+                "data" if self.infinite(&object.name).is_some() => {
+                    "Every row loaded so far, in order: the first page, then each page `fetchNextPage()` loaded. Empty until the first page arrives."
+                }
                 "data" => "The latest successful result, if any.",
                 "status" => "Where the query is in its fetch lifecycle.",
                 "error" => "The error of the latest failed fetch, cleared by the next success.",
                 "fetching" => {
                     "Whether a fetch is in flight (also true while refetching stale data)."
                 }
+                "has_next_page" => {
+                    "Whether another page can be fetched: the last page loaded named a next cursor."
+                }
+                "fetching_next_page" => "Whether the fetch of the next page is in flight.",
                 _ => "When `data` was last updated.",
+            });
+        }
+        if matches!(signal.ty, TypeRef::Lazy(_)) {
+            return Some(if signal.computed {
+                "A list the core derives from another list and this mirror pages through: a row is missing until its page has arrived, and reading it asks for the page. Read-only."
+            } else {
+                "A list the core holds and this mirror pages through: a row is missing until its page has arrived, and reading it asks for the page."
             });
         }
         signal.computed.then_some(if signal.key.is_some() {
@@ -427,6 +554,16 @@ impl Model {
             "Computed by the core; read-only."
         })
     }
+}
+
+/// What an `infinite` query adds to its handle (ADR-043): the record of its rows and the field that
+/// identifies a row.
+#[derive(Clone, Copy, Debug)]
+pub struct Infinite<'a> {
+    /// The record of one row (`T` of `Page<T, C>`).
+    pub item: &'a RecordDef,
+    /// The row's key field, as the schema names it (`item_key`).
+    pub key: &'a str,
 }
 
 /// How a method of a generated class hands objects over: what a return or a parameter that
@@ -584,16 +721,74 @@ fn query_handle(query: &QueryDef) -> ObjectDef {
         no_coalesce: false,
         default: false,
     };
-    let method = |name: &str, id: u32, docs: &str| MethodDef {
+    let method = |name: &str, id: u32, params: Vec<ParamDef>, docs: &str| MethodDef {
         name: name.to_owned(),
         method_id: id,
-        params: Vec::new(),
+        params,
         returns: TypeRef::Unit,
         is_async: false,
         takes_ctx: false,
         coalesce: false,
         docs: docs.to_owned(),
     };
+    // An infinite query's `data` is the list of every row loaded, keyed by the item's key so that
+    // the next page arrives as a patch of appended rows (ADR-043); any other query's is the
+    // optional result.
+    let data = match &query.infinite {
+        Some(infinite) => SignalDef {
+            key: Some(infinite.item_key.clone()),
+            ..signal(0, "data", ok)
+        },
+        None => signal(0, "data", TypeRef::option(ok)),
+    };
+    let mut signals = vec![
+        data,
+        signal(1, "status", TypeRef::named(QUERY_STATUS)),
+        signal(2, "error", error_ty),
+        signal(3, "fetching", TypeRef::Bool),
+        signal(4, "updated_at", TypeRef::option(TypeRef::Timestamp)),
+    ];
+    let mut methods = Vec::new();
+    if query.infinite.is_some() {
+        signals.push(signal(5, "has_next_page", TypeRef::Bool));
+        signals.push(signal(6, "fetching_next_page", TypeRef::Bool));
+        methods.push(method(
+            "fetch_next_page",
+            QUERY_FETCH_NEXT_PAGE_ID,
+            Vec::new(),
+            "Fetches the next page and appends its rows to `data`; nothing happens while a page is loading or when there is no next page.",
+        ));
+    }
+    methods.push(method(
+        "refetch",
+        QUERY_REFETCH_ID,
+        Vec::new(),
+        "Fetches again now, even if the data is fresh.",
+    ));
+    methods.push(method(
+        "invalidate",
+        QUERY_INVALIDATE_ID,
+        Vec::new(),
+        "Marks the cached entry stale; it refetches while observed.",
+    ));
+    methods.push(method(
+        "set_poll_interval",
+        QUERY_SET_POLL_INTERVAL_ID,
+        vec![ParamDef {
+            name: "interval".to_owned(),
+            ty: TypeRef::option(TypeRef::Duration),
+        }],
+        "Overrides how often the query polls while this handle observes it, counted from the end of a fetch.\nThe entry polls at the smallest interval among its observers; no interval clears this handle's override.\nAn interval below 1 second or above 7 days is clamped to that range.",
+    ));
+    let mut docs = format!(
+        "Observes the `{}` query (cache key `{}`).\nConstructing it registers an observer and fetches when the data is stale or missing.",
+        query.name, query.key
+    );
+    if query.infinite.is_some() {
+        docs.push_str(
+            "\nThe query is paged: `data` grows by one page each time `fetchNextPage()` completes.",
+        );
+    }
     ObjectDef {
         name: name.clone(),
         type_id: query.query_id,
@@ -607,31 +802,9 @@ fn query_handle(query: &QueryDef) -> ObjectDef {
             coalesce: false,
             docs: String::new(),
         }],
-        methods: vec![
-            method(
-                "refetch",
-                QUERY_REFETCH_ID,
-                "Fetches again now, even if the data is fresh.",
-            ),
-            method(
-                "invalidate",
-                QUERY_INVALIDATE_ID,
-                "Marks the cached entry stale; it refetches while observed.",
-            ),
-        ],
-        store: Some(StoreDef {
-            signals: vec![
-                signal(0, "data", TypeRef::option(ok)),
-                signal(1, "status", TypeRef::named(QUERY_STATUS)),
-                signal(2, "error", error_ty),
-                signal(3, "fetching", TypeRef::Bool),
-                signal(4, "updated_at", TypeRef::option(TypeRef::Timestamp)),
-            ],
-        }),
-        docs: format!(
-            "Observes the `{}` query (cache key `{}`).\nConstructing it registers an observer and fetches when the data is stale or missing.",
-            query.name, query.key
-        ),
+        methods,
+        store: Some(StoreDef { signals }),
+        docs,
     }
 }
 
@@ -746,7 +919,7 @@ pub fn doc_lines(docs: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use undra_meta::FieldDef;
+    use undra_meta::{FieldDef, InfiniteDef};
 
     use super::*;
 
@@ -824,10 +997,242 @@ mod tests {
         assert_eq!(parse_message(&named, "").unwrap(), vec![]);
     }
 
+    fn newtype(name: &str, inner: TypeRef) -> RecordDef {
+        RecordDef {
+            name: name.into(),
+            type_id: ids::type_id(name),
+            fields: vec![FieldDef {
+                name: "value".into(),
+                ty: inner,
+                default: false,
+                docs: String::new(),
+            }],
+            transparent: true,
+            docs: String::new(),
+        }
+    }
+
+    fn model_of(records: Vec<RecordDef>) -> Model {
+        let mut schema = Schema::new("t");
+        schema.records = records;
+        Model::new(&schema, Lang::Swift, false)
+    }
+
+    #[test]
+    fn a_newtype_resolves_to_the_innermost_type_and_is_ordered_when_that_is() {
+        let model = model_of(vec![
+            newtype("UserId", TypeRef::Uuid),
+            newtype("Owner", TypeRef::named("UserId")),
+            newtype("Meters", TypeRef::F64),
+            newtype("Span", TypeRef::named("Meters")),
+            newtype("Tags", TypeRef::vec(TypeRef::String)),
+            RecordDef {
+                transparent: false,
+                ..newtype("Plain", TypeRef::U8)
+            },
+        ]);
+        assert_eq!(
+            model.resolve_newtypes(&TypeRef::named("Owner")),
+            &TypeRef::Uuid
+        );
+        assert_eq!(model.resolve_newtypes(&TypeRef::U8), &TypeRef::U8);
+        // A record that is not a newtype is not peeled, and neither is what a newtype holds in a list.
+        assert_eq!(
+            model.resolve_newtypes(&TypeRef::named("Plain")),
+            &TypeRef::named("Plain")
+        );
+        assert_eq!(
+            model.resolve_newtypes(&TypeRef::named("Tags")),
+            &TypeRef::vec(TypeRef::String)
+        );
+        for ordered in ["Meters", "Span"] {
+            assert!(model.is_ordered(&TypeRef::named(ordered)), "{ordered}");
+        }
+        for unordered in ["UserId", "Owner", "Tags", "Plain"] {
+            assert!(!model.is_ordered(&TypeRef::named(unordered)), "{unordered}");
+        }
+        // The scalars of ADR-042's list, and only those.
+        for ty in [
+            TypeRef::I8,
+            TypeRef::U64,
+            TypeRef::F32,
+            TypeRef::String,
+            TypeRef::Timestamp,
+            TypeRef::Duration,
+            TypeRef::Decimal,
+        ] {
+            assert!(model.is_ordered(&ty), "{ty}");
+        }
+        for ty in [TypeRef::Bool, TypeRef::Uuid, TypeRef::Bytes] {
+            assert!(!model.is_ordered(&ty), "{ty}");
+        }
+    }
+
+    #[test]
+    fn a_cycle_of_newtypes_resolves_in_bounded_time() {
+        let model = model_of(vec![
+            newtype("A", TypeRef::named("B")),
+            newtype("B", TypeRef::named("A")),
+        ]);
+        let _ = model.resolve_newtypes(&TypeRef::named("A"));
+        assert!(!model.is_ordered(&TypeRef::named("A")));
+    }
+
+    fn infinite_schema() -> Schema {
+        let mut schema = Schema::new("t");
+        schema.records.push(RecordDef {
+            name: "Post".into(),
+            type_id: ids::type_id("Post"),
+            fields: vec![FieldDef {
+                name: "id".into(),
+                ty: TypeRef::U64,
+                default: false,
+                docs: String::new(),
+            }],
+            transparent: false,
+            docs: String::new(),
+        });
+        schema.queries.push(QueryDef {
+            name: "feed".into(),
+            query_id: ids::query_id("feed"),
+            kind: QueryKind::Query,
+            key: "feed".into(),
+            params: Vec::new(),
+            returns: TypeRef::vec(TypeRef::named("Post")),
+            stale_ms: None,
+            persist: false,
+            idempotent: false,
+            interval_ms: None,
+            poll_in_background: false,
+            infinite: Some(InfiniteDef {
+                cursor: TypeRef::String,
+                item_key: "id".into(),
+            }),
+        });
+        schema
+    }
+
+    #[test]
+    fn every_handle_gets_the_poll_method_and_an_infinite_one_its_paging() {
+        let mut schema = infinite_schema();
+        let mut plain = schema.queries[0].clone();
+        plain.name = "latest".into();
+        plain.query_id = ids::query_id("latest");
+        plain.infinite = None;
+        plain.returns = TypeRef::named("Post");
+        schema.queries.push(plain);
+        let model = Model::new(&schema, Lang::Kotlin, false);
+        let handle = |name: &str| {
+            model
+                .query_handles
+                .iter()
+                .find(|h| h.name == name)
+                .unwrap_or_else(|| panic!("no handle {name}"))
+        };
+        let methods = |h: &ObjectDef| -> Vec<(String, u32)> {
+            h.methods
+                .iter()
+                .map(|m| (m.name.clone(), m.method_id))
+                .collect()
+        };
+        let signals = |h: &ObjectDef| -> Vec<(u32, String, Option<String>)> {
+            h.store
+                .iter()
+                .flat_map(|s| s.signals.iter())
+                .map(|g| (g.signal_id, g.name.clone(), g.key.clone()))
+                .collect()
+        };
+        let poll = (
+            "set_poll_interval".to_owned(),
+            ids::SET_POLL_INTERVAL_METHOD_ID,
+        );
+        let latest = handle("LatestQueryHandle");
+        assert_eq!(
+            methods(latest),
+            [
+                ("refetch".to_owned(), QUERY_REFETCH_ID),
+                ("invalidate".to_owned(), QUERY_INVALIDATE_ID),
+                poll.clone()
+            ]
+        );
+        assert_eq!(
+            latest.methods[2].params,
+            [ParamDef {
+                name: "interval".into(),
+                ty: TypeRef::option(TypeRef::Duration)
+            }]
+        );
+        assert_eq!(signals(latest).len(), 5);
+        assert!(signals(latest).iter().all(|(_, _, key)| key.is_none()));
+        assert!(model.infinite("LatestQueryHandle").is_none());
+
+        let feed = handle("FeedQueryHandle");
+        assert_eq!(
+            methods(feed),
+            [
+                ("fetch_next_page".to_owned(), ids::FETCH_NEXT_PAGE_METHOD_ID),
+                ("refetch".to_owned(), QUERY_REFETCH_ID),
+                ("invalidate".to_owned(), QUERY_INVALIDATE_ID),
+                poll
+            ]
+        );
+        assert_eq!(
+            signals(feed),
+            [
+                (0, "data".to_owned(), Some("id".to_owned())),
+                (1, "status".to_owned(), None),
+                (2, "error".to_owned(), None),
+                (3, "fetching".to_owned(), None),
+                (4, "updated_at".to_owned(), None),
+                (5, "has_next_page".to_owned(), None),
+                (6, "fetching_next_page".to_owned(), None),
+            ]
+        );
+        // `data` is the list itself, not an option of one.
+        let data = &feed.store.as_ref().unwrap().signals[0];
+        assert_eq!(data.ty, TypeRef::vec(TypeRef::named("Post")));
+        let infinite = model.infinite("FeedQueryHandle").unwrap();
+        assert_eq!((infinite.item.name.as_str(), infinite.key), ("Post", "id"));
+        assert_eq!(model.identifiable_items(), ["Post"]);
+    }
+
+    #[test]
+    fn an_infinite_query_that_can_fail_keeps_its_typed_error() {
+        // `Result<Vec<T>, E>`: the error type is the handle's, as for any query.
+        let mut schema = infinite_schema();
+        schema.queries[0].returns = TypeRef::result(
+            TypeRef::vec(TypeRef::named("Post")),
+            TypeRef::named("FeedError"),
+        );
+        let model = Model::new(&schema, Lang::Swift, false);
+        let handle = &model.query_handles[0];
+        let error = &handle.store.as_ref().unwrap().signals[2];
+        assert_eq!(error.ty, TypeRef::option(TypeRef::named("FeedError")));
+        assert!(model.infinite(&handle.name).is_some());
+    }
+
+    #[test]
+    fn only_a_key_called_id_makes_the_rows_identifiable() {
+        let mut schema = infinite_schema();
+        schema.records[0].fields[0].name = "slug".into();
+        schema.queries[0].infinite.as_mut().unwrap().item_key = "slug".into();
+        let model = Model::new(&schema, Lang::Swift, false);
+        assert!(model.infinite("FeedQueryHandle").is_some());
+        assert!(model.identifiable_items().is_empty());
+    }
+
     #[test]
     fn query_status_ids_are_the_documented_hashes() {
         assert_eq!(QUERY_REFETCH_ID, ids::fnv1a32("query.refetch"));
         assert_eq!(QUERY_INVALIDATE_ID, ids::fnv1a32("query.invalidate"));
         assert_ne!(QUERY_REFETCH_ID, QUERY_INVALIDATE_ID);
+        assert_eq!(
+            QUERY_SET_POLL_INTERVAL_ID,
+            ids::fnv1a32("QueryHandle.set_poll_interval")
+        );
+        assert_eq!(
+            QUERY_FETCH_NEXT_PAGE_ID,
+            ids::fnv1a32("QueryHandle.fetch_next_page")
+        );
     }
 }

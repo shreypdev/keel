@@ -31,6 +31,7 @@ object UndraIds {
             const val NEW: UInt = 0xa033306au
             const val REFETCH: UInt = 0x21d1b9e2u
             const val INVALIDATE: UInt = 0x44cec2fau
+            const val SET_POLL_INTERVAL: UInt = 0xe327e53bu
         }
     }
 

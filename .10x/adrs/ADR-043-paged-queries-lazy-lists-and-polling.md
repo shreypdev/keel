@@ -1,6 +1,6 @@
 # ADR-043: interval polling, infinite queries as keyed lists, and `Lazy<T>` for lists the host pages through
 
-Status: **Proposed** (2026-10-01, `wt/boundary-adrs`; Amendment B "data layer completion", catalogue M-1 and
+Status: **Accepted (implemented by `types-paging`, 2026-10-02; the deviations are at the end)** (proposed 2026-10-01, `wt/boundary-adrs`; Amendment B "data layer completion", catalogue M-1 and
 finding 2, gap audit RX-2; re-scopes Track E3). Touches SPEC 2.1/2.2 (`QueryDef` gains two optional fields;
 `Lazy<T>` becomes a legal store signal), 3.1/3.3/3.5 (the `Lazy<T>` value, the page reply, op 2 carry a length
 and a version), 4.3, 4.5 (`interval`, `infinite`, `#[undra(cursor)]`), 9, 10, 11.1, 12 (E0001's `Lazy` text
@@ -146,9 +146,11 @@ Two different needs hide under "paging", and they want different machinery:
        public func prefetch(_ range: Range<Int>)
    }
    // a store: public private(set) var books: UndraLazyList<Book>
-   List(0..<library.books.count, id: \.self) { i in
-       if let book = library.books[i] { BookRow(book) } else { BookRow.placeholder }
-   }
+   ScrollView { LazyVStack {          // a lazy container: SwiftUI's `List` builds every row up front (see the deviations)
+       ForEach(0..<library.books.count, id: \.self) { i in
+           if let book = library.books[i] { BookRow(book) } else { BookRow.placeholder }
+       }
+   } }
    ```
 
    ```kotlin
@@ -297,3 +299,48 @@ export class FeedQuery extends UndraStore {
 ADR-034 (`WeakCtx` for polling tasks), ADR-037 (the persisted format of infinite entries and of `Lazy` in
 snapshots), ADR-039 (`Lazy::over(&DerivedList)` follows its implementation). The wire part rides the
 ADR-036/037 revision. Polling (decision 1) is independent and can land first.
+
+## Implementation (2026-10-02, `wt/types-paging`) and deviations
+
+All eleven items of the brief landed (records: `.10x/decisions/sde/types-paging.md`, `types-paging-lazy.md`, `types-paging-query.md`,
+`types-paging-bindgen.md`, `types-paging-swift.md`, `types-paging-kotlin.md`, `types-paging-ts.md`). The contract scenarios are **S32** (paged
+queries and lazy lists) and **S33** (polling) on the three platforms (S23 to S25 were the real-time ports; S29 and S30 went to ADR-046, S31 to
+ADR-042); the playground has the `Library`, the `feed` query and the `ticker` query (`paging.rs`) and a screen for each on iOS, Android and the web;
+the guides are `site/docs/paging.html` and `polling.html`. Deviations, each dated 2026-10-02:
+
+1. **ADR-031's fold rule is amended** (found by the TypeScript implementer, confirmed by the core's): "op 2 supersedes earlier entries for its key"
+   lost the page-server handle when an op 0 and an op 2 of one signal landed in one drain (observe, then a change before the frame; a restore's new
+   handle). In every mirror, per signal, a **full value supersedes everything before it and a lazy invalidation supersedes only earlier
+   invalidations of its signal, never the full value**; delivery order is kept (`[Full, Inv, Inv]` delivers `[Full, Inv(last)]`, `[Inv, Full]`
+   delivers `[Full]`). SPEC 11.1, the three mirrors and their model tests carry it (ADR-031 has the amendment).
+2. **Wire.** As decided (a 12-byte op 2, the 20-byte op 0 value, the page reply header), with one addition in the core: `LazySource::encode_page`
+   returns the `LazyPage` header, because the version could not otherwise be read atomically with the items; `MAX_PAGE_ITEMS` = 4,096 caps a
+   page call's limit. A `Lazy::over(&derived)` view snapshots as an empty list and its store needs a `restore` hook to rebuild it (the macro cannot
+   tell a view from an owned list by its type). A store with a `Lazy` field registers one transient page server per signal through two hooks only
+   such a store sets, so a core without one links none of the page-server code (the hello web core measured below).
+3. **An infinite query's schema `returns` is `Result<Vec<T>, E>`**, not `Vec<T>` (decision 2.2): without `E` bindgen would type the handle's `error`
+   as `String` while the core sends `Option<E>`; `undra-meta`'s E0073 check accepts both. `update_items` reaches platforms as the minimal keyed patch,
+   not as recorded ops (a closure over `&mut Vec` cannot be recorded, ADR-027); a next page does not move `updated_at`; a persisted entry with more
+   pages than `persist_pages` is not used; a poll interval is clamped to 1 s .. 7 days (`MIN_POLL_INTERVAL_MS`, `MAX_POLL_INTERVAL_MS`). Polling is
+   linked into every query (about 1.35 KB on a core with queries: any observer may poll any query); a core with no query links none of it.
+4. **SwiftUI's `List` does not work over a lazy list** (the sketch of decision 3.5 used it): on iOS 26.5 `List` builds every row of its `ForEach`
+   up front (all 10,000 measured in one pass), so a 24-page cache thrashes and the visible rows never fill (4,297 page installs in two minutes);
+   a `LazyVStack` in a `ScrollView` builds the rows near the screen (3 page calls). The sketch above, the runtime's docs and the guide say to use
+   a lazy container; `UndraLazyListObject` (the `ObservableObject` twin) is observed directly (`@ObservedObject`), not through its store.
+5. **Platform details.** Swift: the `RandomAccessCollection` conformance is `@preconcurrency` (a `@MainActor` class cannot satisfy its nonisolated
+   requirements in Swift 6; isolated conformances need a newer runtime than the iOS 15 floor), one page call per page, `pageSize` clamped to
+   1...4,096 (review, 2026-10-02: it was 1,048,576, Kotlin's 65,536 and TypeScript's 65,535, past the core's cut of a page call at 4,096 rows, so a larger page never
+   arrived whole and its rows never loaded; all three now stop at 4,096), `UndraStats.hostPageCalls`. Kotlin: the list makes its own scope on `UndraDispatchers.main` for asynchronous calls, `addChangeListener`
+   bridges `StateFlow` to Compose, a public `version`. TypeScript: a refused page call (status 5) means the page server is gone and the list stops
+   asking quietly (closing a store with a page queued must not report), `LazyList.version`, `useLoadMore` takes an optional `error` signal on the
+   query and does not fetch while it is set. A read of a loaded page asks once for the page beyond it when it is not loaded, so scrolling stays one
+   page ahead (S32 step 2 says so).
+6. **`Lazy<T>` composes with a keyed list** as decided; the Kotlin `undra-compose` module is built by Gradle only where an Android SDK is found
+   (like `:android-adapters`); a `PagingSource` adapter stays an open item.
+7. **Lifecycle.** Polling pauses on the existing `Lifecycle` and `Connectivity` events through one function (`Shared::on_lifecycle`), which also
+   flushes what waits out its debounce when the app goes to the background (ADR-046).
+8. **Bench rows and budgets** (`bench/RESULTS.md`): `lazy/page_50_of_100k` 290 ns (core half; the ADR's target was 20 us), `lazy/page_50_of_10k`
+   288 ns, `lazy/view_page_50_of_100k` 3.2 us, `lazy/invalidate` 178 ns (12 bytes asserted) and `lazy/invalidate_10k` 171 ns, two scaling ratios
+   (100,000 rows against 10,000: 1.0), `query/infinite_append_page_50` 7.3 us against `query/keyed_push_50` 5.4 us (ratio 1.34, gate 2.0); a commit
+   of an observed `Lazy` allocates one buffer more than the same write to a plain observed counter at any length (`lazy_alloc`).
+

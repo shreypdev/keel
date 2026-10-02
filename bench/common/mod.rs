@@ -8,6 +8,7 @@
 pub mod fixtures;
 pub mod host;
 pub mod ports;
+pub mod query_rows;
 pub mod stress;
 pub mod workloads;
 

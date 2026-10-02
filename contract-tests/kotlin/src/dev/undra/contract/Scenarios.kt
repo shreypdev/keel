@@ -54,5 +54,8 @@ val SCENARIOS: List<Scenario> = listOf(
     // S27 step 8 loads S26's two cores again (S26 closed them) to pass one core's object to the other.
     scenario("S27", "objects cross", ::s27ObjectsCross),
     scenario("S28", "host callbacks", ::s28HostCallbacks),
+    scenario("S31", "newtypes, generic instantiations and leaf types", ::s31Ledger),
+    scenario("S32", "paged queries and lazy lists", ::s32Paging),
+    scenario("S33", "polling", ::s33Polling),
     scenario("S17", "panic containment", ::s17Panic),
 )

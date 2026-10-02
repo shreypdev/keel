@@ -47,10 +47,11 @@ assert_eq!(double.get(), 22);
 | `Signal<T>` | A shared value. `get`, `with`, `set`, `update`; `Clone` is another handle to the same signal. A `Signal<Vec<T>>` adds the recorded list operations `push`, `insert`, `remove`, `update_at`, `move_item`, `clear` (and `replace`, which is `set`). |
 | `Computed<T>` | A cached value derived from signals and other computeds; lazy, recomputed eagerly at commit only while observed. |
 | `DerivedList<T>`, `Derive` | A filtered, sorted and mapped view of a `Signal<Vec<T>>` (`list.derive().filter(..).sort_by_key(..).build()`, or `.count()` for its length), kept from the list's recorded operations at O(log n) per changed row and delivered as keyed patches (ADR-039). |
+| `Lazy<T>`, `LazySource` | A core-owned list the host pages through instead of mirroring (ADR-043): the recorded list API, a version that moves with every change, one 12-byte invalidation per commit whatever changed, pages encoded on request; `Lazy::over(&derived)` is a read-only view that pages through a derived list's index. `LazySource` is the type-erased page server the runtime keeps. |
 | `Effect` | Runs after every commit that changed one of its inputs; dropping it cancels it. |
 | `Deps` | The inputs of a computed or effect: one `&Signal` / `&Computed`, or a tuple of up to six. |
 | `txn` | Batches writes; nested calls join the outer transaction; exception safe. |
-| `StoreCell` | The signal table of one store: `attach`, `attach_keyed`, `attach_computed`, `attach_derived`, `observe`, `encode_signal`, `encode_snapshot`. |
+| `StoreCell` | The signal table of one store: `attach`, `attach_keyed`, `attach_computed`, `attach_derived`, `attach_lazy`, `observe`, `encode_signal`, `encode_snapshot`. |
 | `CellSlot` | Where a store keeps its `StoreCell`: empty until first use, then one shared cell for the store's life (the hidden field `#[undra::store]` adds). `get_or_init`, `get_or_try_init`. |
 | `SignalsError` | Why a signal could not be attached: already attached, out of order, unknown signal. |
 | `ChangeSink`, `set_sink`, `with_sink` | Where committed change-sets go. |

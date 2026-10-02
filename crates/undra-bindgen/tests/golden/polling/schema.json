@@ -1,0 +1,157 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-polling",
+  "records": [
+    {
+      "name": "Quote",
+      "type_id": 1522423415,
+      "fields": [
+        {
+          "name": "symbol",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "price",
+          "ty": {
+            "kind": "f64"
+          },
+          "default": false
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "MarketError",
+      "type_id": 2649718549,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Offline",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "offline"
+        }
+      ]
+    }
+  ],
+  "objects": [],
+  "functions": [],
+  "ports": [],
+  "queries": [
+    {
+      "name": "ticker",
+      "query_id": 954090513,
+      "kind": "query",
+      "key": "ticker/{symbol}",
+      "params": [
+        {
+          "name": "symbol",
+          "ty": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "named",
+            "of": "Quote"
+          },
+          {
+            "kind": "named",
+            "of": "MarketError"
+          }
+        ]
+      },
+      "stale_ms": 2000,
+      "persist": false,
+      "idempotent": false,
+      "interval_ms": 5000
+    },
+    {
+      "name": "headlines",
+      "query_id": 320058116,
+      "kind": "query",
+      "key": "headlines",
+      "params": [],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "vec",
+            "of": {
+              "kind": "string"
+            }
+          },
+          {
+            "kind": "named",
+            "of": "MarketError"
+          }
+        ]
+      },
+      "stale_ms": 30000,
+      "persist": false,
+      "idempotent": false,
+      "interval_ms": 60000,
+      "poll_in_background": true
+    },
+    {
+      "name": "status",
+      "query_id": 557694593,
+      "kind": "query",
+      "key": "status",
+      "params": [],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "bool"
+          },
+          {
+            "kind": "named",
+            "of": "MarketError"
+          }
+        ]
+      },
+      "stale_ms": null,
+      "persist": false,
+      "idempotent": false
+    },
+    {
+      "name": "buy",
+      "query_id": 2053241940,
+      "kind": "mutation",
+      "key": "orders",
+      "params": [
+        {
+          "name": "symbol",
+          "ty": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "named",
+            "of": "Quote"
+          },
+          {
+            "kind": "named",
+            "of": "MarketError"
+          }
+        ]
+      },
+      "stale_ms": null,
+      "persist": false,
+      "idempotent": false
+    }
+  ]
+}

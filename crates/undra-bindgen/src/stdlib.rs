@@ -520,6 +520,7 @@ fn type_text(ty: &TypeRef) -> String {
         TypeRef::Duration => "Duration".to_owned(),
         TypeRef::Timestamp => "Timestamp".to_owned(),
         TypeRef::Uuid => "Uuid".to_owned(),
+        TypeRef::Decimal => "Decimal".to_owned(),
         TypeRef::Option(t) => format!("Option<{}>", type_text(t)),
         TypeRef::Vec(t) => format!("Vec<{}>", type_text(t)),
         TypeRef::Map(k, v) => format!("Map<{}, {}>", type_text(k), type_text(v)),

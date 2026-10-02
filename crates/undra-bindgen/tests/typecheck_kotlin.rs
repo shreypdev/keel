@@ -110,6 +110,9 @@ const MAINS: &[(&str, &str)] = &[
     ("enums", "EnumsTestKt"),
     ("records", "RecordsTestKt"),
     ("stdlib", "StdlibTestKt"),
+    ("newtypes", "NewtypesTestKt"),
+    ("infinite", "InfiniteTestKt"),
+    ("lazy", "LazyTestKt"),
 ];
 
 /// Generates every golden case, each in its own package, compiles all of them

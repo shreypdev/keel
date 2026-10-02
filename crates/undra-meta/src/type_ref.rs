@@ -69,6 +69,9 @@ pub enum TypeRef {
     Timestamp,
     /// A 128-bit UUID.
     Uuid,
+    /// A decimal number: a 128-bit two's-complement mantissa and a scale of at most 38, value =
+    /// mantissa x 10^-scale (ADR-042). Not a map key.
+    Decimal,
     /// `Option<T>`.
     Option(Box<TypeRef>),
     /// `Vec<T>`.
@@ -167,8 +170,9 @@ impl TypeRef {
         )
     }
 
-    /// Whether this type may be used as a map key: `String`, an integer,
-    /// `Bool` or `Uuid` (SPEC §2.1).
+    /// Whether this type may be used as a map key, **without a schema to resolve names**:
+    /// `String`, an integer, `Bool` or `Uuid` (SPEC §2.1). A newtype (ADR-042) of one of those is
+    /// a valid key too; [`Schema::is_valid_map_key`](crate::Schema::is_valid_map_key) resolves it.
     #[must_use]
     pub fn is_valid_map_key(&self) -> bool {
         self.is_integer() || matches!(self, TypeRef::String | TypeRef::Bool | TypeRef::Uuid)
@@ -234,6 +238,7 @@ mod tests {
             (TypeRef::Duration, "duration"),
             (TypeRef::Timestamp, "timestamp"),
             (TypeRef::Uuid, "uuid"),
+            (TypeRef::Decimal, "decimal"),
         ]
     }
 
@@ -370,6 +375,7 @@ mod tests {
             TypeRef::Unit,
             TypeRef::Duration,
             TypeRef::Timestamp,
+            TypeRef::Decimal,
             TypeRef::option(TypeRef::String),
             TypeRef::vec(TypeRef::String),
             TypeRef::named("Id"),

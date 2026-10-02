@@ -1,0 +1,134 @@
+error: error[undra::E0002]: `where` clause on `WithWhere`
+         = note: only type parameters are supported: the schema records no bounds, and each instantiation is a plain named type
+         = help: remove the `where` clause; write a bound on the parameter itself (`T: Clone`) if the type needs one
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_template_shapes.rs:9:1
+   |
+ 9 | / where
+10 | |     T: Clone,
+   | |_____________^
+
+error: error[undra::E0002]: const generic `N` on `WithConst`
+         = note: only type parameters are supported: a const parameter changes the layout of the type with its value, and the schema cannot name it
+         = help: remove the const parameter and write the number in the type, or declare one concrete `#[undra::api]` type per value
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_template_shapes.rs:16:25
+   |
+16 | pub struct WithConst<T, const N: usize> {
+   |                         ^^^^^^^^^^^^^^
+
+error: error[undra::E0002]: default type `String` for the parameter `T` of `WithDefault`
+         = note: only type parameters are supported: an instantiation names every argument, so a default would only hide which type a signature means
+         = help: remove the default and write the argument in each alias, `pub type TodoPage = Page<Todo>;`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_template_shapes.rs:21:24
+   |
+21 | pub struct WithDefault<T = String> {
+   |                        ^^^^^^^^^^
+
+error: error[undra::E0003]: lifetime `'a` on `WithLifetime`
+         = note: everything crosses the boundary by value; a borrow cannot outlive the call that made it
+         = help: remove the lifetime parameter and use owned types
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0003
+  --> tests/ui/e0002_template_shapes.rs:26:25
+   |
+26 | pub struct WithLifetime<'a, T> {
+   |                         ^^
+
+error: error[undra::E0003]: lifetime `'a` in `&'a str`
+         = note: everything crosses the boundary by value; a borrow cannot outlive the call that made it
+         = help: use an owned type such as `String` or `Vec<T>`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0003
+  --> tests/ui/e0002_template_shapes.rs:28:15
+   |
+28 |     pub name: &'a str,
+   |               ^^^^^^^
+
+error: error[undra::E0008]: `generic` on `NotGeneric`, which has no type parameters
+         = note: `#[undra::api(generic)]` marks a struct or an enum as the template of named instantiations, and a template needs a type parameter to be instantiated with
+         = help: remove `generic`, or add the type parameter: `struct Page<T> { .. }`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/e0002_template_shapes.rs:31:1
+   |
+31 | #[k::api(generic)]
+   | ^^^^^^^^^^^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error[undra::E0001]: `T::Item` cannot cross the boundary: it is an associated type of a type parameter
+         = note: each instantiation has its own associated type, and the schema records one type per field
+         = help: take the type as a parameter of its own: `struct Page<T, C>` and `pub type TodoPage = Page<Todo, String>;`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0002_template_shapes.rs:38:16
+   |
+38 |     pub first: T::Item,
+   |                ^^^^^^^
+
+error: error[undra::E0008]: `generic` is only valid on a struct or an enum
+         = note: `#[undra::api(generic)]` marks a data type with type parameters as the template of named instantiations; objects, functions, stores and ports are never generic
+         = help: remove `generic`, or apply the attribute to a struct or an enum with a type parameter
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/e0002_template_shapes.rs:41:10
+   |
+41 | #[k::api(generic)]
+   |          ^^^^^^^
+
+error: error[undra::E0002]: `Pair` takes 2 type arguments (`A`, `B`), as declared with `#[undra::api(generic)]`
+         = note: an instantiation names every type parameter of the template: the alias is what the schema and the platforms see
+         = help: write all the arguments: `#[undra::api] pub type MyPair = Pair<Todo, Todo>;`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_template_shapes.rs:44:1
+   |
+44 | #[k::api(generic)]
+   | ^^^^^^^^^^^^^^^^^^
+...
+53 | #[k::api]
+   | --------- in this attribute macro expansion
+   |
+   = note: this error originates in the macro `Pair` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error[undra::E0002]: `Pair` takes 2 type arguments (`A`, `B`), as declared with `#[undra::api(generic)]`
+         = note: an instantiation names every type parameter of the template: the alias is what the schema and the platforms see
+         = help: write all the arguments: `#[undra::api] pub type MyPair = Pair<Todo, Todo>;`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_template_shapes.rs:44:1
+   |
+44 | #[k::api(generic)]
+   | ^^^^^^^^^^^^^^^^^^
+...
+50 | #[k::api]
+   | --------- in this attribute macro expansion
+   |
+   = note: this error originates in the macro `Pair` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0107]: struct takes 2 generic arguments but 1 generic argument was supplied
+  --> tests/ui/e0002_template_shapes.rs:51:17
+   |
+51 | pub type Both = Pair<u8>;
+   |                 ^^^^ -- supplied 1 generic argument
+   |                 |
+   |                 expected 2 generic arguments
+   |
+note: struct defined here, with 2 generic parameters: `A`, `B`
+  --> tests/ui/e0002_template_shapes.rs:45:12
+   |
+45 | pub struct Pair<A, B> {
+   |            ^^^^ -  -
+help: add missing generic argument
+   |
+51 | pub type Both = Pair<u8, B>;
+   |                        +++
+
+error[E0107]: struct takes 2 generic arguments but 3 generic arguments were supplied
+  --> tests/ui/e0002_template_shapes.rs:54:20
+   |
+54 | pub type Neither = Pair<u8, u8, u8>;
+   |                    ^^^^       ---- help: remove the unnecessary generic argument
+   |                    |
+   |                    expected 2 generic arguments
+   |
+note: struct defined here, with 2 generic parameters: `A`, `B`
+  --> tests/ui/e0002_template_shapes.rs:45:12
+   |
+45 | pub struct Pair<A, B> {
+   |            ^^^^ -  -

@@ -2,7 +2,7 @@ import UndraRuntime
 import PlaygroundCore
 import XCTest
 
-/// The scenarios of contracts-tests/scenarios.md that Swift runs (S01 to S20, S23 to S26), one test each:
+/// The scenarios of contracts-tests/scenarios.md that Swift runs (S01 to S20, S23 to S28, S31), one test each:
 /// `UndraRuntime` over the C ABI against the real playground core, through the generated bindings
 /// wherever a UI would use them and through `UndraCore`'s own API for the raw checks.
 ///

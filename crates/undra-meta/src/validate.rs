@@ -147,6 +147,22 @@ pub enum SchemaError {
         /// Where the reference appears.
         at: String,
     },
+    /// A `transparent` record (a newtype, ADR-042) that does not have exactly one field named
+    /// `value` without `#[undra(default)]` (E0007).
+    BadTransparentRecord {
+        /// The record.
+        name: String,
+        /// What is wrong, in a few words.
+        problem: &'static str,
+    },
+    /// An `infinite` query that does not meet ADR-043's shape: it returns `Vec<T>` of a record
+    /// `T` with a field called `item_key`, its cursor is a value type, and it is a query (E0073).
+    BadInfiniteQuery {
+        /// The query.
+        query: String,
+        /// What is wrong.
+        problem: String,
+    },
     /// A method of a callback port that is neither fire-and-forget (`()`, not `async`) nor
     /// `async` with a `Result`, or whose name starts with `__` (reserved for `__release` and
     /// `__cancel`) (E0071, ADR-041).
@@ -177,6 +193,8 @@ impl SchemaError {
             | SchemaError::MisplacedObject { .. } => "E0064",
             SchemaError::MisplacedCallback { .. } | SchemaError::NotACallback { .. } => "E0004",
             SchemaError::BadCallbackMethod { .. } => "E0071",
+            SchemaError::BadTransparentRecord { .. } => "E0007",
+            SchemaError::BadInfiniteQuery { .. } => "E0073",
         }
     }
 }
@@ -223,7 +241,7 @@ impl fmt::Display for SchemaError {
             ),
             SchemaError::InvalidMapKey { key, at } => (
                 format!("`{key}` at {at} is not a valid map key"),
-                "map keys must compare and hash the same on every platform: `String`, an integer type, `bool` and `Uuid` do, floats and composite keys do not".to_owned(),
+                "map keys must compare and hash the same on every platform: `String`, an integer type, `bool`, `Uuid` and a newtype of one of those do, floats, decimals and composite keys do not".to_owned(),
                 "use one of those key types, or a `Vec` of records with an explicit key field".to_owned(),
             ),
             SchemaError::StoreWithoutConstructor { object } => (
@@ -260,6 +278,16 @@ impl fmt::Display for SchemaError {
                 format!("method `{method}` of the callback interface `{port}` {problem}"),
                 "the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone: a method either reports (fire-and-forget, returning nothing) or is `async` and returns a `Result`".to_owned(),
                 "make a reporting method return `()`, or make a method that answers `async` and return `Result<T, E>`; do not start a name with `__`".to_owned(),
+            ),
+            SchemaError::BadTransparentRecord { name, problem } => (
+                format!("the newtype `{name}` {problem}"),
+                "a newtype crosses the boundary as its one inner value, so the schema describes it as a transparent record with a single field called `value`".to_owned(),
+                "give the record exactly one field named `value`, without `#[undra(default)]`, or make it an ordinary record".to_owned(),
+            ),
+            SchemaError::BadInfiniteQuery { query, problem } => (
+                format!("the infinite query `{query}` {problem}"),
+                "an infinite query's handle shows its pages as one keyed list of `T`, so the schema needs `T` to be a record with the `item_key` field, and a cursor the core can store".to_owned(),
+                "return `Page<T, C>` where `T` is an `#[undra::api]` record, and set `item_key` to one of its fields".to_owned(),
             ),
         };
         f.write_str(&crate::diag::message(code, what, why, fix))
@@ -354,6 +382,8 @@ struct Checker<'a> {
     /// While a constructor's return type is checked: the object it constructs, which `Named` may
     /// still spell there.
     constructs: Option<&'a str>,
+    /// The transparent records (newtypes, ADR-042) and the type each wraps, for map keys.
+    transparent: HashMap<&'a str, &'a TypeRef>,
     errors: Vec<SchemaError>,
 }
 
@@ -437,7 +467,7 @@ impl<'a> Checker<'a> {
                 self.check(inner, inner_allow, at);
             }
             TypeRef::Map(key, value) => {
-                if !key.is_valid_map_key() {
+                if !self.is_valid_key(key, 0) {
                     self.errors.push(SchemaError::InvalidMapKey {
                         key: (**key).clone(),
                         at: at(),
@@ -507,7 +537,19 @@ impl<'a> Checker<'a> {
             | TypeRef::Bytes
             | TypeRef::Duration
             | TypeRef::Timestamp
-            | TypeRef::Uuid => {}
+            | TypeRef::Uuid
+            | TypeRef::Decimal => {}
+        }
+    }
+
+    /// [`Schema::is_valid_map_key`] with the transparent records resolved.
+    fn is_valid_key(&self, ty: &TypeRef, depth: u32) -> bool {
+        match ty {
+            TypeRef::Named(name) if depth < 16 => self
+                .transparent
+                .get(name.as_str())
+                .is_some_and(|inner| self.is_valid_key(inner, depth + 1)),
+            other => other.is_valid_map_key(),
         }
     }
 
@@ -590,7 +632,7 @@ impl Schema {
     ///         default: false,
     ///         docs: String::new(),
     ///     }],
-    ///     docs: String::new(),
+    ///     transparent: false, docs: String::new(),
     /// });
     /// let errors = schema.validate().unwrap_err();
     /// assert!(matches!(&errors[0], SchemaError::UnresolvedType { name, .. } if name == "User"));
@@ -625,10 +667,32 @@ impl Schema {
                 .collect(),
             kinds: seen,
             constructs: None,
+            transparent: self
+                .records
+                .iter()
+                .filter(|r| r.transparent)
+                .filter_map(|r| r.fields.first().map(|f| (r.name.as_str(), &f.ty)))
+                .collect(),
             errors,
         };
 
         for record in &self.records {
+            if record.transparent {
+                let problem = match record.fields.as_slice() {
+                    [only] if only.name != "value" => {
+                        Some("has a field that is not called `value`")
+                    }
+                    [only] if only.default => Some("has `#[undra(default)]` on its field"),
+                    [_] => None,
+                    _ => Some("does not have exactly one field"),
+                };
+                if let Some(problem) = problem {
+                    checker.errors.push(SchemaError::BadTransparentRecord {
+                        name: record.name.clone(),
+                        problem,
+                    });
+                }
+            }
             for field in &record.fields {
                 checker.check(&field.ty, PLAIN, &|| {
                     format!("record {}, field {}", record.name, field.name)
@@ -700,6 +764,15 @@ impl Schema {
             };
             checker.check_params(&query.params, &owner, PLAIN);
             checker.check_return(&query.returns, &owner, RETURN);
+            if let Some(infinite) = &query.infinite {
+                checker.check(&infinite.cursor, PLAIN, &|| format!("{owner}, cursor"));
+                if let Some(problem) = self.infinite_problem(query, infinite) {
+                    checker.errors.push(SchemaError::BadInfiniteQuery {
+                        query: query.name.clone(),
+                        problem,
+                    });
+                }
+            }
         }
 
         if checker.errors.is_empty() {
@@ -707,6 +780,80 @@ impl Schema {
         } else {
             Err(checker.errors)
         }
+    }
+}
+
+impl Schema {
+    /// Whether `ty` may be a map key in this schema: [`TypeRef::is_valid_map_key`], and a
+    /// newtype (a transparent record, ADR-042) of a valid key, however deeply nested.
+    ///
+    /// ```
+    /// use undra_meta::{FieldDef, RecordDef, Schema, TypeRef};
+    ///
+    /// let mut schema = Schema::new("demo");
+    /// schema.records.push(RecordDef {
+    ///     name: "UserId".into(),
+    ///     type_id: 1,
+    ///     fields: vec![FieldDef { name: "value".into(), ty: TypeRef::Uuid, default: false, docs: String::new() }],
+    ///     transparent: true,
+    ///     docs: String::new(),
+    /// });
+    /// assert!(schema.is_valid_map_key(&TypeRef::named("UserId")));
+    /// assert!(!TypeRef::named("UserId").is_valid_map_key());
+    /// assert!(!schema.is_valid_map_key(&TypeRef::Decimal));
+    /// ```
+    #[must_use]
+    pub fn is_valid_map_key(&self, ty: &TypeRef) -> bool {
+        let mut ty = ty;
+        for _ in 0..16 {
+            match ty {
+                TypeRef::Named(name) => {
+                    match self
+                        .records
+                        .iter()
+                        .find(|r| r.transparent && &r.name == name)
+                        .and_then(|r| r.fields.first())
+                    {
+                        Some(field) => ty = &field.ty,
+                        None => return false,
+                    }
+                }
+                other => return other.is_valid_map_key(),
+            }
+        }
+        false
+    }
+
+    /// What is wrong with the shape of an `infinite` query (ADR-043), if anything.
+    fn infinite_problem(
+        &self,
+        query: &crate::QueryDef,
+        infinite: &crate::InfiniteDef,
+    ) -> Option<String> {
+        if query.kind != crate::QueryKind::Query {
+            return Some("is a mutation: only a query can be infinite".to_owned());
+        }
+        // The list its handle shows, on the success side of the `Result` the macro records.
+        let list = match &query.returns {
+            TypeRef::Result(ok, _) => &**ok,
+            other => other,
+        };
+        let TypeRef::Vec(item) = list else {
+            return Some("does not return `Vec<T>`, the list its handle shows".to_owned());
+        };
+        let TypeRef::Named(item) = &**item else {
+            return Some("returns a list of something that is not a record".to_owned());
+        };
+        let Some(record) = self.records.iter().find(|r| &r.name == item) else {
+            return Some(format!("returns a list of `{item}`, which is not a record"));
+        };
+        if !record.fields.iter().any(|f| f.name == infinite.item_key) {
+            return Some(format!(
+                "has `item_key = \"{}\"`, but `{item}` has no such field",
+                infinite.item_key
+            ));
+        }
+        None
     }
 }
 
@@ -1032,6 +1179,9 @@ mod tests {
                 stale_ms: None,
                 persist: false,
                 idempotent: false,
+                interval_ms: None,
+                poll_in_background: false,
+                infinite: None,
             });
         });
         let places: Vec<String> = errors(&s)
@@ -1405,6 +1555,9 @@ mod tests {
                 stale_ms: None,
                 persist: false,
                 idempotent: false,
+                interval_ms: None,
+                poll_in_background: false,
+                infinite: None,
             });
         }));
         assert_eq!(in_query.len(), 2, "{in_query:?}");
@@ -1998,5 +2151,194 @@ mod tests {
         let errs = errors(&s);
         assert_eq!(errs.len(), 1);
         assert!(errs[0].to_string().contains('\u{4e2d}'));
+    }
+
+    fn newtype(name: &str, inner: TypeRef) -> crate::RecordDef {
+        let mut r = record(name, vec![field("value", inner)]);
+        r.transparent = true;
+        r
+    }
+
+    #[test]
+    fn a_newtype_of_a_valid_key_is_a_valid_map_key_and_a_decimal_is_not() {
+        let mut s = Schema::new("t");
+        s.records.push(newtype("UserId", TypeRef::Uuid));
+        s.records.push(newtype("OrderNo", TypeRef::named("UserId")));
+        s.records.push(newtype("Price", TypeRef::Decimal));
+        s.records.push(newtype("Ratio", TypeRef::F64));
+        s.records
+            .push(record("Plain", vec![field("value", TypeRef::U8)]));
+        for ok in ["UserId", "OrderNo"] {
+            assert!(s.is_valid_map_key(&TypeRef::named(ok)), "{ok}");
+        }
+        for bad in ["Price", "Ratio", "Plain", "Missing"] {
+            assert!(!s.is_valid_map_key(&TypeRef::named(bad)), "{bad}");
+        }
+        assert!(s.is_valid_map_key(&TypeRef::String));
+        assert!(!s.is_valid_map_key(&TypeRef::Decimal));
+        s.records.push(record(
+            "Holder",
+            vec![
+                field(
+                    "by_user",
+                    TypeRef::map(TypeRef::named("UserId"), TypeRef::Bool),
+                ),
+                field(
+                    "by_order",
+                    TypeRef::map(TypeRef::named("OrderNo"), TypeRef::Bool),
+                ),
+            ],
+        ));
+        assert_eq!(s.validate(), Ok(()));
+        s.records.push(record(
+            "Bad",
+            vec![
+                field(
+                    "by_price",
+                    TypeRef::map(TypeRef::named("Price"), TypeRef::Bool),
+                ),
+                field("by_decimal", TypeRef::map(TypeRef::Decimal, TypeRef::Bool)),
+            ],
+        ));
+        let errs = s.validate().unwrap_err();
+        assert_eq!(errs.len(), 2, "{errs:?}");
+        assert!(errs.iter().all(|e| e.code() == "E0006"));
+    }
+
+    #[test]
+    fn a_self_referential_newtype_is_not_a_key_and_does_not_loop() {
+        let mut s = Schema::new("t");
+        s.records
+            .push(newtype("Loop", TypeRef::option(TypeRef::named("Loop"))));
+        assert!(!s.is_valid_map_key(&TypeRef::named("Loop")));
+        let mut cycle = Schema::new("t");
+        cycle.records.push(newtype("A", TypeRef::named("B")));
+        cycle.records.push(newtype("B", TypeRef::named("A")));
+        assert!(!cycle.is_valid_map_key(&TypeRef::named("A")));
+        cycle.records.push(record(
+            "H",
+            vec![field("m", TypeRef::map(TypeRef::named("A"), TypeRef::Bool))],
+        ));
+        assert!(cycle.validate().is_err());
+    }
+
+    #[test]
+    fn a_transparent_record_has_one_field_called_value_without_default() {
+        let mut ok = Schema::new("t");
+        ok.records.push(newtype("UserId", TypeRef::Uuid));
+        assert_eq!(ok.validate(), Ok(()));
+
+        for (name, fields, expect) in [
+            (
+                "Two",
+                vec![field("value", TypeRef::U8), field("more", TypeRef::U8)],
+                "exactly one field",
+            ),
+            ("None", vec![], "exactly one field"),
+            (
+                "Renamed",
+                vec![field("inner", TypeRef::U8)],
+                "not called `value`",
+            ),
+        ] {
+            let mut s = Schema::new("t");
+            let mut r = record(name, fields);
+            r.transparent = true;
+            s.records.push(r);
+            let errs = s.validate().unwrap_err();
+            assert_eq!(errs.len(), 1, "{name}: {errs:?}");
+            assert_eq!(errs[0].code(), "E0007");
+            assert!(errs[0].to_string().contains(expect), "{}", errs[0]);
+        }
+        let mut s = Schema::new("t");
+        let mut r = record("Defaulted", vec![field("value", TypeRef::U8)]);
+        r.fields[0].default = true;
+        r.transparent = true;
+        s.records.push(r);
+        assert_eq!(s.validate().unwrap_err()[0].code(), "E0007");
+    }
+
+    #[test]
+    fn a_newtype_cannot_wrap_a_unit_an_object_or_a_lazy_list() {
+        for inner in [
+            TypeRef::Unit,
+            TypeRef::lazy(TypeRef::U8),
+            TypeRef::object("Thing"),
+        ] {
+            let mut s = Schema::new("t");
+            s.objects.push(object("Thing", vec![], vec![]));
+            s.records.push(newtype("Bad", inner.clone()));
+            let errs = s.validate().unwrap_err();
+            assert!(!errs.is_empty(), "{inner}");
+        }
+        let mut s = Schema::new("t");
+        s.records.push(newtype(
+            "Many",
+            TypeRef::vec(TypeRef::option(TypeRef::Decimal)),
+        ));
+        assert_eq!(s.validate(), Ok(()));
+    }
+
+    fn infinite_query(returns: TypeRef, item_key: &str) -> Schema {
+        let mut s = Schema::new("t");
+        s.records
+            .push(record("Post", vec![field("id", TypeRef::U64)]));
+        s.queries.push(QueryDef {
+            name: "feed".into(),
+            query_id: ids::query_id("feed"),
+            kind: QueryKind::Query,
+            key: "feed".into(),
+            params: vec![],
+            returns,
+            stale_ms: None,
+            persist: false,
+            idempotent: false,
+            interval_ms: None,
+            poll_in_background: false,
+            infinite: Some(crate::InfiniteDef {
+                cursor: TypeRef::String,
+                item_key: item_key.into(),
+            }),
+        });
+        s
+    }
+
+    #[test]
+    fn an_infinite_query_returns_a_list_of_records_with_the_item_key() {
+        let good = infinite_query(TypeRef::vec(TypeRef::named("Post")), "id");
+        assert_eq!(good.validate(), Ok(()));
+        // What `#[undra::query(infinite)]` records: the list on the success side of a `Result`.
+        let mut with_error = infinite_query(
+            TypeRef::result(
+                TypeRef::vec(TypeRef::named("Post")),
+                TypeRef::named("FeedError"),
+            ),
+            "id",
+        );
+        with_error.enums.push(EnumDef {
+            name: "FeedError".into(),
+            type_id: ids::type_id("FeedError"),
+            is_error: true,
+            variants: vec![],
+            docs: String::new(),
+        });
+        assert_eq!(with_error.validate(), Ok(()));
+        for (returns, key, expect) in [
+            (TypeRef::named("Post"), "id", "does not return `Vec<T>`"),
+            (TypeRef::vec(TypeRef::U8), "id", "not a record"),
+            (
+                TypeRef::vec(TypeRef::named("Post")),
+                "slug",
+                "no such field",
+            ),
+        ] {
+            let errs = infinite_query(returns, key).validate().unwrap_err();
+            assert_eq!(errs.len(), 1, "{errs:?}");
+            assert_eq!(errs[0].code(), "E0073");
+            assert!(errs[0].to_string().contains(expect), "{}", errs[0]);
+        }
+        let mut mutation = infinite_query(TypeRef::vec(TypeRef::named("Post")), "id");
+        mutation.queries[0].kind = QueryKind::Mutation;
+        assert_eq!(mutation.validate().unwrap_err()[0].code(), "E0073");
     }
 }

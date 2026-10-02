@@ -195,14 +195,20 @@ impl<T: SignalValue> Signal<T> {
     /// If a reader is holding a snapshot at that moment (a computed or effect that is mid-run),
     /// the value is copied first so the reader is undisturbed; otherwise it is mutated in place.
     pub fn update(&self, f: impl FnOnce(&mut T)) {
+        self.update_with(f);
+    }
+
+    /// [`update`](Signal::update) for a closure that returns something (what a removal hands
+    /// back): the same write, the same rules.
+    pub(crate) fn update_with<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
         let me = self.id();
         self.write_with(|slot| {
             // Before `f` runs, so that a panic inside it cannot leave a half-changed list that
             // a keyed slot still believes its recorded ops describe.
             self.invalidate_log();
             let _updating = Updating::enter(me);
-            f(Arc::make_mut(slot));
-        });
+            f(Arc::make_mut(slot))
+        })
     }
 
     /// Like [`set`](Signal::set), but a write the calling thread may not make is returned as a

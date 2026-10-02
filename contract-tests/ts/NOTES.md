@@ -136,6 +136,38 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
   (`setReadBigInts`); S25.3's `-9007199254740993` crosses exactly. Node's SQLite is built without double-quoted string
   literals (`SQLITE_DQS=0`): `"x"` is an identifier, never a string.
 
+* S31 (ADR-042, the ledger): every step goes through the generated API (`openAccount`, `deposit`, `balances`, `statement`, `loadableStatement`,
+  `echo*`, `sampleReceipt`, the `Ledger` store) except where it counts entries or sends what no generated function can. A newtype is a branded
+  `string`, `bigint` or `Decimal`: step 1 compares the bytes of `AccountIdCodec`, `CentsCodec` and `PriceCodec` with those of `codecs.uuid`,
+  `codecs.i64` and `decimalCodec`, and checks `===` against the inner value at run time; that the brand is a distinct *type* is checked at compile
+  time, by four `@ts-expect-error` lines in `distinctTypes()` at the top of the file (`tsc --noEmit -p .` fails if any of them stops being an error;
+  vitest does not type-check). `Cents` compares with `<` as a bigint. Step 2b keeps two ledgers in step, one used raw (`RawStore`: it counts the
+  entries of each change-set and decodes the keyed patch, which a generated store hides) and one generated (`Ledger`, whose `accounts` signal is
+  compared with the model), because two stores of one type in one core are two objects. Step 4's scale-39 decimal goes through `core.call` with the
+  17 raw bytes of the wire vector `decimal_scale_39_rejected`: the core answers status 5 (`UndraReplyError` with `ReplyStatus.BadRequest`). The
+  TypeScript `Duration` is milliseconds (`validFor` of 90 s is `90_000`, compared as 90,000,000,000 ns) and `Timestamp` is a number of milliseconds.
+  React Native's column (`runtimes/rn/@undra/react-native/vitest.contract.config.ts`) runs the same file.
+
+* S32 (ADR-043, `Library`, `FeedQueryHandle`) and S33 (`TickerQueryHandle`): the steps of S32 are `src/paging-steps.ts`, run by
+  `test/s32-*.test.ts` on `wasm-main` and, as a non-scenario test, by `test/paging-worker.test.ts` on `wasm-worker` (replies are asynchronous
+  there; the steps that need the core to answer in the caller's turn, the reply versions and 4a, do not run). **Page calls** are counted at the
+  core's transport (`src/page-calls.ts`: `Kind.Call` payloads whose first byte is 3, in `callSync` for `wasm-main` and native, in `send` for
+  a worker; the transport is the core's private field, which a harness may reach). **Entries** of a generated store are recorded by wrapping
+  its `_apply` (`tapEntries` in `src/raw-store.ts`: it sees what the mirror delivers after `create()`; a second `RawStore` of the same type
+  gives the first change-set). The list's `version` is `LazyList.version`. **The frame held** (S32.4): a reply drains the mirror before its
+  caller resumes, so there is no frame to hold across an `await`; the three `add_rows` calls are made in one turn without awaiting, and
+  the mirror holds their three change-sets until it drains (a drain then delivers one op 2). The first-drain half of step 4 (a store whose
+  op 0 and op 2 are folded) is made inside a drain: a subscriber of the first library's `length` observes the second store and calls its
+  `add_rows`, so the drain's next round finds [op 0, op 2] together; with the ADR-031 amendment reversed (op 2 supersedes op 0) that step
+  fails (it waits for a length the list never learns). **Prefetch** (S32.2): a read of a row of an already loaded page asks for the page
+  beyond it if that is not loaded, so "reading any row of those pages afterwards makes none" holds for the pages whose neighbours are loaded
+  (page 2 of pages 1 to 3), and a row of page 1 or 3 asks for page 0 or 4, once; the step reads rows of page 2 for "none" and counts the
+  two edge pages. **The window** (S32.3): the pages read since the last change, here pages 0 and 199 (step 1) and 1 to 3, so five calls
+  re-page it. S33 takes real time (about 25 s): the harness's Clock is manual but `ctx.sleep` is the runtime's `setTimeout`; times are
+  `performance.now()` at the arrival of each value of `data`, and `emitLifecycle` / `emitConnectivity` are the events. After
+  `setPollInterval(3 s)` the fetch that was already scheduled is rescheduled to three seconds after the last one ended, so step 5 waits up to
+  four seconds for it before measuring the gap that follows.
+
 ## Gaps and defects found (for the integrator)
 
 Fixed since (playground finding 5): the Mirror stranded a change-set enqueued from a signal subscriber during the flush; the flush now drains it in a further round (`runtimes/ts/@undra/runtime/test/mirror.test.ts`).

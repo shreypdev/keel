@@ -381,3 +381,202 @@ test("the workshop: shelves the core hands out, merged by one call; a job that c
   await expect(page.getByTestId("job-count")).toHaveText("1 job run");
   expect(problems).toEqual([]);
 });
+
+test("the library: 10,000 books the page never receives whole, paged through a window; a view of the even rows", async ({ page }) => {
+  mkdirSync(PROOF, { recursive: true });
+  const problems: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") problems.push(message.text());
+  });
+  page.on("pageerror", (error) => problems.push(error.message));
+  await page.goto("/?screen=library");
+  const viewport = page.getByTestId("library-viewport");
+
+  await test.step("the length arrives at once, the rows by page, and only a window is drawn", async () => {
+    await expect(page.getByTestId("library-count")).toHaveText("10000");
+    // The first read asks for the pages: the rows are placeholders until they arrive, then real rows.
+    await expect(page.getByTestId("library-row").first()).toContainText("Item 1");
+    await expect(page.getByTestId("library-placeholder")).toHaveCount(0);
+    const drawn = await page.getByTestId("library-row").count();
+    expect(drawn, "only the visible rows are in the DOM").toBeLessThan(40);
+    expect(drawn).toBeGreaterThan(8);
+    await expect(page.getByTestId("library-window")).toContainText("Drawing rows 1 to 15 of 10,000");
+    await page.screenshot({ path: `${PROOF}web-library.png`, fullPage: true });
+  });
+
+  await test.step("a far scroll shows placeholders, then the rows of the pages it asked for", async () => {
+    await viewport.evaluate((element) => {
+      element.scrollTop = 36 * 7_000;
+    });
+    await expect(page.getByTestId("library-window")).toContainText("Drawing rows 6996 to 7015 of 10,000");
+    await expect(page.getByTestId("library-row").first()).toContainText("Item 6996");
+    await expect(page.getByTestId("library-placeholder")).toHaveCount(0);
+    await viewport.evaluate((element) => {
+      element.scrollTop = 36 * 9_990;
+    });
+    await expect(page.getByTestId("library-row").last()).toContainText("Item 10000");
+  });
+
+  await test.step("a change is one notice: the length follows at once and the rows on screen are read again", async () => {
+    await viewport.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await expect(page.getByTestId("library-row").first()).toContainText("Item 1");
+    const version = await page.getByTestId("library-version").textContent();
+    await page.getByTestId("library-add").click();
+    await expect(page.getByTestId("library-count")).toHaveText("10100");
+    await expect(page.getByTestId("library-version")).not.toHaveText(version ?? "");
+    await page.getByTestId("library-rename").click();
+    await expect(page.getByTestId("library-row").first()).toContainText("Renamed at");
+    await expect(page.getByTestId("library-row").first()).toContainText("v1");
+    await page.getByTestId("library-remove").click();
+    await expect(page.getByTestId("library-count")).toHaveText("10099");
+    await expect(page.getByTestId("library-row").first()).toContainText("Item 2");
+    await page.getByTestId("library-reset").click();
+    await expect(page.getByTestId("library-count")).toHaveText("10000");
+    await expect(page.getByTestId("library-row").first()).toContainText("Item 1");
+    await expect(page.getByTestId("library-error")).toHaveCount(0);
+  });
+
+  await test.step("the view of the even rows follows its source", async () => {
+    // A new store: the tab owns its Library, so leaving and coming back starts from the core's fresh one.
+    await page.getByTestId("tab-counter").click();
+    await expect(page.getByTestId("counter-value")).toHaveText("0");
+    await page.getByTestId("tab-library").click();
+    await expect(page.getByTestId("library-count")).toHaveText("10000");
+    await expect(page.getByTestId("evens-count")).toHaveText("10");
+    await expect(page.getByTestId("evens-row").first()).toHaveText(/^#2 /);
+    await expect(page.getByTestId("evens-row").nth(9)).toHaveText(/^#20 /);
+    await page.getByTestId("evens-add").click();
+    await expect(page.getByTestId("evens-count")).toHaveText("11");
+    await expect(page.getByTestId("evens-source")).toHaveText("source: 22 rows");
+    await expect(page.getByTestId("evens-row").nth(10)).toHaveText(/^#\d+ /);
+    await page.getByTestId("evens-drop").click();
+    await expect(page.getByTestId("evens-source")).toHaveText("source: 17 rows");
+    await expect(page.getByTestId("evens-count")).toHaveText("9");
+    await expect(page.getByTestId("evens-row").first()).toHaveText(/^#6 /);
+  });
+
+  expect(problems, "the page logged no errors").toEqual([]);
+});
+
+test("the feed: pages that load as the sentinel scrolls into view; refresh fetches the loaded pages again", async ({ page }) => {
+  mkdirSync(PROOF, { recursive: true });
+  const problems: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") problems.push(message.text());
+  });
+  page.on("pageerror", (error) => problems.push(error.message));
+  await page.goto("/?screen=feed");
+  const scroll = page.getByTestId("feed-scroll");
+
+  await test.step("the first page is fifty rows, and the next waits for the sentinel", async () => {
+    await expect(page.getByTestId("feed-row")).toHaveCount(50);
+    await expect(page.getByTestId("feed-count")).toHaveText("50");
+    await expect(page.getByTestId("feed-status")).toHaveText("success");
+    await expect(page.getByTestId("feed-footer")).toHaveText("Scroll for more");
+    await expect(page.getByTestId("feed-row").first()).toContainText("Item 1");
+    await page.screenshot({ path: `${PROOF}web-feed.png`, fullPage: true });
+    // Nothing scrolled it into view: a moment later there is still one page.
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId("feed-row")).toHaveCount(50);
+  });
+
+  await test.step("scrolling to the end loads the next page, and the next, as the sentinel comes into view", async () => {
+    await scroll.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(page.getByTestId("feed-row")).toHaveCount(100);
+    await scroll.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(page.getByTestId("feed-row")).toHaveCount(150);
+    await expect(page.getByTestId("feed-footer")).toHaveText("Scroll for more");
+    await expect(page.getByTestId("feed-row").nth(149)).toContainText("Item 150");
+  });
+
+  await test.step("refresh fetches the three pages again and finds nothing new; touching the even rows finds them", async () => {
+    await page.getByTestId("feed-refresh").click();
+    await expect(page.getByTestId("feed-status")).toHaveText("success");
+    await expect(page.getByTestId("feed-row")).toHaveCount(150);
+    // A refetch asked for while one is in flight is the one in flight (the buttons are disabled meanwhile): let the three pages finish.
+    await page.waitForTimeout(400);
+    await expect(page.getByTestId("feed-touch")).toBeEnabled();
+    await page.getByTestId("feed-touch").click();
+    await expect(page.getByTestId("feed-revision")).toHaveText("revision 1");
+    await expect(page.getByTestId("feed-row").nth(1)).toContainText("v1"); // row 2 is even
+    await expect(page.getByTestId("feed-row").nth(0)).toContainText("v0"); // row 1 is odd
+    await expect(page.getByTestId("feed-row")).toHaveCount(150);
+    await expect(page.getByTestId("feed-error")).toHaveCount(0);
+  });
+
+  await test.step("even rows only is another feed with its own pages", async () => {
+    await page.getByTestId("feed-even-only").check();
+    await expect(page.getByTestId("feed-row")).toHaveCount(50);
+    await expect(page.getByTestId("feed-row").first()).toContainText("Item 2");
+    await expect(page.getByTestId("feed-row").nth(49)).toContainText("Item 100");
+    await page.getByTestId("feed-even-only").uncheck();
+    await expect(page.getByTestId("feed-row").first()).toContainText("Item 1");
+  });
+
+  expect(problems, "the page logged no errors").toEqual([]);
+});
+
+test("the ticker: a counter the core polls every second; an override, a failure that does not stop it", async ({ page }) => {
+  mkdirSync(PROOF, { recursive: true });
+  const problems: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") problems.push(message.text());
+  });
+  page.on("pageerror", (error) => problems.push(error.message));
+  await page.goto("/?screen=ticker");
+  const value = page.getByTestId("ticker-value");
+  const current = async (): Promise<number> => Number((await value.textContent()) ?? "0");
+
+  await test.step("the counter goes up by itself", async () => {
+    await expect(value).toHaveText("1");
+    await expect(page.getByTestId("ticker-status")).toHaveText("success");
+    await expect(value).toHaveText("2", { timeout: 4_000 });
+    await expect(page.getByTestId("ticker-line")).toContainText("polling every 1 s");
+    await expect(page.getByTestId("ticker-fetches")).toContainText("fetches in the core");
+    await page.screenshot({ path: `${PROOF}web-ticker.png`, fullPage: true });
+  });
+
+  await test.step("an override of five seconds slows this observer down, and clearing it brings the second back", async () => {
+    await page.getByTestId("ticker-slow").click();
+    await expect(page.getByTestId("ticker-slow")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("ticker-line")).toContainText("polling every 5 s");
+    // The fetch that was already scheduled still happens; then nothing for most of five seconds.
+    const seen = await current();
+    await expect.poll(current, { timeout: 7_000 }).toBeGreaterThan(seen);
+    const slowed = await current();
+    await page.waitForTimeout(3_000);
+    expect(await current(), "no fetch for three seconds with a five-second interval").toBe(slowed);
+    await page.getByTestId("ticker-slow").click();
+    await expect(page.getByTestId("ticker-line")).toContainText("polling every 1 s");
+    await expect.poll(current, { timeout: 6_000 }).toBeGreaterThan(slowed);
+  });
+
+  await test.step("a failure shows the error, keeps the last value and keeps polling; the next success clears it", async () => {
+    await page.getByTestId("ticker-fail").click();
+    await expect(page.getByTestId("ticker-error")).toHaveText("the ticker is failing on purpose", { timeout: 6_000 });
+    await expect(page.getByTestId("ticker-status")).toHaveText("error");
+    const held = await current();
+    const before = await page.getByTestId("ticker-fetches").textContent();
+    await expect(page.getByTestId("ticker-fetches")).not.toHaveText(before ?? "", { timeout: 4_000 });
+    expect(await current(), "the value is the last success").toBe(held);
+    await page.getByTestId("ticker-fail").click();
+    await expect(page.getByTestId("ticker-error")).toHaveCount(0, { timeout: 6_000 });
+    await expect.poll(current, { timeout: 4_000 }).toBeGreaterThan(held);
+  });
+
+  await test.step("leaving the tab stops the polling", async () => {
+    await page.getByTestId("tab-counter").click();
+    await expect(page.getByTestId("counter-value")).toHaveText("0");
+    await page.getByTestId("tab-ticker").click();
+    // A new handle: the counter in the core kept counting only while somebody watched, and the new view starts from its cached value.
+    await expect(page.getByTestId("ticker-value")).toBeVisible();
+  });
+
+  expect(problems, "the page logged no errors").toEqual([]);
+});

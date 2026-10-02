@@ -144,7 +144,11 @@ impl Shared {
         if let Some(found) = cache.get(&query_id) {
             return Some(found.clone());
         }
-        let closure = schema.query_closure(query_id)?;
+        let closure = match registered_query(query_id).and_then(|vt| vt.paged) {
+            // An infinite query's entry is `{ next, pages }`, not a value of its `returns`.
+            Some(paged) => (paged.closure)(schema, query_id)?,
+            None => schema.query_closure(query_id)?,
+        };
         let fingerprint = closure.fingerprint();
         let current: Current = Arc::new((closure, fingerprint));
         cache.insert(query_id, current.clone());
@@ -268,7 +272,7 @@ impl Shared {
             state
                 .entries
                 .get(key)
-                .and_then(|entry| Some((entry.data.as_ref()?.bytes.to_vec(), entry.updated_at?)))
+                .and_then(|entry| Some((entry.persist_bytes()?, entry.updated_at?)))
         };
         let Some((data, updated_at)) = snapshot else {
             self.state.lock().storage.failed.retain(|k| k != key);
@@ -552,7 +556,10 @@ impl Shared {
                 return false;
             }
         };
-        let migrated = migrate_value(&stored.data, &old, &current.0);
+        let migrated = match vt.paged {
+            Some(paged) => (paged.migrate)(&stored.data, &old, &current.0),
+            None => migrate_value(&stored.data, &old, &current.0),
+        };
         let data = match migrated.and_then(|data| {
             (vt.decode_data)(&data)
                 .map(|_| data)
@@ -729,7 +736,8 @@ impl Shared {
 }
 
 /// A cached value written with `old`, as bytes of the type `new` describes: structurally (with
-/// `ty` hooks inside), else the `ty` hook of the root type.
+/// `ty` hooks inside), else the `ty` hook of the root type. (An infinite query's entry is not a
+/// value of one type: its own table migrates it, see `PagedVTable`.)
 fn migrate_value(data: &[u8], old: &TypeClosure, new: &TypeClosure) -> Result<Vec<u8>, String> {
     let (Some(old_ty), Some(new_ty)) = (root_type(old), root_type(new)) else {
         return Err("the stored description is not a query's".to_owned());

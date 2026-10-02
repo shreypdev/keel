@@ -20,6 +20,8 @@
 //! | [`biglist`](mod@biglist) | 10,000 keyed rows; every one-row operation is a one-operation patch |
 //! | [`platform`](mod@platform) | the standard ports seen from the core: one function per `Kv`, `SecureStore`, `Fs` and `Http` method, and a store of the `Connectivity` and `Lifecycle` reports, for proving a platform's adapters |
 //! | [`remote`](mod@remote) | a query, mutations and optimistic commands over the `Http` port |
+//! | [`ledger`](mod@ledger) | newtypes (`AccountId`, `Cents`, `Price`), named generic instantiations (`EntrySlice`, `LoadableEntries`), exact `Decimal` money and the leaf types of other crates (`uuid`, `chrono`, `rust_decimal`, `bytes`): ADR-042 |
+//! | [`paging`](mod@paging) | a `Lazy<Item>` list the host pages through (a 10,000-row owned list and a view of a derived one), an infinite `feed` query over the big list and a polled `ticker` query: ADR-043 |
 //! | [`lab`](mod@lab) | every wire type, sync and async calls, typed errors, panics, cancellation, streams |
 //! | [`bench`](mod@bench) | the budget-row methods: a primitive call, 1 KB echo, 100 dirty signals, one insert |
 //! | [`stress`](mod@stress) | high-frequency data: a Timer-paced generator (and bursts) of one-write transactions the platforms apply once per frame, and a `no_coalesce` signal they apply step by step |
@@ -39,8 +41,10 @@ pub mod bench;
 pub mod biglist;
 pub mod counter;
 pub mod lab;
+pub mod ledger;
 pub mod live;
 pub mod notes;
+pub mod paging;
 pub mod platform;
 pub mod remote;
 pub mod stress;
@@ -56,8 +60,17 @@ pub use lab::{
     echo_composite, echo_figure, echo_primitives, explode, explode_later, fail_later, greet,
     parse_count, ping, version,
 };
+pub use ledger::{
+    Account, AccountId, Cents, Entry, EntrySlice, Ledger, LedgerError, Loadable, LoadableEntries,
+    Price, Receipt, Slice, balances, deposit, echo_account, echo_cents, echo_decimal, echo_price,
+    echo_receipt, loadable_statement, open_account, sample_receipt, statement,
+};
 pub use live::{Live, SseFollow, sse_follow, ws_echo};
 pub use notes::{DbCells, Note, Notes, db_cells, db_migrate, db_run};
+pub use paging::{
+    LIBRARY_LEN, Library, PAGE, TickError, feed, set_ticker_failing, ticker, ticker_fetches,
+    touch_feed,
+};
 pub use remote::{
     RemoteConfig, RemoteError, RemoteTodo, configure_remote, create_remote_todo, patch_remote_todo,
     post_remote_todo, remote_todos, set_remote_done,

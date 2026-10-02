@@ -42,6 +42,14 @@ final class PlaygroundTourTests: XCTestCase {
                        "\(element.identifier) reads \"\(element.label)\", which does not end with \"\(text)\"")
     }
 
+    /// Waits until the label of `element` contains `text`.
+    private func wait(for element: XCUIElement, toContain text: String, timeout: TimeInterval = 10) {
+        let predicate = NSPredicate(format: "label CONTAINS %@", text)
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: timeout), .completed,
+                       "\(element.identifier) reads \"\(element.label)\", which does not contain \"\(text)\"")
+    }
+
     /// Flips a switch by tapping the switch itself: its element spans the row, and the middle of
     /// the row is the label, which does not toggle.
     private func flip(_ toggle: XCUIElement) {
@@ -233,6 +241,97 @@ final class PlaygroundTourTests: XCTestCase {
         XCTAssertFalse(app.buttons[title].exists)
     }
 
+    // MARK: Library
+
+    func testLibrary() {
+        let app = launch(tab: "library")
+        wait(for: app.staticTexts["library-count"], toRead: "10,000 books")
+        // Rows arrive a page at a time: the first one shows its book once its page has come (a placeholder until then).
+        wait(for: element("library-row-0", in: app), "the first book")
+        XCTAssertTrue(element("library-row-0", in: app).label.contains("Item 1"), "row 0 reads \"\(element("library-row-0", in: app).label)\"")
+
+        // One call each; the core answers with a new length and version, and the visible pages are asked for again.
+        app.buttons["library-add"].tap()
+        wait(for: app.staticTexts["library-count"], toRead: "10,001 books")
+        app.buttons["library-rename"].tap()
+        wait(for: element("library-row-0", in: app), toContain: "Renamed 1")
+        app.buttons["library-remove"].tap()
+        wait(for: app.staticTexts["library-count"], toRead: "10,000 books")
+
+        // The second list is a lazy view of the even rows of a small list; dropping a source row drops its row.
+        app.segmentedControls["library-filter"].buttons["Even rows of the source"].tap()
+        wait(for: app.staticTexts["library-evens-count"], toRead: "10 even rows of the source")
+        wait(for: element("library-even-0", in: app), toContain: "Item 2")
+        app.buttons["library-drop-source"].tap()
+        app.buttons["library-drop-source"].tap()
+        wait(for: app.staticTexts["library-evens-count"], toRead: "9 even rows of the source")
+        keepScreenshot(named: "library-tour")
+    }
+
+    // MARK: Feed
+
+    func testFeed() {
+        let app = launch(tab: "feed")
+        wait(for: app.staticTexts["feed-count"], toRead: "50 rows")
+        wait(for: app.staticTexts["feed-status"], toEndWith: "Success")
+        wait(for: element("feed-row-1", in: app), "the first row")
+
+        // Scrolling to the end makes the rows near it ask for the next page, which arrives as 50 more rows.
+        let list = app.collectionViews["feed-list"].exists ? app.collectionViews["feed-list"] : app.tables["feed-list"]
+        let deadline = Date().addingTimeInterval(30)
+        while app.staticTexts["feed-count"].label != "100 rows", Date() < deadline {
+            list.swipeUp(velocity: .fast)
+        }
+        wait(for: app.staticTexts["feed-count"], toRead: "100 rows")
+        keepScreenshot(named: "feed-tour")
+
+        // A refetch finds only what changed: the even rows now show revision 1, and the list is as long as before.
+        app.buttons["feed-touch"].tap()
+        let top = Date().addingTimeInterval(20)
+        while !element("feed-row-2", in: app).exists, Date() < top {
+            list.swipeDown(velocity: .fast)
+        }
+        wait(for: app.staticTexts["feed-count"], toRead: "100 rows")
+        wait(for: element("feed-row-2", in: app), toContain: "v1")
+
+        // The even rows are another parameter of the query: another entry with its own first page.
+        app.segmentedControls["feed-filter"].buttons["Even rows"].tap()
+        wait(for: app.staticTexts["feed-count"], toRead: "50 rows")
+        wait(for: element("feed-row-100", in: app).exists ? element("feed-row-100", in: app) : element("feed-row-2", in: app), "an even row")
+    }
+
+    // MARK: Ticker
+
+    func testTicker() {
+        let app = launch(tab: "ticker")
+        let value = app.staticTexts["ticker-value"]
+        wait(for: value, "the counter")
+        // The first tick, then one a second without anybody asking: the core polls while this screen watches.
+        let first = NSPredicate(format: "label != 'none yet'")
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: first, object: value)], timeout: 10), .completed)
+        let start = Int(value.label) ?? 0
+        let advanced = NSPredicate(format: "label.integerValue >= %d", start + 2)
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: advanced, object: value)], timeout: 10), .completed,
+                       "the counter reads \"\(value.label)\" after the first tick \(start)")
+
+        // This observer asks for a faster poll.
+        let mark = Int(value.label) ?? 0
+        flip(app.switches["ticker-fast"])
+        let faster = NSPredicate(format: "label.integerValue >= %d", mark + 4)
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: faster, object: value)], timeout: 2.5), .completed,
+                       "the counter reads \"\(value.label)\" a second and a half after asking for 250 ms (it was \(mark))")
+        flip(app.switches["ticker-fast"])
+
+        // A failure the core makes on purpose shows, polling goes on, and the error clears with the next success.
+        flip(app.switches["ticker-failing"])
+        wait(for: element("ticker-error", in: app), "the error", timeout: 5)
+        keepScreenshot(named: "ticker-failing")
+        flip(app.switches["ticker-failing"])
+        let gone = NSPredicate(format: "exists == false")
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: element("ticker-error", in: app))], timeout: 5), .completed)
+        wait(for: app.staticTexts["ticker-status"], toEndWith: "Success")
+    }
+
     private func wait(for expectation: XCTNSPredicateExpectation, timeout: TimeInterval) {
         XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: timeout), .completed, "timed out waiting for \(expectation)")
     }
@@ -241,9 +340,18 @@ final class PlaygroundTourTests: XCTestCase {
 
     func testTabBarSwitchesScreens() {
         let app = launch(tab: "todos")
-        for (id, marker) in [("counter", "counter-value"), ("biglist", "biglist-count"), ("remote", "remote-status"), ("notes", "notes-count"), ("todos", "remaining")] {
+        // The first four tabs are in the tab bar...
+        for (id, marker) in [("counter", "counter-value"), ("biglist", "biglist-count"), ("remote", "remote-status"), ("todos", "remaining")] {
             app.tabBars.buttons["tab-\(id)"].tap()
             wait(for: app.staticTexts[marker], "the \(id) screen")
+        }
+        // ...and the others are behind "More" (a tab bar has room for five).
+        for (title, marker) in [("Notes", "notes-count"), ("Library", "library-count"), ("Feed", "feed-count"), ("Ticker", "ticker-value")] {
+            app.tabBars.buttons["More"].tap()
+            let row = app.tables.cells.staticTexts[title].exists ? app.tables.cells.staticTexts[title] : app.staticTexts[title]
+            wait(for: row, "the \(title) row of More")
+            row.tap()
+            wait(for: app.staticTexts[marker], "the \(title) screen")
         }
     }
 }

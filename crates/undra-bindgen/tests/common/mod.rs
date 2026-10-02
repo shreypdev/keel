@@ -9,8 +9,8 @@
 
 use undra_bindgen::Generator;
 use undra_meta::{
-    EnumDef, FieldDef, FunctionDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind, QueryDef,
-    QueryKind, RecordDef, Schema, SignalDef, StoreDef, TypeRef, VariantDef, ids,
+    EnumDef, FieldDef, FunctionDef, InfiniteDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind,
+    QueryDef, QueryKind, RecordDef, Schema, SignalDef, StoreDef, TypeRef, VariantDef, ids,
 };
 
 // ----- toolchain helpers -----------------------------------------------------------
@@ -184,12 +184,20 @@ pub const CASES: &[&str] = &[
     "full",
     "stdlib",
     "recursive",
+    "newtypes",
+    "generics",
+    "decimal",
+    "polling",
+    "infinite",
+    "lazy",
 ];
 
 /// The cases whose Swift output is also locked in the iOS 15 / 16 mode (`ObservableObject` stores,
 /// `UndraDuration`; ADR-045), as `tests/golden/<case>/swift-observable-object/`. They are the cases that
-/// have stores or query handles, and the one with a `Duration` field.
-pub const FLOOR_CASES: &[&str] = &["stores", "queries", "full"];
+/// have stores or query handles, and the ones with a `Duration` field.
+pub const FLOOR_CASES: &[&str] = &[
+    "stores", "queries", "full", "newtypes", "polling", "infinite", "lazy",
+];
 
 /// `generator_for` in the iOS 15 mode: `ObservableObject` stores and a floor of iOS 15 (the strictest one).
 pub fn floor_generator_for(case: &str, schema: &Schema) -> Generator {
@@ -222,6 +230,12 @@ pub fn case(name: &str) -> Schema {
         "full" => full(),
         "stdlib" => stdlib(),
         "recursive" => recursive(),
+        "newtypes" => newtypes(),
+        "generics" => generics(),
+        "decimal" => decimal(),
+        "polling" => polling(),
+        "infinite" => infinite(),
+        "lazy" => lazy(),
         other => panic!("unknown golden case {other}"),
     }
 }
@@ -273,7 +287,16 @@ pub fn record(name: &str, docs: &str, fields: Vec<FieldDef>) -> RecordDef {
         name: name.into(),
         type_id: ids::type_id(name),
         fields,
+        transparent: false,
         docs: docs.into(),
+    }
+}
+
+/// A newtype (ADR-042): a transparent record with the one field `value`.
+pub fn newtype_record(name: &str, docs: &str, inner: TypeRef) -> RecordDef {
+    RecordDef {
+        transparent: true,
+        ..record(name, docs, vec![field("value", inner)])
     }
 }
 
@@ -476,6 +499,9 @@ pub fn query(
         stale_ms,
         persist: false,
         idempotent: false,
+        interval_ms: None,
+        poll_in_background: false,
+        infinite: None,
     }
 }
 
@@ -2175,6 +2201,604 @@ fn callbacks() -> Schema {
         vec![param("listener", cb("UploadListener"))],
         TypeRef::Stream(Box::new(TypeRef::U32)),
         false,
+    ));
+    s
+}
+
+// ----- ADR-042 and ADR-043 ------------------------------------------------------
+
+/// Newtypes (ADR-042) in every position: fields, parameters, returns, signals, stream items, errors,
+/// port and callback parameters, map keys and a keyed list's key.
+fn newtypes() -> Schema {
+    let mut s = Schema::new("golden-newtypes");
+    s.enums.push(enum_def(
+        "Priority",
+        "",
+        vec![unit_variant("Low", 0), unit_variant("High", 1)],
+    ));
+    // A newtype of each kind of wrapped type.
+    s.records
+        .push(newtype_record("UserId", "A user's id.", TypeRef::Uuid));
+    s.records
+        .push(newtype_record("TodoId", "A todo's id.", TypeRef::String));
+    s.records.push(newtype_record("OrderNo", "", TypeRef::U64));
+    s.records.push(newtype_record(
+        "Meters",
+        "A length: it has an order.",
+        TypeRef::F64,
+    ));
+    s.records.push(newtype_record(
+        "Span",
+        "A newtype of a newtype with an order is ordered too.",
+        named("Meters"),
+    ));
+    s.records
+        .push(newtype_record("Timeout", "", TypeRef::Duration));
+    s.records
+        .push(newtype_record("Created", "", TypeRef::Timestamp));
+    s.records.push(newtype_record(
+        "Flag",
+        "A bool has no order.",
+        TypeRef::Bool,
+    ));
+    s.records.push(newtype_record("Blob", "", TypeRef::Bytes));
+    s.records
+        .push(newtype_record("Tags", "", vec_of(TypeRef::String)));
+    s.records
+        .push(newtype_record("Nickname", "", opt(TypeRef::String)));
+    s.records
+        .push(newtype_record("Level", "", named("Priority")));
+    s.records.push(newtype_record(
+        "Wrapped",
+        "A newtype of a record.",
+        named("Todo"),
+    ));
+    // Newtypes of newtypes, and an option of one.
+    s.records.push(newtype_record(
+        "Owner",
+        "A newtype of a newtype.",
+        named("UserId"),
+    ));
+    s.records
+        .push(newtype_record("Boss", "Two levels down.", named("Owner")));
+    s.records.push(newtype_record(
+        "Maybe",
+        "A newtype of an option of a newtype.",
+        opt(named("UserId")),
+    ));
+    s.records.push(newtype_record(
+        "Ratings",
+        "A newtype of a map with a newtype key.",
+        TypeRef::map(named("UserId"), named("Meters")),
+    ));
+    s.records.push(record(
+        "Todo",
+        "A todo with a newtype as its key.",
+        vec![
+            field("id", named("TodoId")),
+            field("title", TypeRef::String),
+            field("owner", named("UserId")),
+            field("due", opt(named("Created"))),
+            field("level", named("Level")),
+        ],
+    ));
+    s.records.push(record(
+        "Account",
+        "Newtypes inside a record, in containers and as map keys.",
+        vec![
+            field("id", named("UserId")),
+            field("nickname", named("Nickname")),
+            field("tags", named("Tags")),
+            field("boss", opt(named("Boss"))),
+            field("friends", vec_of(named("UserId"))),
+            field("scores", TypeRef::map(named("UserId"), named("Meters"))),
+            field("by_order", TypeRef::map(named("OrderNo"), named("UserId"))),
+            field("timeout", named("Timeout")),
+            field("blob", named("Blob")),
+            field("flag", named("Flag")),
+            field("maybe", named("Maybe")),
+            field("reach", named("Span")),
+        ],
+    ));
+    s.enums.push(error_def(
+        "BoardError",
+        "",
+        vec![
+            with_message(
+                tuple_variant("NotFound", 0, vec![named("TodoId")]),
+                "todo {0:?} not found",
+            ),
+            with_message(
+                struct_variant("Taken", 1, vec![field("owner", named("UserId"))]),
+                "taken by {owner:?}",
+            ),
+        ],
+    ));
+    s.ports.push(port(
+        "Directory",
+        "Looks users up on the host.",
+        PortKind::Async,
+        vec![port_method(
+            "Directory",
+            "find",
+            "The user called `nickname`.",
+            vec![param("nickname", named("Nickname"))],
+            err_result(named("UserId"), "BoardError"),
+            true,
+        )],
+    ));
+    s.ports.push(port(
+        "Listener",
+        "Hears about the board.",
+        PortKind::Callback,
+        vec![port_method(
+            "Listener",
+            "assigned",
+            "A todo changed hands.",
+            vec![
+                param("todo", named("TodoId")),
+                param("owner", named("UserId")),
+            ],
+            TypeRef::Unit,
+            false,
+        )],
+    ));
+    s.objects.push(store(
+        object(
+            "Board",
+            "A board of todos.",
+            vec![ctor("Board", "new", vec![], false)],
+            vec![
+                method(
+                    "Board",
+                    "assign",
+                    "Gives `todo` to `owner`.",
+                    vec![
+                        param("todo", named("TodoId")),
+                        param("owner", named("UserId")),
+                    ],
+                    err_result(named("Todo"), "BoardError"),
+                    true,
+                ),
+                method(
+                    "Board",
+                    "owner_of",
+                    "",
+                    vec![param("todo", named("TodoId"))],
+                    opt(named("UserId")),
+                    false,
+                ),
+                method(
+                    "Board",
+                    "distance",
+                    "",
+                    vec![param("from", named("Meters")), param("to", named("Meters"))],
+                    named("Meters"),
+                    false,
+                ),
+                method(
+                    "Board",
+                    "changes",
+                    "The ids of the todos as they change.",
+                    vec![],
+                    TypeRef::stream(named("TodoId")),
+                    true,
+                ),
+                method(
+                    "Board",
+                    "listen",
+                    "Tells `listener` about every assignment.",
+                    vec![param("listener", cb("Listener"))],
+                    TypeRef::Unit,
+                    false,
+                ),
+            ],
+        ),
+        vec![
+            ("todos", vec_of(named("Todo")), false, Some("id")),
+            ("owner", named("UserId"), false, None),
+            (
+                "accounts",
+                TypeRef::map(named("UserId"), named("Account")),
+                false,
+                None,
+            ),
+            ("limit", named("Timeout"), false, None),
+            ("blob", named("Blob"), false, None),
+            ("nickname", named("Nickname"), false, None),
+        ],
+    ));
+    s.functions.push(function(
+        "make_id",
+        "Makes the next order number.",
+        vec![param("after", named("OrderNo"))],
+        named("OrderNo"),
+        false,
+    ));
+    s.functions.push(function(
+        "lookup",
+        "Finds an account by id.",
+        vec![param("id", named("UserId"))],
+        err_result(named("Account"), "BoardError"),
+        true,
+    ));
+    s
+}
+
+/// Instantiations of generic templates (ADR-042) as the macro makes them: plain records and enums.
+fn generics() -> Schema {
+    let mut s = Schema::new("golden-generics");
+    s.records.push(record(
+        "Todo",
+        "",
+        vec![field("id", TypeRef::U32), field("title", TypeRef::String)],
+    ));
+    s.records.push(record(
+        "User",
+        "",
+        vec![field("id", TypeRef::U32), field("name", TypeRef::String)],
+    ));
+    // `#[undra::api(generic)] struct Page<T> { items: Vec<T>, next: Option<String> }`, twice.
+    s.records.push(record(
+        "TodoPage",
+        "A page of todos: `Page<Todo>`.",
+        vec![
+            field("items", vec_of(named("Todo"))),
+            field("next", opt(TypeRef::String)),
+        ],
+    ));
+    s.records.push(record(
+        "UserPage",
+        "A page of users: `Page<User>`.",
+        vec![
+            field("items", vec_of(named("User"))),
+            field("next", opt(TypeRef::String)),
+        ],
+    ));
+    // `#[undra::api(generic)] enum Loadable<T> { Loading, Loaded(T), Failed(String) }`, twice.
+    for (name, docs, inner) in [
+        (
+            "LoadableTodo",
+            "A todo on its way: `Loadable<Todo>`.",
+            "Todo",
+        ),
+        (
+            "LoadableUser",
+            "A user on its way: `Loadable<User>`.",
+            "User",
+        ),
+    ] {
+        s.enums.push(enum_def(
+            name,
+            docs,
+            vec![
+                unit_variant("Loading", 0),
+                tuple_variant("Loaded", 1, vec![named(inner)]),
+                tuple_variant("Failed", 2, vec![TypeRef::String]),
+            ],
+        ));
+    }
+    s.enums.push(error_def(
+        "BrowseError",
+        "",
+        vec![with_message(unit_variant("Offline", 0), "offline")],
+    ));
+    s.objects.push(store(
+        object(
+            "Browser",
+            "Pages through todos and users.",
+            vec![ctor("Browser", "new", vec![], false)],
+            vec![
+                method(
+                    "Browser",
+                    "load_todos",
+                    "",
+                    vec![param("cursor", opt(TypeRef::String))],
+                    err_result(named("TodoPage"), "BrowseError"),
+                    true,
+                ),
+                method(
+                    "Browser",
+                    "load_users",
+                    "",
+                    vec![param("cursor", opt(TypeRef::String))],
+                    err_result(named("UserPage"), "BrowseError"),
+                    true,
+                ),
+                method(
+                    "Browser",
+                    "select",
+                    "",
+                    vec![param("todo", named("LoadableTodo"))],
+                    TypeRef::Unit,
+                    false,
+                ),
+            ],
+        ),
+        vec![
+            ("todos", named("TodoPage"), false, None),
+            ("users", named("UserPage"), false, None),
+            ("selected", named("LoadableTodo"), false, None),
+            ("owner", named("LoadableUser"), false, None),
+        ],
+    ));
+    s.functions
+        .push(function("first_page", "", vec![], named("TodoPage"), false));
+    s
+}
+
+/// `Decimal` (ADR-042) in a record, in containers, as a map value, wrapped, in a signal, a
+/// parameter, a return and a query.
+fn decimal() -> Schema {
+    let mut s = Schema::new("golden-decimal");
+    s.records.push(newtype_record(
+        "Price",
+        "A price: a decimal with an order.",
+        TypeRef::Decimal,
+    ));
+    s.records.push(record(
+        "Invoice",
+        "Money amounts of every shape.",
+        vec![
+            field("total", TypeRef::Decimal),
+            field("lines", vec_of(TypeRef::Decimal)),
+            field("discount", opt(TypeRef::Decimal)),
+            field("price", named("Price")),
+            field("by_sku", TypeRef::map(TypeRef::String, TypeRef::Decimal)),
+            field("prices", TypeRef::map(TypeRef::U32, named("Price"))),
+            default_field("tax", TypeRef::Decimal),
+        ],
+    ));
+    s.enums.push(error_def(
+        "PayError",
+        "",
+        vec![with_message(unit_variant("Declined", 0), "declined")],
+    ));
+    s.objects.push(store(
+        object(
+            "Till",
+            "Takes payments.",
+            vec![ctor("Till", "new", vec![], false)],
+            vec![
+                method(
+                    "Till",
+                    "charge",
+                    "Takes `amount` and returns the balance.",
+                    vec![param("amount", TypeRef::Decimal)],
+                    err_result(TypeRef::Decimal, "PayError"),
+                    true,
+                ),
+                method(
+                    "Till",
+                    "refund",
+                    "",
+                    vec![param("amount", opt(TypeRef::Decimal))],
+                    TypeRef::Unit,
+                    false,
+                ),
+                method(
+                    "Till",
+                    "totals",
+                    "",
+                    vec![],
+                    TypeRef::stream(TypeRef::Decimal),
+                    true,
+                ),
+            ],
+        ),
+        vec![
+            ("balance", TypeRef::Decimal, false, None),
+            ("last", opt(named("Price")), false, None),
+            ("history", vec_of(TypeRef::Decimal), false, None),
+            ("invoice", named("Invoice"), false, None),
+        ],
+    ));
+    s.functions.push(function(
+        "quote",
+        "Prices `qty` items.",
+        vec![param("qty", TypeRef::U32)],
+        named("Invoice"),
+        false,
+    ));
+    s.queries.push(query(
+        "price_of",
+        QueryKind::Query,
+        "price/{sku}",
+        vec![param("sku", TypeRef::String)],
+        err_result(TypeRef::Decimal, "PayError"),
+        Some(60_000),
+    ));
+    s
+}
+
+/// Queries that poll (ADR-043): `interval` with and without `poll_in_background`, and one that
+/// does not poll; every handle can set its own interval.
+fn polling() -> Schema {
+    let mut s = Schema::new("golden-polling");
+    s.enums.push(error_def(
+        "MarketError",
+        "",
+        vec![with_message(unit_variant("Offline", 0), "offline")],
+    ));
+    s.records.push(record(
+        "Quote",
+        "",
+        vec![
+            field("symbol", TypeRef::String),
+            field("price", TypeRef::F64),
+        ],
+    ));
+    let mut ticker = query(
+        "ticker",
+        QueryKind::Query,
+        "ticker/{symbol}",
+        vec![param("symbol", TypeRef::String)],
+        err_result(named("Quote"), "MarketError"),
+        Some(2_000),
+    );
+    ticker.interval_ms = Some(5_000);
+    s.queries.push(ticker);
+    let mut headlines = query(
+        "headlines",
+        QueryKind::Query,
+        "headlines",
+        vec![],
+        err_result(vec_of(TypeRef::String), "MarketError"),
+        Some(30_000),
+    );
+    headlines.interval_ms = Some(60_000);
+    headlines.poll_in_background = true;
+    s.queries.push(headlines);
+    s.queries.push(query(
+        "status",
+        QueryKind::Query,
+        "status",
+        vec![],
+        err_result(TypeRef::Bool, "MarketError"),
+        None,
+    ));
+    s.queries.push(query(
+        "buy",
+        QueryKind::Mutation,
+        "orders",
+        vec![param("symbol", TypeRef::String)],
+        err_result(named("Quote"), "MarketError"),
+        None,
+    ));
+    s
+}
+
+/// Infinite queries (ADR-043): a feed whose rows are keyed by `id` (a newtype), and a search
+/// polled every 30 s whose rows are keyed by another field.
+fn infinite() -> Schema {
+    let mut s = Schema::new("golden-infinite");
+    s.enums.push(enum_def(
+        "Filter",
+        "",
+        vec![unit_variant("All", 0), unit_variant("Mine", 1)],
+    ));
+    s.records
+        .push(newtype_record("PostId", "A post's id.", TypeRef::U64));
+    s.records.push(record(
+        "Post",
+        "One post of the feed.",
+        vec![
+            field("id", named("PostId")),
+            field("author", TypeRef::String),
+            field("body", TypeRef::String),
+        ],
+    ));
+    s.records.push(record(
+        "Hit",
+        "One search result.",
+        vec![
+            field("slug", TypeRef::String),
+            field("title", TypeRef::String),
+        ],
+    ));
+    let mut feed = query(
+        "feed",
+        QueryKind::Query,
+        "feed/{filter}",
+        vec![param("filter", named("Filter"))],
+        vec_of(named("Post")),
+        Some(60_000),
+    );
+    feed.infinite = Some(InfiniteDef {
+        cursor: TypeRef::String,
+        item_key: "id".into(),
+    });
+    s.queries.push(feed);
+    let mut search = query(
+        "search",
+        QueryKind::Query,
+        "search/{term}",
+        vec![param("term", TypeRef::String)],
+        vec_of(named("Hit")),
+        None,
+    );
+    search.infinite = Some(InfiniteDef {
+        cursor: TypeRef::U32,
+        item_key: "slug".into(),
+    });
+    search.interval_ms = Some(30_000);
+    search.persist = true;
+    s.queries.push(search);
+    s.queries.push(query(
+        "profile",
+        QueryKind::Query,
+        "profile",
+        vec![],
+        TypeRef::String,
+        None,
+    ));
+    s
+}
+
+/// `Lazy<T>` signals (ADR-043): a keyed one, a derived one, next to ordinary signals.
+fn lazy() -> Schema {
+    let mut s = Schema::new("golden-lazy");
+    s.records.push(record(
+        "Book",
+        "One book of the library.",
+        vec![
+            field("id", TypeRef::U64),
+            field("title", TypeRef::String),
+            field("year", TypeRef::U16),
+        ],
+    ));
+    s.records.push(record(
+        "Shelf",
+        "",
+        vec![field("name", TypeRef::String), field("count", TypeRef::U32)],
+    ));
+    s.records.push(record(
+        "Chapter",
+        "",
+        vec![
+            field("number", TypeRef::U32),
+            field("title", TypeRef::String),
+        ],
+    ));
+    s.enums.push(error_def(
+        "LibraryError",
+        "",
+        vec![with_message(unit_variant("Missing", 0), "missing")],
+    ));
+    s.objects.push(store(
+        object(
+            "Library",
+            "A library with more books than a screen holds.",
+            vec![ctor("Library", "new", vec![], false)],
+            vec![
+                method(
+                    "Library",
+                    "add",
+                    "Adds a book.",
+                    vec![param("title", TypeRef::String)],
+                    err_result(named("Book"), "LibraryError"),
+                    true,
+                ),
+                method("Library", "clear", "", vec![], TypeRef::Unit, false),
+            ],
+        ),
+        vec![
+            ("shelves", vec_of(named("Shelf")), false, Some("name")),
+            ("books", TypeRef::lazy(named("Book")), false, Some("id")),
+            ("selected", opt(named("Book")), false, None),
+            ("recent", TypeRef::lazy(named("Book")), true, None),
+            ("total", TypeRef::U64, false, None),
+        ],
+    ));
+    // A store that is nothing but a lazy list.
+    s.objects.push(store(
+        object(
+            "Archive",
+            "Chapters, paged.",
+            vec![ctor("Archive", "new", vec![], false)],
+            vec![],
+        ),
+        vec![("chapters", TypeRef::lazy(named("Chapter")), false, None)],
     ));
     s
 }

@@ -29,7 +29,8 @@ public abstract class UndraStore(core: UndraCore, handle: Long, noCoalesce: Set<
      * Applies one change to the signal [signalId]. Called on the main thread. [reader] is limited to
      * the change's bytes and valid only during the call; decode it and update the signal's flow. For
      * [ChangeOp.FULL] the reader holds the whole value, for [ChangeOp.PATCH] a keyed patch (SPEC 3.8) and
-     * for [ChangeOp.INVALIDATED] nothing. Signal ids a subclass does not know must be ignored.
+     * for [ChangeOp.INVALIDATED] a [dev.undra.runtime.wire.Payloads.LazyInvalidated] (a `Lazy<T>` signal: hand it
+     * to its [UndraLazyList]). Signal ids a subclass does not know must be ignored.
      */
     protected abstract fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader)
 

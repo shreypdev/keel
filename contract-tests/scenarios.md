@@ -1,10 +1,12 @@
 # Contract scenarios
 
-This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): twenty-eight
+This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): thirty-three
 scenarios against the **real playground core** (`examples/playground/core`, the same Rust crate the
-apps run), through the real boundary. S01 to S20 and S23 to S28 run on every platform; S21 and S22 are about
+apps run), through the real boundary. S01 to S20 and S23 to S33 run on every platform; S21 and S22 are about
 the web host (worker mode and crash recovery, ADR-049) and run on TypeScript only. S23 to S25 are the opt-in
-ports of ADR-047 and ADR-048; S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's:
+ports of ADR-047 and ADR-048; S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's; S29 and S30 are ADR-046's
+(panic reports and background runs); S31 is ADR-042's (newtypes, generic instantiations, leaf types) and S32 and
+S33 are ADR-043's (paged queries and lazy lists, polling):
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
@@ -13,9 +15,9 @@ ports of ADR-047 and ADR-048; S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's:
 | Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI table of the real core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S23 to S28, plus
-S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 80
-cells: 26 on Swift, 26 on Kotlin, 28 on TypeScript.
+`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S23 to S33, plus
+S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 95
+cells: 31 on Swift, 31 on Kotlin, 33 on TypeScript.
 
 ## The harness (the same on every platform)
 
@@ -855,6 +857,80 @@ server serves `[]`; a handle observes it.
    TypeScript: the `AbortSignal`): the call fails with the platform's cancellation, the core keeps working
    (`add(1, 2) == 3`) and the queue is intact (`pending == 1` until the POST answers, then 0).
 6. **Counters.** `stats().background.runs == 4`, `.finished == 1`, `.replayed == 1`.
+
+### S31 newtypes, generic instantiations and leaf types (ADR-042)
+
+`ledger` (`examples/playground/core/src/ledger.rs`): free functions (`open_account`, `deposit`, `balances`, `statement`,
+`loadable_statement`, `echo_*`, `sample_receipt`) and the `Ledger` store. Every step goes through the **generated** API.
+
+1. **A newtype is its inner value on the wire.** The codec of `AccountId` writes the same 16 bytes as the `Uuid` codec of the same
+   value, `Cents(-5)` the same 8 bytes as an `i64`, `Price` the same 17 bytes as a `Decimal`; `echo_account(id)` returns an equal
+   `AccountId`, `echo_cents` an equal `Cents`, `echo_price` an equal `Price`. The platform type is a distinct type
+   (Swift `struct AccountId: RawRepresentable` with `rawValue: UUID`, Kotlin `@JvmInline value class`, TypeScript a branded
+   `string`/`number` that is `===` to its inner value at run time); `Cents` is `Comparable` on Swift and Kotlin
+   (`Cents(1) < Cents(2)`).
+2. **A newtype is a map key and the key of a keyed list.** After `open_account` twice, `balances()` is a dictionary/map with
+   exactly those two `AccountId` keys (Swift `[AccountId: Price]`, Kotlin `Map<AccountId, Price>`, TypeScript
+   `Map<AccountId, Price>`). `Ledger` (a store whose `accounts` list is keyed by an `AccountId`): `open("Ada")` delivers one
+   change-set whose `accounts` entry is a keyed patch of one `Insert` (value under 64 bytes), `rename` one `Update`,
+   `close_account` one `Remove`, and the mirrored list equals the model after each.
+3. **Generic instantiations are plain records and enums.** After five `deposit`s of `1.50` into one account: `statement(a, 0, 2)` is an
+   `EntrySlice` of 2 items with `next == 2`, `statement(a, 4, 10)` has 1 item and `next == nil`; `loadable_statement(a, false, 3)` is
+   `.loading`, `(a, true, 3)` is `.loaded(slice)` with 3 items, an unknown account `.failed("no such account")`.
+4. **Decimals are exact.** `deposit(0.1)` then `deposit(0.2)` returns a balance whose text is `0.3`; `echo_decimal` returns the
+   same mantissa and scale for `0`, `1.10`, `-1.50`, a scale of 38, the smallest and the largest 128-bit mantissa (Swift compares
+   the re-encoded bytes with the sent ones, Kotlin `BigDecimal.equals` and TypeScript `Decimal.equals` are scale-sensitive and hold);
+   a wire decimal with a scale of 39, sent through the raw API, is refused by the core as a bad request, never decoded; `deposit` of
+   an amount `rust_decimal` cannot hold fails with `LedgerError.OutOfRange`.
+5. **Leaf types of other crates cross as wire types.** `sample_receipt()` has `id` equal to the UUID `1ed9e400-0000-0000-0000-000000000007`,
+   `issued` the instant `2026-10-01T12:00:00.123Z` (1 790 856 000 123 ms), `valid_for` 90 s, `total` the decimal `19.990` (scale 3), `signature`
+   the bytes `[1, 2, 3, 255]`; `echo_receipt` of a receipt the platform builds returns an equal receipt.
+
+### S32 paged queries and lazy lists (ADR-043)
+
+`Library` (`examples/playground/core/src/paging.rs`) holds two `Lazy<Item>` lists: `books` (10,000 rows it owns) and `evens` (a read-only view of
+the even rows of `source`, a 20-row `Signal<Vec<Item>>`), and `feed` is an `infinite` query (`FeedQueryHandle`: pages of 50 rows of the big list's
+10,000, `even_only` as its parameter, `touch_feed(revision)` makes the even rows show `revision` as their `version` the next time they are fetched).
+Every step goes through the **generated** classes; "page calls" are the target-3 calls the runner counts at its transport (Swift and Kotlin wrap the
+transport the runner loads, TypeScript counts `Kind.Call` payloads whose first byte is 3).
+
+1. **A lazy list is not sent whole.** `Library()`: after the first drain `books.count == 10_000`, and the store's first change-set carries 20 bytes for
+   `books` (a `LazyValue`), not 10,000 rows; `books[0]` is nothing until its page arrives, then `books[0].id == 1`; reading row 9,999 loads the last
+   page (`id == 10_000`); an index outside `0..<count` is nothing and requests nothing (the page-call count does not move).
+2. **A page is requested once, with one page of prefetch each side.** The first read of row 120 (page size 50) makes 3 page calls (pages 2, 1 and 3);
+   reading another row of page 2 makes none (a row of page 1 or 3 asks once for the page beyond it, so scrolling stays one page ahead); the list's
+   `version` equals the version in the page reply.
+3. **A change is one 12-byte entry and the host re-pages only its window.** `add_rows(1)`: one change-set with one `books` entry, op 2, 12 bytes, carrying
+   `len == 10_001` and a higher version; `count == 10_001`; rows already on screen stay readable while the pages the host touched are asked again
+   (the page-call count grows by the window, not by 200); `rename(121, "x")`: row 121 reads `"x"` (`version == 1`) after the re-page;
+   `remove_at(0)`: `count == 10_000` and `books[0].id == 2`.
+4. **A drain folds without losing the page server** (ADR-031, amendment 2026-10-02). With the frame held, `add_rows(1)` three times, then released: one
+   op-2 delivery with the last length and version. A second `Library()` whose `add_rows(1)` runs before its first drain ends with `count == 10_001`
+   and a readable `books[0]` (the drain held the op 0 that names the page server, then the op 2).
+5. **A view pages through the derived index.** `evens.count == 10`, `evens[0].id == 2`, `evens[9].id == 20`; `add_rows(2)` makes `evens.count == 11` and
+   `evens[10].id == 10_002`; `drop_source(20)` leaves `evens.count == 1`.
+6. **An infinite query grows a page at a time.** `FeedQueryHandle(evenOnly: false)`: after the first fetch `data.count == 50` and `hasNextPage`;
+   `fetchNextPage()` makes `fetchingNextPage` true and then false, `data.count == 100`, and the change-set for `data` is a **keyed patch of 50 inserts**
+   (under 5 KB), not a full value; a second handle with the same parameter shares the entry (no fetch of its own); after `touch_feed(7)` and `refetch()` the
+   even rows' `version == 7`, the odd rows' `0`, and the change-set is a keyed patch of at most 50 updates; `FeedQueryHandle(evenOnly: true)` has the 50 rows
+   `2, 4, .., 100`. On Swift `loadMore(ifNeededFor:)` of a row within 5 of the end fetches the next page, of an earlier row it does not.
+
+### S33 polling (ADR-043)
+
+`ticker` (`paging.rs`) is a query with `interval = "1s"` that returns a counter bumped by every fetch (`ticker_fetches()` reads the same counter,
+`set_ticker_failing` makes it fail). The runner uses the real Timer port (real time), the `Lifecycle` and `Connectivity` events of the harness, and
+5-second waits.
+
+1. **A poll after each fetch.** Observing `TickerQueryHandle`: `data == 1` at once; within 2.5 s `data == 2` and `ticker_fetches() >= 2`; two
+   consecutive fetches are at least 0.9 s apart (the interval runs from the end of a fetch).
+2. **Background pauses, Active resumes.** After `Lifecycle` `Background`, `ticker_fetches()` does not move for 1.5 s; after `Active`, `data` advances again
+   within 2.5 s.
+3. **Offline pauses, online resumes.** After `Connectivity` offline nothing is fetched for 1.5 s; after online `data` advances within 2.5 s.
+4. **A failure keeps polling and clears on success.** After `set_ticker_failing(true)`: `error == TickError.Failing` within 2.5 s and `ticker_fetches()`
+   keeps growing; after `set_ticker_failing(false)`: `error` is nothing and `data` advances.
+5. **An observer's override.** `setPollInterval(3 s)` on the only observer: once the next fetch has ended, the following gap is at least 2.9 s; `setPollInterval(nil)`
+   returns to the query's own second.
+6. **The last observer stops it.** After the handle is closed `ticker_fetches()` does not move for 2.5 s.
 
 ## Platform notes
 

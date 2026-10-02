@@ -525,6 +525,36 @@ anything a UI sees. What a platform adds (a wrapper object, the identity map's l
 on the platform, in the contract scenarios' `adopt` and `lend` timings recorded in the piece's decision record, not
 here.
 
+### 7. A lazy list costs the window the host shows and the 12 bytes that say it changed (ADR-043)
+
+A 100,000-row table is not a value the host should mirror. `Lazy<T>` keeps the items typed in the core; the host is
+told the length and a version (change-set op 0 on observe: handle, length, version, 20 bytes), asks for the 50 rows
+it shows with a page call, and is told that something changed by one 12-byte op-2 entry (`LazyInvalidated`: the new
+length and version), whatever the change was, after which it asks for its window again. `Lazy::over` a derived list
+pages through the derived index (the `k`-th row in O(log n), a page in O(log n + limit)). The gate rows (`lazy/*`,
+through the runtime as the keyed rows are; each checks what it ships before it is timed: the 50 rows decode and equal
+the model, the page header's version is the one `observe` announced, and the invalidation is one change-set of one
+op-2 entry of exactly 12 bytes carrying the new length and version;
+`bench/results/2026-10-01-lazy-lists-layer-a.json`, best of three p50s on a host at load 20-35) and ADR-043's targets:
+
+| Row | p50 | ADR-043 target | Budget (CI) |
+|---|---|---|---|
+| `lazy/page_50_of_100k` (50 rows from the middle: dispatch, the page server, the encoding, the reply) | 290 ns | core half <= 20 us | 1.5 us |
+| `lazy/page_50_of_10k` | 288 ns | (the same row on 10,000) | 1.5 us |
+| `lazy/view_page_50_of_100k` (the rows not done, by title, of a 100,000-row view: found in the derived index) | 3.20 us | (no target; O(log n + limit)) | 16 us |
+| `lazy/invalidate` (one `update_at` of an observed 100,000-row list: the write, the commit, 12 bytes) | 178 ns | <= 1 us, 12 bytes | 900 ns |
+| `lazy/invalidate_10k` | 171 ns | (the same row on 10,000) | 860 ns |
+
+The ratios: `lazy_page_scaling` (100,000 against 10,000 rows) is 1.00-1.01 and `lazy_invalidate_scaling` 0.99-1.16 (max 2
+each: an O(n) step, the list cloned or encoded on the way, would put either near 10). Nothing grows with the list: the
+allocation gate (`crates/undra-ffi/tests/lazy_alloc.rs`) counts the commit of an observed `Lazy` at one buffer more than
+the same write to a plain observed counter (the 12-byte entry), the same number at 10 and at 100,000 items, and zero
+allocations to encode a page of 50 rows into a buffer that is big enough. Against what a `Signal<Vec<T>>` of the same
+rows would send at a change (a keyed patch of about 85 bytes, or the full value, 3.7 MB at 100,000 rows of this shape), the
+invalidation is 12 bytes and the host's cost moves to the page it re-asks for. The view's page is dominated by the
+pipeline running on the 50 rows it serves (the sort-key closure clones a title per row); the index lookup is
+logarithmic.
+
 ## Full tables
 
 ### Wire: encode, decode and round trip per type
@@ -608,6 +638,22 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 | `signals/computed/recompute_1` | 42.1 ns | 41.8 ns .. 42.4 ns |
 | `signals/computed/recompute_chain_10` | 253.1 ns | 251.0 ns .. 256.3 ns |
 
+### Lazy lists (`bench/benches/lazy.rs`, ADR-043)
+
+`Shelf` is a macro-generated store with an owned `Lazy<Item>` of 100,000 rows (24-character titles, every fourth done)
+and a `Lazy::over` view of a derived list of the same rows (the rows not done, by title). `page_*` is one `LazyPage` call
+for 50 rows from the middle through `call_sync_with` (the reply is lent, not copied); `invalidate*` is one method call
+that `update_at`s a row of the observed list and commits the 12-byte entry. The gate harness measured 290 ns, 288 ns,
+3.20 us, 178 ns and 171 ns p50 (the criterion medians below are lower: quieter moments of a shared host).
+
+| Benchmark | Median | 95% CI |
+|---|---|---|
+| `lazy/page_50_of_100k` | 263.8 ns | 261.5 ns .. 266.5 ns |
+| `lazy/page_50_of_10k` | 262.6 ns | 260.5 ns .. 265.0 ns |
+| `lazy/view_page_50_of_100k` | 2.834 µs | 2.817 µs .. 2.851 µs |
+| `lazy/invalidate` | 151.6 ns | 151.2 ns .. 152.0 ns |
+| `lazy/invalidate_10k` | 151.2 ns | 150.5 ns .. 152.1 ns |
+
 ### Snapshot and restore
 
 100 KB is four stores of 250 rows of 100 bytes; 1 MB is forty. `cold_start` builds a runtime and restores; the runtime it made is shut down outside the timed region. `restore_100kb_migrated` restores the same 100 KB as an older build wrote it (`Item.id` a `u32`): every store's fingerprint differs, so each one is decoded by name and migrated structurally, streamed (ADR-037). Measured on 2026-10-01 with snapshot layout 2 (ADR-037), the machine shared with other builds; the restore rows read about 10% slower than the earlier run on the same code paths, which is the load, and the cold start pays one fingerprint computation per new runtime.
@@ -668,6 +714,17 @@ No row of its own in section 14; kept so regressions in the hot paths are visibl
 | `query/refetch_published_to_100_observers` | 6.90 µs | 6.82 µs .. 6.98 µs |
 | `query/platform_construct_and_release` | 1.19 µs | 1.18 µs .. 1.22 µs |
 | `query/platform_refetch_call` | 586.1 ns | 585.0 ns .. 587.4 ns |
+| `query/infinite_append_page_50` | 7.29 µs | 7.07 µs .. 7.59 µs |
+| `query/keyed_push_50` | 5.41 µs | 5.32 µs .. 5.51 µs |
+
+The last two are budgets-test rows (ADR-043, `bench/common/query_rows.rs`; 2026-10-01, the reference host while other pieces
+built, so the ratio is the number to read). `query/infinite_append_page_50` is a platform's `fetch_next_page()` call on an infinite
+query whose list holds 10,000 rows: the call, the fetch task, 50 rows appended with the recorded `push`, and the change-set
+(asserted, when the row is built, to be a keyed patch of exactly those 50 rows) delivered to the host; every run appends a page, so
+the list keeps growing and the cost does not. `query/keyed_push_50` is the same 50 rows appended to a keyed list of 10,000 by a store
+method (`call_sync`, one transaction): the "50-op keyed patch" ADR-043 compares with. Budgets 38 µs and 28 µs (5x the best budgets-test
+p50, 7.4 µs and 5.5 µs); `[ratio."infinite_append_vs_keyed_push_50"]` holds the first at no more than twice the second (1.34 to 1.46
+measured, ADR-043 requires at most 2): the fetch machinery on top of a 50-op keyed patch, however long the list.
 
 ### Opt-in ports (`bench/benches/ports.rs`, ADR-047, ADR-048)
 

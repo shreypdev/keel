@@ -2,10 +2,15 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { fnv1a32, fnv1a64 } from "../src/fnv.js";
 import { type Codec, codecs, decodeValue, encodeValue } from "../src/wire/codec.js";
+import { Decimal, decimalCodec } from "../src/wire/decimal.js";
+import { WireError } from "../src/wire/errors.js";
 import { type Kind, decodeEnvelope, encodeEnvelope } from "../src/wire/envelope.js";
 import {
   type CallPayload,
   type ChangeEntry,
+  type LazyInvalidated,
+  type LazyPage,
+  type LazyValue,
   type PatchOp,
   type ReplyPayload,
   type SnapshotPayload,
@@ -17,12 +22,18 @@ import {
   StreamFlag,
   decodeCall,
   decodeChangeSet,
+  decodeLazyInvalidated,
+  decodeLazyPage,
+  decodeLazyValue,
   decodePatch,
   decodeReply,
   decodeSnapshot,
   decodeStreamItem,
   encodeCall,
   encodeChangeSet,
+  encodeLazyInvalidated,
+  encodeLazyPage,
+  encodeLazyValue,
   encodePatch,
   encodeReply,
   encodeSnapshot,
@@ -392,7 +403,68 @@ function handleCase(v: Vector): Case {
   };
 }
 
+/** A decimal vector: the number as text, or a rejection every decoder must make (ADR-042). */
+function decimalCase(v: Vector & { error?: string }): Case {
+  if (v.error !== undefined) {
+    return {
+      encode: () => fromHex(v.hex),
+      check(bytes) {
+        try {
+          decodeValue(decimalCodec, bytes);
+        } catch (e) {
+          expect(e).toBeInstanceOf(WireError);
+          expect((e as WireError).detail).toMatchObject({ code: "invalid_tag", ty: v.error });
+          return;
+        }
+        throw new Error("expected the decimal to be rejected");
+      },
+      reencode: (bytes) => bytes,
+    };
+  }
+  const json = v.value as { mantissa: number | string; scale: number; text: string };
+  const value = new Decimal(BigInt(json.mantissa), json.scale);
+  expect(value.toString()).toBe(json.text);
+  expect(Decimal.parse(json.text).equals(value)).toBe(true);
+  return codecCase(decimalCodec as Codec<unknown>, value);
+}
+
+// -- the lazy-list payloads (ADR-043) ------------------------------------------
+
+function lazyValueCase(v: Vector): Case {
+  const json = v.value as { handle: number; len: number; version: number };
+  const value: LazyValue = { handle: BigInt(json.handle), len: json.len, version: BigInt(json.version) };
+  return {
+    encode: () => encodeLazyValue(value),
+    check: (bytes) => expect(decodeLazyValue(bytes)).toEqual(value),
+    reencode: (bytes) => encodeLazyValue(decodeLazyValue(bytes)),
+  };
+}
+
+function lazyInvalidatedCase(v: Vector): Case {
+  const json = v.value as { len: number; version: number };
+  const value: LazyInvalidated = { len: json.len, version: BigInt(json.version) };
+  return {
+    encode: () => encodeLazyInvalidated(value),
+    check: (bytes) => expect(decodeLazyInvalidated(bytes)).toEqual(value),
+    reencode: (bytes) => encodeLazyInvalidated(decodeLazyInvalidated(bytes)),
+  };
+}
+
+function lazyPageCase(v: Vector): Case {
+  const json = v.value as { version: number; total: number; items: number[] };
+  const page: LazyPage<number> = { version: BigInt(json.version), total: json.total, items: json.items };
+  return {
+    encode: () => encodeLazyPage(codecs.i32, page),
+    check: (bytes) => expect(decodeLazyPage(codecs.i32, bytes)).toEqual(page),
+    reencode: (bytes) => encodeLazyPage(codecs.i32, decodeLazyPage(codecs.i32, bytes)),
+  };
+}
+
 function caseFor(v: Vector): Case | undefined {
+  if (v.type === "decimal") return decimalCase(v);
+  if (v.type === "lazy value") return lazyValueCase(v);
+  if (v.type === "lazy invalidated") return lazyInvalidatedCase(v);
+  if (v.type === "lazy page (item i32)") return lazyPageCase(v);
   for (const [pattern, codec] of SCHEMA_CODECS) {
     if (pattern.test(v.type)) return codecCase(codec, v.value);
   }

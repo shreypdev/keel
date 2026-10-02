@@ -39,6 +39,18 @@ impl Root {
         }
     }
 
+    /// The path as written (`::undra`), for a macro that hands it to another expansion.
+    pub(crate) fn path_string(&self) -> String {
+        let path = &self.path;
+        quote!(#path).to_string().replace(' ', "")
+    }
+
+    /// `#root::__instantiate`: the hidden macro that the template of a generic type calls.
+    pub(crate) fn instantiate(&self) -> TokenStream {
+        let path = &self.path;
+        quote!(#path::__instantiate)
+    }
+
     /// `#root::wire`.
     pub(crate) fn wire(&self) -> TokenStream {
         let path = &self.path;
@@ -86,6 +98,8 @@ mod tests {
         assert_eq!(render(root.runtime()), "::undra::runtime");
         assert_eq!(render(root.signals()), "::undra::signals");
         assert_eq!(render(root.query()), "::undra::query");
+        assert_eq!(render(root.instantiate()), "::undra::__instantiate");
+        assert_eq!(root.path_string(), "::undra");
     }
 
     #[test]

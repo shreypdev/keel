@@ -31,7 +31,7 @@ use core::fmt;
 use undra_meta::{
     ClosureEnum, ClosureField, ClosureRecord, ClosureRoot, TypeClosure, TypeRef, TypeRefMeta,
 };
-use undra_wire::{MAX_DEPTH, Reader, WireError, Writer};
+use undra_wire::{Decode, Encode, MAX_DEPTH, Reader, WireError, Writer};
 
 use crate::guard;
 
@@ -66,6 +66,13 @@ pub enum DynValue {
     Timestamp(i64),
     /// `Uuid`, its 16 bytes.
     Uuid([u8; 16]),
+    /// `Decimal` (ADR-042): `mantissa x 10^-scale`, the scale at most 38.
+    Decimal {
+        /// The unscaled value.
+        mantissa: i128,
+        /// The digits after the point.
+        scale: u8,
+    },
     /// `Option::None`.
     None,
     /// `Option::Some`.
@@ -163,6 +170,7 @@ impl DynValue {
             DynValue::Duration(_) => "a duration",
             DynValue::Timestamp(_) => "a timestamp",
             DynValue::Uuid(_) => "a uuid",
+            DynValue::Decimal { .. } => "a decimal",
             DynValue::None | DynValue::Some(_) => "an option",
             DynValue::List(_) => "a list",
             DynValue::Map(_) => "a map",
@@ -314,7 +322,8 @@ impl From<WireError> for MigrateError {
 ///
 /// A [`MigrateError`] for bytes that do not decode as `ty`, a named type the closure does not
 /// describe, nesting deeper than [`MAX_DEPTH`], and types that are never persisted values
-/// (`Unit`, `Lazy`, `Result`, `Stream`).
+/// (`Unit`, `Result`, `Stream`, `Object`, `Callback`). A `Lazy<T>` signal decodes as the list of
+/// its items, the `Vec<T>` it is persisted as (ADR-043).
 ///
 /// ```
 /// use undra_meta::{Schema, TypeRef};
@@ -374,14 +383,11 @@ fn min_len(ty: &TypeRef) -> usize {
         | TypeRef::String
         | TypeRef::Bytes
         | TypeRef::Vec(_)
+        | TypeRef::Lazy(_)
         | TypeRef::Map(..) => 4,
-        TypeRef::I64
-        | TypeRef::U64
-        | TypeRef::F64
-        | TypeRef::Duration
-        | TypeRef::Timestamp
-        | TypeRef::Lazy(_) => 8,
+        TypeRef::I64 | TypeRef::U64 | TypeRef::F64 | TypeRef::Duration | TypeRef::Timestamp => 8,
         TypeRef::Uuid => 16,
+        TypeRef::Decimal => 17,
         TypeRef::Unit
         | TypeRef::Result(..)
         | TypeRef::Stream(_)
@@ -423,6 +429,13 @@ fn decode_from(
         }
         TypeRef::Timestamp => DynValue::Timestamp(r.read_i64()?),
         TypeRef::Uuid => DynValue::Uuid(r.read_array::<16>()?),
+        TypeRef::Decimal => {
+            let decimal = undra_wire::Decimal::decode(r)?;
+            DynValue::Decimal {
+                mantissa: decimal.mantissa,
+                scale: decimal.scale,
+            }
+        }
         TypeRef::Option(inner) => {
             let at = r.position();
             match r.read_u8()? {
@@ -438,7 +451,8 @@ fn decode_from(
                 }
             }
         }
-        TypeRef::Vec(item) => {
+        // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4).
+        TypeRef::Vec(item) | TypeRef::Lazy(item) => {
             let count = r.read_count(min_len(item))?;
             let mut items = Vec::with_capacity(count.min(1024));
             for i in 0..count {
@@ -492,7 +506,6 @@ fn decode_from(
             }
         }
         TypeRef::Unit
-        | TypeRef::Lazy(_)
         | TypeRef::Result(..)
         | TypeRef::Stream(_)
         | TypeRef::Object(_)
@@ -676,6 +689,12 @@ fn put_value(
         (TypeRef::Duration, DynValue::Duration(n)) if *n >= 0 => w.write_i64(*n),
         (TypeRef::Timestamp, DynValue::Timestamp(t)) => w.write_i64(*t),
         (TypeRef::Uuid, DynValue::Uuid(u)) => w.write_raw(u),
+        (TypeRef::Decimal, DynValue::Decimal { mantissa, scale }) => {
+            let decimal = undra_wire::Decimal::try_new(*mantissa, *scale).ok_or_else(|| {
+                not_structural(format!("a decimal's scale is at most 38, not {scale}"))
+            })?;
+            decimal.encode(w);
+        }
         (TypeRef::Option(_), DynValue::None) => w.write_u8(0),
         (TypeRef::Option(inner), DynValue::Some(v)) => {
             w.write_u8(1);
@@ -686,7 +705,7 @@ fn put_value(
             w.write_u8(1);
             put_value(w, other, inner, closure, depth + 1)?;
         }
-        (TypeRef::Vec(item), DynValue::List(items)) => {
+        (TypeRef::Vec(item) | TypeRef::Lazy(item), DynValue::List(items)) => {
             w.write_len(len_u32(items.len())?);
             for (i, v) in items.iter().enumerate() {
                 put_value(w, v, item, closure, depth + 1)
@@ -801,6 +820,7 @@ fn put_zero(w: &mut Writer, ty: &TypeRef) -> bool {
         TypeRef::F64 => w.write_f64(0.0),
         TypeRef::I64 | TypeRef::U64 | TypeRef::Duration | TypeRef::Timestamp => w.write_u64(0),
         TypeRef::Uuid => w.write_raw(&[0; 16]),
+        TypeRef::Decimal => w.write_raw(&[0; 17]),
         _ => return false,
     }
     true
@@ -999,7 +1019,12 @@ impl Converter<'_> {
                 w.write_u8(1);
                 self.convert(w, value, old_ty, new_inner, depth + 1, hook_here)?;
             }
-            (TypeRef::Vec(old_item), TypeRef::Vec(new_item)) => {
+            // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4), so
+            // `Lazy<T>` and `Vec<T>` convert as lists do.
+            (
+                TypeRef::Vec(old_item) | TypeRef::Lazy(old_item),
+                TypeRef::Vec(new_item) | TypeRef::Lazy(new_item),
+            ) => {
                 let DynValue::List(items) = value else {
                     return Err(refuse());
                 };
@@ -1055,6 +1080,20 @@ impl Converter<'_> {
                         }
                     }
                 }
+            }
+            // A newtype is its inner value on the wire (ADR-042): unwrap the stored record's one
+            // field, or write the value as the inner type the current newtype wraps.
+            (TypeRef::Named(old_name), new) if !matches!(new, TypeRef::Named(_)) => {
+                let inner = stream::transparent_inner(self.old, old_name).ok_or_else(refuse)?;
+                let DynValue::Record(fields) = value else {
+                    return Err(refuse());
+                };
+                let stored = fields.get("value").ok_or_else(refuse)?;
+                self.convert(w, stored, inner, new, depth + 1, hook_here)?;
+            }
+            (old, TypeRef::Named(new_name)) if !matches!(old, TypeRef::Named(_)) => {
+                let inner = stream::transparent_inner(self.new, new_name).ok_or_else(refuse)?;
+                self.convert(w, value, old, inner, depth + 1, hook_here)?;
             }
             (a, b) if a == b => {
                 // The same primitive type: re-encode what was decoded.

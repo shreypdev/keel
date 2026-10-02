@@ -1,0 +1,254 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-lazy",
+  "records": [
+    {
+      "name": "Book",
+      "type_id": 678699352,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "u64"
+          },
+          "default": false
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "year",
+          "ty": {
+            "kind": "u16"
+          },
+          "default": false
+        }
+      ],
+      "docs": "One book of the library."
+    },
+    {
+      "name": "Shelf",
+      "type_id": 2954451427,
+      "fields": [
+        {
+          "name": "name",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "count",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        }
+      ]
+    },
+    {
+      "name": "Chapter",
+      "type_id": 1838161906,
+      "fields": [
+        {
+          "name": "number",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "LibraryError",
+      "type_id": 1798689110,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Missing",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "missing"
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "name": "Library",
+      "type_id": 2824020592,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 4181809604,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Library"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "add",
+          "method_id": 142415105,
+          "params": [
+            {
+              "name": "title",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "Book"
+              },
+              {
+                "kind": "named",
+                "of": "LibraryError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Adds a book."
+        },
+        {
+          "name": "clear",
+          "method_id": 3293921667,
+          "params": [],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "store": {
+        "signals": [
+          {
+            "name": "shelves",
+            "signal_id": 0,
+            "ty": {
+              "kind": "vec",
+              "of": {
+                "kind": "named",
+                "of": "Shelf"
+              }
+            },
+            "computed": false,
+            "key": "name"
+          },
+          {
+            "name": "books",
+            "signal_id": 1,
+            "ty": {
+              "kind": "lazy",
+              "of": {
+                "kind": "named",
+                "of": "Book"
+              }
+            },
+            "computed": false,
+            "key": "id"
+          },
+          {
+            "name": "selected",
+            "signal_id": 2,
+            "ty": {
+              "kind": "option",
+              "of": {
+                "kind": "named",
+                "of": "Book"
+              }
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "recent",
+            "signal_id": 3,
+            "ty": {
+              "kind": "lazy",
+              "of": {
+                "kind": "named",
+                "of": "Book"
+              }
+            },
+            "computed": true,
+            "key": null
+          },
+          {
+            "name": "total",
+            "signal_id": 4,
+            "ty": {
+              "kind": "u64"
+            },
+            "computed": false,
+            "key": null
+          }
+        ]
+      },
+      "docs": "A library with more books than a screen holds."
+    },
+    {
+      "name": "Archive",
+      "type_id": 1936264037,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 1137474749,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Archive"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [],
+      "store": {
+        "signals": [
+          {
+            "name": "chapters",
+            "signal_id": 0,
+            "ty": {
+              "kind": "lazy",
+              "of": {
+                "kind": "named",
+                "of": "Chapter"
+              }
+            },
+            "computed": false,
+            "key": null
+          }
+        ]
+      },
+      "docs": "Chapters, paged."
+    }
+  ],
+  "functions": [],
+  "ports": [],
+  "queries": []
+}

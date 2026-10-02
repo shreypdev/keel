@@ -57,6 +57,9 @@ static COUNT_META: QueryMeta = QueryMeta {
     stale_ms: Count::STALE_MS,
     persist: true,
     idempotent: false,
+    interval_ms: None,
+    poll_in_background: false,
+    infinite: None,
 };
 inventory::submit! { Registration::Query(&COUNT_META) }
 inventory::submit! { undra_query::__private::LAYER }

@@ -15,6 +15,11 @@ import XCTest
 // mirrored value equals the core's; between those points (without corrupt patches) a signal never
 // shows a value the core never had; the `no_coalesce` signal sees a subsequence of its committed values
 // (all of them while no compaction ran), ending with the last.
+//
+// One signal of each store is a lazy list (ADR-043; added by the types-paging review): a commit sends an
+// invalidation (length, version) and now and then a restart of its page server sends a full value with a
+// new handle. ADR-031's amended fold rule (a full value supersedes everything before it, an invalidation
+// only earlier invalidations) must never lose the handle: reverting it fails this model.
 
 private let modelHandles: [UndraHandle] = [UndraHandle(index: 1, generation: 1), UndraHandle(index: 2, generation: 1)]
 private let u32Lists: [UInt32] = [0, 2]
@@ -22,14 +27,20 @@ private let stringList: UInt32 = 4
 private let modelScalars: [UInt32] = [1, 3]
 private let noCoalesceHandle = UndraHandle(index: 2, generation: 1)
 private let noCoalesceSignal: UInt32 = 3
-private let allKeys: [UInt32] = u32Lists + [stringList] + modelScalars
+/// A `Lazy<T>` signal: its value is (page server handle, length, version).
+private let lazySignal: UInt32 = 5
+private let allKeys: [UInt32] = u32Lists + [stringList] + modelScalars + [lazySignal]
 
 private struct ModelState {
     var lists: [UInt32: [UInt32]] = Dictionary(uniqueKeysWithValues: u32Lists.map { ($0, []) })
     var strings: [String] = []
     var scalars: [UInt32: UInt32] = Dictionary(uniqueKeysWithValues: modelScalars.map { ($0, 0) })
+    var lazy = UndraLazyValue(handle: UndraHandle(index: 1, generation: 1), len: 0, version: 0)
 
     func render(_ id: UInt32) -> String {
+        if id == lazySignal {
+            return "\(lazy.handle.rawValue)/\(lazy.len)/\(lazy.version)"
+        }
         if id == stringList {
             return "#\(strings.count)/" + strings.map { String($0.prefix(12)) }.joined(separator: ",")
         }
@@ -85,7 +96,9 @@ private final class ModelCore {
     func full(_ h: UndraHandle, _ id: UInt32) -> Wire.ChangeEntry {
         let s = truth[h.rawValue]!
         let value: [UInt8]
-        if id == stringList {
+        if id == lazySignal {
+            value = s.lazy.undraEncoded()
+        } else if id == stringList {
             value = s.strings.undraEncoded()
         } else if u32Lists.contains(id) {
             value = (s.lists[id] ?? []).undraEncoded()
@@ -107,7 +120,24 @@ private final class ModelCore {
             var touched: [UInt32: Wire.ChangeEntry] = [:]
             for _ in 0 ..< 1 + below(3) {
                 let pick = below(100)
-                if pick < 30 {
+                if pick >= 92 {
+                    // The lazy list changes (an invalidation), or its page server restarts (a full value with
+                    // a new handle). One entry per signal per change-set: after a restart in this transaction,
+                    // a full value.
+                    let restart = pick >= 97 || touched[lazySignal]?.op == .fullValue
+                    var lazy = truth[h.rawValue]!.lazy
+                    if pick >= 97 {
+                        lazy.handle = UndraHandle(rawValue: lazy.handle.rawValue &+ 1)
+                    }
+                    lazy.len = UInt32(below(500))
+                    lazy.version += 1
+                    truth[h.rawValue]!.lazy = lazy
+                    touched[lazySignal] = restart
+                        ? full(h, lazySignal)
+                        : Wire.ChangeEntry(
+                            handle: h, signalId: lazySignal, op: .lazyListInvalidated,
+                            value: ArraySlice(UndraLazyInvalidated(len: lazy.len, version: lazy.version).undraEncoded()))
+                } else if pick < 30 {
                     let id = modelScalars[below(modelScalars.count)]
                     let v = nextItem()
                     truth[h.rawValue]!.scalars[id] = v
@@ -227,7 +257,16 @@ private final class ModelHost {
 
     func apply(_ h: UndraHandle, _ id: UInt32, _ op: ChangeOp, _ reader: inout UndraReader) {
         let key = h.rawValue
-        if id == stringList {
+        if id == lazySignal {
+            if op == .fullValue {
+                state[key]!.lazy = try! UndraLazyValue.undraDecode(&reader)
+            } else {
+                // An invalidation is relative to the page server a full value named: it keeps the handle.
+                let v = try! UndraLazyInvalidated.undraDecode(&reader)
+                state[key]!.lazy.len = v.len
+                state[key]!.lazy.version = v.version
+            }
+        } else if id == stringList {
             if op == .fullValue {
                 state[key]!.strings = try! [String].undraDecode(&reader)
             } else {

@@ -565,6 +565,38 @@ impl<A: Aggregate> OsTree<A> {
     }
 }
 
+impl OsTree<Pass> {
+    /// The node of the `k`-th passing row in order (`k < sum().0`): the page start of an unsorted
+    /// view. O(log n).
+    pub(crate) fn select_passing(&self, k: usize) -> u32 {
+        debug_assert!(
+            k < self.sum().0 as usize,
+            "select_passing {k} of {}",
+            self.sum().0
+        );
+        let mut x = self.root;
+        let mut k = k;
+        while x != NIL {
+            let node = &self.nodes[x as usize];
+            let left = self.sum_of(node.l).0 as usize;
+            if k < left {
+                x = node.l;
+                continue;
+            }
+            k -= left;
+            if node.own {
+                if k == 0 {
+                    return x;
+                }
+                k -= 1;
+            }
+            x = node.r;
+        }
+        // Unreachable for `k < sum`; the root keeps a release build from looping or panicking.
+        self.root
+    }
+}
+
 /// What one row did to the view when it was re-evaluated ([`DerivedIndex::transition`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Step {
@@ -936,6 +968,32 @@ impl<K: Ord> DerivedIndex<K> {
         self.srt.build(&sorted);
     }
 
+    /// Calls `f` with the source index of the view rows of rank `start..end` (`end <= view_len`),
+    /// in view order: the rows of one page. O(log n + (end - start) log n): a sorted view finds
+    /// the first row in the sorted tree and walks it, an unsorted one selects each passing row.
+    pub(crate) fn for_each_view_source_in(
+        &self,
+        start: usize,
+        end: usize,
+        mut f: impl FnMut(usize),
+    ) {
+        debug_assert!(start <= end && end <= self.view_len());
+        if start >= end {
+            return;
+        }
+        if !self.sorted_view {
+            for k in start..end {
+                f(self.pos.rank(self.pos.select_passing(k)));
+            }
+            return;
+        }
+        let mut s = self.srt.select(start);
+        for _ in start..end {
+            f(self.pos.rank(self.row_of[s as usize]));
+            s = self.srt.next(s);
+        }
+    }
+
     /// The source index of every row of the view, in view order. O(n).
     pub(crate) fn view_sources(&self) -> Vec<usize> {
         let mut out = Vec::with_capacity(self.view_len());
@@ -1293,6 +1351,23 @@ mod tests {
             let expected = reference(&model, sorted);
             assert_eq!(index.view_sources(), expected, "after {op:?}");
             assert_eq!(index.view_len(), expected.len());
+            // A page of the view is found without walking all of it (ADR-043: `Lazy::over`).
+            let n = expected.len();
+            for (start, end) in [
+                (0, n),
+                (n / 3, n),
+                (n / 2, (n / 2 + 3).min(n)),
+                (n, n),
+                (1.min(n), 2.min(n)),
+            ] {
+                let mut page = Vec::new();
+                index.for_each_view_source_in(start, end, |at| page.push(at));
+                assert_eq!(
+                    page,
+                    expected[start..end],
+                    "page {start}..{end} after {op:?}"
+                );
+            }
             let expected_ids: Vec<u32> = expected.iter().map(|&i| rows[i].0).collect();
             assert_eq!(host, expected_ids, "host after {op:?}");
         }

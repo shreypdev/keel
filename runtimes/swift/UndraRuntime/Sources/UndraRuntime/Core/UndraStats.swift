@@ -79,6 +79,9 @@ public struct UndraStats: Sendable, Equatable {
     public var hostPendingCalls: Int
     /// Streams open.
     public var hostOpenStreams: Int
+    /// Page calls (target 3) the host has sent to the core so far: what the lazy lists of the stores asked for (ADR-043). Counted
+    /// when a list asks, whether the call is answered, fails or is cancelled.
+    public var hostPageCalls: Int
     /// Ports registered.
     public var hostRegisteredPorts: Int
     /// The mirror's delivery counters: change-sets and entries received, entries applied after
@@ -117,6 +120,7 @@ public struct UndraStats: Sendable, Equatable {
         self.hostMirroredStores = 0
         self.hostPendingCalls = 0
         self.hostOpenStreams = 0
+        self.hostPageCalls = 0
         self.hostRegisteredPorts = 0
         self.mirror = MirrorStats()
     }

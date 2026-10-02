@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reads a contract runner's output (stdin or a file) and fails unless every scenario of
-# scenarios.md the platform runs reported PASS: S01 to S20 and S23 to S28 everywhere, plus S21 and S22 (worker
+# scenarios.md the platform runs reported PASS: S01 to S20 and S23 to S33 everywhere, plus S21 and S22 (worker
 # mode and crash recovery, web-only, ADR-049) on ts. A line looks like:  SCENARIO S07 PASS stream with backpressure
 #
 #   contract-tests/ts/run.sh 2>&1 | tee /tmp/ts.log | contract-tests/check.sh ts
@@ -13,8 +13,9 @@ set -euo pipefail
 platform="${1:-runner}"
 # S20 to S22 are ADR-049's (S21 and S22 web-only); S23 to S25 are the opt-in ports (ADR-047, ADR-048);
 # S26 is ADR-044's two cores, S27 ADR-040's objects and S28 ADR-041's host callbacks; S29 and S30 are ADR-046's
-# panic report and background run.
-IDS=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10 S11 S12 S13 S14 S15 S16 S17 S18 S19 S20 S23 S24 S25 S26 S27 S28 S29 S30)
+# panic report and background run; S31 to S33 are ADR-042's newtypes, generics and leaf types and ADR-043's paged
+# queries, lazy lists and polling.
+IDS=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10 S11 S12 S13 S14 S15 S16 S17 S18 S19 S20 S23 S24 S25 S26 S27 S28 S29 S30 S31 S32 S33)
 # Web-only scenarios (ADR-049): the TypeScript runner runs them.
 case "$platform" in
   ts) IDS+=(S21 S22) ;;

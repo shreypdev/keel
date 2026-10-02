@@ -13,6 +13,7 @@ import dev.undra.runtime.wire.Timestamp
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.decodeAll
+import kotlin.time.Duration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -67,6 +68,26 @@ class NotesQueryHandle internal constructor(core: UndraCore, handle: Long) : Und
             )
         } catch (e: Exception) {
             this.core.report(e, "NotesQueryHandle.invalidate")
+        }
+    }
+
+    /**
+     * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+     * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setPollInterval(interval: Duration?) {
+        try {
+            val w = UndraWriter()
+            codecOptionDuration.encode(w, interval)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.NotesQueryHandle.SET_POLL_INTERVAL),
+                UndraIds.Objects.NotesQueryHandle.SET_POLL_INTERVAL,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "NotesQueryHandle.setPollInterval")
         }
     }
 
@@ -182,6 +203,26 @@ class ProfileQueryHandle internal constructor(core: UndraCore, handle: Long) : U
             )
         } catch (e: Exception) {
             this.core.report(e, "ProfileQueryHandle.invalidate")
+        }
+    }
+
+    /**
+     * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+     * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setPollInterval(interval: Duration?) {
+        try {
+            val w = UndraWriter()
+            codecOptionDuration.encode(w, interval)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.ProfileQueryHandle.SET_POLL_INTERVAL),
+                UndraIds.Objects.ProfileQueryHandle.SET_POLL_INTERVAL,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "ProfileQueryHandle.setPollInterval")
         }
     }
 
@@ -324,6 +365,7 @@ suspend fun putPart(
     }
 }
 
+private val codecOptionDuration = Codecs.option(Codecs.duration)
 private val codecVecNote = Codecs.vec(Note)
 private val codecOptionVecNote = Codecs.option(codecVecNote)
 private val codecOptionNetError = Codecs.option(NetError)

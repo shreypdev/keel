@@ -7,6 +7,10 @@
 //! table's "handle method call" row.
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+
+#[path = "../common/mod.rs"]
+mod common;
+
 use undra::runtime::testing::TestRuntime;
 use undra::wire::payload::CallTarget;
 use undra_ports::fakes;
@@ -123,10 +127,17 @@ fn platform_calls(c: &mut Criterion) {
     });
 }
 
+/// The next page of an infinite query against the keyed patch it is compared with (ADR-043):
+/// `query/infinite_append_page_50` and `query/keyed_push_50`, the rows the budgets test gates.
+fn pages(c: &mut Criterion) {
+    common::run(c, common::workloads::group("query"));
+}
+
 criterion_group!(
     benches,
     observe_cached,
     publish_to_observers,
-    platform_calls
+    platform_calls,
+    pages
 );
 criterion_main!(benches);

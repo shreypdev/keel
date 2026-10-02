@@ -69,6 +69,8 @@ struct Row {
     stamp: u64,
     updated_at: Option<i64>,
     data: Option<Erased>,
+    /// An infinite query's pages: the list is encoded from them when the row is written.
+    pages: Option<std::sync::Arc<Vec<crate::paged::PageRec>>>,
     error: Option<Erased>,
 }
 
@@ -92,6 +94,7 @@ impl Row {
             stamp: e.stamp,
             updated_at: e.updated_at,
             data: e.data.clone(),
+            pages: e.paged.as_ref().map(|p| p.pages.clone()),
             error: e.error.clone(),
         }
     }
@@ -118,7 +121,13 @@ impl Row {
             }
             None => out.push_str(",\"updated_at\":null"),
         }
-        value("data", self.data.as_ref().map(|d| &*d.bytes), out);
+        match &self.pages {
+            // The rows of an infinite query as the `Vec<T>` its `returns` describes.
+            Some(pages) if !pages.is_empty() => {
+                value("data", Some(&crate::paged::flat_bytes(pages)), out);
+            }
+            _ => value("data", self.data.as_ref().map(|d| &*d.bytes), out),
+        }
         value("error", self.error.as_ref().map(|d| &*d.bytes), out);
         out.push('}');
     }

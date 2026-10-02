@@ -17,7 +17,7 @@
 //! [`Writer`] and [`Reader`] carry the primitive reads and writes; the [`Encode`] and
 //! [`Decode`] traits are implemented for `bool`, the integers, `f32`, `f64`, `()`, `String`,
 //! [`Bytes`], `Option`, `Vec`, `HashMap`, `BTreeMap`, [`Duration`](core::time::Duration),
-//! [`Timestamp`], [`Uuid`], `Result`, tuples up to four, `Box`, [`Handle`] and (encode only)
+//! [`Timestamp`], [`Uuid`], [`Decimal`], `Result`, tuples up to four, `Box`, [`Handle`] and (encode only)
 //! `&T`, `str` and `Arc<T>`.
 //!
 //! ```
@@ -74,6 +74,8 @@
 mod codec;
 mod envelope;
 mod error;
+#[doc(hidden)]
+pub mod leaf;
 mod macros;
 mod patch;
 pub mod payload;
@@ -86,5 +88,5 @@ pub use envelope::{Envelope, HEADER_LEN, Kind, MAGIC, VERSION};
 pub use error::WireError;
 pub use patch::{KeyedPatch, PatchError, PatchOp};
 pub use reader::{MAX_DEPTH, MAX_ZERO_SIZED_COUNT, Reader};
-pub use types::{Bytes, Handle, ParseUuidError, Timestamp, Uuid};
+pub use types::{Bytes, Decimal, Handle, ParseDecimalError, ParseUuidError, Timestamp, Uuid};
 pub use writer::Writer;

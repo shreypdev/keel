@@ -1,6 +1,6 @@
 # ADR-042: transparent newtypes, named generic instantiations, a `Decimal` wire type and third-party leaf types
 
-Status: **Proposed** (2026-10-01, `wt/boundary-adrs`; Amendment B "boundary surface", Amendment C item 5,
+Status: **Accepted (implemented by `types-paging`, 2026-10-02; the deviations are at the end)** (proposed 2026-10-01, `wt/boundary-adrs`; Amendment B "boundary surface", Amendment C item 5,
 which adds decimals and the `uuid`/`chrono` types to this ADR's scope). Touches SPEC 2.1 (`TypeRef::Decimal`),
 2.2 (`RecordDef.transparent`), 3.1 (two encodings), 4.1 (two new accepted shapes), 10.1–10.3 (generated
 shapes), 12 (E0002 and E0007 texts, one new code) and 16.3; `undra-meta`, `undra-wire`, `undra-macros`,
@@ -241,3 +241,37 @@ which keeps hashes stable when a flag is added.
 None to start. ADR-037's structural rules gain the newtype step (decision 1.7) if ADR-037 lands first,
 otherwise ADR-037's implementer adds it. ADR-043 does not need generic instantiations (its `Page<T, C>` is a
 query-only shape the query macro recognises; see ADR-043).
+
+## Implementation (2026-10-02, `wt/types-paging`) and deviations
+
+All eight items of the brief landed (the records: `.10x/decisions/sde/types-paging.md`, `types-paging-macros.md`,
+`types-paging-bindgen.md`, `types-paging-swift.md`, `types-paging-kotlin.md`, `types-paging-ts.md`). The contract scenario is **S31**
+(S29 and S30 went to ADR-046), the playground module `ledger.rs`, the guide `site/docs/types.html`. Deviations, each dated 2026-10-02:
+
+1. **`MapKey` is one blanket impl over a hidden `Newtype` trait**, not a conditional impl per newtype (decision 1.4): `impl MapKey for UserId
+   where Uuid: MapKey {}` is rejected by rustc at the definition when false, so `struct Price(Decimal)` would not compile at all. The macro
+   emits `impl Newtype for UserId { type Inner = Uuid; }`; `impl<T: Newtype> MapKey for T where T::Inner: MapKey` does the rest. A
+   `HashMap<Price, _>` is still E0006 at the map, at compile time.
+2. **The template macro is re-exported under the type's own name** in the macro namespace (`pub use __undra_template_Page as Page;`), so
+   `use model::Page;` finds both; an instantiation checks only its type arguments (a `macro_rules!` resolves names where it is invoked).
+3. **E0070 for an alias in another crate** is found by the macro (the template embeds `CARGO_CRATE_NAME`), so the message is branded; a
+   second alias of one instantiation is `rustc`'s duplicate-constant error pointed at both aliases.
+4. **Feature mirror.** `undra-macros` has its own copy of each leaf feature, turned on by `undra`'s: with a feature off, a spelling only that
+   crate has (`DateTime<Utc>`, `OffsetDateTime`, `TimeDelta`, `uuid::Uuid`, ..) is exactly one E0001 naming the feature; a bare `Uuid`,
+   `Decimal`, `Bytes` or `Duration` may be either type, so without the feature it is the compiler's three errors, which agree on the fix.
+5. **`Decimal` in Rust** has public `mantissa`/`scale` fields, `new` (panics above scale 38), `try_new`, `ZERO`, `is_zero`, `cmp_numeric`/
+   `eq_numeric` (exact for every pair) and `ParseDecimalError`; the `rust_decimal` feature converts through the wire encoding.
+6. **What each platform's `Decimal` does at its edges** (decoding is exact everywhere): Swift saturates a value of 2^127 or more, encodes NaN as
+   zero and cuts digits past the 38th after the point; Kotlin rounds those digits half up, turns a negative scale into whole digits and
+   saturates a mantissa of more than 128 bits; TypeScript's `Decimal` constructor throws `RangeError` for what does not fit. Documented in SPEC 17. (Review, 2026-10-02: Swift and Kotlin saturated any mantissa past 127 bits at scale 0, so `10 / 3` at scale 38 crossed as 1.7 x
+   10^38; such a mantissa now loses its last digits after the point, cut on Swift, rounded half up on Kotlin, and only a whole part of 2^127 or more
+   saturates. Swift's `==` and hashing are Foundation's, numeric: `1.0 == 1.00` there, unlike Rust, Kotlin and TypeScript.)
+7. **Generated shapes**: a Kotlin newtype of `Bytes` is a plain class with content equality (a value class cannot override `equals`); a TypeScript
+   newtype of a newtype is branded on what the inner one wraps and a newtype of an option brands the payload; non-primitive TypeScript newtype
+   codecs delegate lazily (use-before-assignment at module load); `Option<N>` where `N` wraps an option is E0001 (nested optionality, E0063's
+   reason); `Decimal`, `BigDecimal`, `UndraLazyList`, `UndraLazyListObject`, `LazyList` and `InfiniteQuery` are reserved type names.
+8. **Persisted state (decision 1.7)**: the structural migration wraps and unwraps a newtype in both the streamed and the tree conversion
+   (`ClosureRecord.transparent`), and wrapping a persisted field in a newtype needs no hook (tested).
+9. **Numbers.** `wire/decimal/roundtrip` is in the `wire` group with a budget of 250 ns (measured 45 ns: 16 bytes of mantissa, a scale checked on decode). The foundation costs the hello-world
+   web core bytes (schema serialisation of the new fields, the persisted-state arms); see ADR-043's size note, where they were paid back.
+

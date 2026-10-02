@@ -22,6 +22,7 @@ use undra_wire::{Decode, Encode, WireError};
 use crate::client::CtxQuery;
 use crate::defs::{BoxFuture, CacheValue, MutationDef, QueryDef};
 use crate::handle::HandleOps;
+use crate::paged::PagedVTable;
 
 /// A wire value together with its encoding: the typed value serves observers without decoding
 /// it again, the bytes serve equality, persistence and the change-sets.
@@ -87,6 +88,12 @@ pub struct QueryVTable {
     pub(crate) stale_ms: Option<u64>,
     pub(crate) persist: bool,
     pub(crate) retry: u32,
+    /// The polling interval the query declares (`interval`), in milliseconds.
+    pub(crate) interval_ms: Option<u64>,
+    /// The query keeps polling while the app is in the background.
+    pub(crate) poll_in_background: bool,
+    /// The paging half, for an infinite query.
+    pub(crate) paged: Option<&'static PagedVTable>,
     /// Runs the query with encoded parameters.
     pub(crate) fetch: fn(Ctx, &[u8]) -> BoxFuture<Outcome>,
     /// Decodes an encoded output (a persisted entry).
@@ -116,9 +123,20 @@ impl<Q: QueryDef> QueryHolder<Q> {
         stale_ms: Q::STALE_MS,
         persist: Q::PERSIST,
         retry: Q::RETRY,
+        interval_ms: Q::INTERVAL_MS,
+        poll_in_background: Q::POLL_IN_BACKGROUND,
+        paged: Q::PAGED,
         fetch: fetch_erased::<Q>,
-        decode_data: Erased::decode::<Q::Output>,
-        open: open_erased::<Q>,
+        // An infinite query's entry stores `(next cursor, pages)`, not its flattened value, and
+        // its platform handle is the infinite one.
+        decode_data: match Q::PAGED {
+            Some(paged) => paged.decode,
+            None => Erased::decode::<Q::Output>,
+        },
+        open: match Q::PAGED {
+            Some(paged) => paged.open,
+            None => open_erased::<Q>,
+        },
     };
 }
 

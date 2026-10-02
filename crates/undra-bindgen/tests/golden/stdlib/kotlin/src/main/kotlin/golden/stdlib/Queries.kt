@@ -16,6 +16,7 @@ import dev.undra.runtime.wire.Timestamp
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.decodeAll
+import kotlin.time.Duration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -70,6 +71,26 @@ class LatestResponseQueryHandle internal constructor(core: UndraCore, handle: Lo
             )
         } catch (e: Exception) {
             this.core.report(e, "LatestResponseQueryHandle.invalidate")
+        }
+    }
+
+    /**
+     * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+     * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setPollInterval(interval: Duration?) {
+        try {
+            val w = UndraWriter()
+            codecOptionDuration.encode(w, interval)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.LatestResponseQueryHandle.SET_POLL_INTERVAL),
+                UndraIds.Objects.LatestResponseQueryHandle.SET_POLL_INTERVAL,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "LatestResponseQueryHandle.setPollInterval")
         }
     }
 
@@ -153,6 +174,7 @@ suspend fun retry(request: HttpRequest, ctx: UndraCore = UndraGoldenStdlib.core)
     }
 }
 
+private val codecOptionDuration = Codecs.option(Codecs.duration)
 private val codecOptionHttpResponse = Codecs.option(HttpResponse)
 private val codecOptionHttpError = Codecs.option(HttpError)
 private val codecOptionTimestamp = Codecs.option(Codecs.timestamp)

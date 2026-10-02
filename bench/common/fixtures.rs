@@ -682,6 +682,56 @@ pub fn views_rows(count: u32) -> Vec<Item> {
         .collect()
 }
 
+/// A store with lazy lists (ADR-043), for the `lazy/*` rows: `books` is an owned list the host pages
+/// through; `open` is a read-only view of `rows` (the rows not done, by title), paged through the
+/// derived list's index. Seeded rows are `views_rows`: every fourth one done, so `open` holds three
+/// quarters of them.
+#[undra::store(restore = "Self::assemble")]
+pub struct Shelf {
+    #[undra(key = "id")]
+    books: Lazy<Item>,
+    rows: Signal<Vec<Item>>,
+    #[undra(key = "id")]
+    open: Lazy<Item>,
+}
+
+#[undra::api(store)]
+impl Shelf {
+    pub fn new(ctx: Ctx) -> Self {
+        Self::assemble(ctx, Lazy::new(), Signal::new(Vec::new()), Lazy::new())
+    }
+
+    /// The restore hook (and what `new` builds): the view is derived data, rebuilt from `rows`.
+    fn assemble(_ctx: Ctx, books: Lazy<Item>, rows: Signal<Vec<Item>>, _open: Lazy<Item>) -> Self {
+        let open = Lazy::over(
+            &rows
+                .derive()
+                .filter(|row: &Item| !row.done)
+                .sort_by_key(|row: &Item| row.title.clone())
+                .build(),
+        );
+        Shelf { books, rows, open }
+    }
+
+    /// Replaces both lists with `count` rows (`views_rows`).
+    pub fn seed(&self, count: u32) {
+        self.books.replace(views_rows(count));
+        self.rows.replace(views_rows(count));
+    }
+
+    /// Flips `done` of the row at `index` of `books`: one `update_at`, one invalidation.
+    pub fn toggle(&self, index: u32) {
+        self.books
+            .update_at(index as usize, |row| row.done = !row.done);
+    }
+
+    /// Flips `done` of the row at `index` of `rows`: the view's membership changes.
+    pub fn toggle_row(&self, index: u32) {
+        self.rows
+            .update_at(index as usize, |row| row.done = !row.done);
+    }
+}
+
 /// An object whose stream is always ready: its rate is whatever the core polls, far above any
 /// push source. It counts what it produced, so a scenario can prove that the core never
 /// produces more than one item beyond the consumer's credit.

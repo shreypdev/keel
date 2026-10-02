@@ -1,4 +1,5 @@
 export * from "./codec.js";
+export * from "./decimal.js";
 export * from "./envelope.js";
 export * from "./errors.js";
 export * from "./payloads.js";

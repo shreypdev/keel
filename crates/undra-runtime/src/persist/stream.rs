@@ -55,6 +55,11 @@ impl<'a> Streamer<'a> {
         if depth > MAX_DEPTH {
             return Err(WireError::NestingTooDeep { at: r.position() }.into());
         }
+        // A newtype is its inner value on the wire (ADR-042): wrapping a value in one, or unwrapping
+        // it, copies the bytes through the inner type's conversion.
+        if let Some((old_inner, new_inner)) = self.through_newtype(old_ty, new_ty) {
+            return self.convert(r, w, old_inner, new_inner, depth + 1, hook_here);
+        }
         let refuse = || not_structural(format!("{old_ty} cannot become {new_ty}"));
         match (old_ty, new_ty) {
             (TypeRef::Option(old_inner), TypeRef::Option(new_inner)) => {
@@ -79,7 +84,12 @@ impl<'a> Streamer<'a> {
                 w.write_u8(1);
                 self.convert(r, w, old_ty, new_inner, depth + 1, hook_here)?;
             }
-            (TypeRef::Vec(old_item), TypeRef::Vec(new_item)) => {
+            // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4), so
+            // `Lazy<T>` and `Vec<T>` convert as lists do.
+            (
+                TypeRef::Vec(old_item) | TypeRef::Lazy(old_item),
+                TypeRef::Vec(new_item) | TypeRef::Lazy(new_item),
+            ) => {
                 let count = r.read_count(1)?;
                 w.write_len(len_u32(count)?);
                 for i in 0..count {
@@ -149,6 +159,25 @@ impl<'a> Streamer<'a> {
             _ => return Err(refuse()),
         }
         Ok(())
+    }
+
+    /// The pair of types to convert instead when exactly one of `old` and `new` is a newtype: the
+    /// inner type stands for it.
+    fn through_newtype<'t>(
+        &'t self,
+        old: &'t TypeRef,
+        new: &'t TypeRef,
+    ) -> Option<(&'t TypeRef, &'t TypeRef)> {
+        match (old, new) {
+            (TypeRef::Named(_), TypeRef::Named(_)) => None,
+            (TypeRef::Named(name), _) => {
+                transparent_inner(self.old, name).map(|inner| (inner, new))
+            }
+            (_, TypeRef::Named(name)) => {
+                transparent_inner(self.new, name).map(|inner| (old, inner))
+            }
+            _ => None,
+        }
     }
 
     /// Whether the named types `old` and `new` are described identically (so their bytes mean the
@@ -259,6 +288,15 @@ impl<'a> Streamer<'a> {
     }
 }
 
+/// The type a newtype named `name` wraps in `closure`, if it is one (ADR-042).
+pub(super) fn transparent_inner<'c>(closure: &'c TypeClosure, name: &str) -> Option<&'c TypeRef> {
+    closure
+        .record(name)
+        .filter(|record| record.transparent)
+        .and_then(|record| record.fields.first())
+        .map(|field| &field.ty)
+}
+
 /// Writes `i`, read as a narrower integer type, as `ty`: `widens` holds, so it always fits (the
 /// checked `put_int` of the tree form is for values a hook built).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // lossless: `widens` holds
@@ -326,6 +364,9 @@ pub(super) fn skip(
         TypeRef::Uuid => {
             r.read_array::<16>()?;
         }
+        TypeRef::Decimal => {
+            r.read_array::<17>()?;
+        }
         TypeRef::Option(inner) => {
             let at = r.position();
             match r.read_u8()? {
@@ -341,7 +382,8 @@ pub(super) fn skip(
                 }
             }
         }
-        TypeRef::Vec(item) => {
+        // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4).
+        TypeRef::Vec(item) | TypeRef::Lazy(item) => {
             let count = r.read_count(1)?;
             for _ in 0..count {
                 skip(r, item, closure, depth + 1)?;
@@ -380,7 +422,6 @@ pub(super) fn skip(
             }
         }
         TypeRef::Unit
-        | TypeRef::Lazy(_)
         | TypeRef::Result(..)
         | TypeRef::Stream(_)
         | TypeRef::Object(_)

@@ -197,9 +197,23 @@ fn e0007_unsupported_shapes() {
     expect(
         "E0007",
         api(quote!(
-            pub struct S(u8);
+            pub struct S(u8, u8);
         )),
         "struct S",
+    );
+    expect(
+        "E0007",
+        api(quote!(
+            pub struct Marker;
+        )),
+        "struct Marker",
+    );
+    expect(
+        "E0007",
+        api(quote!(
+            pub type Id = u64;
+        )),
+        "type Id",
     );
     expect(
         "E0007",
@@ -1043,4 +1057,41 @@ fn a_reference_field_is_reported_once_and_not_again_as_a_missing_lifetime() {
     let text = squashed(&tokens);
     assert!(text.contains("pubname:&'staticstr"), "{text}");
     assert!(text.contains("Vec<&'staticstr>"), "{text}");
+}
+
+/// Where the messages that no ui test can show are locked (see `tests/catalogue.rs`).
+fn golden_path(code: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden/diagnostics")
+        .join(format!("{code}.txt"))
+}
+
+/// E0070 for an alias in another crate than its template is raised while the alias expands, in a
+/// crate that is not the template's: a ui test is one crate, so the message is locked here
+/// (`UPDATE_GOLDEN=1 cargo test -p undra-macros --lib` rewrites it). The other E0070, a second alias
+/// of one instantiation, is `rustc`'s duplicate-definition error and has the ui test
+/// `e0070_second_alias`.
+#[test]
+fn e0070_an_alias_outside_the_crate_of_its_template() {
+    let alias: syn::Ident = syn::parse_quote!(TodoPage);
+    let diag = impl_::generic::foreign_alias_diag(&alias, "Page", "model", "app");
+    let text = format!("{}\n", diag.message());
+    let path = golden_path("E0070");
+    if std::env::var("UPDATE_GOLDEN").is_ok_and(|v| v == "1") {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &text).unwrap();
+    }
+    let golden = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}; run with UPDATE_GOLDEN=1", path.display()));
+    assert_eq!(
+        golden, text,
+        "the message of E0070 changed: UPDATE_GOLDEN=1"
+    );
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 4, "{text}");
+    assert!(lines[0].starts_with("error[undra::E0070]: "));
+    assert_eq!(
+        lines[3],
+        "  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0070"
+    );
 }

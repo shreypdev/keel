@@ -28,6 +28,7 @@ pub(crate) fn record(name: &str, fields: Vec<FieldDef>) -> RecordDef {
         name: name.into(),
         type_id: ids::type_id(name),
         fields,
+        transparent: false,
         docs: String::new(),
     }
 }
@@ -433,6 +434,9 @@ pub(crate) fn representative_schema() -> Schema {
         stale_ms: Some(30_000),
         persist: true,
         idempotent: true,
+        interval_ms: None,
+        poll_in_background: false,
+        infinite: None,
     });
     s.queries.push(QueryDef {
         name: "add_todo".into(),
@@ -444,6 +448,9 @@ pub(crate) fn representative_schema() -> Schema {
         stale_ms: None,
         persist: false,
         idempotent: false,
+        interval_ms: None,
+        poll_in_background: false,
+        infinite: None,
     });
 
     s

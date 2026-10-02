@@ -1,0 +1,17 @@
+error: error[undra::E0001]: `DateTime<Local>` cannot cross the boundary
+         = note: a `Timestamp` is an instant in milliseconds since the Unix epoch, in UTC; a date-time with a local time zone or a fixed offset has no one value every platform reads alike, and the offset itself would be lost
+         = help: convert to `Utc` (`value.with_timezone(&Utc)`) and spell `DateTime<Utc>`; offsets do not cross
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0001_datetime_offsets.rs:13:16
+   |
+13 |     pub local: DateTime<Local>,
+   |                ^^^^^^^^^^^^^^^
+
+error: error[undra::E0001]: `DateTime<FixedOffset>` cannot cross the boundary
+         = note: a `Timestamp` is an instant in milliseconds since the Unix epoch, in UTC; a date-time with a local time zone or a fixed offset has no one value every platform reads alike, and the offset itself would be lost
+         = help: convert to `Utc` (`value.with_timezone(&Utc)`) and spell `DateTime<Utc>`; offsets do not cross
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0001_datetime_offsets.rs:14:17
+   |
+14 |     pub offset: DateTime<FixedOffset>,
+   |                 ^^^^^^^^^^^^^^^^^^^^^

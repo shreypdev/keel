@@ -9,6 +9,7 @@ export * from "./identity.js";
 export * from "./callbacks.js";
 export * from "./port.js";
 export * from "./signal.js";
+export * from "./lazy.js";
 export * from "./stream.js";
 export * from "./version.js";
 export * from "./transport/transport.js";

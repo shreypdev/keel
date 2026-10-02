@@ -1,0 +1,14 @@
+error[undra::E0073]: the infinite query `feed` does not return `Vec<T>`, the list its handle shows
+  = note: an infinite query's handle shows its pages as one keyed list of `T`, so the schema needs `T` to be a record with the `item_key` field, and a cursor the core can store
+  = help: return `Page<T, C>` where `T` is an `#[undra::api]` record, and set `item_key` to one of its fields
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+
+error[undra::E0073]: the infinite query `feed` has `item_key = "slug"`, but `Post` has no such field
+  = note: an infinite query's handle shows its pages as one keyed list of `T`, so the schema needs `T` to be a record with the `item_key` field, and a cursor the core can store
+  = help: return `Page<T, C>` where `T` is an `#[undra::api]` record, and set `item_key` to one of its fields
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+
+error[undra::E0073]: the infinite query `feed` is a mutation: only a query can be infinite
+  = note: an infinite query's handle shows its pages as one keyed list of `T`, so the schema needs `T` to be a record with the `item_key` field, and a cursor the core can store
+  = help: return `Page<T, C>` where `T` is an `#[undra::api]` record, and set `item_key` to one of its fields
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073

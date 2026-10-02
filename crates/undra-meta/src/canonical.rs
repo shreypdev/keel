@@ -194,7 +194,7 @@ impl Schema {
     ///     name: "P".into(),
     ///     type_id: 1,
     ///     fields: vec![],
-    ///     docs: "A point.".into(),
+    ///     transparent: false, docs: "A point.".into(),
     /// });
     /// let bare = schema.without_docs();
     /// assert_eq!(bare.records[0].docs, "");
@@ -377,6 +377,7 @@ mod tests {
                 default: false,
                 docs: String::new(),
             }],
+            transparent: false,
             docs: String::new(),
         });
         let json = schema.to_json_pretty();
@@ -505,6 +506,7 @@ mod tests {
                     docs: String::new(),
                 },
             ],
+            transparent: false,
             docs: "A todo.".into(),
         });
         assert_eq!(
@@ -914,6 +916,7 @@ mod tests {
                 default: false,
                 docs: String::new(),
             }],
+            transparent: false,
             docs: String::new(),
         });
         let back = Schema::from_json(&schema.to_json_pretty()).unwrap();
@@ -1025,6 +1028,9 @@ mod tests {
                 stale_ms: None,
                 persist: false,
                 idempotent: false,
+                interval_ms: None,
+                poll_in_background: false,
+                infinite: None,
             });
         }
         s
@@ -1077,6 +1083,48 @@ mod tests {
         assert_eq!(
             reversed.canonicalized(),
             canonicalized_with_std_sort(&reversed)
+        );
+    }
+
+    #[test]
+    fn newtype_and_paging_flags_are_written_only_when_set() {
+        // ADR-042 / ADR-043: no schema that does not use them hashes differently.
+        let plain = representative_schema().canonical_json();
+        for absent in [
+            "transparent",
+            "interval_ms",
+            "poll_in_background",
+            "infinite",
+            "decimal",
+        ] {
+            assert!(!plain.contains(absent), "{absent} leaked into {plain}");
+        }
+        let mut schema = Schema::new("t");
+        schema.records.push(RecordDef {
+            name: "UserId".into(),
+            type_id: 1,
+            fields: vec![FieldDef {
+                name: "value".into(),
+                ty: TypeRef::Decimal,
+                default: false,
+                docs: String::new(),
+            }],
+            transparent: true,
+            docs: String::new(),
+        });
+        let json = schema.canonical_json();
+        assert!(json.contains(r#""transparent":true"#), "{json}");
+        assert!(json.contains(r#""kind":"decimal""#), "{json}");
+        let back = Schema::from_json(&schema.to_json()).unwrap();
+        assert_eq!(back, schema);
+        assert_ne!(
+            schema.hash(),
+            {
+                let mut flat = schema.clone();
+                flat.records[0].transparent = false;
+                flat.hash()
+            },
+            "being a newtype is part of the wire-relevant schema"
         );
     }
 }

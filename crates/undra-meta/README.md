@@ -36,6 +36,7 @@ static TODO: RecordMeta = RecordMeta {
             docs: "When it is due.",
         },
     ],
+    transparent: false,
     docs: "A todo item.",
 };
 

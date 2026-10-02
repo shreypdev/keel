@@ -6,10 +6,13 @@ import { type PlaygroundParams, type TabId, resolveTab } from "./url-params";
 import { BigListView } from "./views/BigListView";
 import { CounterView } from "./views/CounterView";
 import { DebugPanel } from "./views/DebugPanel";
+import { FeedView } from "./views/FeedView";
+import { LibraryView } from "./views/LibraryView";
 import { LiveView } from "./views/LiveView";
 import { NotesView } from "./views/NotesView";
 import { RemoteView } from "./views/RemoteView";
 import { StressView } from "./views/StressView";
+import { TickerView } from "./views/TickerView";
 import { TodosView } from "./views/TodosView";
 import { WorkshopView } from "./views/WorkshopView";
 
@@ -22,13 +25,18 @@ const TABS = [
   { id: "live", label: "Live" },
   { id: "notes", label: "Notes" },
   { id: "workshop", label: "Workshop" },
+  { id: "library", label: "Library" },
+  { id: "feed", label: "Feed" },
+  { id: "ticker", label: "Ticker" },
 ] as const satisfies readonly { readonly id: TabId; readonly label: string }[];
 
 /**
- * Eight views over one core. Each reads the signals of its store with `useSignal` (`@undra/runtime/react`) and calls its methods.
- * Live and Notes use the opt-in WebSocket and Db ports (ADR-047, ADR-048); Live's address is `?ws=`.
+ * Eleven views over one core. Each reads the signals of its store with `useSignal` (`@undra/runtime/react`) and calls its methods.
+ * Live and Notes use the opt-in WebSocket and Db ports (ADR-047, ADR-048); Live's address is `?ws=`. Library, Feed and Ticker are
+ * ADR-043's: a lazy list the page pages through (`useLazyList`), an infinite query with a sentinel (`useLoadMore`), a polled query.
  *
- * The first view comes from the URL: `?screen=` (`todos`, `counter`, `list`, `remote`, `stress`, `live`, `notes`, `workshop`), else the
+ * The first view comes from the URL: `?screen=` (`todos`, `counter`, `list`, `remote`, `stress`, `live`, `notes`, `workshop`, `library`,
+ * `feed`, `ticker`), else the
  * `#fragment` (`#counter`, so a view can be linked to and reloaded). With `?embed=1` the page is
  * only that view, with no tab bar or heading, for the landing page's iframe; `channel` is then the
  * line to that page, which the stress screen posts its numbers through.
@@ -66,6 +74,9 @@ export function App({
       {tab === "live" && <LiveView key={lastRestart} initialUrl={params.ws} />}
       {tab === "notes" && <NotesView key={lastRestart} />}
       {tab === "workshop" && <WorkshopView />}
+      {tab === "library" && <LibraryView />}
+      {tab === "feed" && <FeedView />}
+      {tab === "ticker" && <TickerView />}
     </>
   );
 

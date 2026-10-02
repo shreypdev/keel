@@ -1,0 +1,8 @@
+error[E0080]: evaluation panicked: error[undra::E0061]: `LostPage` here is an alias or a renamed import of an Undra type that is declared under another name
+                = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type LostPage = Other` or `use path::Other as LostPage` the platforms would be told `LostPage` and receive the layout of `Other`
+                = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct LostPage` if you mean a distinct type
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061
+  --> tests/ui/e0061_unregistered_alias.rs:31:18
+   |
+31 | pub fn lost() -> LostPage {
+   |                  ^^^^^^^^ evaluation of `_::_` failed here

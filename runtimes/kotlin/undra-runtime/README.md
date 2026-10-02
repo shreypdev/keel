@@ -16,7 +16,7 @@ It has two layers:
 
 ```
 undra-runtime/
-  settings.gradle.kts        includes :runtime and :testkit, and :android-adapters and :android-work when an Android SDK is found
+  settings.gradle.kts        includes :runtime and :testkit, and :android-adapters, :android-work and :undra-compose when an Android SDK is found
   build.gradle.kts           group / version, Kotlin plugin declared once
   gradle/libs.versions.toml  Kotlin 2.0.21, coroutines 1.6.4, JUnit 5.10.3 (+ AGP 8.7.3, JUnit 4 and AndroidX Test for :android-adapters' tests)
   gradlew, gradle/wrapper/   Gradle 8.14.3 wrapper
@@ -27,6 +27,7 @@ undra-runtime/
       NativeApi.kt NativeCallbacks.kt NativeLibrary.kt   the JNI surface of a core (its generated UndraCoreNative)
       Transport.kt InprocTransport.kt RemoteTransport.kt
       Mirror.kt UndraStore.kt UndraObject.kt HandleCleaner.kt UndraDispatchers.kt
+      UndraLazyList.kt InfiniteQuery.kt              a Lazy<T> signal the host pages through; what infinite query handles offer (ADR-043)
       ObjectIdentity.kt                              one wrapper per handle: UndraCore.adopt (ADR-040)
       UndraCallbacks.kt CallbackHost.kt              host callback interfaces: the registry and delivery (ADR-041)
       PortRegistry.kt Markers.kt Errors.kt UndraStats.kt UndraLog.kt
@@ -37,6 +38,7 @@ undra-runtime/
       support/                                      FakeTransport, FakeNative (JNI contract), WsTestServer, ...
     src/test/kotlin/dev/undra/fixture/               UndraCoreNative of undra-ffi's fixture core, as bindgen generates one
   android-adapters/          the Android module: the adapters of the ten standard ports + the Choreographer frame pacer
+  undra-compose/             the optional Compose module: items(list) for a lazily paged list, LoadMoreWhenNearEnd for an infinite query
   android-work/              the optional WorkManager module (ADR-046): UndraWorker + UndraWork, background drains of the offline queue
   test-support/kotlin/       test code shared by both modules' tests (FaultyFileSystem: a file system that fails on demand)
   scripts/
@@ -73,10 +75,38 @@ todos.close()                             // or let the cleaner release it if yo
 | `UndraObject`, `UndraStore` | `AutoCloseable` handles; a `java.lang.ref.Cleaner` (or a phantom-reference fallback where it does not exist, Android below API 33) releases leaked ones. `UndraStore.signal(initial)` makes the `MutableStateFlow` that `apply(signalId, op, reader)` updates. The mirror holds stores weakly: keep a reference to the store while you use its flows |
 | Objects (ADR-040) | `UndraCore.adopt(handle, ::Wrapper)` is how every generated wrapper is made: one wrapper per handle (a weak identity map), the extra reference of a handle the app already holds given back at once, a store observed when its wrapper is made; `adoptObject`/`adoptOptional`/`adoptList` read a reply body; `requireOwn(obj)` refuses another core's object with `UndraCallError.Refused` before anything is sent; `reachabilityFence(obj)` keeps an argument alive until its call is sent; `UndraStats.hostRefs` is the core's count of the references the host owns |
 | Callbacks (ADR-041) | `UndraCore.callbacks` (`UndraCallbacks`): `lend(impl)` gives the instance handle a callback argument is sent as (interned by identity, one reference per crossing, held strongly), `giveBack`, `giveBackIfRefused`, `release` (the core's `__release`), `liveCount`, `count(of)`. The core's calls are only queued in the port callback: `main` interfaces run in the mirror's drain in order with the change-sets (`coalesce` keeps the newest per instance, `MirrorStats.callbacksDelivered`), `background` ones on a serial dispatcher per instance; `__cancel` cancels the running `Job`. Generated `UndraCallbackBridge`s decode the calls; `CoreEntry(callbacks = ...)` registers them before the core starts |
-| `Mirror` | Per-handle registry of `apply` callbacks. Change-sets are applied on `UndraDispatchers.main` in batches (one hop for a burst) with per-batch coalescing of superseded full values; a throwing callback is logged and skipped, a malformed change-set is dropped whole |
+| `Mirror` | Per-handle registry of `apply` callbacks. Change-sets are applied on `UndraDispatchers.main` in batches (one hop for a burst) with per-batch coalescing: a full value supersedes everything queued before it, a lazy invalidation (op 2) only the earlier invalidations of its signal, never the full value that carries the page server (`[Full, Inv, Inv]` applies `[Full, Inv]`); a throwing callback is logged and skipped, a malformed change-set is dropped whole |
 | `UndraDispatchers` | `main`: `Dispatchers.Main.immediate` on Android (found by reflection), else a daemon thread named `undra-main` |
 | `PortImpl(sync, methods, detach)` | What generated `<trait>PortImpl(...)` returns and `LoadOptions.adapters` / `registerPort` take. Sync ports are answered inline (they must not suspend or call Undra); async ports run off the core's threads and answer through `portReply`. `detach` (optional) runs once when the implementation stops serving its core (the core closed, or another one was registered for the port): the WebSocket, Sse and Db bindings close what they hold |
 | Errors | `UndraException` (base of generated errors, and of everything below), `UndraCallError` (sealed: `CancelledByCore`, `Panicked`, `Refused`, `Unavailable`, `Malformed`; what a generated call throws besides its own `E` and `CancellationException`), `UndraUnhandledError(operation, error)` (what `LoadOptions.onError` receives), `UndraReplyException(status, body)` (+ `panicInfo`, `badRequestReason`), `UndraTransportException(reason, ...)`, `UndraProtocolException`, `UndraRestoreException(code)`, `UndraModeException`, `UndraSchemaMismatchException(expected, got)`, `UndraPortException(body)`, `WireException` (sealed) A stream that fails ends with the same set (`UndraCallError.mappedStream`): `E` for its own typed error (flag 2), and for a failure the core ends it with (flag 3) `CancelledByCore`, `Panicked` or `Refused` by the failure's status (ADR-036), `Malformed` for an item or failure body the runtime cannot read |
+
+### Lazy lists and infinite queries (ADR-043)
+
+A `Lazy<T>` signal of a store is an `UndraLazyList<T>`: the core keeps the rows, the host holds the length and a window of
+decoded pages. Generated stores create one per signal (`UndraLazyList(core, itemCodec)`) and hand it the change-set entries of
+its signal (`applyFull(reader)` for the value, `applyInvalidated(reader)` for an invalidation).
+
+```kotlin
+val books: UndraLazyList<Book> = library.books
+val count by books.size.collectAsState()         // StateFlow<Int>: the length the core last sent
+val revision by books.revision.collectAsState()  // bumped when a page arrives or is replaced: read it to recompose
+val row: Book? = books[120]                      // null while its page loads; asks for it and one page on each side, once
+books.prefetch(0..99)                            // warm the pages of a range
+books.pageSize = 100                             // default 50; maxCachedPages (default 24) bounds the cache
+```
+
+Reading never blocks and never calls the core: the pages wanted within one main-thread turn go out together in the next turn, as
+page calls (`CallTarget.LazyListPage`) with `callSync` over an in-process core and the suspending `call` over `undra dev`, and a page
+already in flight is not asked for again. Every reply carries the list's version: an older one is dropped and the page asked for again,
+a newer one raises the list's version and length. When the core changes the list the new length is taken at once, the rows stay visible
+(stale) and only the **window**, the pages read since the previous invalidation (at most `maxCachedPages`, the least recently read
+evicted first), is re-paged: O(window), never O(list), and nothing at all for a list nobody reads. A restore brings a new page server
+and drops the cache. A page that fails to load or does not decode is reported through `LoadOptions.onError` (as `UndraCallError`) and
+leaves its rows `null`; reading does not ask for it again until the list changes or `prefetch` does. The `undra-compose` module
+([undra-compose/README.md](undra-compose/README.md)) draws one in a `LazyColumn`.
+
+`InfiniteQuery` (`hasNextPage`, `fetchingNextPage`, `fetchNextPage()`) is what every generated infinite query handle implements, so
+helpers can load more rows without knowing the query (`LoadMoreWhenNearEnd` in `undra-compose`).
 
 ### Panic reports and background runs (ADR-046)
 
@@ -313,6 +343,7 @@ What runs (see `TestMain.kt`): the wire suites, then
 | `PortsV2BindingTests` | the WebSocket, Sse and Db bindings over scripted adapters: ids, the window and one pending pull, burst coalescing, ends, close and detach, migrations, transactions and `Busy`, the serial queue |
 | `RealtimeAdapterTests` | the default WebSocket and Sse adapters against `contract-tests/servers/realtime-server.mjs` (Node): echo, subprotocols and headers, refusals with status, peer close, drop, invalid UTF-8, a flood under a stalled reader, the SSE feed and resume, `/sse/hang` closed. Skipped without Node (failed with `UNDRA_REQUIRE_TOOLCHAINS=1`) |
 | `JdbcDbAdapterTests` | `JdbcDbAdapter` through the binding against real SQLite: constraint kinds, busy, a corrupt file, migrations, typed cells, one statement, the parameter count. Needs `UNDRA_SQLITE_JDBC` (the driver jar, on the test class path only); skipped without it (failed with `UNDRA_REQUIRE_TOOLCHAINS=1`) |
+| `LazyListTests` | `UndraLazyList` against a fake page server: the prefetch window and coalescing, requests deduplicated, `callSync` vs `call`, versions and races, invalidation re-paging O(window), eviction, restart, every hostile reply, a store routing the signal, threads |
 | `ErrorTests`, `StatsTests`, `CleanerTests`, `DispatcherTests` | exception shapes, the statistics parser, both cleaner backends, main-thread and delivery dispatchers |
 | `NativeShapeTests`, `NativeSmokeTests` | the JNI descriptors of SPEC 6.1 on a core's `UndraCoreNative` (the fixture's and the golden bindings'), `NativeCallbacks`, the R8 rules, `NativeLibrary` reporting a missing library; a smoke test against `undra-ffi`'s fixture core (`libundra_fixture`), skipped unless it is loadable |
 
@@ -336,6 +367,9 @@ JNI smoke test at the fixture library.
 The Gradle build was written on a machine without network access to plugin repositories, so it has not been
 executed end to end; the settings script, the version catalog and the root build script were confirmed to
 parse. Expect at most small fixes on first run.
+
+`:undra-compose` (only where an Android SDK is found): `./gradlew :undra-compose:assembleDebug :undra-compose:testDebugUnitTest`, and on an
+emulator or device `./gradlew :undra-compose:connectedDebugAndroidTest` (a real `LazyColumn` over a lazy list and `LoadMoreWhenNearEnd`).
 
 ### Test data
 

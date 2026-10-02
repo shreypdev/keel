@@ -90,6 +90,7 @@ fn target_name(case: &str) -> String {
 const CHECKS: &[(&str, &str)] = &[
     ("recursive", "recursive.swift"),
     ("callbacks", "callbacks.swift"),
+    ("newtypes", "newtypes.swift"),
 ];
 
 /// The executable target of a check.

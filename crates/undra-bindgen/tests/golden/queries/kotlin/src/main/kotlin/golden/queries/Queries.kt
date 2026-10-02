@@ -14,6 +14,7 @@ import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.decodeAll
 import java.util.UUID
+import kotlin.time.Duration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,6 +69,26 @@ class TodoByIdQueryHandle internal constructor(core: UndraCore, handle: Long) : 
             )
         } catch (e: Exception) {
             this.core.report(e, "TodoByIdQueryHandle.invalidate")
+        }
+    }
+
+    /**
+     * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+     * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setPollInterval(interval: Duration?) {
+        try {
+            val w = UndraWriter()
+            codecOptionDuration.encode(w, interval)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodoByIdQueryHandle.SET_POLL_INTERVAL),
+                UndraIds.Objects.TodoByIdQueryHandle.SET_POLL_INTERVAL,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "TodoByIdQueryHandle.setPollInterval")
         }
     }
 
@@ -192,6 +213,26 @@ class TodoCountQueryHandle internal constructor(core: UndraCore, handle: Long) :
         }
     }
 
+    /**
+     * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+     * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setPollInterval(interval: Duration?) {
+        try {
+            val w = UndraWriter()
+            codecOptionDuration.encode(w, interval)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodoCountQueryHandle.SET_POLL_INTERVAL),
+                UndraIds.Objects.TodoCountQueryHandle.SET_POLL_INTERVAL,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "TodoCountQueryHandle.setPollInterval")
+        }
+    }
+
     override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader) {
         try {
             when (signalId) {
@@ -304,6 +345,26 @@ class TodosQueryHandle internal constructor(core: UndraCore, handle: Long) : Und
         }
     }
 
+    /**
+     * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+     * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setPollInterval(interval: Duration?) {
+        try {
+            val w = UndraWriter()
+            codecOptionDuration.encode(w, interval)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodosQueryHandle.SET_POLL_INTERVAL),
+                UndraIds.Objects.TodosQueryHandle.SET_POLL_INTERVAL,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "TodosQueryHandle.setPollInterval")
+        }
+    }
+
     override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader) {
         try {
             when (signalId) {
@@ -404,6 +465,7 @@ suspend fun clearTodos(ctx: UndraCore = UndraGoldenQueries.core) {
     }
 }
 
+private val codecOptionDuration = Codecs.option(Codecs.duration)
 private val codecOptionTodo = Codecs.option(Todo)
 private val codecOptionTodoError = Codecs.option(TodoError)
 private val codecOptionTimestamp = Codecs.option(Codecs.timestamp)

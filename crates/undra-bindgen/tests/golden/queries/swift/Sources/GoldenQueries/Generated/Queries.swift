@@ -74,6 +74,24 @@ public final class TodoByIdQueryHandle: UndraStore, @unchecked Sendable {
         }
     }
 
+    /// Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+    /// The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+    /// An interval below 1 second or above 7 days is clamped to that range.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func setPollInterval(_ interval: Duration?) {
+        var w = UndraWriter()
+        interval.undraEncode(&w)
+        do {
+            _ = try self.core.callSync(
+                .objectMethod(handle: self.handle, methodId: UndraIds.Objects.TodoByIdQueryHandle.setPollInterval),
+                method: UndraIds.Objects.TodoByIdQueryHandle.setPollInterval,
+                args: w.finish()
+            )
+        } catch {
+            self.core.report(error, operation: "TodoByIdQueryHandle.setPollInterval")
+        }
+    }
+
     public override func apply(signal: UInt32, op: ChangeOp, reader: inout UndraReader) {
         do {
             switch signal {
@@ -205,6 +223,24 @@ public final class TodoCountQueryHandle: UndraStore, @unchecked Sendable {
             )
         } catch {
             self.core.report(error, operation: "TodoCountQueryHandle.invalidate")
+        }
+    }
+
+    /// Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+    /// The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+    /// An interval below 1 second or above 7 days is clamped to that range.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func setPollInterval(_ interval: Duration?) {
+        var w = UndraWriter()
+        interval.undraEncode(&w)
+        do {
+            _ = try self.core.callSync(
+                .objectMethod(handle: self.handle, methodId: UndraIds.Objects.TodoCountQueryHandle.setPollInterval),
+                method: UndraIds.Objects.TodoCountQueryHandle.setPollInterval,
+                args: w.finish()
+            )
+        } catch {
+            self.core.report(error, operation: "TodoCountQueryHandle.setPollInterval")
         }
     }
 
@@ -341,6 +377,24 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             )
         } catch {
             self.core.report(error, operation: "TodosQueryHandle.invalidate")
+        }
+    }
+
+    /// Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+    /// The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+    /// An interval below 1 second or above 7 days is clamped to that range.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func setPollInterval(_ interval: Duration?) {
+        var w = UndraWriter()
+        interval.undraEncode(&w)
+        do {
+            _ = try self.core.callSync(
+                .objectMethod(handle: self.handle, methodId: UndraIds.Objects.TodosQueryHandle.setPollInterval),
+                method: UndraIds.Objects.TodosQueryHandle.setPollInterval,
+                args: w.finish()
+            )
+        } catch {
+            self.core.report(error, operation: "TodosQueryHandle.setPollInterval")
         }
     }
 

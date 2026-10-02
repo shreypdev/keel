@@ -16,18 +16,21 @@ object UndraIds {
             const val NEW: UInt = 0x2bb5eff3u
             const val REFETCH: UInt = 0x21d1b9e2u
             const val INVALIDATE: UInt = 0x44cec2fau
+            const val SET_POLL_INTERVAL: UInt = 0xe327e53bu
         }
         object TodoCountQueryHandle {
             const val TYPE_ID: UInt = 0xcb26daa7u
             const val NEW: UInt = 0xcb26daa7u
             const val REFETCH: UInt = 0x21d1b9e2u
             const val INVALIDATE: UInt = 0x44cec2fau
+            const val SET_POLL_INTERVAL: UInt = 0xe327e53bu
         }
         object TodosQueryHandle {
             const val TYPE_ID: UInt = 0x54209c7cu
             const val NEW: UInt = 0x54209c7cu
             const val REFETCH: UInt = 0x21d1b9e2u
             const val INVALIDATE: UInt = 0x44cec2fau
+            const val SET_POLL_INTERVAL: UInt = 0xe327e53bu
         }
     }
 

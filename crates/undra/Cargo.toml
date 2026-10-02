@@ -23,6 +23,26 @@ undra-testkit = { workspace = true }
 
 # The opt-in standard ports (ADR-047, ADR-048), off by default: `undra = { features = ["websocket"] }`.
 [features]
+# The opt-in leaf types (ADR-042): types of popular crates that cross as the wire type they stand for.
+# Each dependency is built with `default-features = false`, so no clock and no randomness comes with
+# it (R12), and each builds for wasm32-unknown-unknown, iOS and Android (`.github/workflows/ci.yml`).
+# Each feature is also forwarded to `undra-macros`, which needs to know it to name the missing
+# feature when a type of one of these crates is spelled without it.
+#
+# `uuid::Uuid` crosses as `Uuid` (16 bytes).
+uuid = ["undra-wire/uuid", "undra-macros/uuid"]
+# `chrono::DateTime<Utc>` crosses as `Timestamp` (milliseconds since the epoch, truncated toward
+# negative infinity) and `chrono::TimeDelta` as `Duration` (nanoseconds; a negative one encodes as zero).
+chrono = ["undra-wire/chrono", "undra-macros/chrono"]
+# `time::OffsetDateTime` and `time::UtcDateTime` cross as `Timestamp` (normalised to UTC, milliseconds,
+# truncated toward negative infinity) and `time::Duration` as `Duration` (a negative one encodes as zero).
+time = ["undra-wire/time", "undra-macros/time"]
+# `rust_decimal::Decimal` crosses as `Decimal` (96-bit mantissa, scale up to 28: always encodes; a wire
+# value outside that range decodes to an error).
+rust_decimal = ["undra-wire/rust_decimal", "undra-macros/rust_decimal"]
+# `bytes::Bytes` crosses as `Bytes`.
+bytes = ["undra-wire/bytes", "undra-macros/bytes"]
+
 # The `WebSocket` port (`undra::ports::ws`).
 websocket = ["undra-ports/websocket"]
 # The `Sse` port (`undra::ports::sse`).
@@ -35,3 +55,10 @@ db-fake = ["undra-ports/db-fake"]
 
 [dev-dependencies]
 undra-bindgen = { workspace = true }
+# `tests/leaf_types.rs` (run with `--features uuid,chrono,time,rust_decimal,bytes`) spells these
+# types in a core; without a feature the file is empty. No clock or randomness feature of any.
+uuid = { version = "1", default-features = false }
+chrono = { version = "0.4", default-features = false }
+time = { version = "0.3", default-features = false }
+rust_decimal = { version = "1", default-features = false }
+bytes = { version = "1", default-features = false }
