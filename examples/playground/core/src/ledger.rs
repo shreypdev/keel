@@ -312,7 +312,7 @@ pub fn sample_receipt() -> Receipt {
     Receipt {
         id: uuid::Uuid::from_bytes(id_of(7).0.0),
         // 2026-10-01T12:00:00.123Z
-        issued: chrono::DateTime::from_timestamp_millis(1_791_028_800_123)
+        issued: chrono::DateTime::from_timestamp_millis(1_790_856_000_123)
             .unwrap_or(chrono::DateTime::UNIX_EPOCH),
         valid_for: chrono::TimeDelta::milliseconds(90_000),
         total: rust_decimal::Decimal::from_str("19.990").unwrap_or_default(),
@@ -463,7 +463,7 @@ mod tests {
         // uuid (16) + timestamp (8) + duration (8) + decimal (17) + bytes (4 + 4).
         assert_eq!(bytes.len(), 16 + 8 + 8 + 17 + 8);
         assert_eq!(Receipt::decode_exact(&bytes), Ok(receipt.clone()));
-        assert_eq!(&bytes[16..24], &1_791_028_800_123_i64.to_le_bytes());
+        assert_eq!(&bytes[16..24], &1_790_856_000_123_i64.to_le_bytes());
         assert_eq!(&bytes[24..32], &90_000_000_000_i64.to_le_bytes());
         assert_eq!(echo_receipt(receipt.clone()), receipt);
     }
