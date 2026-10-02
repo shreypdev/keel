@@ -209,36 +209,67 @@ final class RealtimeReviewTests: XCTestCase {
         XCTAssertLessThan(late[39], 100, "a pull that found one message waited 100 ms or more")
     }
 
-    /// 1c: a steady trickle (one message every ~1 ms, never a 2 ms gap) still answers within the
+    /// 1c: a steady trickle (one message every 0.5 ms, never a 2 ms gap) still answers within the
     /// burst cap of the pull's first message, not when the trickle stops.
+    ///
+    /// The stimulus is the point, and a loaded or virtualised machine can fail to deliver it: `usleep(500)` slept
+    /// several milliseconds on a hosted macOS runner (the same timer slack that makes the binding's own 2 ms timer
+    /// fire after about 10 ms), so two pushes more than `burstGap` apart are not a trickle, and a pull answered
+    /// between them is answered correctly. The feeder therefore paces itself by spinning on the clock, records when
+    /// each message was pushed, and a trial whose pushes were ever `burstGap` or more apart before the answer is not
+    /// a trickle and is repeated; the assertions about the behaviour are made on a trial that was one.
     func testATrickleIsAnsweredByTheBurstCapNotHeldUntilItStops() async throws {
-        let adapter = ScriptedWebSocket()
-        let binding = WebSocketBinding(adapter: adapter)
-        let conn = try await binding.connect(url: "ws://x.test", protocols: [], headers: []).conn
-        let socket = try XCTUnwrap(adapter.sockets.first)
-        let pull = Task { () async -> (Result<[WsMessage], WsError>, UInt64) in
-            let got = await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 1000) }
-            return (got, DispatchTime.now().uptimeNanoseconds)
-        }
-        try await Task.sleep(nanoseconds: 5_000_000)
-        let started = DispatchTime.now().uptimeNanoseconds
-        // A thread pushes one message every 0.5 ms (usleep is precise enough; Task.sleep is not).
-        let stop = Locked(false)
-        let feeder = Thread {
-            var index = 0
-            while !stop.withLock({ $0 }) && index < 2000 {
-                socket.push(.text("\(index)"))
-                index += 1
-                usleep(500)
+        let gapNanoseconds: UInt64 = 2_000_000 // burstGap
+        var pauses: [Double] = []
+        // Forty tries of about 30 ms each: a machine busy enough to stall the feeder in ten of them (a hosted
+        // runner did) still trickles in one of forty.
+        for _ in 0..<40 {
+            let adapter = ScriptedWebSocket()
+            let binding = WebSocketBinding(adapter: adapter)
+            let conn = try await binding.connect(url: "ws://x.test", protocols: [], headers: []).conn
+            let socket = try XCTUnwrap(adapter.sockets.first)
+            let pull = Task { () async -> (Result<[WsMessage], WsError>, UInt64) in
+                let got = await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 1000) }
+                return (got, DispatchTime.now().uptimeNanoseconds)
             }
+            try await Task.sleep(nanoseconds: 5_000_000)
+            let started = DispatchTime.now().uptimeNanoseconds
+            let stop = Locked(false)
+            let pushedAt = Locked<[UInt64]>([])
+            let feeder = Thread {
+                var index = 0
+                var due = DispatchTime.now().uptimeNanoseconds
+                while !stop.withLock({ $0 }) && index < 20_000 {
+                    pushedAt.withLock { $0.append(DispatchTime.now().uptimeNanoseconds) }
+                    socket.push(.text("\(index)"))
+                    index += 1
+                    due += 500_000
+                    while DispatchTime.now().uptimeNanoseconds < due, !stop.withLock({ $0 }) {}
+                }
+            }
+            feeder.start()
+            let (result, at) = await pull.value
+            let got = try result.get()
+            stop.withLock { $0 = true }
+            binding.detach()
+            // The pushes up to the answer, and the one after it: a feeder held up right after its first push
+            // leaves a single push before the answer, and its pause only shows in when the next one came (or
+            // in the answer's own time, when none did). Without that push the pause went unmeasured, and a
+            // one-message answer, correct for a feeder that stalled, was judged as if it had trickled.
+            let all = pushedAt.withLock { $0 }
+            let before = all.filter { $0 <= at }
+            let pushes = before + [all.first(where: { $0 > at }) ?? at]
+            let widest = zip(pushes, pushes.dropFirst()).map { $1 - $0 }.max() ?? 0
+            if widest >= gapNanoseconds {
+                pauses.append(Double(widest) / 1e6)
+                continue // the feeder was held up: not a trickle, so nothing to assert about one
+            }
+            let elapsed = Double(at - started) / 1e6
+            XCTAssertGreaterThan(got.count, 1, "the trickle was one burst")
+            XCTAssertLessThan(elapsed, 30, "a trickle held the pull for \(elapsed) ms")
+            return
         }
-        feeder.start()
-        let (result, at) = await pull.value
-        let got = try result.get()
-        stop.withLock { $0 = true }
-        let elapsed = Double(at - started) / 1e6
-        XCTAssertGreaterThan(got.count, 1, "the trickle was one burst")
-        XCTAssertLessThan(elapsed, 30, "a trickle held the pull for \(elapsed) ms")
+        XCTFail("no trial of 40 was a trickle: the feeder was held up for \(pauses.map { String(format: "%.1f", $0) }) ms between two pushes")
     }
 
     /// 1b: a second concurrent receive on a URLSession connection is the typed error, and the
