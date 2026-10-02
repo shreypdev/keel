@@ -510,3 +510,11 @@ Every ADR from 029 to 056 is implemented and merged. In flight: `objects-followu
 
 Matrix at checkpoint 26: Rust 3,536 · TS 1,856 + 37 · Kotlin 881 + 32 · Swift 870 · RN 110 · contracts 95/95 (S01–S33).
 **Every code piece of the v1.1/v1.2 program is merged.** Left: the `default-choice-post` fact-check and publication, the Rust 1.99 bump (needs `rustup update stable`), the final state pass.
+
+### Checkpoint 27 (2026-10-02) — the post is published
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **default-choice-post** (H4): "Why Undra is the default choice" — a 36-row limitations matrix against KMP, UniFFI and Flutter/React Native-as-logic (Undra: 27 solved, 6 partial, 2 open, 1 by decision), five measured sections, the adoption cost, what is open; `claims.md` public beside it | `0654810` | opus fact-check `.10x/reviews/2026-10-02-default-choice-post-fact-check.md`: publish; 221 draft claims → 182 verified, 29 corrected (8 about other tools), 10 removed, 11 added; all 45 linked competitor pages re-read from source (plus the 68 pages of UniFFI's manual for the "describes no …" claims); no speed comparison with another tool; the stale statements in the reads post, the KMP post, both migration guides, `roadmap.json` and `pending.json` fixed in the same pass |
+
+In flight: `ci-green` (every red CI job at its root cause + the Rust 1.99.0 bump; the local toolchain is 1.99.0 since `rustup update stable`), `landing-refresh` (landing page, roadmap page, docs nav, README to what shipped).
