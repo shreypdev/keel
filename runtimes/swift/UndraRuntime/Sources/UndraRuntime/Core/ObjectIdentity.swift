@@ -13,9 +13,11 @@
 /// replaced by the next `adopt` of that handle and removed when its wrapper closes, so the map holds
 /// no more entries than there are live wrappers (and the few being replaced).
 final class ObjectIdentityMap: @unchecked Sendable {
-    /// A weak reference to a wrapper.
+    /// A weak reference to a wrapper, and how many open wrappers the handle has: usually one; a store whose `new`
+    /// returns an object the host already wraps has two, each owning a reference.
     private struct Slot {
         weak var object: UndraObject?
+        var holders = 0
     }
 
     private let slots = Guarded<[UInt64: Slot]>([:])
@@ -37,10 +39,14 @@ final class ObjectIdentityMap: @unchecked Sendable {
     func register(_ object: UndraObject) -> UndraObject {
         let raw = object.handle.rawValue
         let existing = slots.withLock { (current: inout [UInt64: Slot]) -> UndraObject? in
-            if let other = current[raw]?.object, other !== object {
+            var slot = current[raw] ?? Slot()
+            slot.holders += 1
+            if let other = slot.object, other !== object {
+                current[raw] = slot
                 return other
             }
-            current[raw] = Slot(object: object)
+            slot.object = object
+            current[raw] = slot
             return nil
         }
         // A closed wrapper is no wrapper: the new one takes its place (checked outside the lock, since
@@ -48,7 +54,7 @@ final class ObjectIdentityMap: @unchecked Sendable {
         if let existing = existing {
             if existing.isClosed {
                 slots.withLock { (current: inout [UInt64: Slot]) -> Void in
-                    current[raw] = Slot(object: object)
+                    current[raw]?.object = object
                 }
                 return object
             }
@@ -57,16 +63,24 @@ final class ObjectIdentityMap: @unchecked Sendable {
         return object
     }
 
-    /// Removes the entry of `object`'s handle when it is `object` or a wrapper that is gone.
-    func forget(_ object: UndraObject) {
+    /// `object` closes (or is discarded as a duplicate): it stops counting as a holder of its handle and stops
+    /// being its wrapper, and `cleanup` runs **under the map's lock** with whether it was the last holder.
+    ///
+    /// Running the cleanup under the lock is what makes a close race an `adopt` of the same handle on another
+    /// thread: a wrapper that registers before the cleanup makes this one not the last, so the routing and the
+    /// observed set the new wrapper depends on stay; one that registers after finds the cleanup done and sets
+    /// them up again. The cleanup takes the mirror's and the core's locks and never calls into the map.
+    func leave(_ object: UndraObject, cleanup: (_ last: Bool) -> Void) {
         let raw = object.handle.rawValue
         slots.withLock { (current: inout [UInt64: Slot]) -> Void in
-            guard let slot = current[raw] else {
-                return
-            }
+            var slot = current[raw] ?? Slot(holders: 1)
+            slot.holders = Swift.max(0, slot.holders - 1)
             if slot.object == nil || slot.object === object {
-                current[raw] = nil
+                slot.object = nil
             }
+            let last = slot.holders == 0
+            cleanup(last)
+            current[raw] = last ? nil : slot
         }
     }
 

@@ -89,10 +89,28 @@ public final class Mirror: @unchecked Sendable {
         }
     }
 
-    /// A store's registration: its apply function and its `no_coalesce` signals.
+    /// A store's registration: the apply functions of the wrappers that mirror it and its `no_coalesce`
+    /// signals. One handle usually has one wrapper (ADR-040); an `Arc<Self>` constructor that returns an
+    /// object the host already wraps makes a second, and each keeps receiving the changes (keyed by owner, so
+    /// that one wrapper going away takes only its own function with it).
     struct Registration {
-        let apply: MirrorApply
+        /// One wrapper's function; `owner` is `nil` for the public, replacing `register`.
+        struct Applier {
+            let owner: ObjectIdentifier?
+            let apply: MirrorApply
+        }
+
+        var appliers: [Applier]
         let noCoalesce: Set<UInt32>
+
+        /// Applies one entry with every wrapper's function: each reads its own copy of `reader`.
+        @MainActor
+        func apply(_ signal: UInt32, _ op: ChangeOp, _ reader: inout UndraReader) {
+            for applier in appliers {
+                var copy = reader
+                applier.apply(signal, op, &copy)
+            }
+        }
     }
 
     typealias ResyncHandler = @MainActor @Sendable (UndraHandle, UInt32) -> Void
@@ -179,8 +197,21 @@ public final class Mirror: @unchecked Sendable {
     /// shows each is up to the UI (SwiftUI renders once per frame whatever the model does). A
     /// queue folded because it passed its bound folds these signals too: the bound wins.
     public func register(_ handle: UndraHandle, noCoalesce: Set<UInt32> = [], _ apply: @escaping MirrorApply) {
-        let registration = Registration(apply: apply, noCoalesce: noCoalesce)
+        let registration = Registration(appliers: [Registration.Applier(owner: nil, apply: apply)], noCoalesce: noCoalesce)
         state.withLock { (current: inout State) -> Void in
+            current.registrations[handle.rawValue] = registration
+        }
+    }
+
+    /// Registers `owner`'s `apply` for `handle` next to the functions other owners registered: a second wrapper of
+    /// the same store does not take the first one's place (ADR-040), each receives every change. An owner that
+    /// registers again replaces its own function.
+    func register(_ handle: UndraHandle, owner: AnyObject, noCoalesce: Set<UInt32> = [], _ apply: @escaping MirrorApply) {
+        let id = ObjectIdentifier(owner)
+        state.withLock { (current: inout State) -> Void in
+            var registration = current.registrations[handle.rawValue] ?? Registration(appliers: [], noCoalesce: noCoalesce)
+            registration.appliers.removeAll { $0.owner == id }
+            registration.appliers.append(Registration.Applier(owner: id, apply: apply))
             current.registrations[handle.rawValue] = registration
         }
     }
@@ -190,6 +221,28 @@ public final class Mirror: @unchecked Sendable {
     public func unregister(_ handle: UndraHandle) {
         let raw = handle.rawValue
         state.withLock { (current: inout State) -> Void in
+            current.registrations[raw] = nil
+            if !current.awaiting.isEmpty {
+                current.awaiting = current.awaiting.filter { $0.key.handle != raw }
+            }
+        }
+    }
+
+    /// Removes `owner`'s function from the registration of `handle`; the registration goes with the last one, and so
+    /// does what waits to be observed again. Another owner's function, which a wrapper made after this one's handle
+    /// was released may have registered, is never touched.
+    func unregister(_ handle: UndraHandle, owner: AnyObject) {
+        let raw = handle.rawValue
+        let id = ObjectIdentifier(owner)
+        state.withLock { (current: inout State) -> Void in
+            guard var registration = current.registrations[raw] else {
+                return
+            }
+            registration.appliers.removeAll { $0.owner == id }
+            if !registration.appliers.isEmpty {
+                current.registrations[raw] = registration
+                return
+            }
             current.registrations[raw] = nil
             if !current.awaiting.isEmpty {
                 current.awaiting = current.awaiting.filter { $0.key.handle != raw }

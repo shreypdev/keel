@@ -394,6 +394,99 @@ final class ObjectIdentityTests: XCTestCase {
         XCTAssertEqual(core.mirror.stats().entriesApplied, 1, "one store applied the entry once")
     }
 
+    /// Objects-followups O2(a): an `Arc<Self>` `new` of a store gives a second wrapper of an object the host
+    /// already wraps (a Swift initializer cannot return the first). It must not take the first one's mirror
+    /// registration over: both keep receiving the changes, and closing either leaves the other routed.
+    func testASecondWrapperOfAStoreDoesNotTakeTheFirstOnesRoutingOver() throws {
+        let transport = FakeTransport()
+        let frames = ManualFrameScheduler()
+        let core = try makeCore(transport, frames: frames)
+        let first = CountStore(adopting: handle(7), core: core)
+        let second = CountStore(adopting: handle(7), core: core)
+        XCTAssertEqual(core.mirror.registeredCount, 1, "one handle, one registration")
+        transport.deliverChangeSet(makeChangeSet([(handle(7), 0, UInt32(5).undraEncoded())]))
+        frames.fire()
+        XCTAssertEqual(first.count, 5, "the first wrapper keeps updating")
+        XCTAssertEqual(second.count, 5, "and so does the second")
+
+        first.close()
+        transport.deliverChangeSet(makeChangeSet([(handle(7), 0, UInt32(6).undraEncoded())]))
+        frames.fire()
+        XCTAssertEqual(second.count, 6, "closing one wrapper leaves the other routed")
+        XCTAssertEqual(first.count, 5, "the closed one is not updated")
+        XCTAssertEqual(core.mirror.registeredCount, 1)
+
+        second.close()
+        XCTAssertEqual(core.mirror.registeredCount, 0, "the registration goes with the last wrapper")
+        XCTAssertEqual(transport.releases, [handle(7).rawValue, handle(7).rawValue], "each wrapper gave back its own reference")
+    }
+
+    /// Objects-followups O2(b): a `close()` racing an `adopt` of the same handle. The other thread adopts at the
+    /// moment the closing wrapper is marked closed and has not left the identity map: its routing and its observed
+    /// signals must survive the close (they were unregistered and cleared after `forget`, not atomically with it).
+    func testACloseRacingAnAdoptOfTheSameHandleLeavesTheNewWrapperRoutedAndObserved() throws {
+        let transport = FakeTransport()
+        let frames = ManualFrameScheduler()
+        let core = try makeCore(transport, frames: frames)
+        let old = core.adopt(handle(8)) { CountStore(adopting: $0, core: $1) }
+        core.observe(handle(8), signal: Observe.allSignals, on: true)
+        XCTAssertTrue(core.isObserved(handle(8)))
+
+        var adopted: CountStore?
+        UndraObject.testHookAfterMarkedClosed = { closing in
+            guard closing === old else {
+                return
+            }
+            UndraObject.testHookAfterMarkedClosed = nil
+            // The core answered another call with the same handle: one more reference, a new wrapper.
+            let made = core.adopt(handle(8)) { CountStore(adopting: $0, core: $1) }
+            core.observe(handle(8), signal: Observe.allSignals, on: true)
+            adopted = made
+        }
+        defer {
+            UndraObject.testHookAfterMarkedClosed = nil
+        }
+        old.close()
+        let new = try XCTUnwrap(adopted)
+        XCTAssertFalse(new === old)
+        XCTAssertEqual(core.mirror.registeredCount, 1, "the new wrapper is still registered")
+        transport.deliverChangeSet(makeChangeSet([(handle(8), 0, UInt32(9).undraEncoded())]))
+        frames.fire()
+        XCTAssertEqual(new.count, 9, "and still receives the changes")
+        XCTAssertTrue(core.isObserved(handle(8)), "its observed signals were not cleared by the old wrapper's close")
+        new.close()
+        XCTAssertFalse(core.isObserved(handle(8)), "the last wrapper's close clears them")
+        XCTAssertEqual(core.mirror.registeredCount, 0)
+    }
+
+    /// Adopting on the main thread while other threads close what was adopted, of one handle, leaves the last wrapper
+    /// routed, observed and counted exactly once afterwards (no lost registration, no deadlock between the identity
+    /// map's lock and the mirror's or the core's).
+    func testAdoptingWhileOtherThreadsCloseTheSameHandleIsConsistent() throws {
+        let transport = FakeTransport()
+        let frames = ManualFrameScheduler()
+        let core = try makeCore(transport, frames: frames)
+        let closing = DispatchGroup()
+        for _ in 0 ..< 600 {
+            let wrapper = core.adopt(handle(9)) { CountStore(adopting: $0, core: $1) }
+            core.observe(handle(9), signal: Observe.allSignals, on: true)
+            DispatchQueue.global().async(group: closing) {
+                wrapper.close()
+            }
+        }
+        XCTAssertEqual(closing.wait(timeout: .now() + 20), .success)
+        let last = core.adopt(handle(9)) { CountStore(adopting: $0, core: $1) }
+        core.observe(handle(9), signal: Observe.allSignals, on: true)
+        XCTAssertEqual(core.mirror.registeredCount, 1, "only the last wrapper is registered")
+        transport.deliverChangeSet(makeChangeSet([(handle(9), 0, UInt32(3).undraEncoded())]))
+        frames.fire()
+        XCTAssertEqual(last.count, 3)
+        last.close()
+        XCTAssertEqual(core.mirror.registeredCount, 0)
+        XCTAssertEqual(core.identities.count, 0)
+        XCTAssertFalse(core.isObserved(handle(9)))
+    }
+
     func testStatisticsReadHostReferencesTolerantly() {
         XCTAssertEqual(UndraStats(json: "{\"live_handles\":2,\"host_refs\":3}").hostRefs, 3)
         XCTAssertEqual(UndraStats(json: "{\"live_handles\":2}").hostRefs, 0)

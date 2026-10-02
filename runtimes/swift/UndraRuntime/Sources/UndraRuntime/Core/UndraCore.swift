@@ -805,29 +805,35 @@ public final class UndraCore: @unchecked Sendable {
         }
     }
 
-    /// Releases a handle. `UndraObject.close()` calls it; call it directly only for a handle that
-    /// was obtained from `construct` and never wrapped.
+    /// Releases a handle. Call it directly only for a handle that was obtained from `construct` and never
+    /// wrapped: a wrapper's `close()` gives its reference back through ``releaseExtraReference(_:)``, after the
+    /// identity map decided whether it was the handle's last wrapper.
     public func release(_ handle: UndraHandle) {
         if isShutDown {
             return
         }
-        let reconnecting = state.withLock { (current: inout State) -> Bool in
-            current.observed[handle] = nil
-            current.constructed.remove(handle)
-            if case .reconnecting = current.connection {
-                // The server keeps the object for us (ADR-051); it is released when the connection is back.
-                current.releasedWhileDown.append(handle)
-                return true
-            }
-            return false
-        }
-        if !reconnecting {
-            transport.release(handle: handle)
+        forgetHandleState(handle)
+        releaseExtraReference(handle)
+    }
+
+    /// Whether the host remembers observing some signal of `handle` (tests).
+    func isObserved(_ handle: UndraHandle) -> Bool {
+        return state.withLock { (current: inout State) -> Bool in
+            return current.observed[handle] != nil
         }
     }
 
-    /// Gives back one reference to `handle` that a reply carried while a live wrapper already owns one
-    /// (``adopt(_:_:)``): the wrapper's own bookkeeping (what it observes, that the host holds it) stays.
+    /// Forgets what the host remembers of `handle` for a reconnect: the signals it observes and that it holds it.
+    func forgetHandleState(_ handle: UndraHandle) {
+        state.withLock { (current: inout State) -> Void in
+            current.observed[handle] = nil
+            current.constructed.remove(handle)
+        }
+    }
+
+    /// Gives back one reference to `handle`, with nothing else: the one a reply carried while a live wrapper already
+    /// owns one (``adopt(_:_:)``), or a closing wrapper's own once the identity map has decided what of the handle's
+    /// state goes with it. What the host remembers of the handle (what it observes, that it holds it) stays.
     func releaseExtraReference(_ handle: UndraHandle) {
         if isShutDown {
             return

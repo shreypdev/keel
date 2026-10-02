@@ -48,9 +48,8 @@ open class UndraObject: @unchecked Sendable {
         if !first {
             return
         }
-        core.identities.forget(self)
-        core.mirror.unregister(handle)
-        core.release(handle)
+        stopHoldingTheHandle()
+        core.releaseExtraReference(handle)
         core.noteHandleReleased()
     }
 
@@ -67,14 +66,35 @@ open class UndraObject: @unchecked Sendable {
         if !first {
             return
         }
+        stopHoldingTheHandle()
         core.releaseExtraReference(handle)
         core.noteHandleReleased()
-        kept.reattach()
     }
 
-    /// Registers again what a duplicate wrapper of the same handle may have replaced. Nothing for a
-    /// plain object.
-    func reattach() {}
+    /// Stops being a wrapper of the handle: this wrapper's own routing goes, and the handle's state (what the app
+    /// observes, that the host holds it) goes only with the **last** wrapper of the handle, decided under the identity
+    /// map's lock. A wrapper of the same handle that another thread adopted while this one was closing therefore
+    /// keeps its routing and its observed signals (it used to lose both: the unregister and the release that
+    /// followed `forget` were not atomic with it).
+    private func stopHoldingTheHandle() {
+        #if DEBUG
+        UndraObject.testHookAfterMarkedClosed?(self)
+        #endif
+        let core = self.core
+        let handle = self.handle
+        core.identities.leave(self) { last in
+            core.mirror.unregister(handle, owner: self)
+            if last {
+                core.forgetHandleState(handle)
+            }
+        }
+    }
+
+    #if DEBUG
+    /// Runs when a wrapper has been marked closed and has not yet left the identity map: lets a test play the other
+    /// thread that adopts the handle at exactly that moment.
+    nonisolated(unsafe) static var testHookAfterMarkedClosed: ((UndraObject) -> Void)?
+    #endif
 
     deinit {
         close()
@@ -110,32 +130,15 @@ open class UndraStore: UndraObject, @unchecked Sendable {
     /// The store's `no_coalesce` signals, as registered.
     private let noCoalesce: Set<UInt32>
 
+    /// Registers this wrapper's own function with the mirror, next to the other wrappers' of the same handle: an
+    /// `Arc<Self>` constructor that returns an object the host already wraps makes a second wrapper (a Swift
+    /// initializer cannot return the first), and the first must keep receiving the changes.
     private func registerWithMirror() {
-        core.mirror.register(handle, noCoalesce: noCoalesce) { [weak self] signal, op, reader in
+        core.mirror.register(handle, owner: self, noCoalesce: noCoalesce) { [weak self] signal, op, reader in
             guard let store = self else {
                 return
             }
             store.apply(signal: signal, op: op, reader: &reader)
-        }
-    }
-
-    /// A duplicate wrapper of this store's handle was made (it registered with the mirror in its
-    /// place) and discarded: register again and observe again, so the mirror delivers here.
-    nonisolated override func reattach() {
-        let again = { @MainActor @Sendable [weak self] () -> Void in
-            guard let store = self else {
-                return
-            }
-            store.registerWithMirror()
-            store.core.observe(store.handle, signal: Observe.allSignals, on: true)
-        }
-        // Stores are made on the main actor, so this runs there; the hop is only a safety net.
-        if Thread.isMainThread {
-            MainActor.assumeIsolated(again)
-        } else {
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated(again)
-            }
         }
     }
 
