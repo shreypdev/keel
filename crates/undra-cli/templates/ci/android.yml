@@ -23,3 +23,17 @@
 @@INSTALL_UNDRA@@      - name: Build (the undraBuild Gradle task builds the core first)
         working-directory: android
         run: ./gradlew assembleDebug
+      # The symbol files of the core (ADR-046): `undra build --release` strips the library that ships and keeps the
+      # unstripped one below build/symbols/android (and native-debug-symbols.zip, the Play Console layout). Keep them with
+      # the build; upload them to Crashlytics (unstrippedNativeLibsDir), Sentry or the Play Console, and resolve a crash
+      # report by hand with `undra symbolicate report.json --symbols <the unpacked artifact>`.
+      - name: Symbol files (release build of the core)
+        if: github.event_name == 'push'
+        run: undra build --platform android --release
+      - name: Upload the symbol files
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: @@NAMESPACE@@-android-symbols
+          path: build/symbols/
+          if-no-files-found: error

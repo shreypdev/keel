@@ -21,3 +21,14 @@
       - name: Build (the undra() Vite plugin builds the core first)
         working-directory: web
         run: npm run build
+      # The web build always writes the symbol files of the core (ADR-046): the debug module with DWARF and names, and
+      # the function map that names every `wasm-function[i]` of a production stack trace. Keep them with the build;
+      # `undra symbolicate report.json --symbols <the unpacked artifact>` resolves a report by hand, and Sentry takes
+      # the debug module as a debug file.
+      - name: Upload the symbol files
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: @@NAMESPACE@@-web-symbols
+          path: build/symbols/
+          if-no-files-found: error
