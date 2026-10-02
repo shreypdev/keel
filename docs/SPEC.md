@@ -837,7 +837,7 @@ All methods return `Promise` (uniform across main-thread, worker and remote mode
 
 ### 10.3a Objects and callbacks (ADR-040, ADR-041)
 
-The three languages generate the same behaviour in their own idiom; the runtime provides the same four helpers under the same names (§17): `adoptObject`/`adoptOptional`/`adoptList` (decode the handle or handles of a reply body and adopt each into the core's identity map, §11), `requireOwn` (a typed refusal of an object of another core) and the callback registry `core.callbacks`.
+The three languages generate the same behaviour in their own idiom; each runtime provides the same helpers (§17): `adopt` and `adoptObject`/`adoptOptional`/`adoptList` (decode the handle or handles of a reply body and adopt each into the core's identity map, §11), `requireOwn` (a typed refusal of an object of another core) and the callback registry (`core.callbacks`; in TypeScript `callbacks(core)`, with `lend`/`giveBack` and `lending` as functions that take the core first, so an app that uses none of it ships none of it, ADR-052).
 
 ```swift
 // returns: the generated class, never a raw handle; one wrapper per handle (`a.mailbox("inbox") === a.mailbox("inbox")` while the first is alive)
@@ -859,7 +859,7 @@ public func upload(file: FileRef, listener: any UploadListener) async throws -> 
 ```
 
 ```kotlin
-class Account private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
+class Account internal constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     fun mailbox(folder: String): Mailbox
     suspend fun openThread(id: ThreadId): Thread                         // throws MailError
     fun drafts(): Mailbox?;  fun mailboxes(): List<Mailbox>
@@ -885,7 +885,7 @@ export interface UploadListener {
 export function weakUploadListener(target: UploadListener): UploadListener;
 ```
 
-* Every constructor goes through `adopt` too (a constructor returning `Arc<Self>` returns the same handle twice). An object with no constructor that a method or function returns has no public initialiser.
+* Every constructor goes through `adopt` too (a constructor returning `Arc<Self>` returns the same handle twice). Kotlin's `X(ctx)` is therefore `X.create(ctx)` behind a companion `operator fun invoke` (a Kotlin constructor cannot return an existing wrapper) and the wrapper's own constructor is `internal`, so one generated class can make another's; in Swift a `new` constructor is a convenience initialiser, which cannot return one either: a `new` that returns an interned `Arc<Self>` while its wrapper is alive gives a second wrapper that owns its own reference (counting stays right, `===` does not hold), and the named constructors (static functions) go through `adopt`. An object with no constructor that a method or function returns has no public initialiser.
 * An object parameter is written as its handle after `requireOwn` and the wrapper stays reachable until the call is sent (`withExtendedLifetime`, `Reference.reachabilityFence`; in TypeScript the finalizer cannot run inside the synchronous send). **Foreign objects:** two cores hand out the same handle numbers (§1.2), so passing an object of one core to another would silently name a different object; the generated code refuses before anything is sent, with `UndraCallError.refused` naming the class and saying it belongs to another core (a command reports it through `onError` and does nothing). A raw-API caller falls back on the core's own checks (stale or wrongly typed: status 5).
 * A callback parameter is written as the instance handle `core.callbacks.lend(impl)` returns; the generated code gives it back (`giveBack`) when the call is refused (status 5) or never reached the core, and every other outcome means the core owns the reference. `main` delivery runs the implementation on the main thread through the mirror's drain (§11.1); `background` (`PortDef.background`) on a serial executor per instance. An implementation that throws its own `E` answers status 1; any other throw is reported (`onError`, operation `Interface.method`) and answered status 2; the core turns that into `E::from(PortError::Unavailable)`. The registry holds an implementation **strongly** while the core holds a reference; a cycle (a view model that holds the object that holds the listener that is the view model) is broken with the generated weak wrapper or by returning an object whose `close()` drops the listener (the subscription-object pattern).
 * The id namespace of a callback interface carries its port id, its method ids and the two reserved methods, `releaseInstance` and `cancelCall` (E0051 if a method is named like either).
@@ -1489,6 +1489,8 @@ Ports in `wasm-worker` mode (ADR-049, worker protocol 3, §11.1): the core canno
 
 Generated stores call `super(core, handle)`, or `super(core, handle, { noCoalesce: [ids] })` when the store has `no_coalesce` signals.
 
+Objects and callbacks (ADR-040, ADR-041; §10.3a, §11), free functions of the package so a bundle that uses none ships none (ADR-052): `adopt<T extends UndraObject>(core, handle: bigint, type: UndraObjectClass<T>): T` (the live wrapper for `handle`, giving the extra reference back at once, or a new one), `adoptObject` / `adoptOptional` / `adoptList(core, body: Uint8Array, type)` (the reply body's handle or handles, each adopted as it is read; a store is observed before it is returned), `requireOwn(core, object): bigint` (rejects `UndraCallError.Refused` for an object of another core), `callbacks(core): UndraCallbacks` (`liveCount`, `count(impl)`, `lend(impl, callback)`, `giveBack(instance)`; strong, interning, over-release reported to `onError`, entries dropped when the connection is lost or the core closes), `lend(core, impl, callback): bigint`, `giveBack(core, instance)`, `lending(core, send, signal?)` (lends what a call's arguments need and gives it back when the call was refused or never sent; what generated calls use), `callbackGone()`. A callback interface's bridge registers its port with `core.registerPort` the first time an instance is lent. `PortImpl.methods` receive the `portCallId` as a second argument (0 for fire-and-forget). `UndraStats.hostRefs`, `MirrorStats.callbacksDelivered`.
+
 ### 17.2 Kotlin (`dev.undra.runtime`)
 
 ```kotlin
@@ -1542,6 +1544,8 @@ Opt-in ports (§8.1), in `dev.undra.runtime.adapters`: the twelve types (errors 
 
 Main-thread delivery through `UndraDispatchers.main` (Android: `Dispatchers.Main.immediate`; JVM: a single-thread executor), at the frames of `MirrorOptions.framePacer` (§11.1). Generated stores extend `UndraStore(core, handle)`, or `UndraStore(core, handle, noCoalesce = setOf(ids))` when the store has `no_coalesce` signals.
 
+Objects and callbacks (ADR-040, ADR-041; §10.3a, §11): `UndraCore.adopt(handle: Long, make: (UndraCore, Long) -> T): T`, `adoptObject(body, make): T`, `adoptOptional(body, make): T?`, `adoptList(body, make): List<T>`, `requireOwn(value: UndraObject?)` and `requireOwn(values: Iterable<UndraObject>)` (throw `UndraCallError.Refused` for an object of another core), `callbacks: UndraCallbacks` (`lend(implementation: Any): ULong`, `giveBack(instance)`, `giveBackIfRefused(error, instance)` (what generated calls use: the references go back when the call was refused or never reached the core), `release(instance)`, `liveCount`, `count(of)`, `instanceOf(implementation)`), `abstract class UndraCallbackBridge<T>` (generated per interface and passed to `CoreEntry(callbacks = listOf(..))`: the port id, the reserved ids, `background`, the coalesced method ids and `invocation(methodId, reader)`, a `Notify` or an `Ask` that answers the encoded value), `UndraCallbackGoneException`, `reachabilityFence(value)` (the JDK's from API 28, a volatile store before). Handles are 24 bits of slot and 40 of generation. `UndraStats.hostRefs`, `UndraStats.liveCallbacks`, `MirrorStats.callbacksDelivered`.
+
 ### 17.3 Swift (`UndraRuntime`)
 
 ```swift
@@ -1587,6 +1591,8 @@ public protocol UndraRecord: UndraCodec, Sendable, Hashable {}; public protocol 
 Opt-in ports (§8.1): the twelve types (public, `Sendable`, `Hashable`, `Codable`), the protocols `WebSocketAdapter` (`connect(url:protocols:headers:) async throws(WsError) -> any WebSocketConnection`; the connection has `negotiatedProtocol`, `messages: AsyncThrowingStream<WsMessage, Error>`, `send(_:) async throws(WsError)`, `close(code:reason:) async`), `SseAdapter` / `SseStream` (`events`), `DbAdapter` / `DbConnection` (`execute`, `query`, `executeScript`, `close`, `async throws(DbError)`), the bindings `WebSocketPortAdapter`, `SsePortAdapter`, `DbPortAdapter(_:busyTimeoutMs:)` (each an `UndraAdapter`, closing what it opened in `detach()`), `SseParser`, and the defaults `URLSessionWebSocketAdapter`, `URLSessionSseAdapter`, `SQLiteDbAdapter`, which `Adapters.platformDefault` registers.
 
 Swift payload types live under `enum Wire { … }` (`Wire.Log`, `Wire.Event`, …) to avoid clashing with generated port protocols. Generated stores call `super.init(core: core, handle: handle)`, or `super.init(core: core, handle: handle, noCoalesce: [ids])` when the store has `no_coalesce` signals. Drains run from a `CADisplayLink` on iOS, tvOS and visionOS and on the main actor's next turn elsewhere (§11.1).
+
+Objects and callbacks (ADR-040, ADR-041; §10.3a, §11): `UndraCore.adopt(_ handle: UndraHandle, _ make: (UndraHandle, UndraCore) -> Object) -> Object`, `adoptObject` / `adoptOptional` / `adoptList(_ body: [UInt8], _ make:)`, `requireOwn(_:)` for an object, an optional one and a list (throw `UndraCallError.refused` for an object of another core), `UndraObject: Hashable` by identity, `callbacks: UndraCallbacks` (`lend(_ implementation: AnyObject) -> UInt64`, `giveBack(_:)`, `release(_:)`, `liveCount`, `count(of:)`), `UndraCallbackInterface` / `UndraCallbackMethod` (what the generated entry installs: the port id, the reserved ids, one entry per method with its `coalesce` flag), `UndraWeakCallback` / `UndraWeakMainCallback` (what the generated `Weak<Name>` classes conform to), `UndraHandle(index:generation:)` with a `UInt64` generation. A generated callback protocol refines `Sendable` (the implementation crosses from the main actor into the nonisolated async methods). The entry registers the callback ports right after the core starts, before `load` returns. `UndraStats.hostRefs`, `MirrorStats.callbacksDelivered`.
 
 ### 17.4 React Native (`@undra/react-native`, ADR-038)
 
