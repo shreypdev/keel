@@ -22,6 +22,7 @@ enum UndraBootstrap {
     /// and no rebuild of the app (ADR-053).
     @MainActor
     static func start() throws {
+        registerBackground()
         #if DEBUG
         if let url = ProcessInfo.processInfo.environment["UNDRA_DEV_URL"], !url.isEmpty {
             devURL = url
@@ -42,5 +43,23 @@ enum UndraBootstrap {
         }
         #endif
         core = try @@CORE_ENTRY@@.load()
+    }
+
+    /// Lets the OS give the app background windows (ADR-046): the runtime then replays offline mutations that
+    /// are still queued and refetches stale queries while the app is not on screen, and asks for the next window
+    /// when the app goes to the background with work waiting. It must run before the app finishes launching (this
+    /// is called from `MainApp.init`) and once: a second call, after `undra dev` reloaded the core, does nothing.
+    /// The identifiers (`<bundle id>.undra.processing` and `.refresh`) are listed in `Config/Info.plist`. The
+    /// loader is only used when the OS launches the app in the background and the core is not loaded yet.
+    ///
+    /// To try it on a device (the simulator has no background scheduler), background the app with work waiting, pause it in the debugger and evaluate
+    /// `e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"<bundle id>.undra.refresh"]`.
+    private static func registerBackground() {
+        guard let bundleId = Bundle.main.bundleIdentifier else {
+            return
+        }
+        UndraBackground.register(taskIdentifier: bundleId + ".undra") {
+            try @@CORE_ENTRY@@.load()
+        }
     }
 }
