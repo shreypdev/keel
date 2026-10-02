@@ -299,7 +299,7 @@ fetched and searched. Verdicts:
 | D07 | a page served by `undra dev` shows every store's live value and a timeline of every change-set | docs/DEV_LOOP.md:254-263; adr-054 | REPO | A | verified |
 | D08 | a scrubber restores the core to an earlier step while the app follows | docs/DEV_LOOP.md:258-261 | REPO | A | verified |
 | D09 | it sits behind a per-run token | docs/DEV_LOOP.md:285-287 | REPO | A | verified |
-| D10 | a screen that shows a query is carried too: its query handle comes back on the same handle, with no code in the app, and its next fetch runs the code that was just rebuilt | adr-059 (section 3, "Dev reload, same schema"); docs/DEV_LOOP.md:110-125; SPEC:509; `crates/undra-cli/tests/dev_reload.rs`, `crates/undra-query/tests/restore.rs` | REPO | A | **added** (`reload-handles`, 2026-10-02) |
+| D10 | a screen that shows a query is carried too: its query handle comes back on the same handle, with no code in the app for the handle (a value the app set by a call outside its stores, such as a server's address, is told to the new core again: the playground's three apps do it on reconnect), and its next fetch runs the code that was just rebuilt | adr-059 (section 3, "Dev reload, same schema", implementation note 10); docs/DEV_LOOP.md ("State the core holds outside its stores"); SPEC:509; `crates/undra-cli/tests/dev_reload.rs`, `crates/undra-query/tests/restore.rs` | REPO | A | **added** (`reload-handles`, 2026-10-02) |
 
 ### Shipping an update, and shipping the app
 

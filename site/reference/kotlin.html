@@ -523,7 +523,7 @@ sealed class WorkshopError(message: String) : UndraException(message) {
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
 <p class="ref-names"><code>Live</code> <code>Probe</code> <code>Watch</code> <code>add</code> <code>addLater</code> <code>area</code> <code>balances</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>dbCells</code> <code>dbMigrate</code> <code>dbRun</code> <code>deposit</code> <code>echoAccount</code> <code>echoCents</code> <code>echoComposite</code> <code>echoDecimal</code> <code>echoFigure</code> <code>echoPrice</code> <code>echoPrimitives</code> <code>echoReceipt</code> <code>explode</code> <code>explodeDetached</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>loadableStatement</code> <code>localizedGreeting</code> <code>openAccount</code> <code>ownerOf</code> <code>parseCount</code> <code>ping</code> <code>sampleReceipt</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>setTickerFailing</code> <code>sseFollow</code> <code>statement</code> <code>storageStatus</code> <code>tickerFetches</code> <code>touchFeed</code> <code>version</code> <code>wsEcho</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>571 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>573 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Objects.kt" rel="noopener">Objects.kt</a></span></div><pre><code data-lang="kotlin">class Live internal constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /**
      * Forgets the connection without closing it: the port closes it going away (1001).
@@ -687,8 +687,10 @@ fun area(figure: Figure, ctx: UndraCore = UndraPlaygroundCore.core): Double
 fun balances(ctx: UndraCore = UndraPlaygroundCore.core): Map&lt;AccountId, Price&gt;
 
 /**
- * Tells the core where the server is. Call it once at start-up, before anything observes
- * [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
+ * Tells the core where the server is. Call it at start-up, before anything observes
+ * [`remote_todos`], and again whenever the core is a new one that kept its stores (after a dev
+ * reload or a web crash restart): the address lives in the core outside any store, so a snapshot
+ * does not carry it. Calling it again points the core elsewhere (cached data stays until it goes
  * stale).
  * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
  */

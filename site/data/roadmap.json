@@ -180,7 +180,7 @@
         },
         {
           "title": "Query handles across a reload (ADR-059)",
-          "text": "A query handle survives an undra dev reload, a devtools time travel, a web crash restart and an app's own restore, on the same handle and with no app code: the snapshot keeps what it is made of and the core builds it again when the app first uses it. A query without persist shows loading once after a reload."
+          "text": "A query handle survives an undra dev reload, a devtools time travel, a web crash restart and an app's own restore, on the same handle and with no app code for the handle: the snapshot keeps what it is made of and the core builds it again when the app first uses it. A query without persist shows loading once after a reload."
         }
       ]
     },

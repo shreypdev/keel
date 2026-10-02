@@ -109,9 +109,10 @@ new one starts fresh, and the line says why (`state reset: ...`):
   recomputed by the store's `restore` hook (the same code as its constructor).
 * **Query handles** carry over too, with their handles (ADR-059): the snapshot keeps what each handle is made of (its
   parameters, and the polling interval its screen set), the new core re-issues the handle, and builds it when the app's
-  reconnect observes it again. A query screen (the playground's Remote tab) keeps working with **no app code**: the tab
-  observes its handle again after the reconnect, `refetch()` and pull-to-refresh are accepted, and polling runs, all on
-  the code that was just rebuilt. What the screen shows meanwhile depends on the query:
+  reconnect observes it again. A query screen (the playground's Remote tab) keeps working with **no code of its own for
+  the handle**: the tab observes it again after the reconnect, `refetch()` and pull-to-refresh are accepted, and polling
+  runs, all on the code that was just rebuilt (the one thing the app does is below: state held outside the stores). What
+  the screen shows meanwhile depends on the query:
   * a query **without `persist`** shows its **loading state once**, then the data the rebuilt code fetched: a query's data
     is never in the snapshot, and the old process's cache is gone with it;
   * a query **with `persist`** shows the data its last fetch stored as soon as the app's `Kv` has answered, and its `stale`
@@ -127,6 +128,11 @@ new one starts fresh, and the line says why (`state reset: ...`):
   handles are stale after a reload: a call on one fails with `UndraCallError.Refused` (the core's status 5), the line above
   counts them, and the app creates them again (it calls the method that returned the object again, or constructs it again).
   A store's `Lazy<T>` list carries over with its store and pages again.
+* **State the core holds outside its stores** does not: a snapshot is the stores, so a value that a call put in a runtime
+  extension (the playground's `configureRemote`, which sets the server's address) is gone from a rebuilt core. Tell the
+  new core again when the runtime is connected again, and fetch what the screen tried before it knew (the playground's
+  three apps do this when their connection goes from `reconnecting` back to `connected`: `configureRemote(..)`, then
+  `refetch()`). A web core restarted after a crash is the same case (ADR-049's `onCoreRestarted`).
 * **Tasks, timers and streams** do not: a task is a future, not data. A call that is running when the core is replaced gets
   up to two seconds to finish (so an `async` command in the middle of a port call completes); one that does not is cancelled
   and fails as `Unavailable`, and a store it half-wrote keeps that value (a `loading = true` nobody clears: tap again). A store

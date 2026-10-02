@@ -534,3 +534,11 @@ removed, the reviver reachable only through `add_reviver`, the wording, S35 in t
 9. **A wrongly typed use builds.** `Runtime::object::<T>` of a dormant handle builds the object before it can tell the type
    is wrong for `T` (a `LazyPage` call aimed at a query handle, say): the handle is the host's own, the cost is one build,
    and the answer is the ordinary wrong-type refusal.
+10. **State outside the stores is the app's to tell again.** The device proof (iPhone 17 Pro simulator and the `undra` AVD, the
+    Remote tab across a reload) showed the handle machinery working and the Remote tab still failing with "the remote server
+    is not configured": the server's address is set by a call (`configureRemote`) into a runtime extension, which is not a
+    store, so no snapshot carries it. That is ADR-049's rule for a web core restarted after a crash, and a rebuilt core is the
+    same case. The three playground apps now tell the new core again once the runtime is connected again (`reconnecting`
+    back to `connected`: `configureRemote(..)`, then `refetch()` on the Remote tab's handle); `configure_remote`'s doc says it
+    and `docs/DEV_LOOP.md` lists "state the core holds outside its stores" next to what carries over. Nothing in the core
+    changed: a framework that persisted extensions would need a schema description of them (R1), which is a separate decision.
