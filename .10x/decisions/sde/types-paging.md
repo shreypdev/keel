@@ -124,6 +124,14 @@ fetchingNextPage: Signal<boolean>; fetchNextPage(): Promise<void> }`.
   `Result<undra::query::Page<T, C>, E>` return (`Page { items: Vec<T>, next: Option<C> }`, `C` defaults to `String`);
   `ctx.query().infinite::<FeedQuery>(params)`; `CacheView::update_items::<Q>(params, |items| ..)`.
 
+## Scenario numbers
+
+`prod-ops` (landing on `main` before this piece) took S29 (panic reports) and S30 (background runs). This piece's contract
+scenarios are **S31 newtypes, generics and leaf types**, **S32 paged queries and lazy lists**, **S33 polling**. `prod-ops` also adds a
+standard `Diagnostics` port, three standard types and `run_background`, so every schema hash moves once more when this branch
+crosses it: regenerate, do not hand-merge. If polling needs a lifecycle signal beyond the existing `Lifecycle` port events, the
+`BackgroundReport`/`Lifecycle` path of `prod-ops` is the one to use (the integrator adapts at the final merge of `main`).
+
 ## Merge protocol
 
 Each sub-piece commits small (`type(scope): summary`, trailer `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`) in its own
