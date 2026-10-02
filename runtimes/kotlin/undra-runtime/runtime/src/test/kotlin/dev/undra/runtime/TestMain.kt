@@ -41,6 +41,8 @@ fun main() {
         CoalesceTests(),
         CoalesceModelTests(),
         StoreTests(),
+        ObjectIdentityTests(),
+        CallbackTests(),
         PortTests(),
         InprocTransportTests(),
         CoreEntryTests(),
