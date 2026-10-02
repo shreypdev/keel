@@ -714,7 +714,7 @@ tolerance = 0.05
 # registration and codecs are lazy chunks. The item-by-item verdict is ADR-052's review note of 2026-10-02.
 [size."web/hello-runtime-js"]
 budget_gzip_bytes = 21700
-measured_gzip_bytes = 21756
+measured_gzip_bytes = 21666
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------
