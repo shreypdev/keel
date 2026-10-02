@@ -99,7 +99,9 @@ of the query's parameters (the cache key's bytes, which are the constructor's ar
 observer set for itself (`set_poll_interval`), if any. Its fingerprint is `fnv1a64` of the canonical closure of the
 query's parameters by name (`Schema::closure_of_params`, ADR-037's function for a mutation's input), `0` for a query
 the schema does not describe, computed once per query id and cached. The record holds no time, no data and nothing
-of the cache. A query handle still answers `transient() = true`: it is not snapshotted as a store.
+of the cache, and never a handle or a callback instance: a query's parameters are values (objects and callbacks are
+refused there, ADR-040 decision 9). A query handle still answers `transient() = true`: it is not snapshotted as a
+store.
 
 **1.2 The snapshot (`Runtime::snapshot`).** After the stores, one **recreation record** for every object the host
 holds a reference to whose `recreation()` is `Some`, and for every dormant handle (1.3): the record shape layout 2
