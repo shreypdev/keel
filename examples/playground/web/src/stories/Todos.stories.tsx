@@ -2,7 +2,7 @@ import { RemoteTodosQueryHandle, Todos, UndraIds, configureRemote } from "@playg
 import { useSignal } from "@undra/runtime/react";
 import { PreviewCore, RecordedCore, type Seed, parseSeed, response } from "@undra/testkit";
 import { type ReactElement, useEffect, useState } from "react";
-import wasmUrl from "../../../build/web/undra_core.wasm?url";
+import wasmUrl from "../../../build/web/playground_core.wasm?url";
 // The testing kit's fixtures (docs/TESTING.md): a recorded session of the Todos store, and a seed for the fakes.
 import seedText from "../../../../../testkit/fixtures/seed.json?raw";
 import sessionText from "../../../../../testkit/fixtures/session-todos.json?raw";
