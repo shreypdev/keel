@@ -672,10 +672,10 @@ measured = 1.43
 # description, the streamed converter) are in every core, since `undra_restore` is; 102,722 -> 119,565.
 # Hooks, the value decoder and the E0066 check are linked only by a core that has a `#[undra::migrate]`.
 # After main's ABI table (ADR-044) the merged core measured 120,188, over the budget; the persistence-v2 review
-# links the standard ports' Rust dispatchers by use (ADR-052 note): 116,731.
+# links the standard ports' Rust dispatchers by use (ADR-052 note): 116,731; 116,800 with devtools' inspector seam.
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 116731
+measured_gzip_bytes = 116800
 tolerance = 0.05
 
 # What a hello-world app ships of the JavaScript runtime: `@undra/runtime` as the template's

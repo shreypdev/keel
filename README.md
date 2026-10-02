@@ -47,7 +47,7 @@ real hardware in the device phase (tracked in [`bench/RESULTS.md`](bench/RESULTS
 | One insert into an observed 10,000-row list | **6.3 µs** | ≤ 20 µs |
 | Change-set for 100 dirty signals | **2.3 µs** | ≤ 100 µs |
 | Cold start restoring 100 KB of state | **71 µs** | ≤ 3 ms |
-| Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->116.7 KB<!--/measured-->** gzipped | ≤ 120 KB |
+| Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->116.8 KB<!--/measured-->** gzipped | ≤ 120 KB |
 | Android core (`.so`, per ABI, release) | **831 KB** | ≤ 1.2 MB |
 
 The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.sh) builds the
