@@ -249,7 +249,7 @@ records, the fakes, scenarios, SPEC sections, docs. The decisions below are the 
 
 1. **The report is the record of decision 4.1, delivered as decided**: `Diagnostics.panicked(report)`, fire and forget,
    `port_call_id 0`, after the FATAL record, once per contained panic, at every containment site the ADR lists plus
-   the executor's and the timer's wakers and the `undra-ffi` boundary entries. A replies to a call with id 0 is ignored by
+   the executor's and the timer's wakers and the `undra-ffi` boundary entries. A reply to a call with id 0 is ignored by
    the runtime (`Runtime::port_reply`), as `undra-ffi` already did, so a remote dev client may answer one like any port
    call. In `undra dev` the report therefore reaches the attached app's `onPanic`.
 2. **Frames without the `backtrace` crate.** `undra-ffi` reads the stack with the platform unwinder
@@ -320,13 +320,13 @@ records, the fakes, scenarios, SPEC sections, docs. The decisions below are the 
     read. A wasm frame resolves to the function and its definition line; the panic's own `location` has the line.
 14. **Shipped artefacts did not grow** (a test asserts it): Android `.so` smaller (the NDK's `llvm-strip` beats the
     linker's), the iOS linked app byte-identical, the host dylib +16 bytes (one `N_OPT` stab Apple `strip` cannot remove),
-    the hello-world web core +2,109 bytes gzipped from the ADR's *schema and dispatch*, not the symbols
-    (117,081 to 119,190: the standard surface is in every schema, `run_background` is dispatched by every core, and the
+    the hello-world web core +2,146 bytes gzipped from the ADR's *schema and dispatch*, not the symbols
+    (117,081 to 119,227, measured on the merged tree: the standard surface is in every schema, `run_background` is dispatched by every core, and the
     wasm FATAL record carries location and operation; `--no-symbols` reproduces the old build's size exactly).
-    The hello-world JavaScript runtime grew by 1,384 bytes gzipped (25,984 to 27,368: 704 up front, 855 for the lazily
+    The hello-world JavaScript runtime grew by 1,401 bytes gzipped (25,984 to 27,385 on the merged tree: 704 up front, 855 for the lazily
     imported report builder, which the committed size script folds into its one chunk), over the 26,000 gate: the budget
-    `web/hello-runtime-js` is raised to 27,500 in `bench/budgets.toml` (proposed; ts-size-e4's script, which leaves
-    dynamically imported modules out, would measure 25,026).
+    `web/hello-runtime-js` is raised to 27,500 in `bench/budgets.toml` and recorded at 27,385 (ADR-052 restates it;
+    ts-size-e4's script, which leaves dynamically imported modules out, would measure about 25,000).
 15. **The Android release build ignored ADR-052's home remap** (17 `/Users/<name>` strings in the baseline `.so`); fixed
     (`cargo ndk` gets the remap through `--config build.rustflags`).
 16. **`.lldbinit`**: Rust 1.98's sysroot has `lldb_lookup.py` and no `lldb_commands`, so the generated file is one `script` line
