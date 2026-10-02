@@ -33,13 +33,15 @@ the deviations, numbers and counts.
 
 ### The platform contract (what Swift, Kotlin and TypeScript implement, with the same names)
 
-**Identity map.** `UndraCore.adopt(handle, make)` returns the live wrapper for `handle` (and gives the extra
-reference back at once with `release`), or makes one with `make`, registers it weakly and returns it. Keyed by handle
-number under the core's own lock. The wrapper's `close()`/finalizer releases the one reference it owns (at most once).
-Constructors go through `adopt` too (an `Arc<Self>` constructor returns the same handle twice). Helpers generated code
-calls (same names in all three): `adoptObject(body, make)`, `adoptOptional(body, make)`, `adoptList(body, make)` (decode
-the reply body's handle(s), adopt each as it is read), `requireOwn(object)` (a typed refusal for an object of another
-core, below). Swift's `UndraObject` is `Hashable` by identity.
+**Identity map.** `adopt(handle, make)` returns the live wrapper for `handle` (and gives the extra reference back at once
+with `release`), or makes one with `make`, registers it weakly and returns it. Keyed by handle number under the core's own
+lock. The wrapper's `close()`/finalizer releases the one reference it owns (at most once). Named constructors go through
+`adopt` too (an `Arc<Self>` constructor returns the same handle twice). Helpers generated code calls: `adoptObject(body,
+make)`, `adoptOptional(body, make)`, `adoptList(body, make)` (decode the reply body's handle(s), adopt each as it is read),
+`requireOwn(object)` (a typed refusal for an object of another core, below). Swift's `UndraObject` is `Hashable` by
+identity. In Swift and Kotlin these are methods of `UndraCore`; **in TypeScript they are free functions that take the core
+first** (`adopt(core, handle, type)`, `adoptObject(core, body, type)`, `requireOwn(core, object)`), so an app that uses none
+of it ships none of it (ADR-052's gate on `web/hello-runtime-js`).
 
 **Foreign objects.** Two cores hand out the same handle numbers (a handle is a slot and a generation of one core's
 table), so a handle means something only to the core that issued it. The generated code refuses to send an object of
@@ -52,12 +54,16 @@ nothing. The core's own checks (stale, wrong type) remain the second line for a 
 wrapper must stay reachable until the call is sent (`withExtendedLifetime` in Swift, `Reference.reachabilityFence`
 in Kotlin; in TypeScript the finalizer cannot run inside the synchronous send).
 
-**Callback registry.** `UndraCore.callbacks` (one per core): `lend(impl) -> UInt64` returns the instance handle the
-host chose (non-zero, from a per-core counter, never reused), interning by object identity (a class instance in Swift
-and Kotlin, an object in TypeScript) and counting one reference per crossing; `giveBack(instance)` takes one back (the
-generated code does it when a call is refused, status 5, or never reached the core); `release(instance)` is what the
-core's `__release` calls; the entry goes at zero. An over-release is logged as an error, never frees early.
-`callbacks.liveCount` (and per-implementation `count(of:)`) is what the scenarios read.
+**Callback registry.** One per core: `lend(impl) -> instance` returns the instance handle the host chose (non-zero, from a
+per-core counter, never reused), interning by object identity (a class instance in Swift and Kotlin, an object in
+TypeScript) and counting one reference per crossing; `giveBack(instance)` takes one back (the generated code does it when a
+call is refused, status 5, or never reached the core: Kotlin's `giveBackIfRefused(error, instance)`, TypeScript's
+`lending(core, send, signal)`); `release(instance)` is what the core's `__release` calls; the entry goes at zero. An
+over-release is logged (TypeScript: reported to `onError`), never frees early. `liveCount` and `count(of:)` are what the
+scenarios read. Swift and Kotlin: `core.callbacks`; TypeScript: `callbacks(core)` and the free functions `lend(core, impl,
+callback)`, `giveBack(core, instance)`. Swift and Kotlin install the interfaces at load (the generated entry passes them:
+`UndraCallbackInterface` list, `CoreEntry(callbacks = ..)`); TypeScript registers an interface's port with the core the
+first time an instance is lent (messages stay in order on every transport, so this is equivalent).
 
 **Callback delivery.** The runtime registers one port per `#[undra::callback]` trait before `init` (the generated
 entry passes the list, `UndraIds`' callback ports). The registered port callback **only enqueues** and returns `1`
@@ -82,8 +88,8 @@ fire-and-forget method is only reported.
 Kotlin `Job.cancel()`, TypeScript aborts the `AbortSignal` that is the method's last argument. A reply that arrives
 anyway is discarded by the core.
 
-**Weak wrappers** (generated per trait): Swift `WeakUploadListener`, Kotlin `UploadListener.weak(target)`, TypeScript
-`weakUploadListener(target)`: forward while the target lives, then do nothing / answer unavailable.
+**Weak wrappers** (generated per trait): Swift `WeakReporter`, Kotlin `Reporter.weak(target)`, TypeScript
+`weakReporter(target)`: forward while the target lives, then do nothing / answer unavailable.
 
 **Stats.** `UndraStats` gains `hostRefs` (the core's `host_refs`); the mirror's stats `callbacksDelivered`; the registry's
 live count.

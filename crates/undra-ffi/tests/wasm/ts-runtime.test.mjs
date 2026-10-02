@@ -195,7 +195,7 @@ test("sync and async calls, typed errors and bad requests", async () => {
   const core = await boot();
   assert.equal(decodeValue(codecs.string, core.callSync(FREE, ids.fn("version"), new Uint8Array(0))), "undra-ffi test core 1");
   const calc = await calculator(core);
-  assert.ok(calc > 0xffff_ffffn);
+  assert.ok(calc >> 24n > 0n, "a handle carries its generation in the high 40 bits (ADR-040)");
   assert.equal(decodeValue(codecs.i64, callSync(core, calc, "add", concat(i64(2), i64(3)))), 105n);
   // The async method runs on undra_poll; its timer is a setTimeout that calls undra_timer_fired.
   assert.equal(decodeValue(codecs.i64, await call(core, calc, "slow_add", concat(i64(2), i64(3)))), 105n);
