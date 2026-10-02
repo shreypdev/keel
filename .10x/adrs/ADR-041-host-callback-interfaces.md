@@ -289,4 +289,8 @@ text left room, and the deviations:
   `boundary/callback/async_roundtrip` 182.7 ns, each with a budget in `bench/budgets.toml` (`bench/RESULTS.md`, finding 6).
 * **Docs**: `site/docs/callbacks.html` (a guide, next to Ports), SPEC 5.7, 6, 10.3a, 11 and 17, the playground's
   `workshop.rs` for the example that runs.
+* **Platform limits.** TypeScript: after a crash-recovery restart the callback registry's entries are not dropped (no restart
+  hook yet). Swift: with typed throws (the default) a weak wrapper's `async` method called directly after its target is gone
+  cannot return (there is no `E` value to throw); the core never calls it in that state, and with `swift_typed_throws =
+  false` it throws `.unavailable(.closed)`. A callback over `undra dev` has unit tests but no end-to-end WebSocket test.
 

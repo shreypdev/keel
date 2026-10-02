@@ -300,4 +300,10 @@ deviations:
 * **Docs** (item 9): `site/docs/objects.html` (a guide, next to Ports) instead of a cookbook recipe: the cookbook's
   recipes are checked against code the site builds, and this one is the playground's own `Workshop`. SPEC 1.2, 2.1,
   3.1, 4.1, 5.4, 5.9, 10.3a, 11, 12, 16 and 17 carry the rules.
+* **Platform limits** (`.10x/decisions/sde/objects-callbacks.md` has the detail). Swift: a `new` constructor is a convenience
+  initialiser and cannot return an existing wrapper, so an `Arc<Self>` constructor that returns an interned object while its
+  wrapper is alive gives a second wrapper with its own reference (the count is right; `===` does not hold); named
+  constructors are exact. Kotlin: a caller's coroutine cancelled at the very moment a reply carrying an object arrives
+  drops that reference until the core closes (a hook on `UndraCore.call` would fix it). TypeScript: a query handle's
+  constructor still makes its wrapper directly (crash recovery re-creates it; no method returns one).
 
