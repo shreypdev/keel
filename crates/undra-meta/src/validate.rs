@@ -998,10 +998,10 @@ fn disagreement(first: &Member<'_>, other: &Member<'_>) -> Option<String> {
     };
     let (arg_a, arg_b) = (a.args.first()?, b.args.first()?);
     if arg_a.ty == arg_b.ty {
-        return Some(format!(
-            "`{}` and `{}` are instantiated with the same type",
-            other.name, first.name
-        ));
+        // One instantiation declared twice (two modules that each list `Todo` for a `newest`):
+        // the same mistake as two functions with one name, which `undra-bindgen` reports (E0051).
+        // A label that does not match its name was reported above, so there is nothing to add.
+        return None;
     }
     if arg_a.param != arg_b.param {
         return Some(format!(
@@ -2726,15 +2726,16 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("errors.html#E0072"), "{text}");
-        // Two definitions with one argument type are one instantiation twice.
+        // Two definitions of one instantiation are one function declared twice: a name collision,
+        // which `undra-bindgen` reports as it does for any function (E0051), not a label to fix.
         let s = generic_schema(|s| {
             s.functions[1] = instance("newest", "Known");
-            s.functions[1].name = "newest<Known>".into();
         });
-        assert!(errors(&s).iter().any(|e| {
-            e.to_string()
-                .contains("are instantiated with the same type")
-        }));
+        assert!(
+            !errors(&s).iter().any(|e| e.code() == "E0072"),
+            "{:?}",
+            errors(&s)
+        );
     }
 
     #[test]

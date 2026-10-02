@@ -804,6 +804,33 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// TypeScript presents a generic function as one exported overload set and keeps a private
+    /// function or method per instantiation, named like its id constant (`pinnedTodo`, ADR-058),
+    /// in the same scope as the store's signals and the other families' overload sets: a name
+    /// there that meets one of them would be declared twice in the generated class or module
+    /// (E0051). `others` are `(source name, camelCase name)`; what the id checks already compare
+    /// (other functions, methods and constructors) is not repeated.
+    fn private_names_of_instantiations<'n>(
+        &mut self,
+        at: &str,
+        instantiations: impl Iterator<Item = (&'n str, String)>,
+        others: &[(&'n str, String)],
+    ) {
+        for (name, id) in instantiations {
+            let private = naming::camel(&id);
+            for (other, converted) in others {
+                if *converted == private {
+                    self.errors.push(BindgenError::NameCollision {
+                        at: at.to_owned(),
+                        names: vec![name.to_owned(), (*other).to_owned()],
+                        converted: private.clone(),
+                        why: "TypeScript keeps a private function or method for each instantiation of a generic function, named after the function and the type, beside the signals and the other functions".to_owned(),
+                    });
+                }
+            }
+        }
+    }
+
     fn check_fields(&mut self, at: &str, fields: &[FieldDef]) {
         self.unique(
             at,
@@ -935,6 +962,31 @@ impl<'a> Checker<'a> {
                 .iter()
                 .chain(&object.methods)
                 .map(|m| (m.name.as_str(), m.generic.is_some(), m.names().id)),
+        );
+        let mut beside: Vec<(&str, String)> = Vec::new();
+        let mut seen: HashSet<&str> = HashSet::new();
+        for m in object.methods.iter().filter(|m| m.generic.is_some()) {
+            let native = m.names().native;
+            if seen.insert(native) {
+                beside.push((m.name.as_str(), naming::camel(native)));
+            }
+        }
+        if let Some(store) = &object.store {
+            beside.extend(
+                store
+                    .signals
+                    .iter()
+                    .map(|g| (g.name.as_str(), naming::camel(&g.name))),
+            );
+        }
+        self.private_names_of_instantiations(
+            &at,
+            object
+                .methods
+                .iter()
+                .filter(|m| m.generic.is_some())
+                .map(|m| (m.name.as_str(), m.names().id)),
+            &beside,
         );
         for (source, converted) in &members {
             if RESERVED_MEMBERS.contains(&converted.as_str()) {
@@ -1165,6 +1217,20 @@ impl<'a> Checker<'a> {
                         .filter(|q| q.kind == QueryKind::Mutation)
                         .map(|q| (q.name.as_str(), false, q.name.clone())),
                 ),
+        );
+        let families: Vec<(&str, String)> = s
+            .functions
+            .iter()
+            .filter(|f| f.generic.is_some())
+            .map(|f| (f.name.as_str(), naming::camel(f.names().native)))
+            .collect();
+        self.private_names_of_instantiations(
+            "the schema",
+            s.functions
+                .iter()
+                .filter(|f| f.generic.is_some())
+                .map(|f| (f.name.as_str(), f.names().id)),
+            &families,
         );
         for q in s.queries.iter().filter(|q| q.kind == QueryKind::Mutation) {
             native_names.push((q.name.as_str(), naming::camel(&q.name)));
