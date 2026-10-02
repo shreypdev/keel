@@ -1,10 +1,12 @@
 # Contract scenarios
 
-This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): twenty-eight
+This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): thirty-three
 scenarios against the **real playground core** (`examples/playground/core`, the same Rust crate the
-apps run), through the real boundary. S01 to S20 and S23 to S28 run on every platform; S21 and S22 are about
+apps run), through the real boundary. S01 to S20 and S23 to S33 run on every platform; S21 and S22 are about
 the web host (worker mode and crash recovery, ADR-049) and run on TypeScript only. S23 to S25 are the opt-in
-ports of ADR-047 and ADR-048; S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's:
+ports of ADR-047 and ADR-048; S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's; S29 and S30 are ADR-046's
+(panic reports and background runs); S31 is ADR-042's (newtypes, generic instantiations, leaf types) and S32 and
+S33 are ADR-043's (paged queries and lazy lists, polling):
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
@@ -13,9 +15,9 @@ ports of ADR-047 and ADR-048; S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's:
 | Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI table of the real core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S23 to S28, plus
-S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 80
-cells: 26 on Swift, 26 on Kotlin, 28 on TypeScript.
+`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S23 to S33, plus
+S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 95
+cells: 31 on Swift, 31 on Kotlin, 33 on TypeScript.
 
 ## The harness (the same on every platform)
 
@@ -896,7 +898,8 @@ transport the runner loads, TypeScript counts `Kind.Call` payloads whose first b
    `books` (a `LazyValue`), not 10,000 rows; `books[0]` is nothing until its page arrives, then `books[0].id == 1`; reading row 9,999 loads the last
    page (`id == 10_000`); an index outside `0..<count` is nothing and requests nothing (the page-call count does not move).
 2. **A page is requested once, with one page of prefetch each side.** The first read of row 120 (page size 50) makes 3 page calls (pages 2, 1 and 3);
-   reading any row of those pages afterwards makes none; the list's `version` equals the version in the page reply.
+   reading another row of page 2 makes none (a row of page 1 or 3 asks once for the page beyond it, so scrolling stays one page ahead); the list's
+   `version` equals the version in the page reply.
 3. **A change is one 12-byte entry and the host re-pages only its window.** `add_rows(1)`: one change-set with one `books` entry, op 2, 12 bytes, carrying
    `len == 10_001` and a higher version; `count == 10_001`; rows already on screen stay readable while the pages the host touched are asked again
    (the page-call count grows by the window, not by 200); `rename(121, "x")`: row 121 reads `"x"` (`version == 1`) after the re-page;
