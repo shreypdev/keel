@@ -13,6 +13,7 @@ import {
   adoptOptional,
   codecs,
   decodeValue,
+  reclaim,
   requireOwn,
 } from "@undra/runtime";
 import { UndraGoldenObjectGraph } from "./core.js";
@@ -75,6 +76,7 @@ export class Account extends UndraObject {
         UndraIds.Objects.Account.openThread,
         w.finish(),
         signal,
+        reclaim(this.core, 0),
       );
       return await adoptObject(this.core, body, Thread);
     } catch (error) {

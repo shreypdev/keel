@@ -131,6 +131,25 @@ export async function adoptList<T extends UndraObject>(core: UndraCore, body: Ui
 }
 
 /**
+ * What `UndraCore.call` hands the reply of a call whose caller aborted after the core had answered (`orphan`), for a
+ * method that returns objects: one reference per handle in the body (`shape` 0: one object, 1: an optional one, 2: a
+ * list), given back. Without it the reply would be dropped and its references owned by nobody until the core closes.
+ *
+ * @internal Generated code passes it for an `async` method that returns objects.
+ */
+export function reclaim(core: UndraCore, shape: 0 | 1 | 2): (body: Uint8Array) => void {
+  return (body) => {
+    try {
+      const r = new UndraReader(body);
+      const count = shape === 2 ? r.readLen(8) : shape === 1 ? (r.readU8() === 1 ? 1 : 0) : 1;
+      for (let i = 0; i < count; i++) core._giveBack(readHandle(r));
+    } catch {
+      // A body that does not read as handles carried none.
+    }
+  };
+}
+
+/**
  * The handle of `object` for a call into `core`: an object parameter is borrowed (the wrapper keeps its reference), and
  * an object of another core is refused before anything is sent (two cores issue the same handle numbers, so its handle
  * would name something else there). Throws `UndraCallError.Refused` naming the object's class.

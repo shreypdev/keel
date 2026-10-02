@@ -700,14 +700,18 @@ export class UndraCore {
    * signal's reason; an already aborted signal never sends anything. The
    * change-sets that arrived before the reply are applied before the promise
    * settles, so the code after `await` sees them.
+   *
+   * `orphan` is for a method whose reply carries references the host owns (objects, ADR-040): when the caller aborts
+   * after the core answered (on a transport where the reply is still on its way), the reply that arrives for the
+   * abandoned call is handed to it, which gives them back; without one it is dropped.
    */
-  call(target: CallTargetArg, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
+  call(target: CallTargetArg, methodId: number, args: Uint8Array, signal?: AbortSignal, orphan?: (body: Uint8Array) => void): Promise<Uint8Array> {
     if (signal === undefined) {
       if (this._transport.synchronous && !this._reporting && !this._closed) return this._callDirect(target, methodId, args);
     } else if (signal.aborted) {
       return Promise.reject(abortReason(signal));
     }
-    return this._request((callId) => encodeTarget(target, methodId, callId, args), signal);
+    return this._request((callId) => encodeTarget(target, methodId, callId, args), signal, orphan);
   }
 
   /**
@@ -1151,8 +1155,8 @@ export class UndraCore {
     return this._nextCallId;
   }
 
-  private _request(encode: (callId: number) => Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
-    const call = this._send(encode, signal);
+  private _request(encode: (callId: number) => Uint8Array, signal?: AbortSignal, orphan?: (body: Uint8Array) => void): Promise<Uint8Array> {
+    const call = this._send(encode, signal, orphan);
     if (!this._reporting) return call;
     // Started by the `onError` handler: it settles after the handler returned, out of reach of the
     // synchronous guard, so its failure is remembered and `report` only logs it.
@@ -1176,7 +1180,7 @@ export class UndraCore {
     return typeof error === "object" && error !== null && this._handlerFailures.has(error);
   }
 
-  private _send(encode: (callId: number) => Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
+  private _send(encode: (callId: number) => Uint8Array, signal?: AbortSignal, orphan?: (body: Uint8Array) => void): Promise<Uint8Array> {
     try {
       this._assertOpen();
     } catch (error) {
@@ -1189,11 +1193,17 @@ export class UndraCore {
       if (signal !== undefined) {
         const onAbort = (): void => {
           if (this._pending.get(callId) !== entry) return;
-          this._pending.delete(callId);
           try {
             this._transport.send(Kind.Cancel, encodeCancel({ callId }));
           } catch {
             // The channel is gone; the core cancels with it.
+          }
+          if (orphan === undefined) this._pending.delete(callId);
+          else {
+            // The core may have answered before it saw the cancel: that reply, if it is a success, still carries
+            // references the host owns. It is the entry's answer, and `orphan` gives them back.
+            entry.resolve = orphan;
+            entry.reject = () => {};
           }
           reject(abortReason(signal));
         };

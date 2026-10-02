@@ -92,7 +92,7 @@ export declare class UndraCore {
   /** Whether the core was closed. */
   readonly closed: boolean;
   callSync(target: CallTargetRef, methodId: number, args: Uint8Array): Uint8Array;
-  call(target: CallTargetRef, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array>;
+  call(target: CallTargetRef, methodId: number, args: Uint8Array, signal?: AbortSignal, orphan?: (body: Uint8Array) => void): Promise<Uint8Array>;
   stream(target: CallTargetRef, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array>;
   construct(typeId: number, methodId: number, args: Uint8Array): Promise<Handle>;
   /**
@@ -149,6 +149,8 @@ export declare function adoptObject<T extends UndraObject>(core: UndraCore, body
 export declare function adoptOptional<T extends UndraObject>(core: UndraCore, body: Uint8Array, type: UndraObjectClass<T>): Promise<T | null>;
 /** Addition (ADR-040): the objects a reply carries. */
 export declare function adoptList<T extends UndraObject>(core: UndraCore, body: Uint8Array, type: UndraObjectClass<T>): Promise<T[]>;
+/** Addition (ADR-040): what gives back the references of the reply of an aborted call (`call`'s `orphan`). */
+export declare function reclaim(core: UndraCore, shape: 0 | 1 | 2): (body: Uint8Array) => void;
 /** Addition (ADR-040): the handle of an object parameter; refuses an object of another core. */
 export declare function requireOwn(core: UndraCore, object: UndraObject): Handle;
 

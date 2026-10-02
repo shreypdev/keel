@@ -2079,6 +2079,18 @@ impl<'a> Ctx<'a> {
         };
         let head = format!("{prefix}async {function_kw}{name}");
         let suffix = format!(": Promise<{ok_ty}>");
+        // An `async` method that returns objects hands the call a way to give the references back when the
+        // caller aborts after the core answered (ADR-040): `reclaim(core, shape)`.
+        let reclaim = match &ret {
+            Ret::Plain(t) | Ret::Result { ok: t, .. } if c.is_async => {
+                ObjectUse::of(t).map(|object| match object {
+                    ObjectUse::One(_) => 0,
+                    ObjectUse::Optional(_) => 1,
+                    ObjectUse::Many(_) => 2,
+                })
+            }
+            _ => None,
+        };
         w.call_block(head, &params, suffix, true, |w| {
             // A command's arguments are encoded inside the `try` too: it cannot reject, and a
             // click handler has no way to handle a `RangeError` from the writer. Any other
@@ -2107,6 +2119,10 @@ impl<'a> Ctx<'a> {
                         if c.is_async {
                             call_args.push(signal.clone());
                         }
+                        if let Some(shape) = reclaim {
+                            self.rt_value("reclaim");
+                            call_args.push(format!("reclaim({core}, {shape})"));
+                        }
                         w.call(format!("return {core}.call"), &call_args, ";", true);
                     });
                     if c.is_async {
@@ -2122,6 +2138,10 @@ impl<'a> Ctx<'a> {
                     let mut call_args = vec![target.clone(), id.clone(), args];
                     if c.is_async {
                         call_args.push(signal.clone());
+                    }
+                    if let Some(shape) = reclaim {
+                        self.rt_value("reclaim");
+                        call_args.push(format!("reclaim({core}, {shape})"));
                     }
                     w.call(format!("{assign}await {core}.call"), &call_args, ";", true);
                 }

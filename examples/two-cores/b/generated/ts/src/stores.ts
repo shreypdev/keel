@@ -26,6 +26,7 @@ import {
   decodeValue,
   lending,
   lendingStream,
+  reclaim,
   requireOwn,
 } from "@undra/runtime";
 import { type Reporter, ReporterCallback } from "./callbacks.js";
@@ -2489,6 +2490,7 @@ export class Workshop extends UndraStore {
         UndraIds.Objects.Workshop.open,
         w.finish(),
         signal,
+        reclaim(this.core, 0),
       );
       return await adoptObject(this.core, body, Shelf);
     } catch (error) {

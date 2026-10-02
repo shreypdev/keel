@@ -106,6 +106,30 @@ describe("objects through the native module", () => {
     expect([r.readU64(), r.readU64()]).toEqual([shelf, shelf]);
   });
 
+  test("a call aborted after the core answered gives the reply's reference back (objects-followups O7)", async () => {
+    const { core, native } = await attach();
+    const workshop = adopt(core, handle(1, 1), Workshop);
+    const shelf = handle(2, 0x12_3456_789a);
+    const half = (h: bigint): string => `release ${Number(h >> 32n)}:${Number(h & 0xffff_ffffn)}`;
+    let answer: (() => void) | undefined;
+    native.onCall = (payload) => {
+      const call = methodCall(payload);
+      // The module answers later: by the time the abort reaches it, the success reply is already on its way.
+      answer = () => native.queue(RecordKind.Reply, reply(call.callId, ReplyStatus.Ok, encodeValue(codecs.u64, shelf)), "core");
+      return 0;
+    };
+    const controller = new AbortController();
+    const opening = workshop.open("x", 0, controller.signal);
+    const aborted = expect(opening).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await aborted;
+    expect(native.log.filter((l) => l.startsWith("cancel"))).toHaveLength(1);
+    expect(native.log.filter((l) => l.startsWith("release"))).toEqual([]);
+    answer?.();
+    await tick(5);
+    expect(native.log.filter((l) => l.startsWith("release")), "the abandoned reply's reference went back").toEqual([half(shelf)]);
+  });
+
   test("an object of another core is refused before anything reaches the module", async () => {
     const one = await attach(new FakeNative("core_one"));
     const two = await attach(new FakeNative("core_two"));
