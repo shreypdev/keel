@@ -76,7 +76,9 @@ fun s06Cancellation(w: World) {
     val typedOutcome = typedEnded.get(WAIT_MS, TimeUnit.MILLISECONDS)
     check(typedOutcome is CancellationException) { "the cancelled fail_later ended with $typedOutcome, not a CancellationException" }
     val tookMs = (System.nanoTime() - cancelRequested) / 1_000_000L
-    check(tookMs < 1_000L) { "the cancelled fail_later took $tookMs ms to end" }
+    // Relative to the call's own 5 s delay, not to a second of wall clock: a cancel that waited for the core's answer would
+    // end 4.9 s after it, so under half the delay (2.5 s) tells the two apart on a machine that stalls.
+    check(tookMs < 2_500L) { "the cancelled fail_later took $tookMs ms to end, not under half of its own 5 s delay" }
     awaitEq("crossings.cancelled grown by the cancelled typed call", 1L) { w.stats().cancelled - cancelledBeforeTyped }
     expectEq("add(1, 1) after the cancelled typed call", 2, add(1, 1))
     probe.close()

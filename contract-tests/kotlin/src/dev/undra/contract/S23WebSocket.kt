@@ -67,10 +67,12 @@ fun s23WebSocket(w: World) {
             expectFailsAsync<WsError.Network>("the read after the drop") { live.read(1u) }
         }
 
-        // 5. A connection nobody closes is closed going away.
+        // 5. A connection nobody closes is closed going away. Bounded by WAIT_MS, a hang detector: the port closes a dropped
+        // connection fire and forget, on no timer, so a port that did not would leave it open; how soon the close frame reaches
+        // the local server is the machine's.
         runBlocking { live.connect("$ws/ws/stall", emptyList(), emptyList()) }
         live.abandon()
-        awaitUntil("the server to see the abandoned connection close with 1001", timeoutMs = 1_000) {
+        awaitUntil("the server to see the abandoned connection close with 1001", timeoutMs = WAIT_MS) {
             RealtimeServer.last("/ws/stall").closeCode == 1001L
         }
     } finally {

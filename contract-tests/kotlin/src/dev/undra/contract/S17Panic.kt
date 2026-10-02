@@ -98,7 +98,9 @@ fun s17Panic(w: World) {
         "fail_later across a shutdown ended with $ended, not Unavailable (closed)"
     }
     val tookMs = (System.nanoTime() - shutdownAt) / 1_000_000L
-    check(tookMs < 1_000L) { "the call in flight took $tookMs ms to fail" }
+    // Relative to the call's own 5 s delay, not to a second of wall clock: a shutdown that left the call to its timer would fail
+    // it 4.9 s later (or never), so under half the delay (2.5 s) tells the two apart on a machine that stalls.
+    check(tookMs < 2_500L) { "the call in flight took $tookMs ms to fail, not under half of its own 5 s delay" }
     val closed = expectFails<UndraCallError.Unavailable>("add(1, 2) on the shut-down core") { add(1, 2, w.core) }
     expectEq("the transport reason of add(1, 2) on the shut-down core", UndraTransportException.Reason.CLOSED, closed.transport.reason)
     w.takeUnhandled()

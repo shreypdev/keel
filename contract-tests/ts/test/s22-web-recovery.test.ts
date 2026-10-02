@@ -4,7 +4,7 @@ import { Counter, Probe, RemoteTodosQueryHandle, UndraIds, add, configureRemote,
 import { BASE_URL, boot } from "../src/harness.js";
 import { replies } from "../src/fake-server.js";
 import { Persisted } from "../src/memory-kv.js";
-import { sleep, step, waitFor } from "../src/wait.js";
+import { WAIT_TIMEOUT_MS, sleep, step, waitFor } from "../src/wait.js";
 
 // S22 a trapped web core restarts from its last snapshot (ADR-049; TypeScript only): `wasm-main` with recovery on.
 // A panic traps the wasm core; the runtime fails what was in flight with "restarted", instantiates the same module
@@ -70,7 +70,10 @@ test("S22 a trapped web core restarts from its last snapshot", async () => {
     const event = restarts[0] as UndraCoreRestarted;
     expect(event.report.message).toContain("kaboom");
     expect(event.restoredFromAgeMs, "restored from a snapshot").not.toBeNull();
-    expect(event.restoredFromAgeMs as number, "a recent snapshot").toBeLessThan(5_000);
+    // Bounded by WAIT_TIMEOUT_MS, a hang detector: the age is the runner's own time since step 1's last change (the snapshot follows
+    // a change within `snapshotEveryMs`, 50 ms; then a 200 ms sleep, the 250 ms persistence debounce and a probe call), about half a
+    // second, so a tighter bound would be about the machine. The claims are that a snapshot was restored at all, and step 4's state.
+    expect(event.restoredFromAgeMs as number, "a recent snapshot").toBeLessThan(WAIT_TIMEOUT_MS);
     expect(event.rejectedCalls).toBeGreaterThanOrEqual(1);
     expect(event.staleObjects, "the probe, which is not a store").toBeGreaterThanOrEqual(1);
     expect(runtimeErrors, "onError received the same").toEqual([event]);

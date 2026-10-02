@@ -60,10 +60,16 @@ private fun queueAndReplay(w: World, list: String, handle: RemoteTodosQueryHandl
 
     // 3. A mutation that is not idempotent is not queued: it fails at once with the network error.
     w.server.fail(HttpMethod.PATCH, "$url/1", offline)
+    val patchesBefore = w.server.count(HttpMethod.PATCH, "$url/1")
     val started = System.nanoTime()
     val refused = expectFailsAsync<RemoteError.Http>("set_remote_done while offline") { setRemoteDone(list, 1u, true) }
     expectEq("the network error of a non-idempotent mutation", offline, refused.cause)
-    check((System.nanoTime() - started) / 1_000_000L < 2_000) { "the non-idempotent mutation did not fail at once" }
+    // "At once, not after a retry's backoff" is counted, not timed: the server saw the one PATCH, so the error came from it and not from
+    // a retry. The time is bounded by WAIT_MS, a hang detector, as on Swift and TypeScript (half of a first retry's backoff,
+    // BACKOFF_BASE_MS less 20 % jitter: 400 ms, would be no more stall-proof than the 2 s this was).
+    expectEq("PATCHes of set_remote_done while offline: it was not retried", patchesBefore + 1, w.server.count(HttpMethod.PATCH, "$url/1"))
+    val tookMs = (System.nanoTime() - started) / 1_000_000L
+    check(tookMs < WAIT_MS) { "the non-idempotent mutation took $tookMs ms to fail, past the $WAIT_MS ms wait" }
 
     // 4. The network returns and the server accepts the replay.
     val whileOffline = w.kv.operations

@@ -268,7 +268,11 @@ class AdapterTests : Suite() {
             val timers = TimerAdapter({ fired.add(it) }, 60L)
             timers.set(1u, 400uL) // pending for much longer than the idle timeout
             Thread.sleep(200)
-            assertTrue(timers.hasLiveThread, "the worker must stay while a timer is pending")
+            // Read in this order: a worker that is gone while the timer has not fired left a pending timer behind. (Once the timer fired, the
+            // worker may go: a machine that slept past 460 ms here makes the check say nothing, where it used to fail it.)
+            val live = timers.hasLiveThread
+            val firedYet = fired.contains(1u)
+            assertTrue(live || firedYet, "the worker must stay while a timer is pending")
             eventually("the pending timer still fires") { fired.contains(1u) }
             eventually("the idle worker exits") { !timers.hasLiveThread }
             timers.set(2u, 10uL) // and a new one starts on demand
