@@ -23,10 +23,10 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
- * The one activity. It shows the four screens of the playground over the one core `UndraApp` loaded.
+ * The one activity. It shows the screens of the playground over the one core `UndraApp` loaded.
  *
  * `adb shell am start -n dev.undra.playground/.MainActivity --es tab remote` opens it on the Remote tab
- * (`todos`, `counter`, `biglist` or `remote`), which is how the screenshots in `.proof/` were taken.
+ * (`todos`, `counter`, `biglist`, `remote`, `notes`, `workshop`, `library`, `feed` or `ticker`), which is how the screenshots in `.proof/` were taken.
  * `--es undra_dev_url ws://10.0.2.2:7443` runs it against `undra dev` (debug builds; see [DevServer]).
  */
 class MainActivity : ComponentActivity() {

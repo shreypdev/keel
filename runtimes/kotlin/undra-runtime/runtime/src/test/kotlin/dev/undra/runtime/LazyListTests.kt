@@ -442,7 +442,7 @@ class LazyListTests : Suite() {
                 r.change() // nothing was read since: nothing to re-page
                 r.turn()
                 assertEq(10, r.server.requests.size)
-                assertEq(3uL, r.list.currentVersion())
+                assertEq(3uL, r.list.version)
             }
         }
 
@@ -488,7 +488,7 @@ class LazyListTests : Suite() {
                 r.invalidated(2000, 4uL)
                 assertEq(revision, r.list.revision.now())
                 assertEq(1000, r.list.size.now())
-                assertEq(5uL, r.list.currentVersion())
+                assertEq(5uL, r.list.version)
             }
         }
 
@@ -500,7 +500,7 @@ class LazyListTests : Suite() {
                 r.list[0]
                 r.turn()
                 assertEq(1200, r.list.size.now())
-                assertEq(2uL, r.list.currentVersion())
+                assertEq(2uL, r.list.version)
                 assertEq(listOf(0, 1), r.server.pages())
                 val revision = r.list.revision.now()
                 r.invalidated(1200, 2uL)
@@ -520,7 +520,7 @@ class LazyListTests : Suite() {
                 r.server.base = 5000
                 r.list.prefetch(0..0) // page 0, which is not cached: the reply says version 2
                 r.turn()
-                assertEq(2uL, r.list.currentVersion())
+                assertEq(2uL, r.list.version)
                 // The window held pages 1, 2, 3 and 0: all but 0 are stale and asked for again.
                 assertEq(listOf(1, 2, 3, 0, 1, 2, 3), r.server.pages())
                 assertEq(5100, r.list[100])
@@ -888,7 +888,7 @@ class LazyListTests : Suite() {
                 server.version = 4uL
                 core.mirror.flush()
                 eventually("the drain was applied") { store.books.size.value == 310 }
-                assertEq(4uL, store.books.currentVersion())
+                assertEq(4uL, store.books.version)
                 assertEq(listOf("full on undra-main", "invalidated on undra-main"), store.seen.toList(), "[Full, Inv, Inv] was folded to [Full, Inv]")
                 assertEq(null, store.books[0])
                 eventually("the first page arrives, asked of the page server the full value named") { store.books[0] != null }
@@ -901,7 +901,7 @@ class LazyListTests : Suite() {
                 t.events.onChangeSet(changeSet(4uL, full(11L, 3u, lazyValue(b, 20, 5uL)), lazyInvalidated(11L, 3u, 25, 6uL)))
                 core.mirror.flush()
                 eventually("the restore was applied") { store.books.size.value == 25 }
-                assertEq(6uL, store.books.currentVersion())
+                assertEq(6uL, store.books.version)
                 assertEq(null, store.books[0], "the cache of the old page server is gone")
                 eventually("rows come from the new page server") { store.books[0] != null }
                 assertTrue(server.requests.all { it.handle == Handle(b) }, "every page call goes to the new page server: ${server.requests}")

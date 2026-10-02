@@ -89,7 +89,7 @@ public class UndraLazyList<T> internal constructor(
 
     // ---- everything below is guarded by `lock` ----
     private var handle = 0L
-    private var version = 0uL
+    private var known = 0uL
     private var epoch = 0
     private var pageRows = DEFAULT_PAGE_SIZE
     private var maxPages = DEFAULT_MAX_CACHED_PAGES
@@ -124,6 +124,12 @@ public class UndraLazyList<T> internal constructor(
      * recomposes).
      */
     public val revision: StateFlow<Long> get() = revisions
+
+    /**
+     * The version of the core's list the last value, invalidation or page reply told this list (`0` before the first value).
+     * It increases with every change the core makes; a page reply read at an older version is dropped.
+     */
+    public val version: ULong get() = synchronized(lock) { known }
 
     /**
      * Items per page, default 50. Changing it drops the cached pages (they are cut differently), so set it before
@@ -218,7 +224,7 @@ public class UndraLazyList<T> internal constructor(
             if (value.handle.raw != handle) {
                 dropCache()
                 handle = value.handle.raw
-                version = value.version
+                known = value.version
                 length.value = len
                 bump()
                 changed = true
@@ -229,7 +235,7 @@ public class UndraLazyList<T> internal constructor(
                     bump()
                     changed = true
                 }
-                if (value.version > version || (value.version == version && len != length.value)) {
+                if (value.version > known || (value.version == known && len != length.value)) {
                     advance(value.version, len)
                     changed = true
                 }
@@ -255,7 +261,7 @@ public class UndraLazyList<T> internal constructor(
         var changed = false
         synchronized(lock) {
             if (closed || handle == 0L) return
-            if (value.version > version || (value.version == version && len != length.value)) {
+            if (value.version > known || (value.version == known && len != length.value)) {
                 advance(value.version, len)
                 changed = true
             }
@@ -305,7 +311,7 @@ public class UndraLazyList<T> internal constructor(
     }
 
     private fun want(page: Int) {
-        val current = loaded[page]?.let { it.version >= version } ?: false
+        val current = loaded[page]?.let { it.version >= known } ?: false
         if (!current && page !in inFlight && page !in failed) wanted.add(page)
     }
 
@@ -326,7 +332,7 @@ public class UndraLazyList<T> internal constructor(
 
     /** Takes a newer version or another length: the window is re-requested and the rows stay (stale) until it arrives. */
     private fun advance(newVersion: ULong, newLength: Int) {
-        version = newVersion
+        known = newVersion
         length.value = newLength
         failed.clear()
         staleReplies.clear()
@@ -377,7 +383,7 @@ public class UndraLazyList<T> internal constructor(
             for (page in wanted) {
                 val offset = page.toLong() * pageRows
                 if (offset >= length.value || page in inFlight) continue
-                if (loaded[page]?.let { it.version >= version } == true) continue
+                if (loaded[page]?.let { it.version >= known } == true) continue
                 inFlight.add(page)
                 batch.add(Request(page, handle, epoch, offset.toInt(), pageRows))
             }
@@ -460,25 +466,25 @@ public class UndraLazyList<T> internal constructor(
             if (closed || request.epoch != epoch) return
             inFlight.remove(request.page)
             val total = header.total.toInt()
-            if (header.version < version) {
+            if (header.version < known) {
                 // Read before the last change: dropped, and the page asked for again (a few times at most).
                 val times = (staleReplies[request.page] ?: 0) + 1
                 if (times > MAX_STALE_REPLIES) {
                     staleReplies.remove(request.page)
                     failed.add(request.page)
-                    problem = UndraProtocolException("the core keeps answering page ${request.page} with a version older than ${version}")
+                    problem = UndraProtocolException("the core keeps answering page ${request.page} with a version older than $known")
                 } else {
                     staleReplies[request.page] = times
                     wanted.add(request.page)
                 }
             } else {
                 staleReplies.remove(request.page)
-                if (header.version > version) {
+                if (header.version > known) {
                     advance(header.version, total)
                     changed = true
                 } else if (total != length.value) {
                     failed.add(request.page)
-                    problem = UndraProtocolException("a page read at version $version says the list has $total items, not ${length.value}")
+                    problem = UndraProtocolException("a page read at version $known says the list has $total items, not ${length.value}")
                 }
                 if (problem == null) {
                     val expected = minOf(request.limit.toLong(), length.value.toLong() - request.offset).toInt()
@@ -523,8 +529,6 @@ public class UndraLazyList<T> internal constructor(
     /** The pages an invalidation would re-page now, least recently read first. */
     internal fun windowPages(): List<Int> = synchronized(lock) { window.toList() }
 
-    /** The version of the list the last value, invalidation or page reply carried. */
-    internal fun currentVersion(): ULong = synchronized(lock) { version }
 
     internal companion object {
         const val DEFAULT_PAGE_SIZE: Int = 50
