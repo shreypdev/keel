@@ -45,17 +45,9 @@ merge the PR, then clean up" before it is used again (propose the change first; 
 [[undra-ci-green-gate]] describe the gate). Landed today, in order: `ci-green` (`fc326d6`), `diagram-rn`
 (`b7efd61`), `generics-fn-obj` (`aa04821`), `generics-followups` (`3c279a6`). Main is `3c279a6` plus state commits.
 
-Open branches (status checkpoint 31 has the full table):
-- `wt/reload-handles` `31ce274` — ADR-059, review verdict merge, grid 35/101, roadmap and post updated. Its CI run
-  was red only on S30's 100 ms bound (Swift contract column), the flake `test-pacing` fixes. Order: land
-  `test-pacing` first (or merge its head in), re-run, PR. The reviewer (opus) finished; nothing of it runs.
-- `wt/test-pacing` `8782a64` — review found the hand-over not mergeable; H1 and M1–M8 are fixed on the branch,
-  nothing open; the Kotlin/TS/RN contract columns and `ci-local --slow --only ci/rust` were not re-run after
-  the last fixes. Run them, fmt/clippy, CI, PR. **Land this first: it removes the S30 flake from main.**
-- `wt/ts-runtime-16k` `1b593df` — ADR-057 at 15,811 B (gate 16,000), review verdict merge after green CI, four
-  Highs fixed; lows L3, L5, L6 open (one-line each in the status table). Close them, CI, PR.
-- Known flakes on main until `test-pacing` lands: contract S30 (100 ms, Swift and Kotlin columns), Swift S14
-  build B (5 s).
+Landed after that: `test-pacing` (`14a4689`) and `reload-handles` (`7e5d238`) — status checkpoint 32. Open:
+- `wt/ts-runtime-16k` `093a457` (contains main `7e5d238`) — ADR-057 at 15,774 B (gate 16,000); every review
+  finding closed (four Highs and L3/L5/L6); CI running on that head at the time of writing. Land it, then clean up.
 - **On hold by the founder:** the Android emulator CI job for `android-adapters`, `android-work` and
   `undra-compose`. Not started. Ask him before starting it. (The "Android emulator (API 34, x86_64)" job in
   `two-cores.yml` is older and unrelated.)
