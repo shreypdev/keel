@@ -51,7 +51,7 @@ phone, so no device target is claimed as met:
 | Filtered view of a 10,000-row list, one row changed (158 bytes on the wire, was 353 KB) | **392 ns** | ≤ 1 µs |
 | Change-set for 100 dirty signals | **2.3 µs** | ≤ 100 µs |
 | Cold start restoring 100 KB of state | **85 µs** | ≤ 3 ms |
-| Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->116.7 KB<!--/measured-->** gzipped | ≤ 120 KB |
+| Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->116.2 KB<!--/measured-->** gzipped | ≤ 120 KB |
 | Android core (`.so`, arm64-v8a, release, hello world) | **<!--measured:android-size-->978.6 KB<!--/measured-->** | ≤ 1.2 MB |
 
 The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.sh) builds the
@@ -69,8 +69,8 @@ Sustained-load results (a firehose, keyed churn, fan-out, a 60-second soak) are 
 
 ## Why you can trust it
 
-* **<!--trust:tests-total-->7,253<!--/trust--> tests across the platforms** — Rust
-  <!--trust:tests-rust-->3,536<!--/trust--> · TypeScript <!--trust:tests-typescript-->1,856<!--/trust--> ·
+* **<!--trust:tests-total-->7,256<!--/trust--> tests across the platforms** — Rust
+  <!--trust:tests-rust-->3,537<!--/trust--> · TypeScript <!--trust:tests-typescript-->1,858<!--/trust--> ·
   Kotlin <!--trust:tests-kotlin-->881<!--/trust--> · Swift <!--trust:tests-swift-->870<!--/trust--> ·
   React Native <!--trust:tests-react-native-->110<!--/trust--> — the counts at the last merge, after the full matrix
   ran (the ledger is [`.10x/status.md`](.10x/status.md)).

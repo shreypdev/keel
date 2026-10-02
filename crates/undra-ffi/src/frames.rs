@@ -18,7 +18,7 @@
 //! "The core's image" is the one that contains this function: the app executable on iOS (the core
 //! is prelinked into it), `lib<namespace>.so` on Android, the dynamic library on the host.
 
-use core::ffi::{c_char, c_int, c_void};
+use core::ffi::{c_int, c_void};
 use std::sync::OnceLock;
 
 use undra_runtime::FrameSource;
@@ -29,37 +29,65 @@ type UnwindContext = c_void;
 /// `_Unwind_Reason_Code`: `_URC_NO_REASON` (continue) is 0, `_URC_END_OF_STACK` 5.
 type TraceFn = extern "C" fn(*mut UnwindContext, *mut c_void) -> c_int;
 
-/// `Dl_info` of `dladdr`.
-#[repr(C)]
-struct DlInfo {
-    dli_fname: *const c_char,
-    dli_fbase: *mut c_void,
-    dli_sname: *const c_char,
-    dli_saddr: *mut c_void,
-}
-
-// SAFETY: these are the platform unwinder's and loader's own entry points, declared with the
-// signatures of `<unwind.h>` and `<dlfcn.h>`; both are in libunwind/libgcc_s and libc/libdl, which
-// every Rust program on these targets links (`std::backtrace` uses the same ones).
+// SAFETY: these are the platform unwinder's own entry points, declared with the signatures of
+// `<unwind.h>`; they are in libunwind/libgcc_s, which every Rust program on these targets links
+// (`std::backtrace` uses the same ones).
 unsafe extern "C" {
     fn _Unwind_Backtrace(trace: TraceFn, arg: *mut c_void) -> c_int;
     fn _Unwind_GetIPInfo(context: *mut UnwindContext, ip_before_insn: *mut c_int) -> usize;
-    fn dladdr(address: *const c_void, info: *mut DlInfo) -> c_int;
 }
 
-/// The base address of the image containing `address`, if the loader knows it.
-fn image_base(address: usize) -> Option<usize> {
-    let mut info = DlInfo {
-        dli_fname: core::ptr::null(),
-        dli_fbase: core::ptr::null_mut(),
-        dli_sname: core::ptr::null(),
-        dli_saddr: core::ptr::null_mut(),
-    };
-    // SAFETY: `info` is a valid `Dl_info` for `dladdr` to fill; `address` is only looked up, never
-    // dereferenced.
-    let found = unsafe { dladdr(address as *const c_void, &mut info) };
-    (found != 0 && !info.dli_fbase.is_null()).then_some(info.dli_fbase as usize)
+/// The loader's side of the frame source: which image an address is in.
+///
+/// Under Miri there is no loader to ask (`dladdr` is a foreign function Miri cannot run, and neither
+/// is the unwinder `capture` walks with), so the source answers as it does for an image the loader
+/// does not know: with nothing. [`Source::capture`] then returns no frames and
+/// [`Source::image_id`] an empty id, while the readers of the image headers below, which are plain
+/// memory reads, stay under test (`cargo +nightly miri test -p undra-ffi --lib`).
+#[cfg(miri)]
+mod loader {
+    /// The base address of the image containing `address`: nothing, under Miri.
+    pub(super) fn image_base(_address: usize) -> Option<usize> {
+        None
+    }
 }
+
+/// The loader's side of the frame source: which image an address is in.
+#[cfg(not(miri))]
+mod loader {
+    use core::ffi::{c_char, c_int, c_void};
+
+    /// `Dl_info` of `dladdr`.
+    #[repr(C)]
+    struct DlInfo {
+        dli_fname: *const c_char,
+        dli_fbase: *mut c_void,
+        dli_sname: *const c_char,
+        dli_saddr: *mut c_void,
+    }
+
+    // SAFETY: the loader's own entry point, declared with the signature of `<dlfcn.h>`; it is in
+    // libc/libdl, which every Rust program on these targets links.
+    unsafe extern "C" {
+        fn dladdr(address: *const c_void, info: *mut DlInfo) -> c_int;
+    }
+
+    /// The base address of the image containing `address`, if the loader knows it.
+    pub(super) fn image_base(address: usize) -> Option<usize> {
+        let mut info = DlInfo {
+            dli_fname: core::ptr::null(),
+            dli_fbase: core::ptr::null_mut(),
+            dli_sname: core::ptr::null(),
+            dli_saddr: core::ptr::null_mut(),
+        };
+        // SAFETY: `info` is a valid `Dl_info` for `dladdr` to fill; `address` is only looked up,
+        // never dereferenced.
+        let found = unsafe { dladdr(address as *const c_void, &mut info) };
+        (found != 0 && !info.dli_fbase.is_null()).then_some(info.dli_fbase as usize)
+    }
+}
+
+use loader::image_base;
 
 /// The base of the image this code is in.
 fn core_base() -> Option<usize> {
@@ -335,6 +363,8 @@ unsafe fn elf_build_id(base: usize) -> String {
 mod tests {
     use super::*;
 
+    /// The walk and the loader are foreign functions: Miri cannot run them (the `loader` module's note).
+    #[cfg(not(miri))]
     #[test]
     fn the_stack_is_captured_as_offsets_into_this_image() {
         #[inline(never)]
@@ -492,6 +522,7 @@ mod tests {
         assert_eq!(id_of(&overlong), "");
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn the_image_has_an_identity_where_the_platform_gives_one() {
         let id = Source.image_id();
@@ -500,5 +531,15 @@ mod tests {
         }
         assert!(id.bytes().all(|b| b.is_ascii_hexdigit()), "{id:?}");
         assert_eq!(id, Source.image_id(), "stable");
+    }
+
+    /// What replaces the two tests above under Miri: no loader, so no frames and no identity, and
+    /// neither is an error.
+    #[cfg(miri)]
+    #[test]
+    fn under_miri_the_source_answers_with_nothing_instead_of_calling_the_loader() {
+        assert_eq!(core_base(), None);
+        assert!(Source.capture(64).is_empty());
+        assert_eq!(Source.image_id(), "");
     }
 }

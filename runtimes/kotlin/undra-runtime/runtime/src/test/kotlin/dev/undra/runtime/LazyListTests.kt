@@ -898,8 +898,16 @@ class LazyListTests : Suite() {
                 assertEq(null, store.books[0])
                 eventually("the first page arrives, asked of the page server the full value named") { store.books[0] != null }
                 assertEq(Handle(a), server.requests.first().handle)
+                // Reading row 0 asks for its page and, in the same turn, the page after it (prefetch), one after the other from
+                // one flush. Both must have landed before the page server below changes: a request still to be made would be
+                // logged after the clear as a call to the old page server, and a reply still to be built would read the new
+                // total and version and re-page the old one.
+                eventually("the first page and the one after it are cached") { store.books.cachedPages().containsAll(listOf(0, 1)) }
+                assertEq(listOf(0, 1), server.pages(), "reading row 0 asks for its page and the one after it")
+                assertTrue(server.requests.all { it.handle == Handle(a) }, "before the restore, every page call goes to the first page server: ${server.requests}")
 
                 // A restore: a new page server, then an invalidation, in one drain: [Full(b), Inv].
+                val before = server.requests.toList()
                 server.requests.clear()
                 server.total = 25
                 server.version = 6uL
@@ -909,7 +917,7 @@ class LazyListTests : Suite() {
                 assertEq(6uL, store.books.version)
                 assertEq(null, store.books[0], "the cache of the old page server is gone")
                 eventually("rows come from the new page server") { store.books[0] != null }
-                assertTrue(server.requests.all { it.handle == Handle(b) }, "every page call goes to the new page server: ${server.requests}")
+                assertTrue(server.requests.all { it.handle == Handle(b) }, "every page call goes to the new page server: ${server.requests} (before the restore: $before)")
                 store.close()
                 store.books.close()
             }

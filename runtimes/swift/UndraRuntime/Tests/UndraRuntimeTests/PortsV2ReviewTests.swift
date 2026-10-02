@@ -150,8 +150,29 @@ final class RealtimeReviewTests: XCTestCase {
         XCTAssertEqual(left?.clientClosed, true)
     }
 
+    /// A `burstGap` timer on the queue the inbox arms its own on, armed now: the instant its waiter ran again.
+    /// What the binding does for a lone message, and nothing else, so the two finish together wherever they run.
+    private func referenceTimer() -> Task<UInt64, Never> {
+        Task { () async -> UInt64 in
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + burstGap) {
+                    continuation.resume()
+                }
+            }
+            return DispatchTime.now().uptimeNanoseconds
+        }
+    }
+
     /// 1c: one lone message is answered within about the burst gap of its arrival, whether the
     /// pull was waiting or came after it.
+    ///
+    /// "About the burst gap" is not a number of milliseconds a test can hold a machine to: the 2 ms timer that
+    /// ends a burst fired after about 3 ms on a laptop, and after 5, 10 and 17 ms in three runs on a hosted macOS
+    /// runner (within one run, too: a calibration made after the rounds read 5 ms where the rounds had seen 17).
+    /// So every round arms a timer of its own beside the binding's, for the same gap on the same queue at the
+    /// same moment, and what is measured is how much later than that timer the binding answered. A lone message
+    /// held for the 8 ms burst cap, or for a linger, answers milliseconds after it on any machine whose timers
+    /// can tell 2 ms from 8; a slow clock moves both and leaves the difference alone.
     func testALoneMessageIsAnsweredWithinAFewMillisecondsOfItsArrival() async throws {
         let adapter = ScriptedWebSocket()
         let binding = WebSocketBinding(adapter: adapter)
@@ -166,57 +187,96 @@ final class RealtimeReviewTests: XCTestCase {
                 return (got, DispatchTime.now().uptimeNanoseconds)
             }
             try await Task.sleep(nanoseconds: 5_000_000)
-            let pushed = DispatchTime.now().uptimeNanoseconds
+            var reference = referenceTimer()
             socket.push(.text("w\(round)"))
             let (result, at) = await pull.value
             XCTAssertEqual(try result.get(), [.text("w\(round)")])
-            waited.append(Double(at - pushed) / 1e6)
+            waited.append((Double(at) - Double(await reference.value)) / 1e6)
             // The message is there before the pull.
             socket.push(.text("l\(round)"))
             await eventually("the read-ahead") { socket.pulled == 2 * (round + 1) }
-            let asked = DispatchTime.now().uptimeNanoseconds
+            reference = referenceTimer()
             let early = try await binding.receive(conn: conn, max: 16)
+            let answered = DispatchTime.now().uptimeNanoseconds
             XCTAssertEqual(early, [.text("l\(round)")])
-            late.append(Double(DispatchTime.now().uptimeNanoseconds - asked) / 1e6)
+            late.append((Double(answered) - Double(await reference.value)) / 1e6)
         }
         waited.sort()
         late.sort()
-        XCTAssertLessThan(waited[20], 10, "median latency of a lone message")
-        XCTAssertLessThan(late[20], 10, "median latency of a pull that finds one message")
-        XCTAssertLessThan(waited[39], 100, "a lone message waited 100 ms or more")
-        XCTAssertLessThan(late[39], 100, "a pull that found one message waited 100 ms or more")
+        XCTAssertLessThan(waited[20], 5, "a lone message was answered \(waited[20]) ms (the median of 40) after a burst-gap timer armed at its arrival")
+        XCTAssertLessThan(late[20], 5, "a pull that found one message was answered \(late[20]) ms (the median of 40) after a burst-gap timer armed with it")
+        // The tail: all but four rounds of forty (a round in which the machine held up the binding's answer and
+        // not the timer beside it says nothing about the binding).
+        XCTAssertLessThan(waited[35], 100, "a lone message waited 100 ms or more past its burst-gap timer in five rounds of 40")
+        XCTAssertLessThan(late[35], 100, "a pull that found one message waited 100 ms or more past its burst-gap timer in five rounds of 40")
     }
 
-    /// 1c: a steady trickle (one message every ~1 ms, never a 2 ms gap) still answers within the
+    /// 1c: a steady trickle (one message every 0.5 ms, never a 2 ms gap) still answers within the
     /// burst cap of the pull's first message, not when the trickle stops.
+    ///
+    /// The stimulus is the point, and a loaded or virtualised machine can fail to deliver it: `usleep(500)` slept
+    /// several milliseconds on a hosted macOS runner (the same timer slack that makes the binding's own 2 ms timer
+    /// fire after about 10 ms), so two pushes more than `burstGap` apart are not a trickle, and a pull answered
+    /// between them is answered correctly. The feeder therefore paces itself by spinning on the clock, records when
+    /// each message was pushed, and a trial whose pushes were ever `burstGap` or more apart before the answer is not
+    /// a trickle and is repeated, up to forty times; the assertions about the behaviour are made on a trial that was
+    /// one. (A machine that never lets the feeder keep a 2 ms cadence for 8 ms fails with that said, not with a
+    /// claim about the binding.)
     func testATrickleIsAnsweredByTheBurstCapNotHeldUntilItStops() async throws {
-        let adapter = ScriptedWebSocket()
-        let binding = WebSocketBinding(adapter: adapter)
-        let conn = try await binding.connect(url: "ws://x.test", protocols: [], headers: []).conn
-        let socket = try XCTUnwrap(adapter.sockets.first)
-        let pull = Task { () async -> (Result<[WsMessage], WsError>, UInt64) in
-            let got = await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 1000) }
-            return (got, DispatchTime.now().uptimeNanoseconds)
-        }
-        try await Task.sleep(nanoseconds: 5_000_000)
-        let started = DispatchTime.now().uptimeNanoseconds
-        // A thread pushes one message every 0.5 ms (usleep is precise enough; Task.sleep is not).
-        let stop = Locked(false)
-        let feeder = Thread {
-            var index = 0
-            while !stop.withLock({ $0 }) && index < 2000 {
-                socket.push(.text("\(index)"))
-                index += 1
-                usleep(500)
+        let gapNanoseconds: UInt64 = 2_000_000 // burstGap
+        var pauses: [Double] = []
+        // Forty tries of about 30 ms each: a machine busy enough to stall the feeder in ten of them (a hosted
+        // runner did) still trickles in one of forty.
+        for _ in 0..<40 {
+            let adapter = ScriptedWebSocket()
+            let binding = WebSocketBinding(adapter: adapter)
+            let conn = try await binding.connect(url: "ws://x.test", protocols: [], headers: []).conn
+            let socket = try XCTUnwrap(adapter.sockets.first)
+            let pull = Task { () async -> (Result<[WsMessage], WsError>, UInt64) in
+                let got = await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 1000) }
+                return (got, DispatchTime.now().uptimeNanoseconds)
             }
+            try await Task.sleep(nanoseconds: 5_000_000)
+            let started = DispatchTime.now().uptimeNanoseconds
+            let stop = Locked(false)
+            let pushedAt = Locked<[UInt64]>([])
+            let feeder = Thread {
+                var index = 0
+                var due = DispatchTime.now().uptimeNanoseconds
+                while !stop.withLock({ $0 }) && index < 20_000 {
+                    pushedAt.withLock { $0.append(DispatchTime.now().uptimeNanoseconds) }
+                    socket.push(.text("\(index)"))
+                    index += 1
+                    due += 500_000
+                    while DispatchTime.now().uptimeNanoseconds < due, !stop.withLock({ $0 }) {}
+                }
+            }
+            feeder.start()
+            let (result, at) = await pull.value
+            let got = try result.get()
+            stop.withLock { $0 = true }
+            binding.detach()
+            // The pushes up to the answer, and the one after it: a feeder held up right after its first push
+            // leaves a single push before the answer, and its pause only shows in when the next one came (or
+            // in the answer's own time, when none did). Without that push the pause went unmeasured, and a
+            // one-message answer, correct for a feeder that stalled, was judged as if it had trickled.
+            let all = pushedAt.withLock { $0 }
+            let before = all.filter { $0 <= at }
+            let pushes = before + [all.first(where: { $0 > at }) ?? at]
+            let widest = zip(pushes, pushes.dropFirst()).map { $1 - $0 }.max() ?? 0
+            if widest >= gapNanoseconds {
+                pauses.append(Double(widest) / 1e6)
+                continue // the feeder was held up: not a trickle, so nothing to assert about one
+            }
+            let elapsed = Double(at - started) / 1e6
+            XCTAssertGreaterThan(got.count, 1, "the trickle was one burst")
+            // The cap answers on the first push 8 ms after the pull's first message: about 17 messages at one per
+            // 0.5 ms, counted where the binding answered and so the same on any machine. (A pull held until the
+            // trickle stops is answered by `max`, with 1,000.)
+            XCTAssertLessThanOrEqual(got.count, 64, "a trickle held the pull for \(got.count) messages (\(elapsed) ms)")
+            return
         }
-        feeder.start()
-        let (result, at) = await pull.value
-        let got = try result.get()
-        stop.withLock { $0 = true }
-        let elapsed = Double(at - started) / 1e6
-        XCTAssertGreaterThan(got.count, 1, "the trickle was one burst")
-        XCTAssertLessThan(elapsed, 30, "a trickle held the pull for \(elapsed) ms")
+        XCTFail("no trial of 40 was a trickle: the feeder was held up for \(pauses.map { String(format: "%.1f", $0) }) ms between two pushes")
     }
 
     /// 1b: a second concurrent receive on a URLSession connection is the typed error, and the
@@ -274,8 +334,7 @@ final class RealtimeReviewTests: XCTestCase {
         binding.detach()
         let answered = try await pull.value.get()
         XCTAssertEqual(answered, [])
-        let seen = try await server.waitFor("/ws/stall") { $0.closeCode != nil }
-        XCTAssertEqual(seen?.closeCode, 1001)
+        try await server.waitForTheClientsClose("/ws/stall", code: 1001, reason: nil)
     }
 
     /// 1e: SSE resume sends Last-Event-ID, retry surfaces as retryMs, the body's end is Ended.
@@ -420,7 +479,9 @@ final class DbReviewTests: XCTestCase {
         }
         XCTAssertGreaterThanOrEqual(waited, 395, "busy came before the timeout")
         XCTAssertLessThan(waited, 600, "busy came well after the timeout")
-        XCTAssertLessThan(Double(slowest) / 1e6, 50, "a transaction statement was blocked by the waiting one")
+        // Blocked by the waiting statement, one of them takes what is left of its 400 ms; 200 is far from both that
+        // and a statement that a busy machine held up.
+        XCTAssertLessThan(Double(slowest) / 1e6, 200, "a transaction statement was blocked by the waiting one")
         try await db.finish(tx, commit: true)
         let rows = try await db.query(id, "SELECT COUNT(*) FROM notes", [])
         XCTAssertEqual(rows.rows, [[.integer(20)]], "the outer statement never ran")

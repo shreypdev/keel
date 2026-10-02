@@ -303,7 +303,7 @@ int main(int argc, char **argv) {
     late[4] = 0;
     wr32(late + 5, 1005);
     A.api->port_reply(late, sizeof late);
-    uint8_t payload[32];
+    uint8_t payload[64]; /* the 17-byte header and the 16 bytes of `add_args` below: 33 */
     uint32_t n = method_call(payload, calc_a, "add", 13, NULL, 0);
     assert(A.api->call(payload, n) == 5);
 

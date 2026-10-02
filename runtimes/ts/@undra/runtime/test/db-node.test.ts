@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DbError } from "../src/adapters/types.js";
 import { dbPort, nodeSqliteDb, sqliteError } from "../src/db.js";
 import { dbSuite } from "./support/db-suite.js";
@@ -61,6 +61,53 @@ describe("nodeSqliteDb: what dispose leaves on disk", () => {
     const again = ok(await api.open("dangling", migration));
     expect(ok(await api.query(again.db, "SELECT COUNT(*) FROM t")).rows, "the port serves a new open after dispose").toEqual([cells(1n)]);
     ok(await api.close(again.db));
+  });
+});
+
+describe("nodeSqliteDb: a node:sqlite that cuts text at U+0000", () => {
+  /** What Node 22.23.3's `node:sqlite` does: a parameter reaches SQLite whole, text read back stops at its first U+0000. */
+  let closed = 0;
+  class LossyStatement {
+    readonly sourceSQL: string;
+    constructor(sql: string) {
+      this.sourceSQL = sql;
+    }
+    setReadBigInts(): void {}
+    setReturnArrays(): void {}
+    columns(): Array<{ name: string }> {
+      return [];
+    }
+    run(): { changes: number; lastInsertRowid: number } {
+      return { changes: 0, lastInsertRowid: 0 };
+    }
+    all(...params: unknown[]): unknown[][] {
+      const text = String(params[0]);
+      return [[text.split("\u0000")[0], BigInt(text.length)]];
+    }
+  }
+  class LossyDatabase {
+    prepare(sql: string): LossyStatement {
+      return new LossyStatement(sql);
+    }
+    exec(): void {}
+    close(): void {
+      closed += 1;
+    }
+  }
+
+  it("is Unavailable at open, and says why, instead of corrupting such text silently; the handle it opened is closed", async () => {
+    const real = process.getBuiltinModule.bind(process);
+    const spy = vi.spyOn(process, "getBuiltinModule").mockImplementation(((id: string) =>
+      id === "node:sqlite" ? { DatabaseSync: LossyDatabase } : real(id)) as typeof process.getBuiltinModule);
+    try {
+      const api = dbCalls(dbPort(nodeSqliteDb({ directory })));
+      const refused = err(await api.open("lossy", [{ version: 1, sql: "CREATE TABLE t (v TEXT)" }]));
+      expect(refused).toBeInstanceOf(DbError.Unavailable);
+      expect((refused as DbError.Unavailable).message).toContain("U+0000");
+      expect(closed, "the database the probe ran on is closed").toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

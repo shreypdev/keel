@@ -615,6 +615,14 @@ impl Hub {
             let mut ring = self.ring.lock();
             if ring.unchanged(&bytes) {
                 self.counters.skipped_same.fetch_add(1, Ordering::Relaxed);
+                // Every change-set up to `through` was delivered before this snapshot was taken, so the
+                // step that holds this state covers them: a commit that landed between the last capture's
+                // read of the sequence number and its snapshot is in that step, and says so now.
+                let covered = ring.cover_newest(through, txn);
+                drop(ring);
+                if let Some(info) = covered {
+                    self.broadcast(&ServerMsg::Step(info));
+                }
                 return;
             }
             ring.push(

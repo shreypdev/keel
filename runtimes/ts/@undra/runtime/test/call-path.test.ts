@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadWebBudgets } from "../../../../../scripts/web-budgets.mjs";
+import { benchScale, loadWebBudgets } from "../../../../../scripts/web-budgets.mjs";
 import { UndraCore } from "../src/core.js";
 import { WasmMainTransport } from "../src/transport/wasm-main.js";
 import { CallTarget, UndraReader, UndraWriter } from "../src/wire/index.js";
@@ -13,7 +13,9 @@ import { track } from "./support/harness.js";
  * the reply, and the promise. The rows are `[web."node/call_async"]` and `[web."node/call_sync"]` of bench/budgets.toml;
  * the playground's device bench holds the rows of the real core to the other `[web."..."]` tables (the 5x rule of
  * that file: the budget is five times what the reference host measured, so a shared runner passes and a call path
- * that went back to allocating a promise, a DataView and a BigInt per call does not).
+ * that went back to allocating a promise, a DataView and a BigInt per call does not). A runner slower than the
+ * reference host sets `UNDRA_BENCH_SCALE` (the workflow's 2), which multiplies these budgets as it multiplies the
+ * host's (`scripts/web-budgets.mjs`); the failure message prints the scaled budget.
  */
 
 const FREE = { target: CallTarget.FreeFunction } as const;
@@ -64,7 +66,8 @@ describe("the call path's budgets (bench/budgets.toml, [web.\"node/...\"])", () 
       }
     });
     expect(sum).toBeGreaterThan(0);
-    expect(p50, `an awaited call took ${p50.toFixed(0)} ns (p50)`).toBeLessThanOrEqual(budgets["node/call_async"]?.budgetNs ?? 0);
+    const budget = budgets["node/call_async"]?.budgetNs ?? 0;
+    expect(p50, `an awaited call took ${p50.toFixed(0)} ns (p50), budget ${budget.toFixed(0)} ns (scale ${benchScale()})`).toBeLessThanOrEqual(budget);
   });
 
   it("UndraCore.callSync is within its budget", async () => {
@@ -78,6 +81,7 @@ describe("the call path's budgets (bench/budgets.toml, [web.\"node/...\"])", () 
       for (let i = 0; i < calls; i++) sum += core.callSync(FREE, STUB.ECHO, bytes).length;
     });
     expect(sum).toBeGreaterThan(0);
-    expect(p50, `callSync took ${p50.toFixed(0)} ns (p50)`).toBeLessThanOrEqual(budgets["node/call_sync"]?.budgetNs ?? 0);
+    const budget = budgets["node/call_sync"]?.budgetNs ?? 0;
+    expect(p50, `callSync took ${p50.toFixed(0)} ns (p50), budget ${budget.toFixed(0)} ns (scale ${benchScale()})`).toBeLessThanOrEqual(budget);
   });
 });

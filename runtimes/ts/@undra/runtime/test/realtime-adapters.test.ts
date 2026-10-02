@@ -344,6 +344,18 @@ describe("browserWebSocket, scripted", () => {
     await expect(opening).rejects.toEqual(new WsError.Refused(null, "the WebSocket could not connect"));
   });
 
+  it("an error before open settles the connect without waiting for a close (Node 22's WebSocket never fires one after a failed upgrade)", async () => {
+    const opening = browserWebSocket({ WebSocket: Socket }).connect("ws://x.test/", [], []);
+    const socket = FakeSocket.last as FakeSocket;
+    socket.fire("error", { message: "Received network error or non-101 status code." });
+    await expect(opening).rejects.toEqual(new WsError.Refused(null, "Received network error or non-101 status code."));
+    // A platform that does fire the close afterwards changes nothing: the connect is settled once.
+    socket.fire("close", { code: 1006, reason: "" });
+    const bare = browserWebSocket({ WebSocket: Socket }).connect("ws://x.test/", [], []);
+    (FakeSocket.last as FakeSocket).fire("error", {});
+    await expect(bare).rejects.toEqual(new WsError.Refused(null, "the WebSocket could not connect"));
+  });
+
   it("past maxBufferedMessages it closes (without a code where 1008 is refused) and ends Closed(1008) after what it held", async () => {
     const opening = browserWebSocket({ WebSocket: Socket, maxBufferedMessages: 3 }).connect("ws://x.test/", [], []);
     const socket = FakeSocket.last as FakeSocket;

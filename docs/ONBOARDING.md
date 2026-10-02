@@ -23,8 +23,10 @@ the `shellenv` line as its fix. The paths below are Apple silicon's; on an Intel
 
 #### Rust
 
-`rustup` with the stable channel, 1.85 or newer (the MSRV of the workspace, edition 2024). Doctor checks
-`rustup`, the active channel, `rustc` and `cargo`.
+`rustup` with the stable channel, 1.85 or newer (the MSRV of the workspace, edition 2024); **1.99.0** is the
+compiler CI pins (every `rust-toolchain` line of `.github/workflows`), and the one the compile-fail goldens, the
+bench budgets and the web size are recorded on: a machine on another stable gets goldens that differ in rustc's
+wording and numbers that differ in the last digits. Doctor checks `rustup`, the active channel, `rustc` and `cargo`.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -49,7 +51,13 @@ rustup target add wasm32-unknown-unknown \
 
 #### Node and npm
 
-Node 20 or newer (the TypeScript runtime's `engines`; 22 or newer is what CI uses) and the npm that comes with it.
+Node 24 (the active LTS) and the npm that comes with it. It is the version every CI job pins (`actions/setup-node` with
+`node-version: 24` in `ci.yml`, `release.yml`, `site.yml`, `bench.yml`, `rn-devices.yml` and `two-cores.yml`, and in the
+workflow `undra init` writes) and the one the measured numbers and the platform readings in the contract notes come from.
+The packages' `engines` stay `>=20`: an app does not need what follows. Running the runtime's own suite (`npm test`) does,
+because two of its adapters are only right on a recent Node: `nodeSqliteDb` over `node:sqlite` refuses to open on a
+Node whose `node:sqlite` cuts text at U+0000 (Node 22.23's does; 24's keeps it), and the `browserWebSocket` cases over
+Node's global `WebSocket` read the failures of its undici 7.
 
 ```bash
 brew install node                 # or: fnm install --lts
@@ -235,7 +243,7 @@ Every suite is local; nothing needs the network after install.
 | Swift runtime over the real C ABI table (the fixture core) | `bash crates/undra-ffi/tests/swift/run.sh` | 6 pass |
 | wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 22 + 36 pass |
 | C host harness (through the fixture core's table, `undra_fixture_undra_api`; `two_cores.c` opens two copies of it side by side) | `bash crates/undra-ffi/tests/c/run.sh` (add `UNDRA_C_SANITIZE=1` for ASan) | `c smoke: ok`, `c lifetime: ok`, `c two cores: ok` |
-| Contract scenarios ×3 platforms | `npm ci` in `runtimes/ts/@undra/runtime` once per checkout (S25 imports wa-sqlite), then `bash contract-tests/run-all.sh` | 86/86 pass (S01–S30 less S21/S22 on native, per platform; S29 "panic report" and S30 "background run" are ADR-046's) |
+| Contract scenarios ×3 platforms | `bash contract-tests/run-all.sh` (the TypeScript column installs the runtime's and its own dependencies when missing, builds the wasm cores it loads and S25 imports wa-sqlite from the runtime's `node_modules`) | 86/86 pass (S01–S30 less S21/S22 on native, per platform; S29 "panic report" and S30 "background run" are ADR-046's) |
 | The iOS 15 / 16 floor (ADR-045): the runtime, every golden case in `ObservableObject` mode, `examples/ios15-sample` (xcodebuild at 15.0), the playground's and Fieldbook's bindings at iOS 15, and the Swift contract grid against iOS 15 bindings | `scripts/ios-floor.sh` (steps: `runtime golden sample apps contract simulator`; the last needs an iOS 15 or 16 simulator runtime and says so when there is none) | all build and pass; `simulator` skips here (iOS 26.5 runtime only) |
 | Two cores in one process (ADR-044): the playground core as `playground_a` and `playground_b` | `examples/two-cores/{ios,android,jvm,node}/run.sh` (iOS: the booted simulator, `CONFIGURATION=Release` for the fat-LTO cores; Android: the attached emulator; Node: `npm ci` for `fake-indexeddb`, the default `Kv` of the web) | `two-cores <platform>: passed`, after the lines that write one default `Kv` key through each core and read two values back (ADR-044 amendment A) |
 | Build systems of a generated project: Gradle, `xcodebuild` and `npm run build` each build the core with no earlier `undra build` (a clean project, then up-to-date, then a change, then the other variant and back; the app links the new core) | `UNDRA_TEST_BUILD_SYSTEMS=1 cargo test -p undra-cli --test build_systems -- --nocapture` (`UNDRA_REQUIRE_TOOLCHAINS=1` makes a missing toolchain a failure; needs `java` on PATH, which `scripts/env.sh` puts there) | 6 pass; skips, saying why, where a toolchain is missing |
@@ -248,7 +256,7 @@ Every suite is local; nothing needs the network after install.
 | Benchmarks (numbers for humans) | `cargo bench -p undra-bench` | see `bench/RESULTS.md` |
 | Device bench: the blueprint rows through the generated binding and the mirror, on a simulator, emulator, browser or phone | `scripts/bench-device.sh --device ios`, `--device android` (boots the `undra` AVD if nothing is attached; `--target <serial>` for a phone), `--device web`; add `--quick` to check the plumbing in seconds | writes `bench/results/device/<date>-<target>.json` and the device tables of `bench/RESULTS.md`; needs the iOS simulator + Xcode, the Android SDK + NDK, or Playwright's Chromium (`cd examples/playground/web && npx playwright install chromium`) |
 | React Native runtime: C++ host under ASan + UBSan (both shims) and the JSI layer against React Native's headers | `runtimes/rn/@undra/react-native/cpp/test/run.sh` (needs `npm ci` in `examples/playground/rn` for the headers, and `undra build --platform host` of the playground and of `examples/two-cores/a`, which it runs when missing; `UNDRA_RN_REQUIRE_JSI=1` makes a missing one a failure) | 15 store checks, then 29 + 29 host checks (the linked shim on macOS only); `UndraJsi.cpp`, `UndraTurboModule.cpp` and (macOS) `UndraPlatformApple.mm` compile |
-| React Native runtime: unit tests, typecheck, contract column | in `runtimes/rn/@undra/react-native`: `npm ci`, `npm test`, `npm run typecheck` (build `runtimes/ts/@undra/runtime` first), `npm run test:contract` (needs `undra build -C examples/playground --platform web`, and `contract-tests/derived-vectors.sh` for S19) | 100 pass; clean; 19 pass + S17 and S29 skipped (app-tested) |
+| React Native runtime: unit tests, typecheck, contract column | in `runtimes/rn/@undra/react-native`: `npm ci`, `npm test`, `npm run typecheck` (build `runtimes/ts/@undra/runtime` first), `npm run test:contract` (needs `bash contract-tests/ts/build-cores.sh`, which builds the wasm cores of S14, S15 and S27 that are not committed, and `contract-tests/derived-vectors.sh` for S19) | 100 pass; clean; 19 pass + S17 and S29 skipped (app-tested) |
 | React Native playground app on a device | `scripts/rn-device-checks.sh ios` (the iPhone simulator; CocoaPods) or `scripts/rn-device-checks.sh android --target <serial>` (an emulator such as the `undra-rn` AVD, or a phone) | `UNDRA-RN CHECKS 19/19 passed` (iOS) or `20/20` (Android) |
 | Device bench report (CI runs it) | `node --test scripts/bench-device-report.test.mjs` | 14 pass |
 
@@ -261,6 +269,33 @@ Gotcha worth knowing: since C ABI version 2 (ADR-044) `undra-ffi` exports nothin
 every native harness (C, Swift, JNI) runs against the fixture core
 (`crates/undra-ffi/tests/fixture`, namespace `undra_fixture`), which exports its table and, with
 the `jni` feature it always builds with on native targets, `JNI_OnLoad`.
+
+### Before you push a branch: `scripts/ci-local.sh`
+
+CI is a list of jobs on hosted runners; a branch that goes there to find out what is red costs a push per failure, and each
+push is slow. `scripts/ci-local.sh` runs every step of the **CI, Bench, Two cores and Site** workflows on this machine, in a
+clone of what you committed (CI sees nothing else), reading the steps from `.github/workflows/*.yml` themselves, so the two
+cannot drift apart. It checks (and never installs) the pinned Rust and its targets, Node 24 and JDK 17, sets what the workflows
+set (`UNDRA_BENCH_SCALE`, `RUSTFLAGS`, ...), and prints a summary; every step it cannot run (runner provisioning: apt, sudo,
+SDK installs; the Android emulator, which is on hold) is listed with the reason, and the end of the output names what only a
+hosted runner can still tell you (Linux behaviour, macOS 15's own frameworks).
+
+```bash
+scripts/ci-local.sh                  # all jobs, in a clone of HEAD, incremental (a cache-restored run); --cold for a new clone
+scripts/ci-local.sh --slow           # the slow-runner pass (below)
+scripts/ci-local.sh --only ci/ts,ci/contracts     # some jobs (<workflow>/<job id>, or the id alone); --skip, --list, -v
+scripts/ci-local.sh --here --only ci/ts           # quick, in this checkout (dirty trees allowed: not a proof)
+```
+
+The slow-runner pass is what finds the failures that only a slower machine shows: the timing-sensitive suites (the Rust
+workspace, the TypeScript runtime, the Swift and Kotlin runtimes, the contract grid, the React Native model) run three rounds
+under `taskpolicy -b` (macOS background QoS: efficiency cores, lowest priority) with 16 CPU burners (`yes`, started and killed
+by the script for the length of each step, your own processes only), four test threads (`RUST_TEST_THREADS=4`: a hosted runner
+has four vCPUs) and four build jobs. It reuses what a normal pass built and installed in the same clone, so run that first:
+what is throttled is the tests, not the compiler. A test that fails only there depends on the machine's speed: fix it at its cause (pace by the consumer, scale a
+budget by `UNDRA_BENCH_SCALE`, a deadline that covers a slow machine and reports the elapsed time, wait on the condition and
+not on a fixed sleep), never by loosening an assertion about behaviour. It needs `ruby` (macOS ships it); logs of every step
+are kept (`--logs DIR`).
 
 ## 3. Run the reference app
 
