@@ -1244,6 +1244,51 @@ fn e0070_an_alias_of_a_generic_object_in_another_crate() {
     assert!(!error.contains("struct or enum"), "{error}");
 }
 
+/// The module-level E0070 constant of an instantiation of `Cache` with the type arguments `args`.
+fn e0070_rule_of(args: TokenStream) -> String {
+    let object = impl_::expand_instantiate(quote! {
+        #[undra_instance(kind = "object", template = "Cache", crate_name = "", root = "::undra", docs = "", impl_docs = "", restore = "", alias_docs = "")]
+        impl SomeCache {
+            pub fn new() -> Self { }
+        }
+        type __UndraInstanceArgs = #args;
+    })
+    .to_string();
+    let start = object
+        .find("_undra_error_E0070_this_instantiation_of_Cache_")
+        .unwrap_or_else(|| panic!("no rule constant: {object}"));
+    object[start..]
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .next()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn the_rule_of_e0070_names_each_instantiation_unambiguously() {
+    // Two different instantiations in one module must not define one constant: that would be a
+    // false "declared twice". Dropping punctuation made these pairs meet.
+    for (a, b) in [
+        (quote!((A_B, C,)), quote!((A, B_C,))),
+        (quote!((Vec<Todo>,)), quote!((VecTodo,))),
+        (quote!((crate::model::Todo,)), quote!((cratemodelTodo,))),
+        (quote!((A, BC,)), quote!((AB, C,))),
+        (quote!((A_B,)), quote!((A, B,))),
+    ] {
+        let (left, right) = (e0070_rule_of(a.clone()), e0070_rule_of(b.clone()));
+        assert_ne!(left, right, "{a} and {b}");
+    }
+    // The same instantiation spelled the same way is one constant, and a plain name reads as itself.
+    assert_eq!(
+        e0070_rule_of(quote!((Todo,))),
+        e0070_rule_of(quote!((Todo,)))
+    );
+    assert_eq!(
+        e0070_rule_of(quote!((Todo,))),
+        "_undra_error_E0070_this_instantiation_of_Cache_Todo_is_declared_twice_keep_one_alias_per_instantiation"
+    );
+}
+
 #[test]
 fn an_instantiation_carries_the_rule_of_e0070_in_one_place_per_part() {
     let object = impl_::expand_instantiate(quote! {
@@ -1256,7 +1301,7 @@ fn an_instantiation_carries_the_rule_of_e0070_in_one_place_per_part() {
     .to_string();
     // The module-level constant names the type arguments, so two aliases in one module collide.
     assert!(
-        object.contains("_undra_error_E0070_this_instantiation_of_Cache_cratemodelTodo_is_declared_twice_keep_one_alias_per_instantiation"),
+        object.contains("_undra_error_E0070_this_instantiation_of_Cache_crate_C_Cmodel_C_CTodo_is_declared_twice_keep_one_alias_per_instantiation"),
         "{object}"
     );
     // A plain object's alias also carries the inherent constant and the generic-store check.
