@@ -668,6 +668,55 @@ fn a_record_whose_slot_was_reused_by_a_kept_handle_is_skipped() {
     );
 }
 
+/// Two entries of one snapshot that name the same slot under different generations (a record and a
+/// store, or two records) cannot both be honoured, and no snapshot a runtime wrote has them: the
+/// record that loses the slot is refused, counted and named in a WARN, not dropped silently. (A
+/// slot reused since the snapshot by a handle the runtime keeps is the other case: a DEBUG, above.)
+#[test]
+fn a_record_that_names_the_slot_of_another_entry_of_the_snapshot_is_refused() {
+    let old = runtime();
+    let counter = new_counter(&old, 4, "kept");
+    let handle = widget(&old, 5);
+    let snapshot = old.runtime().snapshot();
+    let on_the_store = Handle::new(counter.index(), counter.generation() + 7);
+    let twin = Handle::new(handle.index(), handle.generation() + 9);
+    let forged = with_records(
+        &snapshot,
+        &[
+            (on_the_store, WIDGET, record_of(6), None),
+            (twin, WIDGET, record_of(7), None),
+        ],
+    );
+
+    let t = runtime();
+    let report = restore(&t, &forged);
+    assert_eq!((report.restored, report.reissued), (1, 1), "{report:?}");
+    let mut refused: Vec<u64> = report.refused.iter().map(|r| r.handle).collect();
+    refused.sort_unstable();
+    let mut expected = vec![on_the_store.0, twin.0];
+    expected.sort_unstable();
+    assert_eq!(refused, expected, "{:?}", report.refused);
+    assert!(
+        report
+            .refused
+            .iter()
+            .all(|r| r.reason.contains("another entry of the snapshot")),
+        "{:?}",
+        report.refused
+    );
+    let warns = logs_at(&t, 3);
+    for h in [on_the_store, twin] {
+        assert!(
+            warns.iter().any(|w| w.contains(&format!("{h:?}"))),
+            "{h:?}: {warns:?}"
+        );
+    }
+    // What holds the slots is what the snapshot placed first: the store and the first record.
+    assert_eq!(read(&t, handle), 5);
+    assert_eq!(call(&t, twin, READ).status, ReplyStatus::BadRequest);
+    assert_eq!(call(&t, on_the_store, READ).status, ReplyStatus::BadRequest);
+}
+
 #[test]
 fn the_generation_counter_rises_over_the_records_of_a_snapshot_too() {
     let old = runtime();

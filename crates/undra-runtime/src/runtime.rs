@@ -3429,7 +3429,7 @@ impl Runtime {
         // The handles of the recreation records become valid again, dormant: the object is built
         // when the host first uses the handle (ADR-059).
         if let Some(hooks) = hooks {
-            (hooks.place)(self, reissue, &mut report);
+            (hooks.place)(self, &built, reissue, &mut report);
         }
         // The page servers of the restored stores take the slots nothing in the snapshot needs.
         for (handle, object) in placed {

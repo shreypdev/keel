@@ -91,8 +91,8 @@ pub(crate) struct Hooks {
     /// `restore`, phase 2: empties the table except the live re-creatable objects no store of the
     /// snapshot needs the slot of.
     pub(crate) clear: ClearFn,
-    /// `restore`, phase 2: places the dormant objects.
-    pub(crate) place: fn(&Runtime, Reissue, &mut RestoreReport),
+    /// `restore`, phase 2: places the dormant objects (after the stores the snapshot placed).
+    pub(crate) place: fn(&Runtime, &Placed, Reissue, &mut RestoreReport),
     /// `observe`: `object` itself, or the live object built in place of the dormant `object`.
     pub(crate) revive_object: ReviveObjectFn,
     /// `Runtime::object` and `param`: builds the object of `handle` if it is dormant.
@@ -257,16 +257,18 @@ fn plan(
             }
         },
     };
+    refuse(rt, report, s.handle, type_id, reason);
+}
+
+/// A record left out: a WARN that names it and why, and an entry of `RestoreReport::refused`.
+fn refuse(rt: &Runtime, report: &mut RestoreReport, handle: Handle, type_id: u32, reason: String) {
     rt.log(
         WARN,
         "undra::persist",
-        &format!(
-            "restore: {:?} ({type_id:#010x}) is not re-issued: {reason}",
-            s.handle
-        ),
+        &format!("restore: {handle:?} ({type_id:#010x}) is not re-issued: {reason}"),
     );
     report.refused.push(RefusedHandle {
-        handle: s.handle.0,
+        handle: handle.0,
         type_id,
         reason,
     });
@@ -304,14 +306,31 @@ fn clear(
 
 /// [`Hooks::place`]: each accepted record whose handle is **not live** is placed at its handle as
 /// a dormant entry (one host reference). A record whose handle is live is not needed (the object
-/// is there); one whose slot is taken by another kept handle is skipped (DEBUG): the slot was
-/// reused, so the handle the record names was released. The generation counter is raised over the
-/// records' generations as over the stores' (`insert_at` does it).
-fn place(rt: &Runtime, reissue: Reissue, report: &mut RestoreReport) {
+/// is there). A record whose slot holds a handle the runtime kept is skipped (DEBUG): the slot was
+/// reused since the snapshot, so the handle the record names was released. A record whose slot
+/// another entry of the snapshot holds (a store `built` placed, or a record placed before it) is
+/// refused like any record that cannot be honoured: no snapshot a runtime wrote names one slot
+/// twice. The generation counter is raised over the records' generations as over the stores'
+/// (`insert_at` does it).
+fn place(rt: &Runtime, built: &Placed, reissue: Reissue, report: &mut RestoreReport) {
+    let mut claimed: HashSet<u32> = built.iter().map(|(handle, _)| handle.index()).collect();
     for (handle, object) in reissue {
+        let type_id = object.undra_type_id();
         match rt.objects().insert_at(handle, object) {
-            Ok(()) => report.reissued += 1,
+            Ok(()) => {
+                claimed.insert(handle.index());
+                report.reissued += 1;
+            }
             Err(InsertAtError::Occupied) if rt.objects().type_of(handle).is_ok() => {}
+            Err(InsertAtError::Occupied) if claimed.contains(&handle.index()) => {
+                refuse(
+                    rt,
+                    report,
+                    handle,
+                    type_id,
+                    "another entry of the snapshot names its slot".to_owned(),
+                );
+            }
             Err(InsertAtError::Occupied) => rt.log(
                 DEBUG,
                 "undra::persist",
