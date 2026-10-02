@@ -2,7 +2,7 @@
 # Runs the Swift column of the contract scenarios (contract-tests/scenarios.md): the Swift runtime
 # over the C ABI, against the real playground core, through the generated bindings.
 #
-#   contract-tests/swift/run.sh                 all twenty-one (S01 to S20, S26), then the check
+#   contract-tests/swift/run.sh                 all twenty-three (S01 to S20, S26, S29, S30), then the check
 #   contract-tests/swift/run.sh --filter ContractScenarios/testS07_streamWithBackpressure
 #
 # What it does:
@@ -18,7 +18,7 @@
 #      (`swift test --skip-build`, UNDRA_CONTRACT_PHASE=B), which prints `SCENARIO S14|S15 FAIL` lines
 #      if build B's steps fail, then puts build A's library back (also when something fails),
 #   5. pipes the `SCENARIO` lines of both processes through contract-tests/check.sh.
-# The exit status is non-zero if the tests fail or any of the twenty-one scenarios is not a PASS.
+# The exit status is non-zero if the tests fail or any of the twenty-three scenarios is not a PASS.
 # A filtered run skips step 4 (the build-B steps need the whole of S14 and S15).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

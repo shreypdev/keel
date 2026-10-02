@@ -2,6 +2,12 @@ import Foundation
 import UndraRuntime
 import PlaygroundCore
 
+/// A panic report as `onPanic` received it, and whether that was on the main thread.
+struct DeliveredPanic: Sendable {
+    let report: UndraPanicReport
+    let onMainThread: Bool
+}
+
 /// The one core of this process and the fakes it runs against.
 ///
 /// The playground core's `init` is once per core, so every scenario shares the core the first of
@@ -22,6 +28,10 @@ final class Fixture {
     /// after, the way they do for statistics; this is the Swift column's `runtimeErrors` of the
     /// TypeScript harness.
     let unhandled = Locked<[UndraUnhandledError]>([])
+
+    /// Every panic report the core handed to `LoadOptions.onPanic` (ADR-046), oldest first, across reloads, with a note of whether
+    /// it was delivered on the main thread (S29).
+    let panics = Locked<[DeliveredPanic]>([])
 
     /// Every call the core made to one of the adapters below, per port, across reloads (S17.7).
     let portCalls = PortCallCounter()
@@ -44,17 +54,25 @@ final class Fixture {
         for adapter in adapters {
             all = all.replacing(CountingAdapter(inner: adapter, counter: portCalls))
         }
-        return all
+        // The default `Diagnostics`: it hands panic reports to `onPanic` (S29). Not counted: S17.7 is about the ports a core uses.
+        return all.replacing(DiagnosticsAdapter())
     }
 
     /// The options every load of the harness uses: its adapters and an `onError` that records into
     /// `unhandled` (the entry adds the core's table and the generated schema hash).
     func loadOptions() -> LoadOptions {
         let sink = unhandled
+        let reports = panics
         return .inproc(
             adapters: makeAdapters(),
             onError: { (report: UndraUnhandledError) -> Void in
                 sink.withLock { (current: inout [UndraUnhandledError]) -> Void in current.append(report) }
+            },
+            onPanic: { (report: UndraPanicReport) -> Void in
+                let onMain = Thread.isMainThread
+                reports.withLock { (current: inout [DeliveredPanic]) -> Void in
+                    current.append(DeliveredPanic(report: report, onMainThread: onMain))
+                }
             }
         )
     }
