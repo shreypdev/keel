@@ -2,7 +2,8 @@ import Foundation
 
 /// What build A hands over to the build-B process (scenarios.md, "Two builds"): the `Kv` contents and
 /// the failed POST's `Idempotency-Key` from S14 step 7, the snapshots `P` and `L` and the `Profile`
-/// handle from S15 step 11. One JSON file per scenario, in the directory `UNDRA_CONTRACT_HANDOVER` names
+/// handle from S15 step 11, the snapshot with the query handles and their raw handles from S35 step 2.
+/// One JSON file per scenario, in the directory `UNDRA_CONTRACT_HANDOVER` names
 /// (`run.sh` sets it to `.build/migration`), else in `.build/migration` of this package.
 enum Handover {
     /// S14 step 7.
@@ -21,6 +22,23 @@ enum Handover {
         var legacy: String
         /// The raw handle of the `Profile`.
         var profileHandle: UInt64
+    }
+
+    /// S35 step 2.
+    struct QueryHandles: Codable, Equatable {
+        /// The snapshot taken with the query handles alive (a `Counter`, a `Library`, and the handles of `remote_todos`,
+        /// `ticker`, `feed` and `roster`), in hex.
+        var snapshot: String
+        /// The raw handle of the `RemoteTodosQueryHandle` for the list `s35`.
+        var remote: UInt64
+        /// The raw handle of the `TickerQueryHandle`.
+        var ticker: UInt64
+        /// The raw handle of the `FeedQueryHandle`.
+        var feed: UInt64
+        /// The raw handle of the `Library`.
+        var library: UInt64
+        /// The raw handle of the `RosterQueryHandle` (the query whose parameter build B changes).
+        var roster: UInt64
     }
 
     /// The directory of the files.

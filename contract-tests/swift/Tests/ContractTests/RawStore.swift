@@ -53,6 +53,19 @@ final class RawStore {
         }
     }
 
+    /// Registers for the change-sets of a handle this runner did not construct: one a restored snapshot re-issued in a
+    /// runtime that never held it (S35 step 10). It does not observe yet; call `observe()`. `close()` releases the handle.
+    init(core: UndraCore, adopting handle: UndraHandle) {
+        self.core = core
+        self.handle = handle
+        core.mirror.register(handle) { [weak self] signal, op, reader in
+            let value = Array(reader.readRemaining())
+            let entry = Entry(signal: signal, op: op, value: value)
+            self?.entries.append(entry)
+            self?.onEntry?(entry)
+        }
+    }
+
     /// Starts observing every signal; the current values are in `entries` when it returns.
     func observe() {
         core.observe(handle, signal: Observe.allSignals, on: true)
