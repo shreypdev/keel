@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { loadWebBudgets } from "../../../../scripts/web-budgets.mjs";
 import type { UndraBenchApi } from "../src/bench/main";
+import { WEB_BUDGET_IDS } from "../src/bench/ops";
 
 // The device benchmark, web half: loads `bench.html` in the headless Chromium Playwright launched, runs the
 // operations and the ADR-031 drain experiment on the page's wasm core, then takes N cold starts in fresh browser
@@ -41,6 +43,20 @@ test("device bench, web: Chromium, wasm-main", async ({ browser, browserName }) 
   }
 
   expect(problems, "the page logged no errors").toEqual([]);
+
+  // The web call path's budgets are tests (R9): every row's p50 is within its `[web."..."]` table of bench/budgets.toml
+  // (a quick run is a plumbing check of a few batches and is not held to them).
+  if (!quick) {
+    const budgets = loadWebBudgets();
+    const p50s: Record<string, number> = { drain_frame: raw.drain.merged.frame_ns.p50 };
+    for (const op of raw.ops) p50s[op.id] = op.p50;
+    for (const id of WEB_BUDGET_IDS) {
+      const budget = budgets[id];
+      expect(budget, `bench/budgets.toml has no [web."${id}"]`).toBeDefined();
+      expect(p50s[id], `${id} was not measured`).toBeDefined();
+      expect(p50s[id] as number, `${id} p50 (budget ${budget?.budgetNs} ns)`).toBeLessThanOrEqual(budget?.budgetNs ?? 0);
+    }
+  }
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(
     out,

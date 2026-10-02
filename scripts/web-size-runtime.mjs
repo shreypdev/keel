@@ -16,6 +16,8 @@
 //                                                                bytes each source module contributes
 //                                                                to each chunk (what grew: ADR-052, section 5);
 //                                                                `=exports` adds the exports each one keeps
+//   UNDRA_SIZE_TARGET=es2020 node scripts/web-size-runtime.mjs ...   build for that target instead of the pinned
+//                                                                Vite's default (Vite 6's default lowers `#private`)
 //
 // Prints one JSON object: { runtime, bindings, app, lazy } with each chunk's path (relative to out-dir);
 // `lazy` lists the other JavaScript chunks (loaded on demand).
@@ -72,6 +74,9 @@ await vite.build({
     emptyOutDir: true,
     assetsInlineLimit: 0,
     minify: true,
+    // The pinned Vite's own default target (ES2022-capable browsers) unless asked: UNDRA_SIZE_TARGET=es2020 is
+    // what an app on Vite 6's default ships (`#private` fields become WeakMap helpers).
+    ...(process.env.UNDRA_SIZE_TARGET ? { target: process.env.UNDRA_SIZE_TARGET } : {}),
     rollupOptions: {
       input: join(project, "web", "src", "undra.ts"),
       preserveEntrySignatures: "exports-only",

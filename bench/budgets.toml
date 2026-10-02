@@ -708,3 +708,57 @@ tolerance = 0.05
 budget_gzip_bytes = 26000
 measured_gzip_bytes = 25996
 tolerance = 0.05
+
+# ---------------------------------------------------------------------------------------------
+# The web call path (E4; R9: budgets are tests). Per operation, p50, in nanoseconds. Not measured by
+# the budgets test of this crate: the rows named `node/...` by `call-path.test.ts` of the TypeScript
+# runtime (the runtime's own cost: the core is a WebAssembly stub that echoes its arguments, so the
+# path from the writer to the decoded reply is all that is timed), the others by the playground's
+# device bench in Chromium (`npm run bench` in examples/playground/web, scripts/bench-device.sh
+# --device web), which fails a run whose p50 is over its row. The 5x rule of the header: the budget is
+# five times what the reference host measured (Apple M5 Pro, Chromium 153 / Node 24, load up to 30
+# from other builds), rounded up to two significant figures; UNDRA_BENCH_SCALE multiplies it.
+# Where the web rows stood before the call-path pieces (the default Vite target, bench/RESULTS.md,
+# 2026-10-01): sync_call 3.2 to 5.5 us, sync_call_runtime 3.5 to 5.9 us, record_1kb 4.6 to 8.2 us,
+# keyed_insert_10k 20.6 to 28.5 us, changeset_100 88 to 110 us.
+# ---------------------------------------------------------------------------------------------
+
+[web."node/call_async"]
+budget_ns = 1600
+measured_ns = 312
+what = "await core.call(..) on the stub core, with the generated code's writer and decode: the runtime's own cost"
+
+[web."node/call_sync"]
+budget_ns = 800
+measured_ns = 159
+what = "UndraCore.callSync on the stub core: the runtime's own cost"
+
+[web."sync_call"]
+budget_ns = 2200
+measured_ns = 440
+what = "await bench.benchAdd(1, 2): the generated binding, in Chromium (the device bench's `sync_call` row)"
+
+[web."sync_call_runtime"]
+budget_ns = 1500
+measured_ns = 290
+what = "UndraCore.callSync of the same method, in Chromium"
+
+[web."record_1kb"]
+budget_ns = 6100
+measured_ns = 1210
+what = "await bench.benchEchoBytes(1,024 bytes): the payload crosses the boundary twice, in Chromium"
+
+[web."keyed_insert_10k"]
+budget_ns = 67000
+measured_ns = 13350
+what = "await bench.benchListInsert(5000) on 10,000 rows: the call, the core's insert, the patch applied to the mirror, in Chromium"
+
+[web."changeset_100"]
+budget_ns = 84000
+measured_ns = 16700
+what = "await bench.benchTouchSignals(100): one change-set of 100 entries applied to 100 signals, in Chromium"
+
+[web."drain_frame"]
+budget_ns = 6300000
+measured_ns = 1260000
+what = "the ADR-031 experiment: 1,667 one-update keyed patches on 10,000 rows in one frame (100,000 a second at 60 Hz), merged, the page's own thread, in Chromium"

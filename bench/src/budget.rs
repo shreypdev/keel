@@ -72,6 +72,21 @@
 //!
 //! The gate is [`SizeBudget::ceiling`]: the budget, or the record plus the tolerance when that is
 //! lower. `UNDRA_BENCH_SCALE` never applies to a size.
+//!
+//! A fifth kind of table gates a row of the **web call path**, measured in JavaScript (the
+//! playground's device bench in Chromium, `bench.spec.ts`, and `call-path.test.mjs` against the
+//! fixture core in Node), not by this crate:
+//!
+//! ```toml
+//! [web."sync_call"]                   # the row's id, quoted
+//! budget_ns = 3900                    # required: the p50 per operation, never more than this
+//! measured_ns = 780                   # the p50 when the budget was set (kept for humans)
+//! what = "await bench.benchAdd(1, 2) in Chromium"  # optional: in words
+//! ```
+//!
+//! This crate only reads the table and checks that it is consistent with itself
+//! ([`WebBudget::self_check`]); the measuring harnesses read the same file, so there is one place
+//! a web budget is written down. `UNDRA_BENCH_SCALE` multiplies it like any latency ceiling.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -200,6 +215,32 @@ impl SizeBudget {
             problems.push("tolerance is set but there is no measured_gzip_bytes".to_owned());
         }
         problems
+    }
+}
+
+/// A web call-path row's budget (a `[web."id"]` table), in nanoseconds per operation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WebBudget {
+    /// The p50 per operation above which the measuring harness fails.
+    pub budget_ns: f64,
+    /// The p50 measured when the budget was set, if recorded.
+    pub measured_ns: Option<f64>,
+    /// What the row measures, in words.
+    pub what: Option<String>,
+}
+
+impl WebBudget {
+    /// Problems with the table itself: a recorded measurement already over its own budget.
+    pub fn self_check(&self) -> Vec<String> {
+        match self.measured_ns {
+            Some(m) if m > self.budget_ns => {
+                vec![format!(
+                    "measured_ns {m} is over budget_ns {}",
+                    self.budget_ns
+                )]
+            }
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -404,6 +445,8 @@ pub struct Budgets {
     pub ratios: BTreeMap<String, RatioBudget>,
     /// The size gates of shipped artefacts, by artefact name (`[size."name"]`).
     pub sizes: BTreeMap<String, SizeBudget>,
+    /// The web call-path budgets, by row id (`[web."id"]`).
+    pub web: BTreeMap<String, WebBudget>,
 }
 
 /// Why `budgets.toml` could not be read.
@@ -461,6 +504,16 @@ pub enum BudgetError {
         /// The ratio named twice.
         name: String,
     },
+    /// A `[web."id"]` table has no `budget_ns`.
+    MissingWebBudget {
+        /// The row the table names.
+        name: String,
+    },
+    /// Two `[web."id"]` tables name the same row.
+    DuplicateWeb {
+        /// The row named twice.
+        name: String,
+    },
 }
 
 impl fmt::Display for BudgetError {
@@ -499,6 +552,12 @@ impl fmt::Display for BudgetError {
             BudgetError::DuplicateRatio { name } => {
                 write!(f, "budgets file: [ratio.\"{name}\"] appears twice")
             }
+            BudgetError::MissingWebBudget { name } => {
+                write!(f, "budgets file: [web.\"{name}\"] has no budget_ns")
+            }
+            BudgetError::DuplicateWeb { name } => {
+                write!(f, "budgets file: [web.\"{name}\"] appears twice")
+            }
         }
     }
 }
@@ -518,6 +577,7 @@ enum Section {
     Stress(String),
     Ratio(String),
     Size(String),
+    Web(String),
 }
 
 impl Budgets {
@@ -538,6 +598,8 @@ impl Budgets {
         let mut ratio_order: Vec<String> = Vec::new();
         let mut sizes: BTreeMap<String, PartialSize> = BTreeMap::new();
         let mut size_order: Vec<String> = Vec::new();
+        let mut web: BTreeMap<String, PartialWeb> = BTreeMap::new();
+        let mut web_order: Vec<String> = Vec::new();
         for (index, raw) in text.lines().enumerate() {
             let line = index + 1;
             let syntax = |message: &str| BudgetError::Syntax {
@@ -590,10 +652,19 @@ impl Budgets {
                     sizes.insert(name.clone(), PartialSize::default());
                     size_order.push(name.clone());
                     Section::Size(name)
+                } else if let Some(name) = header.strip_prefix("web.") {
+                    let name = parse_string(name.trim())
+                        .ok_or_else(|| syntax("a web table is written [web.\"id\"]"))?;
+                    if web.contains_key(&name) {
+                        return Err(BudgetError::DuplicateWeb { name });
+                    }
+                    web.insert(name.clone(), PartialWeb::default());
+                    web_order.push(name.clone());
+                    Section::Web(name)
                 } else {
                     return Err(syntax(
                         "the only tables are [meta], [bench.\"name\"], [stress.\"name\"], \
-                         [ratio.\"name\"] and [size.\"name\"]",
+                         [ratio.\"name\"], [size.\"name\"] and [web.\"id\"]",
                     ));
                 };
                 continue;
@@ -674,6 +745,20 @@ impl Budgets {
                         }
                     }
                 }
+                Section::Web(name) => {
+                    let entry = web.entry(name.clone()).or_default();
+                    match (key, value) {
+                        ("budget_ns", Value::Number(n)) if n > 0.0 => entry.budget_ns = Some(n),
+                        ("measured_ns", Value::Number(n)) if n > 0.0 => entry.measured_ns = Some(n),
+                        ("what", Value::Text(t)) => entry.what = Some(t),
+                        _ => {
+                            return Err(syntax(
+                                "a web table takes budget_ns and measured_ns (positive numbers) \
+                                 and what (a string)",
+                            ));
+                        }
+                    }
+                }
                 Section::Bench(name) => {
                     let entry = pending.entry(name.clone()).or_default();
                     match (key, value) {
@@ -734,6 +819,20 @@ impl Budgets {
                 },
             );
         }
+        for name in web_order {
+            let partial = web.remove(&name).unwrap_or_default();
+            let Some(budget_ns) = partial.budget_ns else {
+                return Err(BudgetError::MissingWebBudget { name });
+            };
+            budgets.web.insert(
+                name,
+                WebBudget {
+                    budget_ns,
+                    measured_ns: partial.measured_ns,
+                    what: partial.what,
+                },
+            );
+        }
         for name in order {
             let partial = pending.remove(&name).unwrap_or_default();
             let Some(budget_ns) = partial.budget_ns else {
@@ -762,6 +861,13 @@ struct PartialRatio {
     den_div: Option<f64>,
     max: Option<f64>,
     measured: Option<f64>,
+}
+
+#[derive(Default)]
+struct PartialWeb {
+    budget_ns: Option<f64>,
+    measured_ns: Option<f64>,
+    what: Option<String>,
 }
 
 #[derive(Default)]
@@ -912,6 +1018,13 @@ budget_ns = 7
                     size.self_check().is_empty(),
                     "{name}: {:?}",
                     size.self_check()
+                );
+            }
+            for (name, web) in &budgets.web {
+                assert!(
+                    web.self_check().is_empty(),
+                    "{name}: {:?}",
+                    web.self_check()
                 );
             }
             for (name, ratio) in &budgets.ratios {
@@ -1291,6 +1404,34 @@ rss_growth_pct = 1
         let dangling =
             Budgets::parse("[size.\"a\"]\nbudget_gzip_bytes = 10\ntolerance = 0.1\n").unwrap();
         assert_eq!(dangling.sizes["a"].self_check().len(), 1);
+    }
+
+    #[test]
+    fn parses_a_web_table_and_reads_it_strictly() {
+        let b = Budgets::parse(
+            "[web.\"sync_call\"]\nbudget_ns = 3_900\nmeasured_ns = 780\nwhat = \"a call\"\n",
+        )
+        .unwrap();
+        let row = &b.web["sync_call"];
+        assert_eq!(row.budget_ns, 3900.0);
+        assert_eq!(row.measured_ns, Some(780.0));
+        assert_eq!(row.what.as_deref(), Some("a call"));
+        assert!(row.self_check().is_empty());
+
+        let err = Budgets::parse("[web.\"a\"]\nmeasured_ns = 4\n").unwrap_err();
+        assert_eq!(err, BudgetError::MissingWebBudget { name: "a".into() });
+        let err =
+            Budgets::parse("[web.\"a\"]\nbudget_ns = 1\n[web.\"a\"]\nbudget_ns = 2\n").unwrap_err();
+        assert_eq!(err, BudgetError::DuplicateWeb { name: "a".into() });
+        let err = Budgets::parse("[web.\"a\"]\nbudget = 1\n").unwrap_err();
+        assert!(matches!(err, BudgetError::Syntax { line: 2, .. }), "{err}");
+        let err = Budgets::parse("[web.\"a\"]\nbudget_ns = 0\n").unwrap_err();
+        assert!(matches!(err, BudgetError::Syntax { line: 2, .. }), "{err}");
+        let err = Budgets::parse("[web.a]\n").unwrap_err();
+        assert!(matches!(err, BudgetError::Syntax { line: 1, .. }), "{err}");
+
+        let over = Budgets::parse("[web.\"a\"]\nbudget_ns = 10\nmeasured_ns = 11\n").unwrap();
+        assert_eq!(over.web["a"].self_check().len(), 1);
     }
 
     /// The number after `"key":` in a flat JSON object, as `scripts/wasm-size.sh` writes them.

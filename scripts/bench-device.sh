@@ -342,7 +342,7 @@ bench_web() {
     label="Chromium $version headless (Playwright, wasm-main) on $(host_cpu)"
     finalize_run "$WORK/raw-$n.json" "web-chromium-headless" browser "$label" "$(run_tag "$n")" \
       "release-wasm, wasm-opt -Oz" \
-      "vite production build at Vite's default target (the runtime's ES2022 #private class members are lowered to WeakMap/WeakSet helpers, as in any app built with Vite's defaults), cross-origin isolated (5 µs clock)" \
+      "vite production build with build.target es2022 (the playground's vite.config.ts, as the Undra Vite plugin sets it for an app that has none; Vite 6's own default, es2020, lowers the runtime's class fields to helpers), cross-origin isolated (5 µs clock)" \
       "$l1" "$l2"
   done
 }
