@@ -296,5 +296,10 @@ if failed:
     print("Find what grew (ADR-052 has the twiggy recipe for the wasm; scripts/web-size-attribute.mjs says where the "
           "JavaScript chunk's bytes are, per declaration); if the growth is intended, re-record with "
           "scripts/wasm-size.sh --record in the same commit, where review sees it.", file=sys.stderr)
+    if any(line["gzipped"] > line["budget"] for line, _, _ in results if line.get("gzipped") is not None):
+        # --record moves the record, never the budget: a row over its budget needs room made or a decision.
+        print("A row is over its budget, which --record cannot raise: make room in the same change (for the JavaScript, "
+              "ADR-057's \"Levers measured and not taken\" lists what is left, host events by use first, about 530 bytes), "
+              "or restate the budget in an ADR (ADR-052, ADR-057).", file=sys.stderr)
     sys.exit(1)
 PY
