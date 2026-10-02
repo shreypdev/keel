@@ -176,44 +176,44 @@ export class WasmMainTransport implements Transport {
   readonly mode = "wasm-main";
   readonly synchronous = true;
 
-  readonly #options: WasmMainOptions;
-  readonly #clock: ClockAdapter;
-  #rng: RngAdapter | null;
-  readonly #timer: TimerAdapter;
-  #handler: TransportHandler | null = null;
-  #instance: WebAssembly.Instance | null = null;
-  #exports: CoreExports | null = null;
-  #buffer: ArrayBuffer | null = null;
-  #u8 = new Uint8Array(0);
-  #view = new DataView(new ArrayBuffer(0));
-  #depth = 0;
-  #scratchPtr = 0;
-  #scratchCap = 0;
-  #pollScheduled = false;
-  #closed = false;
-  #dead: UndraTransportError | null = null;
+  private readonly _options: WasmMainOptions;
+  private readonly _clock: ClockAdapter;
+  private _rng: RngAdapter | null;
+  private readonly _timer: TimerAdapter;
+  private _handler: TransportHandler | null = null;
+  private _instance: WebAssembly.Instance | null = null;
+  private _exports: CoreExports | null = null;
+  private _buffer: ArrayBuffer | null = null;
+  private _u8 = new Uint8Array(0);
+  private _view = new DataView(new ArrayBuffer(0));
+  private _depth = 0;
+  private _scratchPtr = 0;
+  private _scratchCap = 0;
+  private _pollScheduled = false;
+  private _closed = false;
+  private _dead: UndraTransportError | null = null;
   /** The compiled module, kept so that a restart instantiates it again without compiling (ADR-049, `twin`). */
-  #module: WebAssembly.Module | null = null;
+  private _module: WebAssembly.Module | null = null;
 
   /** @param options See {@link WasmMainOptions}. */
   constructor(options: WasmMainOptions) {
-    this.#options = options;
-    this.#clock = options.clock ?? systemClock();
-    this.#timer = options.timer ?? setTimeoutTimer();
-    this.#rng = options.rng ?? null;
+    this._options = options;
+    this._clock = options.clock ?? systemClock();
+    this._timer = options.timer ?? setTimeoutTimer();
+    this._rng = options.rng ?? null;
   }
 
   /** The instantiated module (after `start`); for devtools and tests. */
   get instance(): WebAssembly.Instance | null {
-    return this.#instance;
+    return this._instance;
   }
 
   async start(handler: TransportHandler): Promise<HelloPayload> {
-    this.#handler = handler;
-    const { module, instance } = await instantiate(this.#options.wasm, this.#imports());
-    if (this.#closed) throw new UndraTransportError("closed", "the core is closed");
-    this.#module = module;
-    this.#instance = instance;
+    this._handler = handler;
+    const { module, instance } = await instantiate(this._options.wasm, this._imports());
+    if (this._closed) throw new UndraTransportError("closed", "the core is closed");
+    this._module = module;
+    this._instance = instance;
     const exported = instance.exports as unknown as Record<string, unknown>;
     const missing = [
       ...(exported.memory instanceof WebAssembly.Memory ? [] : ["memory"]),
@@ -222,26 +222,26 @@ export class WasmMainTransport implements Transport {
     if (missing.length > 0) {
       throw new UndraTransportError("handshake", `the module is not an Undra core: it does not export ${missing.join(", ")}`);
     }
-    this.#exports = exported as unknown as CoreExports;
-    const { abi, schemaHash } = this.#run((e) => {
+    this._exports = exported as unknown as CoreExports;
+    const { abi, schemaHash } = this._run((e) => {
       e._initialize?.();
       return { abi: e.undra_abi_version(), schemaHash: BigInt.asUintN(64, e.undra_schema_hash()) };
     });
     if (abi !== ABI_VERSION) {
       throw new UndraTransportError("handshake", `the core speaks wasm ABI ${abi}, this runtime speaks ${ABI_VERSION}`);
     }
-    if (schemaHash !== this.#options.expectedSchemaHash) {
-      throw new UndraSchemaMismatchError(this.#options.expectedSchemaHash, schemaHash);
+    if (schemaHash !== this._options.expectedSchemaHash) {
+      throw new UndraSchemaMismatchError(this._options.expectedSchemaHash, schemaHash);
     }
-    const mode = this.#options.devtools === true ? "dev" : "inproc";
-    const platform = this.#options.platform ?? hostPlatform();
+    const mode = this._options.devtools === true ? "dev" : "inproc";
+    const platform = this._options.platform ?? hostPlatform();
     const config = new UndraWriter(32);
     config.writeStr(platform);
     config.writeStr(mode);
     config.writeU8(0); // core_threads: the host drives the executor (undra_poll)
     config.writeU8(0); // blocking_threads: no pool on wasm
-    config.writeU8(this.#options.logLevel ?? 2);
-    const code = this.#invoke(config.finish(), (e, ptr, len) => e.undra_init(ptr, len));
+    config.writeU8(this._options.logLevel ?? 2);
+    const code = this._invoke(config.finish(), (e, ptr, len) => e.undra_init(ptr, len));
     if (code !== 0) throw new UndraTransportError("handshake", `undra_init failed with code ${code}`);
     return { undraVersion: `wasm-abi-${abi}`, schemaHash, platform: "wasm", mode };
   }
@@ -251,13 +251,13 @@ export class WasmMainTransport implements Transport {
    * runs on (ADR-049, `crashRecovery`). This one stays dead.
    */
   twin(): WasmMainTransport {
-    return new WasmMainTransport({ ...this.#options, wasm: this.#module ?? this.#options.wasm });
+    return new WasmMainTransport({ ...this._options, wasm: this._module ?? this._options.wasm });
   }
 
   send(kind: Kind, payload: Uint8Array): void {
     switch (kind) {
       case Kind.Call: {
-        const code = this.#invoke(payload, (e, ptr, len) => e.undra_call(ptr, len));
+        const code = this._invoke(payload, (e, ptr, len) => e.undra_call(ptr, len));
         if (code !== 0) {
           throw new UndraReplyError(
             ReplyStatus.BadRequest,
@@ -268,40 +268,40 @@ export class WasmMainTransport implements Transport {
       }
       case Kind.Cancel: {
         const { callId } = decodeCancel(payload);
-        this.#run((e) => e.undra_cancel(callId));
+        this._run((e) => e.undra_cancel(callId));
         return;
       }
       case Kind.StreamCredit: {
         const { callId, credit } = decodeStreamCredit(payload);
-        this.#run((e) => e.undra_stream_credit(callId, credit));
+        this._run((e) => e.undra_stream_credit(callId, credit));
         return;
       }
       case Kind.Observe: {
         const { handle, signalId, on } = decodeObserve(payload);
         const { lo, hi } = splitHandle(handle);
-        this.#run((e) => e.undra_observe(lo, hi, signalId, on ? 1 : 0));
+        this._run((e) => e.undra_observe(lo, hi, signalId, on ? 1 : 0));
         return;
       }
       case Kind.Release: {
         const { lo, hi } = splitHandle(decodeRelease(payload).handle);
-        this.#run((e) => e.undra_release(lo, hi));
+        this._run((e) => e.undra_release(lo, hi));
         return;
       }
       case Kind.Event: {
         const event = decodeEvent(payload);
-        this.#invoke(event.payload, (e, ptr, len) => e.undra_event(event.portId, event.methodId, ptr, len));
+        this._invoke(event.payload, (e, ptr, len) => e.undra_event(event.portId, event.methodId, ptr, len));
         return;
       }
       case Kind.PortReply:
-        this.#invoke(payload, (e, ptr, len) => e.undra_port_reply(ptr, len));
+        this._invoke(payload, (e, ptr, len) => e.undra_port_reply(ptr, len));
         return;
       case Kind.TimerFired: {
         const { timerId } = decodeTimerFired(payload);
-        this.#run((e) => e.undra_timer_fired(timerId));
+        this._run((e) => e.undra_timer_fired(timerId));
         return;
       }
       case Kind.Restore:
-        this.#restore(payload);
+        this._restore(payload);
         return;
       default:
         throw new UndraTransportError("protocol", `cannot send a ${Kind[kind] ?? String(kind)} message to a wasm core`);
@@ -309,12 +309,12 @@ export class WasmMainTransport implements Transport {
   }
 
   callSync(payload: Uint8Array): Uint8Array {
-    return this.#invoke(payload, (e, ptr, len) => this.#takeBuf(e, e.undra_call_sync(ptr, len)));
+    return this._invoke(payload, (e, ptr, len) => this._takeBuf(e, e.undra_call_sync(ptr, len)));
   }
 
   stats(): Promise<string | null> {
     try {
-      const json = this.#run((e) => new TextDecoder().decode(this.#takeBuf(e, e.undra_stats_json())));
+      const json = this._run((e) => new TextDecoder().decode(this._takeBuf(e, e.undra_stats_json())));
       return Promise.resolve(json);
     } catch (error) {
       return Promise.reject(error);
@@ -332,9 +332,9 @@ export class WasmMainTransport implements Transport {
 
   /** `undra_snapshot`, copied out of wasm memory, at once; throws `UndraTransportError` when the core cannot be asked. */
   takeSnapshot(): Uint8Array {
-    return this.#run((e) => {
+    return this._run((e) => {
       if (e.undra_snapshot === undefined) throw new UndraTransportError("unsupported", "the core does not export undra_snapshot");
-      return this.#takeBuf(e, e.undra_snapshot());
+      return this._takeBuf(e, e.undra_snapshot());
     });
   }
 
@@ -345,7 +345,7 @@ export class WasmMainTransport implements Transport {
    */
   restore(bytes: Uint8Array): Promise<void> {
     try {
-      this.#restore(bytes);
+      this._restore(bytes);
       return Promise.resolve();
     } catch (error) {
       return Promise.reject(error);
@@ -353,14 +353,14 @@ export class WasmMainTransport implements Transport {
   }
 
   close(): void {
-    this.#closed = true;
-    this.#handler = null;
-    this.#exports = null;
+    this._closed = true;
+    this._handler = null;
+    this._exports = null;
   }
 
   /** `undra_restore`; throws `UndraRestoreError` for a non-zero code. */
-  #restore(bytes: Uint8Array): void {
-    const code = this.#invoke(bytes, (e, ptr, len) => {
+  private _restore(bytes: Uint8Array): void {
+    const code = this._invoke(bytes, (e, ptr, len) => {
       if (e.undra_restore === undefined) {
         throw new UndraTransportError("unsupported", "the core does not export undra_restore");
       }
@@ -372,21 +372,21 @@ export class WasmMainTransport implements Transport {
   // ----- memory ----------------------------------------------------------------------
 
   /** The current byte view of the module's memory; recreated when memory grew (the old buffer is detached). */
-  #bytes(): Uint8Array {
-    const memory = (this.#exports as CoreExports).memory;
-    if (memory.buffer !== this.#buffer) {
-      this.#buffer = memory.buffer;
-      this.#u8 = new Uint8Array(memory.buffer);
-      this.#view = new DataView(memory.buffer);
+  private _bytes(): Uint8Array {
+    const memory = (this._exports as CoreExports).memory;
+    if (memory.buffer !== this._buffer) {
+      this._buffer = memory.buffer;
+      this._u8 = new Uint8Array(memory.buffer);
+      this._view = new DataView(memory.buffer);
     }
-    return this.#u8;
+    return this._u8;
   }
 
   /** A copy of `[ptr, ptr + len)` of wasm memory. Import arguments are `i32`, so they arrive signed. */
-  #copyOut(ptr: number, len: number): Uint8Array {
+  private _copyOut(ptr: number, len: number): Uint8Array {
     const start = ptr >>> 0;
     const end = start + (len >>> 0);
-    const bytes = this.#bytes();
+    const bytes = this._bytes();
     if (end > bytes.length) {
       throw new RangeError(`the core handed out [${start}, ${end}) beyond its ${bytes.length} bytes of memory`);
     }
@@ -394,13 +394,13 @@ export class WasmMainTransport implements Transport {
   }
 
   /** Copies the bytes of an `UndraBuf { ptr, len, cap }` and frees it. */
-  #takeBuf(e: CoreExports, bufPtr: number): Uint8Array {
+  private _takeBuf(e: CoreExports, bufPtr: number): Uint8Array {
     if (bufPtr === 0) throw new UndraTransportError("protocol", "the core returned a null UndraBuf");
     try {
-      this.#bytes();
-      const ptr = this.#view.getUint32(bufPtr, true);
-      const len = this.#view.getUint32(bufPtr + 4, true);
-      return this.#copyOut(ptr, len);
+      this._bytes();
+      const ptr = this._view.getUint32(bufPtr, true);
+      const len = this._view.getUint32(bufPtr + 4, true);
+      return this._copyOut(ptr, len);
     } finally {
       e.undra_buf_free(bufPtr);
     }
@@ -408,64 +408,64 @@ export class WasmMainTransport implements Transport {
 
   // ----- calling into wasm -----------------------------------------------------------
 
-  #live(): CoreExports {
-    if (this.#dead !== null) throw this.#dead;
-    if (this.#exports === null) {
-      throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
+  private _live(): CoreExports {
+    if (this._dead !== null) throw this._dead;
+    if (this._exports === null) {
+      throw new UndraTransportError("closed", this._closed ? "the core is closed" : "the core is not started");
     }
-    return this.#exports;
+    return this._exports;
   }
 
   /** Runs `call` with a copy of `bytes` in wasm memory. */
-  #invoke<R>(bytes: Uint8Array, call: (e: CoreExports, ptr: number, len: number) => R): R {
-    const e = this.#live();
+  private _invoke<R>(bytes: Uint8Array, call: (e: CoreExports, ptr: number, len: number) => R): R {
+    const e = this._live();
     // A payload copied while another export is running (a sync port reply
     // from inside `port_call`) must not reuse the scratch buffer the outer
     // call may still be reading.
-    const nested = this.#depth > 0;
-    this.#depth++;
+    const nested = this._depth > 0;
+    this._depth++;
     let owned = 0;
     let ptr = 0;
     try {
       const len = bytes.length;
       if (!nested && len <= SCRATCH_LIMIT) {
-        ptr = this.#scratch(e, len);
+        ptr = this._scratch(e, len);
       } else {
         owned = Math.max(len, 1);
         ptr = allocate(e, owned);
       }
-      this.#bytes().set(bytes, ptr >>> 0);
+      this._bytes().set(bytes, ptr >>> 0);
       return call(e, ptr, len);
     } catch (error) {
-      throw this.#classify(error);
+      throw this._classify(error);
     } finally {
-      this.#depth--;
-      if (owned > 0 && this.#dead === null) e.undra_free(ptr, owned);
+      this._depth--;
+      if (owned > 0 && this._dead === null) e.undra_free(ptr, owned);
     }
   }
 
   /** Runs `call` for an export that takes no buffer. */
-  #run<R>(call: (e: CoreExports) => R): R {
-    const e = this.#live();
-    this.#depth++;
+  private _run<R>(call: (e: CoreExports) => R): R {
+    const e = this._live();
+    this._depth++;
     try {
       return call(e);
     } catch (error) {
-      throw this.#classify(error);
+      throw this._classify(error);
     } finally {
-      this.#depth--;
+      this._depth--;
     }
   }
 
-  #scratch(e: CoreExports, len: number): number {
-    if (this.#scratchCap < len) {
-      if (this.#scratchPtr !== 0) e.undra_free(this.#scratchPtr, this.#scratchCap);
+  private _scratch(e: CoreExports, len: number): number {
+    if (this._scratchCap < len) {
+      if (this._scratchPtr !== 0) e.undra_free(this._scratchPtr, this._scratchCap);
       let cap = SCRATCH_MIN;
       while (cap < len) cap *= 2;
-      this.#scratchPtr = allocate(e, cap);
-      this.#scratchCap = cap;
+      this._scratchPtr = allocate(e, cap);
+      this._scratchCap = cap;
     }
-    return this.#scratchPtr;
+    return this._scratchPtr;
   }
 
   /**
@@ -474,23 +474,23 @@ export class WasmMainTransport implements Transport {
    * memory). The instance cannot be trusted afterwards: the transport dies and
    * the handler hears about it once.
    */
-  #classify(error: unknown): unknown {
+  private _classify(error: unknown): unknown {
     if (error instanceof UndraError) return error;
-    if (this.#dead !== null) return this.#dead;
+    if (this._dead !== null) return this._dead;
     const dead = new UndraTransportError("trap", `the wasm core trapped: ${errorMessage(error)}`, { cause: error });
-    this.#dead = dead;
-    const handler = this.#handler;
+    this._dead = dead;
+    const handler = this._handler;
     if (handler !== null) queueMicrotask(() => handler.closed(dead));
     return dead;
   }
 
-  #report(error: unknown): void {
-    this.#options.onError?.(error);
+  private _report(error: unknown): void {
+    this._options.onError?.(error);
   }
 
   // ----- the `undra` import object ----------------------------------------------------
 
-  #imports(): WebAssembly.Imports {
+  private _imports(): WebAssembly.Imports {
     /** Wraps an import so that nothing escapes into wasm; `fallback` is what the core sees instead. */
     const guard =
       <A extends unknown[], R>(fn: (...args: A) => R, fallback: R) =>
@@ -498,58 +498,58 @@ export class WasmMainTransport implements Transport {
         try {
           return fn(...args);
         } catch (error) {
-          this.#report(error);
+          this._report(error);
           return fallback;
         }
       };
     return {
       undra: {
         reply: guard((_callId: number, ptr: number, len: number) => {
-          this.#handler?.reply(this.#copyOut(ptr, len));
+          this._handler?.reply(this._copyOut(ptr, len));
         }, undefined),
         changeset: guard((ptr: number, len: number) => {
-          this.#handler?.changeSet(this.#copyOut(ptr, len));
+          this._handler?.changeSet(this._copyOut(ptr, len));
         }, undefined),
         stream: guard((_callId: number, ptr: number, len: number) => {
-          this.#handler?.streamItem(this.#copyOut(ptr, len));
+          this._handler?.streamItem(this._copyOut(ptr, len));
         }, undefined),
         port_call: guard(
           (portId: number, methodId: number, portCallId: number, ptr: number, len: number) =>
-            this.#portCall({ portId: portId >>> 0, methodId: methodId >>> 0, portCallId: portCallId >>> 0, args: this.#copyOut(ptr, len) }),
+            this._portCall({ portId: portId >>> 0, methodId: methodId >>> 0, portCallId: portCallId >>> 0, args: this._copyOut(ptr, len) }),
           2,
         ),
         schedule: guard(() => {
-          this.#schedulePoll();
+          this._schedulePoll();
         }, undefined),
         timer_set: guard((timerId: number, delayLo: number, delayHi: number) => {
           const id = timerId >>> 0;
-          this.#timer.set(id, (delayHi >>> 0) * 0x1_0000_0000 + (delayLo >>> 0), (fired) => {
-            this.#timerFired(fired);
+          this._timer.set(id, (delayHi >>> 0) * 0x1_0000_0000 + (delayLo >>> 0), (fired) => {
+            this._timerFired(fired);
           });
         }, undefined),
         log: guard((level: number, ptr: number, len: number) => {
-          const { target, message } = parseLog(this.#copyOut(ptr, len));
-          this.#handler?.log(level & 0xff, target, message);
+          const { target, message } = parseLog(this._copyOut(ptr, len));
+          this._handler?.log(level & 0xff, target, message);
         }, undefined),
-        now_ms: guard(() => this.#clock.nowMs(), 0),
+        now_ms: guard(() => this._clock.nowMs(), 0),
         // No CSPRNG (no WebCrypto, or an Rng adapter that throws): the guard writes nothing, so the core finds
         // its canary untouched and answers `Rng.fill` unavailable (ADR-049) instead of using zeros. Never a fallback.
         random: guard((ptr: number, len: number) => {
           const start = ptr >>> 0;
-          (this.#rng ??= cryptoRng()).fill(this.#bytes().subarray(start, start + (len >>> 0)));
+          (this._rng ??= cryptoRng()).fill(this._bytes().subarray(start, start + (len >>> 0)));
         }, undefined),
       },
     };
   }
 
-  #portCall(call: PortCallPayload): number {
-    const handler = this.#handler;
+  private _portCall(call: PortCallPayload): number {
+    const handler = this._handler;
     if (handler === null) return 2;
     const outcome: PortOutcome = handler.portCall(call);
     switch (outcome.kind) {
       case "sync":
         // The reply must be in the core before `port_call` returns 0.
-        this.#invoke(outcome.reply, (e, ptr, len) => e.undra_port_reply(ptr, len));
+        this._invoke(outcome.reply, (e, ptr, len) => e.undra_port_reply(ptr, len));
         return 0;
       case "async":
         return 1;
@@ -558,26 +558,26 @@ export class WasmMainTransport implements Transport {
     }
   }
 
-  #schedulePoll(): void {
-    if (this.#pollScheduled || this.#closed) return;
-    this.#pollScheduled = true;
+  private _schedulePoll(): void {
+    if (this._pollScheduled || this._closed) return;
+    this._pollScheduled = true;
     queueMicrotask(() => {
-      this.#pollScheduled = false;
-      if (this.#closed || this.#dead !== null) return;
+      this._pollScheduled = false;
+      if (this._closed || this._dead !== null) return;
       try {
-        this.#run((e) => e.undra_poll());
+        this._run((e) => e.undra_poll());
       } catch (error) {
-        this.#report(error);
+        this._report(error);
       }
     });
   }
 
-  #timerFired(timerId: number): void {
-    if (this.#closed || this.#dead !== null) return;
+  private _timerFired(timerId: number): void {
+    if (this._closed || this._dead !== null) return;
     try {
-      this.#run((e) => e.undra_timer_fired(timerId));
+      this._run((e) => e.undra_timer_fired(timerId));
     } catch (error) {
-      this.#report(error);
+      this._report(error);
     }
   }
 }

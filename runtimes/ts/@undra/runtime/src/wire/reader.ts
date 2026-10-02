@@ -35,110 +35,110 @@ const MIN_UNSAFE_HI = -0x20_0000;
  * ```
  */
 export class UndraReader {
-  readonly #bytes: Uint8Array;
-  /** Over `#bytes`, made on first use: only the 64-bit and floating-point readers need one (the integer readers load bytes). */
-  #dv: DataView | null = null;
-  #pos = 0;
+  private readonly _bytes: Uint8Array;
+  /** Over `_bytes`, made on first use: only the 64-bit and floating-point readers need one (the integer readers load bytes). */
+  private _dv: DataView | null = null;
+  private _pos = 0;
 
   /** @param bytes The message to read. The reader keeps a reference; it never copies or modifies the bytes. */
   constructor(bytes: Uint8Array) {
-    this.#bytes = bytes;
+    this._bytes = bytes;
   }
 
   /** A `DataView` over the input, for the readers that cannot load bytes one by one cheaply. */
-  #view(): DataView {
-    return (this.#dv ??= new DataView(this.#bytes.buffer, this.#bytes.byteOffset, this.#bytes.byteLength));
+  private _view(): DataView {
+    return (this._dv ??= new DataView(this._bytes.buffer, this._bytes.byteOffset, this._bytes.byteLength));
   }
 
   /** Offset of the next unread byte, relative to the start of the input. */
   get position(): number {
-    return this.#pos;
+    return this._pos;
   }
 
   /** Number of unread bytes. */
   get remaining(): number {
-    return this.#bytes.length - this.#pos;
+    return this._bytes.length - this._pos;
   }
 
   /** Throws `unexpected_eof` for a read of `n` bytes at the current position. */
-  #eof(n: number): never {
+  private _eof(n: number): never {
     throw new WireError({
       code: "unexpected_eof",
-      needed: n - (this.#bytes.length - this.#pos),
-      at: this.#pos,
+      needed: n - (this._bytes.length - this._pos),
+      at: this._pos,
     });
   }
 
   /** The little-endian `u32` at `p` (in range: the caller checked). */
-  #u32(p: number): number {
-    const b = this.#bytes;
+  private _u32(p: number): number {
+    const b = this._bytes;
     return ((b[p] as number) | ((b[p + 1] as number) << 8) | ((b[p + 2] as number) << 16) | ((b[p + 3] as number) << 24)) >>> 0;
   }
 
   /** Reads an unsigned 8-bit integer. */
   readU8(): number {
-    const p = this.#pos;
-    if (p + 1 > this.#bytes.length) this.#eof(1);
-    this.#pos = p + 1;
-    return this.#bytes[p] as number;
+    const p = this._pos;
+    if (p + 1 > this._bytes.length) this._eof(1);
+    this._pos = p + 1;
+    return this._bytes[p] as number;
   }
 
   /** Reads a signed 8-bit integer. */
   readI8(): number {
-    const p = this.#pos;
-    if (p + 1 > this.#bytes.length) this.#eof(1);
-    this.#pos = p + 1;
-    return ((this.#bytes[p] as number) << 24) >> 24;
+    const p = this._pos;
+    if (p + 1 > this._bytes.length) this._eof(1);
+    this._pos = p + 1;
+    return ((this._bytes[p] as number) << 24) >> 24;
   }
 
   /** Reads an unsigned 16-bit integer. */
   readU16(): number {
-    const p = this.#pos;
-    if (p + 2 > this.#bytes.length) this.#eof(2);
-    this.#pos = p + 2;
-    const b = this.#bytes;
+    const p = this._pos;
+    if (p + 2 > this._bytes.length) this._eof(2);
+    this._pos = p + 2;
+    const b = this._bytes;
     return (b[p] as number) | ((b[p + 1] as number) << 8);
   }
 
   /** Reads a signed 16-bit integer. */
   readI16(): number {
-    const p = this.#pos;
-    if (p + 2 > this.#bytes.length) this.#eof(2);
-    this.#pos = p + 2;
-    const b = this.#bytes;
+    const p = this._pos;
+    if (p + 2 > this._bytes.length) this._eof(2);
+    this._pos = p + 2;
+    const b = this._bytes;
     return (((b[p] as number) | ((b[p + 1] as number) << 8)) << 16) >> 16;
   }
 
   /** Reads an unsigned 32-bit integer. */
   readU32(): number {
-    const p = this.#pos;
-    if (p + 4 > this.#bytes.length) this.#eof(4);
-    this.#pos = p + 4;
-    return this.#u32(p);
+    const p = this._pos;
+    if (p + 4 > this._bytes.length) this._eof(4);
+    this._pos = p + 4;
+    return this._u32(p);
   }
 
   /** Reads a signed 32-bit integer. */
   readI32(): number {
-    const p = this.#pos;
-    if (p + 4 > this.#bytes.length) this.#eof(4);
-    this.#pos = p + 4;
-    return this.#u32(p) | 0;
+    const p = this._pos;
+    if (p + 4 > this._bytes.length) this._eof(4);
+    this._pos = p + 4;
+    return this._u32(p) | 0;
   }
 
   /** Reads an unsigned 64-bit integer as a `bigint`. */
   readU64(): bigint {
-    const p = this.#pos;
-    if (p + 8 > this.#bytes.length) this.#eof(8);
-    this.#pos = p + 8;
-    return this.#view().getBigUint64(p, true);
+    const p = this._pos;
+    if (p + 8 > this._bytes.length) this._eof(8);
+    this._pos = p + 8;
+    return this._view().getBigUint64(p, true);
   }
 
   /** Reads a signed 64-bit integer as a `bigint`. */
   readI64(): bigint {
-    const p = this.#pos;
-    if (p + 8 > this.#bytes.length) this.#eof(8);
-    this.#pos = p + 8;
-    return this.#view().getBigInt64(p, true);
+    const p = this._pos;
+    if (p + 8 > this._bytes.length) this._eof(8);
+    this._pos = p + 8;
+    return this._view().getBigInt64(p, true);
   }
 
   /**
@@ -147,14 +147,14 @@ export class UndraReader {
    * allocate a `BigInt` on the success path.
    */
   readU64Number(): number {
-    const p = this.#pos;
-    if (p + 8 > this.#bytes.length) this.#eof(8);
-    const lo = this.#u32(p);
-    const hi = this.#u32(p + 4);
+    const p = this._pos;
+    if (p + 8 > this._bytes.length) this._eof(8);
+    const lo = this._u32(p);
+    const hi = this._u32(p + 4);
     if (hi > MAX_SAFE_HI) {
-      throw new WireError({ code: "unsafe_integer", value: this.#view().getBigUint64(p, true), at: p });
+      throw new WireError({ code: "unsafe_integer", value: this._view().getBigUint64(p, true), at: p });
     }
-    this.#pos = p + 8;
+    this._pos = p + 8;
     return hi * TWO_POW_32 + lo;
   }
 
@@ -164,49 +164,49 @@ export class UndraReader {
    * `BigInt` on the success path.
    */
   readI64Number(): number {
-    const p = this.#pos;
-    if (p + 8 > this.#bytes.length) this.#eof(8);
-    const lo = this.#u32(p);
-    const hi = this.#u32(p + 4) | 0;
+    const p = this._pos;
+    if (p + 8 > this._bytes.length) this._eof(8);
+    const lo = this._u32(p);
+    const hi = this._u32(p + 4) | 0;
     if (hi > MAX_SAFE_HI || hi < MIN_UNSAFE_HI || (hi === MIN_UNSAFE_HI && lo === 0)) {
-      throw new WireError({ code: "unsafe_integer", value: this.#view().getBigInt64(p, true), at: p });
+      throw new WireError({ code: "unsafe_integer", value: this._view().getBigInt64(p, true), at: p });
     }
-    this.#pos = p + 8;
+    this._pos = p + 8;
     return hi * TWO_POW_32 + lo;
   }
 
   /** Reads an IEEE 754 binary32. */
   readF32(): number {
-    const p = this.#pos;
-    if (p + 4 > this.#bytes.length) this.#eof(4);
-    this.#pos = p + 4;
-    return this.#view().getFloat32(p, true);
+    const p = this._pos;
+    if (p + 4 > this._bytes.length) this._eof(4);
+    this._pos = p + 4;
+    return this._view().getFloat32(p, true);
   }
 
   /** Reads an IEEE 754 binary64. */
   readF64(): number {
-    const p = this.#pos;
-    if (p + 8 > this.#bytes.length) this.#eof(8);
-    this.#pos = p + 8;
-    return this.#view().getFloat64(p, true);
+    const p = this._pos;
+    if (p + 8 > this._bytes.length) this._eof(8);
+    this._pos = p + 8;
+    return this._view().getFloat64(p, true);
   }
 
   /** Reads a boolean. Any byte other than 0 or 1 is `invalid_tag`. */
   readBool(): boolean {
-    const p = this.#pos;
-    if (p + 1 > this.#bytes.length) this.#eof(1);
-    const v = this.#bytes[p] as number;
+    const p = this._pos;
+    if (p + 1 > this._bytes.length) this._eof(1);
+    const v = this._bytes[p] as number;
     if (v > 1) throw new WireError({ code: "invalid_tag", tag: v, at: p, ty: "bool" });
-    this.#pos = p + 1;
+    this._pos = p + 1;
     return v === 1;
   }
 
   /** Reads 16 raw bytes as a canonical lowercase UUID string, without an intermediate copy. */
   readUuid(): Uuid {
-    const p = this.#pos;
-    if (p + 16 > this.#bytes.length) this.#eof(16);
-    this.#pos = p + 16;
-    return decodeUuid(this.#bytes, p);
+    const p = this._pos;
+    if (p + 16 > this._bytes.length) this._eof(16);
+    this._pos = p + 16;
+    return decodeUuid(this._bytes, p);
   }
 
   /**
@@ -221,26 +221,26 @@ export class UndraReader {
    *   sequence of them longer than the remaining input is rejected.
    */
   readLen(minItemSize = 1): number {
-    const at = this.#pos;
-    if (at + 4 > this.#bytes.length) this.#eof(4);
-    const n = this.#u32(at);
-    if (n * minItemSize > this.#bytes.length - at - 4) {
+    const at = this._pos;
+    if (at + 4 > this._bytes.length) this._eof(4);
+    const n = this._u32(at);
+    if (n * minItemSize > this._bytes.length - at - 4) {
       throw new WireError({ code: "length_too_large", len: n, at });
     }
-    this.#pos = at + 4;
+    this._pos = at + 4;
     return n;
   }
 
   /** Reads a `u32`-length-prefixed string. Invalid UTF-8 is `invalid_utf8`. */
   readStr(): string {
-    const at = this.#pos;
+    const at = this._pos;
     const n = this.readLen();
-    const start = this.#pos;
+    const start = this._pos;
     const end = start + n;
     let s = "";
     if (n <= SHORT_ASCII) {
       // ASCII is the common case for the short strings of names and keys: build it here, not through `TextDecoder`.
-      const b = this.#bytes;
+      const b = this._bytes;
       let i = start;
       while (i < end) {
         const c = b[i] as number;
@@ -249,16 +249,16 @@ export class UndraReader {
         i++;
       }
       if (i === end) {
-        this.#pos = end;
+        this._pos = end;
         return s;
       }
     }
     try {
-      s = DECODER.decode(this.#bytes.subarray(start, end));
+      s = DECODER.decode(this._bytes.subarray(start, end));
     } catch {
       throw new WireError({ code: "invalid_utf8", at });
     }
-    this.#pos = end;
+    this._pos = end;
     return s;
   }
 
@@ -277,22 +277,22 @@ export class UndraReader {
   /** Reads exactly `n` raw bytes (no length prefix) as a borrowed view; see {@link readBytes}. */
   readRaw(n: number): Uint8Array {
     if (!Number.isInteger(n) || n < 0) throw new RangeError(`raw length out of range: ${String(n)}`);
-    const p = this.#pos;
-    if (n > this.#bytes.length - p) this.#eof(n);
-    this.#pos = p + n;
-    return this.#bytes.subarray(p, p + n);
+    const p = this._pos;
+    if (n > this._bytes.length - p) this._eof(n);
+    this._pos = p + n;
+    return this._bytes.subarray(p, p + n);
   }
 
   /** Reads all unread bytes as a borrowed view (the opaque tail of a payload); see {@link readBytes}. */
   readRest(): Uint8Array {
-    const p = this.#pos;
-    this.#pos = this.#bytes.length;
-    return this.#bytes.subarray(p);
+    const p = this._pos;
+    this._pos = this._bytes.length;
+    return this._bytes.subarray(p);
   }
 
   /** Asserts that the whole input was consumed; throws `trailing_bytes` otherwise. */
   finish(): void {
-    const left = this.#bytes.length - this.#pos;
+    const left = this._bytes.length - this._pos;
     if (left !== 0) throw new WireError({ code: "trailing_bytes", count: left });
   }
 }
