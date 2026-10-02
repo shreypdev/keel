@@ -714,8 +714,10 @@ names, the three generators, the goldens `generic_functions` and `generic_object
 9. **The cookbook has no modelling page** to extend: the guide `generics.html` takes that role (and `types.html` gained the
    "Generics" section with the limits table). The default-choice post's tally follows row T22 (28 solved, 5 partial) and its `claims.md`
    rows M03-N3, O34 and T22, MI04 and section 11.
-10. **Measured**: the web hello core grows from 116,550 to 117,215 bytes gzipped (+665, the label in the JSON writer and the mirrors;
-    gate 120,000) and the up-front JavaScript stays at 22,100 (gate 22,100: no runtime changed). The Swift 6.3 diagnostic for an array
+10. **Measured**: the web hello core grows from 116,023 to 117,215 bytes gzipped (+1,192, the label in the JSON writer and the mirrors;
+    gate 120,000; both built with Rust 1.99.0 and wasm-opt 133 by the review, the merge base `a309e9f` against the branch: the
+    implementation's own note said 116,550 and +665, a main measured another way) and the up-front JavaScript stays at 22,100
+    (gate 22,100: no runtime changed). More than the "well under 1 KB" the Risks expected, inside the gate (2,785 bytes left). The Swift 6.3 diagnostic for an array
     literal of an un-instantiated type is in the guide.
 11. **MSRV 1.85 was not built locally** (no such toolchain on the machine); the two-macro hand-over and the single-segment re-export are
     the constructs ADR-042 already relies on, and CI's pinned toolchain builds the tests.
