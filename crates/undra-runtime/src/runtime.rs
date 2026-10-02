@@ -3406,20 +3406,23 @@ impl Runtime {
             }
             self.drop_guarded_logged("an object replaced by restore", cleared.object);
         }
+        let mut placed: Vec<(Handle, &Arc<dyn AnyObject>)> = Vec::with_capacity(built.len());
         for (handle, object) in &built {
             let refs = refs_before
                 .iter()
                 .find(|(h, _)| *h == handle.0)
                 .map_or(1, |(_, n)| *n);
-            if let Err(e) = self
+            // Their page servers are registered once everything is placed (below).
+            match self
                 .objects
-                .insert_at_with_refs(*handle, object.clone(), refs)
+                .insert_at_deferring_lazy(*handle, object.clone(), refs)
             {
-                self.log(
+                Ok(()) => placed.push((*handle, object)),
+                Err(e) => self.log(
                     ERROR,
                     "undra::runtime",
                     &format!("restore: could not place {handle:?}: {e}"),
-                );
+                ),
             }
         }
 
@@ -3427,6 +3430,10 @@ impl Runtime {
         // when the host first uses the handle (ADR-059).
         if let Some(hooks) = hooks {
             (hooks.place)(self, reissue, &mut report);
+        }
+        // The page servers of the restored stores take the slots nothing in the snapshot needs.
+        for (handle, object) in placed {
+            self.objects.enter_lazy(handle, object);
         }
 
         // Calls and streams that were running on an object this restore replaced or invalidated

@@ -618,6 +618,38 @@ impl ObjectTable {
         object: Arc<dyn AnyObject>,
         host_refs: u32,
     ) -> Result<(), InsertAtError> {
+        self.insert_at_inner(handle, object, host_refs, true)
+    }
+
+    /// [`insert_at_with_refs`](Self::insert_at_with_refs), except a store's page servers are not
+    /// registered yet: a restore places everything the snapshot names first and then calls
+    /// [`enter_lazy`](Self::enter_lazy) for each store. A server takes the lowest free slot, which
+    /// may be one a later entry of the snapshot needs (a query handle's, a store's): registered
+    /// first, it would squat that slot and the entry would not be placed.
+    pub(crate) fn insert_at_deferring_lazy(
+        &self,
+        handle: Handle,
+        object: Arc<dyn AnyObject>,
+        host_refs: u32,
+    ) -> Result<(), InsertAtError> {
+        self.insert_at_inner(handle, object, host_refs, false)
+    }
+
+    /// Registers the page servers of the store at `handle` (see
+    /// [`insert_at_deferring_lazy`](Self::insert_at_deferring_lazy)); nothing for any other object.
+    pub(crate) fn enter_lazy(&self, handle: Handle, object: &Arc<dyn AnyObject>) {
+        if let Some(cell) = object.as_store() {
+            self.lazy_enter(cell, handle);
+        }
+    }
+
+    fn insert_at_inner(
+        &self,
+        handle: Handle,
+        object: Arc<dyn AnyObject>,
+        host_refs: u32,
+        enter_lazy: bool,
+    ) -> Result<(), InsertAtError> {
         let host_refs = host_refs.max(1);
         if handle.is_null()
             || handle.generation() == 0
@@ -670,7 +702,9 @@ impl ObjectTable {
         if let Some(cell) = cell {
             cell.set_owner(self.owner.load(Ordering::Relaxed));
             cell.set_handle(handle.0);
-            self.lazy_enter(&cell, handle);
+            if enter_lazy {
+                self.lazy_enter(&cell, handle);
+            }
         }
         Ok(())
     }
@@ -1641,5 +1675,38 @@ mod tests {
             BadHandleReason::Null
         );
         assert_eq!(t.live(), 0);
+    }
+
+    /// A page server takes the lowest free slot, which a later entry of the snapshot may need (a
+    /// query handle's, a store's): a restore places everything first and registers the servers
+    /// after, so a handle below a lazy store is placed where the snapshot says.
+    #[test]
+    fn a_stores_page_servers_do_not_take_the_slot_of_an_entry_placed_after_it() {
+        let t = ObjectTable::isolated();
+        let shelf = shelf(true);
+        let store_handle = Handle::new(2, 7);
+        let squatted = Handle::new(1, 6);
+        t.insert_at_deferring_lazy(store_handle, store(shelf.clone()), 1)
+            .unwrap();
+        assert_eq!(shelf.cell.lazy_handle(0), 0, "no server yet");
+        t.insert_at(squatted, a(1)).expect("the slot below is free");
+        t.enter_lazy(store_handle, &t.get_dyn(store_handle).unwrap());
+        let (books, tags) = (shelf.cell.lazy_handle(0), shelf.cell.lazy_handle(2));
+        assert!(books != 0 && tags != 0);
+        let taken: Vec<u32> = vec![Handle(books).index(), Handle(tags).index()];
+        assert!(
+            !taken.contains(&squatted.index()) && !taken.contains(&store_handle.index()),
+            "the servers took {taken:?}"
+        );
+        assert_eq!(t.get::<A>(squatted).unwrap().0, 1);
+        assert_eq!(page_len(&t, Handle(books)), Some(3));
+        // The old way (registered at placement) would have taken slot 0 and 1 for the servers.
+        let eager = ObjectTable::isolated();
+        eager.insert_at(store_handle, store(shelf(true))).unwrap();
+        assert_eq!(
+            eager.insert_at(squatted, a(1)),
+            Err(InsertAtError::Occupied),
+            "registered at placement, a server squats the lower slot"
+        );
     }
 }
