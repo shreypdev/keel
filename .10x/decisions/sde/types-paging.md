@@ -150,10 +150,10 @@ Contract scenarios: **S31** newtypes, generic instantiations and leaf types; **S
 app-tested there, as before).
 
 Sizes (`scripts/wasm-size.sh`, both gates, on this worktree's path, which embeds about 240 bytes more than the canonical one): the hello-world
-web core is **116,480 gzipped** (gate 120,000; main's record 119,654), so it did not grow: the foundation cost it about 1.9 KB (schema fields,
-persisted-state arms), which the lazy page server linked by use (`serve_lazy_lists` hooks only a store with a `Lazy` sets) and one shell sort
+web core is **116,480 gzipped** (gate 120,000; main's record 119,654), so it did not grow: the merged tree first measured 120,706 (1,052 over main's record: schema fields,
+persisted-state arms, the page server), which the lazy page server linked by use (`serve_lazy_lists` hooks only a store with a `Lazy` sets) and one shell sort
 (`undra_signals::sort_ids`, replacing three `slice::sort` instantiations) paid back with room to spare. The JavaScript up-front chunk is **22,061**
-(gate 22,100, record 22,005): `LazyList`, the paging hooks and the polling controls load with the generated bindings that use them. The
+(gate 22,100, record 22,005: 39 bytes of headroom). The
 recorded numbers in `bench/budgets.toml`'s sizes were not re-recorded here (a longer path would pin the record 240 bytes high); re-record on the
 canonical path after the merge to `main`.
 
