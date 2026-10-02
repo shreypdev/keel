@@ -402,6 +402,74 @@
    "note": "SPEC 5.9 layout 2 (ADR-037; the floor widened to u64 by ADR-040): count, generation_floor (u64), schema_hash, types x {type_id, fingerprint}, description (UTF-8 JSON, opaque to hosts), stores; signal values are raw bytes (here an i32 7)"
   },
   {
+   "name": "snapshot_recreation",
+   "type": "snapshot payload",
+   "value": {
+    "generation_floor": "8589934594",
+    "schema_hash": "1311768467463790320",
+    "types": [
+     {
+      "type_id": "3735928559",
+      "fingerprint": "18364758544493064720"
+     },
+     {
+      "type_id": "232783885",
+      "fingerprint": "81985529216486895"
+     }
+    ],
+    "description": "{\"stores\":[{\"type_id\":3735928559,\"name\":\"Counter\",\"signals\":[{\"name\":\"count\",\"signal_id\":0,\"ty\":{\"kind\":\"i32\"}}]}],\"records\":[],\"enums\":[]}",
+    "stores": [
+     {
+      "handle": "16777217",
+      "type_id": "3735928559",
+      "signals": [
+       {
+        "signal_id": 0,
+        "value": [
+         7,
+         0,
+         0,
+         0
+        ]
+       }
+      ]
+     },
+     {
+      "handle": "33554434",
+      "type_id": "232783885",
+      "signals": [
+       {
+        "signal_id": 4294967294,
+        "value": [
+         1,
+         0,
+         4,
+         0,
+         0,
+         0,
+         7,
+         0,
+         0,
+         0,
+         1,
+         136,
+         19,
+         0,
+         0,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "hex": "020000000200000002000000f0debc9a7856341202000000efbeadde1032547698badcfe0d00e00defcdab89674523018b0000007b2273746f726573223a5b7b22747970655f6964223a333733353932383535392c226e616d65223a22436f756e746572222c227369676e616c73223a5b7b226e616d65223a22636f756e74222c227369676e616c5f6964223a302c227479223a7b226b696e64223a22693332227d7d5d7d5d2c227265636f726473223a5b5d2c22656e756d73223a5b5d7d0100000100000000efbeadde0100000000000000040000000700000002000002000000000d00e00d01000000feffffff1300000001000400000007000000018813000000000000",
+   "note": "ADR-059: a recreation record is a record of the same layout with one field under the reserved signal id 4294967294 (0xFFFFFFFE); here a query handle's record (format u16 = 1, the encoded parameters as bytes, the observer's polling interval as an Option<u64>: Some(5000) ms) beside a store; the type table lists the query's type once; no layout change"
+  },
+  {
    "name": "decimal_zero",
    "type": "decimal",
    "value": {

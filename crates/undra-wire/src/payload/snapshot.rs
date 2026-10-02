@@ -8,20 +8,53 @@ const STORE_MIN_LEN: usize = 16;
 /// Smallest possible encoded signal: `signal_id u32, len u32`.
 const SIGNAL_MIN_LEN: usize = 8;
 
-/// The persisted state of one store: its handle, its type and the encoded value of every
-/// non-computed signal.
+/// The signal id of a **recreation record** (ADR-059): the one field of a record that is not a
+/// store's but what an object that is not snapshotted as a store is built again from (a query
+/// handle: its parameters). No store has a signal with this id (signals are numbered from 0 in
+/// declaration order, so a store would need four billion of them; `u32::MAX` is `ALL_SIGNALS`), so
+/// a record with exactly this one field is told apart from a store's by [`StoreSnapshot::recreation`].
+pub const RECREATION_FIELD: u32 = 0xFFFF_FFFE;
+
+/// One record of a [`Snapshot`]: a store's persisted state (its handle, its type and the encoded
+/// value of every non-computed signal), or a **recreation record** (ADR-059): the handle of an
+/// object that is built again from what it was made of, and under [`RECREATION_FIELD`] the bytes
+/// the runtime's reviver for that type wrote. Both have the same shape on the wire.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoreSnapshot {
     /// The store's handle; restore re-issues the same handle.
     pub handle: Handle,
-    /// `fnv1a32("<TypeName>")` of the store type.
+    /// `fnv1a32("<TypeName>")` of the store type (for a recreation record, the object's type id).
     pub type_id: u32,
     /// `(signal_id, encoded value)` pairs. Computed signals are excluded; they are restored
-    /// by recomputation.
+    /// by recomputation. A recreation record has exactly one, under [`RECREATION_FIELD`].
     pub signals: Vec<(u32, Vec<u8>)>,
 }
 
 impl StoreSnapshot {
+    /// The recreation bytes, when this record is a recreation record (exactly one field, under
+    /// [`RECREATION_FIELD`]) and not a store's; `None` for a store, whatever its signals are.
+    ///
+    /// ```
+    /// use undra_wire::payload::{RECREATION_FIELD, StoreSnapshot};
+    /// use undra_wire::Handle;
+    ///
+    /// let record = StoreSnapshot {
+    ///     handle: Handle::new(2, 1),
+    ///     type_id: 7,
+    ///     signals: vec![(RECREATION_FIELD, vec![1, 0])],
+    /// };
+    /// assert_eq!(record.recreation(), Some(&[1_u8, 0][..]));
+    /// let store = StoreSnapshot { signals: vec![(0, vec![1, 0])], ..record };
+    /// assert_eq!(store.recreation(), None);
+    /// ```
+    #[must_use]
+    pub fn recreation(&self) -> Option<&[u8]> {
+        match self.signals.as_slice() {
+            [(RECREATION_FIELD, bytes)] => Some(bytes),
+            _ => None,
+        }
+    }
+
     /// Appends the store to `w`:
     /// `handle u64, type_id u32, signal_count u32, signal_count x { signal_id u32, len u32, value }`.
     pub fn encode(&self, w: &mut Writer) {
@@ -70,7 +103,8 @@ pub struct SnapshotType {
 /// Smallest possible encoded type entry: `type_id u32, fingerprint u64`.
 const TYPE_LEN: usize = 12;
 
-/// A snapshot of every store (kind `Snapshot`, SPEC 5.9, layout 2 of ADR-037).
+/// A snapshot of every store, and of the objects that are built again (kind `Snapshot`, SPEC 5.9,
+/// layout 2 of ADR-037).
 ///
 /// Layout, all little-endian:
 ///
@@ -82,14 +116,17 @@ const TYPE_LEN: usize = 12;
 /// count x { handle u64, type_id u32, signal_count u32, signals x { signal_id u32, len u32, value } }
 /// ```
 ///
-/// `count` is the number of stores. Objects that are not stores are not part of a snapshot.
+/// `count` is the number of records, each a store's or a **recreation record** (ADR-059: one field
+/// under [`RECREATION_FIELD`], see [`StoreSnapshot::recreation`]); the layout is the same. Objects
+/// that are neither are not part of a snapshot.
 ///
 /// `generation_floor` is the highest handle generation the core had issued when the snapshot
 /// was taken (`0` if it had issued none). A restore raises the core's generation counter to at
 /// least that, so no handle issued before the snapshot (or between it and the restore) can be
 /// issued again to a different object (ADR-022).
 ///
-/// `types` lists each store type once with the fingerprint of its signals; `description` names,
+/// `types` lists each store type once with the fingerprint of its signals (and each type of a
+/// recreation record once, with the fingerprint of what its record depends on); `description` names,
 /// per store type, its signals (`signal_id`, name, type) and every record and enum they reach, so
 /// a build whose types changed can decode the values by name and migrate them (ADR-037). It is
 /// read only when a fingerprint differs. A store whose type is not in `types`, or a type listed
@@ -128,7 +165,7 @@ pub struct Snapshot {
     pub types: Vec<SnapshotType>,
     /// The canonical JSON description of the store types' closures (ADR-037). Opaque to hosts.
     pub description: String,
-    /// The stores, in the order the runtime produced them.
+    /// The records (stores, then recreation records), in the order the runtime produced them.
     pub stores: Vec<StoreSnapshot>,
 }
 
@@ -428,6 +465,78 @@ mod tests {
         let mut r = Reader::new(&old);
         let decoded = Snapshot::decode(&mut r).and_then(|s| r.finish().map(|()| s));
         assert!(decoded.is_err(), "{decoded:?}");
+    }
+
+    /// A recreation record (ADR-059) is a record of the layout every runtime reads, with one field
+    /// under the reserved id: it encodes and decodes as a store's does and is told apart by its field.
+    #[test]
+    fn a_recreation_record_is_a_record_with_one_reserved_field() {
+        let record = StoreSnapshot {
+            handle: Handle::new(3, 2),
+            type_id: 9,
+            signals: vec![(RECREATION_FIELD, vec![1, 0, 7])],
+        };
+        assert_eq!(RECREATION_FIELD, 0xFFFF_FFFE);
+        assert_eq!(record.recreation(), Some(&[1_u8, 0, 7][..]));
+        let mut snap = sample();
+        snap.types.push(SnapshotType {
+            type_id: 9,
+            fingerprint: 0x33,
+        });
+        snap.stores.push(record.clone());
+        let b = encode(&snap);
+        let mut r = Reader::new(&b);
+        let decoded = Snapshot::decode(&mut r).unwrap();
+        r.finish().unwrap();
+        assert_eq!(decoded, snap);
+        assert_eq!(
+            decoded
+                .stores
+                .iter()
+                .map(|s| s.recreation().is_some())
+                .collect::<Vec<_>>(),
+            [false, false, true],
+            "only the record with the reserved field is a recreation record"
+        );
+        // The bytes of the record are the bytes of a store with that one signal.
+        let mut w = Writer::new();
+        record.encode(&mut w);
+        assert_eq!(
+            w.as_slice(),
+            [
+                3, 0, 0, 2, 0, 0, 0, 0, // handle (index 3, generation 2 << 24)
+                9, 0, 0, 0, // type_id
+                1, 0, 0, 0, // signal_count
+                0xfe, 0xff, 0xff, 0xff, // the reserved signal_id
+                3, 0, 0, 0, 1, 0, 7, // len + record
+            ]
+        );
+    }
+
+    #[test]
+    fn only_exactly_one_reserved_field_makes_a_recreation_record() {
+        let with = |signals: Vec<(u32, Vec<u8>)>| StoreSnapshot {
+            handle: Handle::new(1, 1),
+            type_id: 7,
+            signals,
+        };
+        assert_eq!(with(vec![]).recreation(), None);
+        assert_eq!(with(vec![(0, vec![1])]).recreation(), None);
+        assert_eq!(with(vec![(u32::MAX, vec![1])]).recreation(), None);
+        assert_eq!(
+            with(vec![(RECREATION_FIELD, vec![]), (0, vec![1])]).recreation(),
+            None,
+            "a store that also has other signals is a store"
+        );
+        assert_eq!(
+            with(vec![(RECREATION_FIELD, vec![]), (RECREATION_FIELD, vec![])]).recreation(),
+            None
+        );
+        assert_eq!(
+            with(vec![(RECREATION_FIELD, vec![])]).recreation(),
+            Some(&[][..]),
+            "an empty record is still one"
+        );
     }
 
     #[test]
