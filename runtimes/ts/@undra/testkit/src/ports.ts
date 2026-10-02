@@ -42,10 +42,10 @@ export class PortRecorder {
 
   /** `impl` with every method recording its calls. */
   wrap(port: number, impl: PortImpl): PortImpl {
-    const methods: Record<number, (args: Uint8Array) => Uint8Array | Promise<Uint8Array>> = {};
+    const methods: Record<number, (args: Uint8Array, portCallId: number) => Uint8Array | Promise<Uint8Array>> = {};
     for (const [key, method] of Object.entries(impl.methods)) {
       const methodId = Number(key);
-      methods[methodId] = (args) => {
+      methods[methodId] = (args, portCallId) => {
         this.#next += 1;
         const call = this.#next;
         this.#events.push({ t: this.#t(), kind: "port_call", port, method: methodId, call, args: args.slice() });
@@ -59,7 +59,7 @@ export class PortRecorder {
         };
         let result: Uint8Array | Promise<Uint8Array>;
         try {
-          result = method(args);
+          result = method(args, portCallId);
         } catch (error) {
           return failed(error);
         }
