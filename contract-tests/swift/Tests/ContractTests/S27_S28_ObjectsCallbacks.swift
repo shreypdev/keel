@@ -311,7 +311,9 @@ extension ContractScenarios {
             case .failure(let error):
                 try check(error is CancellationError, "the cancelled run failed with \(error)")
             }
-            try await waitUntil("confirm to see its cancellation", timeout: .seconds(1)) { rep.sawCancellation }
+            // The default wait (waitLimit), a hang detector: `confirm` waits for its cancellation and nothing else, on no timer, so
+            // a cancellation that did not reach it would leave it waiting; how soon it looks again is the machine's.
+            try await waitUntil("confirm to see its cancellation") { rep.sawCancellation }
             try await waitUntil("the run's reference to come back") { registry.count(of: rep) == 1 }
 
             // 5. Interning, and an empty registry once the core lets go.
@@ -332,7 +334,9 @@ extension ContractScenarios {
                 try checkEqual(try workshop.watching(), 2, "two subscriptions, one proxy")
                 watch1.close()
                 watch2.close()
-                try await waitUntil("the registry to let the reporter go", timeout: .seconds(1)) { registry.count(of: twice) == 0 }
+                // The default wait (waitLimit), a hang detector: a proxy the core did not drop holds its reference for good, on no
+                // timer; how soon the release reaches the registry is the machine's.
+                try await waitUntil("the registry to let the reporter go") { registry.count(of: twice) == 0 }
                 try checkEqual(registry.liveCount, baseline, "the registry is back where it started")
             }
             try check(gone == nil, "the reporter is gone once nothing holds it")

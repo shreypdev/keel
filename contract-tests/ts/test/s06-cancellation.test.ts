@@ -92,7 +92,9 @@ test("S06 cancellation", async () => {
     );
     expect(error, "the call rejects with the signal's reason, not with a LabError").toBe(typed.signal.reason);
     expect((error as Error).name).toBe("AbortError");
-    expect(Date.now() - abortedAt, "the cancelled call ends within a second").toBeLessThan(1_000);
+    // Relative to the call's own 5 s delay, not to a second of wall clock: a cancel that waited for the core's answer would
+    // end 4.9 s after the abort, so under half the delay (2.5 s) tells the two apart on a machine that stalls.
+    expect(Date.now() - abortedAt, "the cancelled call ends in under half of its own 5 s delay").toBeLessThan(2_500);
     await waitFor("the cancellation of the typed call to be counted", async () => (await counters(core)).cancelled - beforeTyped.cancelled === 1);
     expect(await add(1, 1, core)).toBe(2);
   });
