@@ -994,3 +994,223 @@ fn renamed_schema_for_streaming() -> Schema {
     ];
     old
 }
+
+// ----- review (2026-10-02): the two conversions on random schema evolutions ---------------------
+
+/// One edit of the base schema an app update could make, structural or not.
+#[derive(Clone, Debug)]
+enum Edit {
+    /// `Todo`'s fields in another order.
+    ReorderTodo(Vec<usize>),
+    /// `Todo` loses a field.
+    DropTodoField(usize),
+    /// `Todo` gains a field: `(name, type, #[undra(default)])`.
+    AddTodoField(&'static str, TypeRef, bool),
+    /// `Todo.title` is renamed (not structural).
+    RenameTitle,
+    /// A `Todo` field's type changes to `ty`.
+    RetypeTodoField(usize, TypeRef),
+    /// `Shape`'s variants get other indices (by name nothing changes).
+    ReindexShape(Vec<u16>),
+    /// `Shape` loses a variant.
+    DropShapeVariant(usize),
+    /// `Tier` gains a variant in front.
+    TierInFront,
+    /// `Shape::Rect` gets `f32` fields (a narrowing).
+    NarrowRect,
+}
+
+fn arb_edit() -> BoxedStrategy<Edit> {
+    prop_oneof![
+        Just(vec![0_usize, 1, 2, 3])
+            .prop_shuffle()
+            .prop_map(Edit::ReorderTodo),
+        (0_usize..4).prop_map(Edit::DropTodoField),
+        prop_oneof![
+            Just(Edit::AddTodoField(
+                "note",
+                TypeRef::option(TypeRef::String),
+                false
+            )),
+            Just(Edit::AddTodoField("count", TypeRef::U32, true)),
+            Just(Edit::AddTodoField("seen", TypeRef::Timestamp, true)),
+            Just(Edit::AddTodoField("owner", TypeRef::Uuid, false)),
+            Just(Edit::AddTodoField("shape", named("Shape"), true)),
+        ],
+        Just(Edit::RenameTitle),
+        (
+            0_usize..4,
+            prop_oneof![
+                Just(TypeRef::option(TypeRef::Uuid)),
+                Just(TypeRef::option(TypeRef::String)),
+                Just(TypeRef::U8),
+                Just(TypeRef::vec(TypeRef::option(TypeRef::String))),
+                Just(TypeRef::Bytes),
+            ]
+        )
+            .prop_map(|(i, ty)| Edit::RetypeTodoField(i, ty)),
+        Just(vec![0_u16, 1, 2])
+            .prop_shuffle()
+            .prop_map(Edit::ReindexShape),
+        (0_usize..3).prop_map(Edit::DropShapeVariant),
+        Just(Edit::TierInFront),
+        Just(Edit::NarrowRect),
+    ]
+    .boxed()
+}
+
+fn apply(schema: &mut Schema, edit: &Edit) {
+    let todo = &mut schema.records[0].fields;
+    match edit {
+        Edit::ReorderTodo(order) => {
+            let old = todo.clone();
+            let mut reordered: Vec<FieldDef> = order
+                .iter()
+                .filter(|&&i| i < old.len())
+                .map(|&i| old[i].clone())
+                .collect();
+            reordered.extend(old.iter().skip(4).cloned());
+            *todo = reordered;
+        }
+        Edit::DropTodoField(i) => {
+            let i = *i % todo.len().max(1);
+            if !todo.is_empty() {
+                todo.remove(i);
+            }
+        }
+        Edit::AddTodoField(name, ty, default) => {
+            if !todo.iter().any(|f| f.name == *name) {
+                todo.push(FieldDef {
+                    default: *default,
+                    ..field(name, ty.clone())
+                });
+            }
+        }
+        Edit::RenameTitle => {
+            for f in todo.iter_mut().filter(|f| f.name == "title") {
+                f.name = "name".into();
+            }
+        }
+        Edit::RetypeTodoField(i, ty) => {
+            if !todo.is_empty() {
+                let i = *i % todo.len();
+                todo[i].ty = ty.clone();
+            }
+        }
+        Edit::ReindexShape(indices) => {
+            for (v, &index) in schema.enums[0].variants.iter_mut().zip(indices) {
+                v.index = index;
+            }
+        }
+        Edit::DropShapeVariant(i) => {
+            let variants = &mut schema.enums[0].variants;
+            if !variants.is_empty() {
+                let i = *i % variants.len();
+                variants.remove(i);
+            }
+        }
+        Edit::TierInFront => {
+            let variants = &mut schema.enums[1].variants;
+            for v in variants.iter_mut() {
+                v.index += 1;
+            }
+            variants.insert(0, variant("Team", 0, vec![], false));
+        }
+        Edit::NarrowRect => {
+            for v in schema.enums[0]
+                .variants
+                .iter_mut()
+                .filter(|v| v.name == "Rect")
+            {
+                for f in &mut v.fields {
+                    f.ty = TypeRef::F32;
+                }
+            }
+        }
+    }
+}
+
+/// The type a value of `ty` may be read as after an update: itself, wrapped in an `Option`, an
+/// `Option` unwrapped (not structural), or an integer widened or narrowed.
+fn arb_new_type(ty: &TypeRef) -> BoxedStrategy<TypeRef> {
+    let same = Just(ty.clone());
+    let wrapped = match ty {
+        TypeRef::Option(_) => ty.clone(),
+        other => TypeRef::option(other.clone()),
+    };
+    let other = match ty {
+        TypeRef::Option(inner) => (**inner).clone(),
+        TypeRef::I8 => TypeRef::I32,
+        TypeRef::U16 => TypeRef::I32,
+        TypeRef::I32 => TypeRef::I8,
+        TypeRef::U64 => TypeRef::I64,
+        TypeRef::F32 => TypeRef::F64,
+        TypeRef::F64 => TypeRef::F32,
+        TypeRef::Vec(item) if **item == TypeRef::U8 => TypeRef::Bytes,
+        TypeRef::Bytes => TypeRef::vec(TypeRef::U8),
+        TypeRef::Vec(item) => TypeRef::vec(TypeRef::option((**item).clone())),
+        TypeRef::Map(k, v) => TypeRef::map((**k).clone(), TypeRef::option((**v).clone())),
+        other => other.clone(),
+    };
+    prop_oneof![3 => same, 1 => Just(wrapped), 1 => Just(other)].boxed()
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1024))]
+
+    /// For a random value of a random type, read by a build that edited the schema (any of
+    /// [`Edit`], up to three) and possibly changed the type itself: the streamed conversion and
+    /// the tree one agree (both convert to the same bytes, or both refuse), and what they produce
+    /// is a valid value of the new type (it decodes, and re-encodes to the same bytes).
+    #[test]
+    fn the_two_conversions_agree_on_random_schema_evolutions(
+        (ty, bytes, new_ty) in arb_type(3).prop_flat_map(|ty| {
+            let b = arb_bytes(&ty);
+            let n = arb_new_type(&ty);
+            (Just(ty), b, n)
+        }),
+        edits in proptest::collection::vec(arb_edit(), 0..4),
+    ) {
+        let old_schema = base_schema();
+        let mut new_schema = base_schema();
+        for edit in &edits {
+            apply(&mut new_schema, edit);
+        }
+        let old = old_schema.closure(&ty);
+        let new = new_schema.closure(&new_ty);
+        let value = decode_dyn(&bytes, &ty, &old).unwrap();
+        let tree = migrate_value(&value, &ty, &old, &new_ty, &new, &NoHooks);
+        let streamed = migrate(&bytes, &ty, &old, &new_ty, &new, &NoHooks);
+        match (&tree, &streamed) {
+            (Ok(a), Ok(b)) => {
+                prop_assert_eq!(a, b, "{} -> {} with {:?}", ty, new_ty, edits);
+                let decoded = decode_dyn(b, &new_ty, &new)
+                    .map_err(|e| TestCaseError::fail(format!("{ty} -> {new_ty} with {edits:?}: the output does not decode: {e}")))?;
+                prop_assert_eq!(&encode_dyn(&decoded, &new_ty, &new).unwrap(), b);
+            }
+            (Err(_), Err(_)) => {}
+            _ => prop_assert!(false, "{} -> {} with {:?}: tree {:?}, streamed {:?}", ty, new_ty, edits, tree, streamed),
+        }
+    }
+
+    /// Bytes that are not a value of the old type: the streamed conversion never panics, and when
+    /// it accepts them its output is only as valid as its input (the copied spans are checked for
+    /// length only; whoever decodes the result validates it, which is what a restore does).
+    #[test]
+    fn hostile_bytes_never_panic_a_conversion(
+        bytes in proptest::collection::vec(any::<u8>(), 0..48),
+        ty in arb_type(2),
+        edits in proptest::collection::vec(arb_edit(), 0..3),
+    ) {
+        let old_schema = base_schema();
+        let mut new_schema = base_schema();
+        for edit in &edits {
+            apply(&mut new_schema, edit);
+        }
+        let old = old_schema.closure(&ty);
+        let new = new_schema.closure(&ty);
+        let _ = migrate(&bytes, &ty, &old, &ty, &new, &NoHooks);
+        let wrapped = TypeRef::option(ty.clone());
+        let _ = migrate(&bytes, &ty, &old, &wrapped, &new_schema.closure(&wrapped), &NoHooks);
+    }
+}

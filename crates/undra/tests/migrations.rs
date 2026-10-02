@@ -353,3 +353,101 @@ fn the_hooks_are_registered_and_their_targets_exist() {
     );
     assert!(undra::persist::check_migrations(t.runtime().schema()).is_empty());
 }
+
+/// Whether a restore's failure is one a host reads as "bad snapshot" (5) or "incompatible" (7):
+/// never a panic (2) and never "unavailable" (6) for a running core.
+fn refused_typed(error: &RestoreError) -> bool {
+    matches!(
+        error,
+        RestoreError::Decode(_)
+            | RestoreError::UnknownStoreType { .. }
+            | RestoreError::Store { .. }
+            | RestoreError::BadHandle { .. }
+            | RestoreError::GenerationFloor { .. }
+            | RestoreError::Incompatible { .. }
+    )
+}
+
+/// A damaged snapshot, truncated at every length and with every byte changed, on both paths (the
+/// fast one and the migrating one): the restore never panics, a refusal is code 5 or 7, and a
+/// refused restore leaves the core byte for byte as it was (ADR-023's all or nothing).
+#[test]
+fn a_damaged_snapshot_is_refused_typed_at_every_byte_and_changes_nothing() {
+    let t = TestRuntime::new();
+    let h = construct(&t, "Profile");
+    let l = construct(&t, "Legacy");
+    let p = profile(&t, h);
+    p.total.set(41);
+    p.notes.set(vec![Note {
+        text: "é".into(),
+        pinned: Some(true),
+    }]);
+    let current = t.runtime().snapshot();
+    let older = old_snapshot(
+        t.runtime(),
+        vec![
+            (
+                h,
+                "Profile",
+                vec![
+                    (0, enc(&30_i32)),
+                    (1, enc(&1_u16)),
+                    (2, enc(&vec![("milk".to_owned(),)])),
+                    (3, enc(&-7_i32)),
+                ],
+            ),
+            (l, "Legacy", vec![]),
+        ],
+    );
+    // `Legacy` lost its only signal in that snapshot and has no default: drop it from the older one
+    // so the original restores, and keep the migrating path for `Profile`.
+    let older = {
+        let mut s = Snapshot::decode(&mut Reader::new(&older)).unwrap();
+        s.stores.retain(|st| st.type_id == ids::type_id("Profile"));
+        s.types.retain(|ty| ty.type_id == ids::type_id("Profile"));
+        let mut w = Writer::new();
+        s.encode(&mut w);
+        w.into_vec()
+    };
+    for original in [&current, &older] {
+        t.runtime()
+            .restore(original)
+            .expect("the undamaged snapshot restores");
+        let mut baseline = t.runtime().snapshot();
+        let mut tried = 0_u32;
+        let mut check = |damaged: &[u8], what: &str| {
+            tried += 1;
+            match t.runtime().restore(damaged) {
+                Ok(()) => {
+                    // A change that still decodes (a value byte, a higher floor): put the original
+                    // back. The generation counter never goes down (ADR-022), so the baseline is
+                    // taken again.
+                    t.runtime().restore(original).unwrap();
+                    baseline = t.runtime().snapshot();
+                }
+                Err(error) => {
+                    assert!(refused_typed(&error), "{what}: {error:?}");
+                    assert_eq!(
+                        t.runtime().snapshot(),
+                        baseline,
+                        "{what}: a refused restore changed the core ({error})"
+                    );
+                }
+            }
+        };
+        for cut in 0..original.len() {
+            check(&original[..cut], &format!("cut at {cut}"));
+        }
+        for at in 0..original.len() {
+            for change in [0xff_u8, 0x01, 0x80] {
+                let mut damaged = original.clone();
+                damaged[at] ^= change;
+                check(&damaged, &format!("byte {at} ^ {change:#x}"));
+            }
+            let mut damaged = original.clone();
+            damaged[at] = 0xff;
+            check(&damaged, &format!("byte {at} = 0xff"));
+        }
+        assert!(tried > 100);
+    }
+}

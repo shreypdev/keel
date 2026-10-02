@@ -40,7 +40,9 @@ fn a_hook_returning_another_type_than_its_signal_refuses_the_restore() {
     let t = TestRuntime::new();
     let problems = undra::persist::check_migrations(t.runtime().schema());
     assert!(
-        problems.iter().any(|p| p.contains("E0066") && p.contains("gauge_level")),
+        problems
+            .iter()
+            .any(|p| p.contains("E0066") && p.contains("gauge_level")),
         "the start-up check names the hook: {problems:?}"
     );
 
@@ -98,5 +100,9 @@ fn a_hook_returning_another_type_than_its_signal_refuses_the_restore() {
             t.runtime().object::<Gauge>(handle.0).unwrap().level.get()
         ),
     }
-    assert_eq!(t.runtime().snapshot(), before, "a refused restore changes nothing");
+    assert_eq!(
+        t.runtime().snapshot(),
+        before,
+        "a refused restore changes nothing"
+    );
 }

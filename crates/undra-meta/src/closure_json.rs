@@ -802,6 +802,183 @@ mod tests {
         );
     }
 
+    // ----- review (2026-10-02): differential against serde_json on generated closures -------
+
+    use proptest::prelude::*;
+
+    /// Names with what the writer must escape and what it must not: quotes, backslashes, every
+    /// control character, DEL, non-ASCII, astral characters, the empty string.
+    fn arb_name() -> BoxedStrategy<String> {
+        prop_oneof![
+            "[a-zA-Z_][a-zA-Z0-9_]{0,8}",
+            any::<String>(),
+            proptest::collection::vec(
+                prop_oneof![
+                    Just('"'),
+                    Just('\\'),
+                    Just('/'),
+                    (0_u32..0x20).prop_map(|c| char::from_u32(c).unwrap()),
+                    Just('\u{7f}'),
+                    Just('\u{2028}'),
+                    Just('é'),
+                    Just('🦀'),
+                    Just('\u{fffd}'),
+                ],
+                0..6
+            )
+            .prop_map(|cs| cs.into_iter().collect()),
+        ]
+        .boxed()
+    }
+
+    fn arb_ty() -> BoxedStrategy<TypeRef> {
+        let leaf = prop_oneof![
+            (0_usize..LEAVES.len()).prop_map(|i| LEAVES[i].clone()),
+            arb_name().prop_map(TypeRef::Named),
+        ];
+        leaf.prop_recursive(6, 32, 2, |inner| {
+            prop_oneof![
+                inner.clone().prop_map(|t| TypeRef::Option(Box::new(t))),
+                inner.clone().prop_map(|t| TypeRef::Vec(Box::new(t))),
+                inner.clone().prop_map(|t| TypeRef::Lazy(Box::new(t))),
+                inner.clone().prop_map(|t| TypeRef::Stream(Box::new(t))),
+                (inner.clone(), inner.clone())
+                    .prop_map(|(a, b)| TypeRef::Map(Box::new(a), Box::new(b))),
+                (inner.clone(), inner).prop_map(|(a, b)| TypeRef::Result(Box::new(a), Box::new(b))),
+            ]
+        })
+        .boxed()
+    }
+
+    fn arb_field() -> BoxedStrategy<ClosureField> {
+        (arb_name(), arb_ty(), any::<bool>())
+            .prop_map(|(name, ty, default)| ClosureField { name, ty, default })
+            .boxed()
+    }
+
+    fn arb_signal() -> BoxedStrategy<ClosureSignal> {
+        (
+            arb_name(),
+            prop_oneof![Just(0_u32), Just(u32::MAX), any::<u32>()],
+            arb_ty(),
+            any::<bool>(),
+        )
+            .prop_map(|(name, signal_id, ty, default)| ClosureSignal {
+                name,
+                signal_id,
+                ty,
+                default,
+            })
+            .boxed()
+    }
+
+    fn arb_records_and_enums() -> BoxedStrategy<(Vec<ClosureRecord>, Vec<ClosureEnum>)> {
+        let record = (arb_name(), proptest::collection::vec(arb_field(), 0..3))
+            .prop_map(|(name, fields)| ClosureRecord { name, fields });
+        let variant = (
+            arb_name(),
+            prop_oneof![Just(0_u16), Just(u16::MAX), any::<u16>()],
+            proptest::collection::vec(arb_field(), 0..3),
+            any::<bool>(),
+        )
+            .prop_map(|(name, index, fields, tuple)| ClosureVariant {
+                name,
+                index,
+                fields,
+                tuple,
+            });
+        let en = (arb_name(), proptest::collection::vec(variant, 0..3))
+            .prop_map(|(name, variants)| ClosureEnum { name, variants });
+        (
+            proptest::collection::vec(record, 0..3),
+            proptest::collection::vec(en, 0..3),
+        )
+            .boxed()
+    }
+
+    fn arb_type_closure() -> BoxedStrategy<TypeClosure> {
+        let root = prop_oneof![
+            arb_ty().prop_map(|ty| ClosureRoot::Type { ty }),
+            proptest::collection::vec(arb_field(), 0..4)
+                .prop_map(|params| ClosureRoot::Params { params }),
+            proptest::collection::vec(arb_signal(), 0..4)
+                .prop_map(|signals| ClosureRoot::Signals { signals }),
+        ];
+        (root, arb_records_and_enums())
+            .prop_map(|(root, (records, enums))| TypeClosure {
+                root,
+                records,
+                enums,
+            })
+            .boxed()
+    }
+
+    fn arb_stores_closure() -> BoxedStrategy<StoresClosure> {
+        let store = (
+            prop_oneof![Just(0_u32), Just(u32::MAX), any::<u32>()],
+            arb_name(),
+            proptest::collection::vec(arb_signal(), 0..3),
+        )
+            .prop_map(|(type_id, name, signals)| DescribedStore {
+                type_id,
+                name,
+                signals,
+            });
+        (
+            proptest::collection::vec(store, 0..3),
+            arb_records_and_enums(),
+        )
+            .prop_map(|(stores, (records, enums))| StoresClosure {
+                stores,
+                records,
+                enums,
+            })
+            .boxed()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(2048))]
+
+        /// The writer is `serde_json::to_string` on any closure, the reader reads both back to the
+        /// same value, and `serde_json` reads the writer's text as the same value.
+        #[test]
+        fn the_writer_and_reader_agree_with_serde_json(c in arb_type_closure(), s in arb_stores_closure()) {
+            let ours = write_type_closure(&c);
+            prop_assert_eq!(&ours, &serde_json::to_string(&c).unwrap());
+            prop_assert_eq!(read_type_closure(&ours).unwrap(), c.clone());
+            prop_assert_eq!(serde_json::from_str::<TypeClosure>(&ours).unwrap(), c);
+            let ours = write_stores_closure(&s);
+            prop_assert_eq!(&ours, &serde_json::to_string(&s).unwrap());
+            prop_assert_eq!(read_stores_closure(&ours).unwrap(), s.clone());
+            prop_assert_eq!(serde_json::from_str::<StoresClosure>(&ours).unwrap(), s);
+        }
+
+        /// Damaged canonical text (a byte replaced, removed or inserted at any place): the reader
+        /// never panics, and what it accepts is what `serde_json` reads too (it never accepts a
+        /// spelling that means something else).
+        #[test]
+        fn damaged_text_never_panics_the_reader(
+            c in arb_type_closure(),
+            at in any::<prop::sample::Index>(),
+            byte in prop_oneof![Just(b'"'), Just(b'\\'), Just(b'{'), Just(b'}'), Just(b','), Just(b'0'), Just(b'9'), Just(b'u'), any::<u8>()],
+            how in 0_u8..3,
+        ) {
+            let mut text = write_type_closure(&c).into_bytes();
+            let i = at.index(text.len() + 1);
+            match how {
+                0 if i < text.len() => text[i] = byte,
+                1 if i < text.len() => { text.remove(i); }
+                _ => text.insert(i, byte),
+            }
+            if let Ok(text) = String::from_utf8(text) {
+                if let Ok(ours) = read_type_closure(&text) {
+                    prop_assert_eq!(Some(ours), serde_json::from_str::<TypeClosure>(&text).ok());
+                }
+                let _ = read_stores_closure(&text);
+            }
+        }
+    }
+
     #[test]
     fn the_reader_refuses_what_is_not_a_closure() {
         let ok = write_type_closure(&sample());
