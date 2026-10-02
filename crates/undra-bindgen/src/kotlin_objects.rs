@@ -77,7 +77,10 @@ pub(super) fn lend(w: &mut CodeWriter, core: &str, lent: &[Lent]) {
                 l.var, l.param
             ));
         } else {
-            w.line(format!("val {} = {core}.callbacks.lend({})", l.var, l.param));
+            w.line(format!(
+                "val {} = {core}.callbacks.lend({})",
+                l.var, l.param
+            ));
         }
     }
 }

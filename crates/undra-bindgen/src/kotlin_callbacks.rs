@@ -242,7 +242,10 @@ impl Ctx<'_> {
             args.push(format!("coalesced = setOf({})", coalesced.join(", ")));
         }
         w.call(
-            format!("internal object {}Bridge : UndraCallbackBridge<{}>", p.name, p.name),
+            format!(
+                "internal object {}Bridge : UndraCallbackBridge<{}>",
+                p.name, p.name
+            ),
             &args,
             " {",
             true,

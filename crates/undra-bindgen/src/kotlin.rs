@@ -385,7 +385,9 @@ impl<'a> Ctx<'a> {
             TypeRef::Duration => self.prim("duration"),
             TypeRef::Timestamp => self.prim("timestamp"),
             TypeRef::Uuid => self.prim("uuid"),
-            TypeRef::Object(_) | TypeRef::Callback(_) => unreachable!("an object or callback has no value codec"),
+            TypeRef::Object(_) | TypeRef::Callback(_) => {
+                unreachable!("an object or callback has no value codec")
+            }
             TypeRef::Named(name) => self.named(name, sh),
             TypeRef::Option(_) | TypeRef::Vec(_) | TypeRef::Map(..) => {
                 if let Some(name) = self.hoist_names.get(t) {
