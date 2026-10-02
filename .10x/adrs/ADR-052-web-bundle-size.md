@@ -222,7 +222,7 @@ Nothing in this ADR changes that path; both tests pass on the optimised build as
   the others, rejects a record already over its own gate, and its test fails when a record line has no
   table or a table no record line. `[size."web/hello-runtime-js"]`: `budget_gzip_bytes = 26000`, the record
   and `tolerance = 0.05` (the ceiling is the budget today: 26,000 bytes against a 24,841 record).
-* CI: a `size` job in `bench.yml` (Rust 1.98.1 with the wasm target, as every CI job pins it; binaryen
+* CI: a `size` job in `bench.yml` (Rust 1.99.0 with the wasm target, as every CI job pins it; binaryen
   `version_133` from its GitHub release, the step failing unless `wasm-opt --version` says 133; Node and
   `npm ci` for the runtime line) runs the script and uploads the JSON as an artifact. It needs no secret
   and no write permission, so it runs the same on a pull request from a fork.
@@ -303,8 +303,8 @@ script, not twiggy's shallow bytes (gzip is not additive).
 ## Risks
 
 * **A toolchain update moves the number by more than 5%.** Then the gate fails on a commit that changed no
-  code; the fix is to re-record (and to look at why). CI pins Rust (1.98.1, the version the record was
-  measured with) and binaryen, so this happens only at a deliberate toolchain bump, which re-records in the
+  code; the fix is to re-record (and to look at why). CI pins Rust (1.99.0, the version the record was
+  measured with since the bump of 2026-10-02: 116,690 gzipped bytes at 1.98.1, 116,181 at 1.99.0) and binaryen, so this happens only at a deliberate toolchain bump, which re-records in the
   same commit.
 * **The runtime-JS measurement depends on Vite's chunking and minifier.** A Vite update in the runtime's
   lockfile can move it by more than 5% with no runtime change; the fix is to re-record in the same commit

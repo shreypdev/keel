@@ -60,16 +60,18 @@ name: Bench
 
 on:
   push:
-    branches: [main]
+    branches: [main, "wt/**"]
   pull_request:
 
 concurrency:
-  # A pull request's newer run replaces its older one: each run compares the whole pull request
-  # with its base. A push to main is NEVER cancelled (one group per commit): its baseline is the
+  # A pull request's newer run replaces its older one, and so does a newer push to a piece's branch
+  # `wt/<slug>` (docs/AGENT_WORKFLOW.md: a piece lands only on a green run of its exact head): each
+  # run compares the whole pull request or branch with its base. A push to main is NEVER cancelled
+  # (one group per commit): its baseline is the
   # commit the push replaced, so a cancelled run would leave that push compared with nothing, and
   # the next push would be gated against it, regression included. (Before this, a merge followed a
   # minute later by its state commit had the merge's run cancelled: 36803857331, 36808385622.)
-  group: bench-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: bench-${{ (github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/wt/')) && github.ref || github.sha }}
   cancel-in-progress: true
 
 env:
@@ -91,7 +93,7 @@ jobs:
         with:
           # A pull request's merge ref has the base as its first parent.
           fetch-depth: 2
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
       - uses: Swatinem/rust-cache@v2
         with:
           # A key of its own since the base build: rust-cache saves only on a miss, and the cache
@@ -106,7 +108,14 @@ jobs:
         continue-on-error: true
         env:
           BASE_REV: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+          PIECE_BRANCH: ${{ startsWith(github.ref, 'refs/heads/wt/') }}
         run: |
+          if [ "$PIECE_BRANCH" = true ]; then
+            # A piece's branch is compared with where it left main, as a pull request is with its base (not with its
+            # previous head: the first push of a branch has none, and a state commit on top would compare with nothing).
+            git fetch --no-tags --depth=200 origin main
+            BASE_REV="$(git merge-base HEAD FETCH_HEAD || true)"
+          fi
           case "$BASE_REV" in
             ''|0000000000000000000000000000000000000000)
               echo "::warning title=No baseline gate::no base commit to measure against; this run is gated by the absolute budgets and the ratios only"
@@ -146,9 +155,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      # The Rust that CI pins (main pins 1.98.1 in every workflow; the deliberate bump re-records the
+      # The Rust that CI pins (main pins 1.99.0 in every workflow; the deliberate bump re-records the
       # size with `scripts/wasm-size.sh --record` in the same commit, since codegen moves the bytes).
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
@@ -158,7 +167,7 @@ jobs:
           key: wasm-size
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: runtimes/ts/@undra/runtime/package-lock.json
       # Pinned: wasm-opt's output size moves between binaryen releases, and Ubuntu's package is

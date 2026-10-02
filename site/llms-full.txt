@@ -204,7 +204,7 @@ undra build --platform ios,android,web --release
 
 `undra init` also writes `.github/workflows/undra.yml`: a job for the core (format, clippy, tests, `undra bindgen --check`) and one per app, each installing `undra` at the version pinned once at the top of the file. When a newer Undra is out, `undra upgrade` moves every pin of the project (the core's dependency, the runtimes, the workflow) in step, regenerates the bindings and prints the migration notes of every release it crosses; `undra upgrade --dry-run` shows the lines first.
 
-Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 116.7 KB gzipped (budget 120 KB, gated in CI) and the arm64-v8a Android `.so` is 978.6 KB (budget 1.2 MB per ABI).
+Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 116.2 KB gzipped (budget 120 KB, gated in CI) and the arm64-v8a Android `.so` is 978.6 KB (budget 1.2 MB per ABI).
 
 ## Prefer to explore first?
 
@@ -3062,7 +3062,7 @@ the core and the project disagree about where Undra comes from, or the project i
 
 The JavaScript runtime (`@undra/runtime`) throws and logs these. Its **production build** (what `vite build`, webpack in production mode and anything else that asks for neither the `development` nor the `react-native` condition resolve) says a code, the values and a link instead of a sentence, so a page does not carry the prose of an error whose class, `kind` and fields it already has: `T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017`. Its **development build** (Vite's dev server, Vitest, React Native) says the sentence. Both throw the same classes with the same `kind` and fields; only `message` differs, so nothing a program can branch on changes. Codes are never reused.
 
-### The T codes (244)
+### The T codes (245)
 
 The sentence is what the development build says; `{0}`, `{1}`, ... are the values the production message lists, in that order.
 
@@ -3312,6 +3312,7 @@ The sentence is what the development build says; `{0}`, `{1}`, ... are the value
 | [`T0242`](https://shreypdev.github.io/undra/docs/errors.html#T0242) | the worker was not started with recovery | worker.ts: UndraTransportError("unsupported") |
 | [`T0243`](https://shreypdev.github.io/undra/docs/errors.html#T0243) | the wasm core trapped ({0}) and was restarted from a snapshot {1} ms old | recovery.ts: UndraCoreRestarted |
 | [`T0244`](https://shreypdev.github.io/undra/docs/errors.html#T0244) | keyed patch operation #{0} ({1}) index {2} is out of bounds for a list of length {3} | wire/errors.ts: PatchError |
+| [`T0245`](https://shreypdev.github.io/undra/docs/errors.html#T0245) | this Node's node:sqlite does not keep text that holds U+0000 (it cuts it at the first one): the Db port carries text exactly, so it needs a newer Node (24 does) | db/node-sqlite.ts: DbError.Unavailable |
 
 ### Wire failures
 
@@ -4409,7 +4410,7 @@ The number: the playground's 204 KiB snapshot restores in 1.6 ms inside `undra d
 
 Persisted data records the structure it was written with, so a build that changed a type still reads what the last one stored: by name for free, through a `#[undra::migrate]` hook when a name changed, and never by discarding it silently ([ADR-037](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-037-persisted-state-migrations.md), [Shipping an update](https://shreypdev.github.io/undra/docs/updates.html)). A queued write the new build cannot carry over becomes a dead letter the app can show. Storage ports fail with typed errors (full, locked, corrupt, unavailable, io) on every platform instead of raw throws ([ADR-049](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-049-storage-errors-worker-sync-ports-web-recovery.md)).
 
-The number: the hello-world web core is 116.7 KB gzipped against a 120 KB budget, and the JavaScript a hello-world page loads up front is 15.7 KB gzipped against a 16 KB budget, for the production build of the runtime as an app installs it, with Vite's own preload helper reported beside it and gated on its own. CI fails a change that exceeds either ([ADR-052](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-052-web-bundle-size.md), [size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl)). Opt-in pieces stay out of the hello world: the remote transport and the default ports load on first use, and the browser database adds about 299 KB gzipped, only to an app that imports it.
+The number: the hello-world web core is 116.2 KB gzipped against a 120 KB budget, and the JavaScript a hello-world page loads up front is 15.7 KB gzipped against a 16 KB budget, for the production build of the runtime as an app installs it, with Vite's own preload helper reported beside it and gated on its own. CI fails a change that exceeds either ([ADR-052](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-052-web-bundle-size.md), [size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl)). Opt-in pieces stay out of the hello world: the remote transport and the default ports load on first use, and the browser database adds about 299 KB gzipped, only to an app that imports it.
 
 ## What it costs to adopt
 
@@ -4551,7 +4552,7 @@ For scale: 49.8 ns for a synchronous call through the C ABI and 6.31 µs for one
 
 KMP has two web targets. Kotlin/JS compiles Kotlin to JavaScript ([docs](https://kotlinlang.org/docs/js-overview.html)). Kotlin/Wasm targets WebAssembly with garbage collection in the browser, and its documentation still calls it Beta ([docs](https://kotlinlang.org/docs/wasm-overview.html)). If your organisation writes Kotlin on the web, that is coherent. If your web team writes TypeScript and React, the questions are what the seam looks like and what the bundle carries.
 
-Undra's web output is a wasm module built from your Rust core plus `@undra/runtime`, a TypeScript package with no runtime dependencies. Each store field becomes a `Signal<T>` with `get`, `peek` and `subscribe`; `@undra/runtime/react` exports `useUndra` and `useSignal` (built on `useSyncExternalStore`), and Vue, Svelte and Solid adapters exist too. The core can run on the main thread, in a worker, or remotely over a WebSocket. The repository measures 116.7 KB gzipped for the wasm module of Undra's runtime plus a hello-world core, against a budget of 120 KB that CI enforces; it grows with your code.
+Undra's web output is a wasm module built from your Rust core plus `@undra/runtime`, a TypeScript package with no runtime dependencies. Each store field becomes a `Signal<T>` with `get`, `peek` and `subscribe`; `@undra/runtime/react` exports `useUndra` and `useSignal` (built on `useSyncExternalStore`), and Vue, Svelte and Solid adapters exist too. The core can run on the main thread, in a worker, or remotely over a WebSocket. The repository measures 116.2 KB gzipped for the wasm module of Undra's runtime plus a hello-world core, against a budget of 120 KB that CI enforces; it grows with your code.
 
 Playground code, abbreviated: examples/playground/web/src/views/TodosView.tsx
 
@@ -4859,7 +4860,7 @@ Every number here comes from [bench/RESULTS.md](https://github.com/shreypdev/und
 | Decoding that change-set, borrowed | 253.9 ns | [Signals and stores](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#signals-and-stores) |
 | Decoding and replaying a one-operation patch on 10,000 rows (Rust wire crate) | 2.57 µs | [Keyed patch](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#wire-keyed-patch-undra-wire) |
 | Cold start, restoring 100 KB of state | 70.87 µs | [Snapshot](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#snapshot-and-restore) |
-| Wasm runtime plus hello-world core, gzipped | 116.7 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
+| Wasm runtime plus hello-world core, gzipped | 116.2 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
 | Android core, hello world, arm64-v8a, release | 978.6 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/android-size.jsonl) |
 
 Read these for what they are. They are core-side, on a host faster than the phones the design targets, so within budget here is necessary and not sufficient. The per-device targets (an iPhone with an A15, a 2022 mid-range Android phone, Chromium) are measured in a later device phase, and the platform half of a crossing, meaning the Swift, JNI or JavaScript side and applying a change-set to a mirror, is not in these numbers. The 46 operations covered by the CI gate have budgets about five times what they measure, so the gate catches an operation that becomes several times slower, not a few percent ([the gate](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#the-ci-gate)). We have not published a stress benchmark for sustained very high write rates, and we have not compared Undra against other tools, so this page makes no such comparison.

@@ -140,7 +140,7 @@ jobs:
       # alone, never from artifacts a cache might hold.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-03
         with:
-          toolchain: 1.98.1 # the version CI pins (ci.yml header); bump them together
+          toolchain: 1.99.0 # the version CI pins (ci.yml header); bump them together
           targets: ${{ matrix.target }}
       - name: Build (release profile, LTO, stripped)
         run: cargo build --release --locked -p undra-cli --target "$TARGET"
@@ -192,7 +192,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
           package-manager-cache: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -301,7 +301,7 @@ jobs:
     steps:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

@@ -230,6 +230,10 @@ nothing from the text of a message.
 * A failed **port** implementation (an untyped throw) and a malformed change-set reach `onError` on Kotlin and TypeScript; on
   Swift they are logged at ERROR (a failed port answers the core `unavailable`, ADR-032 row k). A typed storage failure
   (`StorageError`) is the port's answer, not a failure of the adapter, on all three.
+* A `WebSocket` the core closes with a code (`close(conn, code, reason)`, SPEC 8.1) reaches the peer with that code on every
+  platform but Swift before macOS 26 / iOS 26: there `URLSessionWebSocketTask.cancel(with:reason:)` may end the connection
+  without writing the close frame, the peer sees an abnormal close (no frame), and the adapter, which cannot be told,
+  guarantees only that the connection ends. The core's own view is unchanged (its `close` succeeds and its stream ends).
 * TypeScript has an abort path the others spell differently (`AbortSignal` versus task or coroutine cancellation), and
   its methods are all `Promise`s: a command's promise resolves rather than being `void`.
 * A wasm core cannot contain a panic (SPEC 7: `panic=abort`): the call fails as `unavailable` (reason `trap`) and the

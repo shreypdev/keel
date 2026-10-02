@@ -51,7 +51,8 @@ changed: every class, method, `kind` and typed field of SPEC 17.1 is the same in
   99,762/s and applied 73/s. The same package in `wasm-worker` mode on a real Worker (the Worker script bundled by Vite from `dist/worker.js`): a store created and a call
   answered through the worker, a typed `emptyTitle` rejection across it, `callSync` refused with `UndraModeError` saying `T0093: callSync, wasm-worker — …`,
   `snapshot` (687 bytes) and `restore`. The playground's Playwright smoke: 9 of 9.
-* **Counts**, on the tree before the merge with `main`: the runtime's suite **2,023 pass, 1 skipped** in 75 files (1,646 on `main`'s count in
+* **Counts**, on the tree before the merge with `main` (after it: the runtime's suite 2,025 pass + 1 skipped, `test:dist` 1,983, `main`'s two new tests): the
+  runtime's suite **2,023 pass, 1 skipped** in 75 files (1,646 on `main`'s count in
   `docs/ONBOARDING.md`) and `npm run test:dist` **1,981 pass** in 73 (the two source-only files excluded); its three typechecks; the wasm
   harness 22 + 36 pass on the sources and on the production build; the TypeScript contract column 33/33 on both; the React Native package 111 pass,
   its contract column 24 pass + 2 skipped, on both; the testkit 38, the devtools page 71, on both; the playground web 135 and its build, the
@@ -59,8 +60,8 @@ changed: every class, method, `kind` and typed field of SPEC 17.1 is the same in
   two-cores Node app; `undra bindgen --check --docs` clean on the playground, `two-cores/{a,b}`, the cookbook and the fieldbook (`--check` on
   `ios15-sample`); `cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo test -p undra-bindgen`, `-p undra-cli`,
   `-p undra-bench` (the size record against the tables) pass; `cargo test --workspace --no-fail-fast`: 3,534 pass, 3 fail, 21 ignored, and the 3
-  are not this piece's: `undra-macros`'s two trybuild suites (this host's rustc is 1.99.0, CI pins 1.98.1: the rustc 1.99 golden drift the
-  handoff names) and `undra-transport`'s `a_commit_storm_costs_steps_by_time_not_by_commit` (a timing test of the devtools ring, 13,550 of 20,002
+  are not this piece's: `undra-macros`'s two trybuild suites (this host's rustc is 1.99.0, CI pinned 1.98.1 then: the rustc 1.99 golden drift the
+  handoff names, which `main`'s `e462c3a` regenerated and the merge brought in) and `undra-transport`'s `a_commit_storm_costs_steps_by_time_not_by_commit` (a timing test of the devtools ring, 13,550 of 20,002
   on a loaded host; no change of mine touches that crate); `bash runtimes/ts/devtools/build.sh --check`, `node --test
   scripts/bench-device-report.test.mjs`, `node site/scripts/build-all.mjs` (current) and `check-links --words` (347 of 350) pass.
 
@@ -101,5 +102,8 @@ changed: every class, method, `kind` and typed field of SPEC 17.1 is the same in
 
 * Merge, the `state(ts-runtime-16k)` commit in `.10x/status.md` and `handoff.md`, and the re-record of the JavaScript rows by the next
   `scripts/wasm-size.sh --record` on CI's toolchain (the wasm line then also comes from 1.98.1).
-* The Rust 1.99 drift and the devtools timing test above are main's, not this piece's (the CI-green piece owns them).
+* The Rust 1.99 drift and the devtools timing test above are main's, not this piece's (the CI-green piece owns them; the merge with `fc326d6` brought its fixes).
+* The merge with `fc326d6` (2026-10-02, late): one new sentence of `main` (`node:sqlite` U+0000 refusal, `db/node-sqlite.ts`) became code 245; the devtools
+  bundle and the generated site pages were rebuilt; `bench/results/web-size.jsonl` keeps `main`'s wasm line (116,181 under 1.99.0; this host measures 116,471,
+  a path-dependent difference of a core this piece does not touch) and this piece's three JavaScript rows.
 * Helper branches: none. The scratch directories, servers and the base-commit worktree this piece used are removed.

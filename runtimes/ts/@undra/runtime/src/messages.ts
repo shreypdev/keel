@@ -262,6 +262,7 @@ const MESSAGES: Readonly<Record<number, string | null>> = {
   242: "the worker was not started with recovery", // worker.ts: UndraTransportError("unsupported")
   243: "the wasm core trapped ({0}) and was restarted from a snapshot {1} ms old", // recovery.ts: UndraCoreRestarted
   244: "keyed patch operation #{0} ({1}) index {2} is out of bounds for a list of length {3}", // wire/errors.ts: PatchError
+  245: "this Node's node:sqlite does not keep text that holds U+0000 (it cuts it at the first one): the Db port carries text exactly, so it needs a newer Node (24 does)", // db/node-sqlite.ts: DbError.Unavailable
 };
 
 /**

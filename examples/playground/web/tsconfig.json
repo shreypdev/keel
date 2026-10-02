@@ -26,6 +26,9 @@
     ],
     "baseUrl": ".",
     "paths": {
+      "react": [
+        "./node_modules/@types/react/index.d.ts"
+      ],
       "@playground/core": [
         "../generated/ts/src/index.ts"
       ],

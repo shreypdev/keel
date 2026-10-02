@@ -1,7 +1,7 @@
 //! The CI workflow `undra init` writes: `.github/workflows/undra.yml`.
 //!
 //! One job for the core (format, clippy, tests, `undra bindgen --check`) and one per app of the
-//! project: web (Node 20, `npm ci`, test, build), Android (`assembleDebug` on Ubuntu with NDK r27)
+//! project: web (Node 24, `npm ci`, test, build), Android (`assembleDebug` on Ubuntu with NDK r27)
 //! and iOS (`xcodebuild` on macOS 14). Every job installs `undra` with the install script of
 //! `docs/RELEASING.md`, at the version in the `UNDRA_VERSION` variable at the top of the file, and
 //! the apps' build systems run `undra build` themselves (see `builds::xcode`, the Gradle task and
@@ -181,7 +181,7 @@ mod tests {
             "cargo clippy --workspace --all-targets -- -D warnings",
             "cargo test --workspace",
             "undra bindgen --check",
-            "node-version: 20",
+            "node-version: 24",
             "npm ci",
             "npm test --if-present",
             "npm run build",

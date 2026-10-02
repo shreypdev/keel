@@ -24,10 +24,10 @@ help: the trait `Encode` is not implemented for `Plain`
    = help: the following other types implement trait `Encode`:
              &T
              ()
+             (A,)
              (A, B)
              (A, B, C)
              (A, B, C, D)
-             (A,)
              AppState
              Arc<T>
            and $N others
