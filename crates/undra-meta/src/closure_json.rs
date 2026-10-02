@@ -178,8 +178,10 @@ pub(crate) fn type_ref(out: &mut String, ty: &TypeRef) {
             string(out, name);
         }
         // The leaves, each by name and no wildcard: a variant added to `TypeRef` must not compile
-        // here until this says what its payload is. This writer decides the schema hash and the
-        // fingerprints, and a variant written without its payload would hash like its sibling.
+        // here until this says what its payload is. These are the bytes the schema hash and the
+        // fingerprints are computed over, and a variant written without its payload would hash
+        // like its sibling. (What a closure *reaches* is decided by the collector in `closure.rs`
+        // and read back by the reader below, which still have a catch-all each.)
         TypeRef::Bool
         | TypeRef::I8
         | TypeRef::I16

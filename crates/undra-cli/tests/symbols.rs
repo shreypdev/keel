@@ -1131,9 +1131,9 @@ fn shipped_artefacts_do_not_grow_and_no_symbols_writes_none() {
             // A build with debug info compiles to a few bytes of other code, so the two stripped
             // libraries differ by some tens of bytes in either direction (main at `a309e9f`: x86_64 32
             // and arm64 16 bytes smaller with symbols; after wt/cold-restore-regression: x86_64 16 bytes
-            // larger, arm64 equal). The difference is in `.text` (`llvm-readelf -S`: every other section
-            // has the same size). 256 bytes is the tolerance; a symbol table or a debug section left in
-            // is hundreds of kilobytes.
+            // larger, arm64 equal). The difference is in `.text` (`llvm-readelf -S`; `.shstrtab` differs
+            // by 5 bytes too). 256 bytes is the tolerance; the smallest debug section is 1.5 KB and a
+            // symbol table hundreds of kilobytes.
             before_after(
                 &format!("android {abi}"),
                 size(&plain.root.join(&rel)) + 256,

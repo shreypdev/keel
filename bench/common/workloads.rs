@@ -1317,8 +1317,8 @@ pub fn snapshot() -> Vec<Workload> {
         // The part of a cold start that is not the restore (RESULTS.md, Finding 8): the hash of
         // the schema this binary registered, which `Runtime::new` computes before anything else.
         // A row of its own, so that the canonical form going back through a clone of the schema
-        // or through `serde` (twice the time) fails the baseline gates here and not as a quarter
-        // of the cold-start rows.
+        // and `serde` (1.84x) fails the baseline gates here and not as a quarter of the
+        // cold-start rows. (The clone alone is 1.47x, just inside the gate.)
         Workload::new("snapshot/cold_start_schema_hash", || {
             let schema = undra::meta::collect_schema("undra-core");
             let (rt, _host) = runtime();
