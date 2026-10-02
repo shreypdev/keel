@@ -70,7 +70,7 @@ extension Decimal {
 /// mantissa and its exponent range hold every wire value (the scale is kept, so `1.00` stays
 /// `1.00`). Encoding is exact for every value the wire can hold; the rest is documented, not
 /// hidden: a NaN encodes as zero, a value of 2^127 or more saturates, and digits beyond the 38th
-/// after the point are cut off (rounded toward zero). Convert to your decimal library's type
+/// after the point, or beyond what a 128-bit mantissa holds, are cut off (rounded toward zero). Convert to your decimal library's type
 /// through `description` if you need other behaviour.
 extension Decimal: UndraCodec {
     public static func undraDecode(_ r: inout UndraReader) throws -> Decimal {
@@ -107,6 +107,12 @@ extension Decimal: UndraCodec {
             }
             // More than 38 digits after the point do not fit the wire's scale: cut them off.
             while exponent < -38 {
+                magnitude = magnitude.dividedByTen()
+                exponent += 1
+            }
+            // A mantissa past 127 bits (Foundation keeps 39 digits after some parses) loses its last
+            // digits after the point the same way, never its magnitude.
+            while exponent < 0 && !magnitude.fits(negative: negative) {
                 magnitude = magnitude.dividedByTen()
                 exponent += 1
             }

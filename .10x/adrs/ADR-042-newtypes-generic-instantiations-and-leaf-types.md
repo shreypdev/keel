@@ -263,7 +263,9 @@ All eight items of the brief landed (the records: `.10x/decisions/sde/types-pagi
    `eq_numeric` (exact for every pair) and `ParseDecimalError`; the `rust_decimal` feature converts through the wire encoding.
 6. **What each platform's `Decimal` does at its edges** (decoding is exact everywhere): Swift saturates a value of 2^127 or more, encodes NaN as
    zero and cuts digits past the 38th after the point; Kotlin rounds those digits half up, turns a negative scale into whole digits and
-   saturates a mantissa of more than 128 bits; TypeScript's `Decimal` constructor throws `RangeError` for what does not fit. Documented in SPEC 17.
+   saturates a mantissa of more than 128 bits; TypeScript's `Decimal` constructor throws `RangeError` for what does not fit. Documented in SPEC 17. (Review, 2026-10-02: Swift and Kotlin saturated any mantissa past 127 bits at scale 0, so `10 / 3` at scale 38 crossed as 1.7 x
+   10^38; such a mantissa now loses its last digits after the point, cut on Swift, rounded half up on Kotlin, and only a whole part of 2^127 or more
+   saturates. Swift's `==` and hashing are Foundation's, numeric: `1.0 == 1.00` there, unlike Rust, Kotlin and TypeScript.)
 7. **Generated shapes**: a Kotlin newtype of `Bytes` is a plain class with content equality (a value class cannot override `equals`); a TypeScript
    newtype of a newtype is branded on what the inner one wraps and a newtype of an option brands the payload; non-primitive TypeScript newtype
    codecs delegate lazily (use-before-assignment at module load); `Option<N>` where `N` wraps an option is E0001 (nested optionality, E0063's

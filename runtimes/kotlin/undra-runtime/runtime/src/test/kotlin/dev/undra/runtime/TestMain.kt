@@ -3,6 +3,7 @@ package dev.undra.runtime
 import dev.undra.runtime.testing.Suite
 import dev.undra.runtime.wire.ChangeSetTests
 import dev.undra.runtime.wire.CodecTests
+import dev.undra.runtime.wire.DecimalCodecTests
 import dev.undra.runtime.wire.EnvelopeTests
 import dev.undra.runtime.wire.FnvTests
 import dev.undra.runtime.wire.FuzzTests
@@ -25,6 +26,7 @@ fun main() {
         WriterTests(),
         ReaderTests(),
         CodecTests(),
+        DecimalCodecTests(),
         HandleTests(),
         FnvTests(),
         EnvelopeTests(),

@@ -163,14 +163,18 @@ public object Codecs {
      *
      * Decoding is exact. Encoding is exact for every value the wire can hold; the rest is
      * documented, not hidden: a negative scale (`1E+3`) becomes whole digits (scale 0), digits past
-     * the 38th after the point are rounded half up, and a value whose mantissa needs more than 128
-     * bits saturates at the largest or smallest mantissa.
+     * the 38th after the point are rounded half up, a mantissa that would need more than 128 bits
+     * loses its last digits after the point (rounded half up: `10 / 3` at scale 38 crosses at scale
+     * 37), and only a whole part of 2^127 or more saturates at the largest or smallest mantissa.
      */
     public val decimal: UndraCodec<BigDecimal> = object : UndraCodec<BigDecimal> {
         override fun encode(w: UndraWriter, v: BigDecimal) {
-            var value = v
-            if (value.scale() < 0) value = value.setScale(0)
-            if (value.scale() > MAX_DECIMAL_SCALE) value = value.setScale(MAX_DECIMAL_SCALE, RoundingMode.HALF_UP)
+            val whole = if (v.scale() < 0) v.setScale(0) else v
+            var value = if (whole.scale() > MAX_DECIMAL_SCALE) whole.setScale(MAX_DECIMAL_SCALE, RoundingMode.HALF_UP) else whole
+            if (value.unscaledValue().bitLength() > 127 && value.scale() > 0) {
+                // 38 digits always fit 127 bits: drop the digits after the point beyond them (rounded once, from the value).
+                value = whole.setScale(maxOf(0, value.scale() - (value.precision() - 38)), RoundingMode.HALF_UP)
+            }
             var mantissa = value.unscaledValue()
             var scale = value.scale()
             if (mantissa.bitLength() > 127) {

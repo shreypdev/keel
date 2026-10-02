@@ -54,6 +54,23 @@ final class DecimalCodecTests: XCTestCase {
         XCTAssertEqual(negativeHuge.undraEncoded(), wire(0x8000_0000_0000_0000, 0, 0))
     }
 
+    /// Review (types-paging): a mantissa past 2^127 with digits after the point used to saturate at
+    /// 1.7 x 10^38 with scale 0; it loses its last digits instead (cut toward zero, as past the 38th).
+    func testAMantissaPastTheWireLosesItsLastDigitsNeverItsMagnitude() throws {
+        let posix = Locale(identifier: "en_US_POSIX")
+        // Foundation keeps 39 digits here: a mantissa of 2^128 - 1 at exponent -38.
+        let parsed = try XCTUnwrap(Decimal(string: "3.40282366920938463463374607431768211455", locale: posix))
+        XCTAssertEqual(parsed._exponent, -38)
+        XCTAssertEqual(try Decimal.undraDecoded(from: parsed.undraEncoded()),
+                       Decimal(string: "3.4028236692093846346337460743176821145", locale: posix))
+        XCTAssertEqual(parsed.undraEncoded().last, 37, "one digit after the point goes, not 38")
+        XCTAssertEqual(try Decimal.undraDecoded(from: (-parsed).undraEncoded()),
+                       Decimal(string: "-3.4028236692093846346337460743176821145", locale: posix))
+        // A whole part of 2^127 or more still saturates.
+        let wholeTooBig = try XCTUnwrap(Decimal(string: "340282366920938463463374607431768211455", locale: posix))
+        XCTAssertEqual(wholeTooBig.undraEncoded(), wire(0x7FFF_FFFF_FFFF_FFFF, UInt64.max, 0))
+    }
+
     func testRandomValuesRoundTrip() throws {
         var generator = SystemRandomNumberGenerator()
         for _ in 0..<2_000 {
