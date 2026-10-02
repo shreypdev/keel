@@ -158,3 +158,36 @@ fn a_report_that_panics_is_not_reported_again() {
         "the caller still gets its answer"
     );
 }
+
+/// What a contained panic costs, for `bench/RESULTS.md` (the cold path: no row is budgeted, the hot
+/// path is untouched, ADR-046). `cargo test --release -p undra-ports --test diagnostics -- --ignored --nocapture panic_cost`.
+#[test]
+#[ignore = "a measurement, not a test"]
+fn panic_cost() {
+    let measure = |report: bool| {
+        let t = TestRuntime::new();
+        let fakes = fakes::install(&t);
+        if !report {
+            t.runtime()
+                .unbind_port(<dyn Diagnostics as undra_runtime::Port>::PORT_ID);
+        }
+        let mut times = Vec::new();
+        for i in 0..400_u32 {
+            let started = std::time::Instant::now();
+            let reply = t.call_sync(function("explode"), i + 1, &string_args("cost"));
+            times.push(started.elapsed());
+            assert_eq!(reply.status, ReplyStatus::Panic);
+            fakes.diagnostics.clear();
+        }
+        times.sort();
+        times[times.len() / 2]
+    };
+    println!(
+        "contained panic, status 2 reply and a report: {:?} (p50 of 400)",
+        measure(true)
+    );
+    println!(
+        "contained panic, status 2 reply, port unbound: {:?} (p50 of 400)",
+        measure(false)
+    );
+}
