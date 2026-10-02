@@ -741,7 +741,7 @@ measured = 1.43
 # background run's task table and poll loop are linked only when a task is registered (by use, ADR-052).
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 119055
+measured_gzip_bytes = 119654
 tolerance = 0.05
 
 # What a hello-world app loads up front of the JavaScript runtime: `@undra/runtime` as the template's
@@ -764,7 +764,7 @@ tolerance = 0.05
 # bytes, is ADR-052's prod-ops review note.
 [size."web/hello-runtime-js"]
 budget_gzip_bytes = 22100
-measured_gzip_bytes = 21672
+measured_gzip_bytes = 22001
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------
