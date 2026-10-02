@@ -443,6 +443,24 @@ measured_ns = 76625.0
 blueprint_ns = 3000000
 blueprint = "Core cold start with 100 KB snapshot restore: <= 3 ms iOS (A15), <= 5 ms Android, <= 8 ms web (includes starting the undra-core thread)"
 
+# ADR-059: the recreation records of 100 query handles (no store in the runtime: the cost of the
+# handles alone). A snapshot asks each handle for its record (its parameters and its observer's
+# polling interval); a restore into a runtime that does not hold them (a dev reload, a web crash
+# restart) checks each record and places it as a dormant handle; a restore into the runtime that
+# holds them (a time travel) finds them live and leaves them alone. Best of three on the reference
+# host while two other builds ran.
+[bench."snapshot/encode_100_handles"]
+budget_ns = 78000
+measured_ns = 15594.6
+
+[bench."snapshot/restore_100_handles"]
+budget_ns = 98000
+measured_ns = 19583.0
+
+[bench."snapshot/restore_100_handles_live"]
+budget_ns = 200000
+measured_ns = 38349.4
+
 # ---------------------------------------------------------------------------------------------
 # Harsh conditions, layer A: the unit of work of each stress scenario, gated like every row above
 # (p50 per iteration, 5x, floor 250 ns). Design: .10x/specs/2026-09-30-stress-bench-design.md.

@@ -89,6 +89,117 @@ undra_runtime::inventory::submit! { undra::query::QueryRegistration::of::<BenchF
 undra_runtime::inventory::submit! { undra::query::__private::HYDRATE }
 undra_runtime::inventory::submit! { undra::query::__private::LAYER }
 
+/// A query that answers from memory, one handle of which a platform holds per parameter: what the
+/// `snapshot/*_100_handles` rows carry (ADR-059).
+struct HandleCount;
+
+impl QueryDef for HandleCount {
+    const ID: u32 = 0xbe_c0_50_02;
+    const KEY: &'static str = "handle_count:{n}";
+    const STALE_MS: Option<u64> = Some(3_600_000);
+    const PERSIST: bool = false;
+    const RETRY: u32 = 0;
+    type Params = (u32,);
+    type Output = u32;
+    type Error = String;
+
+    fn fetch(_: Ctx, (n,): (u32,)) -> BoxFuture<Result<u32, String>> {
+        Box::pin(async move { Ok(n) })
+    }
+}
+
+undra_runtime::inventory::submit! { undra::query::QueryRegistration::of::<HandleCount>() }
+
+/// The query handles a snapshot keeps records of (ADR-059).
+const HANDLES: u32 = 100;
+
+/// A runtime holding [`HANDLES`] platform-constructed, observed handles of [`HandleCount`], and the
+/// handles.
+fn handles_rig() -> (TestRuntime, Vec<Handle>) {
+    let t = rig();
+    let mut handles = Vec::new();
+    for n in 0..HANDLES {
+        let reply = t.call_sync(
+            CallTarget::Constructor {
+                type_id: HandleCount::ID,
+                method_id: HandleCount::ID,
+            },
+            n + 1,
+            &(n,).encode_to_vec(),
+        );
+        assert_eq!(reply.status, ReplyStatus::Ok);
+        let handle = Handle::decode_exact(&reply.body).expect("a handle");
+        t.runtime().observe(handle.0, ALL_SIGNALS, true);
+        handles.push(handle);
+    }
+    t.run_pending();
+    t.take_change_sets();
+    (t, handles)
+}
+
+/// The `snapshot/*_100_handles` rows (ADR-059): what keeping a recreation record of 100 query
+/// handles costs a snapshot, and what re-issuing them costs a restore. They carry no store, so
+/// they are the cost of the handles alone.
+///
+/// * `snapshot/encode_100_handles`: `Runtime::snapshot` with 100 live handles (a record each).
+/// * `snapshot/restore_100_handles`: a restore into a runtime that does not hold them (a dev
+///   reload, a web crash restart): 100 records checked and placed as dormant handles. The reset
+///   releases the dormant handles, which a restore of the same snapshot would otherwise keep.
+/// * `snapshot/restore_100_handles_live`: a restore into the runtime that holds them (a time
+///   travel, an app's own `restore`): 100 live handles found and left alone.
+pub fn snapshot_handles() -> Vec<Workload> {
+    vec![
+        Workload::new("snapshot/encode_100_handles", || {
+            let (t, _handles) = handles_rig();
+            let rt = t.runtime().clone();
+            assert_eq!(
+                undra::wire::payload::Snapshot::decode(&mut Reader::new(&rt.snapshot()))
+                    .expect("a snapshot")
+                    .stores
+                    .len(),
+                HANDLES as usize
+            );
+            plain(move || {
+                black_box(rt.snapshot());
+                let _ = &t;
+            })
+        }),
+        Workload::new("snapshot/restore_100_handles", || {
+            let (t, handles) = handles_rig();
+            let rt = t.runtime().clone();
+            let snapshot = rt.snapshot();
+            for handle in &handles {
+                rt.release(handle.0);
+            }
+            let report = rt.restore_with_report(&snapshot).expect("restores");
+            assert_eq!(report.reissued, HANDLES as usize, "every handle re-issued");
+            let rt2 = rt.clone();
+            undra_bench::workload::with_reset(
+                move || {
+                    rt.restore(black_box(&snapshot)).expect("restore");
+                    let _ = &t;
+                },
+                move || {
+                    for handle in &handles {
+                        rt2.release(handle.0);
+                    }
+                },
+            )
+        }),
+        Workload::new("snapshot/restore_100_handles_live", || {
+            let (t, _handles) = handles_rig();
+            let rt = t.runtime().clone();
+            let snapshot = rt.snapshot();
+            let report = rt.restore_with_report(&snapshot).expect("restores");
+            assert_eq!(report.reissued, HANDLES as usize, "every handle kept");
+            plain(move || {
+                rt.restore(black_box(&snapshot)).expect("restore");
+                let _ = &t;
+            })
+        }),
+    ]
+}
+
 /// A store with one keyed list and the method that appends a page to it.
 #[undra::store]
 pub struct PushFeed {
