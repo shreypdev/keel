@@ -60,6 +60,32 @@ enum UndraBootstrap {
     /// (`PlaygroundApp.reload`).
     @MainActor static var coreLost: (() -> Void)?
 
+    /// Called once the runtime is connected again to a core that `undra dev` reloaded with its state kept, after the server's
+    /// address has been told to it again: the screens fetch what they tried before it knew (`PlaygroundApp`).
+    @MainActor static var coreReconnected: (() -> Void)?
+
+    /// Whether the connection dropped and has not come back yet.
+    @MainActor private static var reconnecting = false
+
+    /// What the connection did. A core that `undra dev` reloaded keeps its stores and its query handles (ADR-059), but
+    /// not what it holds outside them: the server's address is set by a call, so it is told again when the runtime is back
+    /// (the pattern of a web core that restarted after a crash, ADR-049).
+    @MainActor private static func connectionChanged(_ state: UndraConnectionState) {
+        switch state {
+        case .closed(let reason):
+            reconnecting = false
+            if reason == .sessionLost { coreLost?() }
+        case .reconnecting:
+            reconnecting = true
+        case .connected where reconnecting:
+            reconnecting = false
+            configureRemote(RemoteConfig(baseUrl: serverURL))
+            coreReconnected?()
+        default:
+            break
+        }
+    }
+
     @MainActor
     static func start() throws {
         registerBackground()
@@ -81,9 +107,7 @@ enum UndraBootstrap {
                 onError: onError,
                 // The runtime reconnects by itself; when it finds a new core instead of its own, it says so.
                 onConnectionChange: { state in
-                    if case .closed(.sessionLost) = state {
-                        Task { @MainActor in coreLost?() }
-                    }
+                    Task { @MainActor in connectionChanged(state) }
                 },
                 // What the dev server says about a reload ("Reloaded, state kept"), for the status bar.
                 onDevNotice: { message in
