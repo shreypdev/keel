@@ -1,5 +1,6 @@
 import type { LoadOptions } from "../core.js";
-import { UndraError, UndraSchemaMismatchError, UndraSessionLostError, UndraTransportError } from "../errors.js";
+import { UndraError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
+import { UndraSessionLostError } from "../errors-rare.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 import { RUNTIME_VERSION } from "../version.js";
 import {

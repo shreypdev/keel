@@ -3,9 +3,7 @@ import {
   UndraModeError,
   UndraPortError,
   UndraReplyError,
-  UndraRestoreError,
   UndraSchemaMismatchError,
-  UndraSessionLostError,
   UndraTransportError,
 } from "./errors.js";
 import { errorMessage } from "./platform.js";
@@ -230,13 +228,14 @@ function classify(error: unknown): unknown {
     // "protocol" is the peer breaking the protocol, not the core being out of reach.
     return error.reason === "protocol" ? new UndraCallError.Malformed(error.message, { cause: error }) : new UndraCallError.Unavailable(error);
   }
-  if (error instanceof UndraSchemaMismatchError || error instanceof UndraSessionLostError) {
+  // (The two rare classes are told by `kind`, so this module does not import them: `errors-rare.ts`, ADR-057.)
+  if (error instanceof UndraSchemaMismatchError || (error instanceof UndraError && error.kind === "sessionLost")) {
     // A remote core that came back with another schema (`undra dev` rebuilt it) or without this core's objects: the
     // connection is closed for good and every call in flight fails with this.
     return new UndraCallError.Unavailable(new UndraTransportError("closed", error.message, { cause: error }));
   }
   if (error instanceof WireError) return new UndraCallError.Malformed(`the reply does not decode: ${error.message}`, { cause: error });
-  if (error instanceof UndraModeError || error instanceof UndraRestoreError) return new UndraCallError.Refused(error.message, { cause: error });
+  if (error instanceof UndraModeError || (error instanceof UndraError && error.kind === "restore")) return new UndraCallError.Refused(error.message, { cause: error });
   if (error instanceof UndraPortError) return new UndraCallError.Malformed("a port implementation's typed failure reached a call", { cause: error });
   // What the runtime itself raised without a class of its own (`UndraError("state" | "options" | "observe")`) is a
   // misuse or a bug it cannot classify; a typed `E` (a subclass) and everything that is not Undra's pass through.

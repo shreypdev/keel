@@ -40,6 +40,7 @@ const STAYS_OUT: Readonly<Record<string, string>> = {
   "transport/framed.ts": "the adapter that frames the control messages of a send-only transport",
   "transport/wasm-main-transport.ts": "`WasmMainTransport`: the in-process host plus `send(kind, payload)`; `UndraCore.load` runs the host itself",
   "mirror-waiters.ts": "the promises behind `observe` of a core that answers later; an in-process core delivers inside `observe`",
+  "errors-rare.ts": "`UndraRestoreError` and `UndraSessionLostError`: only a snapshot operation or a remote core throws them; the first chunk tells them by `kind`",
 };
 
 describe("what UndraCore loads up front", () => {

@@ -9,7 +9,6 @@ import {
   UndraModeError,
   UndraReplyError,
   UndraSchemaMismatchError,
-  UndraSessionLostError,
   UndraTransportError,
 } from "./errors.js";
 import { nextCallId } from "./callid.js";
@@ -1037,7 +1036,7 @@ export class UndraCore {
   private _lostForGood(error: Error): void {
     if (this._closed) return;
     const why: ConnectionClosedReason =
-      error instanceof UndraSchemaMismatchError ? "schemaMismatch" : error instanceof UndraSessionLostError ? "sessionLost" : "failed";
+      error instanceof UndraSchemaMismatchError ? "schemaMismatch" : (error as Partial<UndraError>).kind === "sessionLost" ? "sessionLost" : "failed";
     this._dispose(error, why);
     try {
       this._options.onClose?.(error);

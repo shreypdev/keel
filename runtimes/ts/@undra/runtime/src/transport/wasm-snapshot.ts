@@ -1,4 +1,5 @@
-import { UndraRestoreError, UndraTransportError } from "../errors.js";
+import { UndraTransportError } from "../errors.js";
+import { UndraRestoreError } from "../errors-rare.js";
 import type { HostAdapters, HostOptions, WasmHost } from "./wasm-main.js";
 
 /*

@@ -4,10 +4,10 @@ import {
   UndraModeError,
   UndraPortError,
   UndraReplyError,
-  UndraRestoreError,
   UndraSchemaMismatchError,
   UndraTransportError,
 } from "../src/errors.js";
+import { UndraRestoreError } from "../src/errors-rare.js";
 import { UndraWriter, ReplyStatus } from "../src/wire/index.js";
 
 describe("errors", () => {
@@ -91,5 +91,32 @@ describe("errors", () => {
     const incompatible = new UndraRestoreError(7);
     expect(incompatible.code).toBe(UndraRestoreError.INCOMPATIBLE);
     expect(incompatible.message).toContain("code 7)");
+  });
+});
+
+describe("the two rare error classes (ADR-057)", () => {
+  it("are modules of their own that the package root still exports, with the same name, kind and fields", async () => {
+    const root = await import("../src/index.js");
+    const rare = await import("../src/errors-rare.js");
+    expect(root.UndraRestoreError).toBe(rare.UndraRestoreError);
+    expect(root.UndraSessionLostError).toBe(rare.UndraSessionLostError);
+    const restore = new rare.UndraRestoreError(rare.UndraRestoreError.BAD_SNAPSHOT);
+    expect([restore.name, restore.kind, restore.code]).toEqual(["UndraRestoreError", "restore", 5]);
+    expect(restore).toBeInstanceOf(UndraError);
+    const lost = new rare.UndraSessionLostError();
+    expect([lost.name, lost.kind]).toEqual(["UndraSessionLostError", "sessionLost"]);
+    expect(lost.message).toMatch(/no longer has this core's objects/);
+  });
+
+  it("a generated call tells them by kind: a refused restore is Refused, a lost session is Unavailable", async () => {
+    const { UndraCallError } = await import("../src/call-error.js");
+    const rare = await import("../src/errors-rare.js");
+    expect(UndraCallError.mapped(new rare.UndraRestoreError(7))).toBeInstanceOf(UndraCallError.Refused);
+    const lost = UndraCallError.mapped(new rare.UndraSessionLostError("gone"));
+    expect(lost).toBeInstanceOf(UndraCallError.Unavailable);
+    expect((lost as InstanceType<typeof UndraCallError.Unavailable>).transport.reason).toBe("closed");
+    // By kind, not by class: another UndraError that says so is classified the same (the first chunk does not import the classes).
+    expect(UndraCallError.mapped(new UndraError("restore", "x"))).toBeInstanceOf(UndraCallError.Refused);
+    expect(UndraCallError.mapped(new UndraError("sessionLost", "x"))).toBeInstanceOf(UndraCallError.Unavailable);
   });
 });

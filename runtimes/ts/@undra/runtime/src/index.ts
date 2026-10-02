@@ -3,6 +3,7 @@ export * from "./wire/index.js";
 export * from "./core.js";
 export * from "./call-error.js";
 export * from "./errors.js";
+export * from "./errors-rare.js";
 export * from "./mirror.js";
 export * from "./object.js";
 export * from "./identity.js";

@@ -1,6 +1,7 @@
 import { WEB_CRYPTO_REQUIRED, hasCryptoRandom } from "../adapters/system.js";
 import type { LoadOptions, WorkerModeOptions } from "../core.js";
-import { UndraError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
+import { UndraError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
+import { UndraRestoreError } from "../errors-rare.js";
 import { isTrap } from "../panic.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 import {

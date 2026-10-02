@@ -1,7 +1,8 @@
 import { PortIds } from "./adapters/ids.js";
 import { WEB_CRYPTO_REQUIRED, hasCryptoRandom } from "./adapters/system.js";
 import type { ClockAdapter, RngAdapter, TimerAdapter } from "./adapters/types.js";
-import { UndraError, UndraReplyError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "./errors.js";
+import { UndraError, UndraReplyError, UndraSchemaMismatchError, UndraTransportError } from "./errors.js";
+import { UndraRestoreError } from "./errors-rare.js";
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
 import { dispatchPortCall, portOperation } from "./port-dispatch.js";
