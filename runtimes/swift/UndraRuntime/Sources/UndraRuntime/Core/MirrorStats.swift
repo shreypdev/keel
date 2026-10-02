@@ -27,6 +27,9 @@ public struct MirrorStats: Sendable, Equatable {
     /// Entries dropped because no store was registered for their handle (a store closed while its
     /// updates were in flight).
     public var droppedEntries: Int
+    /// Calls of the app's main-thread callback implementations the drains made (ADR-041): queued with
+    /// the change-sets and delivered in arrival order, never folded with them.
+    public var callbacksDelivered: Int
 
     /// Counters with the given values; every one defaults to zero.
     public init(
@@ -38,7 +41,8 @@ public struct MirrorStats: Sendable, Equatable {
         resyncs: Int = 0,
         pendingEntries: Int = 0,
         pendingBytes: Int = 0,
-        droppedEntries: Int = 0
+        droppedEntries: Int = 0,
+        callbacksDelivered: Int = 0
     ) {
         self.changeSetsReceived = changeSetsReceived
         self.entriesReceived = entriesReceived
@@ -49,6 +53,7 @@ public struct MirrorStats: Sendable, Equatable {
         self.pendingEntries = pendingEntries
         self.pendingBytes = pendingBytes
         self.droppedEntries = droppedEntries
+        self.callbacksDelivered = callbacksDelivered
     }
 }
 

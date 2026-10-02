@@ -60,7 +60,7 @@ run xcrun simctl install "$UDID" "$APP"
 
 # 4. Each screen: launch, wait, screenshot, alive, no crash in the log.
 failed=0
-for view in todos counter biglist remote notes; do
+for view in todos counter biglist remote notes workshop; do
   step "xcrun simctl launch $UDID $BUNDLE -tab $view"
   xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
   xcrun simctl launch "$UDID" "$BUNDLE" -tab "$view"

@@ -23,13 +23,20 @@
 
 use std::collections::{HashMap, HashSet};
 
+#[path = "swift_callbacks.rs"]
+mod callbacks;
+#[path = "swift_objects.rs"]
+mod objects;
+
 use undra_meta::{
     EnumDef, FieldDef, FunctionDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind, RecordDef,
     SignalDef, TypeRef, VariantDef,
 };
 
 use crate::emit::CodeWriter;
-use crate::model::{self, Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, parse_message};
+use crate::model::{
+    self, CallbackUse, Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, parse_message,
+};
 use crate::naming;
 use crate::zero::ZeroState;
 use crate::{GeneratedFile, Generator};
@@ -63,6 +70,12 @@ pub(crate) fn generate(model: &Model, cfg: &Generator) -> Vec<GeneratedFile> {
             contents,
         })
         .collect();
+    if let Some(contents) = sw.callbacks_file() {
+        files.push(GeneratedFile {
+            path: format!("{dir}/Callbacks.swift"),
+            contents,
+        });
+    }
     files.extend(ffi_module(cfg));
     files
 }
@@ -281,12 +294,16 @@ impl Types<'_> {
             TypeRef::Duration => "Duration".to_owned(),
             TypeRef::Timestamp => "Date".to_owned(),
             TypeRef::Uuid => "UUID".to_owned(),
+            // `any Listener?` would be an existential of an optional: the optional goes outside.
+            TypeRef::Option(_) if CallbackUse::of(t).is_some() => CallbackUse::of(t)
+                .map(|callback| format!("(any {})?", callback.name()))
+                .unwrap_or_default(),
             TypeRef::Option(inner) => format!("{}?", self.ty(inner)),
             TypeRef::Vec(inner) => format!("[{}]", self.ty(inner)),
             TypeRef::Map(k, v) => format!("[{}: {}]", self.ty(k), self.ty(v)),
             TypeRef::Named(name) => self.model.spelled(name).to_owned(),
-            // todo(objects-callbacks): objects and callbacks (ADR-040, ADR-041)
-            TypeRef::Object(name) | TypeRef::Callback(name) => name.clone(),
+            TypeRef::Object(name) => name.clone(),
+            TypeRef::Callback(name) => format!("any {name}"),
             // Rejected by validation before generation starts.
             TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => "Never".to_owned(),
         }
@@ -307,6 +324,13 @@ impl Types<'_> {
     fn write_stmt(&self, t: &TypeRef, value: &str, w: &str) -> String {
         match t {
             TypeRef::Bytes => format!("{w}.writeBytes({value})"),
+            // An object crosses as its handle (ADR-040).
+            TypeRef::Object(_) => format!("{value}.handle.undraEncode(&{w})"),
+            TypeRef::Option(inner) | TypeRef::Vec(inner)
+                if matches!(**inner, TypeRef::Object(_)) =>
+            {
+                format!("{value}.map(\\.handle).undraEncode(&{w})")
+            }
             TypeRef::Option(inner) if matches!(**inner, TypeRef::Bytes) => {
                 format!("{value}.map(UndraBytes.init).undraEncode(&{w})")
             }
@@ -1182,23 +1206,20 @@ impl SwiftGen<'_> {
             }
             // The `no_coalesce` signals: the mirror applies every entry of them (ADR-031).
             let no_coalesce = model::no_coalesce_ids(o);
-            w.block(
-                "private init(adopting handle: UndraHandle, core: UndraCore)",
-                |w| {
-                    if no_coalesce.is_empty() {
-                        w.line("super.init(core: core, handle: handle)");
-                    } else {
-                        let ids: Vec<String> = no_coalesce.iter().map(u32::to_string).collect();
-                        w.line(format!(
-                            "super.init(core: core, handle: handle, noCoalesce: [{}])",
-                            ids.join(", ")
-                        ));
-                    }
-                    if store {
-                        w.line("core.observe(handle, signal: Observe.allSignals, on: true)");
-                    }
-                },
-            );
+            w.block("init(adopting handle: UndraHandle, core: UndraCore)", |w| {
+                if no_coalesce.is_empty() {
+                    w.line("super.init(core: core, handle: handle)");
+                } else {
+                    let ids: Vec<String> = no_coalesce.iter().map(u32::to_string).collect();
+                    w.line(format!(
+                        "super.init(core: core, handle: handle, noCoalesce: [{}])",
+                        ids.join(", ")
+                    ));
+                }
+                if store {
+                    w.line("core.observe(handle, signal: Observe.allSignals, on: true)");
+                }
+            });
             for c in &o.constructors {
                 w.blank();
                 self.constructor(w, o, c);
@@ -1255,18 +1276,23 @@ impl SwiftGen<'_> {
                 format!("{asyncw}{throws} -> {}", o.name),
             )
         };
+        let handover = objects::hands_over(&c.params);
         w.call_block(prefix, &params, suffix, false, |w| {
-            let args = self.encode_args(w, &c.params, &writer);
+            // Arguments that hand objects or callbacks over are checked and encoded inside the `do`.
+            let plain_args = (!handover).then(|| self.encode_args(w, &c.params, &writer));
             let t = self.types();
-            let obtain = |w: &mut CodeWriter, bind: &str| {
+            let obtain = |w: &mut CodeWriter, bind: &str, args: &str, lending: Option<&str>| {
+                let lending = lending.map(|l| format!("lending: {l}"));
                 if c.is_async {
+                    let mut call_args = vec![
+                        format!(".constructor(typeId: {ids}.typeId, methodId: {ids}.{member})"),
+                        format!("method: {ids}.{member}"),
+                        format!("args: {args}"),
+                    ];
+                    call_args.extend(lending);
                     w.call(
                         format!("let {reply} = try await {ctx}.call"),
-                        &[
-                            format!(".constructor(typeId: {ids}.typeId, methodId: {ids}.{member})"),
-                            format!("method: {ids}.{member}"),
-                            format!("args: {args}"),
-                        ],
+                        &call_args,
                         "",
                         false,
                     );
@@ -1279,27 +1305,35 @@ impl SwiftGen<'_> {
                         w.line("throw UndraProtocolError.nullHandle");
                     });
                 } else {
-                    w.call(
-                        format!("{bind}try {ctx}.construct"),
-                        &[
-                            format!("type: {ids}.typeId"),
-                            format!("method: {ids}.{member}"),
-                            format!("args: {args}"),
-                        ],
-                        "",
-                        false,
-                    );
+                    let mut call_args = vec![
+                        format!("type: {ids}.typeId"),
+                        format!("method: {ids}.{member}"),
+                        format!("args: {args}"),
+                    ];
+                    call_args.extend(lending);
+                    w.call(format!("{bind}try {ctx}.construct"), &call_args, "", false);
                 }
             };
             w.line(format!("let {handle}: UndraHandle"));
             w.line("do {");
-            w.indented(|w| obtain(w, &format!("{handle} = ")));
+            w.indented(|w| {
+                let bind = format!("{handle} = ");
+                match &plain_args {
+                    Some(args) => obtain(w, &bind, args, None),
+                    None => {
+                        let given = self.handover(w, &c.params, &writer, &ctx, true);
+                        obtain(w, &bind, &given.args, given.lending.as_deref());
+                    }
+                }
+            });
             self.catch_mapped(w, err.as_deref());
             if is_new {
+                // An initializer cannot return an existing object; the new wrapper registers itself
+                // as the handle's (`UndraObject.init`).
                 w.line(format!("self.init(adopting: {handle}, core: {ctx})"));
             } else {
                 w.line(format!(
-                    "return {}(adopting: {handle}, core: {ctx})",
+                    "return {ctx}.adopt({handle}) {{ {}(adopting: $0, core: $1) }}",
                     o.name
                 ));
             }
@@ -1344,7 +1378,21 @@ impl SwiftGen<'_> {
             params.push(format!("{core}: UndraCore = {}", self.default_core()));
         }
         let err = ret.error().map(str::to_owned);
-        let head = format!("public func {name}");
+        let handover = objects::hands_over(c.params);
+        // A method that makes store wrappers runs on the main actor, where stores live (ADR-040);
+        // a store's own methods are main-actor already.
+        let owner_is_store = matches!(site, Site::Method { owner, .. } if self.is_store(owner));
+        let main_actor = match &ret {
+            Ret::Plain(ty) | Ret::Result { ok: ty, .. } => {
+                self.returns_store(ty) && !owner_is_store
+            }
+            Ret::Stream(_) | Ret::ResultStream { .. } => false,
+        };
+        let head = if main_actor {
+            format!("@MainActor public func {name}")
+        } else {
+            format!("public func {name}")
+        };
 
         if let Ret::Stream(item) | Ret::ResultStream { item, .. } = &ret {
             // A stream is not `throws`: its failures end the iteration, mapped like a call's.
@@ -1352,7 +1400,12 @@ impl SwiftGen<'_> {
             let item_ty = t.ty(item);
             let suffix = format!(" -> AsyncThrowingStream<{item_ty}, Error>");
             w.call_block(head, &params, suffix, false, |w| {
-                let args = self.encode_args(w, c.params, &writer);
+                let args = if handover {
+                    // A stream method cannot throw: no checks, and nothing given back on a refusal.
+                    self.handover(w, c.params, &writer, &core, false).args
+                } else {
+                    self.encode_args(w, c.params, &writer)
+                };
                 // `UndraCore.stream` decodes an item when the consumer asks for it, which is what
                 // makes the core's credit follow the consumer (docs/SPEC.md section 3.7).
                 let map_error = match &err {
@@ -1393,14 +1446,11 @@ impl SwiftGen<'_> {
         };
         let suffix = format!("{asyncw}{throws}{returns}");
         w.call_block(head, &params, suffix, false, |w| {
-            let args = self.encode_args(w, c.params, &writer);
+            // Arguments that hand objects or callbacks over are checked and encoded inside the `do`,
+            // so that a command reports a refusal like any other failure.
+            let plain_args = (!handover).then(|| self.encode_args(w, c.params, &writer));
             let method = if c.is_async { "call" } else { "callSync" };
             let awaited = if c.is_async { "await " } else { "" };
-            let call_args = [
-                target.clone(),
-                format!("method: {mid}"),
-                format!("args: {args}"),
-            ];
             let bind = if is_unit {
                 "_ = ".to_owned()
             } else {
@@ -1408,6 +1458,19 @@ impl SwiftGen<'_> {
             };
             w.line("do {");
             w.indented(|w| {
+                let (args, lending) = match &plain_args {
+                    Some(args) => (args.clone(), None),
+                    None => {
+                        let given = self.handover(w, c.params, &writer, &core, true);
+                        (given.args, given.lending)
+                    }
+                };
+                let mut call_args = vec![
+                    target.clone(),
+                    format!("method: {mid}"),
+                    format!("args: {args}"),
+                ];
+                call_args.extend(lending.map(|l| format!("lending: {l}")));
                 w.call(
                     format!("{bind}try {awaited}{core}.{method}"),
                     &call_args,
@@ -1415,7 +1478,7 @@ impl SwiftGen<'_> {
                     false,
                 );
                 if let (Some(ty), false) = (ok, is_unit) {
-                    w.line(format!("return try {}", t.decode_all(ty, &body)));
+                    w.line(self.return_result(ty, &body, &core));
                 }
             });
             if is_command {
@@ -1735,7 +1798,15 @@ impl SwiftGen<'_> {
             w.line("private static let entry = UndraCoreEntry(");
             w.line("    namespace: namespace,");
             w.line("    schemaHash: UndraIds.schemaHash,");
-            w.line(format!("    api: {{ {}() }}", names.api_symbol()));
+            if self.model.callbacks.is_empty() {
+                w.line(format!("    api: {{ {}() }}", names.api_symbol()));
+            } else {
+                // The callback interfaces' bridges, registered by every load (ADR-041).
+                w.line(format!("    api: {{ {}() }},", names.api_symbol()));
+                let bridges: Vec<String> =
+                    self.model.callbacks.iter().map(SwiftGen::bridge_name).collect();
+                w.line(format!("    callbacks: [{}]", bridges.join(", ")));
+            }
             w.line(")");
             w.blank();
             w.line("/// Loads the core (linked into the app unless `options` say otherwise) and makes it");
@@ -1819,6 +1890,7 @@ impl SwiftGen<'_> {
                     });
                 }
             });
+            self.callback_ids(w);
             w.blank();
             w.block("public enum Queries", |w| {
                 for q in &m.queries {

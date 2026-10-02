@@ -396,8 +396,7 @@ final class WireVectorTests: XCTestCase {
     /// value}]}]}`, 64-bit values as decimal strings and signal values as raw bytes.
     private func checkSnapshot(name: String, hex: String, value: Any) -> Bool {
         guard let fields = value as? [String: Any],
-              let rawFloor = jsonUInt64(jsonField(fields, "generation_floor")),
-              let generationFloor = UInt32(exactly: rawFloor),
+              let generationFloor = jsonUInt64(jsonField(fields, "generation_floor")),
               let schemaHash = jsonUInt64(jsonField(fields, "schema_hash")),
               let rawTypes = fields["types"] as? [Any],
               let description = fields["description"] as? String,

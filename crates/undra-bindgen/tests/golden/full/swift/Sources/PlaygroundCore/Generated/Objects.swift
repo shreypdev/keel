@@ -5,7 +5,7 @@ import UndraRuntime
 
 /// Adds numbers.
 public final class Calculator: UndraObject, @unchecked Sendable {
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
     }
 

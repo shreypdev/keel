@@ -1,0 +1,1577 @@
+{
+  "builtTestProducts" : [
+
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.PlaygroundCore-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/sources",
+      "importPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Callbacks.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Core.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Errors.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Objects.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ports.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Queries.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Stores.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Types.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCoreFFI.build/playground_core_undra.c.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules/UndraRuntime.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "PlaygroundCore",
+      "moduleOutputPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules/PlaygroundCore.swiftmodule",
+      "objects" : [
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Callbacks.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Core.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Errors.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Ids.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Objects.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Ports.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Queries.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Stores.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Types.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j18",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-Xcc",
+        "-fmodule-map-file=/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCoreFFI/include/module.modulemap",
+        "-Xcc",
+        "-I",
+        "-Xcc",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCoreFFI/include",
+        "-Xcc",
+        "-fmodule-map-file=/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include/module.modulemap",
+        "-Xcc",
+        "-I",
+        "-Xcc",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include",
+        "-module-cache-path",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/include/PlaygroundCore-Swift.h",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "swift"
+      ],
+      "outputFileMapPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Callbacks.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Core.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Errors.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Ids.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Objects.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Ports.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Queries.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Stores.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/Types.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules/PlaygroundCore.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Callbacks.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Core.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Errors.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Objects.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ports.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Queries.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Stores.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Types.swift"
+      ],
+      "tempsPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.UndraRuntime-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/sources",
+      "importPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/ConnectivityAdapter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/FsAdapter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/HttpAdapter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/KeyValueAdapters.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/PlatformDefaults.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/PosixFiles.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/SystemAdapters.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/TimerAdapter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/WebSocketTransport.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Adapters.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CallError.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CallSlot.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Callbacks.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Connection.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CoreTable.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Errors.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/FrameScheduler.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/InprocTransport.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/LoadOptions.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Mirror.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/MirrorStats.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/ObjectIdentity.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Observe.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/PortImpl.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Protocols.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StandardPorts.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StandardRecords.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StreamChannel.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Transport.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraCore.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraCoreEntry.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraObject.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraStats.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UnloadedTransport.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/Guarded.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/OneShot.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/UndraLog.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Envelope.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/FNV.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Foundation+Undra.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/KeyedPatch.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Payloads.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraCodec.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraReader.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraTypes.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraWriter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Wire.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/WireError.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraFFI.build/undra.c.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "UndraRuntime",
+      "moduleOutputPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules/UndraRuntime.swiftmodule",
+      "objects" : [
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/ConnectivityAdapter.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/FsAdapter.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/HttpAdapter.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/KeyValueAdapters.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/PlatformDefaults.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/PosixFiles.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/SystemAdapters.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/TimerAdapter.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/WebSocketTransport.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Adapters.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/CallError.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/CallSlot.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Callbacks.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Connection.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/CoreTable.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Errors.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/FrameScheduler.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/InprocTransport.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/LoadOptions.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Mirror.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/MirrorStats.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/ObjectIdentity.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Observe.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/PortImpl.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Protocols.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/StandardPorts.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/StandardRecords.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/StreamChannel.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Transport.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraCore.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraCoreEntry.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraObject.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraStats.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UnloadedTransport.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Guarded.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/OneShot.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraLog.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Envelope.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/FNV.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Foundation+Undra.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/KeyedPatch.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Payloads.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraCodec.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraReader.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraTypes.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraWriter.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Wire.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/WireError.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j18",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-Xcc",
+        "-fmodule-map-file=/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include/module.modulemap",
+        "-Xcc",
+        "-I",
+        "-Xcc",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include",
+        "-module-cache-path",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/include/UndraRuntime-Swift.h",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "undraruntime"
+      ],
+      "outputFileMapPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/ConnectivityAdapter.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/FsAdapter.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/HttpAdapter.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/KeyValueAdapters.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/PlatformDefaults.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/PosixFiles.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/SystemAdapters.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/TimerAdapter.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/WebSocketTransport.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Adapters.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/CallError.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/CallSlot.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Callbacks.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Connection.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/CoreTable.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Errors.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/FrameScheduler.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/InprocTransport.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/LoadOptions.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Mirror.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/MirrorStats.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/ObjectIdentity.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Observe.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/PortImpl.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Protocols.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/StandardPorts.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/StandardRecords.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/StreamChannel.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Transport.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraCore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraCoreEntry.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraObject.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraStats.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UnloadedTransport.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Guarded.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/OneShot.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraLog.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Envelope.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/FNV.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Foundation+Undra.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/KeyedPatch.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Payloads.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraCodec.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraReader.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraTypes.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/UndraWriter.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/Wire.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/WireError.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules/UndraRuntime.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/ConnectivityAdapter.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/FsAdapter.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/HttpAdapter.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/KeyValueAdapters.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/PlatformDefaults.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/PosixFiles.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/SystemAdapters.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/TimerAdapter.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/WebSocketTransport.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Adapters.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CallError.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CallSlot.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Callbacks.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Connection.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CoreTable.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Errors.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/FrameScheduler.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/InprocTransport.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/LoadOptions.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Mirror.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/MirrorStats.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/ObjectIdentity.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Observe.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/PortImpl.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Protocols.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StandardPorts.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StandardRecords.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StreamChannel.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Transport.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraCore.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraCoreEntry.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraObject.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraStats.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UnloadedTransport.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/Guarded.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/OneShot.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/UndraLog.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Envelope.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/FNV.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Foundation+Undra.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/KeyedPatch.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Payloads.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraCodec.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraReader.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraTypes.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraWriter.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Wire.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/WireError.swift"
+      ],
+      "tempsPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.UndraTestKit-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/sources",
+      "importPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Fakes.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Json.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Names.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Ports.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/PreviewCore.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/RecordedCore.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Recording.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Seed.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Support.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules/UndraRuntime.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "UndraTestKit",
+      "moduleOutputPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules/UndraTestKit.swiftmodule",
+      "objects" : [
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Fakes.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Json.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Names.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Ports.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/PreviewCore.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/RecordedCore.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Recording.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Seed.swift.o",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Support.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j18",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-Xcc",
+        "-fmodule-map-file=/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include/module.modulemap",
+        "-Xcc",
+        "-I",
+        "-Xcc",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include",
+        "-module-cache-path",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/include/UndraTestKit-Swift.h",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "undraruntime"
+      ],
+      "outputFileMapPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Fakes.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Json.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Names.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Ports.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/PreviewCore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/RecordedCore.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Recording.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Seed.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/Support.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules/UndraTestKit.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Fakes.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Json.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Names.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Ports.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/PreviewCore.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/RecordedCore.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Recording.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Seed.swift",
+        "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Support.swift"
+      ],
+      "tempsPath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "PlaygroundCore" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "PlaygroundCore",
+      "-package-name",
+      "swift",
+      "-c",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Callbacks.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Core.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Errors.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Objects.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ports.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Queries.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Stores.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Types.swift",
+      "-I",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j18",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-Xcc",
+      "-fmodule-map-file=/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCoreFFI/include/module.modulemap",
+      "-Xcc",
+      "-I",
+      "-Xcc",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCoreFFI/include",
+      "-Xcc",
+      "-fmodule-map-file=/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include/module.modulemap",
+      "-Xcc",
+      "-I",
+      "-Xcc",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include",
+      "-module-cache-path",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/include/PlaygroundCore-Swift.h",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "swift",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "UndraRuntime" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "UndraRuntime",
+      "-package-name",
+      "undraruntime",
+      "-c",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/ConnectivityAdapter.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/FsAdapter.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/HttpAdapter.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/KeyValueAdapters.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/PlatformDefaults.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/PosixFiles.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/SystemAdapters.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/TimerAdapter.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/WebSocketTransport.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Adapters.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CallError.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CallSlot.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Callbacks.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Connection.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CoreTable.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Errors.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/FrameScheduler.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/InprocTransport.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/LoadOptions.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Mirror.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/MirrorStats.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/ObjectIdentity.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Observe.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/PortImpl.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Protocols.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StandardPorts.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StandardRecords.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StreamChannel.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Transport.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraCore.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraCoreEntry.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraObject.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraStats.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UnloadedTransport.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/Guarded.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/OneShot.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/UndraLog.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Envelope.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/FNV.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Foundation+Undra.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/KeyedPatch.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Payloads.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraCodec.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraReader.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraTypes.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraWriter.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Wire.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/WireError.swift",
+      "-I",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j18",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-Xcc",
+      "-fmodule-map-file=/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include/module.modulemap",
+      "-Xcc",
+      "-I",
+      "-Xcc",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include",
+      "-module-cache-path",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/include/UndraRuntime-Swift.h",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "undraruntime",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "UndraTestKit" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "UndraTestKit",
+      "-package-name",
+      "undraruntime",
+      "-c",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Fakes.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Json.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Names.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Ports.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/PreviewCore.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/RecordedCore.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Recording.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Seed.swift",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Support.swift",
+      "-I",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j18",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-Xcc",
+      "-fmodule-map-file=/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include/module.modulemap",
+      "-Xcc",
+      "-I",
+      "-Xcc",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraFFI/include",
+      "-module-cache-path",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/include/UndraTestKit-Swift.h",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "undraruntime",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "PlaygroundCore" : [
+      "UndraRuntime",
+      "UndraFFI",
+      "PlaygroundCoreFFI"
+    ],
+    "PlaygroundCoreFFI" : [
+
+    ],
+    "UndraFFI" : [
+
+    ],
+    "UndraRuntime" : [
+      "UndraFFI"
+    ],
+    "UndraTestKit" : [
+      "UndraRuntime",
+      "UndraFFI"
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Callbacks.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Core.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Errors.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Objects.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ports.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Queries.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Stores.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Types.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/PlaygroundCore.build/sources"
+    },
+    "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/ConnectivityAdapter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/FsAdapter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/HttpAdapter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/KeyValueAdapters.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/PlatformDefaults.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/PosixFiles.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/SystemAdapters.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/TimerAdapter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Adapters/WebSocketTransport.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Adapters.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CallError.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CallSlot.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Callbacks.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Connection.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/CoreTable.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Errors.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/FrameScheduler.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/InprocTransport.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/LoadOptions.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Mirror.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/MirrorStats.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/ObjectIdentity.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Observe.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/PortImpl.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Protocols.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StandardPorts.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StandardRecords.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/StreamChannel.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Transport.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraCore.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraCoreEntry.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraObject.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraStats.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UnloadedTransport.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/Guarded.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/OneShot.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Support/UndraLog.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Envelope.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/FNV.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Foundation+Undra.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/KeyedPatch.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Payloads.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraCodec.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraReader.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraTypes.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/UndraWriter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/Wire.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraRuntime/Wire/WireError.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraRuntime.build/sources"
+    },
+    "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Fakes.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Json.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Names.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Ports.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/PreviewCore.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/RecordedCore.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Recording.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Seed.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/runtimes/swift/UndraRuntime/Sources/UndraTestKit/Support.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/UndraTestKit.build/sources"
+    },
+    "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/shrey/Desktop/src/.work/objects-callbacks-swift/examples/playground/generated/swift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}

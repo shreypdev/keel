@@ -5,7 +5,7 @@ import UndraRuntime
 
 /// Adds numbers.
 public final class Calculator: UndraObject, @unchecked Sendable {
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
     }
 
@@ -41,7 +41,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
         } catch {
             throw UndraCallError.mapped(error, domain: CalcError.self)
         }
-        return Calculator(adopting: handle, core: ctx)
+        return ctx.adopt(handle) { Calculator(adopting: $0, core: $1) }
     }
 
     /// - Throws: ``CalcError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
@@ -67,7 +67,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
         } catch {
             throw UndraCallError.mapped(error, domain: CalcError.self)
         }
-        return Calculator(adopting: handle, core: ctx)
+        return ctx.adopt(handle) { Calculator(adopting: $0, core: $1) }
     }
 
     /// Adds two numbers.
