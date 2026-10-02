@@ -114,7 +114,8 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
         _ => return TokenStream::new(),
     };
     let root = item_root(&mut attrs.clone(), args_root, &mut Errors::new());
-    let is_error = mode == Mode::Error && is_enum;
+    // A generic error enum is E0002 and cannot be spelled anywhere: no `Error` impl to follow it.
+    let is_error = mode == Mode::Error && is_enum && generics.params.is_empty();
     if is_error && !derives(attrs, "Debug") {
         // `std::error::Error` needs `Debug`; the expansion adds the derive, so the fallback does.
         attrs.push(syn::parse_quote!(#[derive(::core::fmt::Debug)]));
@@ -311,14 +312,14 @@ enum Body {
     /// `struct Todo { .. }`: a record.
     Record(Vec<FieldModel>),
     /// `struct UserId(pub Uuid);`: a transparent record of one field named `value` (ADR-042).
-    Newtype(FieldModel),
+    Newtype(Box<FieldModel>),
 }
 
 impl Body {
     fn fields(&self) -> &[FieldModel] {
         match self {
             Body::Record(fields) => fields,
-            Body::Newtype(field) => std::slice::from_ref(field),
+            Body::Newtype(field) => std::slice::from_ref(&**field),
         }
     }
 }
@@ -384,9 +385,9 @@ fn parse_struct_body(item: &mut ItemStruct, errors: &mut Errors) -> Body {
                 errors,
             ))
         }
-        Fields::Unnamed(unnamed) if unnamed.unnamed.len() == 1 => Body::Newtype(
+        Fields::Unnamed(unnamed) if unnamed.unnamed.len() == 1 => Body::Newtype(Box::new(
             parse_newtype_field(&mut unnamed.unnamed[0], &self_name, errors),
-        ),
+        )),
         Fields::Unnamed(unnamed) if unnamed.unnamed.is_empty() => {
             errors.push(item_shape(
                 &format!("tuple struct `{}` has no fields", item.ident),
@@ -521,7 +522,9 @@ pub(crate) fn expand_struct_as(
         Body::Record(fields) => fields.iter().map(|f| &f.name).collect(),
         Body::Newtype(_) => Vec::new(),
     };
-    let constants = quote! {
+    // On the name's span, so that `rustc` points at the type (or, for an instantiation, at its
+    // alias) when it reports one of these defined twice.
+    let constants = quote_spanned! {name.span()=>
         /// The stable Undra type id: `fnv1a32` of the type name.
         pub const UNDRA_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
         /// The names of the fields, in declaration order (see `undra_meta::keys`).
@@ -529,7 +532,6 @@ pub(crate) fn expand_struct_as(
         pub const __UNDRA_FIELDS: &'static [&'static str] = &[ #(#field_names),* ];
     };
 
-    let derived = derived();
     match expand {
         Expand::Plain => {
             let codecs = struct_codecs(&wire, &Header::plain(name), fields, newtype);
@@ -568,7 +570,6 @@ pub(crate) fn expand_struct_as(
                 &params,
                 &docs,
             );
-            let _ = &derived;
             Ok(quote! {
                 #item
 
@@ -579,11 +580,11 @@ pub(crate) fn expand_struct_as(
             })
         }
         Expand::Instance(instance) => {
-            let rule = super::generic::duplicate_alias_constant(&instance.template);
-            Ok(quote! {
+            let rule = super::generic::duplicate_alias_constant(&instance.template, name.span());
+            Ok(quote_spanned! {name.span()=>
                 impl #name {
-                    #constants
                     #rule
+                    #constants
                 }
 
                 #registered
@@ -988,7 +989,7 @@ pub(crate) fn expand_enum_as(
     }
     let checks = checks.emit(&root);
 
-    let constants = quote! {
+    let constants = quote_spanned! {name.span()=>
         /// The stable Undra type id: `fnv1a32` of the type name.
         pub const UNDRA_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
         /// Whether this is a `#[undra::error]` enum (what a `Result` may throw).
@@ -1079,11 +1080,11 @@ pub(crate) fn expand_enum_as(
             })
         }
         Expand::Instance(instance) => {
-            let rule = super::generic::duplicate_alias_constant(&instance.template);
-            Ok(quote! {
+            let rule = super::generic::duplicate_alias_constant(&instance.template, name.span());
+            Ok(quote_spanned! {name.span()=>
                 impl #name {
-                    #constants
                     #rule
+                    #constants
                 }
 
                 #registered

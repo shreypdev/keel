@@ -269,7 +269,7 @@ pub(crate) fn template_macro(
         ),
         "an instantiation names every type parameter of the template: the alias is what the schema and the platforms see",
         format!(
-            "write all the arguments: `#[undra::api] pub type TodoPage = {name_str}<{}>;`",
+            "write all the arguments: `#[undra::api] pub type My{name_str} = {name_str}<{}>;`",
             params
                 .iter()
                 .map(|_| "Todo")
@@ -307,14 +307,16 @@ pub(crate) fn template_macro(
 }
 
 /// The constant of an instantiation's inherent impl that names E0070: the impl of a second alias
-/// of the same instantiation defines it again, and `rustc` reports that by its name.
-pub(crate) fn duplicate_alias_constant(template: &str) -> TokenStream {
-    let name = format_ident!(
+/// of the same instantiation defines it again, and `rustc` reports that by its name. It comes
+/// first in the impl, so it is the first of the errors `rustc` gives for the duplicate.
+pub(crate) fn duplicate_alias_constant(template: &str, span: proc_macro2::Span) -> TokenStream {
+    let mut name = format_ident!(
         "_undra_error_{}_this_instantiation_of_{}_is_declared_twice_keep_one_alias_per_instantiation",
         code::E0070,
         template
     );
-    quote! {
+    name.set_span(span);
+    quote::quote_spanned! {span=>
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         pub const #name: () = ();
@@ -517,7 +519,12 @@ pub(crate) fn expand_instantiate(input: TokenStream) -> TokenStream {
     }
 }
 
-fn instantiate(mut item: syn::Item) -> syn::Result<TokenStream> {
+fn instantiate(item: syn::Item) -> syn::Result<TokenStream> {
+    instantiate_in(item, &std::env::var("CARGO_CRATE_NAME").unwrap_or_default())
+}
+
+/// [`instantiate`] for the crate called `here` (empty: not known, nothing is compared).
+fn instantiate_in(mut item: syn::Item, here: &str) -> syn::Result<TokenStream> {
     let attrs = match &mut item {
         syn::Item::Struct(item) => &mut item.attrs,
         syn::Item::Enum(item) => &mut item.attrs,
@@ -536,13 +543,12 @@ fn instantiate(mut item: syn::Item) -> syn::Result<TokenStream> {
     };
 
     // The impl of an instantiation is only legal in the crate of its template.
-    let here = std::env::var("CARGO_CRATE_NAME").unwrap_or_default();
     if !config.crate_name.is_empty() && !here.is_empty() && config.crate_name != here {
         return Err(foreign_alias(
             &alias,
             &config.template,
             &config.crate_name,
-            &here,
+            here,
         ));
     }
 
@@ -803,20 +809,18 @@ mod tests {
 
     #[test]
     fn an_alias_in_another_crate_is_e0070() {
-        let src = INSTANCE.replace("crate_name = \"\"", "crate_name = \"some_other_crate\"");
-        let item: syn::Item = syn::parse_str(&src).unwrap();
-        // The test's own crate is `undra_macros`, or whatever cargo says: it is not the other one.
-        if std::env::var("CARGO_CRATE_NAME").is_ok() {
-            let out = instantiate(item).unwrap_err().to_string();
-            assert!(
-                out.starts_with("error[undra::E0070]: `TodoPage` instantiates `Page`"),
-                "{out}"
-            );
-            assert!(
-                out.contains("declared in the crate `some_other_crate`"),
-                "{out}"
-            );
-        }
+        let src = INSTANCE.replace("crate_name = \"\"", "crate_name = \"model_crate\"");
+        let item = || -> syn::Item { syn::parse_str(&src).unwrap() };
+        let out = instantiate_in(item(), "app_crate").unwrap_err().to_string();
+        assert!(
+            out.starts_with(
+                "error[undra::E0070]: `TodoPage` instantiates `Page`, which is declared in the crate `model_crate`, not in `app_crate`"
+            ),
+            "{out}"
+        );
+        // The same crate, and a crate nobody knows the name of (no cargo), are fine.
+        assert!(instantiate_in(item(), "model_crate").is_ok());
+        assert!(instantiate_in(item(), "").is_ok());
     }
 
     #[test]

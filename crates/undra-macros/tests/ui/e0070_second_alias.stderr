@@ -1,0 +1,26 @@
+error[E0592]: duplicate definitions with name `_undra_error_E0070_this_instantiation_of_Page_is_declared_twice_keep_one_alias_per_instantiation`
+  --> tests/ui/e0070_second_alias.rs:18:10
+   |
+18 | pub type TodoPage = Page<Todo>;
+   |          ^^^^^^^^ duplicate definitions for `_undra_error_E0070_this_instantiation_of_Page_is_declared_twice_keep_one_alias_per_instantiation`
+...
+24 |     pub type AnotherTodoPage = Page<Todo>;
+   |              --------------- other definition for `_undra_error_E0070_this_instantiation_of_Page_is_declared_twice_keep_one_alias_per_instantiation`
+
+error[E0592]: duplicate definitions with name `UNDRA_TYPE_ID`
+  --> tests/ui/e0070_second_alias.rs:18:10
+   |
+18 | pub type TodoPage = Page<Todo>;
+   |          ^^^^^^^^ duplicate definitions for `UNDRA_TYPE_ID`
+...
+24 |     pub type AnotherTodoPage = Page<Todo>;
+   |              --------------- other definition for `UNDRA_TYPE_ID`
+
+error[E0592]: duplicate definitions with name `__UNDRA_FIELDS`
+  --> tests/ui/e0070_second_alias.rs:18:10
+   |
+18 | pub type TodoPage = Page<Todo>;
+   |          ^^^^^^^^ duplicate definitions for `__UNDRA_FIELDS`
+...
+24 |     pub type AnotherTodoPage = Page<Todo>;
+   |              --------------- other definition for `__UNDRA_FIELDS`

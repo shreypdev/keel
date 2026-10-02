@@ -17,8 +17,8 @@ error: error[undra::E0008]: `#[undra(key)]` is not valid on a record or variant 
   |             ^^^
 
 error: error[undra::E0008]: unknown argument `colour` for `#[undra::api]`
-         = note: `#[undra::api]` accepts: `crate = "path"`, and `store` on an impl block of a `#[undra::store]` struct
-         = help: remove `colour`, or use one of: `crate`, `store`
+         = note: `#[undra::api]` accepts: `crate = "path"`, `store` on an impl block of a `#[undra::store]` struct, and `generic` on a struct or an enum with type parameters
+         = help: remove `colour`, or use one of: `crate`, `store`, `generic`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
   --> tests/ui/e0008_unknown_attribute.rs:13:10
    |

@@ -1,12 +1,12 @@
 impl TodoPage {
+    #[doc(hidden)]
+    #[allow(non_upper_case_globals)]
+    pub const _undra_error_E0070_this_instantiation_of_Page_is_declared_twice_keep_one_alias_per_instantiation: () = ();
     /// The stable Undra type id: `fnv1a32` of the type name.
     pub const UNDRA_TYPE_ID: u32 = ::undra::meta::ids::type_id("TodoPage");
     /// The names of the fields, in declaration order (see `undra_meta::keys`).
     #[doc(hidden)]
     pub const __UNDRA_FIELDS: &'static [&'static str] = &["items", "next", "by_name"];
-    #[doc(hidden)]
-    #[allow(non_upper_case_globals)]
-    pub const _undra_error_E0070_this_instantiation_of_Page_is_declared_twice_keep_one_alias_per_instantiation: () = ();
 }
 #[allow(non_upper_case_globals)]
 static __UNDRA_META_TodoPage: ::undra::meta::RecordMeta = ::undra::meta::RecordMeta {

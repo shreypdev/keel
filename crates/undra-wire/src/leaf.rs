@@ -42,8 +42,13 @@ impl WireLeaf<kinds::Decimal> for Decimal {}
 
 /// What a `#[undra::api]` newtype (`struct UserId(pub Uuid);`) says about itself: the type it
 /// wraps. The macro implements it; [`MapKey`] reads it to decide whether the newtype may be a
-/// map key.
+/// map key, so a type that is not a newtype fails *this* bound when it is asked to be a key (or
+/// the newtype of one): the message is the one of [`MapKey`].
 #[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "error[undra::E0006]: `{Self}` cannot be a map key\n  = note: map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not)\n  = help: use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0006",
+    label = "not a type that can be a map key"
+)]
 pub trait Newtype {
     /// The wrapped type.
     type Inner: ?Sized;

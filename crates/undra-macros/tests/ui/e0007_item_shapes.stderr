@@ -1,35 +1,44 @@
-error: error[undra::E0007]: tuple struct `Meters` cannot be a record
-         = note: the schema names every field so the other languages can generate properties; tuple fields have no names
-         = help: use named fields: `struct Meters { value: f64 }`
+error: error[undra::E0007]: tuple struct `Pair` with 2 fields cannot be a record
+         = note: the schema names every field so the other languages can generate properties, and tuple fields have no names; only a tuple struct with exactly one field is a newtype, which crosses as the type it wraps
+         = help: one field: a newtype, `struct Meters(pub f64);` (it crosses as the `f64`); several: named fields, `struct Pair { first: A, second: B }`; for a marker with no data, an enum with a unit variant
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
- --> tests/ui/e0007_item_shapes.rs:6:18
-  |
-6 | pub struct Meters(pub f64);
-  |                  ^^^^^^^^^
+  --> tests/ui/e0007_item_shapes.rs:10:16
+   |
+10 | pub struct Pair(pub f64, pub f64);
+   |                ^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0007]: unit struct `Marker` cannot be a record
+         = note: a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a `Vec` of them would accept any count from a four-byte message
+         = help: one field: a newtype, `struct Meters(pub f64);` (it crosses as the `f64`); several: named fields, `struct Pair { first: A, second: B }`; for a marker with no data, an enum with a unit variant
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/e0007_item_shapes.rs:13:12
+   |
+13 | pub struct Marker;
+   |            ^^^^^^
 
 error: error[undra::E0007]: enum `Nothing` has no variants
          = note: an enum without variants has no values, so it can never be sent
          = help: add at least one variant
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
- --> tests/ui/e0007_item_shapes.rs:9:10
-  |
-9 | pub enum Nothing {}
-  |          ^^^^^^^
+  --> tests/ui/e0007_item_shapes.rs:16:10
+   |
+16 | pub enum Nothing {}
+   |          ^^^^^^^
 
 error: error[undra::E0007]: constructor `new` is `async`
          = note: a constructor inserts the new object into the object table before it replies, so it must finish synchronously
          = help: construct synchronously and start asynchronous work with `ctx.spawn(..)`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
-  --> tests/ui/e0007_item_shapes.rs:15:9
+  --> tests/ui/e0007_item_shapes.rs:22:9
    |
-15 |     pub async fn new() -> Self {
+22 |     pub async fn new() -> Self {
    |         ^^^^^
 
 error: error[undra::E0007]: `helper` is neither a method nor a constructor
          = note: a `pub fn` in a `#[undra::api] impl` block must take `&self` (a method) or return `Self` / `Result<Self, E>` (a constructor); the return type is read as written, so an alias such as `type R<T> = Result<T, E>` is not followed
          = help: add `&self`, make it return `Self` or spell out `Result<Self, E>`, or make it private / move it to a free `#[undra::api] fn`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
-  --> tests/ui/e0007_item_shapes.rs:19:12
+  --> tests/ui/e0007_item_shapes.rs:26:12
    |
-19 |     pub fn helper() -> u8 {
+26 |     pub fn helper() -> u8 {
    |            ^^^^^^

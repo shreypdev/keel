@@ -76,7 +76,7 @@ macro_rules! __undra_template_Page {
         >, } }
     };
     ($($__rest:tt)*) => {
-        ::core::compile_error!("error[undra::E0002]: `Page` takes 1 type argument (`T`), as declared with `#[undra::api(generic)]`\n  = note: an instantiation names every type parameter of the template: the alias is what the schema and the platforms see\n  = help: write all the arguments: `#[undra::api] pub type TodoPage = Page<Todo>;`\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002");
+        ::core::compile_error!("error[undra::E0002]: `Page` takes 1 type argument (`T`), as declared with `#[undra::api(generic)]`\n  = note: an instantiation names every type parameter of the template: the alias is what the schema and the platforms see\n  = help: write all the arguments: `#[undra::api] pub type MyPage = Page<Todo>;`\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002");
     };
 }
 #[doc(hidden)]
