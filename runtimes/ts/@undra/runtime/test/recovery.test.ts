@@ -28,7 +28,7 @@ import {
 } from "../src/recovery.js";
 import { Signal } from "../src/signal.js";
 import type { UndraPanicReport } from "../src/adapters/types.js";
-import { WasmMainTransport } from "../src/transport/wasm-main.js";
+import { WasmMainTransport } from "../src/transport/wasm-main-transport.js";
 import { WasmWorkerTransport } from "../src/transport/wasm-worker.js";
 import {
   ALL_SIGNALS,
@@ -709,6 +709,33 @@ describe("the wasm transports restart over the stub core", () => {
     expect(restarts[0]?.staleObjects).toBe(0);
     await expect(core.call(FREE, STUB.ECHO, u32(5))).resolves.toEqual(u32(5));
     expect(core.callSync(FREE, STUB.ECHO, u32(6))).toEqual(u32(6));
+  });
+
+  it("wasm-main with recovery keeps the in-process fast path: calls take sendCall and callSyncParts, before and after a restart (ADR-056, ADR-057)", async () => {
+    const module = await WebAssembly.compile((await compileStub({ snapshot: true })) as Uint8Array<ArrayBuffer>);
+    const transport = new WasmMainTransport({ wasm: module, expectedSchemaHash: STUB.SCHEMA_HASH });
+    const sendCall = vi.spyOn(transport, "sendCall");
+    const callSyncParts = vi.spyOn(transport, "callSyncParts");
+    const send = vi.spyOn(transport, "send");
+    const restarts: UndraCoreRestarted[] = [];
+    const core = track(
+      await UndraCore.attach(transport, {
+        expectedSchemaHash: STUB.SCHEMA_HASH,
+        shared: false,
+        adapters: { log: captureLog() },
+        recovery: crashRecovery({ snapshotEveryMs: 0, maxSnapshotBytes: 1024 }),
+        onCoreRestarted: (event) => restarts.push(event),
+      }),
+    );
+    await expect(core.call(FREE, STUB.ECHO, u32(1))).resolves.toEqual(u32(1));
+    expect(core.callSync(FREE, STUB.ECHO, u32(2))).toEqual(u32(2));
+    expect([sendCall.mock.calls.length, callSyncParts.mock.calls.length, send.mock.calls.length]).toEqual([1, 1, 0]);
+    await core.call(FREE, STUB.PANIC, new Uint8Array(0)).catch(() => {});
+    await until("the restart", () => restarts.length === 1);
+    // The twin is a new instance of the same class: its own calls are not the spied ones, and nothing used `send`.
+    await expect(core.call(FREE, STUB.ECHO, u32(3))).resolves.toEqual(u32(3));
+    expect(core.callSync(FREE, STUB.ECHO, u32(4))).toEqual(u32(4));
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("wasm-main without recovery: the trap ends the core", async () => {

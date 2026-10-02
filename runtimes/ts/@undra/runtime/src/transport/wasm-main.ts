@@ -7,20 +7,13 @@ import {
   type HelloPayload,
   UndraReader,
   UndraWriter,
-  Kind,
   ReplyStatus,
   codecs,
-  decodeCancel,
-  decodeEvent,
-  decodeObserve,
-  decodeRelease,
-  decodeStreamCredit,
-  decodeTimerFired,
   encodeValue,
   splitHandle,
 } from "../wire/index.js";
 import type { PortCallPayload } from "../wire/index.js";
-import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
+import type { CoreTransport, PortOutcome, TransportHandler } from "./transport.js";
 
 /** The error of a call the core refused without a reply (`undra_call` returned `code`). */
 function refused(code: number): UndraReplyError {
@@ -161,23 +154,23 @@ function parseLog(raw: Uint8Array): { readonly target: string; readonly message:
 }
 
 /**
- * Runs an Undra core in this thread, through the wasm ABI of docs/SPEC.md
- * section 7, and implements the `undra` import object it needs: `reply`,
- * `changeset`, `stream`, `port_call`, `schedule` (`undra_poll` from a
- * microtask), `timer_set` (`setTimeout`, then `undra_timer_fired`), `log`,
- * `now_ms` and `random`.
+ * Runs an Undra core in this thread, through the wasm ABI of docs/SPEC.md section 7, and implements the `undra` import
+ * object it needs: `reply`, `changeset`, `stream`, `port_call`, `schedule` (`undra_poll` from a microtask), `timer_set`
+ * (`setTimeout`, then `undra_timer_fired`), `log`, `now_ms` and `random`.
  *
- * This is the `wasm-main` mode: calls cross into wasm synchronously, so
- * `callSync` works and a reply to a synchronous method is available before
- * `send` returns. The same class runs inside the worker of the `wasm-worker`
- * mode.
+ * This is the host of the `wasm-main` mode, which `UndraCore.load` runs: calls cross into wasm synchronously, so
+ * `callSync` works and a reply to a synchronous method is available before `sendCall` returns. Its control messages are
+ * calls (`observe`, `release`, `cancel`, `streamCredit`, `event`, `timerFired`, `portReply`: ADR-057), straight onto the
+ * wasm exports; it has no `send(kind, payload)` and no payload decoder. `WasmMainTransport` (`wasm-main-transport.ts`) is
+ * the public class: this host plus `send`, for the worker's script, tests and embedders that frame messages. The same host
+ * runs inside the worker of the `wasm-worker` mode.
  *
  * Memory: views over the module's memory are recreated whenever it grows,
  * payloads are copied out of the core inside every callback (they are only
  * valid during it), and no import handler ever throws into wasm, since a JS
  * exception crossing wasm frames would leave the core's lock held.
  */
-export class WasmMainTransport implements Transport {
+export class WasmHost implements CoreTransport {
   readonly mode = "wasm-main";
   readonly synchronous = true;
 
@@ -255,57 +248,40 @@ export class WasmMainTransport implements Transport {
    * A new transport over the same compiled module (no recompile) and options, not started: what a restart after a trap
    * runs on (ADR-049, `crashRecovery`). This one stays dead.
    */
-  twin(): WasmMainTransport {
-    return new WasmMainTransport({ ...this._options, wasm: this._module ?? this._options.wasm });
+  twin(): this {
+    return new (this.constructor as new (options: WasmMainOptions) => this)({ ...this._options, wasm: this._module ?? this._options.wasm });
   }
 
-  send(kind: Kind, payload: Uint8Array): void {
-    switch (kind) {
-      case Kind.Call: {
-        const code = this._invoke(payload, (e, ptr, len) => e.undra_call(ptr, len));
-        if (code !== 0) throw refused(code);
-        return;
-      }
-      case Kind.Cancel: {
-        const { callId } = decodeCancel(payload);
-        this._run((e) => e.undra_cancel(callId));
-        return;
-      }
-      case Kind.StreamCredit: {
-        const { callId, credit } = decodeStreamCredit(payload);
-        this._run((e) => e.undra_stream_credit(callId, credit));
-        return;
-      }
-      case Kind.Observe: {
-        const { handle, signalId, on } = decodeObserve(payload);
-        const { lo, hi } = splitHandle(handle);
-        this._run((e) => e.undra_observe(lo, hi, signalId, on ? 1 : 0));
-        return;
-      }
-      case Kind.Release: {
-        const { lo, hi } = splitHandle(decodeRelease(payload).handle);
-        this._run((e) => e.undra_release(lo, hi));
-        return;
-      }
-      case Kind.Event: {
-        const event = decodeEvent(payload);
-        this._invoke(event.payload, (e, ptr, len) => e.undra_event(event.portId, event.methodId, ptr, len));
-        return;
-      }
-      case Kind.PortReply:
-        this._invoke(payload, (e, ptr, len) => e.undra_port_reply(ptr, len));
-        return;
-      case Kind.TimerFired: {
-        const { timerId } = decodeTimerFired(payload);
-        this._run((e) => e.undra_timer_fired(timerId));
-        return;
-      }
-      case Kind.Restore:
-        this._restore(payload);
-        return;
-      default:
-        throw new UndraTransportError("protocol", `cannot send a ${Kind[kind] ?? String(kind)} message to a wasm core`);
-    }
+  // ----- the control messages (ADR-057): calls onto the wasm exports, nothing decoded -----------------
+
+  observe(handle: bigint, signalId: number, on: boolean): void {
+    const { lo, hi } = splitHandle(handle);
+    this._run((e) => e.undra_observe(lo, hi, signalId, on ? 1 : 0));
+  }
+
+  release(handle: bigint): void {
+    const { lo, hi } = splitHandle(handle);
+    this._run((e) => e.undra_release(lo, hi));
+  }
+
+  cancel(callId: number): void {
+    this._run((e) => e.undra_cancel(callId));
+  }
+
+  streamCredit(callId: number, credit: number): void {
+    this._run((e) => e.undra_stream_credit(callId, credit));
+  }
+
+  event(portId: number, methodId: number, payload: Uint8Array): void {
+    this._invoke(payload, (e, ptr, len) => e.undra_event(portId, methodId, ptr, len));
+  }
+
+  timerFired(timerId: number): void {
+    this._run((e) => e.undra_timer_fired(timerId));
+  }
+
+  portReply(reply: Uint8Array): void {
+    this._invoke(reply, (e, ptr, len) => e.undra_port_reply(ptr, len));
   }
 
   callSync(payload: Uint8Array): Uint8Array {
@@ -316,7 +292,7 @@ export class WasmMainTransport implements Transport {
     return this._invoke(head, (e, ptr, len) => this._takeBuf(e, e.undra_call_sync(ptr, len)), tail);
   }
 
-  sendCall(head: Uint8Array, tail: Uint8Array): void {
+  sendCall(head: Uint8Array, tail?: Uint8Array): void {
     const code = this._invoke(head, (e, ptr, len) => e.undra_call(ptr, len), tail);
     if (code !== 0) throw refused(code);
   }
@@ -367,8 +343,8 @@ export class WasmMainTransport implements Transport {
     this._exports = null;
   }
 
-  /** `undra_restore`; throws `UndraRestoreError` for a non-zero code. */
-  private _restore(bytes: Uint8Array): void {
+  /** `undra_restore`; throws `UndraRestoreError` for a non-zero code. @internal Used by `WasmMainTransport.send`. */
+  _restore(bytes: Uint8Array): void {
     const code = this._invoke(bytes, (e, ptr, len) => {
       if (e.undra_restore === undefined) {
         throw new UndraTransportError("unsupported", "the core does not export undra_restore");
@@ -425,8 +401,8 @@ export class WasmMainTransport implements Transport {
     return this._exports;
   }
 
-  /** Runs `call` with a copy of `bytes` in wasm memory. */
-  private _invoke<R>(bytes: Uint8Array, call: (e: CoreExports, ptr: number, len: number) => R, tail?: Uint8Array): R {
+  /** Runs `call` with a copy of `bytes` in wasm memory. @internal Used by `WasmMainTransport`. */
+  _invoke<R>(bytes: Uint8Array, call: (e: CoreExports, ptr: number, len: number) => R, tail?: Uint8Array): R {
     const e = this._live();
     // A payload copied while another export is running (a sync port reply
     // from inside `port_call`) must not reuse the scratch buffer the outer
@@ -455,8 +431,8 @@ export class WasmMainTransport implements Transport {
     }
   }
 
-  /** Runs `call` for an export that takes no buffer. */
-  private _run<R>(call: (e: CoreExports) => R): R {
+  /** Runs `call` for an export that takes no buffer. @internal Used by `WasmMainTransport`. */
+  _run<R>(call: (e: CoreExports) => R): R {
     const e = this._live();
     this._depth++;
     try {

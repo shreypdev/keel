@@ -1,4 +1,4 @@
-import { CallTarget, type Handle, encodeCall } from "./wire/index.js";
+import { CallTarget, type Handle } from "./wire/index.js";
 
 /*
  * The `Call` header (SPEC 3.3) of a free function or a method, written without a writer, a context object or a closure: what the
@@ -78,9 +78,30 @@ export function writeHead(out: Uint8Array, target: CallTargetArg, methodId: numb
 
 /** A `Call` payload (SPEC 3.3) for a free function or a method, in one allocation: `encodeCall` without its writer. */
 export function encodeTarget(target: CallTargetArg, methodId: number, callId: number, args: Uint8Array): Uint8Array {
-  if ((target as CallTargetRef).target === CallTarget.LazyListPage) return encodeCall({ ...(target as PageTarget), callId });
+  if ((target as CallTargetRef).target === CallTarget.LazyListPage) {
+    // A page call (ADR-043, SPEC 3.3): target u8, the page server's handle u64, offset u32, limit u32, call id u32.
+    const page = target as PageTarget;
+    const out = new Uint8Array(21);
+    out[0] = CallTarget.LazyListPage;
+    putHandle(out, 1, page.handle);
+    put32(out, 9, page.offset);
+    put32(out, 13, page.limit);
+    put32(out, 17, callId);
+    return out;
+  }
   const out = new Uint8Array(HEAD_LEN + args.length);
   writeHead(out, target, methodId, callId);
   if (args.length > 0) out.set(args, HEAD_LEN);
+  return out;
+}
+
+/** The `Call` payload of a constructor (SPEC 3.3): target u8, type id u32, method id u32, call id u32, then the arguments. */
+export function encodeConstructor(typeId: number, methodId: number, callId: number, args: Uint8Array): Uint8Array {
+  const out = new Uint8Array(13 + args.length);
+  out[0] = CallTarget.Constructor;
+  put32(out, 1, typeId);
+  put32(out, 5, methodId);
+  put32(out, 9, callId);
+  out.set(args, 13);
   return out;
 }

@@ -8,8 +8,8 @@ import { isTrap } from "./panic.js";
 import { type PanicSupport, panicSupport } from "./panic-report.js";
 import type { PortImpl } from "./port.js";
 import { errorMessage } from "./platform.js";
-import type { Transport, TransportHandler } from "./transport/transport.js";
-import { type Handle, type HelloPayload, Kind, decodeRelease, decodeSnapshot, encodeSnapshot, handleGeneration } from "./wire/index.js";
+import type { CoreTransport, Transport, TransportHandler } from "./transport/transport.js";
+import { type Handle, type HelloPayload, decodeSnapshot, encodeSnapshot, handleGeneration } from "./wire/index.js";
 
 /*
  * Recovering a web core that trapped (ADR-049 decision 3): `crashRecovery(options)`, which `LoadOptions.recovery`
@@ -290,7 +290,7 @@ export class UndraCoreRestarted extends UndraUnhandledError implements CoreResta
  * A transport whose core runs on this thread (`WasmMainTransport`): the snapshots are kept here, and a restart runs here,
  * on a twin of the transport that trapped.
  */
-export interface Reinstantiable extends Transport {
+export interface Reinstantiable extends CoreTransport {
   /** `undra_snapshot`, copied out of wasm memory; throws when the core cannot be asked now (closed, trapped). */
   takeSnapshot(): Uint8Array;
   /** A new transport over the same compiled module (no recompile) and options, not started. */
@@ -416,7 +416,7 @@ export interface CrashRecovery {
    *
    * @internal Called by `UndraCore`; throws when this recovery already belongs to a core.
    */
-  attach(transport: Transport, host: RecoveryHost, onCoreRestarted?: (event: UndraCoreRestarted) => void): Transport;
+  attach(transport: CoreTransport, host: RecoveryHost, onCoreRestarted?: (event: UndraCoreRestarted) => void): CoreTransport;
   /**
    * A store to re-create after a restart instead of restoring it (a query handle), with its recorded constructor call.
    *
@@ -477,9 +477,9 @@ function restarting(): UndraTransportError {
  * instead of letting the core close), refuses calls while the core restarts, holds back releases until it is back, drops
  * the port replies that belong to the instance that trapped, and keeps the snapshots (`wasm-main`).
  */
-class Recovering implements Transport {
+class Recovering implements CoreTransport {
   /** The core's own transport; in `wasm-main`, a restart replaces it with its twin. */
-  #inner: Transport;
+  #inner: CoreTransport;
   readonly #settings: ResolvedRecovery;
   readonly #host: RecoveryHost;
   /** `#inner` when the core runs on this thread (`wasm-main`): snapshots are kept here, and the restart runs here. */
@@ -507,12 +507,13 @@ class Recovering implements Transport {
   /** Bumped by every restart: a port reply that settles later belongs to the epoch of its call. */
   #epoch = 0;
   declare readonly callSync?: (payload: Uint8Array) => Uint8Array;
+  declare readonly callSyncParts?: (head: Uint8Array, tail: Uint8Array) => Uint8Array;
   declare readonly stats?: () => Promise<string | null>;
   declare readonly snapshot?: () => Promise<Uint8Array>;
   declare readonly restore?: (bytes: Uint8Array) => Promise<void>;
   declare readonly portAdded?: (portId: number, impl: PortImpl) => void;
 
-  constructor(inner: Transport, settings: ResolvedRecovery, host: RecoveryHost, onRestarted: ((event: UndraCoreRestarted) => void) | undefined) {
+  constructor(inner: CoreTransport, settings: ResolvedRecovery, host: RecoveryHost, onRestarted: ((event: UndraCoreRestarted) => void) | undefined) {
     this.#inner = inner;
     this.#settings = settings;
     this.#host = host;
@@ -531,11 +532,17 @@ class Recovering implements Transport {
     // The optional members exactly as the transport has them (the core tells the modes apart by them), called on whichever
     // transport is current: a twin has the same ones.
     const self = this as { -readonly [K in keyof Recovering]?: Recovering[K] };
-    const current = (): Required<Transport> => this.#inner as Required<Transport>;
+    const current = (): Required<CoreTransport> => this.#inner as Required<CoreTransport>;
     if (inner.callSync !== undefined) {
       self.callSync = (payload) => {
         if (this.#restarting) throw restarting();
         return this.#guard(() => current().callSync(payload));
+      };
+    }
+    if (inner.callSyncParts !== undefined) {
+      self.callSyncParts = (head, tail) => {
+        if (this.#restarting) throw restarting();
+        return this.#guard(() => current().callSyncParts(head, tail));
       };
     }
     if (inner.stats !== undefined) self.stats = () => (this.#restarting ? Promise.resolve(null) : current().stats());
@@ -598,20 +605,57 @@ class Recovering implements Transport {
     return this.#inner.start(this.#wrapped);
   }
 
-  send(kind: Kind, payload: Uint8Array): void {
-    if (kind === Kind.PortReply) {
-      // The new instance's own port calls are answered during the restart too; a stale reply (id 0, above) never is.
-      if (payload.byteLength >= 4 && new DataView(payload.buffer, payload.byteOffset, 4).getUint32(0, true) === 0) return;
-    } else if (this.#restarting) {
-      if (kind !== Kind.Release) throw restarting();
+  // The control messages (ADR-057), with the rules the framed `send` had: while the core restarts nothing reaches it except a
+  // port reply of the new instance and a release (kept, and sent once the core is back); a port reply of the instance that
+  // trapped is dropped.
+
+  sendCall(head: Uint8Array, tail?: Uint8Array): void {
+    this.#reaching(() => this.#inner.sendCall(head, tail));
+  }
+
+  observe(handle: Handle, signalId: number, on: boolean): void {
+    this.#reaching(() => this.#inner.observe(handle, signalId, on));
+  }
+
+  cancel(callId: number): void {
+    this.#reaching(() => this.#inner.cancel(callId));
+  }
+
+  streamCredit(callId: number, credit: number): void {
+    this.#reaching(() => this.#inner.streamCredit(callId, credit));
+  }
+
+  event(portId: number, methodId: number, payload: Uint8Array): void {
+    this.#reaching(() => this.#inner.event(portId, methodId, payload));
+  }
+
+  timerFired(timerId: number): void {
+    this.#reaching(() => this.#inner.timerFired(timerId));
+  }
+
+  release(handle: Handle): void {
+    if (this.#restarting) {
       // The core keeps the object meanwhile; it is released once the core is back.
-      const handle = decodeRelease(payload).handle;
       this.#releasedWhileDown.set(handle, (this.#releasedWhileDown.get(handle) ?? 0) + 1);
       return;
     }
     this.#guard(() => {
-      this.#inner.send(kind, payload);
+      this.#inner.release(handle);
     });
+  }
+
+  portReply(reply: Uint8Array): void {
+    // The new instance's own port calls are answered during the restart too; a stale reply (id 0, see `start`) never is.
+    if (reply.byteLength >= 4 && new DataView(reply.buffer, reply.byteOffset, 4).getUint32(0, true) === 0) return;
+    this.#guard(() => {
+      this.#inner.portReply(reply);
+    });
+  }
+
+  /** Runs a message to the core, which refuses with "restarted" while the core restarts. */
+  #reaching(send: () => void): void {
+    if (this.#restarting) throw restarting();
+    this.#guard(send);
   }
 
   close(): void {

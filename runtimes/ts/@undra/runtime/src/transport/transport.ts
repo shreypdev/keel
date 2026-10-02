@@ -87,14 +87,38 @@ export interface Transport {
   /** Runs a `Call` and returns the `Reply` payload (SPEC 6 `undra_call_sync`). Present only when `synchronous`. */
   callSync?(payload: Uint8Array): Uint8Array;
   /**
-   * `send(Kind.Call, head ++ tail)` for a core that runs in this thread, without joining the two: `head` is the 17-byte
-   * `Call` header (SPEC 3.3), which the caller reuses for its next call, and `tail` the encoded arguments. The
-   * transport must have copied both before it returns and keep neither. Optional: `UndraCore` uses it where it is, and
-   * `send` where it is not. Only `wasm-main` has it.
+   * `send(Kind.Call, head ++ tail)` for a core that runs in this thread, without joining the two: `head` is the `Call`
+   * header (SPEC 3.3: 17 bytes for a method or function, which the caller reuses for its next call), `tail` the encoded
+   * arguments, absent when `head` is the whole payload (a page call, a constructor's header). The transport must have
+   * copied both before it returns and keep neither. Optional: a transport that has it is called through it; one that has
+   * not gets the joined payload through `send` (ADR-056, ADR-057). Only `wasm-main` has it.
    */
-  sendCall?(head: Uint8Array, tail: Uint8Array): void;
+  sendCall?(head: Uint8Array, tail?: Uint8Array): void;
   /** `callSync(head ++ tail)`, with the same contract as {@link Transport.sendCall}. */
   callSyncParts?(head: Uint8Array, tail: Uint8Array): Uint8Array;
+  /**
+   * The control messages as calls (ADR-057), for a transport whose core runs in this thread: `UndraCore` calls these
+   * instead of `send(kind, payload)`, so nothing is encoded only to be decoded again in the same thread. `Observe`:
+   * starts or stops observing `signalId` of the store `handle` (`ALL_SIGNALS` for every one).
+   *
+   * A transport that has one of the seven must have all of them (`observe`, `release`, `cancel`, `streamCredit`, `event`,
+   * `timerFired`, `portReply`); one that has none is wrapped by the runtime (`transport/framed.ts`), which encodes each
+   * call into the payload `send` always received, byte for byte. As for {@link Transport.sendCall}: whatever a method is
+   * given it must copy before it returns.
+   */
+  observe?(handle: bigint, signalId: number, on: boolean): void;
+  /** `Release`: the host drops one reference to the object behind `handle`. */
+  release?(handle: bigint): void;
+  /** `Cancel`: cancels the in-flight call or stream `callId`. */
+  cancel?(callId: number): void;
+  /** `StreamCredit`: grants the stream `callId` `credit` more items. */
+  streamCredit?(callId: number, credit: number): void;
+  /** `Event`: a host-to-core event of an event port (`Connectivity.changed`, ...). */
+  event?(portId: number, methodId: number, payload: Uint8Array): void;
+  /** `TimerFired`: a timer the core set through a foreign `Timer` port is due. */
+  timerFired?(timerId: number): void;
+  /** `PortReply`: the host's answer to a `PortCall` it answered later; `reply` is a complete `PortReply` payload. */
+  portReply?(reply: Uint8Array): void;
   /** The core's statistics as JSON (`undra_stats_json`), or `null` when the transport cannot ask. */
   stats?(): Promise<string | null>;
   /**
@@ -128,4 +152,21 @@ export interface Transport {
    * closed with `close()`.
    */
   restart?(generationFloor: number): Promise<RestartResult>;
+}
+
+/**
+ * What `UndraCore` drives (ADR-057): a {@link Transport} whose control messages are calls, either its own (the in-process
+ * host) or the encodings of `send` that `framed()` makes. `send` is not part of it: a core never frames a message itself.
+ * Internal to the package.
+ */
+export interface CoreTransport extends Omit<Transport, "send" | "sendCall" | "observe" | "release" | "cancel" | "streamCredit" | "event" | "timerFired" | "portReply"> {
+  /** `Call`: the header, or the whole payload, and apart the encoded arguments (see {@link Transport.sendCall}). */
+  sendCall(head: Uint8Array, tail?: Uint8Array): void;
+  observe(handle: bigint, signalId: number, on: boolean): void;
+  release(handle: bigint): void;
+  cancel(callId: number): void;
+  streamCredit(callId: number, credit: number): void;
+  event(portId: number, methodId: number, payload: Uint8Array): void;
+  timerFired(timerId: number): void;
+  portReply(reply: Uint8Array): void;
 }

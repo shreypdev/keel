@@ -3,16 +3,7 @@ import type { UndraCore } from "./core.js";
 import { UndraReplyError, UndraTransportError } from "./errors.js";
 import { errorMessage } from "./platform.js";
 import { StreamCall } from "./stream.js";
-import {
-  Kind,
-  ReplyStatus,
-  StreamFlag,
-  type StreamFailure,
-  decodeStreamFailure,
-  encodeCancel,
-  encodeStreamCredit,
-  streamFailureReplyBody,
-} from "./wire/index.js";
+import { ReplyStatus, type StreamFailure, StreamFlag, decodeStreamFailure, streamFailureReplyBody } from "./wire/index.js";
 
 /*
  * Everything a core needs to run streams (`UndraCore.stream`, SPEC 3.7), as a feature (ADR-057): a hello page has no stream,
@@ -57,12 +48,12 @@ const support: StreamSupport = {
     const stream = new StreamCall(callId, {
       sendCredit: (id, credit) => {
         core._assertOpen();
-        core._transport.send(Kind.StreamCredit, encodeStreamCredit({ callId: id, credit }));
+        core._transport.streamCredit(id, credit);
       },
       cancel: (id) => {
         pending.delete(id);
         if (core.closed) return;
-        core._transport.send(Kind.Cancel, encodeCancel({ callId: id }));
+        core._transport.cancel(id);
       },
     });
     if (core.closed) {
@@ -90,7 +81,7 @@ const support: StreamSupport = {
     };
     pending.set(callId, entry);
     try {
-      core._transport.send(Kind.Call, encodeTarget(target, methodId, callId, args));
+      core._transport.sendCall(encodeTarget(target, methodId, callId, args));
     } catch (error) {
       pending.delete(callId);
       stream.fail(error);

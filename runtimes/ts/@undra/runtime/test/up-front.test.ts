@@ -32,6 +32,12 @@ const STAYS_OUT: Readonly<Record<string, string>> = {
   "wire/codecs-more.ts": "the fourteen codecs a hello page does not name (`codecs` is a namespace, ADR-057): a first-chunk module that names one puts it up front",
   "stream-support.ts": "the stream support: the generated entry of a schema with a stream imports it (`features: [streams]`); a core without it loads it at its first stream",
   "stream.ts": "`StreamCall`, which only the stream support opens",
+  "wire/kind.ts": "the message kinds: the core passes its control messages as calls, only framing transports and recovery need the numbers",
+  "wire/framed-payloads.ts": "the encoders and decoders of the framed messages (`Observe`, `Release`, `Cancel`, `Call`, `Reply`, snapshots, ...)",
+  "wire/lazy-payloads.ts": "the lazy list pages: only a schema with a lazy list loads them",
+  "wire/stream-payloads.ts": "the stream failure: only the stream support reads it",
+  "transport/framed.ts": "the adapter that frames the control messages of a send-only transport",
+  "transport/wasm-main-transport.ts": "`WasmMainTransport`: the in-process host plus `send(kind, payload)`; `UndraCore.load` runs the host itself",
 };
 
 describe("what UndraCore loads up front", () => {

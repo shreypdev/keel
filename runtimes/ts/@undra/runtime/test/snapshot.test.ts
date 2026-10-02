@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { UndraCore } from "../src/core.js";
 import { UndraError, UndraModeError, UndraReplyError, UndraRestoreError, UndraTransportError } from "../src/errors.js";
 import type { PortImpl } from "../src/port.js";
-import { WasmMainTransport } from "../src/transport/wasm-main.js";
+import { WasmMainTransport } from "../src/transport/wasm-main-transport.js";
 import { WasmWorkerTransport, type WorkerLike } from "../src/transport/wasm-worker.js";
 import type { Transport, TransportHandler } from "../src/transport/transport.js";
 import { ALL_SIGNALS, CallTarget, Kind, ReplyStatus, decodeReply, encodeCall } from "../src/wire/index.js";
