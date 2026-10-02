@@ -580,6 +580,42 @@ fn a_view_whose_pipeline_panics_is_held_back_on_its_own() {
     assert!(!rig.cell.is_failed(1));
 }
 
+/// Review (types-paging): a transaction of more recorded operations than the derived index keeps
+/// for one commit (4,096) rebuilds the index. A page read before it (one "in flight" on the host)
+/// carries the older version, the commit announces a newer one with the new length, and a page
+/// read after it is at that version and agrees with the model.
+#[test]
+fn a_view_whose_derived_index_rebuilds_announces_a_newer_version_than_a_page_in_flight() {
+    let f = view_fixture(200);
+    f.rig.observe_all();
+    let source = f.rig.cell.lazy_sources().remove(0).1;
+    let announced = value(&f.rig.observe_on(1)[0]);
+    let (before, _) = page(&*source, 0, 50);
+    assert_eq!(before.version, announced.version);
+
+    f.rig.run(|| {
+        txn(|| {
+            for i in 0..5_000_u32 {
+                f.source.push(todo(10_000 + i, &format!("r{i:05}"), i % 3 == 0));
+            }
+        });
+    });
+    let expected = model(&f.source.get());
+    let set = f.rig.one_set();
+    let inv = invalidated(entry(&set, 1));
+    assert_eq!(inv.len as usize, expected.len());
+    assert!(
+        inv.version > before.version,
+        "the page read before the rebuild is stale to the host"
+    );
+    for (offset, limit) in [(0, 50), (1_000, 50), (expected.len() as u32 - 10, 50)] {
+        let (header, rows) = page(&*source, offset, limit);
+        assert_eq!(header.version, inv.version);
+        assert_eq!(header.total as usize, expected.len());
+        assert_eq!(rows, expected[page_window(expected.len(), offset, limit)].to_vec());
+    }
+}
+
 #[derive(Clone, Debug)]
 enum Write {
     Push(u32, bool),

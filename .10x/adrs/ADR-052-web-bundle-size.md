@@ -571,3 +571,19 @@ run: with `panic = "abort"` nothing catches a panic there. Two changes, no behav
 
 The hello wasm is **119,654** gzipped (+599 on `main`: the standard surface every schema carries, R1 and ADR-024, the idle
 dispatcher, the FATAL record's `at`/`in` trailer); the budget stays 120,000.
+
+## Review note (2026-10-02, `types-paging` adversarial review): the JavaScript up front is 22,068 of 22,100; the gate stays
+
+Measured on `wt/types-paging` after the review's fixes, with the gate's own script (`scripts/wasm-size.sh`, zlib level 9):
+**web/hello-runtime-js 22,068** gzipped (record 22,005, budget 22,100: 32 bytes of headroom) and **web/hello-wasm 116,480**
+(record 119,654, budget 120,000). The JavaScript number does not depend on the checkout's path (the ~240-byte path effect the
+piece's record mentions is the wasm's panic locations), so `main` will measure the same after the merge.
+
+What the +63 bytes up front are, each something a hello page runs at load (R9's rule): ADR-031's amended fold in the mirror
+(a slot keeps a full value and the last lazy invalidation after it; +36 as the amendment records), the page call's target in
+`UndraCore.call`/`callSync` (`CallTarget.LazyListPage`: the request encoder every transport shares), and the review's fix of
+the mirror's wait-for-a-full-value rule (an invalidation is dropped like a patch). `LazyList`, `useLazyList`, `useLoadMore`
+and `Decimal` are not in the hello chunk (a store without a `Lazy<T>` signal links none of them).
+
+The budget stays **22,100** and the record is re-measured on `main` by the integrator. The next piece that adds to the chunk
+loaded up front either makes room or restates the budget here with its own measured items; 32 bytes is not room for a feature.
