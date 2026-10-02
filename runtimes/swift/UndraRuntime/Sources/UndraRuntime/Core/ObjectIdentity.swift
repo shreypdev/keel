@@ -15,8 +15,15 @@
 final class ObjectIdentityMap: @unchecked Sendable {
     /// A weak reference to a wrapper, and how many open wrappers the handle has: usually one; a store whose `new`
     /// returns an object the host already wraps has two, each owning a reference.
+    ///
+    /// `id` names the wrapper the slot was made for, so that the map can tell whose slot it is **without loading the
+    /// weak reference**: a load under the lock makes a strong temporary, and when another thread drops the wrapper's
+    /// last reference meanwhile, that temporary is the last one: the wrapper deallocates inside the lock, its
+    /// `deinit` closes it, and closing takes this lock again (a deadlock; it needs no more than a wrapper released on
+    /// one thread while another adopts or closes the same handle).
     private struct Slot {
         weak var object: UndraObject?
+        var id: ObjectIdentifier?
         var holders = 0
     }
 
@@ -46,6 +53,7 @@ final class ObjectIdentityMap: @unchecked Sendable {
                 return other
             }
             slot.object = object
+            slot.id = ObjectIdentifier(object)
             current[raw] = slot
             return nil
         }
@@ -55,6 +63,7 @@ final class ObjectIdentityMap: @unchecked Sendable {
             if existing.isClosed {
                 slots.withLock { (current: inout [UInt64: Slot]) -> Void in
                     current[raw]?.object = object
+                    current[raw]?.id = ObjectIdentifier(object)
                 }
                 return object
             }
@@ -75,8 +84,9 @@ final class ObjectIdentityMap: @unchecked Sendable {
         slots.withLock { (current: inout [UInt64: Slot]) -> Void in
             var slot = current[raw] ?? Slot(holders: 1)
             slot.holders = Swift.max(0, slot.holders - 1)
-            if slot.object == nil || slot.object === object {
+            if slot.id == nil || slot.id == ObjectIdentifier(object) {
                 slot.object = nil
+                slot.id = nil
             }
             let last = slot.holders == 0
             cleanup(last)

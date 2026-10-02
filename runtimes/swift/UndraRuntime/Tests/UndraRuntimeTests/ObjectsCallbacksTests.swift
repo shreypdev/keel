@@ -496,13 +496,24 @@ final class ObjectIdentityTests: XCTestCase {
         let transport = FakeTransport()
         let core = try makeCore(transport, frames: ManualFrameScheduler())
         let threads = 8
-        let rounds = 500
-        DispatchQueue.concurrentPerform(iterations: threads) { _ in
-            for _ in 0 ..< rounds {
-                let wrapper = core.adopt(handle(21)) { Box(adopting: $0, core: $1) }
-                _ = core.adopt(handle(21)) { Box(adopting: $0, core: $1) }
-                wrapper.close()
+        let rounds = 2_000
+        // A deadlock is a failure, not a hung run: the storm runs off this thread and is waited for.
+        let finished = DispatchGroup()
+        DispatchQueue.global().async(group: finished) {
+            DispatchQueue.concurrentPerform(iterations: threads) { _ in
+                for _ in 0 ..< rounds {
+                    // The second adopt's wrapper (the live one, or a duplicate that is discarded) is dropped
+                    // without `close()` at the end of the statement: its `deinit` closes it, on this thread,
+                    // while the others adopt and close the same handle.
+                    let wrapper = core.adopt(handle(21)) { Box(adopting: $0, core: $1) }
+                    _ = core.adopt(handle(21)) { Box(adopting: $0, core: $1) }
+                    wrapper.close()
+                }
             }
+        }
+        guard finished.wait(timeout: .now() + 60) == .success else {
+            XCTFail("eight threads adopting and closing one handle deadlocked (the identity map's lock is not re-entered by a wrapper's deinit)")
+            return
         }
         XCTAssertEqual(transport.releases.count, threads * rounds * 2, "one release per reference the core issued")
         XCTAssertEqual(Set(transport.releases), [handle(21).rawValue])
