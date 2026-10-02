@@ -1683,15 +1683,15 @@ mod tests {
     #[test]
     fn a_stores_page_servers_do_not_take_the_slot_of_an_entry_placed_after_it() {
         let t = ObjectTable::isolated();
-        let shelf = shelf(true);
+        let served = shelf(true);
         let store_handle = Handle::new(2, 7);
         let squatted = Handle::new(1, 6);
-        t.insert_at_deferring_lazy(store_handle, store(shelf.clone()), 1)
+        t.insert_at_deferring_lazy(store_handle, store(served.clone()), 1)
             .unwrap();
-        assert_eq!(shelf.cell.lazy_handle(0), 0, "no server yet");
+        assert_eq!(served.cell.lazy_handle(0), 0, "no server yet");
         t.insert_at(squatted, a(1)).expect("the slot below is free");
         t.enter_lazy(store_handle, &t.get_dyn(store_handle).unwrap());
-        let (books, tags) = (shelf.cell.lazy_handle(0), shelf.cell.lazy_handle(2));
+        let (books, tags) = (served.cell.lazy_handle(0), served.cell.lazy_handle(2));
         assert!(books != 0 && tags != 0);
         let taken: Vec<u32> = vec![Handle(books).index(), Handle(tags).index()];
         assert!(
