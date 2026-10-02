@@ -13,8 +13,8 @@
 //!   [`FsError`] (a path outside the adapter's root is `Denied`);
 //! * [`http_get`]: one `GET` through `Http`, with its typed [`HttpError`] (no network is `Network`).
 //!
-//! `Kv` and `SecureStore` have no error channel: when no adapter answers, the call fails as a
-//! contained panic of the core (status 2), never as a missing value.
+//! `Kv` and `SecureStore` answer failures with their typed [`StorageError`] (ADR-049): a full
+//! store is `Full`, no adapter is `Unavailable`, never a missing value.
 //!
 //! [`Device`] shows the last `Connectivity` and `Lifecycle` report and how many of each the core
 //! received **since it started**: an init hook subscribes when the runtime is created, so the
@@ -24,7 +24,9 @@
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use undra::ports::{AppState, FsError, HttpError, HttpRequest, HttpResponse, NetKind};
+use undra::ports::{
+    AppState, FsError, HttpError, HttpRequest, HttpResponse, NetKind, StorageError,
+};
 use undra::prelude::*;
 use undra::runtime::{InitHook, Subscription, inventory};
 
@@ -32,25 +34,25 @@ use undra::runtime::{InitHook, Subscription, inventory};
 
 /// Stores `value` under `key` in the `Kv` port.
 #[undra::api]
-pub async fn kv_put(ctx: &Ctx, key: String, value: Bytes) {
-    ctx.kv().set(key, value).await;
+pub async fn kv_put(ctx: &Ctx, key: String, value: Bytes) -> Result<(), StorageError> {
+    ctx.kv().set(key, value).await
 }
 
 /// The value the `Kv` port has under `key`, if any.
 #[undra::api]
-pub async fn kv_get(ctx: &Ctx, key: String) -> Option<Bytes> {
+pub async fn kv_get(ctx: &Ctx, key: String) -> Result<Option<Bytes>, StorageError> {
     ctx.kv().get(key).await
 }
 
 /// Removes `key` from the `Kv` port; a missing key is not an error.
 #[undra::api]
-pub async fn kv_remove(ctx: &Ctx, key: String) {
-    ctx.kv().delete(key).await;
+pub async fn kv_remove(ctx: &Ctx, key: String) -> Result<(), StorageError> {
+    ctx.kv().delete(key).await
 }
 
 /// The keys of the `Kv` port that start with `prefix`, in ascending order.
 #[undra::api]
-pub async fn kv_keys(ctx: &Ctx, prefix: String) -> Vec<String> {
+pub async fn kv_keys(ctx: &Ctx, prefix: String) -> Result<Vec<String>, StorageError> {
     ctx.kv().list(prefix).await
 }
 
@@ -58,25 +60,25 @@ pub async fn kv_keys(ctx: &Ctx, prefix: String) -> Vec<String> {
 
 /// Stores `value` under `key` in the `SecureStore` port (the Keychain, the Android Keystore).
 #[undra::api]
-pub async fn secret_put(ctx: &Ctx, key: String, value: Bytes) {
-    ctx.secure_store().set(key, value).await;
+pub async fn secret_put(ctx: &Ctx, key: String, value: Bytes) -> Result<(), StorageError> {
+    ctx.secure_store().set(key, value).await
 }
 
 /// The value the `SecureStore` port has under `key`, if any.
 #[undra::api]
-pub async fn secret_get(ctx: &Ctx, key: String) -> Option<Bytes> {
+pub async fn secret_get(ctx: &Ctx, key: String) -> Result<Option<Bytes>, StorageError> {
     ctx.secure_store().get(key).await
 }
 
 /// Removes `key` from the `SecureStore` port; a missing key is not an error.
 #[undra::api]
-pub async fn secret_remove(ctx: &Ctx, key: String) {
-    ctx.secure_store().delete(key).await;
+pub async fn secret_remove(ctx: &Ctx, key: String) -> Result<(), StorageError> {
+    ctx.secure_store().delete(key).await
 }
 
 /// The keys of the `SecureStore` port that start with `prefix`, in ascending order.
 #[undra::api]
-pub async fn secret_keys(ctx: &Ctx, prefix: String) -> Vec<String> {
+pub async fn secret_keys(ctx: &Ctx, prefix: String) -> Result<Vec<String>, StorageError> {
     ctx.secure_store().list(prefix).await
 }
 
@@ -314,17 +316,23 @@ mod tests {
     fn kv_functions_reach_the_kv_port() {
         let (t, fakes) = app();
         let ctx = t.ctx();
-        t.run_until(kv_put(&ctx, "a.1".into(), Bytes(vec![1, 2])));
-        t.run_until(kv_put(&ctx, "a.2".into(), Bytes(vec![3])));
-        t.run_until(kv_put(&ctx, "b".into(), Bytes(vec![4])));
+        t.run_until(kv_put(&ctx, "a.1".into(), Bytes(vec![1, 2])))
+            .unwrap();
+        t.run_until(kv_put(&ctx, "a.2".into(), Bytes(vec![3])))
+            .unwrap();
+        t.run_until(kv_put(&ctx, "b".into(), Bytes(vec![4])))
+            .unwrap();
         assert_eq!(fakes.kv.value("a.1"), Some(vec![1, 2]));
         assert_eq!(
             t.run_until(kv_get(&ctx, "a.1".into())),
-            Some(Bytes(vec![1, 2]))
+            Ok(Some(Bytes(vec![1, 2])))
         );
-        assert_eq!(t.run_until(kv_keys(&ctx, "a.".into())), ["a.1", "a.2"]);
-        t.run_until(kv_remove(&ctx, "a.1".into()));
-        assert_eq!(t.run_until(kv_get(&ctx, "a.1".into())), None);
+        assert_eq!(
+            t.run_until(kv_keys(&ctx, "a.".into())).unwrap(),
+            ["a.1", "a.2"]
+        );
+        t.run_until(kv_remove(&ctx, "a.1".into())).unwrap();
+        assert_eq!(t.run_until(kv_get(&ctx, "a.1".into())), Ok(None));
         assert!(
             fakes.secure_store.is_empty(),
             "Kv never reaches SecureStore"
@@ -335,16 +343,31 @@ mod tests {
     fn secret_functions_reach_the_secure_store() {
         let (t, fakes) = app();
         let ctx = t.ctx();
-        t.run_until(secret_put(&ctx, "token".into(), Bytes(b"s3cret".to_vec())));
+        t.run_until(secret_put(&ctx, "token".into(), Bytes(b"s3cret".to_vec())))
+            .unwrap();
         assert_eq!(fakes.secure_store.value("token"), Some(b"s3cret".to_vec()));
         assert!(fakes.kv.is_empty(), "SecureStore never reaches Kv");
         assert_eq!(
             t.run_until(secret_get(&ctx, "token".into())),
-            Some(Bytes(b"s3cret".to_vec()))
+            Ok(Some(Bytes(b"s3cret".to_vec())))
         );
-        assert_eq!(t.run_until(secret_keys(&ctx, String::new())), ["token"]);
-        t.run_until(secret_remove(&ctx, "token".into()));
-        assert_eq!(t.run_until(secret_get(&ctx, "token".into())), None);
+        assert_eq!(
+            t.run_until(secret_keys(&ctx, String::new())).unwrap(),
+            ["token"]
+        );
+        t.run_until(secret_remove(&ctx, "token".into())).unwrap();
+        assert_eq!(t.run_until(secret_get(&ctx, "token".into())), Ok(None));
+    }
+
+    #[test]
+    fn a_storage_failure_is_a_typed_answer() {
+        let (t, fakes) = app();
+        let ctx = t.ctx();
+        fakes.kv.fail(fakes::FailOn::Set, StorageError::Full);
+        assert_eq!(
+            t.run_until(kv_put(&ctx, "k".into(), Bytes(vec![1]))),
+            Err(StorageError::Full)
+        );
     }
 
     #[test]

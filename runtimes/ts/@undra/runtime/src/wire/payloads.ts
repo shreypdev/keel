@@ -784,15 +784,33 @@ export interface SnapshotSignal {
 export interface SnapshotStore {
   /** The store's handle, re-issued unchanged on restore. */
   readonly handle: Handle;
-  /** The store's type. */
+  /** The store's type; listed in {@link SnapshotPayload.types}. */
   readonly typeId: number;
   /** Stored (non-computed) signals. */
   readonly signals: readonly SnapshotSignal[];
 }
 
+/** One store type of a snapshot and the fingerprint of its signals when it was taken (ADR-037). */
+export interface SnapshotType {
+  /** `fnv1a32("<TypeName>")` of the store type. */
+  readonly typeId: number;
+  /** `fnv1a64` of the canonical closure of the type's non-computed signals; restore compares it with the current build's. */
+  readonly fingerprint: bigint;
+}
+
 /**
- * Payload of a `Snapshot` (core to host) and of a `Restore` (host to core);
- * both use the layout of section 5.9.
+ * Payload of a `Snapshot` (core to host) and of a `Restore` (host to core): layout 2 of SPEC 5.9
+ * (ADR-037), all little-endian:
+ *
+ * ```text
+ * count u32, generation_floor u32, schema_hash u64,
+ * type_count u32, types x { type_id u32, fingerprint u64 },
+ * description_len u32, description (UTF-8 JSON, opaque to hosts),
+ * count x { handle u64, type_id u32, signal_count u32, signals x { signal_id u32, len u32, value } }
+ * ```
+ *
+ * A host treats a snapshot as opaque bytes (`UndraCore.snapshot`, `restore`); this codec exists for
+ * tools and tests.
  */
 export interface SnapshotPayload {
   /**
@@ -802,6 +820,12 @@ export interface SnapshotPayload {
    * host: pass it back unchanged.
    */
   readonly generationFloor: number;
+  /** The schema hash of the core that took the snapshot. */
+  readonly schemaHash: bigint;
+  /** Each store type of the snapshot, once, with its fingerprint. */
+  readonly types: readonly SnapshotType[];
+  /** The canonical JSON description of the store types' closures (ADR-037), opaque to hosts. */
+  readonly description: string;
   /** Every store in the snapshot. */
   readonly stores: readonly SnapshotStore[];
 }
@@ -810,12 +834,21 @@ export interface SnapshotPayload {
 const SNAPSHOT_STORE_MIN = 16;
 /** Smallest encoded signal: signal id 4, len 4. */
 const SNAPSHOT_SIGNAL_MIN = 8;
+/** An encoded type entry: type id 4, fingerprint 8. */
+const SNAPSHOT_TYPE_LEN = 12;
 
-/** Encodes a `Snapshot` or `Restore` payload. */
+/** Encodes a `Snapshot` or `Restore` payload (layout 2). */
 export function encodeSnapshot(snapshot: SnapshotPayload): Uint8Array {
   const w = new UndraWriter();
   w.writeLen(snapshot.stores.length);
   w.writeU32(snapshot.generationFloor);
+  w.writeU64(snapshot.schemaHash);
+  w.writeLen(snapshot.types.length);
+  for (const type of snapshot.types) {
+    w.writeU32(type.typeId);
+    w.writeU64(type.fingerprint);
+  }
+  w.writeStr(snapshot.description);
   for (const store of snapshot.stores) {
     w.writeU64(store.handle);
     w.writeU32(store.typeId);
@@ -828,13 +861,32 @@ export function encodeSnapshot(snapshot: SnapshotPayload): Uint8Array {
   return w.finish();
 }
 
-/** Decodes a `Snapshot` or `Restore` payload; signal values are borrowed views into `bytes`. */
+/**
+ * Decodes a `Snapshot` or `Restore` payload (layout 2); signal values are borrowed views into `bytes`.
+ * Throws {@link WireError} `duplicate_key` for a type listed twice, `invalid_tag` for a store whose type
+ * is not listed, `invalid_utf8` for a description that is not UTF-8; a snapshot in the layout before
+ * ADR-037 does not decode.
+ */
 export function decodeSnapshot(bytes: Uint8Array): SnapshotPayload {
   return decodeAll(bytes, (r) => {
     const storeCount = r.readLen(SNAPSHOT_STORE_MIN);
     const generationFloor = r.readU32();
+    const schemaHash = r.readU64();
+    const typeCount = r.readLen(SNAPSHOT_TYPE_LEN);
+    const types = new Array<SnapshotType>(typeCount);
+    const listed = new Set<number>();
+    for (let i = 0; i < typeCount; i++) {
+      const at = r.position;
+      const typeId = r.readU32();
+      const fingerprint = r.readU64();
+      if (listed.has(typeId)) throw new WireError({ code: "duplicate_key", at });
+      listed.add(typeId);
+      types[i] = { typeId, fingerprint };
+    }
+    const description = r.readStr();
     const stores = new Array<SnapshotStore>(storeCount);
     for (let i = 0; i < storeCount; i++) {
+      const at = r.position;
       const handle = r.readU64();
       const typeId = r.readU32();
       const signalCount = r.readLen(SNAPSHOT_SIGNAL_MIN);
@@ -843,9 +895,12 @@ export function decodeSnapshot(bytes: Uint8Array): SnapshotPayload {
         const signalId = r.readU32();
         signals[j] = { signalId, value: r.readBytes() };
       }
+      if (!listed.has(typeId)) {
+        throw new WireError({ code: "invalid_tag", tag: typeId, at, ty: "Snapshot store type (not in the type table)" });
+      }
       stores[i] = { handle, typeId, signals };
     }
-    return { generationFloor, stores };
+    return { generationFloor, schemaHash, types, description, stores };
   });
 }
 

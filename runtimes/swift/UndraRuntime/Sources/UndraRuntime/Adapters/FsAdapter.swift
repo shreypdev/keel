@@ -10,25 +10,55 @@ import Foundation
 /// parent's descriptor with `O_NOFOLLOW`; `delete` of a link removes the link.) `write` creates
 /// missing parent directories and is atomic. `list` returns the entry names of one directory,
 /// sorted; a name that is a directory has no trailing slash.
+///
+/// Failures are `FsError`s (port status 1): a missing path is `.notFound`, a permission error, a
+/// link or a path outside the root is `.denied`, a full disk or quota (`ENOSPC`, `EDQUOT`,
+/// `NSFileWriteOutOfSpaceError`) is `.full` (ADR-049), anything else is `.io` with the platform's
+/// message.
 public struct FsAdapter: UndraAdapter {
+    /// Writes a file's bytes atomically below a directory: `PosixFiles.writeAtomically`. Tests
+    /// replace it to make a write fail with the `errno` the platform would leave.
+    typealias AtomicWriter = @Sendable (
+        _ bytes: [UInt8],
+        _ name: String,
+        _ temp: String,
+        _ directory: OwnedDescriptor,
+        _ mode: mode_t
+    ) throws -> Void
+
     private let root: URL
+    private let writeAtomically: AtomicWriter
 
     /// Creates the adapter over `<Application Support>/<bundle id>/Undra/fs`.
     public init() {
-        self.root = KvAdapter.defaultDirectory(named: "fs")
+        self.init(root: KvAdapter.defaultDirectory(named: "fs"))
     }
 
     /// Creates the adapter over `root` (created on first write).
     public init(root: URL) {
-        self.root = root
+        self.init(root: root, writeAtomically: FsAdapter.posixWriter)
     }
 
+    /// Creates the adapter over `root`, sealing written files with `writeAtomically`.
+    init(root: URL, writeAtomically: @escaping AtomicWriter) {
+        self.root = root
+        self.writeAtomically = writeAtomically
+    }
+
+    /// The default ``AtomicWriter``.
+    static let posixWriter: AtomicWriter = { (bytes: [UInt8], name: String, temp: String, directory: OwnedDescriptor, mode: mode_t) throws -> Void in
+        try PosixFiles.writeAtomically(bytes, named: name, via: temp, in: directory, mode: mode)
+    }
+
+    /// `fnv1a32("port.Fs")`.
     public var portId: UInt32 {
         return StandardPorts.Fs.portId
     }
 
+    /// The asynchronous `Fs` method table over the root directory.
     public func makePortImpl(core: UndraCore) -> PortImpl? {
         let root = self.root
+        let writeAtomically = self.writeAtomically
         return .async([
             StandardPorts.Fs.read: { args in
                 var reader = UndraReader(args)
@@ -42,7 +72,7 @@ public struct FsAdapter: UndraAdapter {
                 let path = try reader.readString()
                 let data = try reader.readBytes()
                 try reader.finish()
-                try FsAdapter.write(path, data: data, root: root)
+                try FsAdapter.write(path, data: data, root: root, writeAtomically: writeAtomically)
                 return []
             },
             StandardPorts.Fs.delete: { args in
@@ -126,7 +156,7 @@ public struct FsAdapter: UndraAdapter {
         }
     }
 
-    static func write(_ path: String, data: [UInt8], root: URL) throws {
+    static func write(_ path: String, data: [UInt8], root: URL, writeAtomically: AtomicWriter = FsAdapter.posixWriter) throws {
         let parts = try components(of: path)
         guard let name = parts.last else {
             throw fail(.io("cannot write to the root"))
@@ -142,15 +172,11 @@ public struct FsAdapter: UndraAdapter {
         // The rename that seals the file replaces what is at `name` and never follows it, so a
         // link put there after the check above is replaced, not written through.
         do {
-            try PosixFiles.writeAtomically(
-                data,
-                named: name,
-                via: temporaryPrefix + PosixFiles.randomHex(),
-                in: parent,
-                mode: 0o644
-            )
+            try writeAtomically(data, name, temporaryPrefix + PosixFiles.randomHex(), parent, 0o644)
         } catch let error as PosixError {
             throw failure(error.code)
+        } catch {
+            throw fail(map(error))
         }
     }
 
@@ -348,20 +374,34 @@ public struct FsAdapter: UndraAdapter {
     }
 
     /// The `FsError` of an `errno`: a missing path (or a file where a directory should be) is
-    /// `NotFound`; no permission, and a link met under `O_NOFOLLOW`, is `Denied`.
-    private static func failure(_ code: Int32) -> UndraPortError {
+    /// `NotFound`; no permission, and a link met under `O_NOFOLLOW`, is `Denied`; a full disk or
+    /// quota is `Full` (ADR-049).
+    static func failure(_ code: Int32) -> UndraPortError {
+        return fail(fsError(errno: code))
+    }
+
+    /// The `FsError` of an `errno` (``failure(_:)``'s mapping).
+    static func fsError(errno code: Int32) -> FsError {
         switch code {
         case ENOENT, ENOTDIR:
-            return fail(.notFound)
+            return .notFound
         case EACCES, EPERM, ELOOP:
-            return fail(.denied)
+            return .denied
+        case ENOSPC, EDQUOT:
+            return .full
         default:
-            return fail(.io(String(cString: strerror(code))))
+            return .io(String(cString: strerror(code)))
         }
     }
 
     /// Maps a Foundation error to `FsError`.
     static func map(_ error: any Error) -> FsError {
+        if StorageFailure.isOutOfSpace(error) {
+            return .full
+        }
+        if let posix = error as? PosixError {
+            return fsError(errno: posix.code)
+        }
         if let cocoa = error as? CocoaError {
             switch cocoa.code {
             case .fileNoSuchFile, .fileReadNoSuchFile:

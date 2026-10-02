@@ -271,7 +271,9 @@ fn probe_entries(cap: &Capture) {
     event(1, 2, &[]);
     seen.push((
         "undra_restore refused",
-        restore(&[0; 8]) == restore_code::UNAVAILABLE,
+        // An empty snapshot in layout 2 (ADR-037): it would decode, so only the re-entrancy
+        // refuses it.
+        restore(&[0; 24]) == restore_code::UNAVAILABLE,
     ));
 
     cap.probed
@@ -794,7 +796,11 @@ fn calls_before_init_fail_softly() {
     port_reply(&[]);
     event(1, 2, &[]);
     let snapshot = take(undra_snapshot());
-    assert_eq!(snapshot.len(), 8, "no stores, then the generation floor");
+    let decoded = Snapshot::decode(&mut Reader::new(&snapshot)).expect("layout 2");
+    assert!(
+        decoded.stores.is_empty() && decoded.types.is_empty(),
+        "no stores, the generation floor, this core's hash"
+    );
     assert_eq!(snapshot[..4], [0; 4]);
     assert_eq!(restore(&snapshot), restore_code::UNAVAILABLE);
     let stats: serde_json::Value = serde_json::from_slice(&take(undra_stats_json())).expect("JSON");

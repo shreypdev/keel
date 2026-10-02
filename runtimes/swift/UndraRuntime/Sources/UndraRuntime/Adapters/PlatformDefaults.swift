@@ -42,7 +42,9 @@ extension Adapters {
 }
 
 /// Why a port method could not do what the core asked. Thrown from port methods that have no
-/// typed error in the port's signature; the runtime answers "unavailable" (port status 2).
+/// typed error in the port's signature (`Rng.fill`, for example); the runtime answers
+/// "unavailable" (port status 2) and logs it at ERROR level. A method with an error channel
+/// (`Kv`, `SecureStore`, `Fs`, `Http`) never throws this: it answers with its typed error.
 enum PortAdapterError: Error, Sendable, Equatable, CustomStringConvertible {
     /// The arguments are well-formed but not acceptable.
     case invalidArgument(String)

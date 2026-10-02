@@ -23,7 +23,7 @@ internal fun portMethods(fill: MutableMap<UInt, PortMethod>.() -> Unit): Map<UIn
 private val NO_REPLY = ByteArray(0)
 
 /** Decodes the arguments of a port method with [read] and requires that nothing is left over. */
-private inline fun <T> readArgs(args: ByteArray, read: (UndraReader) -> T): T {
+internal inline fun <T> readArgs(args: ByteArray, read: (UndraReader) -> T): T {
     val r = UndraReader(args)
     val value = read(r)
     r.finish()

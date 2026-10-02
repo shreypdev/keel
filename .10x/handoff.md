@@ -37,14 +37,14 @@ with their context when told to):
    ancestor, matrix green: Rust 2,756, Swift 551, Kotlin 656, TS 1,133 + kit 26, contracts 60/60; `undra dev
    --record`, the three kits, `docs/TESTING.md`, a site page). Needs its review (sonnet is enough), then
    fast-forward. The `dev_reload` tests are load-sensitive on a busy machine (fail on main too under load 13+).
-3. `ports-v2` → record as **ports** (G2/G3, ADR-047/048 written; implementing, 23 commits, merging main;
-   the founder approved rusqlite/libsqlite3-sys dev-only, sqlite-jdbc test-only, wa-sqlite dev dep; the
-   amalgamation is declined — RN Android uses JNI). Needs an opus review (new boundary surface), then land.
-4. `persistence-v2` → record as **persistence** (ADR-037/049 Accepted; implemented, 77 commits; opus review
-   started with the cross-merge of the ABI table — 506 files mid-merge when the budget ran out). The review
-   brief: size gate first (the hello-world wasm sat 435 B under budget before the cross), then migrating
-   restore integrity, the hand-written JSON writer, storage errors on every column, web recovery.
-Order to land: 1, 2, 3, 4 (4 is the largest cross). Then the follow-ups below.
+3. `ports-v2` → record as **ports** (G2/G3): **implemented and complete** at `9cece1b` (main `70fda02` is an
+   ancestor; ADR-047/048 still Proposed — flip to Accepted at review). WebSocket, Sse and Db ports behind
+   cargo features (standard hash unchanged `0x35fae635f80025f2`), adapters on Swift/Kotlin/Android/TS/RN,
+   S23–S25 on three columns (23/23 each), bench rows under budget, hello-world wasm/JS unchanged, playground
+   Notes + Live tabs; the founder approved rusqlite/libsqlite3-sys (dev-only), sqlite-jdbc (test-only) and
+   wa-sqlite (dev dep) directly. Needs an opus review (new boundary surface: the batched pull as credit, Db
+   transactions, the typed ends, the wa-sqlite worker), then fast-forward. Playground hash `0x88d07d5fc9a2d4b4`.
+Landed: devtools, persistence (ADR-037/049 Accepted; opus review `.10x/reviews/2026-10-02-persistence-review.md`: 3 High fixed — a wrong-typed migration hook spliced bytes, RN storage not on ADR-049, a dead web core after a trap during restart; hello wasm 116.8 KB, JS 25,984/26,000; Rust 2,891 · Swift 553 · Kotlin 652 · TS 1,264 · contracts 65/65; hash `0xfa536b9ac6f06149`). Still to land: testkit (review) then ports (review; it must cross persistence: `check.sh`, `run-all.sh`, `scenarios.md`, SPEC §8).
 
 **Also owed:** the Rust 1.99.0 bump (ci.yml header says how; do it when no worktree is mid-build);
 `ts-runtime-size` (16 KB target);  a custom port in the playground for the reference's Ports section; `undra bindgen --declarations`.

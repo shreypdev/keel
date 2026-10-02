@@ -161,6 +161,8 @@ final class WireVectorTests: XCTestCase {
             return checkStreamItem(name: name, hex: hex, value: value)
         case "keyed patch (item i32)":
             return checkPatch(name: name, hex: hex, value: value)
+        case "snapshot payload":
+            return checkSnapshot(name: name, hex: hex, value: value)
         default:
             return checkStructured(name: name, type: type, hex: hex, value: value)
         }
@@ -383,6 +385,66 @@ final class WireVectorTests: XCTestCase {
         do {
             let decoded = try Wire.StreamItem.decode(hexToBytes(hex))
             XCTAssertEqual(try decoded.failure(), failure, "\(name) failure")
+        } catch {
+            XCTFail("\(name) decode threw \(error)")
+        }
+        return true
+    }
+
+    /// A snapshot (docs/SPEC.md section 5.9, layout 2 of ADR-037): `{generation_floor, schema_hash,
+    /// types: [{type_id, fingerprint}], description, stores: [{handle, type_id, signals: [{signal_id,
+    /// value}]}]}`, 64-bit values as decimal strings and signal values as raw bytes.
+    private func checkSnapshot(name: String, hex: String, value: Any) -> Bool {
+        guard let fields = value as? [String: Any],
+              let rawFloor = jsonUInt64(jsonField(fields, "generation_floor")),
+              let generationFloor = UInt32(exactly: rawFloor),
+              let schemaHash = jsonUInt64(jsonField(fields, "schema_hash")),
+              let rawTypes = fields["types"] as? [Any],
+              let description = fields["description"] as? String,
+              let rawStores = fields["stores"] as? [Any]
+        else { return bad(name, "snapshot fields") }
+        var types: [Wire.SnapshotType] = []
+        for rawType in rawTypes {
+            guard let entry = rawType as? [String: Any],
+                  let rawId = jsonUInt64(jsonField(entry, "type_id")),
+                  let typeId = UInt32(exactly: rawId),
+                  let fingerprint = jsonUInt64(jsonField(entry, "fingerprint"))
+            else { return bad(name, "snapshot type") }
+            types.append(Wire.SnapshotType(typeId: typeId, fingerprint: fingerprint))
+        }
+        var stores: [Wire.SnapshotStore] = []
+        for rawStore in rawStores {
+            guard let entry = rawStore as? [String: Any],
+                  let handle = jsonUInt64(jsonField(entry, "handle")),
+                  let rawId = jsonUInt64(jsonField(entry, "type_id")),
+                  let typeId = UInt32(exactly: rawId),
+                  let rawSignals = entry["signals"] as? [Any]
+            else { return bad(name, "snapshot store") }
+            var signals: [Wire.SnapshotSignal] = []
+            for rawSignal in rawSignals {
+                guard let signal = rawSignal as? [String: Any],
+                      let rawSignalId = jsonUInt64(jsonField(signal, "signal_id")),
+                      let signalId = UInt32(exactly: rawSignalId),
+                      let bytes = jsonByteArray(jsonField(signal, "value"))
+                else { return bad(name, "snapshot signal") }
+                signals.append(Wire.SnapshotSignal(signalId: signalId, value: ArraySlice(bytes)))
+            }
+            stores.append(Wire.SnapshotStore(handle: UndraHandle(rawValue: handle), typeId: typeId, signals: signals))
+        }
+        let snapshot = Wire.Snapshot(
+            generationFloor: generationFloor,
+            schemaHash: schemaHash,
+            types: types,
+            description: description,
+            stores: stores
+        )
+        assertCodec(snapshot, hex: hex, name)
+        do {
+            let decoded = try Wire.Snapshot.decode(hexToBytes(hex))
+            XCTAssertEqual(decoded, snapshot, "\(name) strict decode")
+            for type in types {
+                XCTAssertEqual(decoded.fingerprint(typeId: type.typeId), type.fingerprint, "\(name) fingerprint")
+            }
         } catch {
             XCTFail("\(name) decode threw \(error)")
         }

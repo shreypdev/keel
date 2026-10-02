@@ -345,3 +345,16 @@ The options as they were put (kept for the record):
    Recommended: 5%.
 3. **The landing page card** shows the wasm only, labelled as such. A second card for the JavaScript runtime
    would cost words of the 350-word landing budget and show an over-budget number; not added.
+
+## Note (2026-10-01, the persistence-v2 review): the standard ports' dispatchers are linked by use
+
+After ADR-037 and ADR-049 (persistence-v2) and ADR-044 (the ABI table) met on one tree, the hello-world core
+measured 120,188 bytes gzipped, 188 over the budget. The lever the persistence-v2 record named is applied, with
+section 2's "linked by use" pattern: the Rust-side dispatchers of the eight standard request/reply ports
+(`Clock`, `Rng`, `Log`, `Http`, `Kv`, `SecureStore`, `Fs`, `Timer`) are no longer `inventory`-submitted by
+`undra-ports` (every core links those ports, and fat LTO keeps every submission). `#[undra::port(dispatcher_by_use)]`
+(a hidden flag only `undra-ports` uses) emits `pub static <TRAIT_SNAKE>_DISPATCHER: PortDispatcher` instead,
+and `Runtime::bind_dyn_port_with(port_id, imp, &undra_ports::KV_DISPATCHER)` binds a Rust implementation together
+with the dispatcher a raw port call on it runs through (`fakes::install` and the dev runner's native `Clock`,
+`Rng`, `Log` do). The typed accessors (`undra_ports::kv(&ctx)`) never needed a dispatcher. App ports are unchanged
+(their dispatchers are submitted as before). Measured: 116,677 bytes gzipped (−3,511).

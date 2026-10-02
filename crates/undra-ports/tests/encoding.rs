@@ -8,7 +8,7 @@
 use proptest::prelude::*;
 use undra_ports::{
     AppState, FsError, Header, HttpError, HttpMethod, HttpRequest, HttpResponse, NetKind,
-    encode_connectivity_changed_event, encode_lifecycle_changed_event,
+    StorageError, encode_connectivity_changed_event, encode_lifecycle_changed_event,
 };
 use undra_wire::{Bytes, Decode, Encode, Writer};
 
@@ -111,7 +111,19 @@ fn fs_error_variants() {
     assert_codec(&FsError::NotFound, "0000");
     assert_codec(&FsError::Denied, "0100");
     assert_codec(&FsError::Io("e".into()), "0200 01000000 65");
-    assert!(FsError::decode_exact(&hex("0300")).is_err());
+    assert_codec(&FsError::Full, "0300");
+    assert_codec(&FsError::Unavailable("e".into()), "0400 01000000 65");
+    assert!(FsError::decode_exact(&hex("0500")).is_err());
+}
+
+#[test]
+fn storage_error_variants() {
+    assert_codec(&StorageError::Unavailable("e".into()), "0000 01000000 65");
+    assert_codec(&StorageError::Full, "0100");
+    assert_codec(&StorageError::Locked, "0200");
+    assert_codec(&StorageError::Corrupt("e".into()), "0300 01000000 65");
+    assert_codec(&StorageError::Io("e".into()), "0400 01000000 65");
+    assert!(StorageError::decode_exact(&hex("0500")).is_err());
 }
 
 // ---- records -----------------------------------------------------------------------------------
@@ -280,6 +292,18 @@ fn any_fs_error() -> impl Strategy<Value = FsError> {
         Just(FsError::NotFound),
         Just(FsError::Denied),
         any::<String>().prop_map(FsError::Io),
+        Just(FsError::Full),
+        any::<String>().prop_map(FsError::Unavailable),
+    ]
+}
+
+fn any_storage_error() -> impl Strategy<Value = StorageError> {
+    prop_oneof![
+        any::<String>().prop_map(StorageError::Unavailable),
+        Just(StorageError::Full),
+        Just(StorageError::Locked),
+        any::<String>().prop_map(StorageError::Corrupt),
+        any::<String>().prop_map(StorageError::Io),
     ]
 }
 
@@ -333,6 +357,7 @@ proptest! {
     fn errors_and_enums_round_trip(
         http in any_http_error(),
         fs in any_fs_error(),
+        storage in any_storage_error(),
         kind in any_net_kind(),
         state in any_app_state(),
         method in any_method(),
@@ -340,6 +365,7 @@ proptest! {
     ) {
         prop_assert_eq!(HttpError::decode_exact(&http.encode_to_vec()), Ok(http));
         prop_assert_eq!(FsError::decode_exact(&fs.encode_to_vec()), Ok(fs));
+        prop_assert_eq!(StorageError::decode_exact(&storage.encode_to_vec()), Ok(storage));
         prop_assert_eq!(NetKind::decode_exact(&kind.encode_to_vec()), Ok(kind));
         prop_assert_eq!(AppState::decode_exact(&state.encode_to_vec()), Ok(state));
         prop_assert_eq!(HttpMethod::decode_exact(&method.encode_to_vec()), Ok(method));
@@ -364,6 +390,7 @@ proptest! {
         let _ = HttpResponse::decode_exact(&bytes);
         let _ = HttpError::decode_exact(&bytes);
         let _ = FsError::decode_exact(&bytes);
+        let _ = StorageError::decode_exact(&bytes);
         let _ = HttpMethod::decode_exact(&bytes);
         let _ = NetKind::decode_exact(&bytes);
         let _ = AppState::decode_exact(&bytes);
@@ -619,6 +646,12 @@ fn kotlin_numbering_matches() {
         "FsError",
         &[],
     );
+    assert_same(
+        "Kotlin StorageError",
+        kotlin_error(&kotlin, "public sealed class StorageError"),
+        "StorageError",
+        &[],
+    );
 }
 
 #[test]
@@ -658,6 +691,12 @@ fn swift_numbering_matches() {
         "FsError",
         &[],
     );
+    assert_same(
+        "Swift StorageError",
+        swift_error(&swift, "public enum StorageError"),
+        "StorageError",
+        &[],
+    );
 }
 
 #[test]
@@ -689,6 +728,12 @@ fn typescript_numbering_matches() {
         "TS FsError",
         ts_error(&codecs, "export const FsErrorCodec", "FsError"),
         "FsError",
+        &[],
+    );
+    assert_same(
+        "TS StorageError",
+        ts_error(&codecs, "export const StorageErrorCodec", "StorageError"),
+        "StorageError",
         &[],
     );
 }

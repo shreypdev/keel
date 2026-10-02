@@ -76,6 +76,8 @@ join_cp() {
 
 MAIN_SRC="$HERE/runtime/src/main/kotlin"
 TEST_SRC="$HERE/runtime/src/test/kotlin"
+# Test support shared with android-adapters' tests (FaultyFileSystem), compiled into the test build.
+SUPPORT_SRC="$HERE/test-support/kotlin"
 GOLDEN_SRC="$REPO/crates/undra-bindgen/tests/golden/full/kotlin/src/main/kotlin"
 GOLDEN_RUN="$REPO/crates/undra-bindgen/tests/fixtures/kotlin-run/full"
 
@@ -129,14 +131,14 @@ phase_main() {
 
 phase_test() {
   phase_main
-  if up_to_date "$OUT/test.stamp" "$TEST_SRC" "$MAIN_SRC" "$HERE/scripts/local" "$GOLDEN_SRC" "$GOLDEN_RUN" \
+  if up_to_date "$OUT/test.stamp" "$TEST_SRC" "$SUPPORT_SRC" "$MAIN_SRC" "$HERE/scripts/local" "$GOLDEN_SRC" "$GOLDEN_RUN" \
      && [ "$OUT/test.stamp" -nt "$OUT/main.stamp" ]; then
     echo "==> runtime/src/test is up to date"
     return
   fi
   rm -rf "$OUT/test" "$OUT/test.stamp"
   mkdir -p "$OUT/test"
-  local sources=("$TEST_SRC" "$HERE/scripts/local/junit-stub")
+  local sources=("$TEST_SRC" "$SUPPORT_SRC" "$HERE/scripts/local/junit-stub")
   if [ "${UNDRA_SKIP_GOLDEN:-0}" = "1" ]; then
     echo "note: UNDRA_SKIP_GOLDEN=1; GoldenFullTests will be skipped" >&2
   elif [ -d "$GOLDEN_SRC" ] && [ -d "$GOLDEN_RUN" ]; then

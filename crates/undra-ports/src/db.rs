@@ -212,7 +212,7 @@ impl From<PortError> for DbError {
 /// Every open database has one connection and one serial worker owned by the adapter; the core
 /// only awaits replies. Statements on a transaction id run inside it; statements on the database
 /// id wait for a running transaction to end (at most the busy timeout, then `Busy`).
-#[undra_macros::port]
+#[undra_macros::port(dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait Db {
     /// Opens (creating it if needed) the database `name` and runs, in one transaction, every

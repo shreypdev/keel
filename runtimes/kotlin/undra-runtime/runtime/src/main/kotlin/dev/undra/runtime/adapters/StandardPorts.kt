@@ -46,7 +46,11 @@ public object StandardPorts {
         public const val REQUEST: UInt = 0x6b14df26u
     }
 
-    /** `Kv`: `get`, `set`, `delete`, `list` (async). */
+    /**
+     * `Kv` (async; ADR-049): `get(key) -> Result<Option<Bytes>, StorageError>`, `set(key, value) -> Result<(), StorageError>`,
+     * `delete(key) -> Result<(), StorageError>`, `list(prefix) -> Result<Vec<String>, StorageError>`. A failure is
+     * answered with status 1 and the encoded [StorageError] ([StoragePort] does it for a [KeyValueBackend]).
+     */
     public object Kv {
         /** `fnv1a32("port.Kv")`. */
         public const val PORT_ID: UInt = 0x5389110du
@@ -64,7 +68,7 @@ public object StandardPorts {
         public const val LIST: UInt = 0x32f1d03au
     }
 
-    /** `SecureStore`: the same four methods as [Kv], under its own ids (async). */
+    /** `SecureStore`: the same four methods as [Kv], with the same [StorageError] channel, under its own ids (async). */
     public object SecureStore {
         /** `fnv1a32("port.SecureStore")`. */
         public const val PORT_ID: UInt = 0xc01f5beau
@@ -82,7 +86,7 @@ public object StandardPorts {
         public const val LIST: UInt = 0xf5bab8c9u
     }
 
-    /** `Fs`: `read`, `write`, `delete`, `list` (async). */
+    /** `Fs`: `read`, `write`, `delete`, `list` (async), each failing with an [FsError]. */
     public object Fs {
         /** `fnv1a32("port.Fs")`. */
         public const val PORT_ID: UInt = 0x4ea34cabu

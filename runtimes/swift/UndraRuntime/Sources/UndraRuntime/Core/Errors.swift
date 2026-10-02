@@ -239,6 +239,17 @@ extension UndraTransportError: CustomStringConvertible {
 // MARK: - UndraRestoreError
 
 /// `UndraCore.restore(_:)` was refused: the core rejected the snapshot and is unchanged.
+///
+/// `code` is what `undra_restore` returned (`restore_code` in `crates/undra-ffi`); the four the
+/// core uses have named values, so a refusal can be matched with `==`:
+///
+/// ```swift
+/// do {
+///     try core.restore(saved)
+/// } catch let error as UndraRestoreError where error == .incompatible {
+///     // The saved state was written by a build whose types this one cannot read: start fresh.
+/// }
+/// ```
 public struct UndraRestoreError: Error, Sendable, Equatable {
     /// The non-zero code `undra_restore` returned.
     public let code: UInt32
@@ -247,11 +258,42 @@ public struct UndraRestoreError: Error, Sendable, Equatable {
     public init(code: UInt32) {
         self.code = code
     }
+
+    /// Code 2: a store's restore function panicked (the panic was contained).
+    public static let panicked = UndraRestoreError(code: 2)
+
+    /// Code 5: the snapshot is malformed (it does not decode, for example a snapshot in the layout
+    /// before ADR-037), names an unknown store type, has a null or duplicate handle, or a store
+    /// rejected its values.
+    public static let badSnapshot = UndraRestoreError(code: 5)
+
+    /// Code 6: there is no running core, it is shut down, or `restore` was called from inside a
+    /// core callback.
+    public static let unavailable = UndraRestoreError(code: 6)
+
+    /// Code 7: a store's persisted values cannot become this build's types: they neither migrate
+    /// structurally (by name, losslessly) nor through a `#[undra::migrate]` hook (ADR-037,
+    /// `RestoreError::Incompatible`). The core's ERROR log record, which the `Log` port receives,
+    /// names the store, the signal and the reason.
+    public static let incompatible = UndraRestoreError(code: 7)
 }
 
 extension UndraRestoreError: CustomStringConvertible {
     public var description: String {
-        return "the Undra core rejected the snapshot (code \(code)); a rejected restore leaves the core unchanged"
+        let meaning: String
+        switch code {
+        case UndraRestoreError.panicked.code:
+            meaning = "a store's restore panicked"
+        case UndraRestoreError.badSnapshot.code:
+            meaning = "the snapshot is malformed or names an unknown store"
+        case UndraRestoreError.unavailable.code:
+            meaning = "the core is not running"
+        case UndraRestoreError.incompatible.code:
+            meaning = "a store's saved values cannot become this build's types; the core's error log says which"
+        default:
+            meaning = "unknown code"
+        }
+        return "the Undra core rejected the snapshot (code \(code): \(meaning)); a rejected restore leaves the core unchanged"
     }
 }
 

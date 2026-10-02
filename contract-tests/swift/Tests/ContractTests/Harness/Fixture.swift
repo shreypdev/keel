@@ -33,7 +33,12 @@ final class Fixture {
     private var loaded: UndraCore?
     private var realtimeServer: RealtimeServer?
 
-    private init() {}
+    /// The harness fails the first read of the offline queue with `Locked`, as the Keychain or a
+    /// data-protected file answers an app launched before the device's first unlock (scenarios.md,
+    /// "Adapters"; S20 step 4 checks what the core did with it, S14 waits until the queue is read).
+    private init() {
+        kv.fail(.get, key: Persisted.queueKey, with: .locked, times: 1)
+    }
 
     /// The shared local server of S23 and S24 (`contract-tests/servers/realtime-server.mjs`),
     /// started on first use and left running until the process ends (it exits with its stdin).

@@ -26,19 +26,59 @@ export const PLAYGROUND_WASM: string =
 /** The base URL every scenario that talks to the server configures. */
 export const BASE_URL = "https://playground.test";
 
-let compiled: Promise<WebAssembly.Module> | undefined;
+/**
+ * Build B of the playground core (contract-tests/scenarios.md, "Two builds"): what contract-tests/ts/run.sh builds with
+ * `UNDRA_PLAYGROUND_V2=1` and copies to `contract-tests/ts/build/b/`. `UNDRA_PLAYGROUND_WASM_B` overrides the path.
+ */
+export const PLAYGROUND_WASM_B: string =
+  process.env["UNDRA_PLAYGROUND_WASM_B"] ??
+  fileURLToPath(new URL(`../../../../../../contract-tests/ts/build/b/${UndraIds.namespace}.wasm`, import.meta.url));
 
-/** The compiled playground core, once per test file. */
-export function playgroundModule(): Promise<WebAssembly.Module> {
-  compiled ??= readFile(PLAYGROUND_WASM).then(
-    (bytes) => WebAssembly.compile(bytes),
-    (cause: unknown) => {
-      throw new Error(`cannot read the playground core at ${PLAYGROUND_WASM}; build it with \`undra build -C examples/playground --platform web\``, {
-        cause,
-      });
+/** Which build of the playground core a scenario loads: A (the generated bindings' schema) or B. */
+export type Build = "A" | "B";
+
+const compiled = new Map<Build, Promise<WebAssembly.Module>>();
+
+/** The compiled playground core (build A by default), once per test file. */
+export function playgroundModule(build: Build = "A"): Promise<WebAssembly.Module> {
+  let module = compiled.get(build);
+  if (module === undefined) {
+    const path = build === "A" ? PLAYGROUND_WASM : PLAYGROUND_WASM_B;
+    module = readFile(path).then(
+      (bytes) => WebAssembly.compile(bytes),
+      (cause: unknown) => {
+        throw new Error(
+          build === "A"
+            ? `cannot read the playground core at ${path}; build it with \`undra build -C examples/playground --platform web\``
+            : `cannot read build B of the playground core at ${path}; contract-tests/ts/run.sh builds it (UNDRA_PLAYGROUND_V2=1)`,
+          { cause },
+        );
+      },
+    );
+    compiled.set(build, module);
+  }
+  return module;
+}
+
+/** The schema hash a module exports (`undra_schema_hash` works before `undra_init`): build B has no bindings of its own. */
+export async function schemaHashOf(module: WebAssembly.Module): Promise<bigint> {
+  const none = (): void => {};
+  const instance = await WebAssembly.instantiate(module, {
+    undra: {
+      reply: none,
+      changeset: none,
+      stream: none,
+      port_call: () => 2,
+      schedule: none,
+      timer_set: none,
+      log: none,
+      now_ms: () => 0,
+      random: none,
     },
-  );
-  return compiled;
+  });
+  const e = instance.exports as unknown as { _initialize?: () => void; undra_schema_hash: () => bigint };
+  e._initialize?.();
+  return BigInt.asUintN(64, e.undra_schema_hash());
 }
 
 /** The fakes a core runs against. */
@@ -64,6 +104,8 @@ export interface BootedRaw extends Booted {
 /** What a scenario may choose when it boots a core. */
 export interface BootOptions extends Partial<World> {
   readonly expectedSchemaHash?: bigint;
+  /** Which build of the playground core to load (default A); build B is loaded with the hash it reports. */
+  readonly build?: Build;
 }
 
 /** The stand-in behind each transport, for ./wasm-exports.ts. */
@@ -98,8 +140,10 @@ export async function bootRaw(options: BootOptions = {}): Promise<BootedRaw> {
   const world = worldOf(options);
   const closed: Error[] = [];
   const runtimeErrors: unknown[] = [];
-  const expectedSchemaHash = options.expectedSchemaHash ?? UndraIds.schemaHash;
-  const native = await WasmNative.load(await playgroundModule(), { clock: world.clock, namespace: UndraIds.namespace });
+  const build = options.build ?? "A";
+  const expectedSchemaHash =
+    options.expectedSchemaHash ?? (build === "A" ? UndraIds.schemaHash : await schemaHashOf(await playgroundModule("B")));
+  const native = await WasmNative.load(await playgroundModule(build), { clock: world.clock, namespace: UndraIds.namespace });
   const transport = new NativeTransport({
     namespace: UndraIds.namespace,
     native,

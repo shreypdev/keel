@@ -53,6 +53,8 @@ export type CallTargetRef =
   | { readonly target: CallTarget.ObjectMethod; readonly handle: Handle };
 
 export interface PortImpl {
+  /** Addition (ADR-049): the port's name, for the runtime's messages. */
+  readonly name?: string;
   readonly sync: boolean;
   readonly methods: Readonly<Record<number, (args: Uint8Array) => Uint8Array | Promise<Uint8Array>>>;
 }
@@ -70,6 +72,8 @@ export interface Mirror {
 /** Addition (ADR-031): what a generated store tells its base class (its `no_coalesce` signals). */
 export interface StoreOptions {
   readonly noCoalesce?: readonly number[];
+  /** Addition (ADR-049): the recorded constructor call of a query handle, which the runtime re-creates after a restart. */
+  readonly recreate?: { readonly typeId: number; readonly methodId: number; readonly args: Uint8Array };
 }
 
 export declare class UndraCore {

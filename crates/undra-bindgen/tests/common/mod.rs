@@ -379,6 +379,7 @@ pub fn store(mut o: ObjectDef, signals: Vec<(&str, TypeRef, bool, Option<&str>)>
                 computed,
                 key: key.map(str::to_owned),
                 no_coalesce: false,
+                default: false,
             })
             .collect(),
     });

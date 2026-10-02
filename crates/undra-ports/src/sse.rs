@@ -122,7 +122,7 @@ impl From<PortError> for SseError {
 
 /// Opens server-sent event streams on the platform (ADR-047). Use [`subscribe`] rather than
 /// calling it directly.
-#[undra_macros::port]
+#[undra_macros::port(dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait Sse {
     /// Requests `url` with `Accept: text/event-stream`, `headers` and, when given, the

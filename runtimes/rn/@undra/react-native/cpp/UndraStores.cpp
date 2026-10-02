@@ -261,6 +261,10 @@ FsFailure fromErrno(int code) {
     case EPERM:
     case ELOOP:
       return denied();
+    case ENOSPC:
+    case EDQUOT:
+      // ADR-049: a full disk or quota is `FsError::Full`, not an `Io` with its text.
+      return FsFailure{FsErrorKind::Full, {}};
     default:
       return io(errnoText(code));
   }
@@ -624,6 +628,18 @@ bool makeDirectories(const std::string &path, std::string &error) {
 
 // ----- KvStore ----------------------------------------------------------------------------------
 
+StorageErrorKind storageErrorOf(int code) noexcept {
+  switch (code) {
+    case ENOSPC:
+    case EDQUOT:
+      return StorageErrorKind::Full;
+    case EPERM:
+      return StorageErrorKind::Locked;
+    default:
+      return StorageErrorKind::Io;
+  }
+}
+
 std::string kvFileName(KvNaming naming, std::string_view key) {
   switch (naming) {
     case KvNaming::Fnv:
@@ -640,12 +656,15 @@ std::string KvStore::pathOf(const std::string &key) const {
   return directory_ + "/" + kvFileName(naming_, key);
 }
 
-bool KvStore::readKey(const std::string &path, std::optional<std::string> &key, std::string &error) const {
+bool KvStore::readKey(const std::string &path, std::optional<std::string> &key, std::string &error,
+    StorageErrorKind *kind) const {
   key.reset();
   Fd in(::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK));
   if (!in.valid()) {
-    if (errno == ENOENT) return true;
-    error = "cannot open " + path + ": " + errnoText(errno);
+    const int code = errno;
+    if (code == ENOENT) return true;
+    error = "cannot open " + path + ": " + errnoText(code);
+    if (kind != nullptr) *kind = storageErrorOf(code);
     return false;
   }
   struct stat st{};
@@ -655,6 +674,7 @@ bool KvStore::readKey(const std::string &path, std::optional<std::string> &key, 
   int code = 0;
   if (!readExactly(in.get(), head, sizeof(head), got, code)) {
     error = "cannot read " + path + ": " + errnoText(code);
+    if (kind != nullptr) *kind = storageErrorOf(code);
     return false;
   }
   if (got < sizeof(head)) return true;
@@ -665,6 +685,7 @@ bool KvStore::readKey(const std::string &path, std::optional<std::string> &key, 
   std::string text(len, '\0');
   if (!readExactly(in.get(), reinterpret_cast<uint8_t *>(text.data()), len, got, code)) {
     error = "cannot read " + path + ": " + errnoText(code);
+    if (kind != nullptr) *kind = storageErrorOf(code);
     return false;
   }
   if (got < len || !validUtf8(text)) return true;
@@ -672,25 +693,32 @@ bool KvStore::readKey(const std::string &path, std::optional<std::string> &key, 
   return true;
 }
 
-bool KvStore::get(const std::string &key, std::optional<std::vector<uint8_t>> &value, std::string &error) const {
+bool KvStore::get(const std::string &key, std::optional<std::vector<uint8_t>> &value, std::string &error,
+    StorageErrorKind *kind) const {
   value.reset();
   const std::string path = pathOf(key);
   Fd in(::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK));
   if (!in.valid()) {
-    if (errno == ENOENT || errno == ENOTDIR) return true;
-    error = "cannot open the entry of '" + key + "': " + errnoText(errno);
+    const int code = errno;
+    if (code == ENOENT || code == ENOTDIR) return true;
+    error = "cannot open the entry of '" + key + "': " + errnoText(code);
+    if (kind != nullptr) *kind = storageErrorOf(code);
     return false;
   }
   std::vector<uint8_t> bytes;
   int code = 0;
   if (!readAll(in.get(), bytes, code)) {
     error = "cannot read the entry of '" + key + "': " + errnoText(code);
+    if (kind != nullptr) *kind = storageErrorOf(code);
     return false;
   }
   WireReader reader(bytes.data(), bytes.size());
   const std::string stored = reader.str();
   if (!reader.ok()) {
+    // The key is still there and its bytes cannot be read back: `Corrupt` (ADR-049), which the
+    // query client moves to its dead letters instead of waiting for it to become readable.
     error = "the entry file of '" + key + "' is damaged (" + path + ")";
+    if (kind != nullptr) *kind = StorageErrorKind::Corrupt;
     return false;
   }
   if (stored != key) return true; // a name collision: this key has no value
@@ -699,11 +727,17 @@ bool KvStore::get(const std::string &key, std::optional<std::vector<uint8_t>> &v
   return true;
 }
 
-bool KvStore::set(const std::string &key, const uint8_t *value, std::size_t len, std::string &error) const {
-  if (!makeDirectories(directory_, error)) return false;
+bool KvStore::set(const std::string &key, const uint8_t *value, std::size_t len, std::string &error,
+    StorageErrorKind *kind) const {
+  if (!makeDirectories(directory_, error)) {
+    if (kind != nullptr) *kind = storageErrorOf(errno);
+    return false;
+  }
   Fd dir(::open(directory_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
   if (!dir.valid()) {
-    error = "cannot open " + directory_ + ": " + errnoText(errno);
+    const int code = errno;
+    error = "cannot open " + directory_ + ": " + errnoText(code);
+    if (kind != nullptr) *kind = storageErrorOf(code);
     return false;
   }
   WireWriter entry;
@@ -715,30 +749,36 @@ bool KvStore::set(const std::string &key, const uint8_t *value, std::size_t len,
   int code = 0;
   if (!atomicWriteAt(dir.get(), name, temp, entry.out.data(), entry.out.size(), 0600, code)) {
     error = "cannot write the entry of '" + key + "': " + errnoText(code);
+    if (kind != nullptr) *kind = storageErrorOf(code);
     return false;
   }
   return true;
 }
 
-bool KvStore::remove(const std::string &key, std::string &error) const {
+bool KvStore::remove(const std::string &key, std::string &error, StorageErrorKind *kind) const {
   const std::string path = pathOf(key);
   std::optional<std::string> stored;
-  if (!readKey(path, stored, error)) return false;
+  if (!readKey(path, stored, error, kind)) return false;
   // Removing a colliding key's file would lose someone else's value.
   if (stored && *stored != key) return true;
   if (::unlink(path.c_str()) != 0 && errno != ENOENT && errno != ENOTDIR) {
-    error = "cannot remove the entry of '" + key + "': " + errnoText(errno);
+    const int code = errno;
+    error = "cannot remove the entry of '" + key + "': " + errnoText(code);
+    if (kind != nullptr) *kind = storageErrorOf(code);
     return false;
   }
   return true;
 }
 
-bool KvStore::list(const std::string &prefix, std::vector<std::string> &keys, std::string &error) const {
+bool KvStore::list(const std::string &prefix, std::vector<std::string> &keys, std::string &error,
+    StorageErrorKind *kind) const {
   keys.clear();
   DIR *stream = ::opendir(directory_.c_str());
   if (stream == nullptr) {
-    if (errno == ENOENT || errno == ENOTDIR) return true;
-    error = "cannot list " + directory_ + ": " + errnoText(errno);
+    const int code = errno;
+    if (code == ENOENT || code == ENOTDIR) return true;
+    error = "cannot list " + directory_ + ": " + errnoText(code);
+    if (kind != nullptr) *kind = storageErrorOf(code);
     return false;
   }
   DirCloser closer{stream};
@@ -752,7 +792,7 @@ bool KvStore::list(const std::string &prefix, std::vector<std::string> &keys, st
     std::optional<std::string> key;
     std::string ignored;
     // A file that vanished or cannot be read meanwhile is skipped, as the native runtimes do.
-    if (!readKey(directory_ + "/" + name, key, ignored)) continue;
+    if (!readKey(directory_ + "/" + name, key, ignored, nullptr)) continue;
     if (key && startsWith(*key, prefix)) keys.push_back(std::move(*key));
   }
   std::sort(keys.begin(), keys.end());

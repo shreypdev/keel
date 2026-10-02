@@ -13,7 +13,7 @@ use common::{hex, unhex};
 use serde_json::Value;
 use undra_wire::payload::{
     Call, CallOwned, CallTarget, ChangeEntry, ChangeOp, ChangeSet, ChangeSetRef, Reply,
-    ReplyStatus, StreamFailure, StreamFlag, StreamItem,
+    ReplyStatus, Snapshot, SnapshotType, StoreSnapshot, StreamFailure, StreamFlag, StreamItem,
 };
 use undra_wire::{
     Bytes, Decode, Encode, Envelope, Handle, KeyedPatch, Kind, PatchOp, Reader, Timestamp, Uuid,
@@ -225,6 +225,57 @@ fn check_changeset(name: &str, value: &Value, expected: &[u8]) {
     assert_eq!(seen, changeset.entries, "{name}: ChangeSetRef differs");
 }
 
+fn check_snapshot(name: &str, value: &Value, expected: &[u8]) {
+    let u64_of = |v: &Value| u64::try_from(int(v)).unwrap();
+    let snapshot = Snapshot {
+        generation_floor: u32_of(&value["generation_floor"]),
+        schema_hash: u64_of(&value["schema_hash"]),
+        types: value["types"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| SnapshotType {
+                type_id: u32::try_from(int(&t["type_id"])).unwrap(),
+                fingerprint: u64_of(&t["fingerprint"]),
+            })
+            .collect(),
+        description: value["description"].as_str().unwrap().to_owned(),
+        stores: value["stores"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| StoreSnapshot {
+                handle: Handle(u64_of(&s["handle"])),
+                type_id: u32::try_from(int(&s["type_id"])).unwrap(),
+                signals: s["signals"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|g| {
+                        let bytes: Vec<u8> = g["value"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|b| u8::try_from(int(b)).unwrap())
+                            .collect();
+                        (u32_of(&g["signal_id"]), bytes)
+                    })
+                    .collect(),
+            })
+            .collect(),
+    };
+    let mut w = Writer::new();
+    snapshot.encode(&mut w);
+    assert_eq!(hex(w.as_slice()), hex(expected), "{name}: encoding differs");
+    let mut r = Reader::new(expected);
+    assert_eq!(
+        Snapshot::decode(&mut r).as_ref(),
+        Ok(&snapshot),
+        "{name}: decoding differs"
+    );
+    r.finish().unwrap();
+}
+
 fn check_keyed_patch(name: &str, value: &Value, expected: &[u8]) {
     let ops = value["ops"]
         .as_array()
@@ -432,6 +483,7 @@ fn check(v: &Value) {
         "reply payload" => check_reply(name, value, &expected),
         "stream item payload" => check_stream_item(name, value, &expected),
         "changeset payload" => check_changeset(name, value, &expected),
+        "snapshot payload" => check_snapshot(name, value, &expected),
         "keyed patch (item i32)" => check_keyed_patch(name, value, &expected),
         _ if ty.starts_with("record ") || ty.starts_with("enum ") => {
             check_record_or_enum(name, ty, value, &expected)

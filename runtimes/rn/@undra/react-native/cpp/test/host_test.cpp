@@ -928,8 +928,19 @@ void testsWithNativeDefaults(const Api *api) {
     r = await(kKvKeys, keys.bytes);
     check(r->payload.size() >= 9 && getU32(&r->payload[5]) == 1, "kv_keys lists the one key");
     check(noJsPortCall(kKv), "no Kv port call reached JavaScript");
+    // ADR-049: a damaged entry is the typed `StorageError::Corrupt` (status 1, variant 3), so the
+    // query client dead-letters a damaged queue instead of waiting for it to become readable.
+    {
+      std::ofstream damaged(platform.kvDir + "/" + kvFileName(KvNaming::Fnv, "rn.damaged"), std::ios::binary);
+      damaged << std::string("\x09\x00", 2);
+    }
+    Writer broken;
+    broken.str("rn.damaged");
+    r = await(kKvGet, broken.bytes);
+    check(r->payload[4] == 1 && r->payload.size() > 7 && r->payload[5] == 3 && r->payload[6] == 0,
+        "a damaged entry is StorageError::Corrupt (status 1, variant 3)");
   }
-  ok("Kv through the core is answered natively, in the native file layout");
+  ok("Kv through the core is answered natively, in the native file layout; a damaged entry is Corrupt");
 
   // SecureStore through the core, and a failing store answering "unavailable" with a log record.
   {
@@ -949,7 +960,14 @@ void testsWithNativeDefaults(const Api *api) {
       platform.state->fail = true;
     }
     r = await(kSecretGet, get.bytes);
-    check(r->payload[4] == 2, "a failing store is unavailable: the core's call fails (status 2), never 'missing'");
+    // ADR-049: the store's failure is the typed `StorageError::Io` with the platform's text (port
+    // status 1), which `secret_get` returns as its error: status 1, variant 4. Never "missing".
+    check(r->payload[4] == 1 && r->payload.size() > 7 && r->payload[5] == 4 && r->payload[6] == 0,
+        "a failing store is the typed StorageError::Io (status 1, variant 4), never 'missing'");
+    {
+      const std::string text(r->payload.begin(), r->payload.end());
+      check(text.find("the test keychain is locked") != std::string::npos, "with the platform's text");
+    }
     bool logged = false;
     for (const Record &rec : f.seen) {
       const std::string text(rec.payload.begin(), rec.payload.end());
@@ -964,7 +982,10 @@ void testsWithNativeDefaults(const Api *api) {
     // Review (2026-10-02): a store that runs out of memory is answered "unavailable" by a reply built
     // without allocating, and the worker lives on.
     r = await(kSecretGet, get.bytes);
-    check(r->payload[4] == 2, "a store out of memory is unavailable too");
+    // The port answers "unavailable" (built without allocating); the core reads that as the typed
+    // `StorageError::Unavailable` (status 1, variant 0).
+    check(r->payload[4] == 1 && r->payload.size() >= 7 && r->payload[5] == 0 && r->payload[6] == 0,
+        "a store out of memory is StorageError::Unavailable");
     bool oom = false;
     for (const Record &rec : f.seen) {
       const std::string text(rec.payload.begin(), rec.payload.end());
@@ -979,7 +1000,7 @@ void testsWithNativeDefaults(const Api *api) {
     check(r->payload[4] == 0 && r->payload[5] == 1, "the same worker answers the next call");
     check(noJsPortCall(kSecureStorePort), "no SecureStore port call reached JavaScript");
   }
-  ok("SecureStore through the core; a failing store answers unavailable and logs");
+  ok("SecureStore through the core; a failing store answers the typed StorageError and logs");
 
   // Fs through the core, with its typed errors.
   {

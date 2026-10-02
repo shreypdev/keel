@@ -491,6 +491,7 @@ fn query_handle(query: &QueryDef) -> ObjectDef {
         computed: false,
         key: None,
         no_coalesce: false,
+        default: false,
     };
     let method = |name: &str, id: u32, docs: &str| MethodDef {
         name: name.to_owned(),

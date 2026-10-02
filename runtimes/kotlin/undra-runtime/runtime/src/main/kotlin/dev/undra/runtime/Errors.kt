@@ -105,12 +105,60 @@ public class UndraTransportException(public val reason: Reason, message: String,
 public class UndraProtocolException(message: String, cause: Throwable? = null) : UndraException(message, cause)
 
 /**
- * The core rejected a snapshot passed to [UndraCore.restore]; the core is unchanged (SPEC section 5.9).
+ * The core rejected a snapshot passed to [UndraCore.restore]; the core is unchanged (SPEC section 5.9). A generated
+ * call reports it as [UndraCallError.Refused].
  *
- * @property code the non-zero code `undra_restore` returned.
+ * ```kotlin
+ * try {
+ *     core.restore(saved)
+ * } catch (e: UndraRestoreException) {
+ *     if (e.isIncompatible) discard(saved) // written by a build whose stores cannot become this one's
+ * }
+ * ```
+ *
+ * @property code the non-zero code `undra_restore` returned: [PANICKED], [BAD_SNAPSHOT], [UNAVAILABLE] or
+ *   [INCOMPATIBLE] (another value comes from a newer core and is reported as it is).
  */
-public class UndraRestoreException(public val code: Int) :
-    UndraException("the Undra core rejected the snapshot (code $code); a rejected restore leaves the core unchanged")
+public class UndraRestoreException(public val code: Int) : UndraException(describe(code)) {
+    /**
+     * Whether the snapshot is well formed but its values cannot become this build's store types ([INCOMPATIBLE]):
+     * retrying the same bytes will fail again, so a saved snapshot can be dropped.
+     */
+    public val isIncompatible: Boolean
+        get() = code == INCOMPATIBLE
+
+    /** The codes of `undra_restore` (`crates/undra-ffi/src/api.rs`, `restore_code`); `0` is success and never thrown. */
+    public companion object {
+        /** A store's restore function panicked (the panic was contained). */
+        public const val PANICKED: Int = 2
+
+        /** The snapshot is malformed (a layout before ADR-037's included), names an unknown store type, has a null or duplicate handle, or a store rejected its values. */
+        public const val BAD_SNAPSHOT: Int = 5
+
+        /** No core is running, it is shut down, or the restore was asked from inside a core callback. */
+        public const val UNAVAILABLE: Int = 6
+
+        /**
+         * A store's persisted values cannot become this build's types: they neither migrate by name nor through a
+         * `#[undra::migrate]` hook (ADR-037). The core's ERROR log record (through the `Log` port) names the store, the
+         * signal and the reason.
+         */
+        public const val INCOMPATIBLE: Int = 7
+
+        private fun describe(code: Int): String {
+            val why = when (code) {
+                PANICKED -> "a store's restore panicked"
+                BAD_SNAPSHOT -> "the snapshot is malformed or names a store this core cannot rebuild"
+                UNAVAILABLE -> "the core is not running, or the restore was asked from inside a core callback"
+                INCOMPATIBLE ->
+                    "the snapshot's values cannot become this build's store types (they neither migrate by name nor through a " +
+                        "#[undra::migrate] hook; the core's error log names the store and the signal)"
+                else -> "the core refused it"
+            }
+            return "the Undra core rejected the snapshot (code $code): $why; a rejected restore leaves the core unchanged"
+        }
+    }
+}
 
 /**
  * An operation is not available in the mode the core was loaded in, or the [LoadOptions] cannot start a core:

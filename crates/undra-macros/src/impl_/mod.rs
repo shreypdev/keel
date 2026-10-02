@@ -18,6 +18,7 @@ pub(crate) mod check;
 pub(crate) mod common;
 pub(crate) mod diag;
 pub(crate) mod error;
+pub(crate) mod migrate;
 pub(crate) mod naming;
 pub(crate) mod object;
 pub(crate) mod paths;
@@ -248,12 +249,20 @@ pub(crate) fn expand_query(
     })
 }
 
+/// `#[undra::migrate]`.
+pub(crate) fn expand_migrate(attr: TokenStream, item: TokenStream) -> TokenStream {
+    run(item, &[], |item| match item {
+        syn::Item::Fn(item) => migrate::expand(attr, item),
+        other => Err(wrong_item("migrate", "a free `fn`", &other)),
+    })
+}
+
 /// `#[undra::port]`.
 pub(crate) fn expand_port(attr: TokenStream, item: TokenStream) -> TokenStream {
     run(item, &[], |item| match item {
         syn::Item::Trait(item) => {
-            let (root, requested) = port::parse_port_args(attr)?;
-            port::expand_trait(root, requested, item)
+            let (root, requested, dispatcher_by_use) = port::parse_port_args(attr)?;
+            port::expand_trait(root, requested, dispatcher_by_use, item)
         }
         syn::Item::Impl(item) => {
             parse_args(

@@ -26,6 +26,7 @@ const FREE = CallTarget.FreeFunction;
 const snapshotOf = (value: number): Uint8Array => Uint8Array.of(...u32(value), 9, 9, 9, 9);
 const REFUSED_MALFORMED = Uint8Array.of(0xff, 0, 0, 0, 0);
 const REFUSED_UNAVAILABLE = Uint8Array.of(0xfe, 0, 0, 0, 0);
+const REFUSED_INCOMPATIBLE = Uint8Array.of(0xfd, 0, 0, 0, 0);
 
 interface Booted {
   readonly core: UndraCore;
@@ -133,6 +134,7 @@ describe.each(["wasm-main", "wasm-worker"] as const)("snapshot and restore in %s
   it.each([
     ["malformed bytes", REFUSED_MALFORMED, 5],
     ["a core that is not available", REFUSED_UNAVAILABLE, 6],
+    ["values that cannot become this build's types (ADR-037)", REFUSED_INCOMPATIBLE, 7],
     ["bytes too short to be a snapshot", Uint8Array.of(1, 2), 5],
     ["no bytes at all", new Uint8Array(0), 5],
   ] as const)("refused bytes (%s) reject with UndraRestoreError carrying the code, and the core is unchanged", async (_name, bytes, code) => {
@@ -301,6 +303,8 @@ describe("the worker transport's requests", () => {
         portCall: () => ({ kind: "async" }),
         log: () => {},
         closed: () => {},
+        // The stub's port is served by this thread, asynchronously (worker protocol 3 forwards only these).
+        ports: () => new Map([[STUB.PORT_ID, { sync: false, methods: {} }]]),
       },
     };
   }
@@ -381,6 +385,25 @@ describe("the worker transport's requests", () => {
     }
     expect(received.map((m) => (m as { t: string }).t), "nothing but init reached the old worker").toEqual(["init"]);
     transport.close();
+  });
+
+  // Review (2026-10-02): an old worker script (protocol 2: no `ports` feature) ignores `worker.ports`, so the app's
+  // synchronous ports would cross to the main thread and trap the core at their first call: refused at load, typed.
+  it("worker.ports with a worker script that predates protocol 3 is refused at load, typed", async () => {
+    const { worker, received } = silentWorker(["snapshot"]);
+    const transport = new WasmWorkerTransport({ wasm: new Uint8Array(8), expectedSchemaHash: SCHEMA, worker, ports: "./ports.js" });
+    const error = await transport.start(recorder().handler).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(UndraTransportError);
+    expect((error as UndraTransportError).reason).toBe("unsupported");
+    expect((error as Error).message).toMatch(/worker\.ports needs this @undra\/runtime's worker script/);
+    expect(received.map((m) => (m as { t: string }).t), "init, then the worker is closed").toEqual(["init", "close"]);
+    // The same worker without worker.ports still loads (its other features degrade as before).
+    const ok = new WasmWorkerTransport({ wasm: new Uint8Array(8), expectedSchemaHash: SCHEMA, worker: silentWorker(["snapshot"]).worker });
+    await ok.start(recorder().handler);
+    ok.close();
   });
 
   it("a request that is never answered rejects when the transport closes, never hangs it", async () => {

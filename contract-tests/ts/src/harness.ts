@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach } from "vitest";
-import { type AdapterOverrides, type PortImpl, UndraCore, type LoadOptions, WasmMainTransport, type WorkerLike } from "@undra/runtime";
+import { type AdapterOverrides, type AttachOptions, type PortImpl, UndraCore, type LoadOptions, WasmMainTransport, type WorkerLike } from "@undra/runtime";
 import { runWorker, type WorkerScope } from "@undra/runtime/worker";
 import { UndraIds } from "@playground/core";
 import { CapturingLog } from "./capturing-log.js";
@@ -16,23 +16,64 @@ export const PLAYGROUND_WASM: string =
 /** The base URL every scenario that talks to the server configures (scenarios.md, "Server fixtures"). */
 export const BASE_URL = "https://playground.test";
 
-let compiled: Promise<WebAssembly.Module> | undefined;
+/**
+ * Build B of the playground core (scenarios.md, "Two builds"): `UNDRA_PLAYGROUND_V2=1 undra build ... --platform web`,
+ * which run.sh copies to `build/b/playground_core.wasm`. `UNDRA_PLAYGROUND_WASM_B` overrides the path.
+ */
+export const PLAYGROUND_WASM_B: string =
+  process.env["UNDRA_PLAYGROUND_WASM_B"] ?? fileURLToPath(new URL("../build/b/playground_core.wasm", import.meta.url));
+
+/** Which build of the playground core a scenario loads: A (the default, the generated bindings' schema) or B. */
+export type Build = "A" | "B";
+
+const compiled = new Map<Build, Promise<WebAssembly.Module>>();
 
 /**
  * The compiled playground core, compiled once per test file: instantiating a compiled module is
  * cheap, so every scenario gets a fresh instance (a fresh core) without recompiling.
  */
-export function playgroundModule(): Promise<WebAssembly.Module> {
-  compiled ??= readFile(PLAYGROUND_WASM).then(
-    (bytes) => WebAssembly.compile(bytes),
-    (cause: unknown) => {
-      throw new Error(
-        `cannot read the playground core at ${PLAYGROUND_WASM}; build it with \`undra build -C examples/playground --platform web\` (contract-tests/ts/run.sh does)`,
-        { cause },
-      );
+export function playgroundModule(build: Build = "A"): Promise<WebAssembly.Module> {
+  let module = compiled.get(build);
+  if (module === undefined) {
+    const path = build === "A" ? PLAYGROUND_WASM : PLAYGROUND_WASM_B;
+    module = readFile(path).then(
+      (bytes) => WebAssembly.compile(bytes),
+      (cause: unknown) => {
+        throw new Error(
+          build === "A"
+            ? `cannot read the playground core at ${path}; build it with \`undra build -C examples/playground --platform web\` (contract-tests/ts/run.sh does)`
+            : `cannot read build B of the playground core at ${path}; build it with \`UNDRA_PLAYGROUND_V2=1 undra build -C examples/playground --platform web\` and copy the wasm there (contract-tests/ts/run.sh does)`,
+          { cause },
+        );
+      },
+    );
+    compiled.set(build, module);
+  }
+  return module;
+}
+
+/**
+ * The schema hash a module exports (`undra_schema_hash`, which works before `undra_init`): build B has no generated
+ * bindings, so a scenario loads it with the hash it reports (scenarios.md, "Two builds").
+ */
+export async function schemaHashOf(module: WebAssembly.Module): Promise<bigint> {
+  const none = (): void => {};
+  const instance = await WebAssembly.instantiate(module, {
+    undra: {
+      reply: none,
+      changeset: none,
+      stream: none,
+      port_call: () => 2,
+      schedule: none,
+      timer_set: none,
+      log: none,
+      now_ms: () => 0,
+      random: none,
     },
-  );
-  return compiled;
+  });
+  const e = instance.exports as unknown as { _initialize?: () => void; undra_schema_hash: () => bigint };
+  e._initialize?.();
+  return BigInt.asUintN(64, e.undra_schema_hash());
 }
 
 /** The fakes a core runs against: the adapters a scenario scripts and inspects. */
@@ -65,10 +106,21 @@ export interface BootedRaw extends Booted {
 
 /** What a scenario may choose when it boots a core. */
 export interface BootOptions extends Partial<World> {
-  /** The schema hash to demand of the core. Default: the bindings' (`UndraIds.schemaHash`). */
+  /** The schema hash to demand of the core. Default: the bindings' (`UndraIds.schemaHash`), or what build B reports. */
   readonly expectedSchemaHash?: bigint;
-  /** More ports, by port id (`LoadOptions.ports`): the opt-in WebSocket, Sse and Db ports of S23 to S25. */
+  /** Which build of the core to load. Default A. */
+  readonly build?: Build;
+  /** More ports to register (on the main thread), by port id: the opt-in WebSocket, Sse and Db ports of S23 to S25, ... */
   readonly ports?: Readonly<Record<number, PortImpl>>;
+  /** Options of `UndraCore.load` a scenario needs besides the harness's (`recovery`, `onCoreRestarted`, `onPanic`). */
+  readonly load?: Pick<AttachOptions, "recovery" | "onCoreRestarted" | "onPanic">;
+}
+
+/** The schema hash `options` asks for: given, else the bindings' for build A, else what build B reports. */
+async function expectedHash(options: BootOptions): Promise<bigint> {
+  if (options.expectedSchemaHash !== undefined) return options.expectedSchemaHash;
+  if ((options.build ?? "A") === "A") return UndraIds.schemaHash;
+  return schemaHashOf(await playgroundModule("B"));
 }
 
 const booted: Booted[] = [];
@@ -121,9 +173,10 @@ export async function boot(options: BootOptions = {}): Promise<Booted> {
   const closed: Error[] = [];
   const runtimeErrors: unknown[] = [];
   const load: LoadOptions = {
+    ...options.load,
     mode: "wasm-main",
-    wasm: await playgroundModule(),
-    expectedSchemaHash: options.expectedSchemaHash ?? UndraIds.schemaHash,
+    wasm: await playgroundModule(options.build),
+    expectedSchemaHash: await expectedHash(options),
     shared: false,
     adapters: adaptersOf(world),
     ...(options.ports !== undefined && { ports: options.ports }),
@@ -185,8 +238,9 @@ export async function bootRaw(options: BootOptions = {}): Promise<BootedRaw> {
  * itself (inside the worker), so the world's `clock` is not used; the `Http` and `Kv` ports and the `Log`
  * records still reach the world's adapters, through the main thread.
  */
-export async function bootWorker(options: BootOptions = {}): Promise<Booted> {
+export async function bootWorker(options: WorkerBootOptions = {}): Promise<BootedWorker> {
   const world = worldOf(options);
+  const posted: unknown[] = options.posted ?? [];
   const closed: Error[] = [];
   const runtimeErrors: unknown[] = [];
   const channel = new MessageChannel();
@@ -200,6 +254,7 @@ export async function bootWorker(options: BootOptions = {}): Promise<Booted> {
       channel.port2.removeEventListener(type as "message", listener as (event: MessageEvent) => void);
     },
     postMessage: (message, transfer) => {
+      posted.push(message);
       channel.port2.postMessage(message, transfer ?? []);
     },
     close: () => {
@@ -213,10 +268,11 @@ export async function bootWorker(options: BootOptions = {}): Promise<Booted> {
     channel.port2.close();
   });
   const load: LoadOptions = {
+    ...options.load,
     mode: "wasm-worker",
-    worker: host,
-    wasm: await playgroundModule(),
-    expectedSchemaHash: options.expectedSchemaHash ?? UndraIds.schemaHash,
+    worker: options.workerPorts === undefined ? host : { create: host, ports: options.workerPorts },
+    wasm: await playgroundModule(options.build),
+    expectedSchemaHash: await expectedHash(options),
     shared: false,
     adapters: adaptersOf(world),
     ...(options.ports !== undefined && { ports: options.ports }),
@@ -228,7 +284,20 @@ export async function bootWorker(options: BootOptions = {}): Promise<Booted> {
     },
   };
   const core = await UndraCore.load(load);
-  const loaded: Booted = { ...world, core, closed, runtimeErrors };
+  const loaded: BootedWorker = { ...world, core, closed, runtimeErrors, posted };
   booted.push(loaded);
   return loaded;
+}
+
+/** What a scenario may choose when it boots a core in `wasm-worker` mode. */
+export interface WorkerBootOptions extends BootOptions {
+  /** The URL of the module of `LoadOptions.worker.ports` (ADR-049): ports that run in the worker. */
+  readonly workerPorts?: string;
+  /** Where to record what the main thread posts to the worker (also when the load fails). Default a new array. */
+  readonly posted?: unknown[];
+}
+
+/** A {@link Booted} core in `wasm-worker` mode, and every message the main thread posted to its worker (`init` first). */
+export interface BootedWorker extends Booted {
+  readonly posted: unknown[];
 }

@@ -11,13 +11,22 @@
  * "unavailable".
  *
  * `sync: true` promises that every method returns its bytes directly, which is
- * what a synchronous core call (a `#[undra::port(sync)]` port) needs. Sync
- * ports work in the `wasm-main` mode only, where the core waits inside the
- * call; in `wasm-worker` and `remote` mode the core cannot block on the main
- * thread, so it sees them as unavailable unless it built the answer itself
- * (Clock, Rng and Log have built-in bindings).
+ * what a synchronous core call (a `#[undra::port(sync)]` port) needs: the core
+ * waits inside the call. In `wasm-main` mode that is the main thread. In
+ * `wasm-worker` mode the core runs in the worker and cannot wait for the main
+ * thread, so a sync port must be implemented in the worker, in the module of
+ * `LoadOptions.worker.ports` (ADR-049); registering one on the main thread is
+ * an error (at load, or from `registerPort`). Clock, Rng and Log have built-in
+ * bindings in the core, which answer them wherever it runs unless a port of
+ * that id is implemented there.
  */
 export interface PortImpl {
+  /**
+   * The port's name (`"Locale"`), for what the runtime says about it: the refusal of a synchronous port in
+   * `wasm-worker` mode, a failure of the implementation. Generated adapters set it; without it the runtime names
+   * the port by its id.
+   */
+  readonly name?: string;
   /** Whether every method answers synchronously. */
   readonly sync: boolean;
   /** Implementations by method id. */
@@ -30,3 +39,10 @@ export interface PortImpl {
    */
   readonly dispose?: () => void;
 }
+
+/**
+ * The base of every generated port interface (SPEC 17.1): `export interface Locale extends UndraPort { hello(): string }`.
+ * It has no members; it marks a type as the host side of a core port, which the generated `<name>PortImpl` adapter
+ * turns into a {@link PortImpl}.
+ */
+export interface UndraPort {}

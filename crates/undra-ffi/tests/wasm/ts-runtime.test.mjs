@@ -5,7 +5,8 @@
 // UNDRA_TS_DIST; by hand, `npm ci && npx tsc -p tsconfig.build.json` in runtimes/ts/@undra/runtime
 // (a dist/ older than its sources is refused, so this can never test a stale build).
 import assert from "node:assert/strict";
-import { readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -40,6 +41,7 @@ const {
   ALL_SIGNALS,
   CallTarget,
   UndraCore,
+  UndraError,
   UndraModeError,
   UndraReplyError,
   UndraRestoreError,
@@ -48,6 +50,7 @@ const {
   ReplyStatus,
   clockPort,
   codecs,
+  crashRecovery,
   decodeValue,
   encodeValue,
   rngPort,
@@ -72,8 +75,9 @@ after(() => {
   for (const core of opened) core.close();
 });
 
-async function boot({ log = [], adapters = {}, ports, onClose, logLevel, drains } = {}) {
+async function boot({ log = [], adapters = {}, ports, onClose, logLevel, drains, ...extra } = {}) {
   const core = await UndraCore.load({
+    ...extra,
     mode: "wasm-main",
     wasm: module,
     expectedSchemaHash: SCHEMA_HASH,
@@ -139,13 +143,14 @@ function workerLike(thread) {
   };
 }
 
-/** Loads the fixture core on a worker thread: `UndraCore.load({ mode: "wasm-worker" })`. */
-async function bootWorker({ log = [], adapters = {}, ports, onClose, onError, drains } = {}) {
+/** Loads the fixture core on a worker thread: `UndraCore.load({ mode: "wasm-worker" })`; `workerPorts` is the URL of `worker.ports`. */
+async function bootWorker({ log = [], adapters = {}, ports, onClose, onError, drains, workerPorts, ...extra } = {}) {
   const thread = new Worker(WORKER_SOURCE, { eval: true });
   threads.push(thread);
   const core = await UndraCore.load({
+    ...extra,
     mode: "wasm-worker",
-    worker: workerLike(thread),
+    worker: workerPorts === undefined ? workerLike(thread) : { create: workerLike(thread), ports: workerPorts },
     wasm: module,
     expectedSchemaHash: SCHEMA_HASH,
     platform: "test",
@@ -298,10 +303,11 @@ test("the core's own log records reach the log adapter, filtered by the configur
   assert.ok(!log.some((l) => l.level < 3), JSON.stringify(log));
 });
 
-test("a panic in the core logs at level 5, then the transport reports a trap and closes", async () => {
+test("a panic in the core logs at level 5, then the transport reports a trap and closes (recovery is off by default); onPanic hears it", async () => {
   const log = [];
   let closed = null;
-  const core = await boot({ log, onClose: (error) => (closed = error) });
+  const panics = [];
+  const core = await boot({ log, onClose: (error) => (closed = error), onPanic: (report) => panics.push(report) });
   const calc = await calculator(core);
   assert.throws(
     () => callSync(core, calc, "boom"),
@@ -314,6 +320,65 @@ test("a panic in the core logs at level 5, then the transport reports a trap and
   await macrotask();
   assert.ok(closed instanceof UndraTransportError, "the handler heard that the core died");
   assert.throws(() => callSync(core, calc, "add", concat(i64(1), i64(1))), UndraTransportError);
+  assert.equal(panics.length, 1);
+  assert.match(panics[0].message, /kaboom/);
+});
+
+// ----- randomness never degrades silently (ADR-049 decision 2.5, gap PO-11) -------------------------
+
+test("a host without a random source makes Rng.fill unavailable: the core fails loudly (E0062) after an ERROR naming the cause, never zeros", async () => {
+  const log = [];
+  let closed = null;
+  const core = await boot({
+    log,
+    adapters: { rng: { fill: () => {
+      throw new Error("no CSPRNG on this host");
+    } } },
+    onClose: (error) => (closed = error),
+  });
+  const calc = await calculator(core);
+  assert.throws(
+    () => callSync(core, calc, "random_bytes", u32(16)),
+    (e) => e instanceof UndraTransportError && e.reason === "trap",
+  );
+  const cause = log.find((l) => l.level === 4 && l.target === "undra::rng");
+  assert.ok(cause, JSON.stringify(log));
+  assert.match(cause.message, /no cryptographic random source/);
+  // The runtime also says what the import threw.
+  assert.ok(log.some((l) => l.level === 4 && /no CSPRNG on this host/.test(l.message)), JSON.stringify(log));
+  const fatal = log.filter((l) => l.level === 5 && l.target === "undra::panic");
+  assert.equal(fatal.length, 1, JSON.stringify(log));
+  assert.match(fatal[0].message, /E0062/);
+  assert.ok(log.indexOf(cause) < log.indexOf(fatal[0]));
+  await macrotask();
+  assert.ok(closed instanceof UndraTransportError);
+});
+
+test("UndraCore.load refuses both wasm modes without WebCrypto, before anything is instantiated", async () => {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", { value: undefined, configurable: true, writable: true });
+  try {
+    for (const mode of ["wasm-main", "wasm-worker"]) {
+      let spawned = false;
+      const failure = await UndraCore.load({
+        mode,
+        wasm: module,
+        expectedSchemaHash: SCHEMA_HASH,
+        shared: false,
+        worker: () => {
+          spawned = true;
+          throw new Error("no worker should be spawned");
+        },
+        adapters: { http: null },
+      }).catch((e) => e);
+      assert.ok(failure instanceof UndraTransportError, `${mode}: ${String(failure)}`);
+      assert.equal(failure.reason, "unsupported");
+      assert.match(failure.message, /^WebCrypto is required/);
+      assert.equal(spawned, false);
+    }
+  } finally {
+    Object.defineProperty(globalThis, "crypto", saved);
+  }
 });
 
 // ----- wasm-worker mode: the core on a real worker thread (gap PO-4) ---------------------------------
@@ -392,46 +457,85 @@ test("wasm-worker: an async host port still round-trips through the main thread"
   assert.deepEqual(askedOn, [true, true], "the port implementation ran on the main thread");
 });
 
-test("wasm-worker: a host Clock or Rng does not cross to the worker (the built-in bindings serve the core)", async () => {
-  let asked = 0;
-  const core = await bootWorker({
-    adapters: { clock: { nowMs: () => 1_234_567, monotonicNs: () => 9n }, rng: { fill: (out) => out.fill(0xab) } },
-    ports: {
-      [ids.port("Clock")]: clockPort({ nowMs: () => (asked++, 42), monotonicNs: () => 43n }),
-      [ids.port("Rng")]: rngPort({ fill: (out) => out.fill(1) }),
-    },
-  });
+test("wasm-worker: an explicit Clock or Rng adapter does not cross to the worker (the built-in bindings serve the core), and says so", async () => {
+  const log = [];
+  const core = await bootWorker({ log, adapters: { clock: { nowMs: () => 1_234_567, monotonicNs: () => 9n }, rng: { fill: (out) => out.fill(0xab) } } });
   const calc = await calculator(core);
   const now = Number(decodeValue(codecs.i64, await call(core, calc, "clock_now")));
   assert.ok(Math.abs(now - Date.now()) < 5_000, `the worker's own clock: ${now}`);
-  assert.equal(decodeValue(codecs.bytes, await call(core, calc, "random_bytes", u32(4))).length, 4);
-  assert.notDeepEqual([...decodeValue(codecs.bytes, await call(core, calc, "random_bytes", u32(8)))], new Array(8).fill(1));
-  assert.equal(asked, 0, "the main thread's Clock was never asked");
+  assert.notDeepEqual([...decodeValue(codecs.bytes, await call(core, calc, "random_bytes", u32(8)))], new Array(8).fill(0xab));
+  assert.equal(log.filter((l) => l.target === "undra::worker" && l.level === 3 && /worker\.ports/.test(l.message)).length, 1, JSON.stringify(log));
 });
 
-test("wasm-worker: a custom sync port cannot be served; the core's call fails loudly and the reason is logged", async () => {
-  const log = [];
-  const closed = [];
-  const sum = { sync: true, methods: { [ids.portMethod("Sum", "add")]: (args) => {
+test("wasm-worker: a sync port registered on the main thread is a load-time error that names it and the fix (ADR-049)", async () => {
+  const sum = { sync: true, methods: { [ids.portMethod("Sum", "add")]: (args) => args } };
+  for (const [portId, impl] of [[ids.port("Sum"), sum], [ids.port("Clock"), clockPort({ nowMs: () => 42, monotonicNs: () => 43n })]]) {
+    const failure = await bootWorker({ ports: { [portId]: impl } }).then(() => undefined, (e) => e);
+    assert.ok(failure instanceof UndraError, String(failure));
+    assert.equal(failure.kind, "options");
+    assert.match(failure.message, /LoadOptions\.worker\.ports/);
+    assert.ok(failure.message.includes(`0x${(portId >>> 0).toString(16)}`), failure.message);
+  }
+});
+
+/** Writes a module for `worker.ports` (ADR-049) into a scratch directory and returns its URL. */
+function workerPortsModule(source) {
+  const dir = mkdtempSync(join(tmpdir(), "undra-worker-ports-"));
+  scratch_dirs.push(dir);
+  const file = join(dir, "ports.mjs");
+  writeFileSync(file, source);
+  return pathToFileURL(file).href;
+}
+const scratch_dirs = [];
+after(() => {
+  for (const dir of scratch_dirs) rmSync(dir, { recursive: true, force: true });
+});
+
+test("wasm-worker: worker.ports serves an app's sync port and overrides Clock and Rng inside the worker thread (ADR-049)", async () => {
+  const url = workerPortsModule(`
+import { isMainThread } from "node:worker_threads";
+import { clockPort, rngPort } from ${JSON.stringify(pathToFileURL(dist).href)};
+export default {
+  [${ids.port("Sum")}]: { sync: true, methods: { [${ids.portMethod("Sum", "add")}]: (args) => {
+    if (isMainThread) throw new Error("the Sum port ran on the main thread");
     const r = new DataView(args.buffer, args.byteOffset, args.byteLength);
-    return u32(r.getUint32(0, true) + r.getUint32(4, true));
-  } } };
-  const core = await bootWorker({ log, ports: { [ids.port("Sum")]: sum }, onClose: (error) => closed.push(error) });
+    const out = new Uint8Array(4);
+    new DataView(out.buffer).setUint32(0, r.getUint32(0, true) + r.getUint32(4, true), true);
+    return out;
+  } } },
+  [${ids.port("Clock")}]: clockPort({ nowMs: () => 42, monotonicNs: () => 43n }),
+  [${ids.port("Rng")}]: rngPort({ fill: (out) => out.fill(1) }),
+};
+`);
+  const closed = [];
+  const core = await bootWorker({ workerPorts: url, onClose: (e) => closed.push(e) });
   const calc = await calculator(core);
-  // `Sum.add` returns a plain u32 and the core calls it synchronously: the worker cannot wait for the main thread,
-  // the port is unavailable to it, and the infallible proxy panics (a trap on wasm). Typed, not silent.
-  const failure = await call(core, calc, "sum_on_host", concat(u32(20), u32(22))).then(() => undefined, (e) => e);
-  assert.ok(failure instanceof UndraTransportError, String(failure));
-  assert.equal(failure.reason, "trap");
-  assert.ok(log.some((l) => l.level === 5 && l.target === "undra::panic"), `the panic reached the Log adapter: ${JSON.stringify(log)}`);
-  await until("the core to close", () => core.closed);
-  assert.equal(closed.length, 1);
-  // The main thread said why, once.
-  await until("the warning", () => log.some((l) => l.target === "undra::worker" && l.level === 3));
-  const warnings = log.filter((l) => l.target === "undra::worker" && l.level === 3);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0].message, /wasm-worker/);
-  assert.match(warnings[0].message, /wasm-main/);
+  assert.equal(decodeValue(codecs.u32, await call(core, calc, "sum_on_host", concat(u32(20), u32(22)))), 42);
+  assert.equal(decodeValue(codecs.i64, await call(core, calc, "clock_now")), 42n);
+  assert.equal(decodeValue(codecs.u64, await call(core, calc, "clock_monotonic")), 43n);
+  assert.deepEqual([...decodeValue(codecs.bytes, await call(core, calc, "random_bytes", u32(3)))], [1, 1, 1]);
+  // Async ports of the main thread still cross: registered after load, announced to the worker.
+  core.registerPort(ids.port("Echo"), { sync: false, methods: { [ids.portMethod("Echo", "ping")]: async (args) => u32(new DataView(args.buffer, args.byteOffset, args.byteLength).getUint32(0, true) + 1000) } });
+  assert.equal(decodeValue(codecs.u32, await call(core, calc, "ping_host", u32(7))), 1007);
+  assert.deepEqual(closed, []);
+});
+
+test("wasm-worker: the module's adapters back the worker's clock, random source and timers", async () => {
+  const url = workerPortsModule(`
+export default {};
+let timers = 0;
+export const adapters = {
+  clock: { nowMs: () => 1_000_000, monotonicNs: () => 5n },
+  rng: { fill: (out) => out.fill(9) },
+  timer: { set: (id, delay, fire) => { timers++; setTimeout(() => fire(id), 0); } },
+};
+`);
+  const core = await bootWorker({ workerPorts: url });
+  const calc = await calculator(core);
+  assert.equal(decodeValue(codecs.i64, await call(core, calc, "clock_now")), 1_000_000n);
+  assert.deepEqual([...decodeValue(codecs.bytes, await call(core, calc, "random_bytes", u32(2)))], [9, 9]);
+  // A 10-second sleep that the module's timer fires at once.
+  assert.equal(decodeValue(codecs.u32, await call(core, calc, "sleep_ms", u32(10_000))), 10_000);
 });
 
 // ----- snapshot and restore on UndraCore (gap PA-5), in both wasm modes -------------------------------
@@ -524,6 +628,89 @@ inEachMode("a closed core rejects snapshot and restore with UndraTransportError(
     assert.ok(error instanceof UndraTransportError, String(error));
     assert.equal(error.reason, "closed");
   }
+});
+
+// ----- recovery: a trapped core restarts from its last snapshot (ADR-049 decision 3) ----------------
+
+inEachMode("recovery: a trap restarts the core from its last snapshot; calls in flight fail 'restarted', the store keeps its handle and value, an object goes stale", async (mode, bootMode) => {
+  const panics = [];
+  const restarts = [];
+  const errors = [];
+  const closed = [];
+  const core = await bootMode({
+    recovery: crashRecovery({ snapshotEveryMs: 0 }),
+    onPanic: (report) => panics.push(report),
+    onCoreRestarted: (event) => restarts.push(event),
+    onError: (error) => errors.push(error),
+    onClose: (error) => closed.push(error),
+  });
+  const { counter, seen, bump } = await observedCounter(core);
+  for (let i = 0; i < 3; i++) await bump();
+  assert.equal(seen.at(-1), 3);
+  // The snapshot is taken after the change, from a timer (and an idle callback where there is one).
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const calc = await calculator(core);
+  const never = call(core, calc, "never");
+  never.catch(() => {});
+  await macrotask();
+
+  const boom = await call(core, calc, "boom").then(() => undefined, (e) => e);
+  assert.ok(boom instanceof UndraTransportError, String(boom));
+  assert.equal(boom.reason, "restarted");
+  await until("the restart", () => restarts.length === 1, 10_000);
+  const neverFailure = await never.then(() => undefined, (e) => e);
+  assert.equal(neverFailure?.reason, "restarted", String(neverFailure));
+
+  // The panic report: the core's FATAL record and the trap's frames.
+  assert.equal(panics.length, 1);
+  assert.match(panics[0].message, /kaboom/);
+  assert.equal(panics[0].schemaHash, SCHEMA_HASH);
+  assert.ok(panics[0].frames.length > 0, `wasm frames in the report of "${panics[0].trap}": ${panics[0].frames.join(" | ")}`);
+  // The event, to both hooks.
+  const event = restarts[0];
+  assert.equal(event.report, panics[0]);
+  assert.equal(typeof event.restoredFromAgeMs, "number");
+  assert.ok(event.rejectedCalls >= 1, `rejected ${event.rejectedCalls}`);
+  assert.equal(event.staleObjects, 1, "the calculator, which is not a store");
+  assert.ok(errors.includes(event));
+  assert.deepEqual(closed, []);
+  assert.equal(core.closed, false);
+
+  // The store came back on the same handle with the snapshot's value, and is live.
+  assert.equal(core.mirror.has(counter), true);
+  assert.equal(seen.at(-1), 3);
+  await bump();
+  await until("the bump", () => seen.at(-1) === 4);
+  // The calculator went stale: a typed refusal, not a trap.
+  const stale = await call(core, calc, "add", concat(i64(1), i64(1))).then(() => undefined, (e) => e);
+  assert.ok(stale instanceof UndraReplyError, String(stale));
+  assert.equal(stale.status, ReplyStatus.BadRequest);
+  // New objects work, and their handles never collide with the stale one (the generation floor, ADR-022).
+  const fresh = await calculator(core);
+  assert.notEqual(fresh, calc);
+  assert.equal(decodeValue(codecs.i64, await call(core, fresh, "add", concat(i64(2), i64(3)))), 105n);
+});
+
+inEachMode("recovery: past maxRestarts within perMs the core stays dead and onClose reports the trap", async (_mode, bootMode) => {
+  const restarts = [];
+  const closed = [];
+  const core = await bootMode({
+    recovery: crashRecovery({ snapshotEveryMs: 0, maxRestarts: 1 }),
+    onCoreRestarted: (event) => restarts.push(event),
+    onClose: (error) => closed.push(error),
+  });
+  await observedCounter(core);
+  const first = await calculator(core);
+  await call(core, first, "boom").catch(() => {});
+  await until("the restart", () => restarts.length === 1, 10_000);
+  const second = await calculator(core);
+  const failure = await call(core, second, "boom").then(() => undefined, (e) => e);
+  assert.ok(failure instanceof UndraTransportError, String(failure));
+  assert.equal(failure.reason, "trap", "no restart left: the trap is what it is");
+  await until("the close", () => closed.length === 1, 10_000);
+  assert.equal(closed[0].reason, "trap");
+  assert.equal(core.closed, true);
+  assert.equal(restarts.length, 1);
 });
 
 test("a snapshot taken in one mode restores into a core of the other, and into a fresh core of the same", async () => {

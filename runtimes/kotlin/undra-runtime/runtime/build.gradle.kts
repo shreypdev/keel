@@ -39,6 +39,11 @@ dependencies {
     System.getenv("UNDRA_SQLITE_JDBC")?.takeIf { File(it).isFile }?.let { testRuntimeOnly(files(it)) }
 }
 
+// Test support shared with android-adapters' tests (FaultyFileSystem: a file system that fails on demand, ADR-049).
+kotlin.sourceSets.named("test") {
+    kotlin.srcDir(rootProject.projectDir.resolve("test-support/kotlin"))
+}
+
 // The generated Kotlin of bindgen's `full` golden case and its execution test are compiled and run against this
 // runtime as part of the tests (GoldenFullTests). Skipped when the repository layout is not around.
 val bindgenTests = rootProject.projectDir.resolve("../../../crates/undra-bindgen/tests")

@@ -1,23 +1,27 @@
 # Contract tests
 
-The definition of "the platforms agree" (SPEC section 14): twenty scenarios (S01 to S19, and S26), run by each platform
-runtime against the **real playground core** (`examples/playground/core`) through the real boundary.
+The definition of "the platforms agree" (SPEC section 14): twenty-three scenarios, run against the **real
+playground core** (`examples/playground/core`) through the real boundary: S01 to S20 and S26 (two cores,
+ADR-044) by each platform runtime, S21 and S22 (web worker mode and crash recovery, ADR-049) by TypeScript
+only, 65 cells in all. S23 to S25 are held by other ADRs (the boundary-surface plan numbers them).
 
 | Directory | Platform | Boundary | Run |
 |---|---|---|---|
 | `ts/` | TypeScript (vitest) | `@undra/runtime` over the real `playground_core.wasm` (wasm-main) | `ts/run.sh` |
 | `kotlin/` | Kotlin (kotlinc + JVM) | `dev.undra.runtime` over JNI and the real `libplayground_core` | `kotlin/run.sh` |
-| `swift/` | Swift (XCTest) | `UndraRuntime` over the C ABI and the real core library | `swift/run.sh` |
+| `swift/` | Swift (XCTest) | `UndraRuntime` over the C ABI table of the real core library | `swift/run.sh` |
 
 ```sh
-contract-tests/run-all.sh            # all three (swift only on macOS), then the grid
+contract-tests/run-all.sh            # all three (swift only on macOS), then the scenario grid
 contract-tests/run-all.sh ts kotlin  # a subset
 ```
 
 * `scenarios.md` is the shared manifest: each scenario, its wire-level steps and what is expected, and the
   harness (manual clock, in-memory `Http` server, `Kv`, `Log`, `Connectivity`) every runner implements.
-* Every runner prints `SCENARIO S07 PASS|FAIL|SKIP <title>` lines; `check.sh <platform>` fails unless all
-  twenty pass.
+* Every runner prints `SCENARIO S07 PASS|FAIL|SKIP <title>` lines; `check.sh <platform>` fails unless every
+  scenario of that platform passes.
+* S14 and S15 also run against a second build of the core (build B, `UNDRA_PLAYGROUND_V2=1`; ADR-037): see
+  "Two builds" in `scenarios.md`.
 * Each runner builds the core it needs with the `undra` CLI (`undra build -C examples/playground --platform
   web|host`) and uses the bindings `undra bindgen` generated (`examples/playground/generated`), plus the runtime's
   own API for what bindings do not expose (raw signal updates, statistics, snapshots, schema checks).

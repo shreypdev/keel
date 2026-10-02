@@ -590,6 +590,16 @@ button.big {
   }
 }
 
+/* The debug panel (crash recovery, ADR-049): closed by default, under the views. */
+.debug {
+  margin-top: 1rem;
+}
+
+.debug summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
 /* The Live view's conversation: what was sent, what came back, what happened to the connection. */
 .live-log {
   list-style: none;

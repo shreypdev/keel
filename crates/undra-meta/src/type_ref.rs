@@ -162,32 +162,28 @@ impl TypeRef {
 /// assert_eq!(TypeRef::map(TypeRef::String, TypeRef::I32).to_string(), "map<string,i32>");
 /// ```
 impl fmt::Display for TypeRef {
+    // The kind's name (the `kind` tag of the JSON form), then the inner types: written without
+    // `write!`, since every core that migrates persisted data links it (ADR-052).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(crate::closure_json::kind_name(self))?;
         match self {
-            TypeRef::Bool => f.write_str("bool"),
-            TypeRef::I8 => f.write_str("i8"),
-            TypeRef::I16 => f.write_str("i16"),
-            TypeRef::I32 => f.write_str("i32"),
-            TypeRef::I64 => f.write_str("i64"),
-            TypeRef::U8 => f.write_str("u8"),
-            TypeRef::U16 => f.write_str("u16"),
-            TypeRef::U32 => f.write_str("u32"),
-            TypeRef::U64 => f.write_str("u64"),
-            TypeRef::F32 => f.write_str("f32"),
-            TypeRef::F64 => f.write_str("f64"),
-            TypeRef::String => f.write_str("string"),
-            TypeRef::Bytes => f.write_str("bytes"),
-            TypeRef::Unit => f.write_str("unit"),
-            TypeRef::Duration => f.write_str("duration"),
-            TypeRef::Timestamp => f.write_str("timestamp"),
-            TypeRef::Uuid => f.write_str("uuid"),
-            TypeRef::Option(t) => write!(f, "option<{t}>"),
-            TypeRef::Vec(t) => write!(f, "vec<{t}>"),
-            TypeRef::Map(k, v) => write!(f, "map<{k},{v}>"),
-            TypeRef::Lazy(t) => write!(f, "lazy<{t}>"),
-            TypeRef::Named(n) => write!(f, "named:{n}"),
-            TypeRef::Result(t, e) => write!(f, "result<{t},{e}>"),
-            TypeRef::Stream(t) => write!(f, "stream<{t}>"),
+            TypeRef::Option(t) | TypeRef::Vec(t) | TypeRef::Lazy(t) | TypeRef::Stream(t) => {
+                f.write_str("<")?;
+                t.fmt(f)?;
+                f.write_str(">")
+            }
+            TypeRef::Map(a, b) | TypeRef::Result(a, b) => {
+                f.write_str("<")?;
+                a.fmt(f)?;
+                f.write_str(",")?;
+                b.fmt(f)?;
+                f.write_str(">")
+            }
+            TypeRef::Named(n) => {
+                f.write_str(":")?;
+                f.write_str(n)
+            }
+            _ => Ok(()),
         }
     }
 }

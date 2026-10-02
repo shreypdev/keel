@@ -11,6 +11,7 @@ extension ContractScenarios {
     func testS15_snapshotAndRestore() async {
         await scenario("S15", "snapshot and restore") {
             let core = try self.core
+            Handover.discard("s15")
             let liveBefore = core.stat("live_handles")
 
             // 1. Three observed stores, and a handle released before the snapshot.
@@ -138,6 +139,34 @@ extension ContractScenarios {
             let ended = try require(streamOutcome, "the stream ended normally across a restore")
             try check(!(ended is CancellationError), "a stream cancelled by the core ended as a CancellationError")
             try checkEqual(ended as? UndraCallError, .cancelledByCore, "the error of ticks() across a restore")
+
+            // 11. Build A's snapshots, for the build-B process (MigrationBuildB): P holds a Profile, L also a Legacy.
+            let profile = try Profile(name: "ada", ctx: core)
+            defer { profile.close() }
+            profile.visit()
+            profile.visit()
+            try checkEqual(try profile.describe(), "name=ada;visits=2", "the Profile in build A")
+            let snapshotP = try core.snapshot()
+            let legacy = try Legacy(score: 5, ctx: core)
+            try checkEqual(try legacy.describe(), "score=5", "the Legacy in build A")
+            let snapshotL = try core.snapshot()
+            legacy.close()
+            try check(snapshotP != snapshotL, "the snapshot with a Legacy is the snapshot without one")
+            try Handover.write("s15", Handover.Snapshots(
+                profile: Handover.hex(snapshotP),
+                legacy: Handover.hex(snapshotL),
+                profileHandle: profile.handle.rawValue
+            ))
+
+            // 14. A snapshot from before layout 2 (ADR-022's empty one: count, floor) is refused as malformed, and
+            // the core is unchanged.
+            do {
+                try core.restore([0, 0, 0, 0, 0, 0, 0, 0])
+                throw ScenarioFailure(description: "the 8-byte snapshot of the layout before ADR-037 was accepted")
+            } catch let error as UndraRestoreError {
+                try checkEqual(error, .badSnapshot, "the restore error of a layout-1 snapshot")
+            }
+            try checkEqual(try profile.describe(), "name=ada;visits=2", "the Profile after the refused restore")
         }
     }
 

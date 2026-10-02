@@ -267,7 +267,7 @@ fn references_resolve_to_the_runtimes_types() {
     assert!(!text(&kotlin).contains("class HttpRequest"));
     assert!(!text(&kotlin).contains("class HttpError"));
 
-    // Swift: `UndraRuntime` exports all eight, so they are referenced and none is declared;
+    // Swift: `UndraRuntime` exports all nine, so they are referenced and none is declared;
     // `AppState` is the runtime's `UndraAppState`.
     let types = file(&swift, "Types.swift");
     assert!(types.contains("public var request: HttpRequest"), "{types}");
@@ -304,7 +304,7 @@ fn references_resolve_to_the_runtimes_types() {
 #[test]
 fn no_language_declares_a_standard_type_something_refers_to() {
     // Swift used to declare each standard type that something referred to, because its runtime
-    // kept them internal (ADR-024); the runtime exports all eight now, so the three languages
+    // kept them internal (ADR-024); the runtime exports all nine now, so the three languages
     // agree: reference, never declare.
     let mut schema = standard_schema("app-core");
     schema.records.push(record(

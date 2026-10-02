@@ -35,6 +35,7 @@ undra-runtime/
       support/                                      FakeTransport, FakeNative (JNI contract), WsTestServer, ...
     src/test/kotlin/dev/undra/fixture/               UndraCoreNative of undra-ffi's fixture core, as bindgen generates one
   android-adapters/          the Android module: the adapters of the ten standard ports + the Choreographer frame pacer
+  test-support/kotlin/       test code shared by both modules' tests (FaultyFileSystem: a file system that fails on demand)
   scripts/
     test-local.sh            build + test without Gradle or JUnit
     gen-vectors.py           regenerates WireVectors.kt from contract-tests/wire-vectors.json
@@ -140,8 +141,24 @@ methods of its implementations), and each core's generated bindings ship `META-I
 root; `Clock`, `Rng` (`SecureRandom`), `Log` (`java.util.logging`) and `Timer` (a scheduled executor). The data directory is the
 system property `undra.data.dir` or `~/.undra/data`; call `JvmAdapters.standard(dir) { core.timerFired(it) }` to choose another. On Android only
 Clock, Rng, Log and Timer are installed; the rest comes from `android-adapters` (`AndroidPlatformDefaults.install`). Port and method ids are `fnv1a32("port.<Trait>")`
-and `fnv1a32("<Trait>.<method>")` (`StandardPorts`), and the records of SPEC §8 have hand-written codecs
-(`HttpRequest`, `HttpResponse`, `HttpError`, `Header`, `FsError`, `NetKind`, `AppState`, `HttpMethod`).
+and `fnv1a32("<Trait>.<method>")` (`StandardPorts`), and the nine standard types of SPEC §8 have hand-written codecs
+(`HttpRequest`, `HttpResponse`, `HttpError`, `Header`, `FsError`, `StorageError`, `NetKind`, `AppState`, `HttpMethod`).
+
+**Storage failures are typed** (ADR-049). `Kv` and `SecureStore` answer every failure with a `StorageError`
+(`Unavailable`, `Full`, `Locked`, `Corrupt`, `Io`; port status 1), never with a crash of the core: `FileKv` maps a full disk or
+quota (`ENOSPC`, `EDQUOT`) to `Full`, an entry file that does not decode to `Corrupt` (the file stays), and any other I/O
+failure to `Io` with the platform's message; `FsAdapter` maps a full disk to `FsError.Full`. A storage adapter of your own
+implements `KeyValueBackend` (throwing `StorageError`; `StorageError.of(IOException)` does the `ENOSPC` mapping) and registers
+`StoragePort.KV.portImpl(backend)`. The port registry answers a standard port's own error type thrown by one of its methods
+(`StorageError`, `FsError`, `HttpError`) as a typed reply, like an `UndraPortException`; anything else an adapter throws is a
+bug: it is logged at error level naming the port method (`the Kv.get port method (port 0x5389110d method 0xf050bb1a) failed
+with ...`), handed to `LoadOptions.onError`, and the core is answered unavailable (status 2).
+
+**Snapshots** (`UndraCore.snapshot` / `restore`) are opaque bytes in layout 2 of SPEC 5.9 (ADR-037): the schema hash, a
+fingerprint per store type and a description travel with the stores, so a snapshot taken by another build restores when its
+values migrate to this build's types. `Payloads.Snapshot` decodes one for tools and tests. A refused restore throws
+`UndraRestoreException(code)`: `PANICKED` (2), `BAD_SNAPSHOT` (5, a layout-1 snapshot included), `UNAVAILABLE` (6) or
+`INCOMPATIBLE` (7, values that migrate neither by name nor through a hook; `isIncompatible`).
 
 ### The opt-in ports: WebSocket, Sse, Db (ADR-047, ADR-048)
 
@@ -235,7 +252,7 @@ runtimes/kotlin/undra-runtime/scripts/test-local.sh
 ```
 
 It checks that `WireVectors.kt` is up to date, compiles `runtime/src/main` (explicit API mode, warnings are
-errors) and `runtime/src/test` with `kotlinc` from `PATH`, and runs every suite through `TestMain.kt`, a
+errors) and `runtime/src/test` (with `test-support/kotlin`, shared with `android-adapters`' tests) with `kotlinc` from `PATH`, and runs every suite through `TestMain.kt`, a
 reflection-free runner. It exits non-zero on any failure and prints each failing case with its stack frames; a
 case that cannot run here (the JNI smoke test without the native library) is reported as skipped.
 Each phase is incremental (`scripts/test-local.sh check|main|test|run`), so a slow machine or a per-command time
@@ -261,7 +278,8 @@ What runs (see `TestMain.kt`): the wire suites, then
 | `InprocTransportTests` | the transport against `FakeNative`, an in-memory JNI shim that recycles direct buffers on return and flags native calls made from callbacks; ABI 2; the per-namespace claim (two namespaces side by side, one namespace twice refused) |
 | `CoreEntryTests` | `CoreEntry` (what generated `Undra<Namespace>` objects delegate to): the placeholder before a load and after close, the hash it fills in, a second load refused, two cores side by side, a remote load that never touches the natives; `UndraCore.load` refusing `INPROC` and a missing hash |
 | `RemoteTransportTests` | the WebSocket transport against `WsTestServer`, a small RFC 6455 server: handshake, schema mismatch, framing and fragmentation, streams, ports, logs, drops and protocol errors |
-| `AdapterTests`, `FileAdapterTests`, `HttpAdapterTests` | port ids, record codecs, Clock / Rng / Log / Timer, Kv / SecureStore / Fs (traversal and symlink escapes), Http against a JDK `HttpServer` |
+| `AdapterTests`, `FileAdapterTests`, `HttpAdapterTests` | port ids, record codecs (`StorageError` and `FsError` byte for byte with `undra-ports`), Clock / Rng / Log / Timer, Kv / SecureStore / Fs (traversal and symlink escapes), Http against a JDK `HttpServer` |
+| `StorageFailureTests` | ADR-049's failure injection: every `Kv` / `SecureStore` method with every `StorageError` through the real port registry (exact `PortReply` bytes: status 1 and the error), an untyped throw (status 2, one ERROR record, `onError`), and `FileKv` / `FsAdapter` over `test-support`'s `FaultyFileSystem` (a full disk is `Full`, a damaged entry `Corrupt`, the rest `Io`) |
 | `PortsV2RecordTests`, `PortsV2TextTests` | the twelve records of the opt-in ports (the Rust unit tests' exact bytes, round trips, `#[error]` texts, ids), SQLite result codes; the event-stream parser and SQL statement splitting / parameter counts |
 | `PortsV2BindingTests` | the WebSocket, Sse and Db bindings over scripted adapters: ids, the window and one pending pull, burst coalescing, ends, close and detach, migrations, transactions and `Busy`, the serial queue |
 | `RealtimeAdapterTests` | the default WebSocket and Sse adapters against `contract-tests/servers/realtime-server.mjs` (Node): echo, subprotocols and headers, refusals with status, peer close, drop, invalid UTF-8, a flood under a stalled reader, the SSE feed and resume, `/sse/hang` closed. Skipped without Node (failed with `UNDRA_REQUIRE_TOOLCHAINS=1`) |

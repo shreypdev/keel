@@ -13,7 +13,10 @@ use std::sync::{Arc, Once, Weak};
 use std::time::Duration;
 
 use parking_lot::{Mutex, MutexGuard, RwLock};
-use undra_meta::{DispatchCall, DispatchFn, DispatchOutcome, Schema};
+use undra_meta::{
+    ClosureRoot, ClosureSignal, DispatchCall, DispatchFn, DispatchOutcome, Schema, StoresClosure,
+    TypeClosure, TypeRef,
+};
 use undra_signals::ChangeSink;
 use undra_wire::payload::{
     Call, CallTarget, PortReply, PortStatus, Reply, ReplyStatus, Snapshot, StoreSnapshot,
@@ -22,7 +25,9 @@ use undra_wire::payload::{
 use undra_wire::{Handle, Reader, Writer};
 
 use crate::blocking::{Blocking, BlockingTask, default_pool_size};
-use crate::config::{InitError, MODE_DEV, MODE_INPROC, RestoreError, RuntimeConfig};
+use crate::config::{
+    DroppedStore, InitError, MODE_DEV, MODE_INPROC, RestoreError, RestoreReport, RuntimeConfig,
+};
 use crate::ctx::{Ctx, CtxScope, Gone, Lifeline, current_runtime};
 use crate::dispatch::{DispatchBytes, DispatchResult, DispatchTable, E_REENTRANT, needs_async};
 #[cfg(not(target_family = "wasm"))]
@@ -37,6 +42,7 @@ use crate::lazy::LazyList;
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
 use crate::object::{AnyObject, StoreObject, StoreRestorer, UndraObject, erased, store};
 use crate::object_table::{BadHandle, GENERATION_CEILING, ObjectTable};
+use crate::persist::{self, RegisteredHooks};
 use crate::ports::{
     Completion, Events, PortBinding, PortDispatch, PortDispatcher, PortError, PortFuture,
     PortTable, decode_dispatch_reply, decode_port_reply,
@@ -403,6 +409,14 @@ pub struct Runtime {
     blocking: Blocking,
     table: DispatchTable,
     restorers: HashMap<u32, &'static StoreRestorer>,
+    /// The fingerprint of a store type's signals (ADR-037), computed when a snapshot or a restore
+    /// first needs it (only for the types it holds; a few, so a list, not a map).
+    store_fingerprints: Mutex<Vec<(u32, u64)>>,
+    /// The last snapshot description: for which store types, and its bytes (a snapshot of the
+    /// same set of types reuses it).
+    description: Mutex<Option<(Vec<u32>, Arc<str>)>>,
+    /// The sections layered crates added to `stats_json`, one per name.
+    stats_sections: Mutex<Vec<crate::ext::StatsSection>>,
     port_dispatchers: HashMap<u32, &'static PortDispatcher>,
     calls: Mutex<HashMap<u32, CallEntry>>,
     stats: Stats,
@@ -461,6 +475,221 @@ fn stream_payload(call_id: u32, flag: StreamFlag, body: &[u8]) -> Vec<u8> {
     }
     .encode(&mut w);
     w.into_vec()
+}
+
+/// The migrating half of a restore (ADR-037): the snapshot's description, parsed once when a
+/// fingerprint differs, and the per-store conversion by name.
+struct Migration<'a> {
+    snapshot: &'a Snapshot,
+    description: Option<Result<StoresClosure, String>>,
+    /// Per store type: the snapshot's closure (checked against its fingerprint) and today's, or
+    /// why there are none. Many stores share a type; this is worked out once.
+    closures: Vec<(u32, OldAndNew)>,
+}
+
+/// A store type's closure in the snapshot and today's, or why there are none.
+type OldAndNew = Result<Arc<(TypeClosure, TypeClosure)>, String>;
+
+impl<'a> Migration<'a> {
+    fn new(snapshot: &'a Snapshot) -> Migration<'a> {
+        Migration {
+            snapshot,
+            description: None,
+            closures: Vec::new(),
+        }
+    }
+
+    /// The old and the new closure of `type_id`'s signals.
+    #[inline(never)]
+    fn closures(
+        &mut self,
+        rt: &Runtime,
+        type_id: u32,
+    ) -> Result<Arc<(TypeClosure, TypeClosure)>, String> {
+        if let Some((_, found)) = self.closures.iter().find(|(id, _)| *id == type_id) {
+            return found.clone();
+        }
+        let recorded = self.snapshot.fingerprint(type_id).unwrap_or(0);
+        let found = (|| {
+            let description = self.description(rt)?;
+            let old = description
+                .closure_of(type_id)
+                .ok_or_else(|| "the snapshot does not describe this store type".to_owned())?;
+            if old.fingerprint() != recorded {
+                return Err(
+                    "the snapshot's description does not match its fingerprint (the snapshot is damaged)"
+                        .to_owned(),
+                );
+            }
+            let new = rt
+                .schema
+                .store_closure(type_id)
+                .ok_or_else(|| "this build has no such store".to_owned())?;
+            Ok(Arc::new((old, new)))
+        })();
+        self.closures.push((type_id, found.clone()));
+        found
+    }
+
+    /// The parsed description, or why it does not parse.
+    fn description(&mut self, _rt: &Runtime) -> Result<&StoresClosure, String> {
+        let snapshot = self.snapshot;
+        self.description
+            .get_or_insert_with(|| {
+                StoresClosure::from_json(&snapshot.description)
+                    .map_err(|e| format!("the snapshot's description does not parse: {e}"))
+            })
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+
+    /// The body `StoreObject::restore` expects (`signal_count u32, signals x { signal_id u32, len
+    /// u32, value }`, today's ids), built by name from a record whose store type's fingerprint
+    /// differs from today's.
+    #[inline(never)]
+    fn store_body(
+        &mut self,
+        rt: &Runtime,
+        record: &StoreSnapshot,
+    ) -> Result<Vec<u8>, RestoreError> {
+        let type_id = record.type_id;
+        let store = rt.store_name(type_id);
+        let incompatible = |signal: &str, reason: String| RestoreError::Incompatible {
+            type_id,
+            store: store.clone(),
+            signal: signal.to_owned(),
+            reason,
+        };
+        let recorded = self.snapshot.fingerprint(type_id).unwrap_or(0);
+        let pair = self
+            .closures(rt, type_id)
+            .map_err(|why| incompatible("", why))?;
+        let (old, new) = (&pair.0, &pair.1);
+        let (
+            ClosureRoot::Signals {
+                signals: old_signals,
+            },
+            ClosureRoot::Signals {
+                signals: new_signals,
+            },
+        ) = (&old.root, &new.root)
+        else {
+            return Err(incompatible(
+                "",
+                "the description is not a store's".to_owned(),
+            ));
+        };
+        let mut out: Vec<(u32, Vec<u8>)> = Vec::with_capacity(new_signals.len());
+        for signal in new_signals {
+            let stored = old_signals
+                .iter()
+                .find(|o| o.name == signal.name)
+                .and_then(|o| {
+                    record
+                        .signals
+                        .iter()
+                        .find(|(id, _)| *id == o.signal_id)
+                        .map(|(_, bytes)| (o, bytes.as_slice()))
+                });
+            let converted = match stored {
+                Some((old_signal, bytes)) => {
+                    convert_signal(&store, recorded, old_signal, bytes, old, signal, new)
+                }
+                None => missing_signal(&store, recorded, signal),
+            };
+            match converted {
+                Ok(Some(bytes)) => out.push((signal.signal_id, bytes)),
+                Ok(None) => {}
+                Err(reason) => return Err(incompatible(&signal.name, reason)),
+            }
+        }
+        let mut body = Writer::new();
+        body.write_len(u32::try_from(out.len()).unwrap_or(u32::MAX));
+        for (signal_id, value) in &out {
+            body.write_u32(*signal_id);
+            body.write_bytes(value);
+        }
+        Ok(body.into_vec())
+    }
+}
+
+/// One signal the snapshot has, converted to today's type: structurally (with `ty` hooks inside),
+/// else the store-and-signal hook, else the hook of its type (decision 5).
+#[inline(never)]
+fn convert_signal(
+    store: &str,
+    fingerprint: u64,
+    old_signal: &ClosureSignal,
+    bytes: &[u8],
+    old: &TypeClosure,
+    signal: &ClosureSignal,
+    new: &TypeClosure,
+) -> Result<Option<Vec<u8>>, String> {
+    // Streamed, by name: the common case of an update allocates no value tree.
+    let error = match persist::migrate(
+        bytes,
+        &old_signal.ty,
+        old,
+        &signal.ty,
+        new,
+        &RegisteredHooks,
+    ) {
+        Ok(bytes) => return Ok(Some(bytes)),
+        Err(error) => error,
+    };
+    // Not structural: the store-and-signal hook, else the type's, gets the old value, decoded
+    // (by the hook's own `support`: a core without hooks does not link the decoder).
+    let hook = persist::signal_hook(store, &signal.name, fingerprint).or_else(|| {
+        let from = old.narrowed(&old_signal.ty).fingerprint();
+        persist::root_type_hook(&signal.ty, from)
+    });
+    let Some(hook) = hook else {
+        return Err(error.to_string());
+    };
+    let hook = returning(hook, &signal.ty)?;
+    (hook.support.offer)(hook, Some((bytes, &old_signal.ty, old)))
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
+/// A signal the snapshot lacks: its `#[undra(default)]` (left out of the body, the generated
+/// restore fills it), else the store-and-signal hook given `None`.
+fn missing_signal(
+    store: &str,
+    fingerprint: u64,
+    signal: &ClosureSignal,
+) -> Result<Option<Vec<u8>>, String> {
+    if signal.default {
+        return Ok(None);
+    }
+    if let Some(hook) = persist::signal_hook(store, &signal.name, fingerprint) {
+        let hook = returning(hook, &signal.ty)?;
+        return (hook.support.offer)(hook, None)
+            .map(Some)
+            .map_err(|e| e.to_string());
+    }
+    Err(
+        "the snapshot has no such signal and it has no `#[undra(default)]` or migration hook"
+            .to_owned(),
+    )
+}
+
+/// `hook`, if it returns `ty`. A store-and-signal hook's return type is not checked by the compiler
+/// (the macro cannot see the store); the runtime reports a mismatch with an E0066 ERROR at start-up,
+/// and a restore never splices its bytes into a signal of another type, where they could decode as
+/// a wrong value of the same width (the misdecode ADR-037 exists to prevent).
+fn returning(
+    hook: &'static persist::Migration,
+    ty: &TypeRef,
+) -> Result<&'static persist::Migration, String> {
+    match &hook.returns {
+        Some(returns) if TypeRef::from(returns) != *ty => Err(format!(
+            "the migration hook `{}` returns {} but the signal is {ty} (E0066)",
+            hook.name,
+            TypeRef::from(returns)
+        )),
+        _ => Ok(hook),
+    }
 }
 
 impl Runtime {
@@ -563,6 +792,9 @@ impl Runtime {
             events: Events::default(),
             table,
             restorers,
+            store_fingerprints: Mutex::new(Vec::new()),
+            description: Mutex::new(None),
+            stats_sections: Mutex::new(Vec::new()),
             port_dispatchers,
             calls: Mutex::new(HashMap::new()),
             stats: Stats::default(),
@@ -578,6 +810,10 @@ impl Runtime {
 
         register_runtime(rt.id, Arc::downgrade(&rt));
         rt.objects.set_owner(rt.id);
+        // `#[undra::migrate]` targets the macro could not check (ADR-037, E0066).
+        for problem in persist::check_migrations(&rt.schema) {
+            rt.log(ERROR, "undra::persist", &problem);
+        }
         for (id, first, second) in &rt.table.collisions {
             rt.log(
                 ERROR,
@@ -814,6 +1050,21 @@ impl Runtime {
     /// use: how `undra-query` keeps its `QueryClient` here.
     pub fn extension<T: Default + Send + Sync + 'static>(&self) -> &T {
         self.extensions.get_or_init(T::default)
+    }
+
+    /// The `T` of [`extension`](Runtime::extension), if something created it; never creates it.
+    pub fn try_extension<T: Send + Sync + 'static>(&self) -> Option<&T> {
+        self.extensions.get::<T>()
+    }
+
+    /// Adds a section to [`stats_json`](Runtime::stats_json) (one per name: a second section with
+    /// a name already added is ignored). A layered crate calls it when it first keeps state on
+    /// this runtime.
+    pub fn add_stats_section(&self, section: crate::ext::StatsSection) {
+        let mut sections = self.stats_sections.lock();
+        if sections.iter().all(|s| s.name != section.name) {
+            sections.push(section);
+        }
     }
 
     /// Like [`extension`](Runtime::extension) with an explicit initializer (which may run
@@ -1990,14 +2241,32 @@ impl Runtime {
     /// [`port_call`](Runtime::port_call) reaches it through the [`PortDispatcher`] registered
     /// for the port id.
     pub fn bind_port<P: ?Sized + 'static>(&self, port_id: u32, imp: Arc<dyn Any + Send + Sync>) {
-        self.ports.bind(port_id, PortBinding::Rust(imp));
+        self.ports.bind(port_id, PortBinding::Rust(imp, None));
     }
 
     /// Binds an implementation as the trait object `P`
     /// (`rt.bind_dyn_port::<dyn Clock>(port_id, Arc::new(FakeClock::new()))`), following the
     /// [`bind_port`](Runtime::bind_port) convention.
     pub fn bind_dyn_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32, imp: Arc<P>) {
-        self.ports.bind(port_id, PortBinding::Rust(Arc::new(imp)));
+        self.ports
+            .bind(port_id, PortBinding::Rust(Arc::new(imp), None));
+    }
+
+    /// Binds an implementation as the trait object `P`, like
+    /// [`bind_dyn_port`](Runtime::bind_dyn_port), together with the dispatcher a raw
+    /// [`port_call`](Runtime::port_call) on it goes through. That is how a Rust implementation of a
+    /// standard port is bound so that the generated proxies reach it too
+    /// (`rt.bind_dyn_port_with::<dyn Kv>(port_id, kv, &undra_ports::KV_DISPATCHER)`): the standard
+    /// ports' dispatchers are linked only where they are used, not registered for every core
+    /// (ADR-052). The typed accessors (`undra_ports::kv(&ctx)`) reach the binding either way.
+    pub fn bind_dyn_port_with<P: ?Sized + Send + Sync + 'static>(
+        &self,
+        port_id: u32,
+        imp: Arc<P>,
+        dispatcher: &'static PortDispatcher,
+    ) {
+        self.ports
+            .bind(port_id, PortBinding::Rust(Arc::new(imp), Some(dispatcher)));
     }
 
     /// Routes a port id to the platform again (through [`Host::port_call`]), replacing any
@@ -2016,21 +2285,22 @@ impl Runtime {
     /// `None` for a foreign port or a binding of another type.
     pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>> {
         match self.ports.binding(port_id) {
-            PortBinding::Rust(imp) => imp.downcast::<Arc<P>>().ok().map(|arc| Arc::clone(&*arc)),
+            PortBinding::Rust(imp, _) => imp.downcast::<Arc<P>>().ok().map(|arc| Arc::clone(&*arc)),
             PortBinding::Foreign => None,
         }
     }
 
-    /// Runs an encoded call on a Rust-bound port through its registered [`PortDispatcher`].
-    /// `Unavailable` if the port has no dispatcher.
+    /// Runs an encoded call on a Rust-bound port through the dispatcher it was bound with, else
+    /// the one registered for the port id. `Unavailable` if there is neither.
     fn dispatch_to_rust(
         &self,
         imp: &Arc<dyn Any + Send + Sync>,
+        own: Option<&'static PortDispatcher>,
         port_id: u32,
         method_id: u32,
         args: &[u8],
     ) -> PortDispatch {
-        match self.port_dispatchers.get(&port_id) {
+        match own.or_else(|| self.port_dispatchers.get(&port_id).copied()) {
             Some(dispatcher) => (dispatcher.dispatch)(&**imp, method_id, args),
             None => PortDispatch::Sync(vec![2]),
         }
@@ -2048,8 +2318,8 @@ impl Runtime {
             return PortFuture::ready(self.ports.clone(), Err(PortError::Cancelled));
         }
         Stats::inc(&self.stats.port_calls);
-        if let PortBinding::Rust(imp) = self.ports.binding(port_id) {
-            return match self.dispatch_to_rust(&imp, port_id, method_id, &args) {
+        if let PortBinding::Rust(imp, own) = self.ports.binding(port_id) {
+            return match self.dispatch_to_rust(&imp, own, port_id, method_id, &args) {
                 PortDispatch::Sync(bytes) => {
                     PortFuture::ready(self.ports.clone(), decode_dispatch_reply(&bytes))
                 }
@@ -2093,8 +2363,8 @@ impl Runtime {
             return Err(PortError::Cancelled);
         }
         Stats::inc(&self.stats.port_calls);
-        if let PortBinding::Rust(imp) = self.ports.binding(port_id) {
-            return match self.dispatch_to_rust(&imp, port_id, method_id, args) {
+        if let PortBinding::Rust(imp, own) = self.ports.binding(port_id) {
+            return match self.dispatch_to_rust(&imp, own, port_id, method_id, args) {
                 PortDispatch::Sync(bytes) => decode_dispatch_reply(&bytes),
                 // A sync call cannot wait for an implementation that answers later.
                 PortDispatch::Async(future) => {
@@ -2210,9 +2480,44 @@ impl Runtime {
 
     // ----- snapshot and restore ----------------------------------------------------------
 
-    /// Encodes every live store (SPEC 5.9): `count u32, generation_floor u32` followed by each
-    /// store's [`StoreCell::encode_snapshot`](undra_signals::StoreCell::encode_snapshot) record
-    /// (`handle u64, type_id u32, signal_count u32, signals`), which together are exactly an
+    /// The fingerprint of the store type `type_id`'s plain signals (ADR-037); `0` for a type the
+    /// schema does not describe as a store (a hand-written restorer), as `snapshot` writes it.
+    fn store_fingerprint(&self, type_id: u32) -> u64 {
+        if let Some(&(_, found)) = self
+            .store_fingerprints
+            .lock()
+            .iter()
+            .find(|(id, _)| *id == type_id)
+        {
+            return found;
+        }
+        let fingerprint = self.schema.store_fingerprint(type_id).unwrap_or(0);
+        self.store_fingerprints.lock().push((type_id, fingerprint));
+        fingerprint
+    }
+
+    /// The description of the store types `type_ids` (in snapshot order), reused while the set
+    /// does not change.
+    fn snapshot_description(&self, type_ids: &[u32]) -> Arc<str> {
+        let mut key = type_ids.to_vec();
+        key.sort_unstable();
+        let mut cache = self.description.lock();
+        if let Some((cached, text)) = cache.as_ref() {
+            if *cached == key {
+                return text.clone();
+            }
+        }
+        let text: Arc<str> = Arc::from(self.schema.stores_closure(&key).canonical_json());
+        *cache = Some((key, text.clone()));
+        text
+    }
+
+    /// Encodes every live store (SPEC 5.9, layout 2 of ADR-037): `count u32, generation_floor
+    /// u32, schema_hash u64`, the type table (each store type once, with the fingerprint of its
+    /// signals), the description (the canonical JSON of the store types' closures, so a later
+    /// build whose types changed can migrate the values by name), then each store's
+    /// [`StoreCell::encode_snapshot`](undra_signals::StoreCell::encode_snapshot) record
+    /// (`handle u64, type_id u32, signal_count u32, signals`): together exactly an
     /// `undra_wire::payload::Snapshot`. The floor is the highest handle generation issued so far
     /// (ADR-022): restoring it resumes the generation counter above everything the host may
     /// still hold. The runtime re-encodes each record with the table's own
@@ -2223,6 +2528,7 @@ impl Runtime {
         // Read-only, so it is fine even if this thread already holds the lock.
         let _guard = self.enter_core().ok();
         let mut chunks: Vec<Vec<u8>> = Vec::new();
+        let mut type_ids: Vec<u32> = Vec::new();
         for (handle, object) in self.objects.stores() {
             let Some(cell) = object.as_store() else {
                 continue;
@@ -2241,14 +2547,18 @@ impl Runtime {
             let mut r = Reader::new(w.as_slice());
             match StoreSnapshot::decode(&mut r) {
                 Ok(record) => {
+                    let type_id = object.undra_type_id();
                     let mut chunk = Writer::with_capacity(w.len());
                     StoreSnapshot {
                         handle,
-                        type_id: object.undra_type_id(),
+                        type_id,
                         signals: record.signals,
                     }
                     .encode(&mut chunk);
                     chunks.push(chunk.into_vec());
+                    if !type_ids.contains(&type_id) {
+                        type_ids.push(type_id);
+                    }
                 }
                 Err(e) => self.log(
                     ERROR,
@@ -2260,11 +2570,24 @@ impl Runtime {
                 ),
             }
         }
-        let mut out = Writer::new();
+        let description = self.snapshot_description(&type_ids);
+        let mut out = Writer::with_capacity(
+            32 + type_ids.len() * 12
+                + description.len()
+                + chunks.iter().map(Vec::len).sum::<usize>(),
+        );
         out.write_len(u32::try_from(chunks.len()).unwrap_or(u32::MAX));
         // Read after the stores were listed: the counter only grows, so the floor is at least
         // every generation in the snapshot (and every one issued before it was taken).
         out.write_u32(self.objects.generation_floor());
+        out.write_u64(self.schema_hash);
+        // The type table (`SnapshotType`s): each store type once, with its fingerprint.
+        out.write_len(u32::try_from(type_ids.len()).unwrap_or(u32::MAX));
+        for &type_id in &type_ids {
+            out.write_u32(type_id);
+            out.write_u64(self.store_fingerprint(type_id));
+        }
+        out.write_str(&description);
         for chunk in &chunks {
             out.write_raw(chunk);
         }
@@ -2294,7 +2617,32 @@ impl Runtime {
     /// carry on.
     ///
     /// All stores are built before anything is replaced: on error the runtime is unchanged.
+    ///
+    /// **Identity and migration (ADR-037).** Each store type of the snapshot carries the
+    /// fingerprint of its signals. Equal to the current build's, the values decode by
+    /// `signal_id`, as they were written. Different (the app was updated, or a dev reload rebuilt
+    /// the core), each current signal is matched **by name** in the snapshot's description and
+    /// converted structurally ([`persist`]), then by the app's `#[undra::migrate]` hooks; a signal
+    /// the snapshot lacks takes its `#[undra(default)]`, a signal the store no longer has is
+    /// dropped. A value that converts neither way fails the restore with
+    /// [`RestoreError::Incompatible`] (logged at ERROR with the reason). One exception keeps
+    /// ADR-023's all-or-nothing: a store **type** the current build no longer has is left out
+    /// (its handles answer `stale_handle`) and reported, in the [`RestoreReport`] of
+    /// [`Runtime::restore_with_report`] and a WARN log. The re-observe phase re-observes a handle
+    /// only when the restored store there has the type it had when it was observed.
     pub fn restore(&self, payload: &[u8]) -> Result<(), RestoreError> {
+        self.restore_with_report(payload).map(|_| ())
+    }
+
+    /// [`Runtime::restore`], and what it did: how many stores it rebuilt, which store types it
+    /// migrated, which it left out because the current build no longer has them, and whether the
+    /// snapshot was written by a core with another schema hash (`undra dev`'s reload, ADR-053,
+    /// reports these).
+    ///
+    /// # Errors
+    ///
+    /// As [`Runtime::restore`]; on error the runtime is unchanged.
+    pub fn restore_with_report(&self, payload: &[u8]) -> Result<RestoreReport, RestoreError> {
         if self.is_shut_down() {
             return Err(RestoreError::ShutDown);
         }
@@ -2331,19 +2679,54 @@ impl Runtime {
         // Phase 1: build every store. Nothing is touched yet.
         let mut built: Vec<(Handle, Arc<dyn AnyObject>)> =
             Vec::with_capacity(snapshot.stores.len());
+        let mut report = RestoreReport {
+            schema_changed: snapshot.schema_hash != self.schema_hash,
+            ..RestoreReport::default()
+        };
+        let mut migration = Migration::new(&snapshot);
 
         for s in &snapshot.stores {
             let type_id = s.type_id;
             let Some(restorer) = self.restorers.get(&type_id) else {
-                return Err(RestoreError::UnknownStoreType { type_id });
+                // A store type this build no longer has (the app removed that screen): left out,
+                // its handle answers `stale_handle`, reported (ADR-037 decision 7).
+                let name = migration
+                    .description(self)
+                    .ok()
+                    .and_then(|d| d.store(type_id).map(|store| store.name.clone()))
+                    .unwrap_or_else(|| format!("{type_id:#010x}"));
+                match report.dropped.iter_mut().find(|d| d.type_id == type_id) {
+                    Some(dropped) => dropped.handles.push(s.handle.0),
+                    None => report.dropped.push(DroppedStore {
+                        type_id,
+                        name,
+                        handles: vec![s.handle.0],
+                    }),
+                }
+                continue;
             };
-            let mut body = Writer::new();
-            body.write_len(u32::try_from(s.signals.len()).unwrap_or(u32::MAX));
-            for (signal_id, value) in &s.signals {
-                body.write_u32(*signal_id);
-                body.write_bytes(value);
-            }
-            let bytes = body.into_vec();
+            // A store type the schema does not describe (a hand-written restorer) has no
+            // fingerprint: `0`, as `snapshot` writes it.
+            let current = self.store_fingerprint(type_id);
+            let bytes = if snapshot.fingerprint(type_id) == Some(current) {
+                // The fast path: the values were written with today's types.
+                let mut body = Writer::new();
+                body.write_len(u32::try_from(s.signals.len()).unwrap_or(u32::MAX));
+                for (signal_id, value) in &s.signals {
+                    body.write_u32(*signal_id);
+                    body.write_bytes(value);
+                }
+                body.into_vec()
+            } else {
+                let body = migration.store_body(self, s).inspect_err(|e| {
+                    self.log(ERROR, "undra::persist", &format!("restore refused: {e}"));
+                })?;
+                let name = self.store_name(type_id);
+                if !report.migrated.contains(&name) {
+                    report.migrated.push(name);
+                }
+                body
+            };
             let mut r = Reader::new(&bytes);
             let restored = guard::guarded(|| (restorer.restore)(ctx.clone(), s.handle.0, &mut r));
             let any = match restored {
@@ -2378,6 +2761,18 @@ impl Runtime {
                 .map_or("store", |entry| entry.meta.name);
             built.push((s.handle, erased(any, type_id, name, Some(restorer.cell))));
         }
+        report.restored = built.len();
+        for dropped in &report.dropped {
+            self.log(
+                WARN,
+                "undra::persist",
+                &format!(
+                    "restore: left out {} store(s) of `{}`, a type this build does not have",
+                    dropped.handles.len(),
+                    dropped.name
+                ),
+            );
+        }
 
         // Phase 2: replace the table.
         // Nothing issued before the snapshot (or since) may be issued again: the counter resumes
@@ -2385,6 +2780,8 @@ impl Runtime {
         let max_generation = built.iter().map(|(h, _)| h.generation()).max().unwrap_or(0);
         self.objects
             .raise_generation_floor(snapshot.generation_floor.max(max_generation));
+        // What each store handle observed before the restore, and the store type it was observed
+        // as (ADR-037 decision 9: a handle is re-observed only as the same type).
         let mut observed = HashMap::new();
         // Which object each handle named before the restore (by address, for the check below).
         let mut before: HashMap<u64, usize> = HashMap::new();
@@ -2392,7 +2789,10 @@ impl Runtime {
             before.insert(cleared.handle.0, object_address(&cleared.object));
             if let Some(cell) = cleared.object.as_store() {
                 cell.set_handle(0);
-                observed.insert(cleared.handle.0, cleared.observed);
+                observed.insert(
+                    cleared.handle.0,
+                    (cleared.object.undra_type_id(), cleared.observed),
+                );
             }
             self.drop_guarded_logged("an object replaced by restore", cleared.object);
         }
@@ -2419,10 +2819,24 @@ impl Runtime {
         let phase3 = guard::guarded(|| {
             undra_signals::txn(|| {
                 for (handle, object) in &built {
-                    let (Some(previous), Some(cell)) = (observed.get(&handle.0), object.as_store())
+                    let (Some((observed_type, previous)), Some(cell)) =
+                        (observed.get(&handle.0), object.as_store())
                     else {
                         continue;
                     };
+                    if *observed_type != object.undra_type_id() {
+                        // The host mirrors this handle as another store type: re-observing would
+                        // send it entries it would apply to the wrong mirror (runtime review N6).
+                        self.log(
+                            WARN,
+                            "undra::runtime",
+                            &format!(
+                                "restore: {handle:?} was observed as another store type than `{}`; not re-observed",
+                                object.undra_type_name()
+                            ),
+                        );
+                        continue;
+                    }
                     let signal_ids = previous.to_reobserve();
                     if !signal_ids.is_empty() {
                         if let Err(report) =
@@ -2436,13 +2850,22 @@ impl Runtime {
                 }
             });
         });
-        if let Err(report) = phase3 {
+        if let Err(panic) = phase3 {
             self.log_panic(
                 "restore: committing the writes of the re-observed stores panicked",
-                &report,
+                &panic,
             );
         }
-        Ok(())
+        Ok(report)
+    }
+
+    /// The name of the store type `type_id` in this build's schema.
+    fn store_name(&self, type_id: u32) -> String {
+        self.schema
+            .objects
+            .iter()
+            .find(|o| o.type_id == type_id)
+            .map_or_else(|| format!("{type_id:#010x}"), |o| o.name.clone())
     }
 
     // ----- statistics --------------------------------------------------------------------
@@ -2507,6 +2930,23 @@ impl Runtime {
             Stats::get(&s.bad_requests),
             Stats::get(&s.cancelled),
         ));
+        // Sections of layered crates (`undra-query`'s persistence counters), before the closing
+        // brace of the document.
+        let mut sections = String::new();
+        let registered = self.stats_sections.lock().clone();
+        for section in registered {
+            if let Ok(Some(json)) = guard::guarded(|| (section.json)(self)) {
+                sections.push(',');
+                push_json_string(&mut sections, section.name);
+                sections.push(':');
+                sections.push_str(&json);
+            }
+        }
+        if !sections.is_empty() {
+            out.pop();
+            out.push_str(&sections);
+            out.push('}');
+        }
         out
     }
 

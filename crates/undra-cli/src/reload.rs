@@ -11,7 +11,8 @@
 //!        fails -> the old core keeps serving, nothing was touched
 //!   2. snapshot  the old core suspends its server (no new calls, open calls settle, the client is
 //!                closed, its session kept) and answers with its state
-//!        skipped when the schema changed or `--no-keep-state`; failed -> fresh state
+//!        skipped with `--no-keep-state`; failed -> fresh state. A changed schema is no reason to
+//!        skip it: the new core migrates the state by name or refuses it (ADR-037)
 //!   3. stop      the old core exits (its address is free)
 //!   4. restore   the new core restores the state (or is told why not), before it listens
 //!   5. listen    the new core serves; clients reconnect and resume (ADR-051)
@@ -266,14 +267,14 @@ pub fn swap<O: Ops>(
         Err(why) => return Ok(Swap::StillServing { old, why }),
     };
     let mut old = old;
-    // A restore is positional: across a schema change it can succeed with wrong values (ADR-037),
-    // so a changed hash means fresh state until migrations exist.
-    let not_taken = if !keep_state {
-        Some("undra dev --no-keep-state".to_owned())
-    } else if hash != old_hash {
-        Some(format!("schema changed (was {old_hash}, now {hash})"))
-    } else {
+    // Across a schema change too: a restore matches signals by name and migrates what changed
+    // structurally, or refuses as a whole and changes nothing (ADR-037), and the new core says which
+    // (`restore` gets the old hash). A client built from the old bindings is still refused at its
+    // `Hello` (R7): a schema change means `undra bindgen` for the app, not lost state.
+    let not_taken = if keep_state {
         None
+    } else {
+        Some("undra dev --no-keep-state".to_owned())
     };
     let taken = match not_taken {
         Some(reason) => Err(reason),
@@ -431,22 +432,26 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_schema_takes_no_snapshot_and_says_why() {
+    fn a_changed_schema_is_handed_to_the_new_core_which_migrates_or_refuses_it() {
+        // ADR-037: the restore migrates by name or refuses as a whole, so the state is offered.
         let mut fake = Fake::ok();
         fake.standby = Ok("0xbb".into());
         let swapped = run(&mut fake, true);
         assert_eq!(
             fake.steps,
-            [
-                "standby",
-                "stop-old",
-                "reset(schema changed (was 0xaa, now 0xbb))",
-                "listen"
-            ]
+            ["standby", "snapshot", "stop-old", "restore(0xaa)", "listen"]
         );
+        assert!(matches!(outcome(swapped), Outcome::Kept { .. }));
+        // A refusal (an incompatible change) is fresh state with the core's reason.
+        let mut fake = Fake::ok();
+        fake.standby = Ok("0xbb".into());
+        fake.restore =
+            Err("the core refused the snapshot: Counter.count: i32 cannot become String".into());
         assert_eq!(
-            outcome(swapped),
-            Outcome::Reset("schema changed (was 0xaa, now 0xbb)".into())
+            outcome(run(&mut fake, true)),
+            Outcome::Reset(
+                "the core refused the snapshot: Counter.count: i32 cannot become String".into()
+            )
         );
     }
 

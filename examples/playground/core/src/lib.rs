@@ -23,6 +23,7 @@
 //! | [`lab`](mod@lab) | every wire type, sync and async calls, typed errors, panics, cancellation, streams |
 //! | [`bench`](mod@bench) | the budget-row methods: a primitive call, 1 KB echo, 100 dirty signals, one insert |
 //! | [`stress`](mod@stress) | high-frequency data: a Timer-paced generator (and bursts) of one-write transactions the platforms apply once per frame, and a `no_coalesce` signal they apply step by step |
+//! | [`updates`](mod@updates) | shipping an update (ADR-037): stores and queued mutations a second build changes, the persistence status, and an app sync port (ADR-049) |
 //! | [`live`](mod@live) | real-time through the opt-in `WebSocket` and `Sse` ports: an echo, a connection read on demand (the core's credit), an event-stream reader that resumes |
 //! | [`notes`](mod@notes) | a keyed list kept in SQLite through the opt-in `Db` port: migrations, bound statements, transactions, typed errors |
 //!
@@ -43,6 +44,7 @@ pub mod platform;
 pub mod remote;
 pub mod stress;
 pub mod todos;
+pub mod updates;
 
 pub use bench::Bench;
 pub use biglist::{BigList, Item, ListError};
@@ -60,3 +62,6 @@ pub use remote::{
 };
 pub use stress::{MAX_RATE, Stress, StressError, StressMode};
 pub use todos::{Filter, Todo, TodoError, Todos};
+pub use updates::{
+    Legacy, Locale, Profile, StorageStatus, localized_greeting, save_note, storage_status, tag_note,
+};

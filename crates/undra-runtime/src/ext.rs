@@ -111,6 +111,20 @@ pub struct InitHook {
 
 inventory::collect!(InitHook);
 
+/// A section a layered crate adds to [`Runtime::stats_json`](crate::Runtime::stats_json):
+/// `"<name>": <json>` (`undra-query` reports its persistence counters as `"query"`). Added at run
+/// time with [`Runtime::add_stats_section`](crate::Runtime::add_stats_section), when the crate
+/// first keeps state on a runtime, so a core that never uses the crate does not link it (ADR-052).
+#[derive(Clone, Copy)]
+pub struct StatsSection {
+    /// The key of the section in the stats document.
+    pub name: &'static str,
+    /// The section's JSON value, or `None` to leave it out (the crate has no state on this
+    /// runtime yet). Called without the core lock; must not block or call into the runtime's
+    /// host.
+    pub json: fn(&crate::Runtime) -> Option<String>,
+}
+
 struct Node {
     type_id: TypeId,
     value: Box<dyn Any + Send + Sync>,
@@ -129,6 +143,11 @@ impl Extensions {
     ///
     /// If two threads race to create the same `T`, one value wins and the other is dropped
     /// (`init` may run more than once, but only one result is ever observable).
+    /// The `T` stored here, if one was created.
+    pub(crate) fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
+        self.find::<T>()
+    }
+
     pub(crate) fn get_or_init<T: Send + Sync + 'static>(&self, init: impl FnOnce() -> T) -> &T {
         let wanted = TypeId::of::<T>();
         if let Some(found) = self.find::<T>() {

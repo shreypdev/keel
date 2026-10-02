@@ -557,6 +557,7 @@ mod tests {
             computed: true,
             key: Some("id".into()),
             no_coalesce: false,
+            default: false,
         });
         let id = store.signals.len() - 1;
         let canonical = schema.canonical_json();

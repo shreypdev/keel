@@ -34,7 +34,7 @@ pub use call::{Call, CallOwned, CallTarget};
 pub use changeset::{
     ChangeEntries, ChangeEntry, ChangeEntryRef, ChangeOp, ChangeSet, ChangeSetBuilder, ChangeSetRef,
 };
-pub use snapshot::{Restore, Snapshot, StoreSnapshot};
+pub use snapshot::{Restore, Snapshot, SnapshotType, StoreSnapshot};
 
 wire_u8_enum! {
     /// Outcome of a call (SPEC 3.4).

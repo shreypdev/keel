@@ -765,10 +765,12 @@ extension Wire {
 
     /// One signal value inside a snapshot: `signal_id u32, len u32, value bytes`.
     public struct SnapshotSignal: Sendable, Equatable {
+        /// The signal's id within its store type.
         public var signalId: UInt32
         /// The undecoded signal value.
         public var value: ArraySlice<UInt8>
 
+        /// Creates a signal entry.
         public init(signalId: UInt32, value: ArraySlice<UInt8>) {
             self.signalId = signalId
             self.value = value
@@ -776,11 +778,16 @@ extension Wire {
     }
 
     /// One store inside a snapshot: `handle u64, type_id u32, signal_count u32, signals`.
+    /// Computed signals are not part of it; they are recomputed after a restore.
     public struct SnapshotStore: Sendable, Equatable {
+        /// The store's handle; a restore re-issues the same handle.
         public var handle: UndraHandle
+        /// `fnv1a32("<TypeName>")` of the store type; listed in ``Snapshot/types``.
         public var typeId: UInt32
+        /// The non-computed signals and their encoded values.
         public var signals: [SnapshotSignal]
 
+        /// Creates a store entry.
         public init(handle: UndraHandle, typeId: UInt32, signals: [SnapshotSignal]) {
             self.handle = handle
             self.typeId = typeId
@@ -788,32 +795,121 @@ extension Wire {
         }
     }
 
-    /// The persisted state of every store (docs/SPEC.md section 5.9):
-    /// `count u32, generation_floor u32, count x store`. Computed signals are excluded. The same
-    /// layout is the payload of a `Restore` (kind 16) message and of `undra_restore`.
+    /// The identity of one store type in a ``Snapshot`` (ADR-037): `type_id u32, fingerprint u64`.
+    public struct SnapshotType: Sendable, Hashable {
+        /// `fnv1a32("<TypeName>")` of the store type.
+        public var typeId: UInt32
+        /// `fnv1a64` of the canonical closure of the store's non-computed signals when the snapshot
+        /// was taken. A restore compares it with the current build's: equal means the values decode
+        /// as they are, different means the core migrates them by name using ``Snapshot/description``.
+        public var fingerprint: UInt64
+
+        /// Creates a type entry.
+        public init(typeId: UInt32, fingerprint: UInt64) {
+            self.typeId = typeId
+            self.fingerprint = fingerprint
+        }
+    }
+
+    /// The persisted state of every store (docs/SPEC.md section 5.9, layout 2 of ADR-037). The
+    /// same layout is the payload of a `Restore` (kind 16) message and of `undra_restore`.
+    ///
+    /// ```text
+    /// count u32, generation_floor u32,                              ADR-022's two leading words
+    /// schema_hash u64,                                              of the core that wrote it
+    /// type_count u32, types x { type_id u32, fingerprint u64 },     each store type once
+    /// description_len u32, description bytes,                       canonical JSON (UTF-8)
+    /// count x { handle u64, type_id u32, signal_count u32, signals x { signal_id u32, len u32, value } }
+    /// ```
+    ///
+    /// A host passes a snapshot back to the core unchanged; this codec exists for tests and tools.
+    /// Decoding refuses a store whose type is not in ``types`` (`WireError.invalidTag`), a type listed
+    /// twice (`WireError.duplicateKey`) and a description that is not UTF-8
+    /// (`WireError.invalidUTF8`). That, and the 64-bit hash after the floor, makes a snapshot in the
+    /// layout before ADR-037 (`count, generation_floor, stores`) fail with a typed error instead of
+    /// decoding as something else.
     public struct Snapshot: UndraPayload, Equatable {
         /// The highest handle generation the core had issued when the snapshot was taken. A
         /// restore resumes the core's generation counter above it, so no handle issued before the
         /// snapshot (or between it and the restore) is issued again to another object (ADR-022).
         /// Opaque to the host: pass it back unchanged.
         public var generationFloor: UInt32
+        /// The schema hash of the core that took the snapshot.
+        public var schemaHash: UInt64
+        /// Each store type of the snapshot, once, with its fingerprint.
+        public var types: [SnapshotType]
+        /// The canonical JSON description of the store types' signals and the records and enums
+        /// they reach (ADR-037). The core reads it only when a fingerprint differs; opaque to hosts.
+        public var description: String
+        /// The stores, in the order the core produced them.
         public var stores: [SnapshotStore]
 
-        public init(generationFloor: UInt32, stores: [SnapshotStore]) {
+        /// Smallest encoded store: `handle u64, type_id u32, signal_count u32`.
+        private static let storeMinimumSize = 16
+        /// Smallest encoded signal: `signal_id u32, len u32`.
+        private static let signalMinimumSize = 8
+        /// An encoded type entry: `type_id u32, fingerprint u64`.
+        private static let typeSize = 12
+
+        /// Creates a snapshot.
+        public init(
+            generationFloor: UInt32,
+            schemaHash: UInt64,
+            types: [SnapshotType],
+            description: String,
+            stores: [SnapshotStore]
+        ) {
             self.generationFloor = generationFloor
+            self.schemaHash = schemaHash
+            self.types = types
+            self.description = description
             self.stores = stores
         }
 
+        /// The fingerprint recorded for `typeId`, if the snapshot lists it.
+        public func fingerprint(typeId: UInt32) -> UInt64? {
+            return types.first { $0.typeId == typeId }?.fingerprint
+        }
+
+        /// Reads a `u32` element count and checks that that many elements of at least
+        /// `minimumSize` bytes fit in what remains (`WireError.lengthTooLarge` otherwise).
+        private static func readCount(_ r: inout UndraReader, minimumSize: Int) throws -> Int {
+            let at = r.position
+            let raw = try r.readU32()
+            if UInt64(raw) * UInt64(minimumSize) > UInt64(r.remaining) {
+                throw WireError.lengthTooLarge(len: raw, at: at)
+            }
+            return Int(raw)
+        }
+
         public static func undraDecode(_ r: inout UndraReader) throws -> Snapshot {
-            let storeCount = try r.readLen()
+            let storeCount = try readCount(&r, minimumSize: storeMinimumSize)
             let generationFloor = try r.readU32()
+            let schemaHash = try r.readU64()
+            let typeCount = try readCount(&r, minimumSize: typeSize)
+            var types: [SnapshotType] = []
+            types.reserveCapacity(Swift.min(typeCount, undraMaxPreallocatedElements))
+            var listed = Set<UInt32>()
+            var typeIndex = 0
+            while typeIndex < typeCount {
+                let at = r.position
+                let typeId = try r.readU32()
+                let fingerprint = try r.readU64()
+                if !listed.insert(typeId).inserted {
+                    throw WireError.duplicateKey(at: at)
+                }
+                types.append(SnapshotType(typeId: typeId, fingerprint: fingerprint))
+                typeIndex += 1
+            }
+            let description = try r.readString()
             var stores: [SnapshotStore] = []
             stores.reserveCapacity(Swift.min(storeCount, undraMaxPreallocatedElements))
             var storeIndex = 0
             while storeIndex < storeCount {
+                let at = r.position
                 let rawHandle = try r.readU64()
                 let typeId = try r.readU32()
-                let signalCount = try r.readLen()
+                let signalCount = try readCount(&r, minimumSize: signalMinimumSize)
                 var signals: [SnapshotSignal] = []
                 signals.reserveCapacity(Swift.min(signalCount, undraMaxPreallocatedElements))
                 var signalIndex = 0
@@ -824,15 +920,31 @@ extension Wire {
                     signals.append(SnapshotSignal(signalId: signalId, value: value))
                     signalIndex += 1
                 }
+                if !listed.contains(typeId) {
+                    throw WireError.invalidTag(tag: typeId, at: at, type: "Snapshot store type (not in the type table)")
+                }
                 stores.append(SnapshotStore(handle: UndraHandle(rawValue: rawHandle), typeId: typeId, signals: signals))
                 storeIndex += 1
             }
-            return Snapshot(generationFloor: generationFloor, stores: stores)
+            return Snapshot(
+                generationFloor: generationFloor,
+                schemaHash: schemaHash,
+                types: types,
+                description: description,
+                stores: stores
+            )
         }
 
         public func undraEncode(_ w: inout UndraWriter) {
             w.writeLen(stores.count)
             w.writeU32(generationFloor)
+            w.writeU64(schemaHash)
+            w.writeLen(types.count)
+            for type in types {
+                w.writeU32(type.typeId)
+                w.writeU64(type.fingerprint)
+            }
+            w.writeString(description)
             for store in stores {
                 w.writeU64(store.handle.rawValue)
                 w.writeU32(store.typeId)

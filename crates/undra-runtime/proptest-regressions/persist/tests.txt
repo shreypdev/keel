@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 845ed05fe7d36d3d78d3ac383708fc0749ac0b82281fe9f403136f42795bcc4f # shrinks to bytes = [], ty = Bool, edits = [DropTodoField(0), ReorderTodo([0, 1, 2, 3])]
+cc 296ba5058d96d0a90536908cce9ebf1c8ed9dd719cc424ca4f84026c1e2c3944 # shrinks to (ty, bytes, new_ty) = (Bool, [0], Bool), edits = [DropTodoField(0), ReorderTodo([0, 1, 2, 3])]

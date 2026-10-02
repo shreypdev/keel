@@ -312,9 +312,15 @@ const targets: Target[] = [
     name: "snapshot",
     decode: decodeSnapshot,
     valid: [
-      encodeSnapshot({ generationFloor: 0, stores: [] }),
+      encodeSnapshot({ generationFloor: 0, schemaHash: 0n, types: [], description: "", stores: [] }),
       encodeSnapshot({
         generationFloor: 3,
+        schemaHash: 0x0123_4567_89ab_cdefn,
+        types: [
+          { typeId: 7, fingerprint: 1n },
+          { typeId: 8, fingerprint: 0xffff_ffff_ffff_ffffn },
+        ],
+        description: '{"stores":[{"name":"Todos"}]}',
         stores: [
           {
             handle: HANDLE,

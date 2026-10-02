@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { CallTarget, UndraCallError, UndraReplyError, UndraRestoreError, UndraUnhandledError, ReplyStatus } from "@undra/runtime";
-import { BigList, Counter, Probe, UndraIds, Todos, add } from "@playground/core";
+import { CallTarget, type UndraCore, UndraCallError, UndraReplyError, UndraRestoreError, UndraUnhandledError, ReplyStatus, codecs, decodeValue } from "@undra/runtime";
+import { BigList, Counter, Legacy, Probe, Profile, UndraIds, Todos, add } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { counters } from "../src/stats.js";
 import { step, waitFor } from "../src/wait.js";
@@ -176,6 +176,66 @@ test("S15 snapshot and restore", async () => {
     }
     expect(outcome, "the core's own String is not read as a typed error").toBeInstanceOf(UndraCallError.CancelledByCore);
     streamed.close();
+  });
+
+  // Steps 11 to 14 (ADR-037): build A's snapshots, read by build B, loaded in this same process.
+  let snapshotP: Uint8Array = new Uint8Array(0);
+  let snapshotL: Uint8Array = new Uint8Array(0);
+  let profileHandle = 0n;
+
+  await step("11. build A's snapshots: P with a Profile, L with a Legacy as well", async () => {
+    const profile = await Profile.create("ada", core);
+    await profile.visit();
+    await profile.visit();
+    expect(await profile.describe()).toBe("name=ada;visits=2");
+    snapshotP = await core.snapshot();
+    const legacy = await Legacy.create(5, core);
+    snapshotL = await core.snapshot();
+    profileHandle = profile.handle;
+    legacy.close();
+  });
+
+  const buildB = await boot({ build: "B" });
+  expect(buildB.core.hello.schemaHash, "build B is another schema than the bindings'").not.toBe(UndraIds.schemaHash);
+  /** `Profile.describe` on the handle build A's snapshot holds, in build B (no generated class: the raw call). */
+  const describe = async (on: UndraCore): Promise<string> =>
+    decodeValue(codecs.string, await on.call({ target: CallTarget.ObjectMethod, handle: profileHandle }, UndraIds.Objects.Profile.describe, new Uint8Array(0)));
+
+  await step("12. build B restores P by name: the same Profile handle describes with the default theme", async () => {
+    await buildB.core.restore(snapshotP);
+    expect(await describe(buildB.core)).toBe("name=ada;visits=2;theme=");
+  });
+
+  await step("13. build B refuses L with code 7 (incompatible), logs why, and is unchanged", async () => {
+    const logged = buildB.log.records.length;
+    const refusal = await buildB.core.restore(snapshotL).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(refusal).toBeInstanceOf(UndraRestoreError);
+    expect((refusal as UndraRestoreError).code).toBe(UndraRestoreError.INCOMPATIBLE);
+    const errors = buildB.log.records.slice(logged).filter((record) => record.level >= 4);
+    expect(
+      errors.some((record) => record.message.includes("Legacy") && record.message.includes("score")),
+      `an ERROR record names Legacy and score: ${JSON.stringify(errors)}`,
+    ).toBe(true);
+    expect(await describe(buildB.core), "the Profile after the refused restore").toBe("name=ada;visits=2;theme=");
+    expect(buildB.core.closed).toBe(false);
+    expect(await add(40, 2, buildB.core), "a call after the refused restore").toBe(42);
+  });
+
+  await step("14. a snapshot from before layout 2 is malformed (code 5) in either build, and changes nothing", async () => {
+    for (const on of [core, buildB.core]) {
+      const refusal = await on.restore(new Uint8Array(8)).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(refusal).toBeInstanceOf(UndraRestoreError);
+      expect((refusal as UndraRestoreError).code).toBe(UndraRestoreError.BAD_SNAPSHOT);
+    }
+    expect(await describe(buildB.core), "build B's Profile after the malformed snapshot").toBe("name=ada;visits=2;theme=");
+    expect(todos.todos.peek().length, "build A's stores after the malformed snapshot").toBeGreaterThan(0);
+    expect(await add(1, 2, core)).toBe(3);
   });
 
   todos.close();

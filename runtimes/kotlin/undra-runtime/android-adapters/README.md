@@ -47,17 +47,17 @@ gone (the playground's `UndraApp.load` does). `Connectivity` and `Lifecycle` rep
 dropped with a log line, so the dev server's core can hold an older state until the next change.
 
 Without `install`, an Android core has only Clock, Rng, Log and Timer: no network, no storage, no connectivity. `Http`
-calls fail with `Network("the Http port has no adapter registered")` and the query layer's persistence and offline queue do
-nothing.
+calls fail with `Network("the Http port has no adapter registered")`, storage calls with `StorageError.Unavailable` (ADR-049:
+a typed error, never a crash), and the query layer's persistence and offline queue do nothing.
 
 ## What is installed
 
 | Port | Adapter | Android API | Notes |
 |---|---|---|---|
 | `Http` | `AndroidHttpAdapter` | `HttpURLConnection` on `Dispatchers.IO` | Never on the calling thread. Typed outcomes (ADR-025): `InvalidUrl`, `Timeout`, `Cancelled`, `Network`. `timeoutMs` bounds the whole exchange, body included. **Cancelling the caller closes the socket.** Redirects are followed by the adapter (the rules of `java.net.http`, never https to http, no credentials to another origin). Response bodies are read in chunks and capped (64 MiB by default); no cookie jar, no HTTP cache. |
-| `Kv` | `AndroidKvAdapter` | files under `filesDir/undra/kv` | One file per key (named by the SHA-256 of the key, holding `key, value`), written atomically, so a killed process leaves the old or the new value. Backed up with the app's data. |
-| `SecureStore` | `AndroidSecureStoreAdapter` | `AndroidKeyStore` AES-256-GCM, files under `noBackupFilesDir/undra/secure` | The key never leaves the Keystore (hardware-backed where available). Values are sealed as `format, iv, ciphertext+tag` with the key name as authenticated data (the web adapter's layout). Not backed up (a ciphertext could not be opened on another device). A failing Keystore or a damaged file is an error, never "missing". |
-| `Fs` | `AndroidFsAdapter` | files under `filesDir/undra/fs` | Confined to its root: `..` and symbolic links out are `Denied`. `write` creates directories and is atomic; `delete` removes a directory with its contents (like Swift and the web), never the root, and removes a symbolic link without following it. A NUL byte in a path is `Io`. |
+| `Kv` | `AndroidKvAdapter` | files under `filesDir/undra/kv` | One file per key (named by the SHA-256 of the key, holding `key, value`), written atomically, so a killed process leaves the old or the new value. Backed up with the app's data. Failures are `StorageError`s (below). |
+| `SecureStore` | `AndroidSecureStoreAdapter` | `AndroidKeyStore` AES-256-GCM, files under `noBackupFilesDir/undra/secure` | The key never leaves the Keystore (hardware-backed where available). Values are sealed as `format, iv, ciphertext+tag` with the key name as authenticated data (the web adapter's layout). Not backed up (a ciphertext could not be opened on another device). A failing Keystore or a damaged file is a typed `StorageError` (below), never "missing". |
+| `Fs` | `AndroidFsAdapter` | files under `filesDir/undra/fs` | Confined to its root: `..` and symbolic links out are `Denied`. `write` creates directories and is atomic; `delete` removes a directory with its contents (like Swift and the web), never the root, and removes a symbolic link without following it. A NUL byte in a path is `Io`; a full disk or quota is `FsError.Full`. |
 | `Connectivity` | `AndroidConnectivityAdapter` | `ConnectivityManager.registerDefaultNetworkCallback` | Reports the current state at once, then every change (Wi-Fi to cellular, loss, return). Online = the default network provides internet (`NET_CAPABILITY_INTERNET`), like `NWPath.satisfied`; kind = Wi-Fi, cellular, wired, unknown or none. Reports come from a handler thread, never the main thread. |
 | `Lifecycle` | `AndroidLifecycleAdapter` | `Application.ActivityLifecycleCallbacks` | `Active` (an activity resumed), `Inactive` (visible, no focus), `Background` (none started), on the main thread. A move to a less active state is reported after 700 ms if it lasted, so a rotation or one activity giving way to another is not a trip to the background. There is no "terminate" event: `AppState` has none and Android ends a process without notice; the queue and the cache are persisted as they change. `Active` makes the core refetch stale queries (SPEC section 9). |
 | `Log` | `AndroidLogAdapter` | `android.util.Log` | The record's target is the tag; levels trace..fatal map to verbose..assert (fatal is written with `Log.println`, never `Log.wtf`). Unlike `java.util.logging`, which the runtime's default adapter uses, it keeps trace and debug records. |
@@ -68,6 +68,25 @@ nothing.
 
 Each adapter is usable alone: `AndroidKvAdapter(context).portImpl()` is a `PortImpl` for `LoadOptions.adapters` or
 `core.registerPort`; `AndroidConnectivityAdapter(context).attach(core)` starts one event source.
+
+### Storage failures (ADR-049)
+
+`Kv` and `SecureStore` answer every failure with a `StorageError` (port status 1), which the core handles (the query layer
+keeps a persisted entry in memory and retries, and never overwrites an offline queue it could not read); the adapters'
+own methods throw the same `StorageError`s:
+
+| Failure | `Kv` | `SecureStore` |
+|---|---|---|
+| a full disk or quota (`ENOSPC`, `EDQUOT`); the old value stays | `Full` | `Full` |
+| an entry file that does not decode (the file is kept) | `Corrupt` | `Corrupt` |
+| a value that fails authentication or is not in the sealed format, a `KeyPermanentlyInvalidatedException` | — | `Corrupt` |
+| a key that needs the user to authenticate (`UserNotAuthenticatedException`) | — | `Locked` |
+| no Android Keystore, or no `AndroidKeyStore` provider | — | `Unavailable` |
+| anything else the file system, the Keystore or the cipher reports | `Io` | `Io` |
+
+The messages name the key and what failed, never the value. Anything an adapter throws that is not a `StorageError` is a bug:
+the runtime logs it at error level, naming the port method, passes it to `LoadOptions.onError`, and answers the core
+`unavailable`.
 
 **Why no `androidx` dependency.** `androidx.security:security-crypto` (`EncryptedFile`) is deprecated and pulls in a large
 cryptography library for what is about eighty lines of `javax.crypto` and `AndroidKeyStore` here. `ProcessLifecycleOwner`
@@ -92,17 +111,24 @@ failure is a typed `Network` error naming the policy. The playground allows only
 
 * **JVM unit tests** (`./gradlew :android-adapters:test`): the pure logic (URL and header rules, error mapping, redirect rules,
   secret sealing, network classification, the lifecycle state machine, log levels), plus the Http, Kv, Fs and SecureStore
-  adapters against a local server and temporary directories (`src/test`, `src/sharedTest`).
+  adapters against a local server and temporary directories (`src/test`, `src/sharedTest`), and `NoKeystoreTest` (the real
+  SecureStore where there is no Keystore: `Unavailable`).
+* **`StorageFailureTests`** (`src/sharedTest`, so on the JVM and on the device): ADR-049's failure injection. The real Kv,
+  SecureStore and Fs adapters run over `FaultyFileSystem` (`../test-support`, shared with `:runtime`'s tests), a file system
+  that fails on demand the way the platform does, and over key sources that throw what the Keystore throws; every port
+  method is checked for the exact typed reply (`Full`, `Corrupt`, `Locked`, `Unavailable`, `Io`, `FsError.Full`).
 * **Instrumented tests** (`./gradlew :android-adapters:connectedAndroidTest`, on a booted emulator or device; set
   `ANDROID_SERIAL` when several are attached): the shared tests again on Android's own `HttpURLConnection`, file system and
   Keystore, and the device-only ones in `src/androidTest`: no plaintext secret in any file or `SharedPreferences`, a secret
   and a Kv entry that survive a process killed with SIGKILL (the service in `:writer`), a Kv write interrupted by that kill,
   the default network read from `ConnectivityManager`, lifecycle states from real activities (`ActivityScenario`, Home),
   every port of `AndroidPlatformDefaults.install` answering through its port methods, the Http adapter off the main thread,
-  and the `Db` port over `AndroidDbAdapter` (`DbOnDeviceTest`: migrations, typed cells, each constraint kind from Android's
-  `(code NNNN ...)` suffix, busy, a corrupt file kept, unknown ids, the WAL switch). `RealtimeOnDeviceTest` runs the default
-  WebSocket and Sse adapters against the contract tests' realtime server on the host when it is started first and its port
-  passed: `node contract-tests/servers/realtime-server.mjs --port 0`, then
+  a value sealed under another Keystore alias answering `Corrupt`, Android's own `ErrnoException(ENOSPC / EDQUOT)`
+  under the real adapters answering `Full` (`StorageFailureOnDeviceTest`), and the `Db` port over `AndroidDbAdapter`
+  (`DbOnDeviceTest`: migrations, typed cells, each constraint kind from Android's `(code NNNN ...)` suffix, busy, a
+  corrupt file kept, unknown ids, the WAL switch). `RealtimeOnDeviceTest` runs the default WebSocket and Sse adapters
+  against the contract tests' realtime server on the host when it is started first and its port passed:
+  `node contract-tests/servers/realtime-server.mjs --port 0`, then
   `-Pandroid.testInstrumentationRunnerArguments.undra.realtimePort=<port>` (the emulator reaches the host as 10.0.2.2).
   `-Pandroid.testInstrumentationRunnerArguments.undra.networkToggle=true` also runs a test that switches the device's
   Wi-Fi and data off and on to see the Connectivity events; it changes the whole device, so it is off by default.

@@ -86,7 +86,11 @@ impl MemDb {
     ///
     /// [`fakes::install`]: crate::fakes::install
     pub fn install(self: &Arc<Self>, rt: &Arc<Runtime>) {
-        rt.bind_dyn_port::<dyn Db>(<dyn Db as Port>::PORT_ID, self.clone());
+        rt.bind_dyn_port_with::<dyn Db>(
+            <dyn Db as Port>::PORT_ID,
+            self.clone(),
+            &crate::DB_DISPATCHER,
+        );
     }
 
     /// The names of the databases opened so far.

@@ -12,7 +12,8 @@
     "test": "vitest run",
     "smoke": "npm run build && playwright test",
     "preview:bench": "vite preview -c vite.bench.config.ts --host 127.0.0.1 --port 4174 --strictPort",
-    "bench": "vite build -c vite.bench.config.ts && playwright test -c playwright.bench.config.ts"
+    "bench": "vite build -c vite.bench.config.ts && playwright test -c playwright.bench.config.ts",
+    "bench:recovery": "vite build -c vite.bench.config.ts && UNDRA_BENCH_RECOVERY=1 playwright test -c playwright.bench.config.ts"
   },
   "dependencies": {
     "react": "^19.0.0",

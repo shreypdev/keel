@@ -403,8 +403,17 @@ fn snapshot_is_a_wire_snapshot_of_the_stores_only() {
 #[test]
 fn snapshot_of_an_empty_runtime_is_an_empty_snapshot() {
     let t = TestRuntime::new();
-    // `count u32 = 0, generation_floor u32 = 0` (nothing was ever issued).
-    assert_eq!(t.runtime().snapshot(), [0; 8]);
+    // Layout 2 (ADR-037): `count u32 = 0, generation_floor u32 = 0` (nothing was ever issued),
+    // the schema hash, no types, and the description of no store types.
+    let snapshot = snapshot_of(&t);
+    assert_eq!(snapshot.generation_floor, 0);
+    assert_eq!(snapshot.schema_hash, t.runtime().schema_hash());
+    assert!(snapshot.types.is_empty() && snapshot.stores.is_empty());
+    assert_eq!(
+        snapshot.description,
+        r#"{"stores":[],"records":[],"enums":[]}"#
+    );
+    assert_eq!(t.runtime().snapshot()[..8], [0; 8]);
 }
 
 // ----- restore ----------------------------------------------------------------------------
@@ -535,15 +544,7 @@ fn restore_rejects_bad_snapshots_and_leaves_the_runtime_unchanged() {
         Err(RestoreError::Decode(_))
     ));
 
-    let encode = |stores: Vec<StoreSnapshot>| {
-        let mut w = Writer::new();
-        Snapshot {
-            generation_floor: 1,
-            stores,
-        }
-        .encode(&mut w);
-        w.into_vec()
-    };
+    let encode = |stores: Vec<StoreSnapshot>| snapshot_v2(t.runtime(), 1, stores);
     let store = |handle: Handle, type_id: u32| StoreSnapshot {
         handle,
         type_id,
@@ -551,14 +552,8 @@ fn restore_rejects_bad_snapshots_and_leaves_the_runtime_unchanged() {
     };
     let counter_type = ids::type_id("Counter");
 
-    // Unknown store type.
-    assert_eq!(
-        t.runtime()
-            .restore(&encode(vec![store(Handle::new(4, 1), 0xdead_beef)])),
-        Err(RestoreError::UnknownStoreType {
-            type_id: 0xdead_beef
-        })
-    );
+    // An unknown store type is not an error any more (ADR-037): it is checked below that it is
+    // left out and reported, here only that the bad handles are refused first.
     // Null, generation-0 and duplicate handles; absurd indices.
     for bad in [
         Handle::NULL,
@@ -582,14 +577,9 @@ fn restore_rejects_bad_snapshots_and_leaves_the_runtime_unchanged() {
         Err(RestoreError::BadHandle { handle: dup.0 })
     );
     // A floor of u32::MAX could never issue another handle: refused, not obeyed.
-    let mut w = Writer::new();
-    Snapshot {
-        generation_floor: u32::MAX,
-        stores: vec![],
-    }
-    .encode(&mut w);
     assert_eq!(
-        t.runtime().restore(w.as_slice()),
+        t.runtime()
+            .restore(&snapshot_v2(t.runtime(), u32::MAX, vec![])),
         Err(RestoreError::GenerationFloor { floor: u32::MAX })
     );
     // A store's own decoder rejecting its values, and one that panics.
@@ -620,7 +610,7 @@ fn restore_rejects_bad_snapshots_and_leaves_the_runtime_unchanged() {
         t.runtime()
             .restore(&encode(vec![
                 store(Handle::new(6, 1), counter_type),
-                store(Handle::new(7, 1), 0xdead_beef)
+                store(Handle::new(7, 1), REJECTING)
             ]))
             .is_err()
     );
@@ -629,6 +619,48 @@ fn restore_rejects_bad_snapshots_and_leaves_the_runtime_unchanged() {
     assert_eq!(t.runtime().objects().live(), 1);
     assert_eq!(get(&t, h), 5);
     assert_eq!(t.runtime().snapshot(), good);
+}
+
+/// ADR-037 decision 7: a store type this build no longer has is left out and reported, not a
+/// failure of the whole restore; its handle answers `stale_handle`.
+#[test]
+fn a_store_type_this_build_no_longer_has_is_left_out_and_reported() {
+    let t = TestRuntime::new();
+    let h = new_counter(&t, 5, "x");
+    let counter = StoreSnapshot {
+        handle: h,
+        type_id: ids::type_id("Counter"),
+        signals: vec![(COUNT_SIGNAL, enc(&7_i32)), (LABEL_SIGNAL, enc("y"))],
+    };
+    let gone = StoreSnapshot {
+        handle: Handle::new(9, 1),
+        type_id: 0xdead_beef,
+        signals: vec![(0, enc(&1_i32))],
+    };
+    let mut snapshot = Snapshot::decode(&mut Reader::new(&snapshot_v2(
+        t.runtime(),
+        1,
+        vec![counter, gone],
+    )))
+    .unwrap();
+    // The writing build described the removed store.
+    snapshot.description = r#"{"stores":[{"type_id":3735928559,"name":"Removed","signals":[]}],"records":[],"enums":[]}"#.to_owned();
+    let mut w = Writer::new();
+    snapshot.encode(&mut w);
+    let report = t.runtime().restore_with_report(w.as_slice()).unwrap();
+    assert_eq!(report.restored, 1);
+    assert_eq!(report.dropped.len(), 1);
+    assert_eq!(report.dropped[0].name, "Removed");
+    assert_eq!(report.dropped[0].handles, [Handle::new(9, 1).0]);
+    assert!(report.migrated.is_empty() && !report.schema_changed);
+    assert_eq!(get(&t, h), 7);
+    assert!(
+        t.host()
+            .take_logs()
+            .iter()
+            .any(|l| l.message.contains("left out 1 store(s) of `Removed`")),
+        "reported"
+    );
 }
 
 #[test]
@@ -666,7 +698,7 @@ fn restore_reentrancy_is_refused_not_deadlocked() {
     impl Host for Restoring {
         fn reply(&self, _: u32, _: &[u8]) {
             if let Some(rt) = self.rt.get().and_then(std::sync::Weak::upgrade) {
-                *self.result.lock() = Some(rt.restore(&[0; 8]));
+                *self.result.lock() = Some(rt.restore(&[0; 24]));
             }
         }
         fn change_set(&self, _: &[u8]) {}

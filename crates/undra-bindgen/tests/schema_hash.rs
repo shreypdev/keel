@@ -15,12 +15,14 @@ const HASHES_BEFORE_NO_COALESCE: &[(&str, u64)] = &[
     ("ports", 0xde22_6901_32b0_e949),
     ("queries", 0xbfc1_afa6_30b0_b63d),
     ("full", 0x3b1b_d106_2551_c158),
-    ("stdlib", 0x6b46_38c4_a5e3_4313),
 ];
 
 /// The cases written after ADR-031: they never had a hash without the field, so there is nothing
-/// to compare them with.
-const CASES_AFTER_NO_COALESCE: &[&str] = &["recursive"];
+/// to compare them with. `stdlib` is built from the live registrations of `undra-ports`, whose
+/// standard surface ADR-049 changed on purpose (`StorageError`, the storage ports' signatures,
+/// two `FsError` variants): it had `0x6b46_38c4_a5e3_4313` before, and no longer has a hash from
+/// before the field to compare with.
+const CASES_AFTER_NO_COALESCE: &[&str] = &["stdlib", "recursive"];
 
 #[test]
 fn every_golden_case_is_listed() {

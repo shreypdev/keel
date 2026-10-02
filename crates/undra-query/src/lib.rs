@@ -124,22 +124,27 @@ mod queue;
 mod retry;
 mod shared;
 mod status;
+mod storage;
 mod walk;
 
-pub use client::{CtxQuery, QueryClient};
+pub use client::{CtxQuery, PersistStats, QueryClient};
 pub use defs::{BoxFuture, CacheValue, MutationDef, QueryDef};
 pub use dispatch::{INVALIDATE_METHOD_ID, REFETCH_METHOD_ID};
 pub use erased::{MutationRegistration, MutationVTable, QueryRegistration, QueryVTable};
 pub use handle::{QueryHandle, Settled};
 pub use key::Invalidate;
 pub use mutation::{CacheView, MutationBuilder};
-pub use persist::{CACHE_KEY_PREFIX, QUEUE_KEY, cache_key};
-pub use queue::idempotency_key;
+pub use persist::{
+    CACHE_KEY_PREFIX, CACHE_KEY_PREFIX_V1, DEAD_LETTER_KEY, QUEUE_KEY, QUEUE_KEY_V1,
+    TYPES_KEY_PREFIX, cache_key, types_key,
+};
+pub use queue::{DeadLetter, RetryError, idempotency_key};
 pub use retry::{BACKOFF_BASE_MS, BACKOFF_MAX_MS, JITTER_PERCENT, backoff_ms};
 pub use shared::{DEFAULT_GC_MS, PERSIST_DEBOUNCE_MS};
 pub use status::QueryStatus;
+pub use storage::DEFAULT_MAX_PERSISTED_ENTRIES;
 
-use undra_runtime::Ctx;
+use undra_runtime::{Ctx, Runtime};
 
 /// Reads the persisted cache and queue when a runtime starts. The task holds the runtime weakly
 /// (ADR-034), so an idle runtime whose owner lets go is freed even while hydration still waits
@@ -172,4 +177,12 @@ pub mod __private {
         name: "undra-query",
         dispatch: crate::dispatch::dispatch,
     };
+}
+
+/// The `query` section of `stats_json`: cache and queue sizes, whether the stored queue was read,
+/// and the persistence counters (`persist.write_failed`, `read_failed`, `dropped`, `migrated`,
+/// `dead_lettered`; ADR-037, ADR-049). Registered on a runtime when its client is created
+/// (`shared::shared_of`), so a core that never uses the query runtime does not link it (ADR-052).
+pub(crate) fn stats_section(runtime: &Runtime) -> Option<String> {
+    shared::existing(runtime).map(|shared| shared.stats_json())
 }

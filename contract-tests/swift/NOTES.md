@@ -1,15 +1,17 @@
 # Swift contract runner: notes
 
-`run.sh` runs the scenarios of `../scenarios.md` (S01 to S19, S23 to S26) for Swift (`UndraRuntime` over the C ABI
-table, the real playground core through `libplayground_core.dylib` and, for S26, `libplayground_a.dylib` and
-`libplayground_b.dylib` in the same process, the bindings `undra bindgen` generated) and
-pipes the `SCENARIO` lines through `../check.sh swift`.
+`run.sh` runs the scenarios of `../scenarios.md` that Swift runs (S01 to S20 and S23 to S26: `UndraRuntime` over
+the C ABI table, the real playground core through `libplayground_core.dylib` and, for S26, `libplayground_a.dylib` and
+`libplayground_b.dylib` in the same process, the bindings `undra bindgen` generated) and pipes the `SCENARIO` lines
+through `../check.sh swift`. The build-B steps of S14 and S15 run in a second process over the second build of the
+core (see "Two builds" below).
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `Tests/ContractTests/Harness/` | the fakes of scenarios.md: `ManualClock`, `FakeServer` (the `Http` port), `MemoryKv`, `CapturingLog`, `PortCalls` (`CountingAdapter`, which counts the calls each adapter receives), `RealtimeServer` (starts `../servers/realtime-server.mjs` with Node for S23 and S24 and reads its `/stats`), and `Fixture` (the one core of the process, its adapters and its `LoadOptions`; the opt-in ports are served by the runtime's default adapters, `URLSessionWebSocketAdapter`, `URLSessionSseAdapter` and `SQLiteDbAdapter` rooted in a temporary directory that S25 deletes) |
+| `Tests/ContractTests/Harness/` | the fakes of scenarios.md: `ManualClock`, `FakeServer` (the `Http` port), `MemoryKv` (records every operation, fails on demand with a `StorageError`), `CapturingLog`, `PortCalls` (`CountingAdapter`, which counts the calls each adapter receives), `RealtimeServer` (starts `../servers/realtime-server.mjs` with Node for S23 and S24 and reads its `/stats`), `Fixture` (the one core of the process, its adapters and its `LoadOptions`) and `Handover` (what build A leaves for the build-B process) |
+| `Tests/ContractTests/MigrationBuildB.swift` | not a scenario of its own: the build-B steps of S14 (8, 9) and S15 (12 to 14), run by `run.sh` in a second process and skipped in the main run |
 | `Tests/ContractTests/ApplyReportTests.swift` | not a scenario: a generated store skips a change it cannot decode and reports it through `onError` (ADR-032, decision 6); it runs before the scenarios, on the core they share |
 | `Tests/ContractTests/ContractScenarios.swift` and `S*.swift` | one XCTest per scenario, `testS07_streamWithBackpressure` and so on, in one class so that XCTest's alphabetical order is the order of the ids |
 | `Packages/PlaygroundCore` | a symlink to `examples/playground/generated/swift`, see below |
@@ -23,6 +25,32 @@ name. It sits four directories below the repository root on purpose, so that the
 package's own relative path to the runtime (`../../../../runtimes/swift/UndraRuntime`) still resolves
 to the same package as the one this manifest names (otherwise SwiftPM warns of conflicting
 identities, "will be escalated to an error").
+
+## Two builds (S14 steps 7 to 9, S15 steps 11 to 14)
+
+`run.sh` builds the core twice: build B first (`UNDRA_PLAYGROUND_V2=1 undra build --platform host`, which
+the core's `build.rs` turns into `cfg(playground_v2)`; the CLI rebuilds when only that variable changes),
+staged in `.build/core-b`, then build A, staged in `.build/core` where `Package.swift` links it. The script
+stops if the two libraries are identical.
+
+The main `swift test` runs S01 to S20 against build A. S14 step 7 writes `.build/migration/s14.json` (every
+key and value of the harness `Kv` once both notes wait in the queue, and the `Idempotency-Key` of the failed
+`save_note` POST); S15 step 11 writes `s15.json` (snapshots `P` and `L` and the `Profile` handle). Each
+scenario deletes its file first, and `run.sh` deletes the directory before the run, so a failed scenario
+never hands over an older run's data.
+
+Then `run.sh` copies build B's library over `.build/core/libundra_core.dylib` and runs `swift test
+--skip-build --filter MigrationBuildB` with `UNDRA_CONTRACT_PHASE=B`: the same test bundle, relaunched,
+now loading build B. `MigrationBuildB` refuses to run against build A (it compares `undra_schema_hash()`
+with the generated hash), loads build B with the hash it reports and with a fresh `ManualClock`,
+`FakeServer`, `CapturingLog` and a `MemoryKv` holding exactly the handed-over contents (and no injected
+failure), emits `Connectivity.changed(false, None)` right after the load, and drives the core through
+`UndraCore`'s raw API (`configure_remote`, `storage_status`, `add` and `Profile.describe` by `fnv1a32` id;
+the generated `StorageStatus` only as a codec). It prints `SCENARIO S14 FAIL` / `SCENARIO S15 FAIL` lines
+when a build-B step fails and an informational `MIGRATION S14 build B ok: <the dead letter>` /
+`MIGRATION S15 build B ok` otherwise; its output is appended to `.build/contract.log`, which `check.sh`
+reads (the last line of an id counts). Build A's library is put back afterwards, also when something
+fails. A filtered `run.sh` (any arguments) skips this phase.
 
 ## Deviations from scenarios.md
 
@@ -38,8 +66,20 @@ identities, "will be escalated to an error").
   before the restore (up to the credit window) are still read, in order, before the loop fails with
   `UndraCallError.cancelledByCore`; the runner checks they continue the sequence and does not bound their
   number.
-* **S14.6.** The core empties the offline queue by *deleting* the key `undra.query.queue`, it does not
-  write an empty queue. The scenario accepts either as "emptied".
+* **S14.6.** The core empties the offline queue by *deleting* the key `undra.query.queue2`, it does not
+  write an empty queue. The scenario accepts either as "emptied". The Swift column also checks that the
+  first non-empty write of the queue holds one item and that the `undra.types.<fingerprint>` key of that
+  item's fingerprint (the `u64` at offset 18) was written before it.
+* **S14.7 replays build A's notes after the handover.** Once the `Kv` contents and the idempotency key are
+  written to the handover file, the runner answers the notes' POST with 201 and goes online, so both notes
+  replay in build A and the queue is empty for the rest of the run (the reloads of S16 to S18 would
+  otherwise hydrate and retry it, and S20's failing writes would meet it). Build B starts from the contents
+  kept before that.
+* **S20 runs its native variant**: steps 1, 2, 4 (the harness failed the first `get` of `undra.query.queue2`
+  with `Locked` when the process loaded its first core; the `Kv`'s operation log survives the reloads of S16
+  to S18) and 5; step 3 prints nothing. Step 1 also checks that a write of the `s20` entry was attempted and
+  failed `Full`. The `s20` entry's key is computed (`undra.query.cache2.<query id>.<fnv1a64 of the encoded
+  arguments>`). S20 is the last scenario of the main run.
 * **S16.1 "before the core is initialised".** `InprocTransport.start` reads `undra_schema_hash()` (which
   needs no running core) and compares it before it claims the process or calls `undra_init`. The scenario
   checks what a caller can see (`UndraSchemaMismatchError` with `expected` and `got`, hex in the message, no

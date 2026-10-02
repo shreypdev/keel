@@ -1,6 +1,7 @@
 # ADR-037: persisted state carries its type identity, migrates by name, and is never discarded silently
 
-Status: **Proposed** (2026-10-01, from the v1.x gap audit `.10x/specs/2026-10-01-v1x-gaps.md`, gaps PS-1…PS-4
+Status: **Accepted** (2026-10-01, implemented in `wt/persistence-v2`; see "Implementation notes" at the end
+for what the code decided where this text left room, and the one deviation). Proposed 2026-10-01, from the v1.x gap audit `.10x/specs/2026-10-01-v1x-gaps.md`, gaps PS-1…PS-4
 and runtime review N6; Track A, piece A5). Touches SPEC 2 (a per-type fingerprint in `undra-meta`), 3.1 (the
 "evolution is a v2 feature" sentence), 5.9 (the `Snapshot` payload, **a pre-publication wire change** to an
 opaque payload), 9 (persistence and the offline queue), 12 (one macro), 16.2 (`RestoreError`), `undra-meta`,
@@ -191,3 +192,47 @@ under, migrate with a hook the app implements in Rust, discard nothing silently.
 Extends ADR-022 (the snapshot's leading words stay) and ADR-023 (all-or-nothing restore, with one stated
 exception). Lands in `wt/persistence-v2` after ADR-034/035/036; its snapshot layout ships in the same wire revision
 as ADR-036. B3 and A6 depend on it.
+
+## Implementation notes (2026-10-01, `wt/persistence-v2`)
+
+Landed as specified, items 1 to 9, with these decisions and one deviation:
+
+* **Wire revision.** As ADR-036 decided for itself and Amendment C bundles ("one wire revision for 036+037"), nothing
+  is published and every peer is in this repository: the envelope `version` stays **1** and `undra_abi_version` is
+  unchanged. Snapshot layout 2 is the revision; a layout-1 snapshot fails to decode (restore code 5) because the
+  decoder rejects a store whose type is not in the type table and a type listed twice (tested on the three platform
+  codecs and in contract scenario S15 step 14). Live peers with different schema hashes still refuse each other (S16).
+* **Closures** (`undra-meta`): the canonical form covers structure only (names, order, types, indices, tuple-ness,
+  `default` flags); error messages, type ids and docs are not in it. `SignalDef.default` (serialized only when
+  `true`) records `#[undra(default)]` on a `Signal<T>`.
+* **Zero values.** A record field the old value lacks takes its *zero value* when it is `#[undra(default)]` (`false`,
+  `0`, `""`, empty, `None`, the nil UUID, the epoch: what the generated constructors default to); a named type has no
+  zero value the schema knows, so such a field is not structural and needs a hook. A store signal with
+  `#[undra(default)]` takes `T::default()` (the generated restore fills it).
+* **`DynValue`** has a `Float32(f32)` variant besides `Float(f64)`, so an `f32` (a NaN's payload included) survives
+  a decode and an encode bit for bit; the proptests round-trip every bit pattern.
+* **Hooks.** Structural migration first, then the item's hook (store and signal; mutation), then the hook of the root
+  type; `ty` hooks also apply inside (to a record or enum in a list, say). Among hooks for one target, one whose
+  `from` equals the old fingerprint wins over one without `from`. E0066 at compile time covers the arguments, the
+  function's shape and, for `ty`, the identity of the returned type (a const assertion like E0061); a store, signal
+  or mutation is not named by the signature, so its existence (and a signal hook's return type) is checked when a
+  runtime starts, which logs an E0066 ERROR.
+* **Restore.** `Runtime::restore_with_report` (additive) returns `RestoreReport { restored, migrated, dropped,
+  schema_changed }`; `restore` is unchanged in shape. A store type the build no longer has is in `dropped` and a WARN.
+  `RestoreError::UnknownStoreType` is no longer produced (kept for code that matches it).
+* **Performance.** The structural conversion is streamed (old bytes to new bytes, walking both types; a type
+  described identically in both builds is copied as bytes); a `DynValue` is decoded only for a hook. A runtime
+  computes a store type's fingerprint lazily, for the types a snapshot or restore holds. Measured: the fast path
+  `snapshot/restore_100kb` 27 µs, `snapshot/restore_100kb_migrated` 85 µs (3.1x; the budget is 10x, held by a
+  budget and a ratio gate), `snapshot/cold_start_restore_100kb` within its 3 ms budget.
+* **`undra-query`.** A cache entry of a query this build does not define, or no longer persists, is dropped and
+  reported (format 1 kept it). A queue the store reports `Corrupt` cannot be moved with its bytes (they cannot be
+  read): it becomes a dead letter with empty bytes and the reason, and since `Corrupt` is not transient the queue
+  counts as read (ADR-049 1.4's rule that the key is never written unread applies to `Locked`, `Io`, `Unavailable`).
+* **Contract scenarios.** S14 steps 7 to 9 and S15 steps 11 to 14; "two playground core builds" is build B selected
+  by `UNDRA_PLAYGROUND_V2=1` (or the `migration-v2` feature; `build.rs` turns either into `cfg(playground_v2)`),
+  because the CLI passes no Cargo features to a core. Swift and Kotlin run build B in a second process.
+
+**Deviation:** none in behaviour. The ADR's `DynValue` list gains `Float32` (above), which only widens what a hook
+can receive.
+

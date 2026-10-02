@@ -1,12 +1,11 @@
 import { browserAdapters } from "./adapters/browser.js";
 import { standardPorts, startEventSources, timerPort } from "./adapters/ports.js";
 import { PortIds } from "./adapters/ids.js";
-import { consoleLog } from "./adapters/system.js";
+import { WEB_CRYPTO_REQUIRED, consoleLog, hasCryptoRandom } from "./adapters/system.js";
 import type { Adapters, AdapterOverrides } from "./adapters/types.js";
 import {
   UndraError,
   UndraModeError,
-  UndraPortError,
   UndraReplyError,
   UndraSchemaMismatchError,
   UndraSessionLostError,
@@ -15,8 +14,12 @@ import {
 import { nextCallId } from "./callid.js";
 import { UndraCallError, UndraUnhandledError } from "./call-error.js";
 import { Mirror, type MirrorOptions, type MirrorStats } from "./mirror.js";
+import type { RecreateCall, UndraStore } from "./object.js";
+import { type UndraPanicReport, isTrap, panicReport } from "./panic.js";
+import type { CrashRecovery, UndraCoreRestarted } from "./recovery.js";
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
+import { dispatchPortCall, portOperation } from "./port-dispatch.js";
 import { Signal } from "./signal.js";
 import { StreamCall } from "./stream.js";
 import { type ReconnectOptions, RemoteTransport, type WebSocketFactory } from "./transport/remote.js";
@@ -29,7 +32,6 @@ import {
   type Handle,
   type HelloPayload,
   Kind,
-  PortStatus,
   ReplyStatus,
   StreamFlag,
   type PortCallPayload,
@@ -41,7 +43,6 @@ import {
   encodeCancel,
   encodeEvent,
   encodeObserve,
-  encodePortReply,
   encodeRelease,
   encodeStreamCredit,
   encodeTimerFired,
@@ -135,6 +136,29 @@ export interface AttachOptions {
   /** Make this core `UndraCore.shared` when none is set yet. Default `true`. */
   readonly shared?: boolean;
   /**
+   * Restart a wasm core that trapped from its last snapshot (ADR-049), off by default: `recovery: crashRecovery()`, or
+   * `crashRecovery({ snapshotEveryMs, maxSnapshotBytes, maxRestarts, perMs })` (one per core). The runtime keeps a
+   * snapshot at most once a second while stores change (4 MiB at most, outside wasm memory, in the worker in
+   * `wasm-worker` mode). On a trap: `onPanic` hears the panic; every call and stream in flight fails with
+   * `UndraTransportError("restarted")` (it may or may not have run; it is not retried); the same compiled module is
+   * instantiated again and the snapshot restored (stores keep their handles); every observed store is observed again;
+   * query handles are re-created (their wrappers move to the new handles); then `onCoreRestarted` and `onError` hear an
+   * `UndraCoreRestarted`. Store writes after the last snapshot, objects that are not stores (query handles excepted),
+   * the core's running tasks and timers, and what the core held outside its stores are lost. One trap more than
+   * `maxRestarts` within `perMs` (default 3 a minute) and the core stays dead: `onClose` reports the trap, as without
+   * recovery. Wasm modes only (a native core contains its panics). The recovery code ships only with an app that
+   * passes it.
+   */
+  readonly recovery?: CrashRecovery;
+  /** Called after a wasm core trapped and was restarted (`recovery`), with what happened; `onError` receives the same value. */
+  readonly onCoreRestarted?: (event: UndraCoreRestarted) => void;
+  /**
+   * Called once per trap of a wasm core with its panic report (ADR-046 decision 4.4: the core's FATAL `undra::panic`
+   * record and the trap's stack), before any restart, with or without `recovery`: the place to forward a core panic to
+   * a crash reporter. A handler that throws is logged.
+   */
+  readonly onPanic?: (report: UndraPanicReport) => void;
+  /**
    * How the mirror delivers change-sets (docs/SPEC.md section 11): `schedule` replaces the frame
    * scheduler (`scheduleFrame`) that drains what the core produced on its own, and
    * `maxPendingEntries` (default 65,536) / `maxPendingBytes` (default 16 MiB) bound the backlog.
@@ -171,8 +195,26 @@ export interface LoadOptions extends AttachOptions {
   readonly webSocket?: WebSocketFactory;
   /** Reconnect a `"remote"` core by itself when its connection drops: `false` turns it off, an object tunes the backoff. Default on. See {@link ReconnectOptions}. */
   readonly reconnect?: boolean | ReconnectOptions;
-  /** The Worker for `"wasm-worker"`, or a function creating it; default a module worker on `@undra/runtime/worker`. */
-  readonly worker?: WorkerLike | (() => WorkerLike);
+  /**
+   * For `"wasm-worker"`: the Worker, a function creating it, or {@link WorkerModeOptions} (the Worker and the
+   * module of ports that run inside it). Default a module worker on `@undra/runtime/worker`.
+   */
+  readonly worker?: WorkerLike | (() => WorkerLike) | WorkerModeOptions;
+}
+
+/** The `worker` option of `UndraCore.load` in `"wasm-worker"` mode, in full (ADR-049). */
+export interface WorkerModeOptions {
+  /** The Worker, or a function creating it; default a module worker on `@undra/runtime/worker`. */
+  readonly create?: WorkerLike | (() => WorkerLike);
+  /**
+   * The URL of a module the worker imports before `undra_init`. Its default export maps port ids to
+   * implementations (generated `<Name>PortImpl` adapters, `clockPort(...)`, as `registerPort` takes them) that
+   * run inside the worker: that is where a synchronous port of the app must be registered (the core cannot wait
+   * for the main thread, so registering one on the main thread is an error), and how Clock or Rng are overridden.
+   * An `adapters` export (`{ clock?, rng?, timer? }`) backs the core's clock, random source and timers there. The
+   * URL must be loadable by the worker as an ES module (a bundler's worker entry, or a plain `.js` file).
+   */
+  readonly ports?: URL | string;
 }
 
 /** Statistics counters exposed by `undra_stats_json` that this runtime reads. */
@@ -192,14 +234,7 @@ interface PendingStream {
 
 const UNLOADED_MESSAGE =
   "the core is not loaded: load it at app startup (the bindings' Undra<Namespace>.load(...), or UndraCore.load(...)), before creating any Undra object, or pass a core explicitly";
-const UNAVAILABLE: PortOutcome = { kind: "unavailable" };
-const ASYNC: PortOutcome = { kind: "async" };
-const NO_BYTES = new Uint8Array(0);
 const DEFAULT_OBSERVE_TIMEOUT_MS = 10_000;
-
-function isThenable(value: unknown): value is PromiseLike<Uint8Array> {
-  return typeof value === "object" && value !== null && typeof (value as { then?: unknown }).then === "function";
-}
 
 function abortReason(signal: AbortSignal): unknown {
   if (signal.reason !== undefined) return signal.reason;
@@ -320,13 +355,23 @@ export class UndraCore {
    * `UndraSchemaMismatchError` when the core was built from another schema than
    * `expectedSchemaHash`, and with `UndraTransportError` when it cannot be
    * reached or started. The first core loaded becomes {@link UndraCore.shared}.
+   *
+   * The wasm modes need WebCrypto (`crypto.getRandomValues`): without it `load`
+   * rejects with `UndraTransportError("unsupported", "WebCrypto is required ...")`
+   * before anything is instantiated (ADR-049), unless `adapters.rng` supplies the
+   * random source (`wasm-main` only).
    */
   static async load(options: LoadOptions): Promise<UndraCore> {
     const adapters = mergeAdapters(browserAdapters(), options.adapters);
+    // The worker keeps the snapshots of a core in `wasm-worker` mode: it is told the policy (data, not code).
+    const recovery = options.recovery?.options;
     let transport: Transport;
     switch (options.mode) {
       case "wasm-main": {
         if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-main' needs the `wasm` option");
+        // The core's only random source is the `random` import: refuse before instantiating rather than let its
+        // `Rng` fail at the first idempotency key (ADR-049). An app that supplies its own `rng` adapter has one.
+        if (options.adapters?.rng == null && !hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
         transport = new WasmMainTransport({
           wasm: options.wasm,
           expectedSchemaHash: options.expectedSchemaHash,
@@ -344,11 +389,18 @@ export class UndraCore {
       }
       case "wasm-worker": {
         if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-worker' needs the `wasm` option");
+        // Checked here, before the worker is spawned; the worker reads its own `crypto` (ADR-049).
+        if (!hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
         const { WasmWorkerTransport } = await import("./transport/wasm-worker.js");
+        // A Worker (anything with `postMessage`) or a function creating one is `{ create }` in short.
+        const worker = options.worker;
+        const { create, ports } = (typeof worker === "object" && !("postMessage" in worker) ? worker : { create: worker }) as WorkerModeOptions;
         transport = new WasmWorkerTransport({
           wasm: options.wasm,
           expectedSchemaHash: options.expectedSchemaHash,
-          ...(options.worker !== undefined && { worker: options.worker }),
+          ...(create && { worker: create }),
+          ...(ports !== undefined && { ports }),
+          ...(recovery && { recovery }),
           ...(options.platform !== undefined && { platform: options.platform }),
           ...(options.devtools !== undefined && { devtools: options.devtools }),
           ...(options.logLevel !== undefined && { logLevel: options.logLevel }),
@@ -422,11 +474,31 @@ export class UndraCore {
   /** The failures of calls the `onError` handler started (see `report`): reported, they are only logged. */
   readonly #handlerFailures = new WeakSet<object>();
   #stopEvents: (() => void) | null = null;
+  /** The message of the last FATAL `undra::panic` record: what a trap's panic report says (ADR-046). */
+  #lastPanicRecord: string | null = null;
 
   private constructor(transport: Transport, options: AttachOptions, adapters: Partial<Adapters>) {
-    this.#transport = transport;
     this.#options = options;
     this.#adapters = adapters;
+    // With `recovery`, the core runs over the layer that restarts it after a trap (ADR-049; `crashRecovery`).
+    this.#transport =
+      options.recovery?.attach(
+        transport,
+        {
+          core: this,
+          handles: this.#handles,
+          observed: this.#observed,
+          fail: (error) => this.#failInFlight(error),
+          lose: (error) => {
+            this.#lostForGood(error);
+          },
+          deliver: (error) => {
+            this.#hand(error);
+          },
+          panicked: (trap) => this.#panicReport(trap),
+        },
+        options.onCoreRestarted,
+      ) ?? transport;
     this.#notifyConnection(this.#connection.peek());
     this.#observeTimeoutMs = options.observeTimeoutMs ?? DEFAULT_OBSERVE_TIMEOUT_MS;
     this.mirror = new Mirror({
@@ -613,8 +685,16 @@ export class UndraCore {
    * Registers the host implementation of a core port (SPEC 17.1), replacing
    * any earlier one for `portId`. Generated code offers `<name>PortImpl`
    * adapters that build the {@link PortImpl} from a typed implementation.
+   *
+   * In `wasm-worker` mode a synchronous port (`impl.sync`) cannot be served from
+   * this thread, because the core cannot wait for it: registering one throws
+   * `UndraError("options")` naming the port and the fix (register it in the
+   * worker, in the module of `LoadOptions.worker.ports`, ADR-049; or load the
+   * core in mode `"wasm-main"`). An asynchronous port registered after load is
+   * announced to the worker.
    */
   registerPort(portId: number, impl: PortImpl): void {
+    this.#transport.portAdded?.(portId, impl);
     const previous = this.#ports.get(portId);
     this.#ports.set(portId, impl);
     if (previous !== undefined && previous !== impl) this.#disposePorts([previous]);
@@ -645,8 +725,13 @@ export class UndraCore {
       return;
     }
     this.#log(4, "undra::runtime", unhandled.message);
+    if (!this.#startedByHandler(error)) this.#hand(unhandled);
+  }
+
+  /** Calls `onError` with `unhandled`, unless it is running already; what it throws is logged. */
+  #hand(unhandled: UndraUnhandledError): void {
     const handler = this.#options.onError;
-    if (handler === undefined || this.#reporting || this.#startedByHandler(error)) return;
+    if (handler === undefined || this.#reporting) return;
     this.#reporting = true;
     try {
       handler(unhandled);
@@ -671,7 +756,7 @@ export class UndraCore {
   /** Live counters of this core; see {@link UndraStats}. */
   async stats(): Promise<UndraStats> {
     let core: CoreStatsJson | null = null;
-    const json = this.#closed ? null : await this.#transport.stats?.();
+    const json = this.#closed ? null : await this.#transport.stats?.().catch(() => null);
     if (typeof json === "string") {
       try {
         const parsed: unknown = JSON.parse(json);
@@ -743,6 +828,11 @@ export class UndraCore {
   // ----- internals -------------------------------------------------------------------
 
   async #start(): Promise<void> {
+    // In `wasm-worker` the core's Clock, Rng and timers are the worker's (ADR-049): explicit adapters for them are said not to reach it.
+    const given = (["clock", "rng", "timer"] as const).filter((name) => this.#options.adapters?.[name] != null);
+    if (given.length > 0 && this.#transport.mode === "wasm-worker") {
+      this.#log(3, "undra::worker", `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`);
+    }
     const hello = await this.#transport.start(this.#handler);
     if (hello.schemaHash !== this.#options.expectedSchemaHash) {
       throw new UndraSchemaMismatchError(this.#options.expectedSchemaHash, hello.schemaHash);
@@ -771,6 +861,7 @@ export class UndraCore {
     if (this.#closed) throw new UndraTransportError("closed", this.#closedMessage);
   }
 
+
   /** Stops everything. `reason` is what pending work fails with; `null` when there is none (a failed start). */
   #dispose(reason: Error | null, why: ConnectionClosedReason = reason === null ? "failed" : "requested"): void {
     if (this.#closed) return;
@@ -797,8 +888,8 @@ export class UndraCore {
     }
   }
 
-  /** Fails every call, stream and `observe` that waits for the core with `failure`. */
-  #failInFlight(failure: Error): void {
+  /** Fails every call, stream and `observe` that waits for the core with `failure`; returns how many calls and streams there were. */
+  #failInFlight(failure: Error): number {
     const pending = [...this.#pending.values()];
     this.#pending.clear();
     for (const p of pending) {
@@ -810,10 +901,18 @@ export class UndraCore {
       }
     }
     this.mirror.failWaiters(failure);
+    return pending.length;
   }
 
-  /** The channel to the core was lost for good. */
+  /** The channel to the core was lost; a trap's panic report goes to `onPanic` first. (A trap the core recovers from never gets here: `crashRecovery` restarts it.) */
   #lost(error: Error): void {
+    if (this.#closed) return;
+    if (isTrap(error)) this.#panicReport(error);
+    this.#lostForGood(error);
+  }
+
+  /** The channel to the core is lost for good: the core closes and `onClose` hears why. */
+  #lostForGood(error: Error): void {
     if (this.#closed) return;
     const why: ConnectionClosedReason =
       error instanceof UndraSchemaMismatchError ? "schemaMismatch" : error instanceof UndraSessionLostError ? "sessionLost" : "failed";
@@ -823,6 +922,30 @@ export class UndraCore {
     } catch (thrown) {
       this.#reportError("onClose", thrown);
     }
+  }
+
+  // ----- recovery (ADR-049 decision 3; the restart sequence is `crashRecovery`'s) ---------------
+
+  /**
+   * Registers a store the runtime re-creates after a restart instead of restoring it (a query handle): its constructor
+   * call is recorded, and after a restart it runs again and the store moves to the new handle.
+   *
+   * @internal Called by `UndraStore` for the `recreate` option that generated query handles pass.
+   */
+  _recreatable(store: UndraStore, call: RecreateCall): void {
+    this.#options.recovery?.track(store, call);
+  }
+
+  /** The panic report of `trap` (ADR-046 decision 4.4), handed to `onPanic`. */
+  #panicReport(trap: Error): UndraPanicReport {
+    const report = panicReport(this.#lastPanicRecord, trap, this.hello.schemaHash, this.#transport.mode);
+    this.#lastPanicRecord = null;
+    try {
+      this.#options.onPanic?.(report);
+    } catch (thrown) {
+      this.#reportError("onPanic", thrown);
+    }
+    return report;
   }
 
   /** The connection dropped and the transport reconnects: what was in flight is lost, the core stays open. */
@@ -990,6 +1113,8 @@ export class UndraCore {
     },
     portCall: (call) => this.#onPortCall(call),
     log: (level, target, message) => {
+      // The panic's own record, logged by the core before it traps: what the panic report says (ADR-046).
+      if (level >= 5 && target === "undra::panic") this.#lastPanicRecord = message;
       this.#log(level, target, message);
       if (target === DEV_NOTICE_TARGET && this.#transport.mode === "remote") this.#devNotice(message);
     },
@@ -1003,6 +1128,7 @@ export class UndraCore {
       this.#reconnected(hello);
     },
     holdsObjects: () => this.#handles.size > 0,
+    ports: () => this.#ports,
   };
 
   #onReply(payload: Uint8Array): void {
@@ -1110,35 +1236,15 @@ export class UndraCore {
   }
 
   #onPortCall(call: PortCallPayload): PortOutcome {
-    const method = this.#ports.get(call.portId)?.methods[call.methodId];
-    if (method === undefined) return UNAVAILABLE;
-    let result: Uint8Array | PromiseLike<Uint8Array>;
-    try {
-      result = method(call.args);
-    } catch (error) {
-      return { kind: "sync", reply: this.#portFailure(call, error) };
-    }
-    if (isThenable(result)) {
-      result.then(
-        (body) => {
-          this.#sendPortReply(encodePortReply({ portCallId: call.portCallId, status: PortStatus.Ok, body }));
-        },
-        (error: unknown) => {
-          this.#sendPortReply(this.#portFailure(call, error));
-        },
-      );
-      return ASYNC;
-    }
-    return { kind: "sync", reply: encodePortReply({ portCallId: call.portCallId, status: PortStatus.Ok, body: result }) };
-  }
-
-  /** The `PortReply` for a port method that threw: its typed error, or "unavailable" after logging anything else. */
-  #portFailure(call: PortCallPayload, error: unknown): Uint8Array {
-    if (error instanceof UndraPortError) {
-      return encodePortReply({ portCallId: call.portCallId, status: PortStatus.Error, body: error.body });
-    }
-    this.#reportError(`port 0x${call.portId.toString(16)} method 0x${call.methodId.toString(16)}`, error);
-    return encodePortReply({ portCallId: call.portCallId, status: PortStatus.Unavailable, body: NO_BYTES });
+    const impl = this.#ports.get(call.portId);
+    return dispatchPortCall(impl, call, {
+      later: (reply) => {
+        this.#sendPortReply(reply);
+      },
+      untyped: (failed, error) => {
+        this.#reportError(portOperation(failed, impl), error);
+      },
+    });
   }
 
   #sendPortReply(reply: Uint8Array): void {

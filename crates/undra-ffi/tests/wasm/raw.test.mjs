@@ -141,7 +141,14 @@ test("without undra_init the entry points fail softly", () => {
   core.x.undra_cancel(1);
   core.observe(0x1_0000_0001n, 0, true);
   const snapshot = core.takeBuf(core.x.undra_snapshot());
-  assert.deepEqual([...snapshot], [0, 0, 0, 0, 0, 0, 0, 0]);
+  // An empty snapshot in layout 2 (ADR-037): no stores, floor 0, this core's schema hash, no types, a description.
+  const r = new Reader(snapshot);
+  assert.equal(r.u32(), 0, "store count");
+  assert.equal(r.u32(), 0, "generation floor");
+  assert.equal(r.u64(), BigInt.asUintN(64, core.x.undra_schema_hash()), "schema hash");
+  assert.equal(r.u32(), 0, "type count");
+  assert.deepEqual(Object.keys(JSON.parse(r.str())).sort(), ["enums", "records", "stores"]);
+  assert.equal(r.remaining, 0);
   assert.equal(core.withBytes(snapshot, (p, n) => core.x.undra_restore(p, n)), 6);
   core.x.undra_buf_free(0);
 });
@@ -402,7 +409,8 @@ test("Clock, Rng and Log have built-in bindings over now_ms, random and log", ()
   const r = new Reader(random.body);
   assert.equal(r.u32(), 16);
   assert.deepEqual([...r.rest()], Array.from({ length: 16 }, (_, i) => (i * 7 + 1) & 0xff));
-  assert.deepEqual(core.randomCalls, [16]);
+  // The 16 bytes and a 16-byte canary the host must overwrite (ADR-049).
+  assert.deepEqual(core.randomCalls, [32]);
   core.logs.length = 0;
   m("log_line", [...Uint8Array.of(3), ...new Writer().str("hello from rust").done()]);
   assert.deepEqual(
@@ -410,6 +418,33 @@ test("Clock, Rng and Log have built-in bindings over now_ms, random and log", ()
     [{ level: 3, target: "calculator", message: "hello from rust", remaining: 0 }],
   );
 });
+
+for (const [name, random] of [
+  ["leaves the bytes alone", () => {}],
+  ["zeroes them", (view) => view.fill(0)],
+  // A host that fills fewer bytes than it was asked for (the shell's canary is the last 16).
+  ["fills only part of the buffer", (view) => view.subarray(0, view.length - 16).fill(9)],
+]) {
+  test(`a host whose random import ${name} makes Rng.fill unavailable: an ERROR record naming the cause, then E0062 (ADR-049)`, () => {
+    const core = fresh({ random });
+    core.init();
+    const calc = core.construct(CALC, i64(0));
+    core.logs.length = 0;
+    assert.throws(
+      () => core.callSync(call.method(calc, ids.method(CALC, "random_bytes"), core.callId(), u32(16))),
+      (error) => error instanceof WebAssembly.RuntimeError,
+      "an Rng without a random source is a loud failure, never predictable bytes",
+    );
+    const error = core.logs.find((l) => l.level === 4 && l.target === "undra::rng");
+    assert.ok(error, JSON.stringify(core.logs));
+    assert.match(error.message, /no cryptographic random source/);
+    assert.match(error.message, /WebCrypto/);
+    const fatal = core.logs.filter((l) => l.level === 5);
+    assert.equal(fatal.length, 1, JSON.stringify(core.logs));
+    assert.match(fatal[0].message, /E0062/);
+    assert.ok(core.logs.indexOf(error) < core.logs.indexOf(fatal[0]), "the cause is logged before the panic");
+  });
+}
 
 test("a host that answers a built-in port overrides it", () => {
   const core = fresh({

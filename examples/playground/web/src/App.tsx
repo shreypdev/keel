@@ -4,6 +4,7 @@ import type { Playground } from "./undra";
 import { type PlaygroundParams, type TabId, resolveTab } from "./url-params";
 import { BigListView } from "./views/BigListView";
 import { CounterView } from "./views/CounterView";
+import { DebugPanel } from "./views/DebugPanel";
 import { LiveView } from "./views/LiveView";
 import { NotesView } from "./views/NotesView";
 import { RemoteView } from "./views/RemoteView";
@@ -95,6 +96,7 @@ export function App({
       <section role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="panel">
         {view}
       </section>
+      <DebugPanel playground={playground} />
     </main>
   );
 }

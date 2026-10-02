@@ -234,10 +234,41 @@ fn store_with_generated_restore() {
                     ctx: Ctx,
                     count: Signal<i64>,
                     note: String,
+                    #[undra(default)]
+                    visits: Signal<u32>,
                 }
             },
         ),
     );
+}
+
+#[test]
+fn migration_hooks() {
+    let ty = impl_::expand_migrate(
+        quote!(ty = "Todo", from = "0x00000000000000ff"),
+        quote! {
+            fn todo_v1(old: &DynValue) -> Result<Todo, MigrateError> {
+                unimplemented!()
+            }
+        },
+    );
+    let signal = impl_::expand_migrate(
+        quote!(store = "Profile", signal = "age"),
+        quote! {
+            fn age(old: Option<&DynValue>) -> Result<f32, MigrateError> {
+                Ok(18.0)
+            }
+        },
+    );
+    let mutation = impl_::expand_migrate(
+        quote!(mutation = "add_todo"),
+        quote! {
+            fn add_todo(old: &DynRecord) -> Result<DynRecord, MigrateError> {
+                Ok(old.clone())
+            }
+        },
+    );
+    check("migrate", quote!(#ty #signal #mutation));
 }
 
 #[test]
@@ -373,6 +404,7 @@ fn every_snapshot_file_has_a_test() {
         "port_impl",
         "query",
         "mutation",
+        "migrate",
     ];
     let dir = snapshot_path("x");
     let dir = dir.parent().expect("snapshot dir");

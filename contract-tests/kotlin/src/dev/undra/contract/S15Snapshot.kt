@@ -3,9 +3,11 @@ package dev.undra.contract
 import dev.undra.playground.core.BigList
 import dev.undra.playground.core.Counter
 import dev.undra.playground.core.Filter
+import dev.undra.playground.core.Legacy
 import dev.undra.playground.core.UndraIds
 import dev.undra.playground.core.Parity
 import dev.undra.playground.core.Probe
+import dev.undra.playground.core.Profile
 import dev.undra.playground.core.Todos
 import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraReplyException
@@ -22,9 +24,13 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.runBlocking
 
-/** S15: a snapshot of every store restores them in place: the handles the app holds stay valid. */
+/**
+ * S15: a snapshot of every store restores them in place: the handles the app holds stay valid. Steps 11 and 14 take the
+ * snapshots build B restores ([migrationBuildB], steps 12 to 14) and refuse a snapshot in the layout before ADR-037.
+ */
 fun s15Snapshot(w: World) {
     val core = w.core
+    Handover.discard("s15")
     val handlesAtStart = w.stats().liveHandles
 
     // 1. Three observed stores with some state, and a fourth that is released before the snapshot.
@@ -135,6 +141,29 @@ fun s15Snapshot(w: World) {
     val streamOutcome = streamEnded.get(WAIT_MS, TimeUnit.MILLISECONDS)
     check(streamOutcome is UndraCallError.CancelledByCore) { "ticks() across a restore ended with $streamOutcome, not UndraCallError.CancelledByCore" }
     streamed.close()
+
+    // 11. Build A's snapshots, for the build-B process: P holds a Profile, L also a Legacy (scenarios.md, "Two builds").
+    val profile = Profile.create("ada")
+    try {
+        profile.visit()
+        profile.visit()
+        expectEq("the Profile in build A", "name=ada;visits=2", profile.describe())
+        val snapshotP = core.snapshot()
+        val legacy = Legacy.create(5)
+        expectEq("the Legacy in build A", "score=5", legacy.describe())
+        val snapshotL = core.snapshot()
+        legacy.close()
+        check(!snapshotP.contentEquals(snapshotL)) { "the snapshot with a Legacy is the snapshot without one" }
+        Handover.write(Handover.Snapshots(snapshotP, snapshotL, profile.handle))
+
+        // 14. A snapshot from before layout 2 (ADR-022's empty one: count, floor) is refused as malformed, and the
+        // core is unchanged.
+        val layout1 = expectFails<UndraRestoreException>("restore of the 8-byte snapshot of the layout before ADR-037") { core.restore(ByteArray(8)) }
+        expectEq("the restore code of a layout-1 snapshot", UndraRestoreException.BAD_SNAPSHOT, layout1.code)
+        expectEq("the Profile after the refused restore", "name=ada;visits=2", profile.describe())
+    } finally {
+        profile.close()
+    }
 
     todos.close()
     counter.close()

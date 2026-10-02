@@ -4,6 +4,7 @@ import {
   UndraModeError,
   UndraPortError,
   UndraReplyError,
+  UndraRestoreError,
   UndraSchemaMismatchError,
   UndraTransportError,
 } from "../src/errors.js";
@@ -83,5 +84,12 @@ describe("errors", () => {
     const error = new UndraTransportError("trap", "unreachable executed", { cause: "x" });
     expect(error.reason).toBe("trap");
     expect(error.cause).toBe("x");
+  });
+
+  it("UndraRestoreError names its codes, 7 INCOMPATIBLE included (ADR-037)", () => {
+    expect([UndraRestoreError.PANICKED, UndraRestoreError.BAD_SNAPSHOT, UndraRestoreError.UNAVAILABLE, UndraRestoreError.INCOMPATIBLE]).toEqual([2, 5, 6, 7]);
+    const incompatible = new UndraRestoreError(7);
+    expect(incompatible.code).toBe(UndraRestoreError.INCOMPATIBLE);
+    expect(incompatible.message).toContain("code 7)");
   });
 });

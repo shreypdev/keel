@@ -208,7 +208,7 @@ impl From<PortError> for WsError {
 ///
 /// Every method has an error channel, so a platform without an adapter answers
 /// `WsError::Network(..E0062..)` instead of panicking.
-#[undra_macros::port]
+#[undra_macros::port(dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait WebSocket {
     /// Opens a connection to `url` (`ws://` or `wss://`), offering `protocols` and sending

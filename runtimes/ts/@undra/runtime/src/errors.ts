@@ -164,8 +164,14 @@ export type TransportFailure =
   | "protocol"
   /** The peer did not answer in time. */
   | "timeout"
-  /** The environment lacks something the transport needs (`WebSocket`, `Worker`, `WebAssembly`). */
-  | "unsupported";
+  /** The environment lacks something the transport needs (`WebSocket`, `Worker`, `WebAssembly`, WebCrypto). */
+  | "unsupported"
+  /**
+   * The wasm core trapped and was restarted from its last snapshot (`LoadOptions.recovery`, ADR-049): what every
+   * call and stream in flight at the trap ends with. The call may or may not have run before the trap; it is not
+   * retried. Generated calls reject with it as `UndraCallError.Unavailable`.
+   */
+  | "restarted";
 
 /** The channel to the core failed. In-flight calls and streams reject with this. */
 export class UndraTransportError extends UndraError {
@@ -187,7 +193,23 @@ export class UndraTransportError extends UndraError {
  */
 export class UndraRestoreError extends UndraError {
   override readonly name: string = "UndraRestoreError";
-  /** The non-zero code `undra_restore` returned: 2 a store's restore panicked, 5 the snapshot is malformed or names something the core does not have, 6 the core is shut down or was called from inside a callback. */
+  /** `undra_restore` code 2: a store's restore function panicked (contained). */
+  static readonly PANICKED = 2;
+  /** `undra_restore` code 5: the snapshot is malformed (also one in a layout before ADR-037), names an unknown store type, has a null or duplicate handle, or a store rejected its values. */
+  static readonly BAD_SNAPSHOT = 5;
+  /** `undra_restore` code 6: no running core, it is shut down, or the restore was made from inside a core callback. */
+  static readonly UNAVAILABLE = 6;
+  /**
+   * `undra_restore` code 7 (ADR-037): a store's persisted values cannot become this build's types; they neither
+   * migrate structurally nor through a `#[undra::migrate]` hook. The reason is in the ERROR record the core logged.
+   */
+  static readonly INCOMPATIBLE = 7;
+  /**
+   * The non-zero code `undra_restore` returned: {@link UndraRestoreError.PANICKED} (2) a store's restore panicked,
+   * {@link UndraRestoreError.BAD_SNAPSHOT} (5) the snapshot is malformed or names something the core does not have,
+   * {@link UndraRestoreError.UNAVAILABLE} (6) the core is shut down or was called from inside a callback,
+   * {@link UndraRestoreError.INCOMPATIBLE} (7) a store's persisted values cannot become this build's types (ADR-037).
+   */
   readonly code: number;
 
   /** @param code The non-zero code `undra_restore` returned. */

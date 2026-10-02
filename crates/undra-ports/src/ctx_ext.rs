@@ -122,8 +122,10 @@ mod tests {
             .run_until(ctx.http().request(crate::HttpRequest::get("u")))
             .unwrap();
         assert_eq!(response.status, 204);
-        t.run_until(ctx.kv().set("k".into(), Bytes(vec![1])));
-        t.run_until(ctx.secure_store().set("s".into(), Bytes(vec![2])));
+        t.run_until(ctx.kv().set("k".into(), Bytes(vec![1])))
+            .unwrap();
+        t.run_until(ctx.secure_store().set("s".into(), Bytes(vec![2])))
+            .unwrap();
         t.run_until(ctx.fs().write("f".into(), Bytes(vec![3])))
             .unwrap();
         ctx.timer().set(1, 5);

@@ -16,6 +16,7 @@ import dev.undra.runtime.adapters.LogAdapter
 import dev.undra.runtime.adapters.NetKind
 import dev.undra.runtime.adapters.RngAdapter
 import dev.undra.runtime.adapters.StandardPorts
+import dev.undra.runtime.adapters.StorageError
 import dev.undra.runtime.adapters.TimerAdapter
 import dev.undra.runtime.support.FakeTransport
 import dev.undra.runtime.support.LogCapture
@@ -92,6 +93,14 @@ class AdapterTests : Suite() {
             assertBytes("0000", FsError.encodeToByteArray(FsError.NotFound))
             assertBytes("0100", FsError.encodeToByteArray(FsError.Denied))
             assertBytes("0200" + "01000000" + "65", FsError.encodeToByteArray(FsError.Io("e")))
+            assertBytes("0300", FsError.encodeToByteArray(FsError.Full))
+            assertBytes("0400" + "01000000" + "65", FsError.encodeToByteArray(FsError.Unavailable("e")))
+            // StorageError (ADR-049): the bytes of `storage_error_variants` in crates/undra-ports/tests/encoding.rs.
+            assertBytes("0000" + "01000000" + "65", StorageError.encodeToByteArray(StorageError.Unavailable("e")))
+            assertBytes("0100", StorageError.encodeToByteArray(StorageError.Full))
+            assertBytes("0200", StorageError.encodeToByteArray(StorageError.Locked))
+            assertBytes("0300" + "01000000" + "65", StorageError.encodeToByteArray(StorageError.Corrupt("e")))
+            assertBytes("0400" + "01000000" + "65", StorageError.encodeToByteArray(StorageError.Io("e")))
             assertBytes("0400", NetKind.encodeToByteArray(NetKind.NONE))
             assertBytes("0200", AppState.encodeToByteArray(AppState.BACKGROUND))
             assertBytes("0600", HttpMethod.encodeToByteArray(HttpMethod.OPTIONS))
@@ -103,8 +112,10 @@ class AdapterTests : Suite() {
             for (a in AppState.entries) assertEq(a, AppState.decodeAll(AppState.encodeToByteArray(a)))
             val errors = listOf(HttpError.Network("héllo 🌊"), HttpError.Timeout, HttpError.Cancelled, HttpError.InvalidUrl(""))
             for (e in errors) assertEq(e, HttpError.decodeAll(HttpError.encodeToByteArray(e)))
-            val fs = listOf(FsError.NotFound, FsError.Denied, FsError.Io("disk"))
+            val fs = listOf(FsError.NotFound, FsError.Denied, FsError.Io("disk"), FsError.Full, FsError.Unavailable("no root é"))
             for (e in fs) assertEq(e, FsError.decodeAll(FsError.encodeToByteArray(e)))
+            val storage = listOf(StorageError.Unavailable("no Keystore"), StorageError.Full, StorageError.Locked, StorageError.Corrupt("bad tag 🌊"), StorageError.Io(""))
+            for (e in storage) assertEq(e, StorageError.decodeAll(StorageError.encodeToByteArray(e)))
             val request = HttpRequest(HttpMethod.PUT, "https://example.com/é?q=1", listOf(Header("A", "1"), Header("A", "2")), ByteArray(70_000) { it.toByte() }, UInt.MAX_VALUE)
             assertEq(request, HttpRequest.decodeAll(HttpRequest.encodeToByteArray(request)))
             assertEq(request.hashCode(), HttpRequest.decodeAll(HttpRequest.encodeToByteArray(request)).hashCode())
@@ -118,7 +129,12 @@ class AdapterTests : Suite() {
             assertThrows<WireException.InvalidTag> { NetKind.decodeAll(byteArrayOf(5, 0)) }
             assertThrows<WireException.InvalidTag> { AppState.decodeAll(byteArrayOf(3, 0)) }
             assertThrows<WireException.InvalidTag> { HttpError.decodeAll(byteArrayOf(4, 0)) }
-            assertThrows<WireException.InvalidTag> { FsError.decodeAll(byteArrayOf(3, 0)) }
+            assertThrows<WireException.InvalidTag> { FsError.decodeAll(byteArrayOf(5, 0)) }
+            assertEq("StorageError", assertThrows<WireException.InvalidTag> { StorageError.decodeAll(byteArrayOf(5, 0)) }.type)
+            for (e in listOf<StorageError>(StorageError.Unavailable("x"), StorageError.Corrupt("x"), StorageError.Io("x"))) {
+                val bytes = StorageError.encodeToByteArray(e)
+                for (cut in 0 until bytes.size) assertThrows<WireException>("$e cut at $cut") { StorageError.decodeAll(bytes.copyOf(cut)) }
+            }
             val bytes = HttpRequest.encodeToByteArray(HttpRequest(HttpMethod.GET, "/x", listOf(Header("a", "b")), byteArrayOf(1), 1u))
             for (cut in 0 until bytes.size) assertThrows<WireException>("cut at $cut") { HttpRequest.decodeAll(bytes.copyOf(cut)) }
         }
@@ -127,6 +143,49 @@ class AdapterTests : Suite() {
             assertTrue(HttpError.Network("refused").message!!.contains("refused"))
             assertTrue(HttpError.InvalidUrl("no host").message!!.contains("no host"))
             assertTrue(FsError.Io("disk full").message!!.contains("disk full"))
+        }
+
+        case("FsError and StorageError messages are the core's (undra-ports' #[error] texts), and both are UndraExceptions") {
+            assertEq("not found", FsError.NotFound.message)
+            assertEq("access denied", FsError.Denied.message)
+            assertEq("I/O error: disk", FsError.Io("disk").message)
+            assertEq("the disk is full", FsError.Full.message)
+            assertEq("the file system is unavailable: no OPFS", FsError.Unavailable("no OPFS").message)
+            assertEq("storage is unavailable: needs IndexedDB", StorageError.Unavailable("needs IndexedDB").message)
+            assertEq("the storage is full", StorageError.Full.message)
+            assertEq("the storage is locked", StorageError.Locked.message)
+            assertEq("stored data is corrupt: bad tag", StorageError.Corrupt("bad tag").message)
+            assertEq("storage I/O error: EIO", StorageError.Io("EIO").message)
+            val caught: UndraException = StorageError.Locked
+            assertTrue(caught is StorageError)
+        }
+
+        case("StorageError: Unavailable, Locked and Io are transient, Full and Corrupt are not (the core's is_transient)") {
+            assertTrue(StorageError.Unavailable("").isTransient)
+            assertTrue(StorageError.Locked.isTransient)
+            assertTrue(StorageError.Io("").isTransient)
+            assertTrue(!StorageError.Full.isTransient)
+            assertTrue(!StorageError.Corrupt("").isTransient)
+        }
+
+        case("StorageError.of reads an exhausted disk or quota as Full however the platform spells it, anything else as Io") {
+            val full = listOf(
+                java.io.IOException("No space left on device"), // the JVM's FileChannel write on macOS and Linux
+                java.nio.file.FileSystemException("/data/kv/x.tmp", null, "No space left on device"),
+                java.io.IOException("write failed: ENOSPC (No space left on device)"), // Android's ErrnoException.rethrowAsIOException
+                java.io.IOException("write failed", java.io.IOException("ENOSPC")), // the errno only in a cause
+                java.io.IOException("Disk quota exceeded"),
+                java.io.IOException("write failed: EDQUOT (Disk quota exceeded)"),
+                java.io.IOException("There is not enough space on the disk"), // Windows
+            )
+            for (e in full) assertEq(StorageError.Full, StorageError.of(e), e.toString())
+            assertEq(StorageError.Io("Input/output error"), StorageError.of(java.io.IOException("Input/output error")))
+            assertEq(StorageError.Io("IOException"), StorageError.of(java.io.IOException()))
+            // A FileSystemException without a reason says only the file: the class names what happened.
+            assertEq(StorageError.Io("AccessDeniedException: /data/kv/x"), StorageError.of(java.nio.file.AccessDeniedException("/data/kv/x")))
+            // A cyclic or very deep cause chain ends.
+            val deep = (1..50).fold(java.io.IOException("bottom")) { inner, i -> java.io.IOException("level $i", inner) }
+            assertEq(StorageError.Io("level 50"), StorageError.of(deep))
         }
 
         case("Clock: wall time and a monotonic counter from zero, as a sync port") {

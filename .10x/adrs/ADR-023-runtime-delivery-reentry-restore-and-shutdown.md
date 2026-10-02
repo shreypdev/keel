@@ -113,3 +113,12 @@ release-build behavior. This supersedes alternative (c) of ADR-020.
 * Residual, not fixed: a release-build embedder that writes signals off-core is unchecked (the
   lock-level ordering still holds); `Runtime::init` still runs `InitHook`s before the embedder can
   bind ports (L2, documented in SPEC 6).
+
+## Note (2026-10-01, ADR-037)
+
+Restore stays all or nothing, with one exception ADR-037 decision 7 states: a store **type** the
+current build no longer has is left out (its handles answer `stale_handle`) and reported
+(`Runtime::restore_with_report`, a WARN) instead of failing the whole restore. A store whose
+persisted values cannot become today's types fails it with `RestoreError::Incompatible` (restore
+code 7). The re-observe phase of decision 1 now re-observes a handle only when the restored store
+there has the type it was observed as (ADR-037 decision 9).

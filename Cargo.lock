@@ -1481,6 +1481,7 @@ dependencies = [
  "futures-core",
  "inventory",
  "parking_lot",
+ "proptest",
  "serde_json",
  "slab",
  "undra-meta",

@@ -1,0 +1,62 @@
+error: error[undra::E0066]: `#[undra::migrate]` needs a target
+         = note: a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape
+         = help: name exactly one target: `ty = "Todo"`, `store = "Profile", signal = "age"` or `mutation = "add_todo"`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0066
+  --> tests/ui/e0066_migrate_shape.rs:13:4
+   |
+13 | fn nothing(old: &DynValue) -> Result<Todo, MigrateError> {
+   |    ^^^^^^^
+
+error: error[undra::E0066]: `#[undra::migrate]` names more than one target
+         = note: a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape
+         = help: name exactly one target: `ty = "Todo"`, `store = "Profile", signal = "age"` or `mutation = "add_todo"`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0066
+  --> tests/ui/e0066_migrate_shape.rs:19:4
+   |
+19 | fn both(old: &DynValue) -> Result<Todo, MigrateError> {
+   |    ^^^^
+
+error: error[undra::E0066]: `signal = ".."` needs `store = ".."`
+         = note: a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape
+         = help: name the store the signal belongs to: `store = "Profile", signal = "age"`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0066
+  --> tests/ui/e0066_migrate_shape.rs:24:27
+   |
+24 | #[undra::migrate(signal = "age")]
+   |                           ^^^^^
+
+error: error[undra::E0066]: the migration hook `wrong_parameter` must take one parameter, `old: Option<&DynValue>`
+         = note: a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape
+         = help: write `fn wrong_parameter(old: Option<&DynValue>) -> Result<T, MigrateError>`, where `T` is the signal's value type (`old` is `None` when the snapshot lacks the signal): a plain, non-generic, non-async function
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0066
+  --> tests/ui/e0066_migrate_shape.rs:31:20
+   |
+31 | fn wrong_parameter(old: &DynValue) -> Result<f32, MigrateError> {
+   |                    ^^^^^^^^^^^^^^
+
+error: error[undra::E0066]: the migration hook `wrong_return` must return `Result<DynRecord, MigrateError>`
+         = note: a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape
+         = help: write `fn wrong_return(old: &DynRecord) -> Result<DynRecord, MigrateError>`: a plain, non-generic, non-async function
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0066
+  --> tests/ui/e0066_migrate_shape.rs:37:37
+   |
+37 | fn wrong_return(old: &DynRecord) -> Result<Todo, MigrateError> {
+   |                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0066]: `from = "not-hex"` is not a fingerprint
+         = note: a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape
+         = help: write the 64-bit fingerprint of the old type in hex, as the runtime's log or `undra.types.<fingerprint>` key shows it: `from = "0x0123456789abcdef"`, or leave `from` out to take every old version
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0066
+  --> tests/ui/e0066_migrate_shape.rs:42:38
+   |
+42 | #[undra::migrate(ty = "Todo", from = "not-hex")]
+   |                                      ^^^^^^^^^
+
+error: error[undra::E0066]: the migration hook `later` must be a plain, non-generic, non-async `fn`
+         = note: a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape
+         = help: write `fn later(old: &DynValue) -> Result<T, MigrateError>`, where `T` is the target type: a plain, non-generic, non-async function
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0066
+  --> tests/ui/e0066_migrate_shape.rs:49:10
+   |
+49 | async fn later(old: &DynValue) -> Result<Todo, MigrateError> {
+   |          ^^^^^

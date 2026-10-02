@@ -200,6 +200,11 @@ pub struct SignalDef {
     /// signal is what it was before the field existed.
     #[serde(default, skip_serializing_if = "is_false")]
     pub no_coalesce: bool,
+    /// `#[undra(default)]` on a `Signal<T>` field (ADR-037): a restore of a snapshot that lacks
+    /// the signal fills it with `T::default()`. Serialized only when `true`, like `no_coalesce`,
+    /// so a schema without such a signal hashes as it did before the field existed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub default: bool,
 }
 
 /// `skip_serializing_if` for flags that are written only when set.

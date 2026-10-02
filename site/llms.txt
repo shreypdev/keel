@@ -11,8 +11,8 @@ Undra is open source (MIT OR Apache-2.0) and ships an `undra` CLI (`undra init`,
 - [Core concepts · Undra docs](https://shreypdev.github.io/undra/docs/concepts.html): Stores, signals, computeds, transactions, change-sets and keyed lists, and why a list write costs the change and not the list.
 - [Queries & mutations · Undra docs](https://shreypdev.github.io/undra/docs/queries.html): The data layer in the core: cached queries with staleness and dedup, retry, optimistic mutations with precise rollback, persistence and an offline queue.
 - [Ports & adapters · Undra docs](https://shreypdev.github.io/undra/docs/ports.html): The ten standard ports, the default adapter on each platform, how to supply your own, what happens when one is missing, and the fakes for tests.
-- [WebSocket & server-sent events · Undra docs](https://shreypdev.github.io/undra/docs/realtime.html): Real-time from the core: an opt-in WebSocket port with backpressure, server-sent events that resume, typed ends, reconnection under your control.
-- [Local database · Undra docs](https://shreypdev.github.io/undra/docs/db.html): SQL in the core over the platform's SQLite: an opt-in Db port with migrations, bound parameters, transactions and typed errors.
+- [Workers & crash recovery · Undra docs](https://shreypdev.github.io/undra/docs/web.html): The web core in a Web Worker: where synchronous ports run, the worker.ports module, and restarting a trapped wasm core from its last snapshot.
+- [Shipping an update · Undra docs](https://shreypdev.github.io/undra/docs/updates.html): Snapshots, cached queries and queued mutations across an app update: what migrates by name for free, how to write a hook, what is refused.
 - [One core or several · Undra docs](https://shreypdev.github.io/undra/docs/several-cores.html): When an app should carry one Undra core and when several, how a core's namespace keeps them apart, and how to load two side by side.
 - [The CLI · Undra docs](https://shreypdev.github.io/undra/docs/cli.html): Every undra command and flag, the undra.toml project file, exit codes and how errors are reported.
 - [Architecture · Undra docs](https://shreypdev.github.io/undra/docs/architecture.html): How Undra is built: the schema, generators, runtimes, wire format and C ABI, the threading model, diagnostics, and the twelve rules every change follows.
@@ -20,6 +20,8 @@ Undra is open source (MIT OR Apache-2.0) and ships an `undra` CLI (`undra init`,
 - [API overview, Swift · Undra docs](https://shreypdev.github.io/undra/docs/api-swift.html): What Undra's generated Swift looks like: records, enums, errors, objects, stores, query handles and ports, and how the UndraRuntime package loads the core.
 - [API overview, Kotlin · Undra docs](https://shreypdev.github.io/undra/docs/api-kotlin.html): What Undra's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.
 - [API overview, TypeScript · Undra docs](https://shreypdev.github.io/undra/docs/api-typescript.html): What Undra's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.
+- [Local database · Undra docs](https://shreypdev.github.io/undra/docs/db.html): SQL in the core over the platform's SQLite: an opt-in Db port with migrations, bound parameters, transactions and typed errors.
+- [WebSocket & server-sent events · Undra docs](https://shreypdev.github.io/undra/docs/realtime.html): Real-time from the core: an opt-in WebSocket port with backpressure, server-sent events that resume, typed ends, reconnection under your control.
 
 ## Reference
 

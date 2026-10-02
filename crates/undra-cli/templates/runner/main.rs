@@ -133,12 +133,22 @@ impl undra_ports::Log for NativeLog {
 
 fn bind_native_ports(runtime: &Arc<Runtime>) {
     use undra_runtime::Port;
-    runtime.bind_dyn_port::<dyn undra_ports::Clock>(
+    // With their dispatchers, so a raw port call (a generated proxy) reaches them too (ADR-052).
+    runtime.bind_dyn_port_with::<dyn undra_ports::Clock>(
         <dyn undra_ports::Clock as Port>::PORT_ID,
         Arc::new(NativeClock(std::time::Instant::now())),
+        &undra_ports::CLOCK_DISPATCHER,
     );
-    runtime.bind_dyn_port::<dyn undra_ports::Rng>(<dyn undra_ports::Rng as Port>::PORT_ID, Arc::new(NativeRng));
-    runtime.bind_dyn_port::<dyn undra_ports::Log>(<dyn undra_ports::Log as Port>::PORT_ID, Arc::new(NativeLog));
+    runtime.bind_dyn_port_with::<dyn undra_ports::Rng>(
+        <dyn undra_ports::Rng as Port>::PORT_ID,
+        Arc::new(NativeRng),
+        &undra_ports::RNG_DISPATCHER,
+    );
+    runtime.bind_dyn_port_with::<dyn undra_ports::Log>(
+        <dyn undra_ports::Log as Port>::PORT_ID,
+        Arc::new(NativeLog),
+        &undra_ports::LOG_DISPATCHER,
+    );
 }
 // @ports:end
 
@@ -231,31 +241,44 @@ fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
         return reset(handover, "the state handed over was malformed".to_owned());
     };
     let ours = format!("{:#018x}", runtime.schema_hash());
-    // A snapshot is restored by position into whatever types the new core has: across a schema
-    // change that can succeed with wrong values (ADR-037), so a changed hash means fresh state.
-    if old_hash != ours {
-        return reset(handover, format!("schema changed (was {old_hash}, now {ours})"));
-    }
     let (Some(bytes), Some(handles)) = (from_hex(hex), parse_handles(handles)) else {
         return reset(handover, "the state handed over did not decode".to_owned());
     };
-    let stores: HashSet<u64> = {
+    let mut stores: HashSet<u64> = {
         let mut reader = Reader::new(&bytes);
         match Snapshot::decode(&mut reader) {
             Ok(snapshot) => snapshot.stores.iter().map(|s| s.handle.0).collect(),
             Err(e) => return reset(handover, format!("the snapshot is malformed: {e}")),
         }
     };
+    // Across a schema change too (ADR-037): the restore matches signals by name, migrates what
+    // changed structurally (and through the app's `#[undra::migrate]` hooks), and otherwise refuses
+    // as a whole and changes nothing, so the state is never restored with wrong values.
     let started = Instant::now();
-    if let Err(e) = runtime.restore(&bytes) {
-        return reset(handover, format!("the core refused the snapshot: {e}"));
-    }
+    let report = match runtime.restore_with_report(&bytes) {
+        Ok(report) => report,
+        Err(e) => return reset(handover, format!("the core refused the snapshot: {e}")),
+    };
     let micros = started.elapsed().as_micros();
+    // A store type the rebuild removed was left out: its handles are stale, like a plain object's.
+    for dropped in &report.dropped {
+        for handle in &dropped.handles {
+            stores.remove(handle);
+        }
+    }
+    let restored = stores.len();
     // Objects that are not stores (and query handles) do not survive a restore: their handles
     // are stale and the app re-creates them.
     let (kept, lost): (Vec<u64>, Vec<u64>) = handles.into_iter().partition(|h| stores.contains(h));
     let mut text = "Reloaded, state kept".to_owned();
     let mut caveats = Vec::new();
+    if old_hash != ours {
+        caveats.push(if report.migrated.is_empty() {
+            "the schema changed".to_owned()
+        } else {
+            format!("the schema changed: {} migrated", report.migrated.join(", "))
+        });
+    }
     if !lost.is_empty() {
         caveats.push(format!("{} not carried over", plural(lost.len(), "object", "objects")));
     }
@@ -274,7 +297,7 @@ fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
         window: NOTICE_WINDOW,
         ..AttachNotices::default()
     };
-    say(&format!("restored {} {} {} {micros}", stores.len(), lost.len(), bytes.len()));
+    say(&format!("restored {restored} {} {} {micros}", lost.len(), bytes.len()));
 }
 
 /// Binds `addr` and serves `runtime`, holding the handed-over session and telling the clients what

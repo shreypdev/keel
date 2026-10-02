@@ -84,7 +84,7 @@ internal class ConnectedCore(
     @Volatile
     private var closeCause: Throwable? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("undra-ports"))
-    private val ports = PortRegistry(scope, ::reportFromCore) { payload ->
+    private val ports = PortRegistry(scope, ::reportPortFailure) { payload ->
         if (!closed.get()) {
             try {
                 transport.portReply(payload)
@@ -380,6 +380,11 @@ internal class ConnectedCore(
             return
         }
         UndraLog.error(unhandled.message.orEmpty(), error)
+        deliver(unhandled)
+    }
+
+    /** Hands [unhandled] to `onError`, at most once per thread at a time. */
+    private fun deliver(unhandled: UndraUnhandledError) {
         val handler = onError ?: return
         if (reporting.get()) return
         reporting.set(true)
@@ -390,6 +395,15 @@ internal class ConnectedCore(
         } finally {
             reporting.set(false)
         }
+    }
+
+    /**
+     * A port implementation that failed with something other than its typed error (ADR-049): the registry has logged
+     * it at error level, naming the port, and answered the core `unavailable`; what is left is `onError`, on the
+     * delivery thread (the failure may have been found inside a core callback).
+     */
+    private fun reportPortFailure(error: Throwable, operation: String) {
+        UndraDispatchers.delivery.execute { deliver(UndraUnhandledError(operation, UndraCallError.asCallError(error))) }
     }
 
     /**

@@ -30,12 +30,25 @@ constexpr uint8_t kOk = 0;
 constexpr uint8_t kTypedError = 1;
 constexpr uint8_t kUnavailable = 2;
 
-/// The encoded `FsError` of a failure.
+/// The encoded `FsError` of a failure: the variant, then the text of `Io` and `Unavailable`.
 std::vector<uint8_t> fsError(const FsFailure &failure) {
   WireWriter w;
   w.u16(static_cast<uint16_t>(failure.kind));
-  if (failure.kind == FsErrorKind::Io) w.str(failure.message);
+  if (failure.kind == FsErrorKind::Io || failure.kind == FsErrorKind::Unavailable) w.str(failure.message);
   return std::move(w.out);
+}
+
+/// A `PortReply` with the typed `StorageError` of a `Kv` or `SecureStore` failure (status 1,
+/// ADR-049): the variant, then the text of `Unavailable`, `Corrupt` and `Io`. Never "unavailable"
+/// (status 2) for a store that answered: that would read as "no adapter registered" (E0062), and the
+/// query client would wait for a damaged queue to become readable instead of dead-lettering it.
+std::vector<uint8_t> storageFailure(uint32_t portCallId, StorageErrorKind kind, const std::string &message) {
+  WireWriter w;
+  w.u16(static_cast<uint16_t>(kind));
+  if (kind == StorageErrorKind::Unavailable || kind == StorageErrorKind::Corrupt || kind == StorageErrorKind::Io) {
+    w.str(message);
+  }
+  return portReply(portCallId, kTypedError, w.out);
 }
 
 std::vector<uint8_t> optionBytes(const std::optional<std::vector<uint8_t>> &value) {
@@ -256,13 +269,14 @@ std::vector<uint8_t> NativeDefaults::kv(KvStore &store, uint32_t portId, uint32_
   WireReader r(args.data(), args.size());
   const char *name = portName(portId);
   std::string error;
+  StorageErrorKind kind = StorageErrorKind::Io;
   if (methodId == ports::kKvGet) {
     const std::string key = r.str();
     if (!r.finish()) return portReply(portCallId, kUnavailable);
     std::optional<std::vector<uint8_t>> value;
-    if (!store.get(key, value, error)) {
+    if (!store.get(key, value, error, &kind)) {
       log_(4, std::string(name) + ".get failed: " + error);
-      return portReply(portCallId, kUnavailable);
+      return storageFailure(portCallId, kind, error);
     }
     return portReply(portCallId, kOk, optionBytes(value));
   }
@@ -270,18 +284,18 @@ std::vector<uint8_t> NativeDefaults::kv(KvStore &store, uint32_t portId, uint32_
     const std::string key = r.str();
     const std::vector<uint8_t> value = r.bytes();
     if (!r.finish()) return portReply(portCallId, kUnavailable);
-    if (!store.set(key, value.data(), value.size(), error)) {
+    if (!store.set(key, value.data(), value.size(), error, &kind)) {
       log_(4, std::string(name) + ".set failed: " + error);
-      return portReply(portCallId, kUnavailable);
+      return storageFailure(portCallId, kind, error);
     }
     return portReply(portCallId, kOk);
   }
   if (methodId == ports::kKvDelete) {
     const std::string key = r.str();
     if (!r.finish()) return portReply(portCallId, kUnavailable);
-    if (!store.remove(key, error)) {
+    if (!store.remove(key, error, &kind)) {
       log_(4, std::string(name) + ".delete failed: " + error);
-      return portReply(portCallId, kUnavailable);
+      return storageFailure(portCallId, kind, error);
     }
     return portReply(portCallId, kOk);
   }
@@ -289,9 +303,9 @@ std::vector<uint8_t> NativeDefaults::kv(KvStore &store, uint32_t portId, uint32_
     const std::string prefix = r.str();
     if (!r.finish()) return portReply(portCallId, kUnavailable);
     std::vector<std::string> keys;
-    if (!store.list(prefix, keys, error)) {
+    if (!store.list(prefix, keys, error, &kind)) {
       log_(4, std::string(name) + ".list failed: " + error);
-      return portReply(portCallId, kUnavailable);
+      return storageFailure(portCallId, kind, error);
     }
     WireWriter w;
     w.strings(keys);
@@ -310,7 +324,8 @@ std::vector<uint8_t> NativeDefaults::secure(uint32_t methodId, uint32_t portCall
     std::optional<std::vector<uint8_t>> value;
     if (!store.get(key, value, error)) {
       log_(4, "SecureStore.get failed: " + error);
-      return portReply(portCallId, kUnavailable);
+      // The platform's Keychain or Keystore said why in `error`; it has no variant to give, so `Io`.
+      return storageFailure(portCallId, StorageErrorKind::Io, error);
     }
     return portReply(portCallId, kOk, optionBytes(value));
   }
@@ -320,7 +335,8 @@ std::vector<uint8_t> NativeDefaults::secure(uint32_t methodId, uint32_t portCall
     if (!r.finish()) return portReply(portCallId, kUnavailable);
     if (!store.set(key, value, error)) {
       log_(4, "SecureStore.set failed: " + error);
-      return portReply(portCallId, kUnavailable);
+      // The platform's Keychain or Keystore said why in `error`; it has no variant to give, so `Io`.
+      return storageFailure(portCallId, StorageErrorKind::Io, error);
     }
     return portReply(portCallId, kOk);
   }
@@ -329,7 +345,8 @@ std::vector<uint8_t> NativeDefaults::secure(uint32_t methodId, uint32_t portCall
     if (!r.finish()) return portReply(portCallId, kUnavailable);
     if (!store.remove(key, error)) {
       log_(4, "SecureStore.delete failed: " + error);
-      return portReply(portCallId, kUnavailable);
+      // The platform's Keychain or Keystore said why in `error`; it has no variant to give, so `Io`.
+      return storageFailure(portCallId, StorageErrorKind::Io, error);
     }
     return portReply(portCallId, kOk);
   }
@@ -339,7 +356,8 @@ std::vector<uint8_t> NativeDefaults::secure(uint32_t methodId, uint32_t portCall
     std::vector<std::string> keys;
     if (!store.list(prefix, keys, error)) {
       log_(4, "SecureStore.list failed: " + error);
-      return portReply(portCallId, kUnavailable);
+      // The platform's Keychain or Keystore said why in `error`; it has no variant to give, so `Io`.
+      return storageFailure(portCallId, StorageErrorKind::Io, error);
     }
     WireWriter w;
     w.strings(keys);

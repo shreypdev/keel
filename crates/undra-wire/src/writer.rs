@@ -102,6 +102,22 @@ impl Writer {
         self.buf.clear();
     }
 
+    /// Discards everything written after the first `len` bytes (nothing if fewer were written):
+    /// undoes a partial write.
+    ///
+    /// ```
+    /// let mut w = undra_wire::Writer::new();
+    /// w.write_u8(1);
+    /// let mark = w.len();
+    /// w.write_u32(7);
+    /// w.truncate(mark);
+    /// assert_eq!(w.as_slice(), [1]);
+    /// ```
+    #[inline]
+    pub fn truncate(&mut self, len: usize) {
+        self.buf.truncate(len);
+    }
+
     /// The bytes written so far.
     #[inline]
     pub fn as_slice(&self) -> &[u8] {

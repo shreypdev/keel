@@ -22,7 +22,7 @@ use undra_runtime::testing::TestRuntime;
 use undra_wire::{Bytes, Decode, Encode};
 
 /// `Schema::hash()` of the standard ports with all three opt-in ports.
-const SCHEMA_HASH: u64 = 0xdb07_a090_521a_1971;
+const SCHEMA_HASH: u64 = 0x716f_c678_df98_087c;
 
 const GOLDEN: &str = "tests/golden/schema-opt-in.json";
 

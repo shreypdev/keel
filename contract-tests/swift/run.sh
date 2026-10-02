@@ -2,24 +2,34 @@
 # Runs the Swift column of the contract scenarios (contract-tests/scenarios.md): the Swift runtime
 # over the C ABI, against the real playground core, through the generated bindings.
 #
-#   contract-tests/swift/run.sh                 all of them (S01..S19, S23..S26), then the check
+#   contract-tests/swift/run.sh                 all of them (S01 to S20, S23 to S26), then the check
 #   contract-tests/swift/run.sh --filter ContractScenarios/testS07_streamWithBackpressure
 #
 # What it does:
 #   1. builds the cores for the host with the undra CLI (`undra build --platform host`, incremental):
-#      the playground's (namespace playground_core) and S26's two (examples/two-cores/a and b),
+#      first build B of the migration steps (`UNDRA_PLAYGROUND_V2=1`, scenarios.md "Two builds"), whose
+#      library is copied aside to .build/core-b, then build A, the default (namespace playground_core),
+#      and S26's two (examples/two-cores/a and b),
 #   2. stages a copy of each lib<namespace>.dylib under .build/core (Package.swift links them and adds
 #      the rpath). Each exports one symbol, its table entry (ADR-044), so the three sit side by side;
 #      a dynamic library keeps every object file of the core, so its registrations need no flag,
-#   3. runs `swift test`,
-#   4. pipes the `SCENARIO` lines through contract-tests/check.sh.
+#   3. runs `swift test`. S14 and S15 hand what build A persisted over in .build/migration,
+#   4. swaps build B's library into .build/core and runs only `MigrationBuildB` in a second process
+#      (`swift test --skip-build`, UNDRA_CONTRACT_PHASE=B), which prints `SCENARIO S14|S15 FAIL` lines
+#      if build B's steps fail, then puts build A's library back (also when something fails),
+#   5. pipes the `SCENARIO` lines of both processes through contract-tests/check.sh.
 # The exit status is non-zero if the tests fail or any scenario is not a PASS.
+# A filtered run skips step 4 (the build-B steps need the whole of S14 and S15).
 # S23 and S24 start contract-tests/servers/realtime-server.mjs with Node (it exits with this run).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
+PROJECT="$REPO/examples/playground"
 UNDRA="${UNDRA:-$REPO/target/debug/undra}"
 LOG="$HERE/.build/contract.log"
+STAGE="$HERE/.build/core"
+STAGE_B="$HERE/.build/core-b"
+HANDOVER="$HERE/.build/migration"
 
 if [ -z "${DEVELOPER_DIR:-}" ] && [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
   export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
@@ -29,31 +39,57 @@ if [ ! -x "$UNDRA" ]; then
   cargo build --manifest-path "$REPO/Cargo.toml" -p undra-cli
 fi
 
-# 1 and 2. The cores and their staged copies. `undra build` names each `@rpath/lib<namespace>.dylib`;
-# the copy keeps the test bundle away from the build directories.
-STAGE="$HERE/.build/core"
-mkdir -p "$STAGE"
-stage() { # <project dir> <namespace>
-  "$UNDRA" build -C "$1" --platform host >&2
-  local core="$1/build/host/lib$2.dylib"
-  if [ ! -f "$STAGE/lib$2.dylib" ] || [ "$core" -nt "$STAGE/lib$2.dylib" ]; then
-    cp "$core" "$STAGE/lib$2.dylib"
-    install_name_tool -id "@rpath/lib$2.dylib" "$STAGE/lib$2.dylib"
-    codesign --force --sign - "$STAGE/lib$2.dylib" >/dev/null 2>&1
-  fi
+CORE="$PROJECT/build/host/libplayground_core.dylib"
+
+# Copies a built library to $2/<its name> with an @rpath install name; the copy keeps the test bundle away
+# from the build directories.
+stage() {
+  local name
+  name="$(basename "$1")"
+  mkdir -p "$2"
+  cp "$1" "$2/$name"
+  install_name_tool -id "@rpath/$name" "$2/$name"
+  codesign --force --sign - "$2/$name" >/dev/null 2>&1
 }
-stage "$REPO/examples/playground" playground_core
-stage "$REPO/examples/two-cores/a" playground_a
-stage "$REPO/examples/two-cores/b" playground_b
+
+# 1. The cores: build B first, kept aside, then build A (what the apps and the bindings are made from).
+UNDRA_PLAYGROUND_V2=1 "$UNDRA" build -C "$PROJECT" --platform host >&2
+stage "$CORE" "$STAGE_B"
+"$UNDRA" build -C "$PROJECT" --platform host >&2
+# 2. Build A, staged where Package.swift links it.
+stage "$CORE" "$STAGE"
+if cmp -s "$STAGE/libplayground_core.dylib" "$STAGE_B/libplayground_core.dylib"; then
+  echo "run.sh: build B's library is identical to build A's; UNDRA_PLAYGROUND_V2=1 did not reach the core" >&2
+  exit 1
+fi
+# S26's two cores: the same core (build A) under two more namespaces.
+for ns in a b; do
+  "$UNDRA" build -C "$REPO/examples/two-cores/$ns" --platform host >&2
+  stage "$REPO/examples/two-cores/$ns/build/host/libplayground_$ns.dylib" "$STAGE"
+done
 
 # 3. The scenarios. The runner prints one `SCENARIO Sxx PASS|FAIL|SKIP <title>` line each. S19 step 9
 #    replays the derived-list recording (written when missing or stale).
 "$REPO/contract-tests/derived-vectors.sh" >&2
-export UNDRA_DERIVED_VECTORS="${UNDRA_DERIVED_VECTORS:-$REPO/examples/playground/build/derived-vectors.bin}"
+export UNDRA_DERIVED_VECTORS="${UNDRA_DERIVED_VECTORS:-$PROJECT/build/derived-vectors.bin}"
 cd "$HERE"
+rm -rf "$HANDOVER"
+export UNDRA_CONTRACT_HANDOVER="$HANDOVER"
 status=0
 swift test "$@" 2>&1 | tee "$LOG" || status=$?
 
-# 4. The grid. A filtered run reports the scenarios it did not run as MISSING, which is expected.
+# 4. Build B's steps, in a second process over build B's library. Build A's goes back afterwards,
+# whatever happens, so the next run (and the Package's link) finds it.
+if [ "$#" -eq 0 ]; then
+  cp "$STAGE/libplayground_core.dylib" "$STAGE/libplayground_core.dylib.a"
+  restore_a() { mv -f "$STAGE/libplayground_core.dylib.a" "$STAGE/libplayground_core.dylib"; }
+  trap restore_a EXIT
+  cp "$STAGE_B/libplayground_core.dylib" "$STAGE/libplayground_core.dylib"
+  UNDRA_CONTRACT_PHASE=B swift test --skip-build --filter MigrationBuildB 2>&1 | tee -a "$LOG" || status=$?
+  restore_a
+  trap - EXIT
+fi
+
+# 5. The grid. A filtered run reports the scenarios it did not run as MISSING, which is expected.
 "$REPO/contract-tests/check.sh" swift < "$LOG" || status=1
 exit "$status"

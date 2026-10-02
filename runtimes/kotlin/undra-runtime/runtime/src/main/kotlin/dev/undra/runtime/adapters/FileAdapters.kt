@@ -3,14 +3,15 @@ package dev.undra.runtime.adapters
 import dev.undra.runtime.UndraPortException
 import dev.undra.runtime.PortImpl
 import dev.undra.runtime.wire.Codecs
-import dev.undra.runtime.wire.UndraCodec
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.WireException
 import dev.undra.runtime.wire.encodeToByteArray
 import java.io.IOException
+import java.io.UncheckedIOException
 import java.nio.file.AccessDeniedException
 import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.DirectoryIteratorException
 import java.nio.file.DirectoryNotEmptyException
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
@@ -34,27 +35,45 @@ import kotlinx.coroutines.withContext
  * torn one. `list` reads only the key at the start of every file (4 + the key's bytes), so it costs a directory scan
  * and an `open` per entry, not the size of the values.
  *
+ * Failures are [StorageError]s (ADR-049): a full disk or quota (`ENOSPC`, `EDQUOT`) is [StorageError.Full], an entry
+ * file that does not decode is [StorageError.Corrupt] (from [get]; the file stays, so nothing is lost silently), any
+ * other I/O failure is [StorageError.Io] with the platform's description.
+ *
  * **This is not secure storage.** The files are only readable by their owner where the file system
  * supports permissions; nothing is encrypted. On a JVM that is the best a default can do; a real
  * `SecureStore` needs the platform's keystore (see `android-adapters`).
  *
  * @param dir the directory holding the entries; created on first write.
  */
-public class FileKv(private val dir: Path) {
+public class FileKv(private val dir: Path) : KeyValueBackend {
 
-    /** The value stored under [key], or `null`. */
-    public suspend fun get(key: String): ByteArray? = withContext(Dispatchers.IO) {
-        val file = fileFor(key)
-        try {
-            val stored = readEntry(Files.readAllBytes(file))
-            if (stored.first == key) stored.second else null // a hash collision is not a hit
+    /**
+     * The value stored under [key], or `null`.
+     *
+     * @throws StorageError.Corrupt if the entry file of [key] does not decode.
+     * @throws StorageError if it cannot be read.
+     */
+    override suspend fun get(key: String): ByteArray? = io {
+        val bytes = try {
+            Files.readAllBytes(fileFor(key))
         } catch (e: NoSuchFileException) {
-            null
+            return@io null
         }
+        val stored = try {
+            readEntry(bytes)
+        } catch (e: WireException) {
+            throw StorageError.Corrupt("the entry of '$key' does not decode: ${e.message}")
+        }
+        if (stored.first == key) stored.second else null // a hash collision is not a hit
     }
 
-    /** Stores [value] under [key], replacing what was there. */
-    public suspend fun set(key: String, value: ByteArray): Unit = withContext(Dispatchers.IO) {
+    /**
+     * Stores [value] under [key], replacing what was there.
+     *
+     * @throws StorageError.Full if the disk or the quota is exhausted (the old value, if any, stays).
+     * @throws StorageError if it cannot be written.
+     */
+    override suspend fun set(key: String, value: ByteArray): Unit = io {
         Files.createDirectories(dir)
         val w = UndraWriter(8 + key.length + value.size)
         w.writeStr(key)
@@ -62,14 +81,23 @@ public class FileKv(private val dir: Path) {
         atomicWrite(fileFor(key), w.toByteArray(), ownerOnly = true)
     }
 
-    /** Removes [key]; removing a missing key is not an error. */
-    public suspend fun delete(key: String) {
-        withContext(Dispatchers.IO) { Files.deleteIfExists(fileFor(key)) }
+    /**
+     * Removes [key]; removing a missing key is not an error.
+     *
+     * @throws StorageError if it cannot be removed.
+     */
+    override suspend fun delete(key: String) {
+        io { Files.deleteIfExists(fileFor(key)) }
     }
 
-    /** Every stored key that starts with [prefix], sorted. */
-    public suspend fun list(prefix: String): List<String> = withContext(Dispatchers.IO) {
-        if (!Files.isDirectory(dir)) return@withContext emptyList()
+    /**
+     * Every stored key that starts with [prefix], sorted. A file of the directory that is not an entry, or that is
+     * removed while the directory is read, is not listed.
+     *
+     * @throws StorageError if the directory cannot be read.
+     */
+    override suspend fun list(prefix: String): List<String> = io {
+        if (!Files.isDirectory(dir)) return@io emptyList()
         val keys = ArrayList<String>()
         Files.newDirectoryStream(dir).use { entries ->
             for (file in entries) {
@@ -87,34 +115,31 @@ public class FileKv(private val dir: Path) {
         keys.sorted()
     }
 
-    /** This store as an async [PortImpl] for the port whose trait is named [trait] (`"Kv"` or `"SecureStore"`). */
-    public fun portImpl(trait: String): PortImpl {
-        require(trait == "Kv" || trait == "SecureStore") { "trait must be Kv or SecureStore, was $trait" }
-        val ids = if (trait == "Kv") {
-            arrayOf(StandardPorts.Kv.GET, StandardPorts.Kv.SET, StandardPorts.Kv.DELETE, StandardPorts.Kv.LIST)
-        } else {
-            arrayOf(StandardPorts.SecureStore.GET, StandardPorts.SecureStore.SET, StandardPorts.SecureStore.DELETE, StandardPorts.SecureStore.LIST)
+    /**
+     * This store as an async [PortImpl] for the port whose trait is named [trait] (`"Kv"` or `"SecureStore"`); see
+     * [StoragePort.portImpl].
+     *
+     * @throws IllegalArgumentException for any other trait name.
+     */
+    public fun portImpl(trait: String): PortImpl = StoragePort.of(trait).portImpl(this)
+
+    /** Runs [block] on `Dispatchers.IO`, turning what the file system throws into a [StorageError]. */
+    private suspend fun <T> io(block: () -> T): T =
+        withContext(Dispatchers.IO) {
+            try {
+                block()
+            } catch (e: StorageError) {
+                throw e
+            } catch (e: IOException) {
+                throw StorageError.of(e)
+            } catch (e: DirectoryIteratorException) {
+                throw StorageError.of(e.cause ?: IOException(e))
+            } catch (e: UncheckedIOException) {
+                throw StorageError.of(e.cause ?: IOException(e))
+            } catch (e: SecurityException) {
+                throw StorageError.Io(StorageFailures.describe(e))
+            }
         }
-        return PortImpl(
-            sync = false,
-            methods = portMethods {
-                this[ids[0]] = { args -> optionBytes.encodeToByteArray(this@FileKv.get(readArgs(args) { it.readStr() })) }
-                this[ids[1]] = { args ->
-                    val r = UndraReader(args)
-                    val key = r.readStr()
-                    val value = r.readBytes()
-                    r.finish()
-                    this@FileKv.set(key, value)
-                    NO_BYTES
-                }
-                this[ids[2]] = { args ->
-                    this@FileKv.delete(readArgs(args) { it.readStr() })
-                    NO_BYTES
-                }
-                this[ids[3]] = { args -> stringList.encodeToByteArray(this@FileKv.list(readArgs(args) { it.readStr() })) }
-            },
-        )
-    }
 
     private fun fileFor(key: String): Path = dir.resolve(sha256Hex(key))
 
@@ -158,17 +183,14 @@ public class FileKv(private val dir: Path) {
         }
         return true
     }
-
-    private companion object {
-        val optionBytes: UndraCodec<ByteArray?> = Codecs.option(Codecs.bytes)
-        val stringList: UndraCodec<List<String>> = Codecs.vec(Codecs.string)
-    }
 }
 
 /**
  * The `Fs` port over a directory: paths are relative to [root] (a leading `/` is ignored), and nothing outside
  * it can be reached: a path that resolves outside, whether through `..` or a symbolic link, is
- * [FsError.Denied]. Writes create missing parent directories and are atomic.
+ * [FsError.Denied]. Writes create missing parent directories and are atomic. A missing file is
+ * [FsError.NotFound], a refused permission [FsError.Denied], a full disk or quota (`ENOSPC`, `EDQUOT`)
+ * [FsError.Full] (ADR-049), and any other failure [FsError.Io] with the platform's description.
  *
  * @param root the directory acting as the file system's root; created on first write.
  */
@@ -279,7 +301,7 @@ public class FsAdapter(root: Path) {
             } catch (e: DirectoryNotEmptyException) {
                 throw FsError.Io("directory not empty: ${e.file}")
             } catch (e: IOException) {
-                throw FsError.Io(e.message ?: e.javaClass.simpleName)
+                throw if (StorageFailures.isOutOfSpace(e)) FsError.Full else FsError.Io(StorageFailures.describe(e))
             }
         }
 
@@ -313,14 +335,6 @@ public class FsAdapter(root: Path) {
 
 private val NO_BYTES = ByteArray(0)
 
-/** Decodes the arguments of a port method with [read] and requires that nothing is left over. */
-private inline fun <T> readArgs(args: ByteArray, read: (UndraReader) -> T): T {
-    val r = UndraReader(args)
-    val value = read(r)
-    r.finish()
-    return value
-}
-
 private const val TEMP_SUFFIX = ".tmp"
 
 private fun sha256Hex(text: String): String {
@@ -332,7 +346,11 @@ private fun sha256Hex(text: String): String {
     return sb.toString()
 }
 
-/** Writes [bytes] to a temporary sibling and moves it over [target], so readers never see a partial file. */
+/**
+ * Writes [bytes] to a temporary sibling and moves it over [target], so readers never see a partial file. A write that
+ * fails (a full disk) removes what it wrote of the temporary file and throws the write's own failure; a failure to
+ * remove it is attached as suppressed.
+ */
 private fun atomicWrite(target: Path, bytes: ByteArray, ownerOnly: Boolean) {
     val temp = target.resolveSibling("${target.fileName}.${java.util.UUID.randomUUID()}$TEMP_SUFFIX")
     try {
@@ -349,7 +367,12 @@ private fun atomicWrite(target: Path, bytes: ByteArray, ownerOnly: Boolean) {
         } catch (e: AtomicMoveNotSupportedException) {
             Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING)
         }
-    } finally {
-        Files.deleteIfExists(temp)
+    } catch (e: Throwable) {
+        try {
+            Files.deleteIfExists(temp)
+        } catch (cleanup: IOException) {
+            e.addSuppressed(cleanup)
+        }
+        throw e
     }
 }

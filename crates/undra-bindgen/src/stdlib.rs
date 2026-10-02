@@ -1,4 +1,4 @@
-//! The Undra standard library: the ten standard ports of SPEC section 8 and the eight records,
+//! The Undra standard library: the ten standard ports of SPEC section 8 and the nine records,
 //! enums and errors they exchange, plus the three opt-in ports (`WebSocket` and `Sse`, ADR-047;
 //! `Db`, ADR-048) and their twelve types, which a core has only when it enables the cargo feature
 //! of `undra-ports` (`websocket`, `sse`, `db`).
@@ -92,7 +92,8 @@ const fn m(id: u32, decl: &'static str) -> StandardMethod {
     StandardMethod { id, decl }
 }
 
-/// The standard types: the eight of SPEC section 8, then the twelve of the opt-in ports.
+/// The standard types: the nine of SPEC section 8 (`StorageError` since ADR-049), then the twelve
+/// of the opt-in ports.
 pub const TYPES: &[StandardType] = &[
     StandardType {
         name: "HttpMethod",
@@ -128,7 +129,13 @@ pub const TYPES: &[StandardType] = &[
         name: "FsError",
         type_id: 0xd15e_c208,
         kind: StandardKind::Error,
-        shape: "NotFound = 0, Denied = 1, Io(String) = 2",
+        shape: "NotFound = 0, Denied = 1, Io(String) = 2, Full = 3, Unavailable(String) = 4",
+    },
+    StandardType {
+        name: "StorageError",
+        type_id: 0x3d40_b010,
+        kind: StandardKind::Error,
+        shape: "Unavailable(String) = 0, Full = 1, Locked = 2, Corrupt(String) = 3, Io(String) = 4",
     },
     StandardType {
         name: "NetKind",
@@ -219,8 +226,8 @@ pub const TYPES: &[StandardType] = &[
     },
 ];
 
-/// How many of [`TYPES`] are the eight of SPEC section 8 (the rest are opt-in).
-pub const CORE_TYPE_COUNT: usize = 8;
+/// How many of [`TYPES`] are the nine of SPEC section 8 (the rest are opt-in).
+pub const CORE_TYPE_COUNT: usize = 9;
 
 /// How many of [`PORTS`] are the ten of SPEC section 8 (the rest are opt-in).
 pub const CORE_PORT_COUNT: usize = 10;
@@ -282,17 +289,41 @@ const DB_METHODS: &[StandardMethod] = &[
 ];
 
 const KV_METHODS: &[StandardMethod] = &[
-    m(0xf050_bb1a, "async get(key: String) -> Option<Bytes>"),
-    m(0x6242_7856, "async set(key: String, value: Bytes)"),
-    m(0x60a3_86b9, "async delete(key: String)"),
-    m(0x32f1_d03a, "async list(prefix: String) -> Vec<String>"),
+    m(
+        0xf050_bb1a,
+        "async get(key: String) -> Result<Option<Bytes>, StorageError>",
+    ),
+    m(
+        0x6242_7856,
+        "async set(key: String, value: Bytes) -> Result<(), StorageError>",
+    ),
+    m(
+        0x60a3_86b9,
+        "async delete(key: String) -> Result<(), StorageError>",
+    ),
+    m(
+        0x32f1_d03a,
+        "async list(prefix: String) -> Result<Vec<String>, StorageError>",
+    ),
 ];
 
 const SECURE_STORE_METHODS: &[StandardMethod] = &[
-    m(0x5703_6f6f, "async get(key: String) -> Option<Bytes>"),
-    m(0xe91e_017b, "async set(key: String, value: Bytes)"),
-    m(0xd57d_b4e2, "async delete(key: String)"),
-    m(0xf5ba_b8c9, "async list(prefix: String) -> Vec<String>"),
+    m(
+        0x5703_6f6f,
+        "async get(key: String) -> Result<Option<Bytes>, StorageError>",
+    ),
+    m(
+        0xe91e_017b,
+        "async set(key: String, value: Bytes) -> Result<(), StorageError>",
+    ),
+    m(
+        0xd57d_b4e2,
+        "async delete(key: String) -> Result<(), StorageError>",
+    ),
+    m(
+        0xf5ba_b8c9,
+        "async list(prefix: String) -> Result<Vec<String>, StorageError>",
+    ),
 ];
 
 const FS_METHODS: &[StandardMethod] = &[
@@ -636,11 +667,11 @@ pub fn covered(schema: &Schema) -> Covered {
 /// Every runtime exports every standard type, so generated code refers to all of them and
 /// declares none (ADR-024; the twelve opt-in types are exported whatever a core enables):
 ///
-/// * TypeScript: `@undra/runtime` exports all eight types with their codecs (`HttpRequestCodec`,
+/// * TypeScript: `@undra/runtime` exports all nine types with their codecs (`HttpRequestCodec`,
 ///   ...) from `adapters/types.ts` and `adapters/codecs.ts`, under the standard names.
-/// * Kotlin: `dev.undra.runtime.adapters` declares all eight as public classes whose companion
+/// * Kotlin: `dev.undra.runtime.adapters` declares all nine as public classes whose companion
 ///   object is the `UndraCodec` (`StandardRecords.kt`), under the standard names.
-/// * Swift: `UndraRuntime` exports all eight as public types (`Core/StandardRecords.swift`),
+/// * Swift: `UndraRuntime` exports all nine as public types (`Core/StandardRecords.swift`),
 ///   under the standard names except `AppState`, which is `UndraAppState`: an app's own
 ///   `AppState` is the commonest type name in Swift, and the runtime has exported it under that
 ///   name since v1 (ADR-024, amended).
@@ -735,9 +766,10 @@ mod tests {
     }
 
     #[test]
-    fn the_table_has_the_ten_ports_and_eight_types_then_the_opt_in_ones() {
+    fn the_table_has_the_ten_ports_and_nine_types_then_the_opt_in_ones() {
         assert_eq!(PORTS.len(), CORE_PORT_COUNT + 3);
         assert_eq!(TYPES.len(), CORE_TYPE_COUNT + 12);
+        assert_eq!(CORE_TYPE_COUNT, 9);
         assert_eq!(PORTS[CORE_PORT_COUNT - 1].name, "Lifecycle");
         assert_eq!(TYPES[CORE_TYPE_COUNT - 1].name, "AppState");
         let names: BTreeSet<_> = PORTS.iter().map(|p| p.name).collect();
