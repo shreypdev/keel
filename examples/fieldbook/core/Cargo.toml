@@ -8,8 +8,12 @@ publish = false
 description = "The Undra core of Fieldbook, the sample app: field notes with photos. Auth, an offline queue, a derived notebook, an update with a migration hook, and (feature `presence`) real-time presence over WebSocket."
 
 [features]
-# Who else is in the notebook right now, over the opt-in `WebSocket` port (ADR-047: `undra = { features = ["websocket"] }`).
-# This feature turns `src/presence.rs` on and is what asks `undra` for the port.
+# Who else is in the notebook (src/presence.rs) needs the opt-in `WebSocket` port of the `undra` crate (ADR-047:
+# `undra = { features = ["websocket"] }`). Until the port is on this branch the flag only turns the module on, and a
+# tree that has it builds it with
+#     presence = ["undra/websocket"]
+# (the line it was built and tested with: 22 tests, see .10x/decisions/sde/docs-v1x.md). Flip it when the port lands
+# on main. It is off by default, so the bindings in `generated/` do not include the presence store.
 presence = []
 
 [dependencies]

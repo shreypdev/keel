@@ -1196,7 +1196,7 @@ The UI observes `link` (idle, open, reconnecting, fallback, stopped) and the key
 
 ## Limits
 
-- WebSocket and Sse are opt-in ports ([WebSocket & server-sent events](https://shreypdev.github.io/undra/docs/realtime.html)): the module is compiled with the cookbook's `realtime` feature, which asks `undra` for them.
+- WebSocket and Sse are opt-in ports ([WebSocket & server-sent events](https://shreypdev.github.io/undra/docs/realtime.html)): the module is behind the cookbook's `realtime` feature.
 - A message sent while the link is down is not queued: presence and chat are facts about now. Anything that must arrive is a mutation.
 - A browser cannot send headers on a WebSocket, so a credential goes in the URL or a subprotocol.
 

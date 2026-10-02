@@ -8,9 +8,12 @@ publish = false
 description = "The Undra cookbook: one recipe per module (auth, pagination, forms, upload, offline-first), each tested against the test runtime and the fakes. The site's cookbook pages quote it."
 
 [features]
-# The real-time recipe (src/realtime.rs) needs the opt-in `WebSocket` and `Sse` ports of the
-# `undra` crate (ADR-047: `undra = { features = ["websocket", "sse"] }`); this feature turns the
-# module on and is what asks `undra` for them.
+# The real-time recipe (src/realtime.rs) needs the opt-in `WebSocket` and `Sse` ports of the `undra` crate
+# (ADR-047: `undra = { features = ["websocket", "sse"] }`). Until those ports are on this branch the flag only
+# turns the module on, and a tree that has them builds it with
+#     realtime = ["undra/websocket", "undra/sse"]
+# (that is the line it was built and tested with: 44 tests, see .10x/decisions/sde/docs-v1x.md). Flip it when
+# the ports land on main, and CI can run `cargo test -p cookbook --features realtime`.
 realtime = []
 
 [dependencies]
