@@ -201,6 +201,10 @@ pub const RESERVED_ENTRIES: &[&str] = &[
     "UndraCallError",
     "UndraCallErrorKind",
     "UndraCallFailure",
+    "UndraCallbackInterface",
+    "UndraCallbackMethod",
+    "UndraCallbackTargetGone",
+    "UndraCallbacks",
     "UndraClass",
     "UndraClosedReason",
     "UndraCodec",
@@ -262,6 +266,8 @@ pub const RESERVED_ENTRIES: &[&str] = &[
     "UndraUnhandledError",
     "UndraUnit",
     "UndraVitePlugin",
+    "UndraWeakCallback",
+    "UndraWeakMainCallback",
     "UndraWriter",
 ];
 

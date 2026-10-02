@@ -9,7 +9,7 @@ import Observation
 public final class Clock: UndraStore, @unchecked Sendable {
     public private(set) var now: Date = Date(timeIntervalSince1970: 0)
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle, noCoalesce: [0])
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
@@ -79,7 +79,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
     public private(set) var default_: Bool = false
     public private(set) var uuid: UUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
@@ -120,7 +120,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
         } catch {
             throw UndraCallError.mapped(error, domain: TodoError.self)
         }
-        return Todos(adopting: handle, core: ctx)
+        return ctx.adopt(handle) { Todos(adopting: $0, core: $1) }
     }
 
     /// Shows only the todos matching `f`.
