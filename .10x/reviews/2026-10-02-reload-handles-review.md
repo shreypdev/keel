@@ -1,7 +1,7 @@
 # `reload-handles` (ADR-059: query handles across every restore) — adversarial review
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/reload-handles` at
-`a9bd725` (38 commits from `main` `a309e9f`), reviewed against `main` `12dafe2`, then merged with `main` `fc326d6` (the CI piece) ·
+`a9bd725` (38 commits from `main` `a309e9f`), reviewed against `main` `12dafe2`, then merged with `main` `fc326d6` (the CI piece) and again with `1e8f33c` (diagram-rn; no conflicts, the generated site files unchanged by a rebuild) ·
 **Fixes:** one review-test commit, two `fix(reload-handles): review fixes` commits, the merge, one `bench` commit (the size record),
 then this record · **Read:** `CLAUDE.md` (R1-R12),
 ADR-059 with its implementation note, `.10x/decisions/architect/reload-handles.md`, `.10x/decisions/sde/reload-handles.md`, ADR-022,
