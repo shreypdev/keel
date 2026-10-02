@@ -21,7 +21,8 @@ use undra_meta::{
 
 use crate::emit::CodeWriter;
 use crate::model::{
-    self, CallbackUse, Model, MsgPart, NamedKind, ObjectUse, Ret, doc_lines, parse_message,
+    self, CallbackUse, Callee, Entry, Model, MsgPart, NamedKind, ObjectUse, Ret, doc_lines,
+    parse_message,
 };
 use crate::naming;
 use crate::zero::ZeroState;
@@ -1045,8 +1046,13 @@ impl TsGen<'_> {
             cx.object(&mut w, object);
             w.blank();
         }
-        for function in &self.model.functions {
-            cx.function(&mut w, function, "UndraIds.Functions");
+        for entry in model::entries(&self.model.functions) {
+            match entry {
+                Entry::Single(function) => cx.function(&mut w, function, "UndraIds.Functions"),
+                Entry::Family(members) => {
+                    cx.function_family(&mut w, &members, "UndraIds.Functions")
+                }
+            }
             w.blank();
         }
         cx.body = w;
@@ -1119,7 +1125,7 @@ impl TsGen<'_> {
                         for method in o.constructors.iter().chain(&o.methods) {
                             w.line(format!(
                                 "{}: {},",
-                                naming::ts_member(&naming::camel(&method.name)),
+                                naming::ts_member(&naming::camel(&method.names().id)),
                                 hex(method.method_id)
                             ));
                         }
@@ -1130,7 +1136,7 @@ impl TsGen<'_> {
                 for f in &m.functions {
                     w.line(format!(
                         "{}: {},",
-                        naming::ts_member(&naming::camel(&f.name)),
+                        naming::ts_member(&naming::camel(&f.names().id)),
                         hex(f.method_id)
                     ));
                 }
@@ -1948,13 +1954,32 @@ impl<'a> Ctx<'a> {
                 w.blank();
                 self.constructor(w, o, c, is_store, recreate.is_some());
             }
-            for m in &o.methods {
+            for entry in model::entries(&o.methods) {
                 w.blank();
-                let id = format!(
-                    "UndraIds.Objects.{}.{}",
-                    o.name,
-                    naming::ts_member(&naming::camel(&m.name))
-                );
+                let id_of = |m: &MethodDef| {
+                    format!(
+                        "UndraIds.Objects.{}.{}",
+                        o.name,
+                        naming::ts_member(&naming::camel(&m.names().id))
+                    )
+                };
+                let m = match entry {
+                    Entry::Single(m) => m,
+                    Entry::Family(members) => {
+                        let sites: Vec<Site> = members
+                            .iter()
+                            .map(|m| Site::Method {
+                                id: id_of(m),
+                                owner: o.name.clone(),
+                            })
+                            .collect();
+                        let callables: Vec<Callable<'_>> =
+                            members.iter().map(|m| Callable::from_method(m)).collect();
+                        self.family(w, &callables, &sites);
+                        continue;
+                    }
+                };
+                let id = id_of(m);
                 // A duration is a number of milliseconds in TypeScript: the poll interval's
                 // parameter says so (ADR-043).
                 let mut method = m.clone();
@@ -2094,8 +2119,22 @@ impl<'a> Ctx<'a> {
 
     fn function(&mut self, w: &mut CodeWriter, f: &FunctionDef, ids: &str) {
         self.ids();
-        let id = format!("{ids}.{}", naming::ts_member(&naming::camel(&f.name)));
+        let id = format!("{ids}.{}", naming::ts_member(&naming::camel(&f.names().id)));
         self.callable(w, &Callable::from_function(f), &Site::Function { id });
+    }
+
+    /// The instantiations of one generic function (ADR-058).
+    fn function_family(&mut self, w: &mut CodeWriter, members: &[&FunctionDef], ids: &str) {
+        self.ids();
+        let sites: Vec<Site> = members
+            .iter()
+            .map(|f| Site::Function {
+                id: format!("{ids}.{}", naming::ts_member(&naming::camel(&f.names().id))),
+            })
+            .collect();
+        let callables: Vec<Callable<'_>> =
+            members.iter().map(|f| Callable::from_function(f)).collect();
+        self.family(w, &callables, &sites);
     }
 
     /// One method or free function.
@@ -2105,6 +2144,13 @@ impl<'a> Ctx<'a> {
     /// command (a synchronous method that returns nothing and has no error type) never
     /// rejects: it reports to `onError` and resolves.
     fn callable(&mut self, w: &mut CodeWriter, c: &Callable<'_>, site: &Site) {
+        self.callable_as(w, c, site, &Emit::Public);
+    }
+
+    /// [`Ctx::callable`], or (`Emit::Hidden`) the implementation of one instantiation of a generic
+    /// function behind its overload set: the same code under a name of its own, not exported (a
+    /// method is `private`), and without the documentation, which the overloads carry (ADR-058).
+    fn callable_as(&mut self, w: &mut CodeWriter, c: &Callable<'_>, site: &Site, emit: &Emit) {
         let ret = Ret::classify(c.returns).unwrap_or(Ret::Plain(c.returns));
         let taken: Vec<String> = c.params.iter().map(|p| param_ident(&p.name)).collect();
         let taken_refs: Vec<&str> = taken.iter().map(String::as_str).collect();
@@ -2121,7 +2167,7 @@ impl<'a> Ctx<'a> {
                 id.clone(),
                 "",
                 false,
-                format!("{owner}.{}", naming::camel(c.name)),
+                format!("{owner}.{}", naming::camel(c.native)),
             ),
             Site::Function { id } => (
                 naming::avoid("core", &taken_refs),
@@ -2129,16 +2175,26 @@ impl<'a> Ctx<'a> {
                 id.clone(),
                 "export ",
                 true,
-                naming::camel(c.name),
+                naming::camel(c.native),
             ),
+        };
+        let prefix = match (emit, is_function) {
+            (Emit::Public, _) => prefix,
+            (Emit::Hidden(_), true) => "",
+            (Emit::Hidden(_), false) => "private ",
         };
         self.rt_value("CallTarget");
 
         let mut params = self.param_list(c.params);
         if is_function {
             self.rt_value("UndraCore");
-            let default_core = self.default_core();
-            params.push(format!("{core}: UndraCore = {default_core}"));
+            // The implementation behind an overload set is always given the core.
+            if matches!(emit, Emit::Hidden(_)) {
+                params.push(format!("{core}: UndraCore"));
+            } else {
+                let default_core = self.default_core();
+                params.push(format!("{core}: UndraCore = {default_core}"));
+            }
         }
         let is_stream = ret.is_stream();
         if c.is_async && !is_stream {
@@ -2146,26 +2202,15 @@ impl<'a> Ctx<'a> {
         }
         let err = ret.error().map(str::to_owned);
         let is_command = !c.is_async && err.is_none() && matches!(&ret, Ret::Plain(TypeRef::Unit));
-        let mut extra = Vec::new();
-        if is_command {
-            extra.push(COMMAND_DOC.to_owned());
-        } else if is_stream {
-            extra.push(stream_doc(err.as_deref()));
-        } else {
-            if let Some(err) = &err {
-                extra.push(format!("@throws {{{err}}}"));
-            }
-            extra.push(THROWS_CALL.to_owned());
-            if c.is_async {
-                extra.push(THROWS_ABORT.to_owned());
-            }
+        if matches!(emit, Emit::Public) {
+            let extra = doc_extra(c, &ret);
+            jsdoc(w, c.docs, &extra);
         }
-        jsdoc(w, c.docs, &extra);
 
-        let name = if is_function {
-            naming::ts_ident(&naming::camel(c.name))
-        } else {
-            naming::ts_member(&naming::camel(c.name))
+        let name = match emit {
+            Emit::Hidden(name) => name.clone(),
+            Emit::Public if is_function => naming::ts_ident(&naming::camel(c.native)),
+            Emit::Public => naming::ts_member(&naming::camel(c.native)),
         };
         let function_kw = if is_function { "function " } else { "" };
 
@@ -2305,6 +2350,195 @@ impl<'a> Ctx<'a> {
             }
             w.line("}");
         });
+    }
+
+    /// The instantiations of one generic function or method as the overload set TypeScript has
+    /// for a closed set of signatures (ADR-058): one overload signature per listed type, with the
+    /// type's name as a leading string literal (TypeScript has no runtime types, so `Todo[]` and
+    /// `Note[]` cannot be told apart, an empty list being both); one implementation signature that
+    /// switches on the literal and calls the instantiation's own implementation, generated as an
+    /// ordinary function (or `private` method) under a name of its own; and a `default` branch
+    /// that only a caller that bypassed the types (plain JavaScript, a cast) can reach, which fails
+    /// as a refused call of that kind of function fails.
+    fn family(&mut self, w: &mut CodeWriter, members: &[Callable<'_>], sites: &[Site]) {
+        let first = &members[0];
+        let is_function = matches!(sites[0], Site::Function { .. });
+        let ret = Ret::classify(first.returns).unwrap_or(Ret::Plain(first.returns));
+        let is_stream = ret.is_stream();
+        let err = ret.error().map(str::to_owned);
+        let is_command =
+            !first.is_async && err.is_none() && matches!(&ret, Ret::Plain(TypeRef::Unit));
+        let taken: Vec<String> = first.params.iter().map(|p| param_ident(&p.name)).collect();
+        let taken_refs: Vec<&str> = taken.iter().map(String::as_str).collect();
+        let token = naming::avoid("type", &taken_refs);
+        let core = naming::avoid("core", &taken_refs);
+        let signal = naming::avoid("signal", &taken_refs);
+        let name = if is_function {
+            naming::ts_ident(&naming::camel(first.native))
+        } else {
+            naming::ts_member(&naming::camel(first.native))
+        };
+        let (prefix, keyword) = if is_function {
+            ("export ", "function ")
+        } else {
+            ("", "")
+        };
+        let head = format!("{prefix}{keyword}{name}");
+        self.rt_value("UndraCallError");
+        if is_function {
+            self.rt_value("UndraCore");
+        }
+        let takes_signal = first.is_async && !is_stream;
+
+        // The types of each member's parameters and result, as TypeScript spells them.
+        let parts: Vec<Vec<(String, String)>> = members
+            .iter()
+            .map(|c| {
+                c.params
+                    .iter()
+                    .map(|p| (param_ident(&p.name), self.ty(&p.ty)))
+                    .collect()
+            })
+            .collect();
+        let result_of = |this: &mut Self, c: &Callable<'_>| -> String {
+            match Ret::classify(c.returns).unwrap_or(Ret::Plain(c.returns)) {
+                Ret::Stream(item) | Ret::ResultStream { item, .. } => {
+                    format!("AsyncIterable<{}>", this.ty(item))
+                }
+                Ret::Plain(t) | Ret::Result { ok: t, .. } => {
+                    let shown = if matches!(t, TypeRef::Unit) {
+                        "void".to_owned()
+                    } else {
+                        this.ty(t)
+                    };
+                    format!("Promise<{shown}>")
+                }
+            }
+        };
+        let results: Vec<String> = members.iter().map(|c| result_of(self, c)).collect();
+        let literals: Vec<String> = members
+            .iter()
+            .map(|c| js_string(c.arg.unwrap_or_default()))
+            .collect();
+
+        // The documentation, once, on the first overload.
+        let extra = doc_extra(first, &ret);
+        jsdoc(w, first.docs, &extra);
+
+        // One overload signature per listed type.
+        for (index, literal) in literals.iter().enumerate() {
+            let mut params = vec![format!("{token}: {literal}")];
+            params.extend(parts[index].iter().map(|(n, t)| format!("{n}: {t}")));
+            if is_function {
+                params.push(format!("{core}?: UndraCore"));
+            }
+            if takes_signal {
+                params.push(format!("{signal}?: AbortSignal"));
+            }
+            w.call(&head, &params, format!(": {};", results[index]), true);
+        }
+
+        // The implementation signature: each parameter is the union of the members' types.
+        let union = |types: Vec<&String>| -> String {
+            let mut seen: Vec<&String> = Vec::new();
+            for t in types {
+                if !seen.contains(&t) {
+                    seen.push(t);
+                }
+            }
+            seen.iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
+        let mut params = vec![format!("{token}: {}", literals.join(" | "))];
+        for (position, (n, _)) in parts[0].iter().enumerate() {
+            let types: Vec<&String> = parts.iter().map(|p| &p[position].1).collect();
+            params.push(format!("{n}: {}", union(types)));
+        }
+        if is_function {
+            let default_core = self.default_core();
+            params.push(format!("{core}: UndraCore = {default_core}"));
+        }
+        if takes_signal {
+            params.push(format!("{signal}?: AbortSignal"));
+        }
+        let result = if results.iter().all(|r| *r == results[0]) {
+            results[0].clone()
+        } else if is_stream {
+            "AsyncIterable<unknown>".to_owned()
+        } else {
+            "Promise<unknown>".to_owned()
+        };
+        let operation = js_string(&naming::camel(first.native));
+        let refused = format!(
+            "new UndraCallError.Refused(`{} is not declared for ${{String({token})}}`)",
+            naming::camel(first.native)
+        );
+        let hidden: Vec<String> = members
+            .iter()
+            .map(|c| {
+                if is_function {
+                    naming::ts_ident(&naming::camel(&c.id_name))
+                } else {
+                    naming::ts_member(&naming::camel(&c.id_name))
+                }
+            })
+            .collect();
+        w.call_block(&head, &params, format!(": {result}"), true, |w| {
+            w.line(format!("switch ({token}) {{"));
+            w.indented(|w| {
+                for (index, literal) in literals.iter().enumerate() {
+                    w.line(format!("case {literal}:"));
+                    w.indented(|w| {
+                        let mut args: Vec<String> = Vec::new();
+                        for (position, (n, t)) in parts[index].iter().enumerate() {
+                            let distinct = parts.iter().any(|p| p[position].1 != *t);
+                            args.push(if distinct {
+                                format!("{n} as {t}")
+                            } else {
+                                n.clone()
+                            });
+                        }
+                        if is_function {
+                            args.push(core.clone());
+                        }
+                        if takes_signal {
+                            args.push(signal.clone());
+                        }
+                        let target = if is_function {
+                            hidden[index].clone()
+                        } else {
+                            format!("this.{}", hidden[index])
+                        };
+                        w.call(format!("return {target}"), &args, ";", true);
+                    });
+                }
+                w.line("default:");
+                w.indented(|w| {
+                    if is_stream {
+                        w.line(format!("throw {refused};"));
+                    } else if is_command {
+                        let core = if is_function {
+                            core.clone()
+                        } else {
+                            "this.core".to_owned()
+                        };
+                        w.line(format!("{core}.report({refused}, {operation});"));
+                        w.line("return Promise.resolve();");
+                    } else {
+                        w.line(format!("return Promise.reject({refused});"));
+                    }
+                });
+            });
+            w.line("}");
+        });
+
+        // The implementations: ordinary generated code, under a name of their own.
+        for (index, (c, site)) in members.iter().zip(sites).enumerate() {
+            w.blank();
+            self.callable_as(w, c, site, &Emit::Hidden(hidden[index].clone()));
+        }
     }
 
     // ----- stores ----------------------------------------------------------------
@@ -2600,9 +2834,46 @@ impl<'a> Ctx<'a> {
     }
 }
 
+/// What `callable_as` writes.
+enum Emit {
+    /// The function or method as the package's API.
+    Public,
+    /// The implementation of one instantiation of a generic function, under this name.
+    Hidden(String),
+}
+
+/// The doc lines a call carries besides its documentation: what it throws, or where a command's
+/// failure goes.
+fn doc_extra(c: &Callable<'_>, ret: &Ret<'_>) -> Vec<String> {
+    let err = ret.error();
+    let is_command = !c.is_async && err.is_none() && matches!(ret, Ret::Plain(TypeRef::Unit));
+    let mut extra = Vec::new();
+    if is_command {
+        extra.push(COMMAND_DOC.to_owned());
+    } else if ret.is_stream() {
+        extra.push(stream_doc(err));
+    } else {
+        if let Some(err) = err {
+            extra.push(format!("@throws {{{err}}}"));
+        }
+        extra.push(THROWS_CALL.to_owned());
+        if c.is_async {
+            extra.push(THROWS_ABORT.to_owned());
+        }
+    }
+    extra
+}
+
 /// A method or free function, whichever the schema calls it.
 struct Callable<'a> {
-    name: &'a str,
+    /// What the native name derives from: the generic function's own name for an instantiation
+    /// (ADR-058), the schema name otherwise.
+    native: &'a str,
+    /// The name of the type an instantiation of a generic function is for (`Todo`), which is the
+    /// string literal an overload takes first.
+    arg: Option<&'a str>,
+    /// What the id constant and the implementation behind an overload set are named after.
+    id_name: String,
     params: &'a [ParamDef],
     returns: &'a TypeRef,
     is_async: bool,
@@ -2611,8 +2882,11 @@ struct Callable<'a> {
 
 impl<'a> Callable<'a> {
     fn from_method(m: &'a MethodDef) -> Self {
+        let names = model::names(&m.name, m.generic.as_ref());
         Callable {
-            name: &m.name,
+            native: names.native,
+            arg: m.generic.as_ref().and_then(generic_arg),
+            id_name: names.id,
             params: &m.params,
             returns: &m.returns,
             is_async: m.is_async,
@@ -2621,13 +2895,24 @@ impl<'a> Callable<'a> {
     }
 
     fn from_function(f: &'a FunctionDef) -> Self {
+        let names = model::names(&f.name, f.generic.as_ref());
         Callable {
-            name: &f.name,
+            native: names.native,
+            arg: f.generic.as_ref().and_then(generic_arg),
+            id_name: names.id,
             params: &f.params,
             returns: &f.returns,
             is_async: f.is_async,
             docs: &f.docs,
         }
+    }
+}
+
+/// The name of the type an instantiation is for.
+fn generic_arg(label: &undra_meta::GenericOf) -> Option<&str> {
+    match label.args.first().map(|a| &a.ty) {
+        Some(TypeRef::Named(name)) => Some(name),
+        _ => None,
     }
 }
 

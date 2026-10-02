@@ -3,7 +3,7 @@
 # the real wasm build of the playground core, in wasm-main mode (and wasm-worker where a scenario says so),
 # under vitest on Node.
 #
-#   contract-tests/ts/run.sh              # build the cores if missing or stale, run S01..S28 and S31..S33, grade
+#   contract-tests/ts/run.sh              # build the cores if missing or stale, run S01..S28 and S31..S34, grade
 #   contract-tests/ts/run.sh -t S07       # extra arguments go to vitest (here: only scenario S07)
 #
 # Builds the cores first (contract-tests/ts/build-cores.sh, which a runner of the same scenarios that does not go
@@ -15,7 +15,7 @@
 # build A is built again, so the default wasm stays build A. UNDRA_PLAYGROUND_WASM_B overrides its path.
 # The dependencies (the runtime's and this directory's) are installed with `npm ci` when missing or older than their lockfiles.
 # Prints `SCENARIO Sxx PASS|FAIL|SKIP <title>` lines (src/reporter.ts) and pipes them through
-# contract-tests/check.sh, so the exit status is non-zero unless every one (S01..S33) passes.
+# contract-tests/check.sh, so the exit status is non-zero unless every one (S01..S34) passes.
 # UNDRA_CLI overrides the path of the undra binary (default target/debug/undra, built if missing).
 set -euo pipefail
 

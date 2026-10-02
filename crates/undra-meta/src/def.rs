@@ -172,9 +172,75 @@ pub struct MethodDef {
     /// [`SignalDef::no_coalesce`], so no schema without one hashes differently.
     #[serde(default, skip_serializing_if = "is_false")]
     pub coalesce: bool,
+    /// The generic method this definition is one instantiation of (ADR-058): `Some` when the
+    /// object's author listed the types a method with a type parameter crosses for. The method's
+    /// `name` is then `pinned<Todo>` and its `method_id` the ordinary formula over it. Serialized
+    /// only when set, so no schema without a generic method hashes differently.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generic: Option<GenericOf>,
     /// Doc comment; excluded from the schema hash.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub docs: String,
+}
+
+/// The generic function or method a definition is one instantiation of (ADR-058).
+///
+/// The schema describes concrete types only: a generic function that crosses the boundary is one
+/// [`FunctionDef`] (or [`MethodDef`]) per type its author listed, named `newest<Todo>`. This label
+/// says which function they are instantiations of, so a generator can put them back under one
+/// native name (`newest`, with an overload per type). It carries no type parameter of its own: the
+/// definition it sits on is complete without it, and nothing on the wire reads it.
+///
+/// ```
+/// use undra_meta::{GenericArg, GenericOf, TypeRef};
+///
+/// let label = GenericOf {
+///     of: "newest".into(),
+///     args: vec![GenericArg { param: "T".into(), ty: TypeRef::named("Todo"), inferred: true }],
+/// };
+/// assert_eq!(label.name(), "newest<Todo>");
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GenericOf {
+    /// The generic function's own name, `newest`.
+    pub of: String,
+    /// The type parameter and the type it is instantiated with. One entry in v1.x.
+    pub args: Vec<GenericArg>,
+}
+
+impl GenericOf {
+    /// The name of the instantiation this label describes: `newest<Todo>`, with the arguments
+    /// joined by `", "` when there are several.
+    #[must_use]
+    pub fn name(&self) -> String {
+        let mut name = self.of.clone();
+        name.push('<');
+        for (index, arg) in self.args.iter().enumerate() {
+            if index > 0 {
+                name.push_str(", ");
+            }
+            match &arg.ty {
+                TypeRef::Named(type_name) => name.push_str(type_name),
+                other => name.push_str(&other.to_string()),
+            }
+        }
+        name.push('>');
+        name
+    }
+}
+
+/// One type parameter of a [`GenericOf`] and the type this instantiation has for it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GenericArg {
+    /// The type parameter's name in the Rust source, `T`.
+    pub param: String,
+    /// The type this instantiation replaces it with: a named value type in v1.x (`Named("Todo")`).
+    pub ty: TypeRef,
+    /// Whether the parameter stands in the type of at least one parameter of the function, so a
+    /// caller's arguments fix it (`newest(rows: Vec<T>)`: true) and a generator needs no type
+    /// token for it (`draft() -> T`: false). A fact of the generic function, not of the set of
+    /// instantiations: every instantiation of one function agrees on it.
+    pub inferred: bool,
 }
 
 /// A method or function parameter.
@@ -240,6 +306,11 @@ pub struct FunctionDef {
     pub is_async: bool,
     /// Whether the first Rust parameter is a `Ctx`.
     pub takes_ctx: bool,
+    /// The generic function this definition is one instantiation of (ADR-058); see
+    /// [`MethodDef::generic`]. The function's `name` is then `newest<Todo>` and its `method_id`
+    /// `fnv1a32("fn.newest<Todo>")`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generic: Option<GenericOf>,
     /// Doc comment; excluded from the schema hash.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub docs: String,

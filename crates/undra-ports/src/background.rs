@@ -73,6 +73,7 @@ static META: FunctionMeta = FunctionMeta {
     takes_ctx: true,
     docs: "Runs the background tasks for at most `deadline_ms` (the window the OS granted).",
     dispatch,
+    generic: None,
 };
 
 undra_meta::inventory::submit! {

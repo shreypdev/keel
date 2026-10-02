@@ -176,14 +176,14 @@ impl Todos {
 }
 
 /// The identity of the `n`th item: `n` in the first eight bytes, big-endian.
-fn id_of(n: u64) -> Uuid {
+pub(crate) fn id_of(n: u64) -> Uuid {
     let mut id = [0; 16];
     id[..8].copy_from_slice(&n.to_be_bytes());
     Uuid(id)
 }
 
 /// The counter value inside an identity made by [`id_of`].
-fn counter_of(id: Uuid) -> u64 {
+pub(crate) fn counter_of(id: Uuid) -> u64 {
     let mut n = [0; 8];
     n.copy_from_slice(&id.0[..8]);
     u64::from_be_bytes(n)

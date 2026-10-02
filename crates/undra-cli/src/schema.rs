@@ -581,6 +581,7 @@ mod tests {
             takes_ctx: false,
             coalesce: false,
             docs: format!("Docs of {name}."),
+            generic: None,
         };
         let mut schema = Schema::new("demo-core");
         schema.objects.push(ObjectDef {

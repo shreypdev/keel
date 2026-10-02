@@ -9,5 +9,5 @@
     { "name": "Swift", "slug": "swift", "count": 870 },
     { "name": "React Native", "slug": "react-native", "count": 110 }
   ],
-  "cellsPassing": 95
+  "cellsPassing": 98
 }

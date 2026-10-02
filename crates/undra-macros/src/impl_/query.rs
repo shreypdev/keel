@@ -45,7 +45,7 @@ use syn::{FnArg, ItemFn, LitInt, LitStr, Pat};
 
 use super::attrs::{flag, option_value, parse_args, root_arg};
 use super::check::Checks;
-use super::common::{item_root, mentions_self, param_meta, send_assertion, submit};
+use super::common::{GenericOn, item_root, mentions_self, param_meta, send_assertion, submit};
 use super::diag::{Diag, Errors, code};
 use super::naming::{pascal_case, unraw};
 use super::object::{Kindred, ParamModel, analyze, arg_local};
@@ -424,7 +424,11 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
     }
 
     // The function itself.
-    let analysis = analyze(&mut item.sig, &mut errors, Kindred::Query);
+    let generic_on = match flavor {
+        Flavor::Query => GenericOn::Query,
+        Flavor::Mutation => GenericOn::Mutation,
+    };
+    let analysis = analyze(&mut item.sig, &mut errors, Kindred::Query, Some(generic_on));
     if item.sig.asyncness.is_none() {
         errors.push(signature_error(
             format!("`{fn_name}` must be `async`"),

@@ -75,8 +75,8 @@ Sustained-load results (a firehose, keyed churn, fan-out, a 60-second soak) are 
   Kotlin <!--trust:tests-kotlin-->881<!--/trust--> · Swift <!--trust:tests-swift-->870<!--/trust--> ·
   React Native <!--trust:tests-react-native-->110<!--/trust--> — the counts at the last merge, after the full matrix
   ran (the ledger is [`.10x/status.md`](.10x/status.md)).
-* **<!--trust:scenarios-->33<!--/trust--> wire-level contract scenarios, run on every platform**
-  (<!--trust:cells-->95<!--/trust-->/<!--trust:cells-->95<!--/trust--> cells pass; two scenarios are about the web
+* **<!--trust:scenarios-->34<!--/trust--> wire-level contract scenarios, run on every platform**
+  (<!--trust:cells-->98<!--/trust-->/<!--trust:cells-->98<!--/trust--> cells pass; two scenarios are about the web
   host and run on TypeScript only): sync/async calls, typed errors, cancellation, stream backpressure, keyed patches,
   optimistic rollback, offline queue replay, snapshot/restore, schema-mismatch rejection, panic containment, a
   coalesced 1,000-transaction burst applied in one drain, a derived keyed list whose 60,000 recorded operations replay
@@ -219,7 +219,10 @@ Added since, each with its page:
   that replay in tests on Swift, Kotlin, TypeScript and Rust: [docs/TESTING.md](docs/TESTING.md).
 * **iOS 15 and 16** — a lower deployment target generates `ObservableObject` stores; proven by compilation and a
   runtime probe on iOS 26.5, not yet on an iOS 15 or 16 runtime: [docs/IOS_15_16.md](docs/IOS_15_16.md).
-* Also: objects and host callbacks across the boundary, newtypes, generics and `Decimal`, paged and lazy lists,
+* **Generics** — a generic record, enum, function, method, object or store crosses as the instantiations you list:
+  overloads for functions, one ordinary class per alias for objects and stores. Declared, not open-ended; no native
+  generic types: [Generic functions, objects and stores](https://shreypdev.github.io/undra/docs/generics.html).
+* Also: objects and host callbacks across the boundary, newtypes and `Decimal`, paged and lazy lists,
   polling, panic reports with symbolication, background runs, several cores in one app, and a
   [cookbook](https://shreypdev.github.io/undra/docs/cookbook/) with a sample app.
 
@@ -228,8 +231,6 @@ Added since, each with its page:
 Open, with the work done around it (the same list as the [roadmap](https://shreypdev.github.io/undra/roadmap/)):
 
 * Benchmark rows from physical phones; today's device rows are a simulator, an emulator and headless Chromium.
-* Generic functions and objects across the boundary (a generic record or enum crosses as one named type per
-  instantiation).
 * Query handles across an `undra dev` reload (stores survive; query handles need a decision record).
 * The `undra-compose` and `android-adapters` tests in CI (they pass locally and on the emulator).
 
@@ -248,7 +249,7 @@ package (see [`docs/blueprint.html`](docs/blueprint.html)).
 | `crates/` | the 13 Rust crates: schema (`undra-meta`), wire codec, macros, signals, runtime, ports, query, testkit, ffi (the only `unsafe`), transport, bindgen, cli, facade |
 | `runtimes/` | the Swift, Kotlin, TypeScript and React Native runtime packages the generated code sits on |
 | `examples/` | `playground` (the reference app: one core, three platforms and React Native, proof screenshots), `cookbook`, `fieldbook` (a sample app), `two-cores`, `ios15-sample` |
-| `contract-tests/` | the <!--trust:scenarios-->33<!--/trust--> scenarios + a runner per platform |
+| `contract-tests/` | the <!--trust:scenarios-->34<!--/trust--> scenarios + a runner per platform |
 | `bench/` | criterion benches + the budget gate; `RESULTS.md` has the numbers |
 | `docs/SPEC.md` | the binding specification (wire, ABI, runtime model, generated shapes) |
 | `.10x/` | the project's decision record: ADRs, reviews, status ledger |

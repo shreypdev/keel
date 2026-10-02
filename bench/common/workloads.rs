@@ -304,6 +304,22 @@ pub fn dispatch() -> Vec<Workload> {
                 black_box(rt.call_sync(black_box(&payload)));
             })
         }),
+        // ADR-058: an instantiation of a generic function, `add_one_for<Record5>`: the same body as
+        // `function` above, through the same path. `generic_fn_vs_function` gates the pair.
+        Workload::new("dispatch/call_sync/generic_fn", || {
+            let (rt, _host) = runtime();
+            let payload = call_payload(
+                CallTarget::Function {
+                    method_id: ids::function_id("add_one_for<Record5>"),
+                },
+                2,
+                &enc(&41_u32),
+            );
+            call_ok(&rt, &payload);
+            plain(move || {
+                black_box(rt.call_sync(black_box(&payload)));
+            })
+        }),
         Workload::new("dispatch/call_sync/echo_record1k", || {
             let (rt, _host) = runtime();
             let calc = construct(&rt, "Calculator", &enc(&7_i64));

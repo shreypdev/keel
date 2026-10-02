@@ -932,6 +932,33 @@ transport the runner loads, TypeScript counts `Kind.Call` payloads whose first b
    returns to the query's own second.
 6. **The last observer stops it.** After the handle is closed `ticker_fetches()` does not move for 2.5 s.
 
+### S34 generic functions, objects and stores (ADR-058)
+
+`selection` (`examples/playground/core/src/selection.rs`): the generic functions `newest` and `draft`, each listed for `Todo` and `Note`, the
+generic store `Selection<T>` (the aliases `TodoSelection` and `NoteSelection`: two stores, two type ids) and the generic object `Recent<T>` (the
+alias `RecentTodos`, returned by `recent_todos`). Every step goes through the **generated** API (the raw API where a step says so). The
+platforms spell a generic function as overloads (Swift `newest(rows:)`, `draft(Todo.self, title:)`; Kotlin `newest(rows)`, `draft(Todo::class, title)`;
+TypeScript `newest("Todo", rows)`, `draft("Todo", title)`); the rows of the steps have the identities named by their counter (a to-do's `Uuid` holds it in
+its first eight bytes, big-endian; a note's `id` is it).
+
+1. **A generic function is one function per type.** `newest` of the to-dos with counters 5, 9 and 7 is the one with counter 9; of the notes with
+   counters 2 and 1 it is the one with counter 2 (a `Note`, not a `Todo`); of an empty list of either type it is nothing.
+2. **A type that no argument names is named by the caller.** `draft(Todo.self, "first")` and a second `draft` of the same type return rows
+   titled as asked, not done, with different ids; `draft(Note.self, "a note")` returns a `Note`; `newest` of the two drafts is the second.
+3. **Two instantiations are two stores.** `TodoSelection` and `NoteSelection` have different handles and different type ids
+   (`UndraIds.Objects.<Name>.typeId`). Toggling a to-do on the to-do selection delivers one change-set whose `rows` entry is a keyed patch of one
+   `Insert` (and whose `count` entry follows), and **nothing** to the note selection; toggling it again delivers one `Remove`; toggling a note
+   delivers one `Insert` to the note selection and nothing to the to-do one.
+4. **Snapshot and restore keep both.** With two to-dos ticked on a `TodoSelection` and one note on a `NoteSelection`, `snapshot`, then clear the
+   first and tick another note, then `restore`: both stores keep their handles and show the snapshot's rows and counts (2 and 1), and keep
+   working, each on its own rows.
+5. **An id that names no instantiation is refused.** A raw free-function call with `fnv1a32("fn.newest<Draft>")` fails as a bad request (status 5;
+   Swift `UndraCallError.refused`, Kotlin `UndraCallError.Refused`; TypeScript `UndraReplyError`), the core is unharmed, and the ids of the
+   instantiations that exist are `fnv1a32("fn.newest<Todo>")` and `fnv1a32("fn.newest<Note>")`.
+6. **A generic object returned from a function is the alias's class.** `recent_todos([1, 2, 3], 2)` is a `RecentTodos` whose `rows()` are the
+   to-dos with counters 3 and 2 and whose `latest()` is the one with 3; `open` of the one with 2 puts it first; a second `recent_todos([], 5)` is another
+   wrapper with no rows, and closing it leaves the first working.
+
 ## Platform notes
 
 * TypeScript: S03 runs only in `wasm-main` mode (the only one with `callSync`); S17 step 6 is the only

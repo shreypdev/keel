@@ -64,9 +64,9 @@ error: error[undra::E0001]: `T::Item` cannot cross the boundary: it is an associ
 38 |     pub first: T::Item,
    |                ^^^^^^^
 
-error: error[undra::E0008]: `generic` is only valid on a struct or an enum
-         = note: `#[undra::api(generic)]` marks a data type with type parameters as the template of named instantiations; objects, functions, stores and ports are never generic
-         = help: remove `generic`, or apply the attribute to a struct or an enum with a type parameter
+error: error[undra::E0008]: `generic` is only valid on a struct, an enum or an impl block
+         = note: `#[undra::api(generic)]` marks a type with type parameters, or the impl block of an object with them, as the template of named instantiations; a function with a type parameter lists the types it crosses for instead
+         = help: remove `generic`, apply the attribute to a struct, an enum or the impl block of an object with a type parameter, or list the types of a function: `generic(T = [Todo, Note])`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
   --> tests/ui/e0002_template_shapes.rs:41:10
    |

@@ -57,6 +57,7 @@ static TODOS: ObjectMeta = ObjectMeta {
         is_async: false,
         takes_ctx: false,
         coalesce: false,
+        generic: None,
         docs: "",
     }],
     methods: &[MethodMeta {
@@ -67,6 +68,7 @@ static TODOS: ObjectMeta = ObjectMeta {
         is_async: false,
         takes_ctx: false,
         coalesce: false,
+        generic: None,
         docs: "",
     }],
     store: None,

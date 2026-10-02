@@ -1,0 +1,7 @@
+error: cannot find macro `Selection` in this scope
+  --> tests/ui/e0011_generic_store_without_a_block.rs:21:26
+   |
+21 | pub type TodoSelection = Selection<Todo>;
+   |                          ^^^^^^^^^
+   |
+   = note: `Selection` is in scope, but it is a struct, not a macro

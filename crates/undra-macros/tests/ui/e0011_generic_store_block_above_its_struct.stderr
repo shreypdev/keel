@@ -1,0 +1,8 @@
+error: cannot find macro `_undra_error_E0011_Selection_is_not_a_generic_store_declared_above_this_impl_block_in_the_same_module` in this scope
+ --> tests/ui/e0011_generic_store_block_above_its_struct.rs:9:1
+  |
+9 | #[k::api(store, generic)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: have you added the `#[macro_use]` on the module/import?
+  = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

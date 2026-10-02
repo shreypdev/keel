@@ -4,10 +4,15 @@ import SwiftUI
 /// The to-do list. Reading `todos.visible` (or any signal) is a plain property read: the core
 /// pushes changes, SwiftUI observes them. The filter, the `visible` list and the count of items
 /// left are computed in the core.
+///
+/// The strip under the filter is the generic code of the core (ADR-058): the ticks live in a
+/// `TodoSelection`, the "Latest" line is `newest(rows:)` and "New draft" is `draft(Todo.self, title:)`.
 struct TodosScreen: View {
     let todos: Todos
+    let selection: TodoSelection
     @State private var draft = ""
     @State private var problem: String?
+    @State private var latest: Todo?
 
     var body: some View {
         NavigationStack {
@@ -38,13 +43,34 @@ struct TodosScreen: View {
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("todo-filter")
                 }
+                SelectionStrip(
+                    kind: "todo",
+                    count: selection.count,
+                    latest: latest?.title,
+                    picked: selection.rows.map(\.title),
+                    selectAll: { selection.selectAll(rows: todos.visible) },
+                    clear: { selection.clear() },
+                    newDraft: newDraft,
+                    extra: (title: "Remove selected", action: removeSelected)
+                )
                 Section {
                     ForEach(todos.visible, id: \.id) { todo in
-                        Button {
-                            todos.toggle(id: todo.id)
-                        } label: {
-                            Label(todo.title, systemImage: todo.done ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(todo.done ? .secondary : .primary)
+                        HStack {
+                            Button {
+                                todos.toggle(id: todo.id)
+                            } label: {
+                                Label(todo.title, systemImage: todo.done ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(todo.done ? .secondary : .primary)
+                            }
+                            Spacer()
+                            Button {
+                                selection.toggle(todo)
+                            } label: {
+                                Image(systemName: isSelected(todo) ? "checkmark.square.fill" : "square")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Select \(todo.title)")
+                            .accessibilityIdentifier("todo-select")
                         }
                         .swipeActions {
                             Button(role: .destructive) {
@@ -56,6 +82,10 @@ struct TodosScreen: View {
                         .accessibilityIdentifier("todo-row")
                     }
                 }
+            }
+            .onChange(of: todos.todos, initial: true) {
+                // The newest to-do is the core's to say: one call of the function `newest`.
+                latest = try? newest(rows: todos.todos)
             }
             .navigationTitle("Todos")
             .navigationBarTitleDisplayMode(.inline)
@@ -71,6 +101,25 @@ struct TodosScreen: View {
                 }
             }
         }
+    }
+
+    private func isSelected(_ todo: Todo) -> Bool {
+        selection.rows.contains { $0.id == todo.id }
+    }
+
+    /// A draft is a to-do the core made but did not store: it is ticked, not added to the list.
+    private func newDraft() {
+        let title = draft.trimmingCharacters(in: .whitespaces)
+        if let row = try? PlaygroundCore.draft(Todo.self, title: title.isEmpty ? "Untitled" : title) {
+            selection.toggle(row)
+        }
+    }
+
+    private func removeSelected() {
+        for todo in selection.rows {
+            todos.remove(id: todo.id)
+        }
+        selection.clear()
     }
 
     /// The filter as the picker edits it: read from the core, written to the core.

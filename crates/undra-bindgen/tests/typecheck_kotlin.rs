@@ -113,6 +113,7 @@ const MAINS: &[(&str, &str)] = &[
     ("newtypes", "NewtypesTestKt"),
     ("infinite", "InfiniteTestKt"),
     ("lazy", "LazyTestKt"),
+    ("generic_functions", "GenericFunctionsTestKt"),
 ];
 
 /// Generates every golden case, each in its own package, compiles all of them

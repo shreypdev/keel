@@ -1,0 +1,12 @@
+error[E0080]: evaluation panicked: error[undra::E0011]: `Selection` is a `#[undra::store(generic)]` but its impl block is not marked as a store
+                = note: the impl block of a store must say so, so its constructors can attach the store's signals and its struct literals get the hidden cell field
+                = help: write `#[undra::api(store, generic)]` on the impl block
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0011
+  --> tests/ui/e0011_generic_store_block_without_store.rs:30:10
+   |
+29 | #[k::api]
+   | --------- in this attribute macro expansion
+30 | pub type TodoSelection = Selection<Todo>;
+   |          ^^^^^^^^^^^^^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

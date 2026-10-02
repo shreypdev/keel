@@ -175,6 +175,10 @@
           "text": "A lower deployment target generates ObservableObject stores and the iOS 17 output is unchanged; the mode is proven by compilation and a runtime probe on iOS 26.5, not yet on an iOS 15 or 16 runtime."
         },
         {
+          "title": "Generic functions, objects and stores (ADR-058)",
+          "text": "A function lists the types it crosses for and arrives as overloads; a generic object or store is a template, and each alias is an ordinary class with its own type id. Instantiations are declared, not open-ended; native generics, and generic queries, ports and callbacks, are not there."
+        },
+        {
           "title": "The web call path (ADR-056)",
           "text": "A generated TypeScript call went from 3.2–3.5 µs to 0.47–0.68 µs in headless Chromium, and React Native's mirror work at 100,000 updates a second from about 22 ms to about 5 ms a frame on the iPhone simulator."
         },
@@ -194,10 +198,6 @@
         {
           "title": "Rows from physical devices",
           "text": "The device benchmarks run on the iPhone simulator, the Android emulator and headless Chromium, and are labelled so; rows from real phones are owed, and no device target is claimed as met."
-        },
-        {
-          "title": "Generic functions and objects",
-          "text": "A generic record or enum crosses as one named type per instantiation; generic objects, stores, functions and methods do not cross yet."
         },
         {
           "title": "Query handles across a dev reload",

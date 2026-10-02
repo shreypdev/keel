@@ -1,0 +1,38 @@
+error: error[undra::E0006]: `f64` cannot be a map key
+         = note: map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not)
+         = help: use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0006
+  --> tests/ui/e0006_generic_object_map_key.rs:13:1
+   |
+13 | #[k::api(generic)]
+   | ^^^^^^^^^^^^^^^^^^
+...
+24 | #[k::api]
+   | --------- in this attribute macro expansion
+   |
+   = note: this error originates in the macro `::undra::__instantiate` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0080]: evaluation panicked: error[undra::E0008]: `#[undra(key = "id")]` on `rows` names no field of `Tag`
+                = note: `key` names the field of the list's items that identifies them, and `Tag` has the fields `name`
+                = help: write the name of one of those fields as the key
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/e0006_generic_object_map_key.rs:35:19
+   |
+35 |     #[undra(key = "id")]
+   |                   ^^^^ evaluation of `Selection::<Tag>::__undra_build_cell::__undra_key_rows::__UNDRA_KEY_IS_A_FIELD` failed here
+...
+48 | #[k::api]
+   | --------- in this attribute macro expansion
+   |
+   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+note: erroneous constant encountered
+  --> tests/ui/e0006_generic_object_map_key.rs:35:19
+   |
+35 |     #[undra(key = "id")]
+   |                   ^^^^
+...
+48 | #[k::api]
+   | --------- in this attribute macro expansion
+   |
+   = note: this note originates in the macro `::undra::__instantiate` which comes from the expansion of the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

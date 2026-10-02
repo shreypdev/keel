@@ -1,0 +1,841 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-generic-functions",
+  "records": [
+    {
+      "name": "Todo",
+      "type_id": 2995082141,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ],
+      "docs": "A todo."
+    },
+    {
+      "name": "Note",
+      "type_id": 339788125,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        },
+        {
+          "name": "body",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ],
+      "docs": "A note."
+    }
+  ],
+  "enums": [
+    {
+      "name": "LoadError",
+      "type_id": 177456109,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Missing",
+          "index": 0,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "u32"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "no row {0}"
+        },
+        {
+          "name": "Offline",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": "offline"
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "name": "Library",
+      "type_id": 2824020592,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 4181809604,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Library"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "pinned<Todo>",
+          "method_id": 2093807946,
+          "params": [],
+          "returns": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Todo"
+            }
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "generic": {
+            "of": "pinned",
+            "args": [
+              {
+                "param": "T",
+                "ty": {
+                  "kind": "named",
+                  "of": "Todo"
+                },
+                "inferred": false
+              }
+            ]
+          },
+          "docs": "The pinned rows of a type."
+        },
+        {
+          "name": "pinned<Note>",
+          "method_id": 821146894,
+          "params": [],
+          "returns": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Note"
+            }
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "generic": {
+            "of": "pinned",
+            "args": [
+              {
+                "param": "T",
+                "ty": {
+                  "kind": "named",
+                  "of": "Note"
+                },
+                "inferred": false
+              }
+            ]
+          },
+          "docs": "The pinned rows of a type."
+        },
+        {
+          "name": "remember<Todo>",
+          "method_id": 3048346879,
+          "params": [
+            {
+              "name": "row",
+              "ty": {
+                "kind": "named",
+                "of": "Todo"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "u32"
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "generic": {
+            "of": "remember",
+            "args": [
+              {
+                "param": "T",
+                "ty": {
+                  "kind": "named",
+                  "of": "Todo"
+                },
+                "inferred": true
+              }
+            ]
+          },
+          "docs": "Remembers a row and answers how many there are."
+        },
+        {
+          "name": "remember<Note>",
+          "method_id": 3955443679,
+          "params": [
+            {
+              "name": "row",
+              "ty": {
+                "kind": "named",
+                "of": "Note"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "u32"
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "generic": {
+            "of": "remember",
+            "args": [
+              {
+                "param": "T",
+                "ty": {
+                  "kind": "named",
+                  "of": "Note"
+                },
+                "inferred": true
+              }
+            ]
+          },
+          "docs": "Remembers a row and answers how many there are."
+        },
+        {
+          "name": "count",
+          "method_id": 1157885265,
+          "params": [],
+          "returns": {
+            "kind": "u32"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "How many rows are pinned."
+        }
+      ],
+      "store": null,
+      "docs": "A shelf of rows."
+    },
+    {
+      "name": "Shelf",
+      "type_id": 2954451427,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 1318930775,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Shelf"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "tidy<Todo>",
+          "method_id": 1036259805,
+          "params": [
+            {
+              "name": "rows",
+              "ty": {
+                "kind": "vec",
+                "of": {
+                  "kind": "named",
+                  "of": "Todo"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "generic": {
+            "of": "tidy",
+            "args": [
+              {
+                "param": "T",
+                "ty": {
+                  "kind": "named",
+                  "of": "Todo"
+                },
+                "inferred": true
+              }
+            ]
+          },
+          "docs": "Sorts rows."
+        },
+        {
+          "name": "tidy<Note>",
+          "method_id": 924402493,
+          "params": [
+            {
+              "name": "rows",
+              "ty": {
+                "kind": "vec",
+                "of": {
+                  "kind": "named",
+                  "of": "Note"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "generic": {
+            "of": "tidy",
+            "args": [
+              {
+                "param": "T",
+                "ty": {
+                  "kind": "named",
+                  "of": "Note"
+                },
+                "inferred": true
+              }
+            ]
+          },
+          "docs": "Sorts rows."
+        }
+      ],
+      "store": {
+        "signals": [
+          {
+            "name": "size",
+            "signal_id": 0,
+            "ty": {
+              "kind": "u32"
+            },
+            "computed": false,
+            "key": null
+          }
+        ]
+      },
+      "docs": "A store with generic methods."
+    }
+  ],
+  "functions": [
+    {
+      "name": "newest<Todo>",
+      "method_id": 3111402365,
+      "params": [
+        {
+          "name": "rows",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Todo"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "kind": "option",
+        "of": {
+          "kind": "named",
+          "of": "Todo"
+        }
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "newest",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Todo"
+            },
+            "inferred": true
+          }
+        ]
+      },
+      "docs": "The row that changed last, if there is one."
+    },
+    {
+      "name": "newest<Note>",
+      "method_id": 1211459677,
+      "params": [
+        {
+          "name": "rows",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Note"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "kind": "option",
+        "of": {
+          "kind": "named",
+          "of": "Note"
+        }
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "newest",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Note"
+            },
+            "inferred": true
+          }
+        ]
+      },
+      "docs": "The row that changed last, if there is one."
+    },
+    {
+      "name": "draft<Todo>",
+      "method_id": 202629358,
+      "params": [],
+      "returns": {
+        "kind": "named",
+        "of": "Todo"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "draft",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Todo"
+            },
+            "inferred": false
+          }
+        ]
+      },
+      "docs": "An empty row with a fresh id, ready to edit."
+    },
+    {
+      "name": "draft<Note>",
+      "method_id": 518259234,
+      "params": [],
+      "returns": {
+        "kind": "named",
+        "of": "Note"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "draft",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Note"
+            },
+            "inferred": false
+          }
+        ]
+      },
+      "docs": "An empty row with a fresh id, ready to edit."
+    },
+    {
+      "name": "load<Todo>",
+      "method_id": 1982894903,
+      "params": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "named",
+            "of": "Todo"
+          },
+          {
+            "kind": "named",
+            "of": "LoadError"
+          }
+        ]
+      },
+      "is_async": true,
+      "takes_ctx": true,
+      "generic": {
+        "of": "load",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Todo"
+            },
+            "inferred": false
+          }
+        ]
+      },
+      "docs": "Loads a row from the server."
+    },
+    {
+      "name": "load<Note>",
+      "method_id": 3249744695,
+      "params": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "named",
+            "of": "Note"
+          },
+          {
+            "kind": "named",
+            "of": "LoadError"
+          }
+        ]
+      },
+      "is_async": true,
+      "takes_ctx": true,
+      "generic": {
+        "of": "load",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Note"
+            },
+            "inferred": false
+          }
+        ]
+      },
+      "docs": "Loads a row from the server."
+    },
+    {
+      "name": "rows<Todo>",
+      "method_id": 1523942474,
+      "params": [
+        {
+          "name": "count",
+          "ty": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "stream",
+        "of": {
+          "kind": "named",
+          "of": "Todo"
+        }
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "rows",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Todo"
+            },
+            "inferred": false
+          }
+        ]
+      },
+      "docs": "A stream of the first rows."
+    },
+    {
+      "name": "rows<Note>",
+      "method_id": 251281422,
+      "params": [
+        {
+          "name": "count",
+          "ty": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "stream",
+        "of": {
+          "kind": "named",
+          "of": "Note"
+        }
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "rows",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Note"
+            },
+            "inferred": false
+          }
+        ]
+      },
+      "docs": "A stream of the first rows."
+    },
+    {
+      "name": "forget<Todo>",
+      "method_id": 4091627366,
+      "params": [
+        {
+          "name": "row",
+          "ty": {
+            "kind": "named",
+            "of": "Todo"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "forget",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Todo"
+            },
+            "inferred": true
+          }
+        ]
+      },
+      "docs": "Drops a row from the cache."
+    },
+    {
+      "name": "forget<Note>",
+      "method_id": 1220311226,
+      "params": [
+        {
+          "name": "row",
+          "ty": {
+            "kind": "named",
+            "of": "Note"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "unit"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "forget",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Note"
+            },
+            "inferred": true
+          }
+        ]
+      },
+      "docs": "Drops a row from the cache."
+    },
+    {
+      "name": "save<Todo>",
+      "method_id": 2347542234,
+      "params": [
+        {
+          "name": "row",
+          "ty": {
+            "kind": "named",
+            "of": "Todo"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "unit"
+          },
+          {
+            "kind": "named",
+            "of": "LoadError"
+          }
+        ]
+      },
+      "is_async": true,
+      "takes_ctx": false,
+      "generic": {
+        "of": "save",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Todo"
+            },
+            "inferred": true
+          }
+        ]
+      },
+      "docs": "Writes a row back."
+    },
+    {
+      "name": "save<Note>",
+      "method_id": 3935042910,
+      "params": [
+        {
+          "name": "row",
+          "ty": {
+            "kind": "named",
+            "of": "Note"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "unit"
+          },
+          {
+            "kind": "named",
+            "of": "LoadError"
+          }
+        ]
+      },
+      "is_async": true,
+      "takes_ctx": false,
+      "generic": {
+        "of": "save",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Note"
+            },
+            "inferred": true
+          }
+        ]
+      },
+      "docs": "Writes a row back."
+    },
+    {
+      "name": "make<Todo>",
+      "method_id": 4194848281,
+      "params": [
+        {
+          "name": "type",
+          "ty": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "named",
+        "of": "Todo"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "make",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Todo"
+            },
+            "inferred": false
+          }
+        ]
+      },
+      "docs": "Makes a row of the given kind: a parameter called `type` does not collide with the type token."
+    },
+    {
+      "name": "make<Note>",
+      "method_id": 2484474713,
+      "params": [
+        {
+          "name": "type",
+          "ty": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "named",
+        "of": "Note"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "generic": {
+        "of": "make",
+        "args": [
+          {
+            "param": "T",
+            "ty": {
+              "kind": "named",
+              "of": "Note"
+            },
+            "inferred": false
+          }
+        ]
+      },
+      "docs": "Makes a row of the given kind: a parameter called `type` does not collide with the type token."
+    },
+    {
+      "name": "count_rows",
+      "method_id": 134185752,
+      "params": [],
+      "returns": {
+        "kind": "u32"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "docs": "How many rows there are."
+    }
+  ],
+  "ports": [],
+  "queries": []
+}

@@ -14,6 +14,7 @@
 //! the code and the *what*; the *why*, the *fix* and the docs link follow on their own
 //! lines.
 
+use core::cell::RefCell;
 use core::fmt::Display;
 
 use proc_macro2::Span;
@@ -72,7 +73,9 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0066 | a `#[undra::migrate]` hook with a wrong target or shape (ADR-037; addition) |
 /// | E0070 | a named instantiation of a generic data type that is declared twice or outside the crate of its template (addition) |
 /// | E0071 | a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041) |
+/// | E0072 | the instantiation list of a generic function or method (`generic(T = [Todo, Note])`) is empty, repeats a type, lists something that is not a named value type, names a type parameter the function does not have, or the function has several type parameters; a schema whose `generic` labels do not describe their definitions (ADR-058; addition) |
 /// | E0073 | an `infinite` query that does not meet ADR-043's shape: no `item_key` or one that names no field of the rows, no or more than one `#[undra(cursor)]` parameter, a cursor that is not `Option<C>` or is in the key, a success type that is not `Page<T, C>`, rows that are not a record (addition) |
+/// | E0074 | the impl block of a generic object that is not for the type with its own type parameters, each exactly once, or a method of a generic object with type parameters of its own (ADR-058; addition) |
 pub(crate) mod code {
     pub(crate) const E0001: &str = "E0001";
     pub(crate) const E0002: &str = "E0002";
@@ -104,7 +107,34 @@ pub(crate) mod code {
     pub(crate) const E0066: &str = "E0066";
     pub(crate) const E0070: &str = "E0070";
     pub(crate) const E0071: &str = "E0071";
+    pub(crate) const E0072: &str = "E0072";
     pub(crate) const E0073: &str = "E0073";
+    pub(crate) const E0074: &str = "E0074";
+}
+
+thread_local! {
+    /// The instantiation being expanded (ADR-058), `newest<Todo>`: every message built while it
+    /// is set says so, because the tokens of a signature are the same for every type of a list.
+    static INSTANCE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Marks the diagnostics built while it lives as raised by one instantiation of a generic
+/// function or method (see [`in_instance`]).
+pub(crate) struct InstanceGuard {
+    previous: Option<String>,
+}
+
+impl Drop for InstanceGuard {
+    fn drop(&mut self) {
+        INSTANCE.with(|cell| *cell.borrow_mut() = self.previous.take());
+    }
+}
+
+/// Every [`Diag`] built until the guard is dropped names the instantiation `name`
+/// (`newest<Todo>`) at the end of its first line.
+pub(crate) fn in_instance(name: &str) -> InstanceGuard {
+    let previous = INSTANCE.with(|cell| cell.borrow_mut().replace(name.to_owned()));
+    InstanceGuard { previous }
 }
 
 /// A diagnostic under construction: everything except the span it is reported on.
@@ -138,10 +168,23 @@ impl Diag {
 
     /// The full multi-line message text.
     pub(crate) fn message(&self) -> String {
+        let instance = INSTANCE.with(|cell| cell.borrow().clone());
+        match instance {
+            Some(name) => self.render(&format!("{} (in `{name}`)", self.what)),
+            None => self.render(&self.what),
+        }
+    }
+
+    /// [`Diag::message`] without the name of the instantiation being expanded, for a diagnostic
+    /// that already says which one it is about.
+    pub(crate) fn plain_message(&self) -> String {
+        self.render(&self.what)
+    }
+
+    fn render(&self, what: &str) -> String {
         format!(
             "{MESSAGE_PREFIX}[undra::{code}]: {what}\n  = note: {why}\n  = help: {help}\n  = docs: {DOCS_BASE}#{code}",
             code = self.code,
-            what = self.what,
             why = self.why,
             help = self.help,
         )
@@ -190,6 +233,13 @@ impl Errors {
     /// Whether any error was recorded.
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_none()
+    }
+
+    /// Adds everything `other` recorded.
+    pub(crate) fn absorb(&mut self, other: Errors) {
+        if let Some(error) = other.0 {
+            self.push(error);
+        }
     }
 
     /// `Ok(())` if nothing was recorded, else all errors combined.
