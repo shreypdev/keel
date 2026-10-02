@@ -14,11 +14,15 @@
 //! is a few instructions. A long list already in order (the canonical form re-sorts what
 //! `collect_schema` sorted) costs one pass over it and no allocation.
 //!
+//! The canonical form no longer sorts a clone of the schema: its writer
+//! ([`schema_json`](crate::schema_json)) asks [`order_by`] for the same order as references, with
+//! the same two paths, and writes the items in it.
+//!
 //! The result is exactly what `slice::sort_by` / `sort_by_key` would produce with the same key
-//! (tests compare them), so the canonical form and the schema hash cannot move. Hashing a schema
-//! whose 2,000 records arrive in reverse order takes 239 µs on an Apple M5 Pro (205 µs with
-//! `sort_by`); an insertion sort for every length, 3 KB smaller still, took 9 ms there, which is why
-//! only short lists take one.
+//! (tests compare them), so the canonical form and the schema hash cannot move. When the canonical
+//! form still sorted a clone, hashing a schema whose 2,000 records arrive in reverse order took
+//! 239 µs on an Apple M5 Pro (205 µs with `sort_by`); an insertion sort for every length, 3 KB
+//! smaller still, took 9 ms there, which is why only short lists take one.
 
 /// Sorts `items` by the name `name` returns, stably (equal names keep their order).
 pub(crate) fn by_name<T>(items: &mut [T], name: fn(&T) -> &str) {
@@ -35,7 +39,10 @@ pub(crate) fn by_name<T>(items: &mut [T], name: fn(&T) -> &str) {
     permute(items, order);
 }
 
-/// Sorts `items` by the `u16` key `key` returns, stably (enum variants by wire index).
+/// Sorts `items` by the `u16` key `key` returns, stably (enum variants by wire index). Only the
+/// tests' oracle sorts a clone now (`Schema::canonicalized`); the canonical writer visits the
+/// variants through [`order_by`].
+#[cfg(test)]
 pub(crate) fn by_index<T>(items: &mut [T], key: fn(&T) -> u16) {
     if items.len() <= SMALL {
         insertion(items, |a, b| key(a) > key(b));
@@ -59,6 +66,33 @@ pub(crate) fn insertion_by_key<T, K: Ord>(items: &mut [T], key: impl Fn(&T) -> K
 /// [`insertion_by_key`] by a name the item holds.
 pub(crate) fn insertion_by_name<T>(items: &mut [T], name: fn(&T) -> &str) {
     insertion(items, |a, b| name(a) > name(b));
+}
+
+/// The order [`by_name`] (or [`by_index`]) would put `items` in, without moving or cloning them:
+/// references to the items sorted by `key`, stably, or `None` when they already are in that order
+/// (the top-level lists `collect_schema` sorted: one pass and no allocation). What the canonical
+/// writer walks, so that hashing a schema does not copy it first.
+///
+/// A stable sort has one result, so visiting these references is visiting a sorted clone.
+pub(crate) fn order_by<'a, T, K: Ord>(
+    items: &'a [T],
+    key: impl Fn(&'a T) -> K,
+) -> Option<Vec<&'a T>> {
+    if items.is_sorted_by_key(&key) {
+        return None;
+    }
+    if items.len() <= SMALL {
+        let mut refs: Vec<&T> = items.iter().collect();
+        insertion(&mut refs, |a, b| key(a) > key(b));
+        return Some(refs);
+    }
+    let keys: Vec<K> = items.iter().map(&key).collect();
+    Some(
+        stable_order(&keys)
+            .into_iter()
+            .map(|at| &items[at])
+            .collect(),
+    )
 }
 
 /// Up to this many items, an in-place insertion sort: no allocation, and fewer steps than the
@@ -275,6 +309,50 @@ mod tests {
             std.sort_by_key(|i| i.0);
             proptest::prop_assert_eq!(ours, std);
         }
+
+        /// `order_by` visits the items as `by_name` (so as `sort_by`) would leave them, on both
+        /// sides of the threshold, and says `None` exactly when they already are in order.
+        #[test]
+        fn order_by_is_the_sorted_clone_on_any_input(keys in proptest::collection::vec(0..WORDS.len(), 0..80)) {
+            let input: Vec<Item> = keys.iter().map(|&k| WORDS[k]).zip(0..).collect();
+            let mut std = input.clone();
+            std.sort_by(|a, b| a.0.cmp(b.0));
+            match order_by(&input, |item| item.0) {
+                Some(refs) => {
+                    proptest::prop_assert_ne!(&input, &std);
+                    let ours: Vec<Item> = refs.into_iter().copied().collect();
+                    proptest::prop_assert_eq!(ours, std);
+                }
+                None => proptest::prop_assert_eq!(input, std),
+            }
+        }
+    }
+
+    #[test]
+    fn order_by_at_the_threshold_and_by_index() {
+        for len in [0, 1, 2, 15, 16, 17, 18, 100] {
+            let shapes: [Vec<&str>; 3] = [
+                (0..len).rev().map(|i| WORDS[i % WORDS.len()]).collect(),
+                vec!["a"; len],
+                (0..len).map(|i| WORDS[i % 2 + 1]).collect(),
+            ];
+            for shape in shapes {
+                let input: Vec<Item> = shape.into_iter().zip(0..).collect();
+                let mut std = input.clone();
+                std.sort_by(|a, b| a.0.cmp(b.0));
+                let ours: Vec<Item> = match order_by(&input, |item| item.0) {
+                    Some(refs) => refs.into_iter().copied().collect(),
+                    None => input.clone(),
+                };
+                assert_eq!(ours, std, "length {len}: {input:?}");
+            }
+        }
+        // A `u16` key, as an enum's variants have: equal indexes keep their order.
+        let input = [(3_u16, 'a'), (1, 'b'), (3, 'c'), (0, 'd'), (1, 'e')];
+        let refs = order_by(&input, |item| item.0).expect("not in order");
+        let ours: Vec<(u16, char)> = refs.into_iter().copied().collect();
+        assert_eq!(ours, [(0, 'd'), (1, 'b'), (1, 'e'), (3, 'a'), (3, 'c')]);
+        assert!(order_by(&ours, |item| item.0).is_none());
     }
 
     #[test]

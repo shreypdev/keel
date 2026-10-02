@@ -157,7 +157,7 @@ fn signal(out: &mut String, s: &ClosureSignal) {
 
 /// `TypeRef` as its `serde` form: `{"kind":"i32"}`, `{"kind":"vec","of":T}`,
 /// `{"kind":"map","of":[K,V]}`, `{"kind":"named","of":"Todo"}`.
-fn type_ref(out: &mut String, ty: &TypeRef) {
+pub(crate) fn type_ref(out: &mut String, ty: &TypeRef) {
     out.push_str("{\"kind\":\"");
     out.push_str(kind_name(ty));
     out.push('"');
@@ -268,16 +268,38 @@ pub(crate) fn kind_name(ty: &TypeRef) -> &'static str {
     KINDS[at]
 }
 
-fn number(out: &mut String, n: u64) {
-    use fmt::Write as _;
-    let _ = write!(out, "{n}");
+/// `n` in decimal, as `serde_json` writes an unsigned integer. Written digit by digit: a
+/// schema's canonical form holds a few hundred ids, and `fmt`'s machinery for each was a
+/// measurable part of hashing one at start-up.
+pub(crate) fn number(out: &mut String, mut n: u64) {
+    // `u64::MAX` has 20 digits.
+    let mut digits = [0_u8; 20];
+    let mut at = digits.len();
+    loop {
+        at -= 1;
+        digits[at] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            break;
+        }
+    }
+    for &digit in &digits[at..] {
+        out.push(char::from(digit));
+    }
 }
 
 /// A JSON string exactly as `serde_json` escapes it: `"` and `\`, the control characters as
 /// `\b \t \n \f \r` or `\u00xx`, everything else (non-ASCII included) as it is.
-fn string(out: &mut String, s: &str) {
+pub(crate) fn string(out: &mut String, s: &str) {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     out.push('"');
+    // Nearly every string is a name with nothing to escape: copied whole. (Every byte of a
+    // multi-byte character is 0x80 or above, so the test below never splits one.)
+    if s.bytes().all(|b| b >= 0x20 && b != b'"' && b != b'\\') {
+        out.push_str(s);
+        out.push('"');
+        return;
+    }
     for c in s.chars() {
         match c {
             '"' => out.push_str("\\\""),
@@ -660,7 +682,7 @@ impl Cursor<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::closure::{ClosureRoot, TypeClosure};
 
@@ -838,7 +860,7 @@ mod tests {
 
     /// Names with what the writer must escape and what it must not: quotes, backslashes, every
     /// control character, DEL, non-ASCII, astral characters, the empty string.
-    fn arb_name() -> BoxedStrategy<String> {
+    pub(crate) fn arb_name() -> BoxedStrategy<String> {
         prop_oneof![
             "[a-zA-Z_][a-zA-Z0-9_]{0,8}",
             any::<String>(),
@@ -861,7 +883,7 @@ mod tests {
         .boxed()
     }
 
-    fn arb_ty() -> BoxedStrategy<TypeRef> {
+    pub(crate) fn arb_ty() -> BoxedStrategy<TypeRef> {
         let leaf = prop_oneof![
             (0_usize..LEAVES.len()).prop_map(|i| LEAVES[i].clone()),
             arb_name().prop_map(TypeRef::Named),

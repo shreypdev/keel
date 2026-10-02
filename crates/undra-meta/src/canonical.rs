@@ -23,13 +23,19 @@
 //! record fields, variant fields, parameters and signals (a `signal_id` is its
 //! index).
 
+#[cfg(test)]
 use serde::Serialize;
 
 use crate::ids::fnv1a64;
-use crate::{EnumDef, FunctionDef, ObjectDef, PortDef, QueryDef, RecordDef, Schema, VariantDef};
+#[cfg(test)]
+use crate::{EnumDef, FunctionDef, ObjectDef, PortDef, QueryDef, RecordDef};
+use crate::{Schema, VariantDef};
 
-/// The value the canonical JSON is serialized from: the schema without its
-/// labels. Field order here is the key order of the canonical JSON.
+/// The canonical JSON as `serde` writes it from a doc-stripped, sorted clone: the schema
+/// without its labels, field order the key order. This is how the canonical form was produced
+/// before [`crate::schema_json`] wrote it straight from the schema; the tests keep it as the
+/// oracle the writer is compared with.
+#[cfg(test)]
 #[derive(Serialize)]
 struct Canonical<'a> {
     records: &'a [RecordDef],
@@ -40,10 +46,10 @@ struct Canonical<'a> {
     queries: &'a [QueryDef],
 }
 
-/// The whole schema, borrowed: what [`Schema::to_json`] serializes. It writes the same document
-/// as `Schema`'s own derived `Serialize` (the same keys in the same order) but through the same
-/// slice types as [`Canonical`], so the two share their serialization code: a core links one copy
-/// of it, not two (`undra_schema_json` and the hash are both in every shipped binary).
+/// The whole schema, borrowed: what [`Schema::to_json`] serialized through `serde_json` before
+/// [`crate::schema_json`] wrote it. The same document as `Schema`'s own derived `Serialize` (the
+/// same keys in the same order); the tests keep it as the writer's oracle.
+#[cfg(test)]
 #[derive(Serialize)]
 struct Document<'a> {
     undra_version: &'a str,
@@ -80,6 +86,15 @@ impl Schema {
     /// ```
     #[must_use]
     pub fn canonical_json(&self) -> String {
+        // Written straight from `self`, in canonical order: no clone, no `serde` (every core
+        // computes this when it starts; see `crate::schema_json`).
+        crate::schema_json::canonical(self)
+    }
+
+    /// [`Schema::canonical_json`] as it was computed before the writer: `serde_json` on a
+    /// doc-stripped, sorted clone. The oracle of the writer's tests.
+    #[cfg(test)]
+    pub(crate) fn canonical_json_by_serde(&self) -> String {
         let s = self.canonicalized();
         let canonical = Canonical {
             records: &s.records,
@@ -89,9 +104,6 @@ impl Schema {
             ports: &s.ports,
             queries: &s.queries,
         };
-        // Serializing these types cannot fail: they contain only strings,
-        // integers, booleans, options and sequences, and the writer is an
-        // in-memory `String`.
         serde_json::to_string(&canonical).expect("schema types always serialize to JSON")
     }
 
@@ -131,6 +143,13 @@ impl Schema {
     /// ```
     #[must_use]
     pub fn to_json(&self) -> String {
+        // The same writer as the canonical form, so a core links one (`crate::schema_json`).
+        crate::schema_json::exchange(self)
+    }
+
+    /// [`Schema::to_json`] as `serde_json` wrote it before the writer: its oracle in the tests.
+    #[cfg(test)]
+    pub(crate) fn to_json_by_serde(&self) -> String {
         let document = Document {
             undra_version: &self.undra_version,
             crate_name: &self.crate_name,
@@ -141,7 +160,9 @@ impl Schema {
             ports: &self.ports,
             queries: &self.queries,
         };
-        // Infallible for the same reason as `canonical_json`.
+        // Serializing these types cannot fail: they contain only strings,
+        // integers, booleans, options and sequences, and the writer is an
+        // in-memory `String`.
         serde_json::to_string(&document).expect("schema types always serialize to JSON")
     }
 
@@ -152,7 +173,7 @@ impl Schema {
     /// hashing and comparisons.
     #[must_use]
     pub fn to_json_pretty(&self) -> String {
-        // Infallible for the same reason as `canonical_json`.
+        // Serializing these types cannot fail, as above.
         serde_json::to_string_pretty(self).expect("schema types always serialize to JSON")
     }
 
@@ -239,7 +260,9 @@ impl Schema {
     }
 
     /// A doc-stripped clone with every unordered list sorted: the value the
-    /// canonical JSON is serialized from.
+    /// canonical JSON describes (and was serialized from, see
+    /// `canonical_json_by_serde`).
+    #[cfg(test)]
     fn canonicalized(&self) -> Schema {
         let mut s = self.without_docs();
 
@@ -1084,6 +1107,12 @@ mod tests {
             reversed.canonicalized(),
             canonicalized_with_std_sort(&reversed)
         );
+
+        // The writer visits the lists in that order without sorting a clone (`sort::order_by`):
+        // the same bytes as `serde_json` on the clone, equal keys and long lists included.
+        for s in [&schema, &reversed] {
+            assert_eq!(s.canonical_json(), s.canonical_json_by_serde());
+        }
     }
 
     #[test]
