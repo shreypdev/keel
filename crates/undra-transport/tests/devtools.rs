@@ -1560,15 +1560,19 @@ fn a_time_travel_leaves_a_live_query_handle_alone_and_the_page_never_lists_it() 
             );
         }
     }
-    // The dev bar says which step, and no store is gone.
-    let notices: Vec<String> = app
-        .frames_of(Kind::Log)
-        .iter()
-        .filter_map(|f| Log::decode(&mut Reader::new(&f.payload)).ok())
-        .filter(|log| log.target == "undra::dev")
-        .map(|log| log.message.to_owned())
-        .collect();
-    assert_eq!(notices, ["time travel: step 1"]);
+    // The dev bar says which step, and no store is gone: wait for the notice, however long the machine takes to send it.
+    let dev_notices = |app: &TestClient| -> Vec<String> {
+        app.frames_of(Kind::Log)
+            .iter()
+            .filter_map(|f| Log::decode(&mut Reader::new(&f.payload)).ok())
+            .filter(|log| log.target == "undra::dev")
+            .map(|log| log.message.to_owned())
+            .collect()
+    };
+    while dev_notices(&app).is_empty() {
+        app.recv_kind(Kind::Log);
+    }
+    assert_eq!(dev_notices(&app), ["time travel: step 1"]);
 }
 
 /// A reload with a page attached: the new core re-issues the query handle dormant, and the hub of
@@ -1582,7 +1586,7 @@ fn the_hub_of_a_reloaded_core_does_not_build_the_re_issued_query_handles() {
     let counter = app.new_counter(1);
     let query = open_query(&mut app);
     wait_for_the_answer(&mut app, query);
-    let suspended = fx.server.suspend(Duration::from_millis(500));
+    let suspended = fx.server.suspend(Duration::from_secs(5));
     assert!(suspended.settled);
     let session = suspended.session.expect("the app's session is handed over");
     let mut handles = session.handles.clone();

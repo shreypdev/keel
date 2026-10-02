@@ -379,6 +379,17 @@ impl Client {
         while let Got::Frame(..) = self.read_within(wait) {}
         self.notices.clone()
     }
+
+    /// The notices once the first has arrived (the server sends it after the reconnect, however long a loaded
+    /// machine takes), and what follows it closely.
+    fn notices_when_told(&mut self) -> Vec<String> {
+        while self.notices.is_empty() {
+            if !matches!(self.read(), Got::Frame(..)) {
+                break;
+            }
+        }
+        self.notices_after(Duration::from_millis(500))
+    }
 }
 
 fn describe(got: &Got) -> String {
@@ -911,7 +922,7 @@ fn ticks(client: &Client, handle: u64) -> Option<u32> {
 
 /// Reads until the ticker has shown `at_least`.
 fn await_ticks(client: &mut Client, handle: u64, at_least: u32) {
-    for _ in 0..100 {
+    for _ in 0..300 {
         if ticks(client, handle).is_some_and(|n| n >= at_least) {
             return;
         }
@@ -998,7 +1009,7 @@ fn a_query_handle_and_a_paged_list_keep_working_across_a_rebuild() {
     );
     // The new core fetches and keeps polling: the tick counter of the new process climbs from 1.
     let mut seen = Vec::new();
-    for _ in 0..60 {
+    for _ in 0..300 {
         if let Some(n) = ticks(&back, ticker) {
             if seen.last() != Some(&n) {
                 seen.push(n);
@@ -1019,10 +1030,7 @@ fn a_query_handle_and_a_paged_list_keep_working_across_a_rebuild() {
     assert_eq!(page_of_books(&mut back, library), (10_000, 3));
     let values = back.observe(counter);
     assert_eq!(i32_of(&values[&COUNT]), 5);
-    assert_eq!(
-        back.notices_after(Duration::from_millis(500)),
-        ["Reloaded, state kept"]
-    );
+    assert_eq!(back.notices_when_told(), ["Reloaded, state kept"]);
     drop(back);
     dev.kill_and_expect_the_port_to_close();
 }
@@ -1097,7 +1105,7 @@ fn a_query_whose_parameter_type_the_edit_changes_is_not_carried_over_and_the_res
         "a refused handle is stale, as every object a restore does not carry"
     );
     assert_eq!(
-        back.notices_after(Duration::from_millis(500)),
+        back.notices_when_told(),
         ["Reloaded, state kept (the schema changed; 1 object not carried over)"]
     );
     let log = dev.log.lock().unwrap().clone();

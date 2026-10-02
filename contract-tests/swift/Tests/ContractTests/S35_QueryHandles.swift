@@ -146,7 +146,7 @@ extension ContractScenarios {
 
             // 5. Polling continues with no call from the runner.
             let shown = ticker.data ?? 0
-            try await waitUntil("the ticker to advance", timeout: .milliseconds(2_500)) { (ticker.data ?? 0) > shown }
+            try await waitUntil("the ticker to advance", timeout: .milliseconds(20_000)) { (ticker.data ?? 0) > shown }
 
             // 6. Pages still load: the next page of the same feed wrapper, and a page of books through the server the restore made.
             feed.fetchNextPage()

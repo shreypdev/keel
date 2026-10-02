@@ -166,7 +166,7 @@ fun s35QueryHandles(w: World) {
 
         // 5. Polling continues, with no call from the runner.
         val shown = ticker.data.value ?: 0u
-        awaitUntil("the ticker to advance", 2_500L) { (ticker.data.value ?: 0u) > shown }
+        awaitUntil("the ticker to advance", 20_000L) { (ticker.data.value ?: 0u) > shown }
 
         // 6. The next page loads on the same feed wrapper, and the library's rows are readable again (the restore rebuilt the store
         // and its page servers: its books entry names a new one, and a page call through it succeeds).

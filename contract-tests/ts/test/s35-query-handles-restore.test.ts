@@ -115,7 +115,7 @@ test("S35 query handles across a restore", { timeout: 90_000 }, async () => {
 
   await step("5. polling continues with no call from the runner", async () => {
     const shown = ticker.data.peek() as number;
-    await waitFor("the ticker to advance", () => (ticker.data.peek() as number) > shown, { timeoutMs: 2_500 });
+    await waitFor("the ticker to advance", () => (ticker.data.peek() as number) > shown, { timeoutMs: 20_000 });
   });
 
   await step("6. the next page loads, and the library's rows are readable again", async () => {

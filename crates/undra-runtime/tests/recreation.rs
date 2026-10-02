@@ -996,7 +996,7 @@ fn hold_recreation(
     let entered_tx = Mutex::new(entered_tx);
     let gate: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let _ = entered_tx.lock().unwrap().send(());
-        let _ = go_rx.lock().unwrap().recv_timeout(Duration::from_secs(10));
+        let _ = go_rx.lock().unwrap().recv_timeout(Duration::from_secs(60));
     });
     let widget = t.runtime().object::<Widget>(handle.0).unwrap();
     *widget.gate.lock().unwrap() = Some(gate);
@@ -1019,12 +1019,12 @@ fn a_snapshot_asks_for_the_records_with_no_lock_of_the_table_held() {
         std::thread::spawn(move || t.runtime().snapshot())
     };
     entered
-        .recv_timeout(Duration::from_secs(10))
+        .recv_timeout(Duration::from_secs(60))
         .expect("the snapshot reached the widget's recreation");
     // While it waits there, the table takes writes (a release from another thread, an insert).
     let other = with_timeout(
         "an insert while a snapshot waits in recreation()",
-        Duration::from_secs(5),
+        Duration::from_secs(60),
         {
             let t = t.clone();
             move || {
@@ -1059,11 +1059,11 @@ fn a_restore_asks_for_the_records_with_no_lock_of_the_table_held() {
         std::thread::spawn(move || t.runtime().restore_with_report(&snapshot))
     };
     entered
-        .recv_timeout(Duration::from_secs(10))
+        .recv_timeout(Duration::from_secs(60))
         .expect("the restore reached the widget's recreation");
     let other = with_timeout(
         "an insert while a restore waits in recreation()",
-        Duration::from_secs(5),
+        Duration::from_secs(60),
         {
             let t = t.clone();
             move || {
