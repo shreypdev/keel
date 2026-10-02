@@ -16,7 +16,7 @@ public final class TodoStore: UndraStore, ObservableObject, @unchecked Sendable 
     @Published public private(set) var remaining: UInt32 = 0
     @Published public private(set) var selected: Todo? = nil
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
@@ -57,7 +57,7 @@ public final class TodoStore: UndraStore, ObservableObject, @unchecked Sendable 
         } catch {
             throw UndraCallError.mapped(error, domain: TodoError.self)
         }
-        return TodoStore(adopting: handle, core: ctx)
+        return ctx.adopt(handle) { TodoStore(adopting: $0, core: $1) }
     }
 
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.

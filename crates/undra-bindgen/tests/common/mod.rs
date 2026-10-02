@@ -172,6 +172,8 @@ pub fn copy_dir(from: &Path, to: &Path) {
 
 /// The names of the golden cases, in the order they are documented.
 pub const CASES: &[&str] = &[
+    "object_graph",
+    "callbacks",
     "records",
     "enums",
     "errors",
@@ -208,6 +210,8 @@ pub fn generator_for(case: &str, schema: &Schema) -> Generator {
 /// The schema of golden case `name`.
 pub fn case(name: &str) -> Schema {
     match name {
+        "object_graph" => object_graph(),
+        "callbacks" => callbacks(),
         "records" => records(),
         "enums" => enums(),
         "errors" => errors(),
@@ -223,6 +227,14 @@ pub fn case(name: &str) -> Schema {
 }
 
 // ----- builders ---------------------------------------------------------------
+
+pub fn obj(name: &str) -> TypeRef {
+    TypeRef::object(name)
+}
+
+pub fn cb(name: &str) -> TypeRef {
+    TypeRef::callback(name)
+}
 
 pub fn field(name: &str, ty: TypeRef) -> FieldDef {
     FieldDef {
@@ -339,6 +351,7 @@ pub fn method(
         returns,
         is_async,
         takes_ctx: false,
+        coalesce: false,
         docs: docs.into(),
     }
 }
@@ -422,6 +435,7 @@ pub fn port(name: &str, docs: &str, kind: PortKind, methods: Vec<MethodDef>) -> 
         name: name.into(),
         port_id: ids::port_id(name),
         kind,
+        background: false,
         methods,
         docs: docs.into(),
     }
@@ -1798,6 +1812,302 @@ fn recursive() -> Schema {
         vec![param("expr", named("Expr"))],
         err_result(TypeRef::F64, "ParseError"),
         true,
+    ));
+    s
+}
+
+/// Objects as parameters and returns (ADR-040): an account that hands out mailboxes, threads and a
+/// child store, takes them back, and a free function that returns an object.
+fn object_graph() -> Schema {
+    let mut s = Schema::new("golden-object-graph");
+    s.enums.push(error_def(
+        "MailError",
+        "",
+        vec![with_message(unit_variant("NoThread", 0), "no such thread")],
+    ));
+    s.records.push(record(
+        "Message",
+        "A message in a chat.",
+        vec![field("id", TypeRef::U32), field("text", TypeRef::String)],
+    ));
+    s.objects.push(object(
+        "Account",
+        "An account that hands out its mailboxes.",
+        vec![ctor("Account", "new", vec![], false)],
+        vec![
+            method(
+                "Account",
+                "mailbox",
+                "The mailbox for `folder`, created on first use.",
+                vec![param("folder", TypeRef::String)],
+                obj("Mailbox"),
+                false,
+            ),
+            method(
+                "Account",
+                "open_thread",
+                "Opens a thread.",
+                vec![param("id", TypeRef::U32)],
+                TypeRef::result(obj("Thread"), named("MailError")),
+                true,
+            ),
+            method(
+                "Account",
+                "move_to",
+                "Moves a message to `target`.",
+                vec![
+                    param("message", TypeRef::U32),
+                    param("target", obj("Mailbox")),
+                ],
+                TypeRef::Unit,
+                false,
+            ),
+            method(
+                "Account",
+                "drafts",
+                "The drafts folder, if there is one.",
+                vec![],
+                opt(obj("Mailbox")),
+                false,
+            ),
+            method(
+                "Account",
+                "mailboxes",
+                "Every mailbox.",
+                vec![],
+                TypeRef::vec(obj("Mailbox")),
+                false,
+            ),
+            method(
+                "Account",
+                "chat",
+                "The chat with `peer`: a store.",
+                vec![param("peer", TypeRef::U32)],
+                obj("ChatStore"),
+                false,
+            ),
+            method(
+                "Account",
+                "merge",
+                "Merges the given mailboxes into the first and returns how many there were.",
+                vec![
+                    param("boxes", TypeRef::vec(obj("Mailbox"))),
+                    param("extra", opt(obj("Mailbox"))),
+                ],
+                TypeRef::U32,
+                false,
+            ),
+            method(
+                "Account",
+                "find_thread",
+                "Finds a thread, if it exists.",
+                vec![param("id", TypeRef::U32)],
+                TypeRef::result(opt(obj("Thread")), named("MailError")),
+                false,
+            ),
+        ],
+    ));
+    s.objects.push(object(
+        "Mailbox",
+        "A folder.",
+        vec![],
+        vec![method(
+            "Mailbox",
+            "name",
+            "",
+            vec![],
+            TypeRef::String,
+            false,
+        )],
+    ));
+    s.objects.push(object(
+        "Thread",
+        "A conversation.",
+        vec![],
+        vec![method("Thread", "id", "", vec![], TypeRef::U32, false)],
+    ));
+    s.objects.push(store(
+        object(
+            "ChatStore",
+            "A conversation the platform observes.",
+            vec![ctor("ChatStore", "new", vec![], false)],
+            vec![method(
+                "ChatStore",
+                "send",
+                "Sends a message.",
+                vec![param("text", TypeRef::String)],
+                TypeRef::Unit,
+                false,
+            )],
+        ),
+        vec![(
+            "messages",
+            TypeRef::vec(named("Message")),
+            false,
+            Some("id"),
+        )],
+    ));
+    s.functions.push(function(
+        "mailbox_of",
+        "The mailbox of `account` for `folder`.",
+        vec![
+            param("account", obj("Account")),
+            param("folder", TypeRef::String),
+        ],
+        obj("Mailbox"),
+        false,
+    ));
+    s
+}
+
+/// Host callback interfaces (ADR-041): a listener delivered on the main thread (with a coalesced
+/// progress report, a fire-and-forget note and an async question), a token provider delivered off
+/// it, and objects and functions that take them.
+fn callbacks() -> Schema {
+    let mut s = Schema::new("golden-callbacks");
+    s.enums.push(error_def(
+        "PromptError",
+        "",
+        vec![
+            with_message(unit_variant("Declined", 0), "the user declined"),
+            with_message(
+                tuple_variant("Unavailable", 1, vec![TypeRef::String]),
+                "{0}",
+            ),
+        ],
+    ));
+    s.enums.push(error_def(
+        "AuthError",
+        "",
+        vec![with_message(
+            unit_variant("Expired", 0),
+            "the token expired",
+        )],
+    ));
+    s.enums.push(error_def(
+        "UploadError",
+        "",
+        vec![with_message(unit_variant("Failed", 0), "the upload failed")],
+    ));
+    s.ports.push(port(
+        "UploadListener",
+        "Hears about an upload.",
+        PortKind::Callback,
+        vec![
+            MethodDef {
+                coalesce: true,
+                ..port_method(
+                    "UploadListener",
+                    "progress",
+                    "Bytes sent so far.",
+                    vec![param("sent", TypeRef::U64), param("total", TypeRef::U64)],
+                    TypeRef::Unit,
+                    false,
+                )
+            },
+            port_method(
+                "UploadListener",
+                "finished",
+                "The upload is over.",
+                vec![param("name", TypeRef::String)],
+                TypeRef::Unit,
+                false,
+            ),
+            port_method(
+                "UploadListener",
+                "confirm_replace",
+                "Asks the user whether to replace an existing file.",
+                vec![param("name", TypeRef::String)],
+                TypeRef::result(TypeRef::Bool, named("PromptError")),
+                true,
+            ),
+        ],
+    ));
+    s.ports.push(PortDef {
+        background: true,
+        ..port(
+            "TokenProvider",
+            "Provides tokens off the main thread.",
+            PortKind::Callback,
+            vec![
+                port_method(
+                    "TokenProvider",
+                    "token",
+                    "The token for `account`.",
+                    vec![param("account", TypeRef::String)],
+                    TypeRef::result(TypeRef::String, named("AuthError")),
+                    true,
+                ),
+                port_method(
+                    "TokenProvider",
+                    "refreshed",
+                    "A token was refreshed.",
+                    vec![param("account", TypeRef::String)],
+                    TypeRef::Unit,
+                    false,
+                ),
+            ],
+        )
+    });
+    s.objects.push(object(
+        "Uploader",
+        "Uploads files.",
+        vec![ctor(
+            "Uploader",
+            "new",
+            vec![param("listener", opt(cb("UploadListener")))],
+            false,
+        )],
+        vec![
+            method(
+                "Uploader",
+                "upload",
+                "Uploads `file`, reporting to `listener`.",
+                vec![
+                    param("file", TypeRef::String),
+                    param("listener", cb("UploadListener")),
+                ],
+                TypeRef::result(TypeRef::U32, named("UploadError")),
+                true,
+            ),
+            method(
+                "Uploader",
+                "watch",
+                "Keeps `listener` until the returned watch is closed.",
+                vec![param("listener", cb("UploadListener"))],
+                obj("Watch"),
+                false,
+            ),
+            method(
+                "Uploader",
+                "set_provider",
+                "Uses `provider` for the tokens.",
+                vec![param("provider", cb("TokenProvider"))],
+                TypeRef::Unit,
+                false,
+            ),
+            method(
+                "Uploader",
+                "notify",
+                "Tells the optional `listener` the upload is over.",
+                vec![param("listener", opt(cb("UploadListener")))],
+                TypeRef::Unit,
+                false,
+            ),
+        ],
+    ));
+    s.objects.push(object(
+        "Watch",
+        "A subscription.",
+        vec![],
+        vec![method("Watch", "id", "", vec![], TypeRef::U32, false)],
+    ));
+    s.functions.push(function(
+        "with_listener",
+        "Calls `listener` once and returns how many arguments it had.",
+        vec![param("listener", cb("UploadListener"))],
+        TypeRef::U32,
+        false,
     ));
     s
 }

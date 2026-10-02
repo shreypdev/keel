@@ -1,0 +1,17 @@
+error[E0080]: evaluation panicked: error[undra::E0061]: `Kid` here is an alias or a renamed import of an object that is declared under another name
+                = note: Undra describes an object to the platforms by the name it is written with, while the handle the core issues is of the type that name resolves to; with `type Kid = Other` or `use path::Other as Kid` the platforms would wrap it as `Kid`
+                = help: write the object under the name it is declared with (`Other` in the examples above)
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061
+  --> tests/ui/e0061_object_alias.rs:30:34
+   |
+30 |     pub fn aliased(&self) -> Arc<Kid> {
+   |                                  ^^^ evaluation of `_::_` failed here
+
+error[E0080]: evaluation panicked: error[undra::E0064]: `NotAnObject` is not an object
+                = note: an object is a type with an `#[undra::api] impl` block: the macro generates what lets the core hand it to the platforms as a handle, and without one there is nothing to hand out
+                = help: add `#[undra::api]` to an `impl NotAnObject { .. }` block, or use a record (`#[undra::api] struct`) if it is plain data
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064
+  --> tests/ui/e0061_object_alias.rs:34:32
+   |
+34 |     pub fn plain(&self, p: Arc<NotAnObject>) {}
+   |                                ^^^^^^^^^^^ evaluation of `_::_` failed here

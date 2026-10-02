@@ -140,7 +140,11 @@ fn walk(
                 return Err(bad("named type", r));
             }
         }
-        TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
+        TypeRef::Lazy(_)
+        | TypeRef::Result(..)
+        | TypeRef::Stream(_)
+        | TypeRef::Object(_)
+        | TypeRef::Callback(_) => {
             return Err(bad("type that cannot be a value", r));
         }
     }

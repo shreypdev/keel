@@ -41,6 +41,12 @@ import kotlin.time.Duration.Companion.nanoseconds
  * Entries for a handle that is not registered (a store closed meanwhile) are dropped and counted
  * ([MirrorStats.droppedEntries]).
  *
+ * The queue also carries the core's calls into the app's `main` callback implementations (ADR-041): an
+ * invocation is queued in arrival order with the change-sets and run at its place in the drain, after the
+ * change-sets that arrived before it and before those that arrived after it (an invocation is never folded with
+ * change-set entries: it splits the merging). Of the pending invocations of a `coalesce` method only the newest
+ * per instance runs ([MirrorStats.callbacksDelivered]).
+ *
  * This class is open only so that tests can substitute a fake mirror in a fake core; the runtime never
  * calls the overridable members from a core thread.
  */
@@ -102,6 +108,7 @@ public open class Mirror internal constructor(
     @Volatile private var drains = 0L
     @Volatile private var resyncs = 0L
     @Volatile private var droppedEntries = 0L
+    @Volatile private var callbacksDelivered = 0L
     private var appliedInDrain = 0
 
     private val frameTask = Runnable {
@@ -158,6 +165,7 @@ public open class Mirror internal constructor(
             pendingEntries = queue.size,
             pendingBytes = queueBytes,
             droppedEntries = droppedEntries,
+            callbacksDelivered = callbacksDelivered,
         )
     }
 
@@ -230,6 +238,26 @@ public open class Mirror internal constructor(
                 UndraLog.warn("dropping a malformed change-set (${changeSet.size} bytes)", it)
             }
             return
+        }
+        if (request) requestFrame()
+    }
+
+    /**
+     * Queues a callback [invocation] for the main thread at its arrival position among the change-sets, and asks for
+     * a drain like a change-set does. Safe from any thread, including a core callback: it only queues.
+     */
+    internal fun submitInvocation(invocation: MirrorInvocation) {
+        val insideDrain = draining && main.isCurrent()
+        var request = false
+        lock.withLock {
+            queue.addInvocation(invocation)
+            queueBytes += ENTRY_OVERHEAD + invocation.bytes
+            if (queue.size > compactAtEntries || queueBytes > compactAtBytes) compactLocked()
+            if (insideDrain) moreRounds = true
+            if (!frameRequested && !insideDrain) {
+                frameRequested = true
+                request = true
+            }
         }
         if (request) requestFrame()
     }
@@ -320,7 +348,14 @@ public open class Mirror internal constructor(
         val out = EntryBuffer(maxOf(16, units.size * 2))
         var bytes = 0L
         for (unit in units) {
-            val slot = unit as Slot
+            if (unit is Invoke) {
+                val invocation = source.invocations[unit.index]!!
+                out.addInvocation(invocation)
+                bytes += ENTRY_OVERHEAD + invocation.bytes
+                continue
+            }
+            if (unit !is Slot) continue // a superseded `coalesce` invocation
+            val slot = unit
             if (slot.oversized) {
                 markDropped(slot)
                 continue
@@ -357,11 +392,24 @@ public open class Mirror internal constructor(
      */
     private fun fold(batch: EntryBuffer, everyKey: Boolean): ArrayList<Any> {
         val units = ArrayList<Any>()
-        val index = SlotIndex()
+        var index = SlotIndex()
+        var newest: HashMap<Any, Int>? = null
         var lastHandle = 0L
         var lastNoCoalesce: IntArray? = null
         var haveLast = false
         for (i in 0 until batch.size) {
+            val invocation = batch.invocations[i]
+            if (invocation != null) {
+                // A barrier: what arrived before it is applied before it, what arrives after is merged anew.
+                index = SlotIndex()
+                val key = invocation.coalesceKey
+                if (key != null) {
+                    val seen = newest ?: HashMap<Any, Int>().also { newest = it }
+                    seen.put(key, units.size)?.let { superseded -> units[superseded] = SUPERSEDED }
+                }
+                units.add(Invoke(i))
+                continue
+            }
             val handle = batch.handles[i]
             val signal = batch.signals[i]
             val op = batch.ops[i]
@@ -508,7 +556,24 @@ public open class Mirror internal constructor(
 
     private fun applyUnits(batch: EntryBuffer, units: List<Any>) {
         for (unit in units) {
-            if (unit is Slot) applySlot(batch, unit) else applySingle(batch, (unit as Single).index)
+            when (unit) {
+                is Slot -> applySlot(batch, unit)
+                is Single -> applySingle(batch, unit.index)
+                is Invoke -> invoke(batch.invocations[unit.index]!!)
+                else -> Unit // a superseded `coalesce` invocation
+            }
+        }
+    }
+
+    private fun invoke(invocation: MirrorInvocation) {
+        callbacksDelivered++
+        try {
+            invocation.run()
+        } catch (e: OutOfMemoryError) {
+            throw e
+        } catch (e: Throwable) {
+            // The callback host reports an implementation's failures itself; this covers its own bugs.
+            UndraLog.error("running a callback invocation failed", e)
         }
     }
 
@@ -602,6 +667,9 @@ public open class Mirror internal constructor(
     /** An entry of a `no_coalesce` signal: applied on its own, at its arrival position. */
     private class Single(val index: Int)
 
+    /** A callback invocation: run at its arrival position. */
+    private class Invoke(val index: Int)
+
     /** Queued entries as parallel arrays: a queued entry costs no object of its own. */
     private class EntryBuffer(capacity: Int = 16) {
         var size: Int = 0
@@ -623,6 +691,10 @@ public open class Mirror internal constructor(
         var weights = IntArray(capacity)
             private set
 
+        /** The callback invocation an entry is, or `null` for a change-set entry. */
+        var invocations = arrayOfNulls<MirrorInvocation>(capacity)
+            private set
+
         fun add(handle: Long, signal: Int, op: Byte, value: ByteArray, start: Int, length: Int, weight: Int) {
             if (size == handles.size) grow()
             handles[size] = handle
@@ -632,6 +704,21 @@ public open class Mirror internal constructor(
             starts[size] = start
             lengths[size] = length
             weights[size] = weight
+            invocations[size] = null
+            size++
+        }
+
+        /** Appends a callback invocation (it stands for no change-set entry). */
+        fun addInvocation(invocation: MirrorInvocation) {
+            if (size == handles.size) grow()
+            handles[size] = 0L
+            signals[size] = 0
+            ops[size] = 0
+            values[size] = null
+            starts[size] = 0
+            lengths[size] = 0
+            weights[size] = 0
+            invocations[size] = invocation
             size++
         }
 
@@ -646,7 +733,10 @@ public open class Mirror internal constructor(
 
         /** Drops the entries from [newSize] on (a change-set that turned out malformed). */
         fun truncate(newSize: Int) {
-            for (i in newSize until size) values[i] = null
+            for (i in newSize until size) {
+                values[i] = null
+                invocations[i] = null
+            }
             size = newSize
         }
 
@@ -659,6 +749,7 @@ public open class Mirror internal constructor(
             starts = starts.copyOf(n)
             lengths = lengths.copyOf(n)
             weights = weights.copyOf(n)
+            invocations = invocations.copyOf(n)
         }
     }
 
@@ -792,6 +883,19 @@ public open class Mirror internal constructor(
         const val MAX_MERGED_PATCH_BYTES: Long = 1L shl 20
 
         private const val MAX_U32: Long = 0xFFFF_FFFFL
+
+        /** What a superseded `coalesce` invocation's unit becomes in a fold. */
+        private val SUPERSEDED = Any()
         private val PATCH_CODE: Byte = ChangeOp.PATCH.code.toByte()
     }
 }
+
+/**
+ * A call of the core into a `main` callback implementation, queued in the mirror (ADR-041): [run] at its place in a
+ * drain, on the main thread.
+ *
+ * @property coalesceKey for a `coalesce` method, what identifies the instance and the method: of the pending
+ *   invocations with equal keys only the newest runs. `null` for every other invocation.
+ * @property bytes the size of the call's arguments, counted against the queue's byte bound.
+ */
+internal class MirrorInvocation(val coalesceKey: Any?, val bytes: Int, val run: () -> Unit)

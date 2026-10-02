@@ -219,6 +219,42 @@ measured_ns = 142.1
 blueprint_ns = 3000
 blueprint = "1 KB record, round trip: <= 3 us iOS (A15), <= 8 us Android, <= 4 us web (core half of the call here)"
 
+# ADR-040: objects across the boundary, on the `Calculator`'s dock (`call_sync`, the same path as `add`).
+# `object_param` passes a handle the core resolves to its object (a table lookup under the table's
+# lock); `return_object` returns an object the host does not hold yet (a new entry, one host reference),
+# `return_interned_object` one it already holds (the same handle, one more reference). The two returns
+# run their release outside the clock (`with_reset`), so the timer's 41.7 ns tick (macOS) is their
+# resolution: 84.0 is two ticks. The ratio gate `object_param_vs_bare_call` below is the guard that
+# does not depend on the machine.
+[bench."dispatch/call_sync/object_param"]
+budget_ns = 250
+measured_ns = 48.7
+
+[bench."dispatch/call_sync/return_object"]
+budget_ns = 420
+measured_ns = 84.0
+
+[bench."dispatch/call_sync/return_interned_object"]
+budget_ns = 420
+measured_ns = 84.0
+
+# ADR-041: a host callback interface. `port_call/notify` is a fire-and-forget port call (the shape every
+# callback method with no reply has: encode, one `UndraPortCall`, no id); `callback/notify` the same
+# through a `CallbackHandle` (the instance id first in the args, the weak proxy upgraded);
+# `callback/async_roundtrip` an `async` callback method answered by the host: call, the host's
+# `port_reply`, the awaiting task woken and resumed.
+[bench."boundary/port_call/notify"]
+budget_ns = 250
+measured_ns = 24.3
+
+[bench."boundary/callback/notify"]
+budget_ns = 250
+measured_ns = 43.2
+
+[bench."boundary/callback/async_roundtrip"]
+budget_ns = 920
+measured_ns = 182.7
+
 [bench."dispatch/call_async/ready_add"]
 budget_ns = 1100
 measured_ns = 213.6
@@ -611,6 +647,17 @@ den = "stress/firehose/call_set"
 max = 1.1
 measured = 0.85
 
+# An object parameter costs a table lookup on top of a bare call: `Calculator.dock_slots(&Dock)` through
+# `call_sync` against `Calculator.add`. Healthy 0.99-1.14 on the reference host (quiet and loaded). No
+# runner samples exist yet, so the maximum is the bound of what it guards (an object resolved by a
+# scan, a lock per argument, a copy of the object per call would each put it past 2) and not 1.15x of the
+# largest sample; tighten it from the first runner runs that record it.
+[ratio."object_param_vs_bare_call"]
+num = "dispatch/call_sync/object_param"
+den = "dispatch/call_sync/add"
+max = 2.0
+measured = 1.03
+
 # Commit cost follows the dirty count, not the observed count (the layer B scenario asserts the same
 # on its sustained run, at 4x). Cache-bound, so it is the one ratio whose spread across hardware is
 # as wide as what it could see: healthy 0.99-2.37 over twelve runner runs. Its first maximum, 2.3
@@ -694,7 +741,7 @@ measured = 1.43
 # background run's task table and poll loop are linked only when a task is registered (by use, ADR-052).
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 119227
+measured_gzip_bytes = 119055
 tolerance = 0.05
 
 # What a hello-world app loads up front of the JavaScript runtime: `@undra/runtime` as the template's
@@ -708,13 +755,15 @@ tolerance = 0.05
 # -> 24,335 by that change of what is measured alone) and cuts it to 21,159: the remote transport, the default
 # ports and the framed transports' wire code load on demand (-4,686), the call path's levers (ADR-056) cost 1,510.
 # The 16 KB the first restatement aimed at is not reached: what is left is the runtime itself (the amendment says
-# what). Gated like the wasm. prod-ops (ADR-046) raises the budget to 21,700: the hello world carries, up front, the
-# report loader of the wasm trap path, the page's background window with its `pagehide` and `freeze` listeners and the
-# stats fields, 330 bytes over main's 21,336; `runInBackground`, the report builder and the Diagnostics port with its
-# registration and codecs are lazy chunks. The item-by-item verdict is ADR-052's review note of 2026-10-02.
+# what). Gated like the wasm. Restated at 21,800 by the objects-callbacks review (ADR-052, note of 2026-10-02): every
+# generated constructor adopts through the identity map of ADR-040, and the mirror carries ADR-041's callback
+# entries, in the up-front chunk; loading the identity map lazily was measured and rejected (the note says why).
+# prod-ops (ADR-046) adds, up front, the report loader of the wasm trap path, the page's background window with its
+# `pagehide` and `freeze` listeners and the stats fields; `runInBackground`, the report builder and the Diagnostics port
+# with its registration and codecs are lazy chunks. The item-by-item verdict is ADR-052's prod-ops review note.
 [size."web/hello-runtime-js"]
-budget_gzip_bytes = 21700
-measured_gzip_bytes = 21666
+budget_gzip_bytes = @@JSGATE@@
+measured_gzip_bytes = 21672
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------

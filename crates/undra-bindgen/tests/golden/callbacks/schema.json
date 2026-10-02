@@ -1,0 +1,368 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-callbacks",
+  "records": [],
+  "enums": [
+    {
+      "name": "PromptError",
+      "type_id": 2714689603,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Declined",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "the user declined"
+        },
+        {
+          "name": "Unavailable",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "{0}"
+        }
+      ]
+    },
+    {
+      "name": "AuthError",
+      "type_id": 626743103,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Expired",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "the token expired"
+        }
+      ]
+    },
+    {
+      "name": "UploadError",
+      "type_id": 529190378,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Failed",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "the upload failed"
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "name": "Uploader",
+      "type_id": 612285579,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 190944895,
+          "params": [
+            {
+              "name": "listener",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "callback",
+                  "of": "UploadListener"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "named",
+            "of": "Uploader"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "upload",
+          "method_id": 2170235650,
+          "params": [
+            {
+              "name": "file",
+              "ty": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "listener",
+              "ty": {
+                "kind": "callback",
+                "of": "UploadListener"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "u32"
+              },
+              {
+                "kind": "named",
+                "of": "UploadError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Uploads `file`, reporting to `listener`."
+        },
+        {
+          "name": "watch",
+          "method_id": 1146178550,
+          "params": [
+            {
+              "name": "listener",
+              "ty": {
+                "kind": "callback",
+                "of": "UploadListener"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "object",
+            "of": "Watch"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Keeps `listener` until the returned watch is closed."
+        },
+        {
+          "name": "set_provider",
+          "method_id": 3766219019,
+          "params": [
+            {
+              "name": "provider",
+              "ty": {
+                "kind": "callback",
+                "of": "TokenProvider"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Uses `provider` for the tokens."
+        },
+        {
+          "name": "notify",
+          "method_id": 583233210,
+          "params": [
+            {
+              "name": "listener",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "callback",
+                  "of": "UploadListener"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Tells the optional `listener` the upload is over."
+        }
+      ],
+      "store": null,
+      "docs": "Uploads files."
+    },
+    {
+      "name": "Watch",
+      "type_id": 3961941704,
+      "constructors": [],
+      "methods": [
+        {
+          "name": "id",
+          "method_id": 544587039,
+          "params": [],
+          "returns": {
+            "kind": "u32"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "store": null,
+      "docs": "A subscription."
+    }
+  ],
+  "functions": [
+    {
+      "name": "with_listener",
+      "method_id": 4121729154,
+      "params": [
+        {
+          "name": "listener",
+          "ty": {
+            "kind": "callback",
+            "of": "UploadListener"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "u32"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "docs": "Calls `listener` once and returns how many arguments it had."
+    }
+  ],
+  "ports": [
+    {
+      "name": "UploadListener",
+      "port_id": 2007366221,
+      "kind": "callback",
+      "methods": [
+        {
+          "name": "progress",
+          "method_id": 3549259033,
+          "params": [
+            {
+              "name": "sent",
+              "ty": {
+                "kind": "u64"
+              }
+            },
+            {
+              "name": "total",
+              "ty": {
+                "kind": "u64"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "coalesce": true,
+          "docs": "Bytes sent so far."
+        },
+        {
+          "name": "finished",
+          "method_id": 2554980824,
+          "params": [
+            {
+              "name": "name",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "The upload is over."
+        },
+        {
+          "name": "confirm_replace",
+          "method_id": 3825695845,
+          "params": [
+            {
+              "name": "name",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "bool"
+              },
+              {
+                "kind": "named",
+                "of": "PromptError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Asks the user whether to replace an existing file."
+        }
+      ],
+      "docs": "Hears about an upload."
+    },
+    {
+      "name": "TokenProvider",
+      "port_id": 2461941092,
+      "kind": "callback",
+      "background": true,
+      "methods": [
+        {
+          "name": "token",
+          "method_id": 1617752784,
+          "params": [
+            {
+              "name": "account",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "named",
+                "of": "AuthError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "The token for `account`."
+        },
+        {
+          "name": "refreshed",
+          "method_id": 3990164439,
+          "params": [
+            {
+              "name": "account",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "A token was refreshed."
+        }
+      ],
+      "docs": "Provides tokens off the main thread."
+    }
+  ],
+  "queries": []
+}

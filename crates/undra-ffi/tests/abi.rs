@@ -268,14 +268,14 @@ fn probe_entries(cap: &Capture) {
     };
     seen.push(("undra_call_sync refused", sync_refused));
     undra_cancel(9_999_003);
-    undra_observe(0x1_0000_0001, 0, 1);
-    undra_release(0x1_0000_0001);
+    undra_observe(0x100_0001, 0, 1);
+    undra_release(0x100_0001);
     event(1, 2, &[]);
     seen.push((
         "undra_restore refused",
         // An empty snapshot in layout 2 (ADR-037): it would decode, so only the re-entrancy
         // refuses it.
-        restore(&[0; 24]) == restore_code::UNAVAILABLE,
+        restore(&[0; 28]) == restore_code::UNAVAILABLE,
     ));
 
     cap.probed
@@ -801,8 +801,8 @@ fn calls_before_init_fail_softly() {
     // Every other entry is a quiet no-op.
     undra_cancel(1);
     undra_stream_credit(1, 1);
-    undra_observe(0x1_0000_0001, 0, 1);
-    undra_release(0x1_0000_0001);
+    undra_observe(0x100_0001, 0, 1);
+    undra_release(0x100_0001);
     undra_timer_fired(9);
     port_reply(&[]);
     event(1, 2, &[]);
@@ -1298,9 +1298,9 @@ fn snapshot_and_restore_round_trip_and_reject_garbage() {
     ] {
         assert_eq!(restore(bad), restore_code::BAD_SNAPSHOT);
     }
-    // A generation floor of u32::MAX would leave nothing to issue: refused like any bad snapshot.
+    // A generation floor of u64::MAX would leave nothing to issue: refused like any bad snapshot.
     let mut hostile = snapshot.clone();
-    hostile[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+    hostile[4..12].copy_from_slice(&u64::MAX.to_le_bytes());
     assert_eq!(restore(&hostile), restore_code::BAD_SNAPSHOT);
     let (status, _) = host.sync(method(counter, "Counter", "bump"), &[]);
     assert_eq!(status, ReplyStatus::Ok);

@@ -382,7 +382,11 @@ fn min_len(ty: &TypeRef) -> usize {
         | TypeRef::Timestamp
         | TypeRef::Lazy(_) => 8,
         TypeRef::Uuid => 16,
-        TypeRef::Unit | TypeRef::Result(..) | TypeRef::Stream(_) => 1,
+        TypeRef::Unit
+        | TypeRef::Result(..)
+        | TypeRef::Stream(_)
+        | TypeRef::Object(_)
+        | TypeRef::Callback(_) => 1,
     }
 }
 
@@ -487,7 +491,12 @@ fn decode_from(
                 )));
             }
         }
-        TypeRef::Unit | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
+        TypeRef::Unit
+        | TypeRef::Lazy(_)
+        | TypeRef::Result(..)
+        | TypeRef::Stream(_)
+        | TypeRef::Object(_)
+        | TypeRef::Callback(_) => {
             return Err(MigrateError::new(format!(
                 "{ty} is not a persisted value type"
             )));

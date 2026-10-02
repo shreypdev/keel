@@ -56,7 +56,7 @@ use super::diag::{Diag, Errors, code};
 use super::naming::{fnv1a32, snake_case, unraw};
 use super::object::arg_local;
 use super::paths::Root;
-use super::types::{Allow, KType, Pos, map_return, map_type, ty_string};
+use super::types::{Allow, KType, Pos, map_return_at, map_type, ty_string};
 
 /// What kind of port the attribute arguments ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +67,8 @@ pub(crate) enum Requested {
     Sync,
     /// `event`: host to core, fire and forget.
     Event,
+    /// `#[undra::callback]`: a host-implemented interface with many instances (ADR-041).
+    Callback,
 }
 
 struct PortParam {
@@ -80,6 +82,8 @@ struct PortMethod {
     ident: syn::Ident,
     name: String,
     is_async: bool,
+    /// `#[undra(coalesce)]` (callback interfaces only).
+    coalesce: bool,
     params: Vec<PortParam>,
     ret: KType,
     docs: String,
@@ -173,7 +177,15 @@ fn analyze_method(
     checks: &mut Checks,
     errors: &mut Errors,
 ) -> Option<PortMethod> {
-    take(&mut method.attrs, Site::NOTHING, errors);
+    let attrs = take(
+        &mut method.attrs,
+        if requested == Requested::Callback {
+            Site::CALLBACK_METHOD
+        } else {
+            Site::NOTHING
+        },
+        errors,
+    );
     let name = unraw(&method.sig.ident);
     reject_undra_macros(&method.attrs, accessor, &name, errors);
     check_generics(&method.sig.generics, &name, errors);
@@ -241,7 +253,7 @@ fn analyze_method(
             }
         };
         let param_name = unraw(&ident);
-        let kty = match map_type(&pat_type.ty, Pos::Param, Allow::NONE) {
+        let kty = match map_type(&pat_type.ty, Pos::PortParam, Allow::NONE) {
             Ok(kty) => kty,
             Err(err) => {
                 errors.push(port_param_error(err, &name, &param_name));
@@ -258,7 +270,7 @@ fn analyze_method(
     }
 
     let is_async = method.sig.asyncness.is_some();
-    let ret = match map_return(&method.sig.output) {
+    let ret = match map_return_at(&method.sig.output, Pos::PortReturn) {
         Ok(ret) => ret,
         Err(err) => {
             errors.push(err.into_error());
@@ -316,10 +328,15 @@ fn analyze_method(
         );
     }
 
+    if requested == Requested::Callback {
+        callback_shape(&name, is_async, &ret, attrs.coalesce, method, errors);
+    }
+
     ok.then(|| PortMethod {
         ident: method.sig.ident.clone(),
         name,
         is_async,
+        coalesce: attrs.coalesce,
         params,
         ret,
         docs,
@@ -327,11 +344,80 @@ fn analyze_method(
     })
 }
 
+/// E0071: a method of a callback interface either reports (a plain `fn` returning nothing) or is
+/// `async` and returns a `Result`; its name must not start with `__` (reserved for `__release`
+/// and `__cancel`); `#[undra(coalesce)]` is for reporting methods.
+fn callback_shape(
+    name: &str,
+    is_async: bool,
+    ret: &KType,
+    coalesce: bool,
+    method: &syn::TraitItemFn,
+    errors: &mut Errors,
+) {
+    let why = "the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone";
+    if name.starts_with("__") {
+        errors.push(
+            Diag::new(
+                code::E0071,
+                format!("callback method `{name}` has a reserved name"),
+                "names that start with `__` belong to the protocol (`__release` gives an instance back, `__cancel` cancels a call): a method of that name would be mistaken for one",
+                "rename the method",
+            )
+            .on(&method.sig.ident),
+        );
+    }
+    match (is_async, ret) {
+        (false, KType::Unit) => {}
+        (true, KType::Result(..)) => {
+            if coalesce {
+                errors.push(
+                    Diag::new(
+                        code::E0071,
+                        format!("`#[undra(coalesce)]` on the `async` callback method `{name}`"),
+                        "`coalesce` drops the older of two pending calls, and an `async` method's caller is waiting for each answer",
+                        "remove `#[undra(coalesce)]`, or make the method a plain `fn` that reports progress",
+                    )
+                    .on(&method.sig.ident),
+                );
+            }
+        }
+        (false, _) => errors.push(
+            Diag::new(
+                code::E0071,
+                format!("callback method `{name}` returns a value synchronously"),
+                why,
+                "make it `async` and return `Result<T, E>`, or make it a plain `fn` that returns nothing",
+            )
+            .on(&method.sig.output),
+        ),
+        (true, KType::Unit) => errors.push(
+            Diag::new(
+                code::E0071,
+                format!("callback method `{name}` is `async` and returns nothing"),
+                why,
+                "return `Result<T, E>` (an `#[undra::error]` enum that implements `From<PortError>`), or remove `async` to make it a fire-and-forget report",
+            )
+            .on(&method.sig.asyncness),
+        ),
+        (true, _) => errors.push(
+            Diag::new(
+                code::E0071,
+                format!("callback method `{name}` is `async` but does not return a `Result`"),
+                why,
+                "return `Result<T, E>` so the method can report that the host failed or is gone",
+            )
+            .on(&method.sig.output),
+        ),
+    }
+}
+
 /// Expands `#[undra::port]` on a trait.
 pub(crate) fn expand_trait(
     args_root: Option<Root>,
     requested: Requested,
     dispatcher_by_use: bool,
+    background: bool,
     mut item: ItemTrait,
 ) -> syn::Result<TokenStream> {
     let mut errors = Errors::new();
@@ -413,6 +499,7 @@ pub(crate) fn expand_trait(
 
     let kind = match requested {
         Requested::Event => "Event",
+        Requested::Callback => "Callback",
         _ if methods.iter().any(|m| m.is_async) => "Async",
         _ => "Sync",
     };
@@ -429,6 +516,7 @@ pub(crate) fn expand_trait(
         let params = m.params.iter().map(|p| param_meta(&meta, &p.name, &p.kty));
         let returns = m.ret.meta(&meta);
         let is_async = m.is_async;
+        let coalesce = m.coalesce;
         let mdocs = &m.docs;
         quote! {
             #meta::MethodMeta {
@@ -438,6 +526,7 @@ pub(crate) fn expand_trait(
                 returns: #returns,
                 is_async: #is_async,
                 takes_ctx: false,
+                coalesce: #coalesce,
                 docs: #mdocs,
             }
         }
@@ -459,6 +548,7 @@ pub(crate) fn expand_trait(
             name: #name_str,
             port_id: #meta::ids::port_id(#name_str),
             kind: #meta::PortKind::#kind_ident,
+            background: #background,
             methods: &[ #(#method_metas),* ],
             docs: #type_docs,
         };
@@ -467,6 +557,8 @@ pub(crate) fn expand_trait(
 
     let extras = if requested == Requested::Event {
         event_helpers(&root, &vis, &name, &name_str, &snake, &methods)
+    } else if requested == Requested::Callback {
+        callback_helpers(&root, &vis, &name, &name_str, &methods)
     } else {
         call_helpers(
             &root,
@@ -486,6 +578,108 @@ pub(crate) fn expand_trait(
         #extras
         #checks
     })
+}
+
+/// The tokens that turn the reply of a port call (`__undra_reply`, a
+/// `Result<Vec<u8>, PortError>`) into the value of method `m`: the typed `Result` of a method
+/// with an error channel, the decoded value, or a panic that names how to fix a missing adapter
+/// (E0062).
+fn reply_tokens(
+    m: &PortMethod,
+    runtime: &TokenStream,
+    wire: &TokenStream,
+    port_error_trait: &syn::Ident,
+    failure_fn: &syn::Ident,
+) -> TokenStream {
+    let mname = &m.name;
+    // What a method with no error channel does with an outcome it cannot return: a
+    // contained panic whose message says how to fix it (E0062).
+    let failed = quote!(#failure_fn(#mname, __undra_error));
+    let undecodable = |ty: &Type| {
+        quote_spanned! {ty.span()=>
+            match <#ty as #wire::Decode>::decode_exact(&__undra_bytes) {
+                ::core::result::Result::Ok(__undra_value) => __undra_value,
+                ::core::result::Result::Err(__undra_error) => #failure_fn(
+                    #mname,
+                    #runtime::PortError::Decode(__undra_error),
+                ),
+            }
+        }
+    };
+    let (ok_ty, err_ty) = result_types(&m.sig.output, m.is_async);
+    match (&m.ret, ok_ty, err_ty) {
+        // A method with an error channel turns every outcome into a value: the encoded `E`
+        // the adapter reported, or `E::from(PortError)` for an unavailable port, a
+        // cancelled call or a reply that does not decode.
+        (KType::Result(ok, _), ok_ty, Some(err_ty)) => {
+            let to_err = quote_spanned! {err_ty.span()=>
+                fn __undra_port_error(__undra_e: #runtime::PortError) -> #err_ty {
+                    <#err_ty as #port_error_trait>::__undra_from_port_error(__undra_e)
+                }
+            };
+            let ok_arm = if ok.is_unit() {
+                quote!(::core::result::Result::Ok(_) => ::core::result::Result::Ok(()),)
+            } else {
+                let ok_ty = ok_ty.expect("result has an ok type");
+                quote_spanned! {ok_ty.span()=>
+                    ::core::result::Result::Ok(__undra_bytes) => {
+                        match <#ok_ty as #wire::Decode>::decode_exact(&__undra_bytes) {
+                            ::core::result::Result::Ok(__undra_value) => {
+                                ::core::result::Result::Ok(__undra_value)
+                            }
+                            ::core::result::Result::Err(__undra_error) => {
+                                ::core::result::Result::Err(__undra_port_error(
+                                    #runtime::PortError::Decode(__undra_error),
+                                ))
+                            }
+                        }
+                    }
+                }
+            };
+            let failed_arm = quote_spanned! {err_ty.span()=>
+                ::core::result::Result::Err(#runtime::PortError::Failed(__undra_bytes)) => {
+                    match <#err_ty as #wire::Decode>::decode_exact(&__undra_bytes) {
+                        ::core::result::Result::Ok(__undra_value) => {
+                            ::core::result::Result::Err(__undra_value)
+                        }
+                        ::core::result::Result::Err(__undra_error) => {
+                            ::core::result::Result::Err(__undra_port_error(
+                                #runtime::PortError::Decode(__undra_error),
+                            ))
+                        }
+                    }
+                }
+            };
+            quote! {
+                #to_err
+                match __undra_reply {
+                    #ok_arm
+                    #failed_arm
+                    ::core::result::Result::Err(__undra_other) => {
+                        ::core::result::Result::Err(__undra_port_error(__undra_other))
+                    }
+                }
+            }
+        }
+        (ret, ok_ty, _) if ret.is_unit() => {
+            let _ = ok_ty;
+            quote! {
+                match __undra_reply {
+                    ::core::result::Result::Ok(_) => (),
+                    ::core::result::Result::Err(__undra_error) => #failed,
+                }
+            }
+        }
+        (_, ok_ty, _) => {
+            let decode = undecodable(&ok_ty.expect("plain return has a type"));
+            quote! {
+                match __undra_reply {
+                    ::core::result::Result::Ok(__undra_bytes) => #decode,
+                    ::core::result::Result::Err(__undra_error) => #failed,
+                }
+            }
+        }
+    }
 }
 
 /// The proxy, the accessor and the Rust-side dispatcher of a request/reply port.
@@ -529,94 +723,7 @@ fn call_helpers(
             let ident = &p.ident;
             quote_spanned!(p.ty.span()=> #wire::Encode::encode(&#ident, &mut __undra_w);)
         });
-        // What a method with no error channel does with an outcome it cannot return: a
-        // contained panic whose message says how to fix it (E0062).
-        let failed = quote!(#failure_fn(#mname, __undra_error));
-        let undecodable = |ty: &Type| {
-            quote_spanned! {ty.span()=>
-                match <#ty as #wire::Decode>::decode_exact(&__undra_bytes) {
-                    ::core::result::Result::Ok(__undra_value) => __undra_value,
-                    ::core::result::Result::Err(__undra_error) => #failure_fn(
-                        #mname,
-                        #runtime::PortError::Decode(__undra_error),
-                    ),
-                }
-            }
-        };
-        let (ok_ty, err_ty) = result_types(&m.sig.output, m.is_async);
-        let reply = match (&m.ret, ok_ty, err_ty) {
-            // A method with an error channel turns every outcome into a value: the encoded `E`
-            // the adapter reported, or `E::from(PortError)` for an unavailable port, a
-            // cancelled call or a reply that does not decode.
-            (KType::Result(ok, _), ok_ty, Some(err_ty)) => {
-                let to_err = quote_spanned! {err_ty.span()=>
-                    fn __undra_port_error(__undra_e: #runtime::PortError) -> #err_ty {
-                        <#err_ty as #port_error_trait>::__undra_from_port_error(__undra_e)
-                    }
-                };
-                let ok_arm = if ok.is_unit() {
-                    quote!(::core::result::Result::Ok(_) => ::core::result::Result::Ok(()),)
-                } else {
-                    let ok_ty = ok_ty.expect("result has an ok type");
-                    quote_spanned! {ok_ty.span()=>
-                        ::core::result::Result::Ok(__undra_bytes) => {
-                            match <#ok_ty as #wire::Decode>::decode_exact(&__undra_bytes) {
-                                ::core::result::Result::Ok(__undra_value) => {
-                                    ::core::result::Result::Ok(__undra_value)
-                                }
-                                ::core::result::Result::Err(__undra_error) => {
-                                    ::core::result::Result::Err(__undra_port_error(
-                                        #runtime::PortError::Decode(__undra_error),
-                                    ))
-                                }
-                            }
-                        }
-                    }
-                };
-                let failed_arm = quote_spanned! {err_ty.span()=>
-                    ::core::result::Result::Err(#runtime::PortError::Failed(__undra_bytes)) => {
-                        match <#err_ty as #wire::Decode>::decode_exact(&__undra_bytes) {
-                            ::core::result::Result::Ok(__undra_value) => {
-                                ::core::result::Result::Err(__undra_value)
-                            }
-                            ::core::result::Result::Err(__undra_error) => {
-                                ::core::result::Result::Err(__undra_port_error(
-                                    #runtime::PortError::Decode(__undra_error),
-                                ))
-                            }
-                        }
-                    }
-                };
-                quote! {
-                    #to_err
-                    match __undra_reply {
-                        #ok_arm
-                        #failed_arm
-                        ::core::result::Result::Err(__undra_other) => {
-                            ::core::result::Result::Err(__undra_port_error(__undra_other))
-                        }
-                    }
-                }
-            }
-            (ret, ok_ty, _) if ret.is_unit() => {
-                let _ = ok_ty;
-                quote! {
-                    match __undra_reply {
-                        ::core::result::Result::Ok(_) => (),
-                        ::core::result::Result::Err(__undra_error) => #failed,
-                    }
-                }
-            }
-            (_, ok_ty, _) => {
-                let decode = undecodable(&ok_ty.expect("plain return has a type"));
-                quote! {
-                    match __undra_reply {
-                        ::core::result::Result::Ok(__undra_bytes) => #decode,
-                        ::core::result::Result::Err(__undra_error) => #failed,
-                    }
-                }
-            }
-        };
+        let reply = reply_tokens(m, &runtime, &wire, &port_error_trait, &failure_fn);
         let body = if m.is_async {
             quote! {
                 let __undra_ctx = ::core::clone::Clone::clone(&self.0);
@@ -980,6 +1087,150 @@ fn boxed_future_output(ty: &Type) -> Option<&Type> {
     })
 }
 
+/// The proxy of a callback interface (ADR-041): `<Trait>Proxy` over a
+/// [`CallbackHandle`](undra_runtime::CallbackHandle), implementing the trait by calling the host
+/// instance, and `impl CallbackInterface for dyn Trait`, which is how a dispatcher makes one from
+/// an instance handle. A reporting method is a fire-and-forget call (`port_call_id 0`); an `async`
+/// one is a port call whose future sends `__cancel` when it is dropped before the host answered.
+fn callback_helpers(
+    root: &Root,
+    vis: &syn::Visibility,
+    name: &syn::Ident,
+    name_str: &str,
+    methods: &[PortMethod],
+) -> TokenStream {
+    let meta = root.meta();
+    let runtime = root.runtime();
+    let wire = root.wire();
+    let derived = derived();
+    let proxy = format_ident!("{}Proxy", name_str);
+    let proxy_doc = format!(
+        "The core's handle on one host instance of the `{name_str}` callback interface: its methods call the host (ADR-041). Dropping it gives the instance's reference back."
+    );
+    let port_error_trait = format_ident!("__UndraPortError_{}", name_str);
+    let failure_fn = format_ident!("__undra_port_failure_{}", name_str);
+    let needs_error_trait = methods.iter().any(|m| matches!(m.ret, KType::Result(..)));
+
+    let proxy_methods = methods.iter().map(|m| {
+        let sig = &m.sig;
+        let mname = &m.name;
+        let method_id = quote!(#meta::ids::port_method_id(#name_str, #mname));
+        let encodes = m.params.iter().map(|p| {
+            let ident = &p.ident;
+            quote_spanned!(p.ty.span()=> #wire::Encode::encode(&#ident, __undra_w);)
+        });
+        if m.is_async {
+            let reply = reply_tokens(m, &runtime, &wire, &port_error_trait, &failure_fn);
+            quote! {
+                #sig {
+                    // Sent now, in call order; dropping the future before it completes cancels.
+                    let __undra_call = self.0.call(#method_id, |__undra_w| { #(#encodes)* });
+                    ::std::boxed::Box::pin(async move {
+                        let __undra_reply = __undra_call.await;
+                        #reply
+                    })
+                }
+            }
+        } else {
+            quote! {
+                #sig {
+                    self.0.notify(#method_id, |__undra_w| { #(#encodes)* });
+                }
+            }
+        }
+    });
+    let proxy_methods: Vec<TokenStream> = proxy_methods.collect();
+
+    let error_trait_attr = on_unimplemented(
+        &Diag::new(
+            code::E0033,
+            format!(
+                "the error type `{{Self}}` of an async method of the `{name_str}` callback interface cannot represent a host that is gone"
+            ),
+            "a host instance that was closed, a call that was cancelled and a reply that does not decode are ordinary outcomes, and an async callback method reports them as its error instead of panicking; that needs `From<PortError>` for the error type",
+            "implement `From<undra::runtime::PortError>` for `{Self}`, mapping it to a variant such as `Unavailable`, or to the `Display` text of the `PortError`",
+        ),
+        "`From<PortError>` is not implemented for this error type",
+    );
+    let error_trait = if needs_error_trait {
+        quote! {
+            #[doc(hidden)]
+            #[allow(non_camel_case_types, dead_code)]
+            #error_trait_attr
+            trait #port_error_trait: ::core::marker::Sized {
+                fn __undra_from_port_error(__undra_e: #runtime::PortError) -> Self;
+            }
+            impl<__UndraE: ::core::convert::From<#runtime::PortError>> #port_error_trait for __UndraE {
+                fn __undra_from_port_error(__undra_e: #runtime::PortError) -> Self {
+                    <__UndraE as ::core::convert::From<#runtime::PortError>>::from(__undra_e)
+                }
+            }
+        }
+    } else {
+        TokenStream::new()
+    };
+    // `reply_tokens` names the failure function of a method without an error channel; a callback
+    // method never is one (E0071), so it is never called.
+    let failure = quote! {
+        #[doc(hidden)]
+        #[allow(non_snake_case, dead_code)]
+        fn #failure_fn(__undra_method: &str, __undra_error: #runtime::PortError) -> ! {
+            ::core::panic!("callback `{}` method `{}`: {}", #name_str, __undra_method, __undra_error)
+        }
+    };
+
+    quote! {
+        #error_trait
+        #failure
+
+        #[doc = #proxy_doc]
+        #vis struct #proxy(#runtime::CallbackHandle);
+
+        impl #proxy {
+            /// Wraps a host instance.
+            #vis fn new(handle: #runtime::CallbackHandle) -> Self {
+                Self(handle)
+            }
+        }
+
+        #derived
+        impl #name for #proxy {
+            #(#proxy_methods)*
+        }
+
+        #derived
+        impl #runtime::CallbackInterface for dyn #name {
+            fn proxy(handle: #runtime::CallbackHandle) -> ::std::sync::Arc<dyn #name> {
+                ::std::sync::Arc::new(#proxy::new(handle))
+            }
+        }
+    }
+}
+
+/// The arguments of `#[undra::callback]`: `background` and `crate = "path"`.
+pub(crate) fn parse_callback_args(attr: TokenStream) -> syn::Result<(Option<Root>, bool)> {
+    let mut root = None;
+    let mut background = false;
+    parse_args(
+        attr,
+        "callback",
+        "`background` and `crate = \"path\"`",
+        |meta| {
+            if meta.path.is_ident("crate") {
+                root = Some(root_arg(meta)?);
+                Ok(true)
+            } else if meta.path.is_ident("background") {
+                flag(meta, code::E0008, "background")?;
+                background = true;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        },
+    )?;
+    Ok((root, background))
+}
+
 /// Subscription helpers and payload encoders of an event port.
 fn event_helpers(
     root: &Root,
@@ -1138,7 +1389,7 @@ mod tests {
 
     fn trait_result(src: &str, requested: Requested) -> Result<String, String> {
         let item: ItemTrait = syn::parse_str(src).unwrap();
-        expand_trait(None, requested, false, item)
+        expand_trait(None, requested, false, false, item)
             .map(|t| t.to_string())
             .map_err(|e| e.to_string())
     }
@@ -1173,7 +1424,7 @@ mod tests {
             "pub trait SecureStore { async fn get(&self, key: String) -> Option<Bytes>; }",
         )
         .unwrap();
-        let out = expand_trait(None, Requested::Inferred, true, item)
+        let out = expand_trait(None, Requested::Inferred, true, false, item)
             .unwrap()
             .to_string();
         assert!(

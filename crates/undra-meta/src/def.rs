@@ -160,6 +160,12 @@ pub struct MethodDef {
     /// Whether the first Rust parameter is a `Ctx` (constructors and free
     /// functions only).
     pub takes_ctx: bool,
+    /// `#[undra(coalesce)]` on a fire-and-forget method of a callback interface (ADR-041): of the
+    /// invocations still waiting in one drain only the newest, per instance and method, is
+    /// delivered (progress reporting). Serialized only when `true`, like
+    /// [`SignalDef::no_coalesce`], so no schema without one hashes differently.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub coalesce: bool,
     /// Doc comment; excluded from the schema hash.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub docs: String,
@@ -243,6 +249,11 @@ pub enum PortKind {
     Async,
     /// Fire-and-forget host to core events; methods return `()`.
     Event,
+    /// A host-implemented callback interface (`#[undra::callback]`, ADR-041): a port with many
+    /// instances, which the host passes in as parameters. Every method is fire-and-forget
+    /// (returns `()`) or `async` with a `Result<T, E>`. A call on an instance is a port call
+    /// whose arguments begin with the instance handle.
+    Callback,
 }
 
 /// A port: a trait implemented by the platform (foreign) or a Rust fake.
@@ -252,8 +263,14 @@ pub struct PortDef {
     pub name: String,
     /// `fnv1a32("port.<name>")`, see [`crate::ids::port_id`].
     pub port_id: u32,
-    /// Sync, async or event.
+    /// Sync, async, event or callback.
     pub kind: PortKind,
+    /// `#[undra::callback(background)]` (ADR-041): the host runs this callback interface's
+    /// implementations on a serial executor per instance, in call order, without waiting for a
+    /// frame, instead of through the mirror's drain on the main thread. Serialized only when
+    /// `true`, so no schema without one hashes differently.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub background: bool,
     /// Port methods; `method_id` is `fnv1a32("<Trait>.<method>")`. Sorted by
     /// name in the canonical form.
     pub methods: Vec<MethodDef>,

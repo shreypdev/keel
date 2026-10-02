@@ -40,16 +40,25 @@ public final class UndraCoreEntry: Sendable {
     /// Returns the core's table (`<namespace>_undra_api()`); called by an in-process `load` only,
     /// so a remote-only app never needs it to resolve to anything.
     private let api: @Sendable () -> UnsafeRawPointer?
+    /// The bridges of the core's callback interfaces (ADR-041), installed on every core this entry loads.
+    private let callbacks: [UndraCallbackInterface]
     private let slot = Guarded<Slot>(.empty)
     /// Whether the "load this core first" message has been logged.
     private let warned = Guarded<Bool>(false)
 
     /// An entry for the core `namespace`, whose bindings expect `schemaHash` and whose table `api`
-    /// returns.
-    public init(namespace: String, schemaHash: UInt64, api: @escaping @Sendable () -> UnsafeRawPointer?) {
+    /// returns. `callbacks` are the bridges of the core's callback interfaces, which every load
+    /// registers before it returns the core.
+    public init(
+        namespace: String,
+        schemaHash: UInt64,
+        api: @escaping @Sendable () -> UnsafeRawPointer?,
+        callbacks: [UndraCallbackInterface] = []
+    ) {
         self.namespace = namespace
         self.schemaHash = schemaHash
         self.api = api
+        self.callbacks = callbacks
     }
 
     /// Loads the core and makes it ``core``.
@@ -88,6 +97,7 @@ public final class UndraCoreEntry: Sendable {
         }
         do {
             let core = try UndraCore.load(resolved)
+            core.callbacks.install(callbacks)
             slot.withLock { (current: inout Slot) -> Void in
                 current = .loaded(core)
             }

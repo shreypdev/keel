@@ -192,18 +192,19 @@ export class SnapshotKeeper {
   }
 }
 
-/** A copy of `snapshot` whose generation floor (the u32 after the store count, SPEC 5.9) is at least `floor` (ADR-022). */
+/** A copy of `snapshot` whose generation floor (the u64 after the store count, SPEC 5.9; ADR-040 widened it) is at least `floor` (ADR-022). */
 export function withGenerationFloor(snapshot: Uint8Array, floor: number): Uint8Array {
   const copy = snapshot.slice();
-  if (copy.byteLength < 8) return copy;
+  if (copy.byteLength < 12) return copy;
   const view = new DataView(copy.buffer, copy.byteOffset, copy.byteLength);
-  if (view.getUint32(4, true) < floor) view.setUint32(4, floor >>> 0, true);
+  const wanted = BigInt(Math.max(0, Math.floor(floor)));
+  if (view.getBigUint64(4, true) < wanted) view.setBigUint64(4, wanted, true);
   return copy;
 }
 
 /** A snapshot with no stores whose only effect is to raise the generation counter of a fresh core to `floor`. */
 export function emptySnapshot(schemaHash: bigint, floor: number): Uint8Array {
-  return encodeSnapshot({ generationFloor: floor >>> 0, schemaHash, types: [], description: "", stores: [] });
+  return encodeSnapshot({ generationFloor: Math.max(0, Math.floor(floor)), schemaHash, types: [], description: "", stores: [] });
 }
 
 /** The handles of the stores in a snapshot, or `null` when it does not decode (a layout this runtime does not read). */

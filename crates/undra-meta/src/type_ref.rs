@@ -77,12 +77,23 @@ pub enum TypeRef {
     Map(Box<TypeRef>, Box<TypeRef>),
     /// A lazily paged list handle; the content is the item type.
     Lazy(Box<TypeRef>),
-    /// A record, enum, error or object, by type name.
+    /// A record, enum or error, by type name. An object is named by [`TypeRef::Object`], except
+    /// as the return type of its own constructors, which keep naming it with `Named` (the schema
+    /// of an object that only has constructors did not change, so no hash moved, ADR-040).
     Named(String),
     /// `Result<T, E>`; only as a return type.
     Result(Box<TypeRef>, Box<TypeRef>),
     /// A stream of items; only as a return type.
     Stream(Box<TypeRef>),
+    /// An object (an `#[undra::api] impl`, a store included) crossing as a parameter or a
+    /// return, by type name: one owned host reference on its way out of the core, a borrowed
+    /// reference on its way in (ADR-040). `{"kind":"object","of":"Mailbox"}`.
+    Object(String),
+    /// A host-implemented callback interface (`#[undra::callback]`) passed in as a parameter, by
+    /// trait name: it names a [`PortDef`](crate::PortDef) of kind
+    /// [`PortKind::Callback`](crate::PortKind::Callback) (ADR-041).
+    /// `{"kind":"callback","of":"UploadListener"}`.
+    Callback(String),
 }
 
 impl TypeRef {
@@ -114,6 +125,18 @@ impl TypeRef {
     #[must_use]
     pub fn named(name: impl Into<String>) -> TypeRef {
         TypeRef::Named(name.into())
+    }
+
+    /// A reference to the object called `name` (ADR-040).
+    #[must_use]
+    pub fn object(name: impl Into<String>) -> TypeRef {
+        TypeRef::Object(name.into())
+    }
+
+    /// A reference to the callback interface called `name` (ADR-041).
+    #[must_use]
+    pub fn callback(name: impl Into<String>) -> TypeRef {
+        TypeRef::Callback(name.into())
     }
 
     /// `Result<ok, err>`.
@@ -179,7 +202,7 @@ impl fmt::Display for TypeRef {
                 b.fmt(f)?;
                 f.write_str(">")
             }
-            TypeRef::Named(n) => {
+            TypeRef::Named(n) | TypeRef::Object(n) | TypeRef::Callback(n) => {
                 f.write_str(":")?;
                 f.write_str(n)
             }
@@ -246,6 +269,9 @@ mod tests {
             TypeRef::option(TypeRef::option(TypeRef::U8)),
             TypeRef::map(TypeRef::Uuid, TypeRef::vec(TypeRef::named("Todo"))),
             TypeRef::lazy(TypeRef::named("Todo")),
+            TypeRef::option(TypeRef::object("Mailbox")),
+            TypeRef::vec(TypeRef::object("Mailbox")),
+            TypeRef::callback("UploadListener"),
             TypeRef::result(TypeRef::Unit, TypeRef::named("TodoError")),
             TypeRef::result(
                 TypeRef::stream(TypeRef::named("Todo")),
@@ -260,6 +286,23 @@ mod tests {
             let back: TypeRef = serde_json::from_str(&json).unwrap();
             assert_eq!(back, ty, "round trip of {json}");
         }
+    }
+
+    #[test]
+    fn objects_and_callbacks_serialize_by_name() {
+        assert_eq!(
+            serde_json::to_string(&TypeRef::object("Mailbox")).unwrap(),
+            r#"{"kind":"object","of":"Mailbox"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&TypeRef::callback("UploadListener")).unwrap(),
+            r#"{"kind":"callback","of":"UploadListener"}"#
+        );
+        assert_eq!(TypeRef::object("Mailbox").to_string(), "object:Mailbox");
+        assert_eq!(
+            TypeRef::option(TypeRef::callback("L")).to_string(),
+            "option<callback:L>"
+        );
     }
 
     #[test]
@@ -330,6 +373,7 @@ mod tests {
             TypeRef::option(TypeRef::String),
             TypeRef::vec(TypeRef::String),
             TypeRef::named("Id"),
+            TypeRef::object("Mailbox"),
         ] {
             assert!(!bad.is_valid_map_key(), "{bad}");
         }

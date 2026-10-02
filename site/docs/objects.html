@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Objects and identity · Undra docs</title>
+<meta name="description" content="Methods that return and take objects: the Rust spelling, the class each platform gets, why the same object is always the same wrapper, and what an object cannot be part of.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/objects.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Objects and identity · Undra docs">
+<meta property="og:description" content="Methods that return and take objects: the Rust spelling, the class each platform gets, why the same object is always the same wrapper, and what an object cannot be part of.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/objects.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Objects and identity · Undra docs">
+<meta name="twitter:description" content="Methods that return and take objects: the Rust spelling, the class each platform gets, why the same object is always the same wrapper, and what an object cannot be part of.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/objects.html#article","headline":"Objects and identity · Undra docs","description":"Methods that return and take objects: the Rust spelling, the class each platform gets, why the same object is always the same wrapper, and what an object cannot be part of.","url":"https://shreypdev.github.io/undra/docs/objects.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Objects and identity","item":"https://shreypdev.github.io/undra/docs/objects.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html" aria-current="page">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html" aria-current="page">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1>Objects and identity</h1>
+    <p class="lede">A method can return an object and take one. The platform gets a class, the same wrapper every time it asks for the same object.</p>
+<h2 id="returns-and-parameters">Returns and parameters<a class="anchor" href="#returns-and-parameters" aria-label="Link to this section">#</a></h2>
+<p>A method returns an object the way Rust already shares one, behind an <code>Arc</code>, and takes one by reference. Undra generates a class for it in each language, so you never see a handle.</p>
+<div class="table-wrap"><table><thead><tr><th>In Rust</th><th>On the platform</th></tr></thead><tbody><tr><td><code>Arc&lt;Shelf&gt;</code>, <code>Option&lt;Arc&lt;Shelf&gt;&gt;</code>, <code>Vec&lt;Arc&lt;Shelf&gt;&gt;</code> returned, also inside a <code>Result</code> or an <code>async</code> method</td><td>a <code>Shelf</code>, an optional one, a list of them</td></tr><tr><td><code>&amp;Shelf</code>, <code>Arc&lt;Shelf&gt;</code>, <code>Option&lt;&amp;Shelf&gt;</code>, <code>Vec&lt;Arc&lt;Shelf&gt;&gt;</code> as a parameter</td><td>a <code>Shelf</code> you pass, an optional one, a list</td></tr><tr><td>a constructor returning <code>Arc&lt;Self&gt;</code></td><td>a constructor that gives the same object back while you hold it</td></tr></tbody></table></div>
+<p>A returned store is a store: observe it and its signals arrive like those of any other.</p>
+<details class="reveal-code"><summary>Show the code for Rust, Swift, Kotlin and TypeScript</summary>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">#[undra::api]
+impl Workshop {
+    /// The shelf called `name`, made on first use.
+    pub fn shelf(&amp;self, name: String) -&gt; Arc&lt;Shelf&gt; { .. }
+    pub fn find(&amp;self, name: String) -&gt; Option&lt;Arc&lt;Shelf&gt;&gt; { .. }
+    pub fn shelves(&amp;self) -&gt; Vec&lt;Arc&lt;Shelf&gt;&gt; { .. }
+    pub async fn open(&amp;self, name: String) -&gt; Result&lt;Arc&lt;Shelf&gt;, WorkshopError&gt; { .. }
+    /// Takes stores as parameters.
+    pub fn merge(&amp;self, from: &amp;Shelf, onto: &amp;Shelf) { .. }
+    pub fn total(&amp;self, shelves: Vec&lt;Arc&lt;Shelf&gt;&gt;) -&gt; u32 { .. }
+}</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">let inbox = try workshop.shelf(name: "inbox")        // a Shelf: observe it like any store
+let again = try workshop.shelf(name: "inbox")
+assert(inbox === again)                              // one object, one wrapper
+
+let archive = try workshop.shelf(name: "archive")
+workshop.merge(from: inbox, onto: archive)
+let all: [Shelf] = try workshop.shelves()
+let n = try workshop.total(shelves: all)</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">val inbox = workshop.shelf("inbox")                  // a Shelf: observe it like any store
+check(inbox === workshop.shelf("inbox"))             // one object, one wrapper
+
+workshop.merge(from = inbox, onto = workshop.shelf("archive"))
+val n = workshop.total(workshop.shelves())</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">const inbox = await workshop.shelf("inbox");         // a Shelf: observe it like any store
+console.assert(inbox === (await workshop.shelf("inbox")));   // one object, one wrapper
+
+await workshop.merge(inbox, await workshop.shelf("archive"));
+const n = await workshop.total(await workshop.shelves());</code></pre></div>
+</details>
+<h2 id="one-object-one-wrapper">One object, one wrapper<a class="anchor" href="#one-object-one-wrapper" aria-label="Link to this section">#</a></h2>
+<p>Ask for the same object twice and you get the same wrapper while the first is alive. A store returned twice is observed once, a list of shelves is a list you can compare, and in Swift the wrapper is <code>Hashable</code> by identity, so <code>ForEach(shelves, id: \.self)</code> works.</p>
+<p>The reference you hold is given back when the wrapper is closed or collected, once. Hold the wrapper for as long as you use it; <code>close()</code> it to let go early.</p>
+<h2 id="what-stays-out">What stays out<a class="anchor" href="#what-stays-out" aria-label="Link to this section">#</a></h2>
+<p>An object travels as a parameter or a return, and nowhere else.</p>
+<div class="table-wrap"><table><thead><tr><th>Not allowed</th><th>Why</th></tr></thead><tbody><tr><td>An object inside a record, a variant or a store's signal, in a stream item, a query or a mutation</td><td>a value is copied, compared, saved and merged; an object is none of those. Put the object behind a method (<code>E0064</code> says so)</td></tr><tr><td>An object of another core</td><td>two cores can issue the same handle numbers, so the generated code refuses it before anything is sent: <code>UndraCallError.refused</code></td></tr><tr><td>An object in a port's parameter or return</td><td>pass a record or an id instead</td></tr></tbody></table></div>
+<h2 id="after-a-restore">After a restore<a class="anchor" href="#after-a-restore" aria-label="Link to this section">#</a></h2>
+<p>An object a method returned is not part of a saved snapshot: after a restore (a web worker crash, <code>undra dev</code> reloading the core) its handle is stale, and calling the method again returns it. Constructed stores restore as before. What a store keeps in a private field is whatever its <code>restore</code> hook rebuilds.</p>
+<h2 id="good-to-know">Good to know<a class="anchor" href="#good-to-know" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Passing an object lends it.</strong> The call holds it until it finishes, so closing the wrapper while a call is in flight is safe.</li><li><strong>A failed call hands nothing out.</strong> An error, a cancel or a panic gives the references it had issued back.</li><li><strong>A shelf stays alive while you hold it,</strong> even if the core drops its own reference.</li></ul>
+<p>The playground's <a href="https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/workshop.rs" rel="noopener">Workshop</a> uses every shape on this page, and the contract scenario S27 checks them on Swift, Kotlin and TypeScript.</p>
+
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/objects.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="ports.html"><span>Previous</span><b>Ports &amp; adapters</b></a>
+    <a class="next" href="callbacks.html"><span>Next</span><b>Host callbacks</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#returns-and-parameters">Returns and parameters</a></li><li><a href="#one-object-one-wrapper">One object, one wrapper</a></li><li><a href="#what-stays-out">What stays out</a></li><li><a href="#after-a-restore">After a restore</a></li><li><a href="#good-to-know">Good to know</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

@@ -577,6 +577,48 @@ mod tests {
     }
 
     #[test]
+    fn objects_and_callbacks_add_variants_only_where_they_are_used() {
+        // ADR-040 and ADR-041: `object` and `callback` type references and the `callback` port
+        // kind are written only by a schema that uses them, so every existing schema (the
+        // representative one, golden above) hashes as it did, and the new spellings are fixed.
+        assert_eq!(representative_schema().hash(), 0xd5b8_c3a3_afbd_bc33);
+        let mut schema = representative_schema();
+        let owner = schema.objects[0].name.clone();
+        schema.objects[0].methods.push(crate::fixtures::method(
+            &owner,
+            "child",
+            vec![crate::fixtures::param("c", TypeRef::object("Calculator"))],
+            TypeRef::option(TypeRef::object("Calculator")),
+            false,
+        ));
+        schema.ports.push(crate::PortDef {
+            name: "Listener".into(),
+            port_id: crate::ids::port_id("Listener"),
+            kind: crate::PortKind::Callback,
+            background: false,
+            methods: vec![],
+            docs: String::new(),
+        });
+        let canonical = schema.canonical_json();
+        assert!(
+            canonical.contains(r#""ty":{"kind":"object","of":"Calculator"}"#),
+            "{canonical}"
+        );
+        assert!(
+            canonical.contains(
+                r#""returns":{"kind":"option","of":{"kind":"object","of":"Calculator"}}"#
+            ),
+            "{canonical}"
+        );
+        assert!(
+            canonical.contains(r#""kind":"callback","methods":[]"#),
+            "{canonical}"
+        );
+        assert_ne!(schema.hash(), representative_schema().hash());
+        assert_eq!(Schema::from_json(&schema.to_json_pretty()).unwrap(), schema);
+    }
+
+    #[test]
     fn no_coalesce_is_written_only_when_set() {
         // ADR-031 decision 6: a schema without a `no_coalesce` signal serializes, and so hashes,
         // exactly as it did before the field existed (the representative schema's hash is the
@@ -961,6 +1003,7 @@ mod tests {
                 name: name(i).into(),
                 port_id: i as u32,
                 kind: PortKind::Async,
+                background: false,
                 methods: (0..(20 - i))
                     .map(|m| method(name(i), name(m), vec![], TypeRef::String, true))
                     .collect(),

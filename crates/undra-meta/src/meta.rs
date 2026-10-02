@@ -99,6 +99,10 @@ pub enum TypeRefMeta {
     Result(&'static TypeRefMeta, &'static TypeRefMeta),
     /// See [`TypeRef::Stream`].
     Stream(&'static TypeRefMeta),
+    /// See [`TypeRef::Object`].
+    Object(&'static str),
+    /// See [`TypeRef::Callback`].
+    Callback(&'static str),
 }
 
 impl From<&TypeRefMeta> for TypeRef {
@@ -128,6 +132,8 @@ impl From<&TypeRefMeta> for TypeRef {
             TypeRefMeta::Named(n) => TypeRef::named(n),
             TypeRefMeta::Result(t, e) => TypeRef::result(t.into(), e.into()),
             TypeRefMeta::Stream(t) => TypeRef::stream(t.into()),
+            TypeRefMeta::Object(n) => TypeRef::object(n),
+            TypeRefMeta::Callback(n) => TypeRef::callback(n),
         }
     }
 }
@@ -289,6 +295,8 @@ pub struct MethodMeta {
     pub is_async: bool,
     /// Whether the first Rust parameter is a `Ctx`.
     pub takes_ctx: bool,
+    /// `#[undra(coalesce)]`, see [`MethodDef::coalesce`].
+    pub coalesce: bool,
     /// Doc comment (empty if none).
     pub docs: &'static str,
 }
@@ -302,6 +310,7 @@ impl From<&MethodMeta> for MethodDef {
             returns: (&m.returns).into(),
             is_async: m.is_async,
             takes_ctx: m.takes_ctx,
+            coalesce: m.coalesce,
             docs: m.docs.to_owned(),
         }
     }
@@ -418,8 +427,10 @@ pub struct PortMeta {
     pub name: &'static str,
     /// `fnv1a32("port.<name>")`.
     pub port_id: u32,
-    /// Sync, async or event.
+    /// Sync, async, event or callback.
     pub kind: PortKind,
+    /// `#[undra::callback(background)]`, see [`PortDef::background`].
+    pub background: bool,
     /// Port methods.
     pub methods: &'static [MethodMeta],
     /// Doc comment (empty if none).
@@ -432,6 +443,7 @@ impl From<&PortMeta> for PortDef {
             name: m.name.to_owned(),
             port_id: m.port_id,
             kind: m.kind,
+            background: m.background,
             methods: convert_all(m.methods),
             docs: m.docs.to_owned(),
         }
@@ -512,6 +524,7 @@ mod tests {
             returns: TypeRefMeta::Named("Counter"),
             is_async: false,
             takes_ctx: true,
+            coalesce: false,
             docs: "Creates a counter.",
         }],
         methods: &[MethodMeta {
@@ -524,6 +537,7 @@ mod tests {
             ),
             is_async: true,
             takes_ctx: false,
+            coalesce: false,
             docs: "",
         }],
         store: Some(StoreMeta {
@@ -689,6 +703,7 @@ mod tests {
             name: "Lifecycle",
             port_id: ids::port_id("Lifecycle"),
             kind: PortKind::Event,
+            background: false,
             methods: &[MethodMeta {
                 name: "changed",
                 method_id: ids::port_method_id("Lifecycle", "changed"),
@@ -699,6 +714,7 @@ mod tests {
                 returns: TypeRefMeta::Unit,
                 is_async: false,
                 takes_ctx: false,
+                coalesce: false,
                 docs: "",
             }],
             docs: "",

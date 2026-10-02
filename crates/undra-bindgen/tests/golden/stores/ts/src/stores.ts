@@ -13,6 +13,7 @@ import {
   UndraReader,
   UndraStore,
   UndraWriter,
+  adopt,
   applyPatch,
   codecs,
   decodePatch,
@@ -53,7 +54,7 @@ export class Clock extends UndraStore {
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new Clock(core, handle);
+    const store = adopt(core, handle, Clock);
     await store._observeAll();
     return store;
   }
@@ -128,7 +129,7 @@ export class Todos extends UndraStore {
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new Todos(core, handle);
+    const store = adopt(core, handle, Todos);
     await store._observeAll();
     return store;
   }
@@ -150,7 +151,7 @@ export class Todos extends UndraStore {
     } catch (error) {
       throw UndraCallError.mapped(error, TodoErrorCodec);
     }
-    const store = new Todos(core, handle);
+    const store = adopt(core, handle, Todos);
     await store._observeAll();
     return store;
   }

@@ -19,6 +19,8 @@
 //! | `HashMap<K, V>`, `BTreeMap<K, V>` | `Map(K, V)` |
 //! | `Duration`, `Timestamp`, `Uuid` | the same-named variants |
 //! | `Box<T>` | `T` (transparent, so recursive types can be written) |
+//! | `Arc<T>`, `&T`, `Option<&T>`, `Option<Arc<T>>`, `Vec<Arc<T>>` as a method, constructor or function parameter; `Arc<T>`, `Option<Arc<T>>`, `Vec<Arc<T>>` as a method or function return (ADR-040) | `Object("T")` (and `Option`/`Vec` of it) |
+//! | `Arc<dyn Trait>`, `Option<Arc<dyn Trait>>` as a method, constructor or function parameter (ADR-041) | `Callback("Trait")` (and `Option` of it) |
 //! | `Option<Option<T>>` | rejected (E0063): Kotlin and TypeScript cannot tell `Some(None)` from `None` |
 //! | `Handle` | rejected (E0001): handles are how objects cross, not a value type |
 //! | `()` | `Unit` (return types only) |
@@ -58,6 +60,10 @@ pub(crate) enum KType {
     Named(std::string::String),
     Result(Box<KType>, Box<KType>),
     Stream(Box<KType>),
+    /// An object crossing as a parameter or a return (ADR-040).
+    Object(std::string::String),
+    /// A host callback interface passed in as a parameter (ADR-041).
+    Callback(std::string::String),
 }
 
 impl KType {
@@ -108,6 +114,8 @@ impl KType {
                 quote!(#meta::TypeRefMeta::Result(&#ok, &#err))
             }
             KType::Named(name) => quote!(#meta::TypeRefMeta::Named(#name)),
+            KType::Object(name) => quote!(#meta::TypeRefMeta::Object(#name)),
+            KType::Callback(name) => quote!(#meta::TypeRefMeta::Callback(#name)),
         }
     }
 
@@ -140,21 +148,56 @@ impl KType {
 pub(crate) enum Pos {
     /// A record or variant field.
     Field,
-    /// A method, function, port or query parameter.
+    /// A parameter of a method, constructor or free function (objects and callbacks may stand
+    /// here, ADR-040, ADR-041).
     Param,
-    /// A return type.
+    /// The return type of a method or free function (objects may stand here, ADR-040).
     Return,
     /// The value type of a store signal.
     Signal,
+    /// A parameter of a port (or callback) method.
+    PortParam,
+    /// The return type of a port (or callback) method.
+    PortReturn,
+    /// A parameter of a query or mutation.
+    QueryParam,
+    /// The result of a query or mutation.
+    QueryReturn,
 }
 
 impl Pos {
     fn describe(self) -> &'static str {
         match self {
             Pos::Field => "a field",
-            Pos::Param => "a parameter",
-            Pos::Return => "a return type",
+            Pos::Param | Pos::PortParam | Pos::QueryParam => "a parameter",
+            Pos::Return | Pos::PortReturn | Pos::QueryReturn => "a return type",
             Pos::Signal => "a signal value",
+        }
+    }
+
+    /// Why an object cannot stand here, and what to do instead (ADR-040 decision 9).
+    fn object_refusal(self) -> (&'static str, &'static str) {
+        match self {
+            Pos::Field => (
+                "a record or enum field holds a value: it is copied, compared, hashed and `Codable`, and none of that can carry a reference to an object",
+                "keep the data the platform needs in the field (an id, a record), and put the child object behind a method of the parent",
+            ),
+            Pos::Signal => (
+                "a store signal holds a value: it is copied, compared, coalesced and snapshotted, and none of that can carry a reference to an object",
+                "keep an id or a record in the signal, and return the child object from a method of the store",
+            ),
+            Pos::PortParam | Pos::PortReturn => (
+                "a port implementation on the platform would receive a reference it has no wrapper type for",
+                "pass a record or an id through the port",
+            ),
+            Pos::QueryParam | Pos::QueryReturn => (
+                "query and mutation values are cached, compared and persisted, so they must be values",
+                "use a record or an id, and return the object from a method that calls the query",
+            ),
+            Pos::Param | Pos::Return => (
+                "an object can only stand alone, or inside `Option` or `Vec`, as a method or function parameter or return",
+                "use `Arc<T>`, `Option<Arc<T>>` or `Vec<Arc<T>>` (a parameter may also be `&T` or `Option<&T>`)",
+            ),
         }
     }
 }
@@ -182,6 +225,36 @@ pub(crate) struct Allow {
     pub(crate) result: bool,
     pub(crate) stream: bool,
     pub(crate) unit: bool,
+    /// Where an object (`Arc<T>`, `&T`) may stand (ADR-040).
+    pub(crate) object: Objects,
+    /// Whether a callback (`Arc<dyn Trait>`) may stand here, alone or in `Option` (ADR-041).
+    pub(crate) callback: Callbacks,
+}
+
+/// Where an object spelling is accepted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Objects {
+    /// Nowhere.
+    No,
+    /// A parameter: `&T`, `Arc<T>`, `Option<&T>`, `Option<Arc<T>>`, `Vec<Arc<T>>`.
+    Param,
+    /// A return: `Arc<T>`, `Option<Arc<T>>`, `Vec<Arc<T>>`.
+    Return,
+    /// Inside an `Option` of a parameter: `&T` or `Arc<T>`.
+    InnerRef,
+    /// Inside a `Vec`, or an `Option` of a return: `Arc<T>`.
+    InnerOwned,
+}
+
+/// Where a callback spelling is accepted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Callbacks {
+    /// Nowhere.
+    No,
+    /// A parameter: `Arc<dyn Trait>` or `Option<Arc<dyn Trait>>`.
+    Param,
+    /// Inside the `Option` of a parameter.
+    Inner,
 }
 
 impl Allow {
@@ -190,12 +263,27 @@ impl Allow {
         result: false,
         stream: false,
         unit: false,
+        object: Objects::No,
+        callback: Callbacks::No,
+    };
+    /// A parameter of a method, constructor or free function: a value, an object or a callback.
+    pub(crate) const PARAM: Allow = Allow {
+        object: Objects::Param,
+        callback: Callbacks::Param,
+        ..Allow::NONE
     };
     /// The outermost type of a return: `T`, `()`, `Result<T, E>`, `impl Stream<Item = T>`.
     pub(crate) const RETURN: Allow = Allow {
         result: true,
         stream: true,
         unit: true,
+        object: Objects::No,
+        callback: Callbacks::No,
+    };
+    /// A method's or free function's return: as [`Allow::RETURN`], and objects.
+    pub(crate) const RETURN_OBJECTS: Allow = Allow {
+        object: Objects::Return,
+        ..Allow::RETURN
     };
 }
 
@@ -268,7 +356,8 @@ pub(crate) fn map_field(ty: &Type, field: &str, self_name: &str) -> Result<KType
         self_name: Some(self_name),
     };
     match map_type(ty, cx, Allow::NONE) {
-        Err(err) if err.diag.code == code::E0004 => {
+        // A callback in a field keeps its own diagnostic (E0004, with the help of its position).
+        Err(err) if err.diag.code == code::E0004 && !err.diag.what.starts_with("callback") => {
             let shown = ty_string(ty);
             Err(TyErr::new(
                 ty,
@@ -286,14 +375,25 @@ pub(crate) fn map_field(ty: &Type, field: &str, self_name: &str) -> Result<KType
     }
 }
 
-/// Maps a return type: `T`, `()`, `Result<T, E>`, `impl Stream<Item = T>`,
-/// `Result<impl Stream<Item = T>, E>`, and (ADR-036) `impl Stream<Item = Result<T, E>>` or
-/// `Result<impl Stream<Item = Result<T, E>>, E>` (the same `E`), which the schema records exactly
-/// as `Result<Stream<T>, E>`: a stream that can end with its typed error part-way.
-pub(crate) fn map_return(ret: &ReturnType) -> Result<KType, TyErr> {
+/// Maps the return type of a method or free function: `T`, `()`, `Result<T, E>`,
+/// `impl Stream<Item = T>`, `Result<impl Stream<Item = T>, E>`, (ADR-036) `impl Stream<Item =
+/// Result<T, E>>` or `Result<impl Stream<Item = Result<T, E>>, E>` (the same `E`), which the
+/// schema records exactly as `Result<Stream<T>, E>`: a stream that can end with its typed error
+/// part-way. An object may also be returned (`Arc<T>`, `Option<Arc<T>>`, `Vec<Arc<T>>`, alone or
+/// as the `Ok` of a `Result`, ADR-040).
+pub(crate) fn map_method_return(ret: &ReturnType) -> Result<KType, TyErr> {
     match ret {
         ReturnType::Default => Ok(KType::Unit),
-        ReturnType::Type(_, ty) => map_type(ty, Pos::Return, Allow::RETURN),
+        ReturnType::Type(_, ty) => map_type(ty, Pos::Return, Allow::RETURN_OBJECTS),
+    }
+}
+
+/// The same as [`map_method_return`] without objects, reported at `pos` (a port's or a query's
+/// return).
+pub(crate) fn map_return_at(ret: &ReturnType, pos: Pos) -> Result<KType, TyErr> {
+    match ret {
+        ReturnType::Default => Ok(KType::Unit),
+        ReturnType::Type(_, ty) => map_type(ty, pos, Allow::RETURN),
     }
 }
 
@@ -331,7 +431,11 @@ pub(crate) fn map_type<'a>(ty: &Type, cx: impl Into<Cx<'a>>, allow: Allow) -> Re
                 ),
             ),
         )),
-        Type::Reference(reference) => Err(reference_error(ty, reference)),
+        Type::Reference(reference) => match object_reference(reference, allow) {
+            Some(name) => Ok(KType::Object(name)),
+            None => Err(reference_in_list(reference, ty, allow)
+                .unwrap_or_else(|| reference_error(ty, reference))),
+        },
         Type::Path(path) => map_path(path, ty, cx, allow),
         Type::TraitObject(object) if has_stream_bound(&object.bounds) => Err(dyn_stream_error(ty)),
         Type::TraitObject(_) => Err(TyErr::new(
@@ -340,7 +444,7 @@ pub(crate) fn map_type<'a>(ty: &Type, cx: impl Into<Cx<'a>>, allow: Allow) -> Re
                 code::E0004,
                 format!("trait object `{}` cannot cross the boundary", ty_string(ty)),
                 "trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript",
-                "use a concrete `#[undra::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[undra::port]`)",
+                "use a concrete `#[undra::api]` type or an enum listing the cases you need; to call into the platform, declare a `#[undra::callback]` trait and take `Arc<dyn Trait>` as a parameter",
             ),
         )),
         Type::ImplTrait(impl_trait) => map_impl_trait(impl_trait, ty, cx, allow),
@@ -353,7 +457,7 @@ pub(crate) fn map_type<'a>(ty: &Type, cx: impl Into<Cx<'a>>, allow: Allow) -> Re
                     ty_string(ty)
                 ),
                 "callbacks have no wire representation",
-                "declare a port (`#[undra::port]`) for the callback, or return a stream (`impl Stream<Item = T>`) for a sequence of results",
+                "declare a `#[undra::callback]` trait and take `Arc<dyn Trait>`, or return a stream (`impl Stream<Item = T>`) for a sequence of results",
             ),
         )),
         Type::Ptr(_) => Err(TyErr::new(
@@ -456,6 +560,313 @@ fn reference_error(ty: &Type, reference: &syn::TypeReference) -> TyErr {
     )
 }
 
+/// Names a type that can only be a record, an enum or a built-in: never an object.
+const NOT_OBJECTS: &[&str] = &[
+    "bool",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "f32",
+    "f64",
+    "usize",
+    "isize",
+    "i128",
+    "u128",
+    "char",
+    "str",
+    "String",
+    "Bytes",
+    "Duration",
+    "Timestamp",
+    "Uuid",
+    "Vec",
+    "Option",
+    "Box",
+    "Arc",
+    "Rc",
+    "Result",
+    "HashMap",
+    "BTreeMap",
+    "HashSet",
+    "BTreeSet",
+    "VecDeque",
+    "LinkedList",
+    "BinaryHeap",
+    "Cow",
+    "Cell",
+    "RefCell",
+    "Mutex",
+    "RwLock",
+    "OnceCell",
+    "OnceLock",
+    "PathBuf",
+    "Path",
+    "OsString",
+    "OsStr",
+    "Instant",
+    "SystemTime",
+    "Lazy",
+    "Signal",
+    "Computed",
+    "Effect",
+    "Ctx",
+    "Handle",
+    "Pin",
+    "Self",
+];
+
+/// The name of the object a plain type path spells (`Mailbox`, `crate::mail::Mailbox`): the last
+/// segment, when the path has no arguments and does not name a built-in. Whether it really is an
+/// object is checked by `check.rs`.
+fn object_path_name(path: &syn::TypePath) -> Option<String> {
+    if path.qself.is_some() {
+        return None;
+    }
+    let last = path.path.segments.last()?;
+    if !last.arguments.is_none() {
+        return None;
+    }
+    let name = last.ident.to_string();
+    (!NOT_OBJECTS.contains(&name.as_str())).then(|| strip_raw(&name))
+}
+
+/// `&T` where an object may be taken by reference (a parameter, alone or in an `Option`): the
+/// object's name. A lifetime, `&mut` and a built-in element are not objects, and keep the
+/// reference diagnostics.
+fn object_reference(reference: &syn::TypeReference, allow: Allow) -> Option<String> {
+    if !matches!(allow.object, Objects::Param | Objects::InnerRef) {
+        return None;
+    }
+    if reference.lifetime.is_some() || reference.mutability.is_some() {
+        return None;
+    }
+    match &*reference.elem {
+        Type::Path(path) => object_path_name(path),
+        _ => None,
+    }
+}
+
+/// `&T` of an object inside a `Vec`: the way to write a list of objects is `Vec<Arc<T>>`.
+fn reference_in_list(reference: &syn::TypeReference, ty: &Type, allow: Allow) -> Option<TyErr> {
+    if allow.object != Objects::InnerOwned
+        || reference.lifetime.is_some()
+        || reference.mutability.is_some()
+    {
+        return None;
+    }
+    let Type::Path(path) = &*reference.elem else {
+        return None;
+    };
+    let name = object_path_name(path)?;
+    Some(TyErr::new(
+        ty,
+        Diag::new(
+            code::E0064,
+            format!("`{}` cannot be an element of a list", ty_string(ty)),
+            "a list owns its elements, and a borrow of an object cannot outlive the call that made it",
+            format!("write the list as `Vec<Arc<{name}>>`"),
+        ),
+    ))
+}
+
+/// `Arc<..>`: an object (`Arc<T>`) or a callback (`Arc<dyn Trait>`), where one may stand.
+fn map_arc(inner: &Type, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result<KType, TyErr> {
+    let mut inner = inner;
+    while let Type::Paren(p) = inner {
+        inner = &p.elem;
+    }
+    match inner {
+        Type::TraitObject(object) => {
+            if has_stream_bound(&object.bounds) {
+                return Err(dyn_stream_error(ty));
+            }
+            let name = callback_trait(object, ty)?;
+            match allow.callback {
+                Callbacks::Param | Callbacks::Inner => Ok(KType::Callback(name)),
+                Callbacks::No => Err(callback_refusal(ty, cx.pos, &name)),
+            }
+        }
+        Type::Path(path) => match object_path_name(path) {
+            Some(name) if allow.object != Objects::No => Ok(KType::Object(name)),
+            Some(name) => {
+                let (why, help) = cx.pos.object_refusal();
+                Err(TyErr::new(
+                    ty,
+                    Diag::new(
+                        code::E0064,
+                        format!(
+                            "object `{}` cannot be {}",
+                            ty_string(ty),
+                            position_phrase(cx.pos)
+                        ),
+                        why,
+                        format!("{help} (the object here is `{name}`)"),
+                    ),
+                ))
+            }
+            None => Err(unsupported(
+                ty,
+                format!("`{}` cannot cross the boundary", ty_string(ty)),
+                "shared ownership does not survive a copy across the boundary",
+                "use the owned inner type",
+            )),
+        },
+        _ => Err(unsupported(
+            ty,
+            format!("`{}` cannot cross the boundary", ty_string(ty)),
+            "shared ownership does not survive a copy across the boundary",
+            "use the owned inner type",
+        )),
+    }
+}
+
+/// "used as a field", "taken by a query": where an object was refused, for the message.
+fn position_phrase(pos: Pos) -> &'static str {
+    match pos {
+        Pos::Field => "a field of a record or enum",
+        Pos::Signal => "the value of a store signal",
+        Pos::PortParam => "a parameter of a port",
+        Pos::PortReturn => "returned by a port",
+        Pos::QueryParam => "a parameter of a query or mutation",
+        Pos::QueryReturn => "the result of a query or mutation",
+        Pos::Param | Pos::Return => "used here",
+    }
+}
+
+/// The trait of `dyn Trait`, with its auto-trait bounds (`Send`, `Sync`, `Unpin`, `'static`)
+/// dropped: `dyn Trait` and `dyn Trait + Send + Sync` are one type for a trait whose
+/// supertraits are `Send + Sync`, which every callback trait has.
+fn callback_trait(object: &syn::TypeTraitObject, ty: &Type) -> Result<String, TyErr> {
+    let mut found: Option<&syn::TraitBound> = None;
+    for bound in &object.bounds {
+        match bound {
+            TypeParamBound::Trait(bound) => {
+                let last = bound.path.segments.last();
+                let auto = last.is_some_and(|seg| {
+                    matches!(seg.ident.to_string().as_str(), "Send" | "Sync" | "Unpin")
+                });
+                if auto {
+                    continue;
+                }
+                if last.is_some_and(|seg| matches!(seg.arguments, PathArguments::Parenthesized(_)))
+                {
+                    return Err(TyErr::new(
+                        ty,
+                        Diag::new(
+                            code::E0004,
+                            format!("closure type `{}` cannot cross the boundary", ty_string(ty)),
+                            "callbacks have no wire representation",
+                            "declare a `#[undra::callback]` trait and take `Arc<dyn Trait>`",
+                        ),
+                    ));
+                }
+                if found.is_some() {
+                    return Err(TyErr::new(
+                        ty,
+                        Diag::new(
+                            code::E0004,
+                            format!("`{}` names more than one trait", ty_string(ty)),
+                            "a callback is one `#[undra::callback]` trait: the host implements one protocol per instance",
+                            "take `Arc<dyn Trait>` of a single callback trait",
+                        ),
+                    ));
+                }
+                found = Some(bound);
+            }
+            TypeParamBound::Lifetime(lifetime) if lifetime.ident != "static" => {
+                return Err(TyErr::new(
+                    ty,
+                    Diag::new(
+                        code::E0003,
+                        format!("lifetime `{lifetime}` in `{}`", ty_string(ty)),
+                        "the host's instance outlives the call that passed it",
+                        "use `Arc<dyn Trait>`",
+                    ),
+                ));
+            }
+            _ => {}
+        }
+    }
+    let Some(bound) = found else {
+        return Err(TyErr::new(
+            ty,
+            Diag::new(
+                code::E0004,
+                format!("trait object `{}` names no trait", ty_string(ty)),
+                "a callback is an `Arc<dyn Trait>` of a `#[undra::callback]` trait",
+                "name the trait",
+            ),
+        ));
+    };
+    let Some(last) = bound.path.segments.last() else {
+        return Err(unsupported(
+            ty,
+            "empty trait path".to_owned(),
+            "the schema needs a trait name",
+            "write the trait",
+        ));
+    };
+    if !last.arguments.is_none() {
+        return Err(TyErr::new(
+            ty,
+            Diag::new(
+                code::E0002,
+                format!(
+                    "generic trait `{}` cannot cross the boundary",
+                    ty_string(ty)
+                ),
+                "the schema describes concrete callback interfaces; every target language would need one per instantiation",
+                "declare a concrete `#[undra::callback]` trait",
+            ),
+        ));
+    }
+    Ok(strip_raw(&last.ident.to_string()))
+}
+
+/// E0004 for a callback where none may stand, with the help of the position.
+fn callback_refusal(ty: &Type, pos: Pos, name: &str) -> TyErr {
+    let (why, help) = match pos {
+        Pos::Return | Pos::PortReturn | Pos::QueryReturn => (
+            "a callback is an object the host implements and passes in for the core to call; the core never hands one out",
+            "return a plain value, or an object (`Arc<T>`) the host can call methods on",
+        ),
+        Pos::Field | Pos::Signal => (
+            "a callback is an instance with a lifetime, not a value: it cannot be copied, compared, stored in a record or mirrored from a signal",
+            "keep an id or a record here, and take the callback as a parameter of the method that needs it",
+        ),
+        Pos::PortParam => (
+            "a port is implemented once, by the platform, for the whole process; a callback instance in its arguments would need a wrapper type the port implementation does not have",
+            "pass a record or an id through the port",
+        ),
+        Pos::QueryParam => (
+            "query and mutation values are cached, compared and persisted, so they must be values",
+            "take the callback in the method that runs the query, or pass an id",
+        ),
+        Pos::Param => (
+            "a callback may be a parameter of a method, constructor or function, alone or in an `Option`; it cannot be nested in another type",
+            "take one `Arc<dyn Trait>` (or `Option<Arc<dyn Trait>>`) per parameter",
+        ),
+    };
+    TyErr::new(
+        ty,
+        Diag::new(
+            code::E0004,
+            format!(
+                "callback `{}` cannot be {} (`{name}` is a callback interface)",
+                ty_string(ty),
+                position_phrase(pos),
+            ),
+            why,
+            help,
+        ),
+    )
+}
+
 fn unsupported(ty: &Type, what: String, why: &str, help: &str) -> TyErr {
     TyErr::new(ty, Diag::new(code::E0001, what, why, help))
 }
@@ -470,7 +881,7 @@ fn type_args<'a>(seg: &'a syn::PathSegment, ty: &Type) -> Result<Vec<&'a Type>, 
                 code::E0004,
                 format!("closure type `{}` cannot cross the boundary", ty_string(ty)),
                 "callbacks have no wire representation",
-                "declare a port (`#[undra::port]`) for the callback",
+                "declare a `#[undra::callback]` trait and take `Arc<dyn Trait>`",
             ),
         )),
         PathArguments::AngleBracketed(args) => {
@@ -621,9 +1032,30 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
             "use an owned `String`",
         )),
         ("Box", 1) => map_type(args[0], cx, Allow::NONE),
-        ("Vec", 1) => Ok(KType::Vec(Box::new(map_type(args[0], cx, Allow::NONE)?))),
+        ("Vec", 1) => {
+            let inner_allow = Allow {
+                object: match allow.object {
+                    Objects::Param | Objects::Return => Objects::InnerOwned,
+                    _ => Objects::No,
+                },
+                ..Allow::NONE
+            };
+            Ok(KType::Vec(Box::new(map_type(args[0], cx, inner_allow)?)))
+        }
         ("Option", 1) => {
-            let inner = map_type(args[0], cx, Allow::NONE)?;
+            let inner_allow = Allow {
+                object: match allow.object {
+                    Objects::Param => Objects::InnerRef,
+                    Objects::Return => Objects::InnerOwned,
+                    _ => Objects::No,
+                },
+                callback: match allow.callback {
+                    Callbacks::Param => Callbacks::Inner,
+                    _ => Callbacks::No,
+                },
+                ..Allow::NONE
+            };
+            let inner = map_type(args[0], cx, inner_allow)?;
             if matches!(inner, KType::Option(_)) {
                 return Err(TyErr::new(
                     ty,
@@ -673,6 +1105,8 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
                     result: false,
                     stream: allow.stream,
                     unit: true,
+                    object: allow.object,
+                    callback: Callbacks::No,
                 },
             )?;
             let err = map_error_type(args[1], cx)?;
@@ -766,6 +1200,7 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
             "only sequences (`Vec<T>`) and maps have a wire representation",
             "use `Vec<T>` (deduplicate before sending if you need set semantics)",
         )),
+        ("Arc", 1) => map_arc(args[0], ty, cx, allow),
         ("Rc" | "Arc", _) => Err(unsupported(
             ty,
             format!("`{}` cannot cross the boundary", ty_string(ty)),
@@ -1267,9 +1702,15 @@ mod tests {
     #[test]
     fn map_return_defaults_to_unit() {
         let sig: syn::Signature = syn::parse_quote!(fn f());
-        assert_eq!(map_return(&sig.output).unwrap(), KType::Unit);
+        assert_eq!(
+            map_return_at(&sig.output, Pos::PortReturn).unwrap(),
+            KType::Unit
+        );
         let sig: syn::Signature = syn::parse_quote!(fn f() -> u8);
-        assert_eq!(map_return(&sig.output).unwrap(), KType::U8);
+        assert_eq!(
+            map_return_at(&sig.output, Pos::PortReturn).unwrap(),
+            KType::U8
+        );
     }
 
     #[test]

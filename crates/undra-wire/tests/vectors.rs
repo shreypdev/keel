@@ -228,7 +228,7 @@ fn check_changeset(name: &str, value: &Value, expected: &[u8]) {
 fn check_snapshot(name: &str, value: &Value, expected: &[u8]) {
     let u64_of = |v: &Value| u64::try_from(int(v)).unwrap();
     let snapshot = Snapshot {
-        generation_floor: u32_of(&value["generation_floor"]),
+        generation_floor: u64_of(&value["generation_floor"]),
         schema_hash: u64_of(&value["schema_hash"]),
         types: value["types"]
             .as_array()

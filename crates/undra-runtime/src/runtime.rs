@@ -25,6 +25,7 @@ use undra_wire::payload::{
 use undra_wire::{Handle, Reader, Writer};
 
 use crate::blocking::{Blocking, BlockingTask, default_pool_size};
+use crate::callbacks::CallbackRegistry;
 use crate::config::{
     DroppedStore, InitError, MODE_DEV, MODE_INPROC, RestoreError, RestoreReport, RuntimeConfig,
 };
@@ -38,13 +39,14 @@ use crate::executor::{
 use crate::ext::{Extensions, InitHook, InspectFn, Inspectors};
 use crate::guard::{self, PanicReport, drop_guarded, encode_panic_body};
 use crate::host::{Host, PortCallOutcome};
+use crate::issue::{IssueScope, OriginScope, Origins, WithOrigin};
 use crate::lazy::LazyList;
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
 
 /// The `port_call_id` of a fire-and-forget port call: no answer is expected (SPEC 6, host contract 6).
 const FIRE_AND_FORGET: u32 = 0;
 use crate::object::{AnyObject, StoreObject, StoreRestorer, UndraObject, erased, store};
-use crate::object_table::{BadHandle, GENERATION_CEILING, ObjectTable};
+use crate::object_table::{BadHandle, GENERATION_CEILING, ObjectTable, Released};
 use crate::persist::{self, RegisteredHooks};
 use crate::ports::{
     Completion, Events, PortBinding, PortDispatch, PortDispatcher, PortError, PortFuture,
@@ -186,6 +188,13 @@ pub(crate) fn report_current(what: &str, operation: &str, report: &PanicReport) 
 pub(crate) fn log_fatal_current(target: &str, message: &str) {
     if let Some(rt) = current_or_global() {
         rt.log(FATAL, target, message);
+    }
+}
+
+/// Logs an error record through the current runtime.
+pub(crate) fn log_error_current(target: &str, message: &str) {
+    if let Some(rt) = current_or_global() {
+        rt.log(ERROR, target, message);
     }
 }
 
@@ -468,6 +477,11 @@ pub struct Runtime {
     /// The computed signals currently held back because they panicked, as `(store handle,
     /// signal id)` (ADR-019 amendment): what `stats_json` reports as `poisoned_signals`.
     poisoned_signals: Mutex<HashSet<(u64, u32)>>,
+    /// What each client origin holds of the references the core handed out (ADR-040): what an
+    /// `undra dev` session's disconnect gives back.
+    origins: Origins,
+    /// The live proxies of the host's callback instances, for interning (ADR-041).
+    callbacks: CallbackRegistry,
 }
 
 /// Where an object lives: equal addresses are the same object.
@@ -839,6 +853,8 @@ impl Runtime {
             core_thread: Mutex::new(None),
             lifeline: Arc::new(Lifeline::default()),
             poisoned_signals: Mutex::new(HashSet::new()),
+            origins: Origins::default(),
+            callbacks: CallbackRegistry::default(),
         });
 
         register_runtime(rt.id, Arc::downgrade(&rt));
@@ -1458,6 +1474,17 @@ impl Runtime {
     /// (no `call_id` to answer), `call_id == 0`, a `call_id` that is already in flight, a
     /// shut-down runtime, or a re-entrant call.
     pub fn call(&self, payload: &[u8]) -> u32 {
+        self.call_from(0, payload)
+    }
+
+    /// [`call`](Runtime::call) on behalf of a client that is not in this process (an `undra dev`
+    /// session): `origin` (non-zero) names it, so that the references the call hands out
+    /// (ADR-040) are recorded against it and [`release_origin`](Runtime::release_origin) can
+    /// give them back when the client disconnects. `origin` 0 is the process's own embedder.
+    pub fn call_from(&self, origin: u64, payload: &[u8]) -> u32 {
+        // Set for the dispatch of a synchronous method and, through the spawned future, for every
+        // poll of an asynchronous one.
+        let _origin = (origin != 0).then(|| OriginScope::enter(origin));
         Stats::inc(&self.stats.calls);
         let call = match Call::decode(&mut Reader::new(payload)) {
             Ok(call) => call,
@@ -1510,7 +1537,16 @@ impl Runtime {
                     self.send_reply(call_id, ReplyStatus::Error, &body);
                 }
                 DispatchResult::Async(future) => {
-                    self.spawn_call(call_id, handle, call.target, future);
+                    if origin == 0 {
+                        self.spawn_call(call_id, handle, call.target, future);
+                    } else {
+                        self.spawn_call(
+                            call_id,
+                            handle,
+                            call.target,
+                            Box::pin(WithOrigin::new(origin, future)),
+                        );
+                    }
                 }
                 DispatchResult::Stream(stream) => {
                     self.open_stream(call_id, handle, call.target, stream);
@@ -1947,6 +1983,13 @@ impl Runtime {
         if self.calls.lock().remove(&call_id).is_none() {
             return;
         }
+        // Shutdown began while the call's last poll ran: answered as cancelled, as shutdown answers
+        // every call still in flight. Its result may not be whole: a method that returns objects
+        // lowers them through a `WeakCtx` that no longer upgrades, so it issued nothing (ADR-040).
+        if self.is_shut_down() {
+            self.send_reply(call_id, ReplyStatus::Cancelled, &[]);
+            return;
+        }
         match result {
             Ok(body) => self.send_reply(call_id, ReplyStatus::Ok, &body),
             Err(body) => self.send_reply(call_id, ReplyStatus::Error, &body),
@@ -2151,22 +2194,103 @@ impl Runtime {
         }
     }
 
-    /// Releases a handle. The object is dropped once no task holds it; a released store stops
-    /// delivering change-sets. Stale handles are ignored.
+    /// Gives one host reference to `handle` back (ADR-040). The object is dropped, and a store
+    /// stops delivering change-sets, once the last reference is gone and no task holds it. A
+    /// stale handle is ignored. Every runtime wrapper releases the one reference it owns, once.
     pub fn release(&self, handle: u64) {
         let Ok(_guard) = self.enter_core() else {
             self.reentrant("release");
             return;
         };
-        match self.objects.release(Handle(handle)) {
-            Ok(object) => {
+        self.release_inner(Handle(handle));
+    }
+
+    /// [`release`](Runtime::release) for a client origin: also forgets the reference in what
+    /// the origin holds, so [`release_origin`](Runtime::release_origin) does not give it back a
+    /// second time.
+    pub fn release_from(&self, origin: u64, handle: u64) {
+        let Ok(_guard) = self.enter_core() else {
+            self.reentrant("release");
+            return;
+        };
+        if origin != 0 {
+            self.origins.forget_one(origin, Handle(handle));
+        }
+        self.release_inner(Handle(handle));
+    }
+
+    /// Gives back every reference `origin` still holds of what its calls returned (a client
+    /// that disconnected without releasing, ADR-040). Returns how many references it gave back.
+    pub fn release_origin(&self, origin: u64) -> usize {
+        let held = self.origins.take(origin);
+        if held.is_empty() {
+            return 0;
+        }
+        let Ok(_guard) = self.enter_core() else {
+            self.reentrant("release_origin");
+            return 0;
+        };
+        let mut given = 0;
+        for (handle, count) in held {
+            for _ in 0..count {
+                self.release_inner(handle);
+                given += 1;
+            }
+        }
+        given
+    }
+
+    /// Rolls back one issued reference (the core lock is held by the caller).
+    pub(crate) fn release_issued(&self, handle: Handle) {
+        self.release_inner(handle);
+    }
+
+    /// One reference back, with the core lock held.
+    fn release_inner(&self, handle: Handle) {
+        match self.objects.release(handle) {
+            Ok(Released::Kept { .. }) => {}
+            Ok(Released::Removed(object)) => {
                 if let Some(cell) = object.as_store() {
+                    // The object may be issued again, to a host that has not mirrored it yet:
+                    // it starts clean (ADR-040 decision 5).
+                    cell.observe(undra_meta::ids::ALL_SIGNALS, false, &mut Writer::new());
                     cell.set_handle(0);
                 }
                 self.drop_guarded_logged("a released object", object);
             }
             Err(e) => self.log(DEBUG, "undra::runtime", &format!("release: {e}")),
         }
+    }
+
+    /// Starts an issue scope for the call being served: the references handed to the host by
+    /// the objects a method returns, which a dropped (uncommitted) scope gives back. See
+    /// [`IssueScope`].
+    pub fn issue_scope(&self) -> IssueScope<'_> {
+        IssueScope::new(self)
+    }
+
+    pub(crate) fn origins(&self) -> &Origins {
+        &self.origins
+    }
+
+    pub(crate) fn callbacks(&self) -> &CallbackRegistry {
+        &self.callbacks
+    }
+
+    /// Calls a fire-and-forget method of a host callback instance: a port call with
+    /// `port_call_id 0` (SPEC 6 host contract 6), whose answer, if the host gives one, is
+    /// ignored. After [`shutdown`](Runtime::shutdown) it does nothing.
+    pub fn port_notify(&self, port_id: u32, method_id: u32, args: Vec<u8>) {
+        if self.is_shut_down() {
+            return;
+        }
+        Stats::inc(&self.stats.port_calls);
+        if let PortBinding::Rust(imp, own) = self.ports.binding(port_id) {
+            // A fake bound in Rust (a test): the answer is not read.
+            let _ = self.dispatch_to_rust(&imp, own, port_id, method_id, &args);
+            return;
+        }
+        let _ = self.host_port_call(port_id, method_id, 0, &args);
     }
 
     /// Stores `object` and returns its handle. Generated constructors call this (or
@@ -2799,7 +2923,7 @@ impl Runtime {
         out.write_len(u32::try_from(chunks.len()).unwrap_or(u32::MAX));
         // Read after the stores were listed: the counter only grows, so the floor is at least
         // every generation in the snapshot (and every one issued before it was taken).
-        out.write_u32(self.objects.generation_floor());
+        out.write_u64(self.objects.generation_floor());
         out.write_u64(self.schema_hash);
         // The type table (`SnapshotType`s): each store type once, with its fingerprint.
         out.write_len(u32::try_from(type_ids.len()).unwrap_or(u32::MAX));
@@ -3009,8 +3133,18 @@ impl Runtime {
         let mut observed = HashMap::new();
         // Which object each handle named before the restore (by address, for the check below).
         let mut before: HashMap<u64, usize> = HashMap::new();
+        // The references the host held to each handle (ADR-040): a store the snapshot puts back
+        // under its handle keeps them, because the host's wrappers (one per reference given out:
+        // a second `Arc<Self>` construction, a reply whose extra reference is still on its way
+        // back) each give exactly one back later. Starting from one would let the first of them
+        // remove the store the others still use.
+        // (A list, not a map: a handful of entries, and no second map type in the wasm.)
+        let mut refs_before: Vec<(u64, u32)> = Vec::new();
         for cleared in self.objects.clear() {
             before.insert(cleared.handle.0, object_address(&cleared.object));
+            if cleared.host_refs > 1 {
+                refs_before.push((cleared.handle.0, cleared.host_refs));
+            }
             if let Some(cell) = cleared.object.as_store() {
                 cell.set_handle(0);
                 observed.insert(
@@ -3021,7 +3155,14 @@ impl Runtime {
             self.drop_guarded_logged("an object replaced by restore", cleared.object);
         }
         for (handle, object) in &built {
-            if let Err(e) = self.objects.insert_at(*handle, object.clone()) {
+            let refs = refs_before
+                .iter()
+                .find(|(h, _)| *h == handle.0)
+                .map_or(1, |(_, n)| *n);
+            if let Err(e) = self
+                .objects
+                .insert_at_with_refs(*handle, object.clone(), refs)
+            {
                 self.log(
                     ERROR,
                     "undra::runtime",
@@ -3125,10 +3266,13 @@ impl Runtime {
         out.push_str(",\"mode\":");
         push_json_string(&mut out, &self.config.mode);
         out.push_str(&format!(
-            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"poisoned_signals\":{},\"transactions\":{},\"panics\":{},\"off_core_writes\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}",
+            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"host_refs\":{},\"live_callbacks\":{},\"origin_refs\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"poisoned_signals\":{},\"transactions\":{},\"panics\":{},\"off_core_writes\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}",
             self.schema_hash,
             strong_refs,
             self.objects.live(),
+            self.objects.host_refs(),
+            self.callbacks.live(),
+            self.origins.total(),
             self.objects.store_count(),
             self.objects.poisoned_stores(),
             self.exec.live(),

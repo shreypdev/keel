@@ -505,6 +505,33 @@ stand-in) now fetches the `ports` chunk (about 2.3 KB gzipped) at load, because 
 before the transport starts; `main` fetched it there only for an explicit Timer adapter. A failed fetch rejects `load`, as
 it already did in that case.
 
+## Note (2026-10-02, the objects-callbacks review): the JavaScript gate is restated at 21,800 bytes
+
+ADR-040 and ADR-041 put code in the chunk a page loads up front, because every generated constructor now goes
+through it: `[size."web/hello-runtime-js"]`'s `budget_gzip_bytes` is **21,800** (was 21,500), the tolerance stays 5%,
+and the record is re-measured in the same commit. What the bytes are, measured on the hello app (zlib level 9, the
+gate's own build):
+
+* `main` at `b800994` already measured **21,336**: ns-storage's namespace check had added 163 bytes to the record of
+  21,173 without a re-record (its review states 21,336 of 21,500). That is not this piece's growth.
+* This piece adds **341** (21,336 -> 21,677 before the review's fixes): the identity map (`adopt`, `collected`:
+  one wrapper per handle, a reply's extra reference given back at once, a finalizer that releases a collected
+  wrapper's reference exactly once without touching a newer wrapper of the handle), about **132** of them (the
+  chunk with `adopt` reduced to `new type(core, handle)` and `collected` to `release` measures 21,533); the
+  mirror's callback entries (a main-delivered invocation is a queue entry kind and a fold barrier, ADR-041
+  decision 6), the core's `_giveBack`, `_held` and `hostRefs`, and the wire's handle layout of 24 and 40 bits
+  make the rest.
+* **The alternative, measured and rejected: load the identity map on the first `create()`.** It would take at most
+  the 132 bytes out of the chunk (less the cost of the dynamic import), leaving the chunk above 21,500 anyway, and
+  the first `create()` of a page would wait for a chunk that is not loaded yet: a dynamic import of a 5 to 7 KB
+  chunk the page has not fetched measured **2.6 to 3.8 ms** in headless Chromium against `vite preview` on the
+  loopback (three runs), one round trip more on a real network, against 0.1 ms for a chunk already loaded and
+  0.000 ms for later imports. Prefetching it during `load` would keep the bytes on the startup path while the gate
+  stopped counting them. Later creates would have been unchanged (the module cached), but the first is every
+  app's first screen.
+
+The README's and the site's numbers come from the record as before.
+
 ## Review note (2026-10-02, `prod-ops` adversarial review): D1, the gate is 21,700
 
 The rule (R9): growth of `web/hello-runtime-js` is allowed only for behaviour a hello app gets at load. The review took the

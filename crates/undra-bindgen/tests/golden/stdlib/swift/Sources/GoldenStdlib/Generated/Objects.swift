@@ -5,7 +5,7 @@ import UndraRuntime
 
 /// Talks to the server.
 public final class Syncer: UndraObject, @unchecked Sendable {
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
     }
 

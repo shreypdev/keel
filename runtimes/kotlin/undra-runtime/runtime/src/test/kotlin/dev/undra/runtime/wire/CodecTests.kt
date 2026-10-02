@@ -233,7 +233,7 @@ class CodecTests : Suite() {
         }
 
         case("handle codec is the raw u64") {
-            assertBytes("0100000001000000", roundTrip(Codecs.handle, Handle.make(1u, 1u).raw))
+            assertBytes("0100000100000000", roundTrip(Codecs.handle, Handle.make(1u, 1u).raw))
             assertBytes("0000000000000000", roundTrip(Codecs.handle, 0L))
             assertBytes("ffffffffffffffff", roundTrip(Codecs.handle, -1L))
         }

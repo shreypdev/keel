@@ -149,7 +149,7 @@ class WireVectorsTest : Suite() {
         codec(v, Codecs.handle, raw)
         val h = Handle(raw)
         assertEq(1u, h.index, "index (vector note: index 1, generation 1)")
-        assertEq(1u, h.generation, "generation")
+        assertEq(1uL, h.generation, "generation")
         assertEq(h, Handle.make(1u, 1u))
     }
 
@@ -288,7 +288,7 @@ class WireVectorsTest : Suite() {
             }
             Payloads.Snapshot.Store(Handle(so["handle"].asLong()), so["type_id"].asLong().toUInt(), signals)
         }
-        val expected = Payloads.Snapshot(o["generation_floor"].asLong().toUInt(), o["schema_hash"].asULong(), types, o["description"].asString(), stores)
+        val expected = Payloads.Snapshot(o["generation_floor"].asULong(), o["schema_hash"].asULong(), types, o["description"].asString(), stores)
         verify(v, expected, { expected.encode(it) }, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
         val decoded = Payloads.Snapshot.decode(unhex(v.hex))
         for (t in types) assertEq(t.fingerprint, decoded.fingerprint(t.typeId), "${v.name}: fingerprint of ${t.typeId}")

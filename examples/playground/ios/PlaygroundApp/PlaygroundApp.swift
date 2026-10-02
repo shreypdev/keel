@@ -69,6 +69,10 @@ final class PlaygroundModel {
     let inbox: RemoteTodosQueryHandle
     /// Opened by its screen (`NotesScreen`): the database is the platform's `SQLiteDbAdapter`.
     let notes: Notes
+    let workshop: Workshop
+    /// Two shelves the workshop hands out: child stores, one wrapper each however often asked for.
+    let leftShelf: Shelf
+    let rightShelf: Shelf
 
     init() throws {
         todos = try Todos()
@@ -76,5 +80,8 @@ final class PlaygroundModel {
         bigList = try BigList()
         inbox = try RemoteTodosQueryHandle(list: UndraBootstrap.inboxList)
         notes = try Notes()
+        workshop = try Workshop()
+        leftShelf = try workshop.shelf(name: "left")
+        rightShelf = try workshop.shelf(name: "right")
     }
 }

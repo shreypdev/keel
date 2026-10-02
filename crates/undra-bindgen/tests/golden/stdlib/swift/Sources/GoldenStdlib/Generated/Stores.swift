@@ -13,7 +13,7 @@ public final class Link: UndraStore, @unchecked Sendable {
     public private(set) var failure: HttpError? = nil
     public private(set) var pending: [HttpRequest] = []
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }

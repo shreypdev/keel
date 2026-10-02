@@ -525,6 +525,8 @@ fn type_text(ty: &TypeRef) -> String {
         TypeRef::Map(k, v) => format!("Map<{}, {}>", type_text(k), type_text(v)),
         TypeRef::Lazy(t) => format!("Lazy<{}>", type_text(t)),
         TypeRef::Named(n) => n.clone(),
+        TypeRef::Object(n) => format!("Arc<{n}>"),
+        TypeRef::Callback(n) => format!("Arc<dyn {n}>"),
         TypeRef::Result(t, e) => format!("Result<{}, {}>", type_text(t), type_text(e)),
         TypeRef::Stream(t) => format!("Stream<{}>", type_text(t)),
     }

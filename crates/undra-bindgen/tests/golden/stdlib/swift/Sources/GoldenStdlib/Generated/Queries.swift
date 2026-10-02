@@ -19,7 +19,7 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
     /// When `data` was last updated.
     public private(set) var updatedAt: Date? = nil
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }

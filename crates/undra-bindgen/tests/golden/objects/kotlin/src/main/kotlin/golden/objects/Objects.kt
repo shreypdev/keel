@@ -16,13 +16,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
 /** Adds numbers. */
-class Calculator private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraGoldenObjects.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0)),
-    )
-
+class Calculator internal constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /**
      * Adds two numbers.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
@@ -228,9 +222,12 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(ctx: UndraCore = UndraGoldenObjects.core): Calculator = create(ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraGoldenObjects.core): Calculator {
             val handle = ctx.constructObject(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0))
-            return Calculator(ctx, handle)
+            return ctx.adopt(handle, ::Calculator)
         }
 
         /**
@@ -245,7 +242,7 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
             } catch (e: Exception) {
                 throw UndraCallError.mapped(e, CalcError)
             }
-            return Calculator(ctx, handle)
+            return ctx.adopt(handle, ::Calculator)
         }
 
         /**
@@ -267,7 +264,7 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
                 throw UndraCallError.mapped(e, CalcError)
             }
             if (handle == 0L) throw UndraCallError.Malformed("the core returned the null handle for a constructor")
-            return Calculator(ctx, handle)
+            return ctx.adopt(handle, ::Calculator)
         }
     }
 }

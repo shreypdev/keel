@@ -62,6 +62,9 @@ public struct UndraStats: Sendable, Equatable {
     public var coreTransactions: Int
     /// Panics the core caught.
     public var corePanics: Int
+    /// References to the core's objects the host owns, summed over its object table (`host_refs`,
+    /// ADR-040): one per live wrapper. Zero when the document does not report it.
+    public var hostRefs: Int
     /// Panic reports the core handed to the `Diagnostics` port (ADR-046): one per contained panic, the
     /// ones ``LoadOptions/onPanic`` receives.
     public var panicReports: Int
@@ -100,6 +103,7 @@ public struct UndraStats: Sendable, Equatable {
         self.coreOpenStreams = values["open_streams"] ?? 0
         self.coreTransactions = values["transactions"] ?? 0
         self.corePanics = values["panics"] ?? 0
+        self.hostRefs = values["host_refs"] ?? 0
         self.panicReports = values["panic_reports"] ?? 0
         self.background = UndraBackgroundStats(
             tasks: values["background.tasks"] ?? 0,

@@ -51,5 +51,8 @@ val SCENARIOS: List<Scenario> = listOf(
     scenario("S25", "db", ::s25Db),
     // S26 loads two other cores (other namespaces) next to the playground core, and closes them again.
     scenario("S26", "two cores", ::s26TwoCores),
+    // S27 step 8 loads S26's two cores again (S26 closed them) to pass one core's object to the other.
+    scenario("S27", "objects cross", ::s27ObjectsCross),
+    scenario("S28", "host callbacks", ::s28HostCallbacks),
     scenario("S17", "panic containment", ::s17Panic),
 )

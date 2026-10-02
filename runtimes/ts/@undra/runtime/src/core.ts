@@ -70,8 +70,14 @@ export type CallTargetArg = CallTargetRef | CallTarget.FreeFunction;
 
 /** Live counters of a core; see {@link UndraCore.stats}. */
 export interface UndraStats {
-  /** Object handles alive in the core (its own count when it reports one, else the handles this runtime constructed and has not released). */
+  /** Object handles alive in the core (its own count when it reports one, else the handles this runtime's wrappers hold). */
   readonly liveHandles: number;
+  /**
+   * References to objects the host owns, as the core counts them (`host_refs`, ADR-040): one per live wrapper, since a
+   * reply that carries an object the host already wraps gives the extra reference back at once. Without the core's
+   * count (over a socket), the handles this runtime's wrappers hold.
+   */
+  readonly hostRefs: number;
   /** Calls sent and not yet answered. */
   readonly pendingCalls: number;
   /** Streams opened and not yet finished. */
@@ -587,8 +593,8 @@ export class UndraCore {
   private readonly _handles = new Set<Handle>();
   /** The signals the app observes, per handle: what a reconnect observes again. */
   private readonly _observed = new Map<Handle, Set<number>>();
-  /** Handles released while the connection was down: released in the core once it is back. */
-  private readonly _releasedWhileDown = new Set<Handle>();
+  /** References given back while the connection was down, one per reference: released in the core once it is back. */
+  private readonly _releasedWhileDown: Handle[] = [];
   private readonly _connection = new Signal<ConnectionState>({ kind: "connecting" });
   /** The header of the call being sent, reused: an in-process transport copies it before it returns (`Transport.sendCall`). */
   private readonly _head = new Uint8Array(HEAD_LEN);
@@ -793,10 +799,20 @@ export class UndraCore {
     this.mirror.unregister(handle);
     this._handles.delete(handle);
     this._observed.delete(handle);
+    this._giveBack(handle);
+  }
+
+  /**
+   * Gives one reference to `handle` back to the core without touching the wrapper that holds the handle: what `adopt`
+   * does with a reply's reference to an object the host already wraps (ADR-040). Ignored by a closed core.
+   *
+   * @internal Called by `adopt` and `release`.
+   */
+  _giveBack(handle: Handle): void {
     if (this._closed) return;
     if (this._connection.peek().kind === "reconnecting") {
       // The core keeps the object for us (ADR-051); it is released when the connection is back.
-      this._releasedWhileDown.add(handle);
+      this._releasedWhileDown.push(handle);
       return;
     }
     try {
@@ -804,6 +820,16 @@ export class UndraCore {
     } catch (error) {
       this._reportError("release", error);
     }
+  }
+
+  /**
+   * Counts `handle` among the handles this runtime's wrappers hold (a reply's object that a new wrapper now owns, ADR-040),
+   * as `construct` does for a constructor's.
+   *
+   * @internal Called by `adopt`.
+   */
+  _held(handle: Handle): void {
+    this._handles.add(handle);
   }
 
   /** Remembers what the app observes, so that a reconnect can observe it again. */
@@ -925,8 +951,10 @@ export class UndraCore {
     const coreHandles = core?.live_handles;
     const count = (value: unknown): number => (typeof value === "number" ? value : 0);
     const background = (core?.background ?? {}) as CoreStatsJson;
+    const hostRefs = core?.host_refs;
     return {
       liveHandles: typeof coreHandles === "number" ? coreHandles : this._handles.size,
+      hostRefs: typeof hostRefs === "number" ? hostRefs : this._handles.size,
       pendingCalls: calls,
       openStreams: streams,
       mirroredStores: this.mirror.size,
@@ -1190,7 +1218,7 @@ export class UndraCore {
     this.hello = hello;
     try {
       for (const handle of this._releasedWhileDown) this._transport.send(Kind.Release, encodeRelease({ handle }));
-      this._releasedWhileDown.clear();
+      this._releasedWhileDown.length = 0;
       for (const [handle, signals] of this._observed) {
         for (const signalId of signals) this._transport.send(Kind.Observe, encodeObserve({ handle, signalId, on: true }));
       }

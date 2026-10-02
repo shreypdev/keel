@@ -1,6 +1,7 @@
-//! A compare-exchange loop for `AtomicU32`, stable across the MSRV and the newest stable.
+//! A compare-exchange loop for `AtomicU32` and `AtomicU64`, stable across the MSRV and the newest
+//! stable.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 /// Read-modify-write on an `AtomicU32` through a compare-exchange loop: `f` sees the current value
 /// and returns the next one, or `None` to leave the value alone. Returns the previous value either
@@ -13,6 +14,25 @@ pub(crate) fn cas_update(
     fetch_order: Ordering,
     mut f: impl FnMut(u32) -> Option<u32>,
 ) -> Result<u32, u32> {
+    let mut previous = cell.load(fetch_order);
+    loop {
+        let Some(next) = f(previous) else {
+            return Err(previous);
+        };
+        match cell.compare_exchange_weak(previous, next, set_order, fetch_order) {
+            Ok(_) => return Ok(previous),
+            Err(observed) => previous = observed,
+        }
+    }
+}
+
+/// [`cas_update`] for an `AtomicU64` (the handle generation counter, ADR-040).
+pub(crate) fn cas_update_u64(
+    cell: &AtomicU64,
+    set_order: Ordering,
+    fetch_order: Ordering,
+    mut f: impl FnMut(u64) -> Option<u64>,
+) -> Result<u64, u64> {
     let mut previous = cell.load(fetch_order);
     loop {
         let Some(next) = f(previous) else {

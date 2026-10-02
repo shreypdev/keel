@@ -16,7 +16,7 @@ export * from "./adapters/codecs.js";
 export * from "./errors.js";
 export * from "./call-error.js";
 
-import type { CallTarget, ChangeOp, Handle } from "./wire/index.js";
+import type { CallTarget, ChangeOp, Handle, UndraReader } from "./wire/index.js";
 
 export type LoadMode = "wasm-main" | "wasm-worker" | "remote";
 
@@ -135,3 +135,43 @@ export declare class Signal<T> {
 }
 
 export interface UndraPort {}
+
+/** Addition (ADR-040): a generated class as `adopt` takes it. */
+export interface UndraObjectClass<T extends UndraObject> {
+  readonly prototype: T;
+}
+
+/** Addition (ADR-040): the wrapper of a handle the core handed over, one per handle. */
+export declare function adopt<T extends UndraObject>(core: UndraCore, handle: Handle, type: UndraObjectClass<T>): T;
+/** Addition (ADR-040): the object a reply carries, adopted (a new store is observed first). */
+export declare function adoptObject<T extends UndraObject>(core: UndraCore, body: Uint8Array, type: UndraObjectClass<T>): Promise<T>;
+/** Addition (ADR-040): the optional object a reply carries. */
+export declare function adoptOptional<T extends UndraObject>(core: UndraCore, body: Uint8Array, type: UndraObjectClass<T>): Promise<T | null>;
+/** Addition (ADR-040): the objects a reply carries. */
+export declare function adoptList<T extends UndraObject>(core: UndraCore, body: Uint8Array, type: UndraObjectClass<T>): Promise<T[]>;
+/** Addition (ADR-040): the handle of an object parameter; refuses an object of another core. */
+export declare function requireOwn(core: UndraCore, object: UndraObject): Handle;
+
+/** Addition (ADR-041): one method of a callback interface, as its generated bridge describes it. */
+export type CallbackMethod<T> =
+  | { readonly name: string; readonly coalesce?: boolean; readonly notify: (args: UndraReader) => (impl: T) => unknown }
+  | { readonly name: string; readonly call: (args: UndraReader) => (impl: T, signal: AbortSignal) => Promise<Uint8Array> };
+
+/** Addition (ADR-041): a host callback interface, as its generated bridge describes it. */
+export interface CallbackInterface<T extends object> {
+  readonly name: string;
+  readonly portId: number;
+  readonly releaseInstance: number;
+  readonly cancelCall: number;
+  readonly background?: boolean;
+  readonly methods: Readonly<Record<number, CallbackMethod<T>>>;
+}
+
+/** Addition (ADR-041): lends a callback for the call being encoded. */
+export type Lend = <T extends object>(impl: T, callback: CallbackInterface<T>) => bigint;
+/** Addition (ADR-041): sends a call whose arguments lend callbacks; a refused or unsent call gives them back. */
+export declare function lending<R>(core: UndraCore, send: (lend: Lend) => Promise<R>, signal?: AbortSignal): Promise<R>;
+/** Addition (ADR-041): lends a callback to a core outside `lending` (a stream's arguments). */
+export declare function lend<T extends object>(core: UndraCore, impl: T, callback: CallbackInterface<T>): bigint;
+/** Addition (ADR-041): what a weak wrapper's async method answers once its target is gone. */
+export declare function callbackGone(): Promise<never>;

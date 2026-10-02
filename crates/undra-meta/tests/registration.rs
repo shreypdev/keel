@@ -71,6 +71,7 @@ static CALCULATOR: ObjectMeta = ObjectMeta {
         returns: TypeRefMeta::Named("Calculator"),
         is_async: false,
         takes_ctx: false,
+        coalesce: false,
         docs: "",
     }],
     methods: &[MethodMeta {
@@ -89,6 +90,7 @@ static CALCULATOR: ObjectMeta = ObjectMeta {
         returns: TypeRefMeta::I32,
         is_async: false,
         takes_ctx: false,
+        coalesce: false,
         docs: "",
     }],
     store: None,
@@ -106,6 +108,7 @@ static COUNTER: ObjectMeta = ObjectMeta {
         returns: TypeRefMeta::Named("Counter"),
         is_async: false,
         takes_ctx: true,
+        coalesce: false,
         docs: "",
     }],
     methods: &[],
@@ -142,6 +145,7 @@ static CLOCK: PortMeta = PortMeta {
     name: "Clock",
     port_id: ids::port_id("Clock"),
     kind: PortKind::Sync,
+    background: false,
     methods: &[MethodMeta {
         name: "now_ms",
         method_id: ids::port_method_id("Clock", "now_ms"),
@@ -149,6 +153,7 @@ static CLOCK: PortMeta = PortMeta {
         returns: TypeRefMeta::I64,
         is_async: false,
         takes_ctx: false,
+        coalesce: false,
         docs: "",
     }],
     docs: "",
@@ -342,6 +347,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
         docs: String::new(),
     });
     let ctor = |ty: &str, takes_ctx: bool| MethodDef {
+        coalesce: false,
         name: "new".into(),
         method_id: ids::method_id(ty, "new"),
         params: vec![],
@@ -370,6 +376,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
             returns: TypeRef::I32,
             is_async: false,
             takes_ctx: false,
+            coalesce: false,
             docs: String::new(),
         }],
         store: None,
@@ -409,6 +416,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
         name: "Clock".into(),
         port_id: ids::port_id("Clock"),
         kind: PortKind::Sync,
+        background: false,
         methods: vec![MethodDef {
             name: "now_ms".into(),
             method_id: ids::port_method_id("Clock", "now_ms"),
@@ -416,6 +424,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
             returns: TypeRef::I64,
             is_async: false,
             takes_ctx: false,
+            coalesce: false,
             docs: String::new(),
         }],
         docs: String::new(),

@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
  *
  * Generated subclasses declare one `StateFlow` per signal, created with [signal] and updated by their
  * [apply], which the runtime calls **on the main thread** ([UndraDispatchers.main]) for the changes the
- * core reports, after the subclass has called `core.observe(handle, ...)`. Changes that arrive between two
+ * core reports, once it observes them ([observeAll]). Changes that arrive between two
  * display frames are merged first (see [Mirror]): a signal set many times is applied once with its last
  * value, and its keyed patches are applied as one patch. The constructor registers the store with
  * `core.mirror`; [close] (or the cleaner backstop, see [UndraObject]) unregisters it.
@@ -35,8 +35,9 @@ public abstract class UndraStore(core: UndraCore, handle: Long, noCoalesce: Set<
 
     /**
      * Starts observing every signal, so the core reports their current values (applied before this returns when
-     * the core is in process). Generated stores call it from `init`. If the core cannot be reached the store is
-     * closed (no handle leaks) and the failure is thrown as an [UndraCallError].
+     * the core is in process). The runtime calls it when it makes a generated store's wrapper ([UndraCore.adopt]);
+     * a store written by hand calls it from `init`. If the core cannot be reached the store is closed (no handle
+     * leaks) and the failure is thrown as an [UndraCallError].
      *
      * @throws UndraCallError if the core is closed or unreachable.
      */
@@ -47,6 +48,11 @@ public abstract class UndraStore(core: UndraCore, handle: Long, noCoalesce: Set<
             close()
             throw UndraCallError.mapped(e)
         }
+    }
+
+    /** What [UndraCore.adopt] does once the wrapper is registered: observes every signal ([observeAll]). */
+    internal fun start() {
+        observeAll()
     }
 
     /** Creates the [MutableStateFlow] backing one signal, holding [initial] until the core reports the real value. */

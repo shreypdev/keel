@@ -1,0 +1,373 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-object-graph",
+  "records": [
+    {
+      "name": "Message",
+      "type_id": 2920208772,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        },
+        {
+          "name": "text",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ],
+      "docs": "A message in a chat."
+    }
+  ],
+  "enums": [
+    {
+      "name": "MailError",
+      "type_id": 661063768,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "NoThread",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "no such thread"
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "name": "Account",
+      "type_id": 1509466876,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 3759858176,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Account"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "mailbox",
+          "method_id": 610414866,
+          "params": [
+            {
+              "name": "folder",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "object",
+            "of": "Mailbox"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "The mailbox for `folder`, created on first use."
+        },
+        {
+          "name": "open_thread",
+          "method_id": 2276982531,
+          "params": [
+            {
+              "name": "id",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "object",
+                "of": "Thread"
+              },
+              {
+                "kind": "named",
+                "of": "MailError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Opens a thread."
+        },
+        {
+          "name": "move_to",
+          "method_id": 3727307101,
+          "params": [
+            {
+              "name": "message",
+              "ty": {
+                "kind": "u32"
+              }
+            },
+            {
+              "name": "target",
+              "ty": {
+                "kind": "object",
+                "of": "Mailbox"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Moves a message to `target`."
+        },
+        {
+          "name": "drafts",
+          "method_id": 3209835250,
+          "params": [],
+          "returns": {
+            "kind": "option",
+            "of": {
+              "kind": "object",
+              "of": "Mailbox"
+            }
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "The drafts folder, if there is one."
+        },
+        {
+          "name": "mailboxes",
+          "method_id": 2512827858,
+          "params": [],
+          "returns": {
+            "kind": "vec",
+            "of": {
+              "kind": "object",
+              "of": "Mailbox"
+            }
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Every mailbox."
+        },
+        {
+          "name": "chat",
+          "method_id": 205846536,
+          "params": [
+            {
+              "name": "peer",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "object",
+            "of": "ChatStore"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "The chat with `peer`: a store."
+        },
+        {
+          "name": "merge",
+          "method_id": 355038278,
+          "params": [
+            {
+              "name": "boxes",
+              "ty": {
+                "kind": "vec",
+                "of": {
+                  "kind": "object",
+                  "of": "Mailbox"
+                }
+              }
+            },
+            {
+              "name": "extra",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "object",
+                  "of": "Mailbox"
+                }
+              }
+            }
+          ],
+          "returns": {
+            "kind": "u32"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Merges the given mailboxes into the first and returns how many there were."
+        },
+        {
+          "name": "find_thread",
+          "method_id": 3100000686,
+          "params": [
+            {
+              "name": "id",
+              "ty": {
+                "kind": "u32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "option",
+                "of": {
+                  "kind": "object",
+                  "of": "Thread"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "MailError"
+              }
+            ]
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Finds a thread, if it exists."
+        }
+      ],
+      "store": null,
+      "docs": "An account that hands out its mailboxes."
+    },
+    {
+      "name": "Mailbox",
+      "type_id": 2987480683,
+      "constructors": [],
+      "methods": [
+        {
+          "name": "name",
+          "method_id": 1363372700,
+          "params": [],
+          "returns": {
+            "kind": "string"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "store": null,
+      "docs": "A folder."
+    },
+    {
+      "name": "Thread",
+      "type_id": 3935324561,
+      "constructors": [],
+      "methods": [
+        {
+          "name": "id",
+          "method_id": 3853105208,
+          "params": [],
+          "returns": {
+            "kind": "u32"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "store": null,
+      "docs": "A conversation."
+    },
+    {
+      "name": "ChatStore",
+      "type_id": 2564683908,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 1892242760,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "ChatStore"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "send",
+          "method_id": 3165758148,
+          "params": [
+            {
+              "name": "text",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Sends a message."
+        }
+      ],
+      "store": {
+        "signals": [
+          {
+            "name": "messages",
+            "signal_id": 0,
+            "ty": {
+              "kind": "vec",
+              "of": {
+                "kind": "named",
+                "of": "Message"
+              }
+            },
+            "computed": false,
+            "key": "id"
+          }
+        ]
+      },
+      "docs": "A conversation the platform observes."
+    }
+  ],
+  "functions": [
+    {
+      "name": "mailbox_of",
+      "method_id": 3954983753,
+      "params": [
+        {
+          "name": "account",
+          "ty": {
+            "kind": "object",
+            "of": "Account"
+          }
+        },
+        {
+          "name": "folder",
+          "ty": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "object",
+        "of": "Mailbox"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "docs": "The mailbox of `account` for `folder`."
+    }
+  ],
+  "ports": [],
+  "queries": []
+}

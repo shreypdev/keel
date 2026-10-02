@@ -104,6 +104,8 @@ fn stdlib() -> Option<PathBuf> {
 /// The `main` classes of `tests/fixtures/kotlin-run`: package and class.
 const MAINS: &[(&str, &str)] = &[
     ("full", "FullTestKt"),
+    ("object_graph", "ObjectGraphTestKt"),
+    ("callbacks", "CallbacksTestKt"),
     ("errors", "ErrorsTestKt"),
     ("enums", "EnumsTestKt"),
     ("records", "RecordsTestKt"),

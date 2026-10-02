@@ -10,7 +10,7 @@ public final class Auth: UndraStore, @unchecked Sendable {
     public private(set) var session: Session = Session.signedOut
     public private(set) var busy: Bool = false
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
@@ -127,7 +127,7 @@ public final class Notebook: UndraStore, @unchecked Sendable {
     /// Computed by the core; read-only.
     public private(set) var tags: [String] = []
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }

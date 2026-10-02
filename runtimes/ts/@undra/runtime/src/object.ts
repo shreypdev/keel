@@ -1,5 +1,6 @@
 import { UndraCallError } from "./call-error.js";
 import type { UndraCore } from "./core.js";
+import { collected } from "./identity.js";
 import type { Signal } from "./signal.js";
 import { ALL_SIGNALS, type ChangeOp, type Handle } from "./wire/index.js";
 
@@ -25,7 +26,8 @@ const leaks: FinalizationRegistry<Leak> | null =
   typeof FinalizationRegistry === "function"
     ? new FinalizationRegistry<Leak>((leak) => {
         try {
-          leak.core.deref()?.release(leak.handle);
+          const core = leak.core.deref();
+          if (core !== undefined) collected(core, leak.handle);
         } catch {
           // The core is closed or going away; there is nothing left to release.
         }
@@ -34,7 +36,9 @@ const leaks: FinalizationRegistry<Leak> | null =
 
 /**
  * A core object addressed by handle: the base class of generated objects and
- * stores. Owns exactly one handle; `close()` (idempotent) releases it.
+ * stores. Owns exactly one reference to its handle; `close()` (idempotent)
+ * releases it. There is one wrapper per handle (`adopt`, ADR-040), so `===`
+ * between wrappers is identity of the core's objects.
  *
  * ```ts
  * using calc = await Calculator.create();

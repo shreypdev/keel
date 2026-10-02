@@ -677,10 +677,27 @@ impl<'a> Checker<'a> {
             s.ports.iter().map(|p| (p.port_id, p.name.clone())),
         );
         for p in &s.ports {
+            // A callback interface answers two more methods, reserved by the protocol (ADR-041):
+            // a collision of a user method's id with either would route a call wrongly.
+            let reserved = (p.kind == PortKind::Callback).then(|| {
+                [
+                    (
+                        undra_meta::ids::callback_release_id(&p.name),
+                        undra_meta::ids::CALLBACK_RELEASE.to_owned(),
+                    ),
+                    (
+                        undra_meta::ids::callback_cancel_id(&p.name),
+                        undra_meta::ids::CALLBACK_CANCEL.to_owned(),
+                    ),
+                ]
+            });
             self.dup_ids(
                 "method id",
                 &format!("port {}", p.name),
-                p.methods.iter().map(|m| (m.method_id, m.name.clone())),
+                p.methods
+                    .iter()
+                    .map(|m| (m.method_id, m.name.clone()))
+                    .chain(reserved.into_iter().flatten()),
             );
         }
         self.dup_ids(
@@ -868,15 +885,15 @@ impl<'a> Checker<'a> {
         }
 
         if object.constructors.is_empty() {
-            // Plain objects without a constructor can only be reached through
-            // other calls, which are not supported; stores are checked by
-            // `Schema::validate`.
-            if object.store.is_none() {
+            // A plain object without a constructor is created by the core and handed out by a
+            // method or function that returns it (ADR-040); one nothing returns can never be
+            // reached. Stores are checked by `Schema::validate`.
+            if object.store.is_none() && !self.is_returned(&object.name) {
                 self.errors.push(BindgenError::Unsupported {
                     at: at.clone(),
-                    what: "an object without a constructor".to_owned(),
-                    why: "the platforms create an object by calling one of its constructors, and no other call can hand one out, so without a constructor it can never be created".to_owned(),
-                    help: "add `pub fn new(..) -> Self` to its `#[undra::api]` impl block so the platform can create it".to_owned(),
+                    what: "an object without a constructor that nothing returns".to_owned(),
+                    why: "the platforms create an object by calling one of its constructors, or receive it from a method or function that returns it, and without either it can never be created".to_owned(),
+                    help: format!("add `pub fn new(..) -> Self` to its `#[undra::api]` impl block so the platform can create it, or return `Arc<{}>` from a method that hands it out", object.name),
                 });
             }
         }
@@ -934,6 +951,26 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Whether some method or function returns the object `name` (alone, optional, in a list, or
+    /// on the `Ok` side of a `Result`): the core can hand an instance to the platform.
+    fn is_returned(&self, name: &str) -> bool {
+        fn mentions(ty: &TypeRef, name: &str) -> bool {
+            match ty {
+                TypeRef::Object(n) => n == name,
+                TypeRef::Option(inner) | TypeRef::Vec(inner) => mentions(inner, name),
+                TypeRef::Result(ok, _) => mentions(ok, name),
+                _ => false,
+            }
+        }
+        self.schema
+            .objects
+            .iter()
+            .flat_map(|o| &o.methods)
+            .map(|m| &m.returns)
+            .chain(self.schema.functions.iter().map(|f| &f.returns))
+            .any(|ty| mentions(ty, name))
+    }
+
     fn check_constructor_return(&mut self, object: &ObjectDef, c: &MethodDef, at: &str) {
         let ok = match Ret::classify(&c.returns) {
             Some(Ret::Plain(TypeRef::Named(n))) if *n == object.name => true,
@@ -984,6 +1021,21 @@ impl<'a> Checker<'a> {
                     why: "the id namespace of a port already has `portId`".to_owned(),
                 });
             }
+            // A callback interface's id namespace also names the two reserved methods of the
+            // protocol (ADR-041): `releaseInstance` and `cancelCall`.
+            if port.kind == PortKind::Callback
+                && matches!(
+                    naming::camel(&m.name).as_str(),
+                    "releaseInstance" | "cancelCall"
+                )
+            {
+                self.errors.push(BindgenError::NameCollision {
+                    at: at.clone(),
+                    names: vec![m.name.clone()],
+                    converted: naming::camel(&m.name),
+                    why: "the id namespace of a callback interface already names the reserved methods `__release` (as `releaseInstance`) and `__cancel` (as `cancelCall`)".to_owned(),
+                });
+            }
             let mat = format!("{at}, method {}", m.name);
             self.check_params(&mat, &m.params);
             self.check_param_types(&m.params, &mat);
@@ -996,7 +1048,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                PortKind::Sync | PortKind::Async => {
+                PortKind::Sync | PortKind::Async | PortKind::Callback => {
                     self.check_return(&m.returns, &mat, false);
                 }
             }
@@ -1141,9 +1193,12 @@ impl<'a> Checker<'a> {
                     at: at.to_owned(),
                     what: format!("the object `{name}` used as a value"),
                     why: "an object lives in the core and crosses the boundary as a handle; its contents have no wire representation".to_owned(),
-                    help: "return a record with the data the platform needs, or construct the object from the platform with one of its constructors".to_owned(),
+                    help: format!("return it as `Arc<{name}>`, take it as `&{name}` or `Arc<{name}>`, or use a record with the data the platform needs"),
                 });
             }
+            // Where an object or a callback may stand was decided by `Schema::validate` (E0064,
+            // E0004); what stands here is one the generators write.
+            TypeRef::Object(_) | TypeRef::Callback(_) => {}
             TypeRef::Option(inner) => {
                 if matches!(**inner, TypeRef::Option(_)) {
                     self.errors.push(BindgenError::Unsupported {

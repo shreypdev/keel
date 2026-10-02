@@ -75,7 +75,7 @@ const TYPE_LEN: usize = 12;
 /// Layout, all little-endian:
 ///
 /// ```text
-/// count u32, generation_floor u32,                              // ADR-022's two leading words
+/// count u32, generation_floor u64,                              // ADR-022's leading words, the floor widened by ADR-040
 /// schema_hash u64,                                              // of the core that wrote it
 /// type_count u32, types x { type_id u32, fingerprint u64 },     // the fast path
 /// description_len u32, description bytes,                       // canonical JSON (UTF-8)
@@ -121,7 +121,7 @@ const TYPE_LEN: usize = 12;
 pub struct Snapshot {
     /// The highest handle generation issued when the snapshot was taken; every store's
     /// generation is at most this. Restore resumes the generation counter above it.
-    pub generation_floor: u32,
+    pub generation_floor: u64,
     /// The schema hash of the core that took the snapshot.
     pub schema_hash: u64,
     /// Each store type of the snapshot, once, with its fingerprint.
@@ -144,7 +144,7 @@ impl Snapshot {
     /// Appends the payload to `w`.
     pub fn encode(&self, w: &mut Writer) {
         w.write_len(len_u32(self.stores.len()));
-        w.write_u32(self.generation_floor);
+        w.write_u64(self.generation_floor);
         w.write_u64(self.schema_hash);
         w.write_len(len_u32(self.types.len()));
         for t in &self.types {
@@ -161,7 +161,7 @@ impl Snapshot {
     /// a description that is not UTF-8.
     pub fn decode(r: &mut Reader<'_>) -> Result<Self, WireError> {
         let count = r.read_count(STORE_MIN_LEN)?;
-        let generation_floor = r.read_u32()?;
+        let generation_floor = r.read_u64()?;
         let schema_hash = r.read_u64()?;
         let type_count = r.read_count(TYPE_LEN)?;
         let mut types: Vec<SnapshotType> = Vec::with_capacity(type_count.min(1024));
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn layout_matches_the_spec() {
         let snap = Snapshot {
-            generation_floor: 0x0102_0304,
+            generation_floor: 0x0102_0304_0506_0708,
             schema_hash: 0x0807_0605_0403_0201,
             types: vec![SnapshotType {
                 type_id: 7,
@@ -264,12 +264,12 @@ mod tests {
             encode(&snap),
             [
                 1, 0, 0, 0, // store count
-                4, 3, 2, 1, // generation_floor
+                8, 7, 6, 5, 4, 3, 2, 1, // generation_floor (u64)
                 1, 2, 3, 4, 5, 6, 7, 8, // schema_hash
                 1, 0, 0, 0, // type_count
                 7, 0, 0, 0, 0x0a, 0, 0, 0, 0, 0, 0, 0, // type_id, fingerprint
                 2, 0, 0, 0, b'{', b'}', // description
-                1, 0, 0, 0, 1, 0, 0, 0, // handle
+                1, 0, 0, 1, 0, 0, 0, 0, // handle (index 1, generation 1 << 24)
                 7, 0, 0, 0, // type_id
                 1, 0, 0, 0, // signal_count
                 2, 0, 0, 0, // signal_id
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn empty_snapshot() {
         let b = encode(&Snapshot::default());
-        assert_eq!(b, [0; 24]);
+        assert_eq!(b, [0; 28]);
         assert_eq!(
             Snapshot::decode(&mut Reader::new(&b)),
             Ok(Snapshot::default())
@@ -310,7 +310,7 @@ mod tests {
         // Type count larger than the input could hold.
         let mut b = Vec::new();
         b.extend_from_slice(&0_u32.to_le_bytes());
-        b.extend_from_slice(&0_u32.to_le_bytes());
+        b.extend_from_slice(&0_u64.to_le_bytes());
         b.extend_from_slice(&0_u64.to_le_bytes());
         b.extend_from_slice(&u32::MAX.to_le_bytes());
         assert!(matches!(
@@ -404,6 +404,30 @@ mod tests {
             let decoded = Snapshot::decode(&mut r).and_then(|s| r.finish().map(|()| s));
             assert!(decoded.is_err(), "type id {type_id:#x}");
         }
+    }
+
+    /// Layout 2 of ADR-037 wrote the floor as a `u32`; ADR-040 widened it to `u64`. The old bytes
+    /// never decode as the new layout, so a host that kept a snapshot gets a typed refusal.
+    #[test]
+    fn a_snapshot_with_a_32_bit_floor_is_refused() {
+        let snap = sample();
+        let mut w = Writer::new();
+        w.write_len(len_u32(snap.stores.len()));
+        w.write_u32(5); // the old 32-bit floor
+        w.write_u64(snap.schema_hash);
+        w.write_len(len_u32(snap.types.len()));
+        for t in &snap.types {
+            w.write_u32(t.type_id);
+            w.write_u64(t.fingerprint);
+        }
+        w.write_str(&snap.description);
+        for store in &snap.stores {
+            store.encode(&mut w);
+        }
+        let old = w.into_vec();
+        let mut r = Reader::new(&old);
+        let decoded = Snapshot::decode(&mut r).and_then(|s| r.finish().map(|()| s));
+        assert!(decoded.is_err(), "{decoded:?}");
     }
 
     #[test]

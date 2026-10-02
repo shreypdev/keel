@@ -24,13 +24,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
 /** Talks to the server. */
-class Syncer private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraGoldenStdlib.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.Syncer.TYPE_ID, UndraIds.Objects.Syncer.NEW, ByteArray(0)),
-    )
-
+class Syncer internal constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /**
      * Performs one request.
      * @throws HttpError
@@ -168,9 +162,12 @@ class Syncer private constructor(core: UndraCore, handle: Long) : UndraObject(co
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(ctx: UndraCore = UndraGoldenStdlib.core): Syncer = create(ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraGoldenStdlib.core): Syncer {
             val handle = ctx.constructObject(UndraIds.Objects.Syncer.TYPE_ID, UndraIds.Objects.Syncer.NEW, ByteArray(0))
-            return Syncer(ctx, handle)
+            return ctx.adopt(handle, ::Syncer)
         }
     }
 }

@@ -722,7 +722,7 @@ export interface SnapshotType {
  * (ADR-037), all little-endian:
  *
  * ```text
- * count u32, generation_floor u32, schema_hash u64,
+ * count u32, generation_floor u64, schema_hash u64,
  * type_count u32, types x { type_id u32, fingerprint u64 },
  * description_len u32, description (UTF-8 JSON, opaque to hosts),
  * count x { handle u64, type_id u32, signal_count u32, signals x { signal_id u32, len u32, value } }
@@ -735,8 +735,9 @@ export interface SnapshotPayload {
   /**
    * The highest handle generation the core had issued when the snapshot was taken. A restore
    * resumes the core's generation counter above it, so no handle issued before the snapshot (or
-   * between it and the restore) is ever issued again to another object (ADR-022). Opaque to the
-   * host: pass it back unchanged.
+   * between it and the restore) is ever issued again to another object (ADR-022). A `u64` on the
+   * wire (ADR-040: generations are 40 bits), read as a `number`, which holds every generation
+   * exactly. Opaque to the host: pass it back unchanged.
    */
   readonly generationFloor: number;
   /** The schema hash of the core that took the snapshot. */
@@ -760,7 +761,7 @@ const SNAPSHOT_TYPE_LEN = 12;
 export function encodeSnapshot(snapshot: SnapshotPayload): Uint8Array {
   const w = new UndraWriter();
   w.writeLen(snapshot.stores.length);
-  w.writeU32(snapshot.generationFloor);
+  w.writeU64Number(snapshot.generationFloor);
   w.writeU64(snapshot.schemaHash);
   w.writeLen(snapshot.types.length);
   for (const type of snapshot.types) {
@@ -789,7 +790,7 @@ export function encodeSnapshot(snapshot: SnapshotPayload): Uint8Array {
 export function decodeSnapshot(bytes: Uint8Array): SnapshotPayload {
   return decodeAll(bytes, (r) => {
     const storeCount = r.readLen(SNAPSHOT_STORE_MIN);
-    const generationFloor = r.readU32();
+    const generationFloor = r.readU64Number();
     const schemaHash = r.readU64();
     const typeCount = r.readLen(SNAPSHOT_TYPE_LEN);
     const types = new Array<SnapshotType>(typeCount);

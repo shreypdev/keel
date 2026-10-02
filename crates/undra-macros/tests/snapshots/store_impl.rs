@@ -15,11 +15,10 @@ impl Todos {
     /// Marks the type as an object, so a signature that uses it as a value can say so.
     #[doc(hidden)]
     pub const __UNDRA_IS_OBJECT: bool = true;
-}
-#[automatically_derived]
-impl ::undra::runtime::UndraObject for Todos {
-    const TYPE_ID: u32 = ::undra::meta::ids::type_id("Todos");
-    const NAME: &'static str = "Todos";
+    /// The type id of the declared name: what a signature that takes or returns the
+    /// object as `Arc<T>` or `&T` is checked against (E0061).
+    #[doc(hidden)]
+    pub const __UNDRA_OBJECT_ID: u32 = ::undra::meta::ids::type_id("Todos");
 }
 #[doc(hidden)]
 #[allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code)]
@@ -69,6 +68,21 @@ const _: () = {
             __r: &mut ::undra::wire::Reader<'_>,
         ) -> ::core::result::Result<Self, ::undra::wire::WireError> {
             Self::__undra_restore(__ctx, __r)
+        }
+    }
+    #[automatically_derived]
+    impl ::undra::runtime::UndraObject for Todos {
+        const TYPE_ID: u32 = ::undra::meta::ids::type_id("Todos");
+        const NAME: &'static str = "Todos";
+        fn __undra_store_cell(
+            &self,
+        ) -> ::core::option::Option<&::std::sync::Arc<::undra::signals::StoreCell>> {
+            ::core::option::Option::Some(self.__undra_cell_ref())
+        }
+        fn __undra_attach(
+            &self,
+        ) -> ::core::result::Result<(), ::undra::signals::SignalsError> {
+            self.__undra_attach_all()
         }
     }
     #[allow(unused_variables, unused_mut, deprecated, clippy::all)]
@@ -177,6 +191,7 @@ const _: () = {
                 returns: ::undra::meta::TypeRefMeta::Named("Todos"),
                 is_async: false,
                 takes_ctx: true,
+                coalesce: false,
                 docs: "",
             },
         ],
@@ -193,6 +208,7 @@ const _: () = {
                 returns: ::undra::meta::TypeRefMeta::Unit,
                 is_async: false,
                 takes_ctx: false,
+                coalesce: false,
                 docs: "",
             },
         ],

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
@@ -38,6 +39,9 @@ enum class Tab(val id: String, val label: String, val icon: ImageVector) {
 
     /** Notes kept in SQLite through the opt-in `Db` port (ADR-048). */
     NOTES("notes", "Notes", Icons.Filled.Edit),
+
+    /** A workshop that hands out shelves and takes them back, and calls the app's reporter. */
+    WORKSHOP("workshop", "Workshop", Icons.Filled.Build),
     ;
 
     /** Finds tabs by the name in the launch extra. */
@@ -75,6 +79,7 @@ fun PlaygroundApp(tab: Tab, onTab: (Tab) -> Unit) {
                 Tab.BIGLIST -> BigListScreen()
                 Tab.REMOTE -> RemoteScreen()
                 Tab.NOTES -> NotesScreen()
+                Tab.WORKSHOP -> WorkshopScreen()
             }
         }
     }

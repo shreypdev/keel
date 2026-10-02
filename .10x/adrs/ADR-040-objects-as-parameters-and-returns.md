@@ -1,7 +1,8 @@
 # ADR-040: objects cross as parameters and returns; every handle the core hands out is one owned reference
 
-Status: **Proposed** (2026-10-01, `wt/boundary-adrs`; Amendment B "boundary surface", catalogue M-3, gap
-audit TY-4). Touches SPEC 1.2 (handle layout), 2.1 (`TypeRef::Object`), 3.1, 4.1, 5.4 (the object table
+Status: **Accepted** (2026-10-02, implemented in `wt/objects-callbacks`; see "Implementation notes" at the end for what
+the code decided where this text left room, and the deviations). Proposed 2026-10-01 (`wt/boundary-adrs`; Amendment B
+"boundary surface", catalogue M-3, gap audit TY-4). Touches SPEC 1.2 (handle layout), 2.1 (`TypeRef::Object`), 3.1, 4.1, 5.4 (the object table
 counts host references), 5.9 (derived handles are transient; the snapshot floor widens), 10.1–10.3, 12
 (E0064's text), 16.2/16.3; `undra-meta`, `undra-macros`, `undra-runtime`, `undra-transport`, `undra-bindgen`
 and the three platform runtimes. **Schema: one new `TypeRef` variant (no existing hash moves). Wire: the
@@ -256,3 +257,53 @@ A returned store observes its signals when its wrapper is made, exactly as a con
 Independent of ADR-041…046 for its code, but ADR-041 reuses decision 6's ledger idea in the other direction, and
 decision 8's snapshot word must ride the ADR-036/037 wire revision (if that revision ships first, its snapshot
 codec should already carry a `u64` floor). Benefits from ADR-034 (`WeakCtx`) for objects that hold a context.
+
+## Implementation notes (2026-10-02, `wt/objects-callbacks`)
+
+Landed items 1 to 9 with ADR-041 in the same piece. No C ABI or wasm ABI change; the wire change is the one decision 8
+named (the handle's partition and the snapshot's `u64` floor). What the code decided where the text left room, and the
+deviations:
+
+* **Scenario number.** The provisional S21 is **S27** (objects cross, every column): S21 and S22 were taken by ADR-049's
+  web-only scenarios, S23 to S25 by ADR-047/048's ports. `contract-tests/scenarios.md` holds it.
+* **Constructors keep `Named`** (decision 2). A constructor returning `Arc<Self>` is recorded as `Named(Self)`, like every
+  constructor before it, so no existing hash moves and the platforms' constructor path is unchanged. `Schema::validate`
+  lets a `Named` stand for an object in exactly that position (the return of the object's own constructors) and nowhere
+  else; every other object position is `TypeRef::Object`.
+* **The ledger is a scope, not a table** (decision 6). `IssueScope` is an RAII guard held where the call is (inside the
+  dispatcher for a synchronous method; around the last poll for an asynchronous one, whose objects are lowered inside
+  the poll that completes it, through a `WeakCtx`, so a call that is dropped before then issued nothing). `commit`
+  says the reply carries the references; a scope dropped any other way gives them all back. The behaviours the ADR
+  lists (cancelled, panic, a reply that could not be built) are the three ways a scope is dropped uncommitted.
+* **Origins** (brief item 4). `Runtime::call_from(origin, ..)`, `release_from` and
+  `release_origin` record what a remote session's calls committed; `undra-transport` names a session's origin (a hash of
+  its resume token, so a resumed connection keeps it; the connection id for a session without one) and releases it when
+  the session ends for good: a disconnect with no token to resume by, or the expiry or replacement of a retained
+  session. In-process hosts never use them.
+* **`Handle::new` masks.** `Handle::new(index: u32, generation: u64)` keeps the low 24 bits of the index and the low 40 of
+  the generation; the object table never issues a larger value, and a hand-made handle cannot spill into its neighbour.
+  The table's counter panics (contained at the boundary) at `2^40 - 1` issues, never wraps.
+* **Foreign handles are refused on the host** (decision 9, last bullet). "A foreign handle fails as stale" was a gap: two
+  cores hand out the same numbers, so a handle of core A is a *valid* handle of core B naming another object. Generated
+  code now calls `core.requireOwn(object)` for every object argument; it throws `UndraCallError.refused(reason)` (reason
+  names the class and says it belongs to another core) before anything is sent, and a command reports it through
+  `onError` (ADR-032). The core's own checks stay the second line for a raw-API caller.
+* **An object nobody constructs** (decision 1 and the generated shapes): a plain object (no `#[undra::api(store)]`) with
+  no constructor that some method returns is legal; the generated class has no public initialiser. The brief's
+  validation rule "an object needs a constructor" is relaxed accordingly.
+* **Names**: the playground's example is `Workshop` / `Shelf` / `Watch` (`examples/playground/core/src/workshop.rs`), not
+  `Account` / `Mailbox`; the SPEC's examples keep the ADR's names.
+* **Bench rows** (item 8): `dispatch/call_sync/return_object` 84.0 ns, `return_interned_object` 84.0 ns (1.7x the `add`
+  row of the same run, inside the ADR's 2x), `object_param` 48.7 ns (1.0x), with a ratio gate; budgets and ratio in
+  `bench/budgets.toml`, text in `bench/RESULTS.md` finding 6. The platform side (`adopt`) is measured in each runtime's
+  own suite and recorded in `.10x/decisions/sde/objects-callbacks.md`.
+* **Docs** (item 9): `site/docs/objects.html` (a guide, next to Ports) instead of a cookbook recipe: the cookbook's
+  recipes are checked against code the site builds, and this one is the playground's own `Workshop`. SPEC 1.2, 2.1,
+  3.1, 4.1, 5.4, 5.9, 10.3a, 11, 12, 16 and 17 carry the rules.
+* **Platform limits** (`.10x/decisions/sde/objects-callbacks.md` has the detail). Swift: a `new` constructor is a convenience
+  initialiser and cannot return an existing wrapper, so an `Arc<Self>` constructor that returns an interned object while its
+  wrapper is alive gives a second wrapper with its own reference (the count is right; `===` does not hold); named
+  constructors are exact. Kotlin: a caller's coroutine cancelled at the very moment a reply carrying an object arrives
+  drops that reference until the core closes (a hook on `UndraCore.call` would fix it). TypeScript: a query handle's
+  constructor still makes its wrapper directly (crash recovery re-creates it; no method returns one).
+

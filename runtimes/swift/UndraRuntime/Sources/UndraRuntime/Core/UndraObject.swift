@@ -1,6 +1,8 @@
 // Objects and stores: the host-side owners of core handles (docs/SPEC.md sections 10.1, 11 and
 // 17.3).
 
+import Foundation
+
 /// The base class of every generated object: it owns one handle of the core's object table.
 ///
 /// `close()` releases the handle explicitly. `deinit` is only a backstop for objects that go out
@@ -17,11 +19,13 @@ open class UndraObject: @unchecked Sendable {
 
     private let closedFlag = Guarded<Bool>(false)
 
-    /// Adopts `handle`, which `core` issued and which this object now owns.
+    /// Adopts `handle`, which `core` issued and which this object now owns, and makes this object the
+    /// wrapper of the handle in `core`'s identity map (ADR-040) unless a live one already is.
     public init(core: UndraCore, handle: UndraHandle) {
         self.core = core
         self.handle = handle
         core.noteHandleAdopted()
+        core.identities.register(self)
     }
 
     /// Whether `close()` has run.
@@ -44,10 +48,33 @@ open class UndraObject: @unchecked Sendable {
         if !first {
             return
         }
+        core.identities.forget(self)
         core.mirror.unregister(handle)
         core.release(handle)
         core.noteHandleReleased()
     }
+
+    /// Gives this wrapper's reference back without touching what the handle's other, kept wrapper
+    /// `kept` registered (``UndraCore/adopt(_:_:)`` found two for one handle).
+    func discardAsDuplicate(of kept: UndraObject) {
+        let first = closedFlag.withLock { (closed: inout Bool) -> Bool in
+            if closed {
+                return false
+            }
+            closed = true
+            return true
+        }
+        if !first {
+            return
+        }
+        core.releaseExtraReference(handle)
+        core.noteHandleReleased()
+        kept.reattach()
+    }
+
+    /// Registers again what a duplicate wrapper of the same handle may have replaced. Nothing for a
+    /// plain object.
+    func reattach() {}
 
     deinit {
         close()
@@ -75,12 +102,40 @@ open class UndraStore: UndraObject, @unchecked Sendable {
     /// the last one per drain. SwiftUI still renders once per frame whatever the model does, so a
     /// view may not show each intermediate value; the store's properties take every one.
     public init(core: UndraCore, handle: UndraHandle, noCoalesce: Set<UInt32> = []) {
+        self.noCoalesce = noCoalesce
         super.init(core: core, handle: handle)
+        registerWithMirror()
+    }
+
+    /// The store's `no_coalesce` signals, as registered.
+    private let noCoalesce: Set<UInt32>
+
+    private func registerWithMirror() {
         core.mirror.register(handle, noCoalesce: noCoalesce) { [weak self] signal, op, reader in
             guard let store = self else {
                 return
             }
             store.apply(signal: signal, op: op, reader: &reader)
+        }
+    }
+
+    /// A duplicate wrapper of this store's handle was made (it registered with the mirror in its
+    /// place) and discarded: register again and observe again, so the mirror delivers here.
+    nonisolated override func reattach() {
+        let again = { @MainActor @Sendable [weak self] () -> Void in
+            guard let store = self else {
+                return
+            }
+            store.registerWithMirror()
+            store.core.observe(store.handle, signal: Observe.allSignals, on: true)
+        }
+        // Stores are made on the main actor, so this runs there; the hop is only a safety net.
+        if Thread.isMainThread {
+            MainActor.assumeIsolated(again)
+        } else {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated(again)
+            }
         }
     }
 

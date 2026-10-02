@@ -16,28 +16,28 @@ import {
 import { expectWireError, fromHex, prng, randInt, randomBytes, toHex } from "./helpers.js";
 
 describe("Handle", () => {
-  it("packs index into the low and generation into the high 32 bits", () => {
+  it("packs index into the low 24 and generation into the high 40 bits (ADR-040)", () => {
     const h = makeHandle(1, 1);
-    expect(h).toBe(4294967297n);
+    expect(h).toBe(16777217n);
     expect(handleIndex(h)).toBe(1);
     expect(handleGeneration(h)).toBe(1);
-    expect(makeHandle(0xdeadbeef, 0x12345678)).toBe(0x12345678_deadbeefn);
+    expect(makeHandle(0xbeef, 0x12_3456_789a)).toBe(0x12_3456_789a_00beefn);
   });
 
   it("round-trips the extremes", () => {
     for (const [index, generation] of [
       [0, 0],
       [0, 1],
-      [0xffffffff, 0],
-      [0, 0xffffffff],
-      [0xffffffff, 0xffffffff],
+      [0xffffff, 0],
+      [0, 0xff_ffff_ffff],
+      [0xffffff, 0xff_ffff_ffff],
       [7, 9],
     ] as const) {
       const h = makeHandle(index, generation);
       expect(handleIndex(h)).toBe(index);
       expect(handleGeneration(h)).toBe(generation);
     }
-    expect(makeHandle(0xffffffff, 0xffffffff)).toBe(2n ** 64n - 1n);
+    expect(makeHandle(0xffffff, 0xff_ffff_ffff)).toBe(2n ** 64n - 1n);
   });
 
   it("the null handle is zero", () => {
@@ -47,11 +47,11 @@ describe("Handle", () => {
     expect(makeHandle(0, 0)).toBe(NULL_HANDLE);
   });
 
-  it("rejects an index or generation outside u32", () => {
+  it("rejects an index outside 24 bits or a generation outside 40 bits", () => {
     expect(() => makeHandle(-1, 1)).toThrow(RangeError);
-    expect(() => makeHandle(2 ** 32, 1)).toThrow(RangeError);
+    expect(() => makeHandle(2 ** 24, 1)).toThrow(RangeError);
     expect(() => makeHandle(1, -1)).toThrow(RangeError);
-    expect(() => makeHandle(1, 2 ** 32)).toThrow(RangeError);
+    expect(() => makeHandle(1, 2 ** 40)).toThrow(RangeError);
     expect(() => makeHandle(1.5, 1)).toThrow(RangeError);
     expect(() => makeHandle(Number.NaN, 1)).toThrow(RangeError);
   });
@@ -82,7 +82,7 @@ describe("Handle", () => {
   it("split then join is the identity", () => {
     const rand = prng(5);
     for (let i = 0; i < 500; i++) {
-      const h = makeHandle(randInt(rand, 2 ** 32), randInt(rand, 2 ** 32));
+      const h = makeHandle(randInt(rand, 2 ** 24), randInt(rand, 2 ** 32) * 256 + randInt(rand, 256));
       const { lo, hi } = splitHandle(h);
       expect(joinHandle(lo, hi)).toBe(h);
       // Through the i32 representation wasm uses.

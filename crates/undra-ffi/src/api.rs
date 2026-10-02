@@ -290,7 +290,7 @@ pub(crate) fn poll() {
     );
 }
 
-/// A snapshot of nothing: `count u32 = 0, generation_floor u32` (SPEC 5.9), the floor being the
+/// A snapshot of nothing: `count u32 = 0, generation_floor u64` (SPEC 5.9; ADR-040 widened it), the floor being the
 /// process-wide generation counter: it outlives `undra_shutdown`, so a host that snapshots
 /// between a shutdown and the next init keeps ADR-022's guarantee that a generation it may still
 /// hold is never issued again in this process.
@@ -303,9 +303,9 @@ fn empty_snapshot() -> Vec<u8> {
         enums: Vec::new(),
     }
     .canonical_json();
-    let mut w = Writer::with_capacity(24 + description.len());
+    let mut w = Writer::with_capacity(28 + description.len());
     w.write_u32(0);
-    w.write_u32(undra_runtime::object_table::process_generation_floor());
+    w.write_u64(undra_runtime::object_table::process_generation_floor());
     w.write_u64(schema_hash());
     w.write_u32(0);
     w.write_str(&description);
@@ -395,7 +395,7 @@ mod tests {
         let floor = undra_runtime::object_table::process_generation_floor();
         let bytes = empty_snapshot();
         assert_eq!(bytes[..4], [0; 4]);
-        let carried = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        let carried = u64::from_le_bytes(bytes[4..12].try_into().unwrap());
         // Layout 2 (ADR-037): it decodes, with this core's hash and no types.
         let snapshot = undra_runtime::undra_wire::payload::Snapshot::decode(
             &mut undra_runtime::undra_wire::Reader::new(&bytes),
@@ -451,7 +451,7 @@ mod tests {
             RestoreError::Decode(WireError::BadMagic),
             RestoreError::UnknownStoreType { type_id: 1 },
             RestoreError::BadHandle { handle: 0 },
-            RestoreError::GenerationFloor { floor: u32::MAX },
+            RestoreError::GenerationFloor { floor: u64::MAX },
             RestoreError::Store {
                 type_id: 1,
                 source: WireError::BadMagic,

@@ -173,6 +173,7 @@ const fn method(
         returns,
         is_async,
         takes_ctx: false,
+        coalesce: false,
         docs: "",
     }
 }

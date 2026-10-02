@@ -78,6 +78,18 @@ pub trait Beep {
     fn beep(&self, n: u32);
 }
 
+/// A child object a method hands out (ADR-040).
+pub struct Child;
+
+#[undra::api]
+impl Child {
+    pub fn tag(&self) -> u32 {
+        7
+    }
+}
+
+static CHILD: std::sync::OnceLock<std::sync::Arc<Child>> = std::sync::OnceLock::new();
+
 #[undra::store]
 pub struct Counter {
     ctx: Ctx,
@@ -97,6 +109,11 @@ impl Counter {
 
     pub fn get(&self) -> i32 {
         self.count.get()
+    }
+
+    /// The one shared child: the same object (one handle) every time.
+    pub fn child(&self) -> std::sync::Arc<Child> {
+        std::sync::Arc::clone(CHILD.get_or_init(|| std::sync::Arc::new(Child)))
     }
 
     pub fn add(&self, n: i32) -> i32 {

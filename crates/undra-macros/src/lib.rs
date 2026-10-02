@@ -13,6 +13,7 @@
 //! | `#[undra::api]` | free `fn` | the dispatcher, `FunctionMeta` |
 //! | `#[undra::store]` | struct | `StoreObject`, signal table, restore, `StoreMeta` |
 //! | `#[undra::port]` | trait | `Port`, the proxy, the accessor, the Rust-side dispatcher, `PortMeta` |
+//! | `#[undra::callback]` | trait | `Port`, `CallbackInterface`, the proxy over a host instance, `PortMeta` (ADR-041) |
 //! | `#[undra::query]` / `#[undra::mutation]` | `async fn` | `<Name>Query` / `<Name>Mutation`, `QueryMeta` |
 //! | `#[undra::migrate]` | free `fn` | a `persist::Migration` registration (ADR-037) |
 //!
@@ -159,6 +160,23 @@ pub fn migrate(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn port(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_::expand_port(attr.into(), item.into()).into()
+}
+
+/// Marks a trait as a host callback interface (ADR-041): the host implements it, once per
+/// instance, and passes an instance to a method as `Arc<dyn Trait>`; the core calls it back.
+///
+/// A method either reports (`fn m(&self, ..)`, fire-and-forget; `#[undra(coalesce)]` keeps only
+/// the newest pending call of a method per instance) or is `async` and returns `Result<T, E>`
+/// with an `#[undra::error]` enum that implements `From<PortError>` (anything else is E0071).
+/// `#[undra::callback(background)]` makes the host run implementations on a serial executor per
+/// instance instead of on the main thread through the mirror's drain.
+///
+/// Generated: `impl Port for dyn Trait`, `<Trait>Proxy`, `impl CallbackInterface for dyn Trait`
+/// and `PortMeta` with `kind: Callback`. Rust code and tests implement the trait directly and
+/// pass their own `Arc`.
+#[proc_macro_attribute]
+pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
+    impl_::expand_callback(attr.into(), item.into()).into()
 }
 
 /// Marks a struct as a store: an object whose `Signal<T>` and `Computed<T>` fields the

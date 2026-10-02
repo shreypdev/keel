@@ -5,6 +5,8 @@ export * from "./call-error.js";
 export * from "./errors.js";
 export * from "./mirror.js";
 export * from "./object.js";
+export * from "./identity.js";
+export * from "./callbacks.js";
 export * from "./port.js";
 export * from "./signal.js";
 export * from "./stream.js";

@@ -1,5 +1,5 @@
 error: error[undra::E0008]: unknown option `defualt` in `#[undra(..)]`
-         = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields)
+         = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields), and `coalesce` (fire-and-forget methods of a callback interface)
          = help: did you mean `default`? Otherwise remove `defualt`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
   --> tests/ui/d1_unknown_option_suggestions.rs:12:13
@@ -8,8 +8,8 @@ error: error[undra::E0008]: unknown option `defualt` in `#[undra(..)]`
    |             ^^^^^^^
 
 error: error[undra::E0008]: unknown option `frobnicate` in `#[undra(..)]`
-         = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields)
-         = help: remove `frobnicate`, or use one of: `crate`, `default`, `key`, `no_coalesce`
+         = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields), and `coalesce` (fire-and-forget methods of a callback interface)
+         = help: remove `frobnicate`, or use one of: `crate`, `default`, `key`, `no_coalesce`, `coalesce`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
   --> tests/ui/d1_unknown_option_suggestions.rs:14:13
    |

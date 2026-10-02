@@ -151,8 +151,12 @@ pub struct Model {
     pub functions: Vec<FunctionDef>,
     /// One synthesized function per mutation, sorted by name.
     pub mutations: Vec<FunctionDef>,
-    /// Ports, sorted by name.
+    /// Ports (not callback interfaces), sorted by name.
     pub ports: Vec<PortDef>,
+    /// Host callback interfaces (`PortKind::Callback`, ADR-041), sorted by name. They are ports
+    /// with many instances: the host implements the generated protocol per instance, so they
+    /// have their own generated shape and are not in [`Model::ports`].
+    pub callbacks: Vec<PortDef>,
     /// Queries and mutations, sorted by name.
     pub queries: Vec<QueryDef>,
     kinds: HashMap<String, NamedKind>,
@@ -228,9 +232,17 @@ impl Model {
             .ports
             .iter()
             .filter(|p| !covered.ports.contains(p.name.as_str()))
+            .filter(|p| p.kind != undra_meta::PortKind::Callback)
             .cloned()
             .collect();
         ports.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut callbacks: Vec<PortDef> = schema
+            .ports
+            .iter()
+            .filter(|p| p.kind == undra_meta::PortKind::Callback)
+            .cloned()
+            .collect();
+        callbacks.sort_by(|a, b| a.name.cmp(&b.name));
         let mut queries = schema.queries.clone();
         queries.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -327,6 +339,7 @@ impl Model {
             functions,
             mutations,
             ports,
+            callbacks,
             queries,
             kinds,
             externals,
@@ -413,6 +426,78 @@ impl Model {
         } else {
             "Computed by the core; read-only."
         })
+    }
+}
+
+/// How a method of a generated class hands objects over: what a return or a parameter that
+/// involves an object looks like once classified (ADR-040).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ObjectUse<'a> {
+    /// `T`: one object.
+    One(&'a str),
+    /// `Option<T>`.
+    Optional(&'a str),
+    /// `Vec<T>`.
+    Many(&'a str),
+}
+
+impl<'a> ObjectUse<'a> {
+    /// Classifies `ty` as an object, an optional object or a list of objects; `None` for any
+    /// other type.
+    #[must_use]
+    pub fn of(ty: &'a TypeRef) -> Option<ObjectUse<'a>> {
+        match ty {
+            TypeRef::Object(name) => Some(ObjectUse::One(name)),
+            TypeRef::Option(inner) => match &**inner {
+                TypeRef::Object(name) => Some(ObjectUse::Optional(name)),
+                _ => None,
+            },
+            TypeRef::Vec(inner) => match &**inner {
+                TypeRef::Object(name) => Some(ObjectUse::Many(name)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The object's type name.
+    #[must_use]
+    pub fn name(&self) -> &'a str {
+        match self {
+            ObjectUse::One(name) | ObjectUse::Optional(name) | ObjectUse::Many(name) => name,
+        }
+    }
+}
+
+/// A host callback interface in a parameter: a callback, or an optional one (ADR-041).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CallbackUse<'a> {
+    /// `Arc<dyn Trait>`.
+    One(&'a str),
+    /// `Option<Arc<dyn Trait>>`.
+    Optional(&'a str),
+}
+
+impl<'a> CallbackUse<'a> {
+    /// Classifies `ty` as a callback parameter; `None` for any other type.
+    #[must_use]
+    pub fn of(ty: &'a TypeRef) -> Option<CallbackUse<'a>> {
+        match ty {
+            TypeRef::Callback(name) => Some(CallbackUse::One(name)),
+            TypeRef::Option(inner) => match &**inner {
+                TypeRef::Callback(name) => Some(CallbackUse::Optional(name)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The callback interface's name.
+    #[must_use]
+    pub fn name(&self) -> &'a str {
+        match self {
+            CallbackUse::One(name) | CallbackUse::Optional(name) => name,
+        }
     }
 }
 
@@ -506,6 +591,7 @@ fn query_handle(query: &QueryDef) -> ObjectDef {
         returns: TypeRef::Unit,
         is_async: false,
         takes_ctx: false,
+        coalesce: false,
         docs: docs.to_owned(),
     };
     ObjectDef {
@@ -518,6 +604,7 @@ fn query_handle(query: &QueryDef) -> ObjectDef {
             returns: TypeRef::named(name),
             is_async: false,
             takes_ctx: false,
+            coalesce: false,
             docs: String::new(),
         }],
         methods: vec![

@@ -22,6 +22,9 @@ package dev.undra.runtime
  * @property raw the core's statistics document exactly as received (`"{}"` when unavailable).
  * @property mirror the mirror's delivery counters: change-sets and entries received, entries applied after
  *   merging, drains, compactions, resyncs, the backlog (all zero when not reported).
+ * @property hostRefs the references to core objects the host owns, summed over the object table (ADR-040): one per
+ *   open wrapper of this host, so it returns to its earlier value once those are closed.
+ * @property liveCallbacks the host callback instances the core holds proxies of (ADR-041).
  * @property panicReports panic reports the core handed to the `Diagnostics` port (`LoadOptions.onPanic`; ADR-046); [UNKNOWN] when a
  *   core without the counter (or a remote one) cannot say. It grows with [panics], which counts every contained panic.
  * @property background what the core's background tasks say and have done (ADR-046); [BackgroundStats.pending] above zero means a
@@ -41,6 +44,8 @@ public class UndraStats(
     public val hostMirrorHandles: Int = 0,
     public val raw: String = "{}",
     public val mirror: MirrorStats = NO_MIRROR_STATS,
+    public val hostRefs: Long = UNKNOWN.toLong(),
+    public val liveCallbacks: Int = UNKNOWN,
     public val panicReports: Long = UNKNOWN.toLong(),
     public val background: BackgroundStats = NO_BACKGROUND_STATS,
 ) {
@@ -48,7 +53,7 @@ public class UndraStats(
         "UndraStats(liveHandles=$liveHandles, liveStores=$liveStores, tasks=$tasks, activeCalls=$activeCalls, " +
             "openStreams=$openStreams, pendingPortCalls=$pendingPortCalls, pendingTimers=$pendingTimers, " +
             "transactions=$transactions, panics=$panics, hostPendingCalls=$hostPendingCalls, hostMirrorHandles=$hostMirrorHandles, " +
-            "mirror=$mirror, panicReports=$panicReports, background=$background)"
+            "hostRefs=$hostRefs, liveCallbacks=$liveCallbacks, mirror=$mirror, panicReports=$panicReports, background=$background)"
 
     /** The marker for numbers that are not known. */
     public companion object {
@@ -89,6 +94,8 @@ public class UndraStats(
                 hostMirrorHandles = hostMirrorHandles,
                 raw = json,
                 mirror = mirror,
+                hostRefs = long("host_refs"),
+                liveCallbacks = int("live_callbacks"),
                 panicReports = long("panic_reports"),
                 background = background,
             )

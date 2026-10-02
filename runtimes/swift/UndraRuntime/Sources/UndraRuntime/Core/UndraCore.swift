@@ -53,8 +53,8 @@ public final class UndraCore: @unchecked Sendable {
         var observed: [UndraHandle: Set<UInt32>] = [:]
         /// The objects the app's constructors made and it has not released: what the server is asked to keep for it.
         var constructed: Set<UndraHandle> = []
-        /// Handles released while the connection was down: released at the server once it is back.
-        var releasedWhileDown: Set<UndraHandle> = []
+        /// Handles released while the connection was down, once per reference: released at the server once it is back.
+        var releasedWhileDown: [UndraHandle] = []
         /// Counts the times the connection was lost, so that a replay that a newer loss overtook does not announce a connection.
         var lossEpoch = 0
         /// The last state an app reported through the `Lifecycle` port (`event(port:method:payload:)`), if any.
@@ -93,6 +93,13 @@ public final class UndraCore: @unchecked Sendable {
     /// The `@Observable` twin of ``connectionObject``, made by `init` where the OS has it (iOS 17 / macOS 14).
     /// It needs iOS 17, so it cannot be a stored property of its own type.
     private let observation: Guarded<(any Sendable)?>
+
+    /// The app's callback implementations this core holds references to (ADR-041), and the bridges that
+    /// deliver the core's calls to them.
+    public let callbacks: UndraCallbacks
+
+    /// One wrapper per handle (ADR-040): see ``adopt(_:_:)``.
+    let identities = ObjectIdentityMap()
 
     /// The namespace of the core this is the attachment to (`[core] namespace` of its undra.toml,
     /// `UndraIds.namespace`): the one the generated entry loaded it under, else the in-process
@@ -153,6 +160,7 @@ public final class UndraCore: @unchecked Sendable {
             twin = UndraConnection()
         }
         self.observation = Guarded<(any Sendable)?>(twin)
+        self.callbacks = UndraCallbacks()
         self.state = Guarded<State>(initial)
         if isShutDown {
             // The placeholder `shared` returns: its observables say so too, not `.connecting`. They are
@@ -172,6 +180,7 @@ public final class UndraCore: @unchecked Sendable {
         mirror.setResyncHandler { [weak self] handle, signal in
             self?.resync(handle, signal: signal)
         }
+        callbacks.attach(to: self)
     }
 
     // MARK: Loading
@@ -493,21 +502,28 @@ public final class UndraCore: @unchecked Sendable {
     /// - Throws: `UndraReplyError` for any status other than ok; `UndraProtocolError` for an
     ///   undecodable reply; `UndraTransportError` if the core is shut down or does not answer.
     ///   Generated methods map these with ``UndraCallError/mapped(_:)`` and never expose them.
-    public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8]) throws -> [UInt8] {
+    ///
+    /// `lending` lists the callback instances the arguments carry (``UndraCallbacks/lend(_:)``): when the
+    /// call never reaches the core or the core refuses it (status 5), it holds none of them, and they are
+    /// given back here; any other outcome means the core owns them (ADR-041).
+    public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8], lending: [UInt64?] = []) throws -> [UInt8] {
         UndraCore.checkMethod(target, method)
+        let lent = LentInstances(lending, to: callbacks)
         // Read-your-writes: on the main thread the call's change-sets are applied before it returns.
-        return try mirror.withImmediateDrain {
-            let callId = try reserveCallId()
-            let payload = UndraCore.makeCallPayload(target, callId: callId, args: args)
-            if transport.supportsDirectSync {
-                defer {
-                    removePending(callId)
+        return try lent.givingBackIfRefused {
+            try mirror.withImmediateDrain {
+                let callId = try lent.unlessSent { try reserveCallId() }
+                let payload = UndraCore.makeCallPayload(target, callId: callId, args: args)
+                if transport.supportsDirectSync {
+                    defer {
+                        removePending(callId)
+                    }
+                    let replyBytes = try lent.unlessSent { try transport.callSync(payload) }
+                    let reply = try UndraCore.decodeReply(replyBytes)
+                    return try UndraCore.unwrap(reply)
                 }
-                let replyBytes = try transport.callSync(payload)
-                let reply = try UndraCore.decodeReply(replyBytes)
-                return try UndraCore.unwrap(reply)
+                return try blockingCall(callId, payload, operation: "callSync", lent: lent)
             }
-            return try blockingCall(callId, payload, operation: "callSync")
         }
     }
 
@@ -522,11 +538,21 @@ public final class UndraCore: @unchecked Sendable {
     ///   `status == .error` whose `body` is the encoded `E`); `UndraTransportError` if the core is
     ///   shut down or disconnected before it answers. Generated methods map these with
     ///   ``UndraCallError/mapped(_:domain:)`` and never expose them.
-    public func call(_ target: CallTarget, method: UInt32, args: [UInt8]) async throws -> [UInt8] {
+    ///
+    /// `lending` lists the callback instances the arguments carry, as for ``callSync(_:method:args:lending:)``.
+    public func call(_ target: CallTarget, method: UInt32, args: [UInt8], lending: [UInt64?] = []) async throws -> [UInt8] {
         UndraCore.checkMethod(target, method)
-        try Task.checkCancellation()
+        let lent = LentInstances(lending, to: callbacks)
+        return try await lent.givingBackIfRefused {
+            try await send(target, args: args, lent: lent)
+        }
+    }
+
+    /// The body of ``call(_:method:args:lending:)``.
+    private func send(_ target: CallTarget, args: [UInt8], lent: LentInstances) async throws -> [UInt8] {
+        try lent.unlessSent { try Task.checkCancellation() }
         let slot = CallSlot()
-        let callId = try reserveCallId()
+        let callId = try lent.unlessSent { try reserveCallId() }
         setPending(callId, .unary(slot))
         let payload = UndraCore.makeCallPayload(target, callId: callId, args: args)
         return try await withTaskCancellationHandler(
@@ -535,10 +561,12 @@ public final class UndraCore: @unchecked Sendable {
                     if !slot.install(continuation) {
                         // Cancelled before the call was sent: nothing to tell the core.
                         self.removePending(callId)
+                        lent.giveBack()
                         return
                     }
                     if !self.transport.send(call: payload) {
                         self.removePending(callId)
+                        lent.giveBack()
                         slot.complete(.failure(self.notSent()))
                     }
                 }
@@ -703,8 +731,8 @@ public final class UndraCore: @unchecked Sendable {
     ///
     /// Asynchronous constructors go through `call(.constructor(...))` and decode the handle from
     /// the reply themselves.
-    public func construct(type: UInt32, method: UInt32, args: [UInt8]) throws -> UndraHandle {
-        let body = try callSync(.constructor(typeId: type, methodId: method), method: method, args: args)
+    public func construct(type: UInt32, method: UInt32, args: [UInt8], lending: [UInt64?] = []) throws -> UndraHandle {
+        let body = try callSync(.constructor(typeId: type, methodId: method), method: method, args: args, lending: lending)
         let handle: UndraHandle
         do {
             handle = try UndraHandle.undraDecoded(from: body)
@@ -816,13 +844,39 @@ public final class UndraCore: @unchecked Sendable {
             current.constructed.remove(handle)
             if case .reconnecting = current.connection {
                 // The server keeps the object for us (ADR-051); it is released when the connection is back.
-                current.releasedWhileDown.insert(handle)
+                current.releasedWhileDown.append(handle)
                 return true
             }
             return false
         }
         if !reconnecting {
             transport.release(handle: handle)
+        }
+    }
+
+    /// Gives back one reference to `handle` that a reply carried while a live wrapper already owns one
+    /// (``adopt(_:_:)``): the wrapper's own bookkeeping (what it observes, that the host holds it) stays.
+    func releaseExtraReference(_ handle: UndraHandle) {
+        if isShutDown {
+            return
+        }
+        let reconnecting = state.withLock { (current: inout State) -> Bool in
+            if case .reconnecting = current.connection {
+                current.releasedWhileDown.append(handle)
+                return true
+            }
+            return false
+        }
+        if !reconnecting {
+            transport.release(handle: handle)
+        }
+    }
+
+    /// Records that the host holds `handle` (a wrapper owns a reference), so that a remote core asks
+    /// the server to keep it across a reconnect.
+    func noteHeld(_ handle: UndraHandle) {
+        state.withLock { (current: inout State) -> Void in
+            current.constructed.insert(handle)
         }
     }
 
@@ -985,6 +1039,7 @@ public final class UndraCore: @unchecked Sendable {
             adapter.detach()
         }
         failAllPending(error)
+        callbacks.close()
         transport.shutdown()
         mirror.invalidateScheduler()
         UndraCore.sharedSlot.withLock { (slot: inout UndraCore?) -> Void in
@@ -1054,11 +1109,12 @@ public final class UndraCore: @unchecked Sendable {
         transport.cancel(callId: callId)
     }
 
-    private func blockingCall(_ callId: UInt32, _ payload: [UInt8], operation: String) throws -> [UInt8] {
+    private func blockingCall(_ callId: UInt32, _ payload: [UInt8], operation: String, lent: LentInstances? = nil) throws -> [UInt8] {
         let box = OneShot<Result<[UInt8], any Error>>()
         setPending(callId, .blocking(box))
         if !transport.send(call: payload) {
             removePending(callId)
+            lent?.giveBack()
             throw notSent()
         }
         guard let result = box.wait(timeoutSeconds: blockingTimeout) else {
@@ -1300,6 +1356,10 @@ extension UndraCore: UndraInbound {
     }
 
     package func onPortCall(portId: UInt32, methodId: UInt32, portCallId: UInt32, args: [UInt8]) -> PortCallOutcome {
+        // A callback interface's port (ADR-041): queued for the app's implementation, never run here.
+        if let outcome = callbacks.route(portId: portId, methodId: methodId, portCallId: portCallId, args: args) {
+            return outcome
+        }
         let impl = state.withLock { (current: inout State) -> PortImpl? in
             return current.ports[portId]
         }
@@ -1447,7 +1507,7 @@ extension UndraCore: UndraInbound {
             transport.release(handle: handle)
         }
         state.withLock { (current: inout State) -> Void in
-            current.releasedWhileDown.subtract(work.released)
+            current.releasedWhileDown.removeFirst(Swift.min(work.released.count, current.releasedWhileDown.count))
         }
         for (handle, signals) in work.observed {
             for signal in signals {

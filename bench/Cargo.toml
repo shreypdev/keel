@@ -43,5 +43,9 @@ name = "stress"
 harness = false
 
 [[bench]]
+name = "boundary"
+harness = false
+
+[[bench]]
 name = "ports"
 harness = false

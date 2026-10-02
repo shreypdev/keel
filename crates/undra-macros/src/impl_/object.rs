@@ -40,14 +40,14 @@ use syn::visit_mut::{self, VisitMut};
 use syn::{FnArg, ImplItem, ItemFn, ItemImpl, Pat, ReturnType, Signature, Type, Visibility};
 
 use super::attrs::{Site, docs, is_undra_macro_path, take};
-use super::check::{Checks, panic_text};
+use super::check::{Checks, panic_text, primary_trait};
 use super::common::{
     check_generics, derived, item_root, mentions_self, param_meta, send_assertion, submit,
 };
 use super::diag::{Diag, Errors, code};
 use super::naming::{fnv1a32, unraw};
 use super::paths::Root;
-use super::types::{Allow, KType, Pos, map_error_type, map_return, map_type, ty_string};
+use super::types::{Allow, KType, Pos, map_error_type, map_method_return, map_type, ty_string};
 
 /// A leading `ctx: Ctx` / `ctx: &Ctx` parameter.
 #[derive(Clone, Copy, Debug)]
@@ -61,6 +61,136 @@ pub(crate) struct ParamModel {
     pub(crate) name: String,
     pub(crate) ty: Type,
     pub(crate) kty: KType,
+    /// How the dispatcher decodes it: a value, a handle to an object, or a host callback.
+    pub(crate) plan: ParamPlan,
+}
+
+/// How an object parameter is spelled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ObjShape {
+    /// `&T`.
+    Ref,
+    /// `Arc<T>`.
+    Arc,
+    /// `Option<&T>`.
+    OptionRef,
+    /// `Option<Arc<T>>`.
+    OptionArc,
+    /// `Vec<Arc<T>>`.
+    VecArc,
+}
+
+/// How the dispatcher turns the bytes of a parameter into the Rust value (ADR-040, ADR-041).
+#[derive(Clone, Debug)]
+pub(crate) enum ParamPlan {
+    /// The wire value itself.
+    Plain,
+    /// A handle (`Option` or `Vec` of handles) resolved to the object, `elem` being `T`.
+    Object { elem: Type, shape: ObjShape },
+    /// A host callback instance (`Option` of one) turned into a proxy; `dyn_ty` is `dyn Trait`.
+    Callback { dyn_ty: Type, optional: bool },
+}
+
+fn peel(mut ty: &Type) -> &Type {
+    loop {
+        match ty {
+            Type::Paren(inner) => ty = &inner.elem,
+            Type::Group(inner) => ty = &inner.elem,
+            _ => return ty,
+        }
+    }
+}
+
+/// The single type argument of a path type such as `Arc<T>` or `Option<T>`.
+fn sole_arg(ty: &Type) -> Option<&Type> {
+    let Type::Path(path) = peel(ty) else {
+        return None;
+    };
+    let seg = path.path.segments.last()?;
+    let syn::PathArguments::AngleBracketed(args) = &seg.arguments else {
+        return None;
+    };
+    let mut types = args.args.iter().filter_map(|arg| match arg {
+        syn::GenericArgument::Type(ty) => Some(ty),
+        _ => None,
+    });
+    match (types.next(), types.next()) {
+        (Some(ty), None) => Some(ty),
+        _ => None,
+    }
+}
+
+/// What `T` is in `&T` or `Arc<T>`, and which of the two it was.
+fn object_of(ty: &Type) -> Option<(Type, bool)> {
+    match peel(ty) {
+        Type::Reference(reference) => Some(((*reference.elem).clone(), true)),
+        other => sole_arg(other).map(|inner| (inner.clone(), false)),
+    }
+}
+
+/// Reads how a parameter the mapper accepted is spelled.
+fn plan_of(ty: &Type, kty: &KType) -> ParamPlan {
+    match kty {
+        KType::Object(_) => match object_of(ty) {
+            Some((elem, true)) => ParamPlan::Object {
+                elem,
+                shape: ObjShape::Ref,
+            },
+            Some((elem, false)) => ParamPlan::Object {
+                elem,
+                shape: ObjShape::Arc,
+            },
+            None => ParamPlan::Plain,
+        },
+        KType::Callback(_) => match sole_arg(ty) {
+            Some(inner) => ParamPlan::Callback {
+                dyn_ty: primary_trait(inner),
+                optional: false,
+            },
+            None => ParamPlan::Plain,
+        },
+        KType::Option(inner) => match (&**inner, sole_arg(ty)) {
+            (KType::Object(_), Some(arg)) => match object_of(arg) {
+                Some((elem, true)) => ParamPlan::Object {
+                    elem,
+                    shape: ObjShape::OptionRef,
+                },
+                Some((elem, false)) => ParamPlan::Object {
+                    elem,
+                    shape: ObjShape::OptionArc,
+                },
+                None => ParamPlan::Plain,
+            },
+            (KType::Callback(_), Some(arg)) => match sole_arg(arg) {
+                Some(dyn_arg) => ParamPlan::Callback {
+                    dyn_ty: primary_trait(dyn_arg),
+                    optional: true,
+                },
+                None => ParamPlan::Plain,
+            },
+            _ => ParamPlan::Plain,
+        },
+        KType::Vec(inner) if matches!(**inner, KType::Object(_)) => match sole_arg(ty) {
+            Some(arg) => match object_of(arg) {
+                Some((elem, false)) => ParamPlan::Object {
+                    elem,
+                    shape: ObjShape::VecArc,
+                },
+                _ => ParamPlan::Plain,
+            },
+            None => ParamPlan::Plain,
+        },
+        _ => ParamPlan::Plain,
+    }
+}
+
+/// Which kind of function a signature is analysed for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Kindred {
+    /// A method, constructor or free function: objects and callbacks may be parameters.
+    Callable,
+    /// A query or mutation: values only.
+    Query,
 }
 
 /// What a function is for the dispatcher.
@@ -82,6 +212,9 @@ pub(crate) struct FnModel {
     pub(crate) params: Vec<ParamModel>,
     /// The schema return type (for constructors: `Named(Type)` or `Result<Named(Type), E>`).
     pub(crate) ret: KType,
+    /// A constructor that returns `Arc<Self>` (the singleton pattern, ADR-040): the dispatcher
+    /// interns the object instead of inserting a new one.
+    pub(crate) ctor_shared: bool,
     /// The `T` of a returned `impl Stream<Item = T>` (also inside `Result<.., E>`). For a stream
     /// that can fail part-way (ADR-036) it is the `Result<T, E>` as written.
     pub(crate) stream_item: Option<Type>,
@@ -233,7 +366,7 @@ fn typed_receiver(fn_name: &str, node: &impl quote::ToTokens, ty: &Type) -> syn:
 }
 
 /// Checks the generics, receiver and parameters of `sig` and collects the parameters.
-pub(crate) fn analyze(sig: &mut Signature, errors: &mut Errors) -> Analysis {
+pub(crate) fn analyze(sig: &mut Signature, errors: &mut Errors, site: Kindred) -> Analysis {
     let fn_name = sig.ident.to_string();
     check_generics(&sig.generics, &fn_name, errors);
     if sig.unsafety.is_some() || sig.abi.is_some() {
@@ -355,17 +488,23 @@ pub(crate) fn analyze(sig: &mut Signature, errors: &mut Errors) -> Analysis {
             ));
             continue;
         };
-        let kty = match map_type(&pat_type.ty, Pos::Param, Allow::NONE) {
+        let (pos, allow) = match site {
+            Kindred::Callable => (Pos::Param, Allow::PARAM),
+            Kindred::Query => (Pos::QueryParam, Allow::NONE),
+        };
+        let kty = match map_type(&pat_type.ty, pos, allow) {
             Ok(kty) => kty,
             Err(err) => {
                 errors.push(err.into_error());
                 KType::Unit
             }
         };
+        let plan = plan_of(&pat_type.ty, &kty);
         params.push(ParamModel {
             name: unraw(&ident),
             ty: (*pat_type.ty).clone(),
             kty,
+            plan,
         });
     }
 
@@ -383,6 +522,29 @@ enum CtorReturn {
     Plain,
     /// `-> Result<Self, E>` or `-> Result<Type, E>`, with the error type.
     Fallible(Box<Type>),
+    /// `-> Arc<Self>` or `-> Arc<Type>`: an instance that may already exist (ADR-040).
+    Shared,
+    /// `-> Result<Arc<Self>, E>`.
+    FallibleShared(Box<Type>),
+}
+
+impl CtorReturn {
+    fn shared(&self) -> bool {
+        matches!(self, CtorReturn::Shared | CtorReturn::FallibleShared(_))
+    }
+}
+
+/// `Arc<Self>` / `Arc<Type>`.
+fn is_arc_self(ty: &Type, type_name: &str) -> bool {
+    match peel(ty) {
+        Type::Path(path) if path.qself.is_none() => {
+            let Some(seg) = path.path.segments.last() else {
+                return false;
+            };
+            seg.ident == "Arc" && sole_arg(ty).is_some_and(|inner| is_self_type(inner, type_name))
+        }
+        _ => false,
+    }
 }
 
 fn is_self_type(ty: &Type, type_name: &str) -> bool {
@@ -404,6 +566,9 @@ fn ctor_return(output: &ReturnType, type_name: &str) -> Option<CtorReturn> {
     if is_self_type(ty, type_name) {
         return Some(CtorReturn::Plain);
     }
+    if is_arc_self(ty, type_name) {
+        return Some(CtorReturn::Shared);
+    }
     let Type::Path(path) = &**ty else {
         return None;
     };
@@ -422,6 +587,8 @@ fn ctor_return(output: &ReturnType, type_name: &str) -> Option<CtorReturn> {
     let err = types.next()?;
     if is_self_type(ok, type_name) {
         Some(CtorReturn::Fallible(Box::new(err.clone())))
+    } else if is_arc_self(ok, type_name) {
+        Some(CtorReturn::FallibleShared(Box::new(err.clone())))
     } else {
         None
     }
@@ -503,6 +670,16 @@ pub(crate) fn arg_local(index: usize) -> syn::Ident {
     format_ident!("__undra_a{}", index)
 }
 
+/// The local that holds the raw handle of the object parameter at `index`.
+fn handle_local(index: usize) -> syn::Ident {
+    format_ident!("__undra_h{}", index)
+}
+
+/// The local that holds the host instance of the callback parameter at `index`.
+fn callback_local(index: usize) -> syn::Ident {
+    format_ident!("__undra_c{}", index)
+}
+
 fn enc(wire: &TokenStream, value: &TokenStream) -> TokenStream {
     quote!(#wire::Encode::encode_to_vec(&#value))
 }
@@ -533,6 +710,11 @@ fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) 
         let bytes = enc(&wire, &value);
         quote!(::core::result::Result::<::std::vec::Vec<u8>, _>::Err(#bytes))
     };
+
+    // An object (or several) handed to the host (ADR-040): lowered to handles first.
+    if let Some((shape, in_result)) = object_return(&m.ret) {
+        return object_result(root, m, call, shape, in_result, needs);
+    }
 
     // A stream whose items are `Result<T, E>` (ADR-036): an `Err(e)` item ends it with flag 2.
     let fallible_items = m
@@ -677,6 +859,160 @@ fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) 
     }
 }
 
+/// How many objects a return hands out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ObjReturn {
+    /// `Arc<T>`.
+    One,
+    /// `Option<Arc<T>>`.
+    Optional,
+    /// `Vec<Arc<T>>`.
+    Many,
+}
+
+/// The shape of a return that hands out objects, and whether it is the `Ok` of a `Result`.
+fn object_return(ret: &KType) -> Option<(ObjReturn, bool)> {
+    fn plain(ret: &KType) -> Option<ObjReturn> {
+        match ret {
+            KType::Object(_) => Some(ObjReturn::One),
+            KType::Option(inner) if matches!(**inner, KType::Object(_)) => {
+                Some(ObjReturn::Optional)
+            }
+            KType::Vec(inner) if matches!(**inner, KType::Object(_)) => Some(ObjReturn::Many),
+            _ => None,
+        }
+    }
+    match ret {
+        KType::Result(ok, _) => plain(ok).map(|shape| (shape, true)),
+        other => plain(other).map(|shape| (shape, false)),
+    }
+}
+
+/// The expression that lowers `value` (the object or objects a method returned) to the handles
+/// of the reply, issuing each one through `scope`.
+fn lower(shape: ObjReturn, value: TokenStream, scope: &syn::Ident) -> TokenStream {
+    let issue = |object: TokenStream| {
+        quote! {
+            match #scope.issue(#object) {
+                ::core::result::Result::Ok(__handle) => __handle,
+                // A store that cannot attach its signals is a bug in the app: contained like any
+                // other panic (the scope gives back what it had issued while it unwinds).
+                ::core::result::Result::Err(__why) => ::core::panic!("{}", __why),
+            }
+        }
+    };
+    match shape {
+        ObjReturn::One => issue(value),
+        ObjReturn::Optional => {
+            let inner = issue(quote!(__object));
+            quote! {
+                match #value {
+                    ::core::option::Option::Some(__object) => ::core::option::Option::Some(#inner),
+                    ::core::option::Option::None => ::core::option::Option::None,
+                }
+            }
+        }
+        ObjReturn::Many => {
+            let inner = issue(quote!(__object));
+            quote! {{
+                let __objects = #value;
+                let mut __handles = ::std::vec::Vec::with_capacity(__objects.len());
+                for __object in __objects {
+                    __handles.push(#inner);
+                }
+                __handles
+            }}
+        }
+    }
+}
+
+/// The outcome of a method that returns objects: each one is issued to the host as a handle, in
+/// a scope that gives the references back unless the reply carries them (ADR-040 decision 6).
+fn object_result(
+    root: &Root,
+    m: &FnModel,
+    call: &TokenStream,
+    shape: ObjReturn,
+    in_result: bool,
+    needs: &mut Needs,
+) -> TokenStream {
+    let wire = root.wire();
+    let runtime = root.runtime();
+    let span = m.ident.span();
+    let scope = format_ident!("__scope");
+    if !m.is_async {
+        let ok = |value: TokenStream| {
+            let lowered = lower(shape, value, &scope);
+            quote! {{
+                let mut #scope = __rt.issue_scope();
+                let __lowered = #lowered;
+                let __outcome = __rt.sync_ok(&__lowered, #wire::Encode::encode);
+                #scope.commit();
+                __outcome
+            }}
+        };
+        return if in_result {
+            let ok = ok(quote!(__v));
+            quote! {
+                match #call {
+                    ::core::result::Result::Ok(__v) => #ok,
+                    ::core::result::Result::Err(__e) => __rt.sync_err(&__e, #wire::Encode::encode),
+                }
+            }
+        } else {
+            let ok = ok(quote!(__out));
+            quote! {{
+                let __out = #call;
+                #ok
+            }}
+        };
+    }
+    // An asynchronous method lowers in the last poll of its future: after the final `.await`, in
+    // the poll that completes the call, so nothing can cancel the call between the issue and the
+    // reply (both happen under the core lock). The runtime is reached through a weak context: a
+    // runtime that is gone has already answered the call.
+    needs.send_assert = true;
+    let send_fn = send_assertion(span);
+    let lowered_ok = |value: TokenStream| {
+        let lowered = lower(shape, value, &scope);
+        quote! {
+            match __weak.upgrade() {
+                ::core::result::Result::Ok(__ctx) => {
+                    let mut #scope = __ctx.runtime().issue_scope();
+                    let __lowered = #lowered;
+                    let __bytes = #wire::Encode::encode_to_vec(&__lowered);
+                    #scope.commit();
+                    ::core::result::Result::Ok(__bytes)
+                }
+                ::core::result::Result::Err(_) => ::core::result::Result::Ok(::std::vec::Vec::new()),
+            }
+        }
+    };
+    let body = if in_result {
+        let ok = lowered_ok(quote!(__v));
+        quote! {
+            match #call.await {
+                ::core::result::Result::Ok(__v) => #ok,
+                ::core::result::Result::Err(__e) => {
+                    ::core::result::Result::Err(#wire::Encode::encode_to_vec(&__e))
+                }
+            }
+        }
+    } else {
+        let ok = lowered_ok(quote!(__out));
+        quote! {{
+            let __out = #call.await;
+            #ok
+        }}
+    };
+    quote! {{
+        let __weak = __rt.ctx().downgrade();
+        let __fut = async move { #body };
+        #send_fn(&__fut);
+        __undra_out(#runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut)))
+    }}
+}
+
 /// The outcome (a `DispatchOutcome`) of a constructor: insert the new object and reply with
 /// its handle.
 fn constructor_result(
@@ -689,8 +1025,25 @@ fn constructor_result(
     let ok = quote!(__rt.sync_ok(&__handle, #wire::Encode::encode));
     // What to do with the constructed `__value`: publish it and answer its handle. A store
     // first attaches its signals; if that fails the store is never published and the caller
-    // gets a bad request carrying the reason (nothing panics).
-    let finish = if target.store {
+    // gets a bad request carrying the reason (nothing panics). A constructor that returns an
+    // `Arc` interns the instance (ADR-040), a store included: `issue_constructed` attaches the
+    // signals and keeps the entry in snapshots, as a constructed object is.
+    let finish = if m.ctor_shared {
+        let type_name = target.self_ty.map(ty_string).unwrap_or_default();
+        quote! {{
+            let mut __scope = __rt.issue_scope();
+            match __scope.issue_constructed(__value) {
+                ::core::result::Result::Ok(__handle) => {
+                    let __outcome = #ok;
+                    __scope.commit();
+                    __outcome
+                }
+                ::core::result::Result::Err(__why) => __undra_bad_request(
+                    ::std::format!("`{}`: {}", #type_name, __why),
+                ),
+            }
+        }}
+    } else if target.store {
         let type_name = target.self_ty.map(ty_string).unwrap_or_default();
         quote! {
             match __value.__undra_attach_all() {
@@ -739,19 +1092,64 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
     // Decode the arguments in declaration order; any failure is a bad request that says which.
     // The values are bound to positional locals, never to the user's parameter names, so a
     // parameter called `__r` or `__ctx` cannot collide with what the dispatcher generates.
+    // An object is read as its handle (`__h<i>`) and a callback as its instance (`__c<i>`); both
+    // are resolved only once every argument has decoded.
     let lets = m.params.iter().enumerate().map(|(index, p)| {
-        let local = arg_local(index);
-        let ty = &p.ty;
         let param = &p.name;
-        quote_spanned! {p.ty.span()=>
-            let #local: #ty = match <#ty as #wire::Decode>::decode(&mut __r) {
-                ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(__e) => {
-                    return __undra_bad_request(::std::format!(
-                        "cannot decode argument `{}` of `{}`: {}", #param, #what, __e
-                    ));
+        let fail = quote! {
+            return __undra_bad_request(::std::format!(
+                "cannot decode argument `{}` of `{}`: {}", #param, #what, __e
+            ));
+        };
+        match &p.plan {
+            ParamPlan::Plain => {
+                let local = arg_local(index);
+                let ty = &p.ty;
+                quote_spanned! {p.ty.span()=>
+                    let #local: #ty = match <#ty as #wire::Decode>::decode(&mut __r) {
+                        ::core::result::Result::Ok(__v) => __v,
+                        ::core::result::Result::Err(__e) => { #fail }
+                    };
                 }
-            };
+            }
+            ParamPlan::Object { shape, .. } => {
+                let local = handle_local(index);
+                let raw = match shape {
+                    ObjShape::Ref | ObjShape::Arc => quote!(u64),
+                    ObjShape::OptionRef | ObjShape::OptionArc => quote!(::core::option::Option<u64>),
+                    ObjShape::VecArc => quote!(::std::vec::Vec<u64>),
+                };
+                quote_spanned! {p.ty.span()=>
+                    let #local: #raw = match <#raw as #wire::Decode>::decode(&mut __r) {
+                        ::core::result::Result::Ok(__v) => __v,
+                        ::core::result::Result::Err(__e) => { #fail }
+                    };
+                }
+            }
+            ParamPlan::Callback { optional, .. } => {
+                let local = callback_local(index);
+                let raw = if *optional {
+                    quote!(::core::option::Option<u64>)
+                } else {
+                    quote!(u64)
+                };
+                let null = if *optional {
+                    quote!(#local == ::core::option::Option::Some(0))
+                } else {
+                    quote!(#local == 0)
+                };
+                quote_spanned! {p.ty.span()=>
+                    let #local: #raw = match <#raw as #wire::Decode>::decode(&mut __r) {
+                        ::core::result::Result::Ok(__v) => __v,
+                        ::core::result::Result::Err(__e) => { #fail }
+                    };
+                    if #null {
+                        return __undra_bad_request(::std::format!(
+                            "argument `{}` of `{}`: callback instance 0 is the null instance", #param, #what
+                        ));
+                    }
+                }
+            }
         }
     });
     let decode = quote! {
@@ -763,6 +1161,75 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
             ));
         }
     };
+
+    // Objects: each handle resolved to its `Arc` before the method runs (before its first
+    // `.await`), so a host `close()` racing the call never frees what the call uses, and a stale
+    // or wrongly typed handle is a bad request naming the parameter (ADR-040 decision 4).
+    let resolves = m.params.iter().enumerate().filter_map(|(index, p)| {
+        let ParamPlan::Object { elem, shape } = &p.plan else {
+            return None;
+        };
+        let local = arg_local(index);
+        let handle = handle_local(index);
+        let param = &p.name;
+        let one = |h: TokenStream| {
+            quote! {
+                match __rt.object::<#elem>(#h) {
+                    ::core::result::Result::Ok(__o) => __o,
+                    ::core::result::Result::Err(__e) => {
+                        return __undra_bad_request(::std::format!(
+                            "argument `{}` of `{}`: {}", #param, #what, __e
+                        ));
+                    }
+                }
+            }
+        };
+        let resolved = match shape {
+            ObjShape::Ref | ObjShape::Arc => one(quote!(#handle)),
+            ObjShape::OptionRef | ObjShape::OptionArc => {
+                let inner = one(quote!(__h));
+                quote! {
+                    match #handle {
+                        ::core::option::Option::Some(__h) => ::core::option::Option::Some(#inner),
+                        ::core::option::Option::None => ::core::option::Option::None,
+                    }
+                }
+            }
+            ObjShape::VecArc => {
+                let inner = one(quote!(__h));
+                quote! {{
+                    let mut __all = ::std::vec::Vec::with_capacity(#handle.len());
+                    for __h in #handle {
+                        __all.push(#inner);
+                    }
+                    __all
+                }}
+            }
+        };
+        Some(quote_spanned! {p.ty.span()=> let #local = #resolved; })
+    });
+    let resolves: Vec<TokenStream> = resolves.collect();
+
+    // Callbacks: pending until now. Everything that could refuse the call has run, so the core
+    // takes ownership of the host's references only for a call it will serve (ADR-041 decision
+    // 5: "a refused call transfers nothing").
+    let callbacks = m.params.iter().enumerate().filter_map(|(index, p)| {
+        let ParamPlan::Callback { dyn_ty, optional } = &p.plan else {
+            return None;
+        };
+        let local = arg_local(index);
+        let instance = callback_local(index);
+        Some(if *optional {
+            quote_spanned! {p.ty.span()=>
+                let #local = #instance.map(|__i| __rt.callback::<#dyn_ty>(__i));
+            }
+        } else {
+            quote_spanned! {p.ty.span()=>
+                let #local = __rt.callback::<#dyn_ty>(#instance);
+            }
+        })
+    });
+    let callbacks: Vec<TokenStream> = callbacks.collect();
 
     // Resolve `self` and the context.
     let receiver = match (m.kind, target.self_ty) {
@@ -796,9 +1263,19 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
             quote!(__ctx)
         });
     }
-    call_args.extend((0..m.params.len()).map(|index| {
+    call_args.extend(m.params.iter().enumerate().map(|(index, p)| {
         let local = arg_local(index);
-        quote!(#local)
+        match &p.plan {
+            ParamPlan::Object {
+                shape: ObjShape::Ref,
+                ..
+            } => quote!(&*#local),
+            ParamPlan::Object {
+                shape: ObjShape::OptionRef,
+                ..
+            } => quote!(#local.as_deref()),
+            _ => quote!(#local),
+        }
     }));
     let ident = &m.ident;
     let call = match target.self_ty {
@@ -815,8 +1292,10 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
 
     quote! {
         #decode
+        #(#resolves)*
         #receiver
         #ctx_binding
+        #(#callbacks)*
         #result
     }
 }
@@ -1187,6 +1666,7 @@ fn method_meta(root: &Root, m: &FnModel, method_id: &TokenStream) -> TokenStream
             returns: #returns,
             is_async: #is_async,
             takes_ctx: #takes_ctx,
+            coalesce: false,
             docs: #docs,
         }
     }
@@ -1309,14 +1789,14 @@ pub(crate) fn expand_impl(
             continue; // private helpers are not part of the API
         }
         let fn_docs = docs(&func.attrs);
-        let analysis = analyze(&mut func.sig, &mut errors);
+        let analysis = analyze(&mut func.sig, &mut errors, Kindred::Callable);
         let name = unraw(&func.sig.ident);
 
         for p in &analysis.params {
             checks.ty(&p.ty, &p.kty);
         }
         if analysis.has_receiver {
-            let ret = match map_return(&func.sig.output) {
+            let ret = match map_method_return(&func.sig.output) {
                 Ok(ret) => ret,
                 Err(err) => {
                     errors.push(err.into_error());
@@ -1335,6 +1815,7 @@ pub(crate) fn expand_impl(
                 ctx: None,
                 params: analysis.params,
                 ret,
+                ctor_shared: false,
                 stream_item,
                 stream_in_result,
                 docs: fn_docs,
@@ -1349,18 +1830,21 @@ pub(crate) fn expand_impl(
                 ));
             }
             let named = KType::Named(type_name.clone());
+            let ctor_shared = returns.shared();
             let ret = match returns {
-                CtorReturn::Plain => named,
-                CtorReturn::Fallible(err_ty) => match map_error_type(&err_ty, Pos::Return) {
-                    Ok(err) => {
-                        checks.error_ty(&err_ty, &err);
-                        KType::Result(Box::new(named), Box::new(err))
+                CtorReturn::Plain | CtorReturn::Shared => named,
+                CtorReturn::Fallible(err_ty) | CtorReturn::FallibleShared(err_ty) => {
+                    match map_error_type(&err_ty, Pos::Return) {
+                        Ok(err) => {
+                            checks.error_ty(&err_ty, &err);
+                            KType::Result(Box::new(named), Box::new(err))
+                        }
+                        Err(err) => {
+                            errors.push(err.into_error());
+                            named
+                        }
                     }
-                    Err(err) => {
-                        errors.push(err.into_error());
-                        named
-                    }
-                },
+                }
             };
             constructors.push(FnModel {
                 ident: func.sig.ident.clone(),
@@ -1370,6 +1854,7 @@ pub(crate) fn expand_impl(
                 ctx: analysis.ctx,
                 params: analysis.params,
                 ret,
+                ctor_shared,
                 stream_item: None,
                 stream_in_result: false,
                 docs: fn_docs,
@@ -1518,6 +2003,19 @@ pub(crate) fn expand_impl(
     } else {
         TokenStream::new()
     };
+    // What the runtime needs of a store to hand one the host did not construct (ADR-040).
+    let object_hooks = if store {
+        quote! {
+            fn __undra_store_cell(&self) -> ::core::option::Option<&::std::sync::Arc<#signals::StoreCell>> {
+                ::core::option::Option::Some(self.__undra_cell_ref())
+            }
+            fn __undra_attach(&self) -> ::core::result::Result<(), #signals::SignalsError> {
+                self.__undra_attach_all()
+            }
+        }
+    } else {
+        TokenStream::new()
+    };
     // A store's docs are its struct's docs, then its impl block's (a plain object's struct has
     // no Undra attribute, so its docs are not visible here: document it on the impl block).
     let object_docs = if store {
@@ -1583,12 +2081,10 @@ pub(crate) fn expand_impl(
             /// Marks the type as an object, so a signature that uses it as a value can say so.
             #[doc(hidden)]
             pub const __UNDRA_IS_OBJECT: bool = true;
-        }
-
-        #derived
-        impl #runtime::UndraObject for #self_ty {
-            const TYPE_ID: u32 = #meta::ids::type_id(#type_name);
-            const NAME: &'static str = #type_name;
+            /// The type id of the declared name: what a signature that takes or returns the
+            /// object as `Arc<T>` or `&T` is checked against (E0061).
+            #[doc(hidden)]
+            pub const __UNDRA_OBJECT_ID: u32 = #meta::ids::type_id(#type_name);
         }
 
         // Private to this block: a second block for the type does not define any of this twice.
@@ -1627,6 +2123,13 @@ pub(crate) fn expand_impl(
             }
 
             #store_object
+
+            #derived
+            impl #runtime::UndraObject for #self_ty {
+                const TYPE_ID: u32 = #meta::ids::type_id(#type_name);
+                const NAME: &'static str = #type_name;
+                #object_hooks
+            }
 
             #[allow(unused_variables, unused_mut, deprecated, clippy::all)]
             fn #dispatch_fn(
@@ -1736,7 +2239,7 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
             .on(&item.sig.ident),
         );
     }
-    let analysis = analyze(&mut item.sig, &mut errors);
+    let analysis = analyze(&mut item.sig, &mut errors, Kindred::Callable);
     if analysis.has_receiver {
         errors.push(
             Diag::new(
@@ -1748,7 +2251,7 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
             .on(&item.sig.ident),
         );
     }
-    let ret = match map_return(&item.sig.output) {
+    let ret = match map_method_return(&item.sig.output) {
         Ok(ret) => ret,
         Err(err) => {
             errors.push(err.into_error());
@@ -1775,6 +2278,7 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
         ctx: analysis.ctx,
         params: analysis.params,
         ret,
+        ctor_shared: false,
         stream_item,
         stream_in_result,
         docs: docs(&item.attrs),

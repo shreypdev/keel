@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /** The todo list store. */
-class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class TodoStore internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _todos: MutableStateFlow<List<Todo>> = signal(emptyList())
     val todos: StateFlow<List<Todo>> = _todos.asStateFlow()
     private val _filter: MutableStateFlow<Filter> = signal(Filter.ALL)
@@ -33,16 +33,6 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
     val remaining: StateFlow<UInt> = _remaining.asStateFlow()
     private val _selected: MutableStateFlow<Todo?> = signal(null)
     val selected: StateFlow<Todo?> = _selected.asStateFlow()
-
-    init {
-        observeAll()
-    }
-
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.TodoStore.TYPE_ID, UndraIds.Objects.TodoStore.NEW, ByteArray(0)),
-    )
 
     /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
     fun setFilter(f: Filter) {
@@ -163,9 +153,12 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(ctx: UndraCore = UndraPlaygroundCore.core): TodoStore = create(ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): TodoStore {
             val handle = ctx.constructObject(UndraIds.Objects.TodoStore.TYPE_ID, UndraIds.Objects.TodoStore.NEW, ByteArray(0))
-            return TodoStore(ctx, handle)
+            return ctx.adopt(handle, ::TodoStore)
         }
 
         /**
@@ -182,7 +175,7 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
                 throw UndraCallError.mapped(e, TodoError)
             }
             if (handle == 0L) throw UndraCallError.Malformed("the core returned the null handle for a constructor")
-            return TodoStore(ctx, handle)
+            return ctx.adopt(handle, ::TodoStore)
         }
     }
 }

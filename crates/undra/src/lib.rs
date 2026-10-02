@@ -6,7 +6,7 @@
 //!
 //! | Path | What |
 //! |---|---|
-//! | [`api`], [`error`], [`store`], [`port`], [`query`](macro@query), [`mutation`], [`migrate`] | the attribute macros (`undra-macros`) |
+//! | [`api`], [`error`], [`store`], [`port`], [`callback`], [`query`](macro@query), [`mutation`], [`migrate`] | the attribute macros (`undra-macros`) |
 //! | [`background`] | register a background task of your own (`undra::background::register`, ADR-046) |
 //! | [`persist`] | what a `#[undra::migrate]` hook works with: `DynValue`, `DynRecord`, `MigrateError` (ADR-037) |
 //! | [`prelude`] | what an application core imports: signals, `Ctx`, the wire scalars, the macros |
@@ -21,7 +21,7 @@
 //! The code the macros generate names everything through `::undra::{wire, meta, runtime,
 //! signals, query}` (SPEC 16.3), which is why an application depends on this crate alone.
 
-pub use undra_macros::{api, error, migrate, mutation, port, query, store};
+pub use undra_macros::{api, callback, error, migrate, mutation, port, query, store};
 pub use undra_meta as meta;
 pub use undra_ports as ports;
 pub use undra_runtime as runtime;
@@ -50,7 +50,7 @@ pub mod query;
 pub mod prelude {
     pub use core::time::Duration;
 
-    pub use undra_macros::{api, error, migrate, mutation, port, query, store};
+    pub use undra_macros::{api, callback, error, migrate, mutation, port, query, store};
     pub use undra_ports::CtxPorts;
     pub use undra_query::CtxQuery;
     pub use undra_runtime::persist::{DynRecord, DynValue, MigrateError};

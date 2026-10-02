@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * Observes the `notes` query (cache key `notes:{list}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
  */
-class NotesQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class NotesQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _data: MutableStateFlow<List<Note>?> = signal(null)
     /** The latest successful result, if any. */
     val data: StateFlow<List<Note>?> = _data.asStateFlow()
@@ -37,10 +37,6 @@ class NotesQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
     private val _updatedAt: MutableStateFlow<Timestamp?> = signal(null)
     /** When `data` was last updated. */
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
-
-    init {
-        observeAll()
-    }
 
     /**
      * Fetches again now, even if the data is fresh.
@@ -125,7 +121,7 @@ class NotesQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
             val w = UndraWriter()
             w.writeStr(list)
             val handle = ctx.constructObject(UndraIds.Objects.NotesQueryHandle.TYPE_ID, UndraIds.Objects.NotesQueryHandle.NEW, w.toByteArray())
-            return NotesQueryHandle(ctx, handle)
+            return ctx.adopt(handle, ::NotesQueryHandle)
         }
     }
 }
@@ -134,7 +130,7 @@ class NotesQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
  * Observes the `profile` query (cache key `profile:{user}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
  */
-class ProfileQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class ProfileQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _data: MutableStateFlow<Profile?> = signal(null)
     /** The latest successful result, if any. */
     val data: StateFlow<Profile?> = _data.asStateFlow()
@@ -150,10 +146,6 @@ class ProfileQueryHandle private constructor(core: UndraCore, handle: Long) : Un
     private val _updatedAt: MutableStateFlow<Timestamp?> = signal(null)
     /** When `data` was last updated. */
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
-
-    init {
-        observeAll()
-    }
 
     /**
      * Fetches again now, even if the data is fresh.
@@ -238,7 +230,7 @@ class ProfileQueryHandle private constructor(core: UndraCore, handle: Long) : Un
             val w = UndraWriter()
             w.writeStr(user)
             val handle = ctx.constructObject(UndraIds.Objects.ProfileQueryHandle.TYPE_ID, UndraIds.Objects.ProfileQueryHandle.NEW, w.toByteArray())
-            return ProfileQueryHandle(ctx, handle)
+            return ctx.adopt(handle, ::ProfileQueryHandle)
         }
     }
 }
