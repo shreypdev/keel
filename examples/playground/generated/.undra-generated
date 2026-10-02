@@ -11,6 +11,7 @@ kotlin/src/main/kotlin/dev/undra/playground/core/Stores.kt
 kotlin/src/main/kotlin/dev/undra/playground/core/Types.kt
 kotlin/src/main/resources/META-INF/proguard/undra-playground_core.pro
 swift/Package.swift
+swift/Sources/PlaygroundCore/Generated/Callbacks.swift
 swift/Sources/PlaygroundCore/Generated/Core.swift
 swift/Sources/PlaygroundCore/Generated/Errors.swift
 swift/Sources/PlaygroundCore/Generated/Ids.swift
