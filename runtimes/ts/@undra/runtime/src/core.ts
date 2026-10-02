@@ -660,7 +660,7 @@ export class UndraCore {
   private _streamAfterLoad(target: CallTargetArg, methodId: number, args: Uint8Array): AsyncIterableIterator<Uint8Array> {
     const opened = (async () => {
       this._assertOpen();
-      if (this._streams === undefined) (await onDemand("stream support", () => import("./stream-support.js"))).streams._install(this);
+      if (this._streams === undefined) (await onDemand("stream support", () => import("./stream-feature.js"))).streams._install(this);
       return (this._streams as StreamSupport).open(this, target, methodId, args);
     })();
     opened.catch(() => {});

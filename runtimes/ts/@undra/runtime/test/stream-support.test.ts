@@ -51,7 +51,7 @@ async function boot(core: typeof UndraCore, features?: readonly UndraFeature[]) 
 }
 
 afterEach(() => {
-  vi.doUnmock("../src/stream-support.js");
+  vi.doUnmock("../src/stream-feature.js");
   vi.resetModules();
 });
 
@@ -66,6 +66,7 @@ describe("features: [streams]", () => {
 
   it("counts the open stream in stats().openStreams, and not after it ended", async () => {
     const { fake, core } = await boot(UndraCore, [streams]);
+    await core.stats(); // loads core-extras.ts: a first call waits for the chunk, long enough for a one-item stream to finish
     fake.stream(TICKS, items(1));
     const iterator = core.stream(FREE, TICKS, none)[Symbol.asyncIterator]();
     expect((await core.stats()).openStreams).toBe(1);
@@ -97,7 +98,7 @@ describe("features: [streams]", () => {
 describe("a core without the feature loads the support at its first stream", () => {
   async function freshCore(gate?: Promise<void>, onLoad?: () => void) {
     vi.resetModules();
-    vi.doMock("../src/stream-support.js", async (importOriginal) => {
+    vi.doMock("../src/stream-feature.js", async (importOriginal) => {
       onLoad?.();
       await gate;
       return importOriginal();
@@ -156,7 +157,7 @@ describe("a core without the feature loads the support at its first stream", () 
   it("a chunk that cannot load ends the stream with UndraTransportError('closed') and its cause, which a generated stream maps to Unavailable; the next stream tries again", async () => {
     vi.resetModules();
     let attempts = 0;
-    vi.doMock("../src/stream-support.js", async (importOriginal) => {
+    vi.doMock("../src/stream-feature.js", async (importOriginal) => {
       attempts++;
       if (attempts === 1) throw new TypeError("Failed to fetch dynamically imported module: https://app.test/assets/stream-support-abc.js");
       return importOriginal();
@@ -179,7 +180,7 @@ describe("a core without the feature loads the support at its first stream", () 
 
   it("a failed load is reported once to the iterator and an iterator nobody pulls from does not leave an unhandled rejection", async () => {
     vi.resetModules();
-    vi.doMock("../src/stream-support.js", () => {
+    vi.doMock("../src/stream-feature.js", () => {
       throw new Error("the chunk did not load");
     });
     const unhandled = vi.fn();

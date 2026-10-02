@@ -9,7 +9,7 @@ import { msg } from "./messages.js";
  * as `UndraCallError.Unavailable`. Nothing is remembered: the next use tries the import again, as the lazy default ports do.
  *
  * @param what The chunk, for the message (`"stream support"`).
- * @param load The import, written where the bundler can see its specifier: `() => import("./stream-support.js")`.
+ * @param load The import, written where the bundler can see its specifier: `() => import("./stream-feature.js")`.
  */
 export function onDemand<T>(what: string, load: () => Promise<T>): Promise<T> {
   return load().catch((cause: unknown) => {

@@ -32,6 +32,7 @@ const STAYS_OUT: Readonly<Record<string, string>> = {
   "fnv.ts": "the hash that `PortIds` is computed with",
   "wire/codecs-more.ts": "the fourteen codecs a hello page does not name (`codecs` is a namespace, ADR-057): a first-chunk module that names one puts it up front",
   "stream-support.ts": "the stream support: the generated entry of a schema with a stream imports it (`features: [streams]`); a core without it loads it at its first stream",
+  "stream-feature.ts": "what a core without the feature imports at its first stream: `stream-support.ts` through a module nobody imports statically (no INEFFECTIVE_DYNAMIC_IMPORT warning in an app's build)",
   "stream.ts": "`StreamCall`, which only the stream support opens",
   "wire/kind.ts": "the message kinds: the core passes its control messages as calls, only framing transports and recovery need the numbers",
   "wire/framed-payloads.ts": "the encoders and decoders of the framed messages (`Observe`, `Release`, `Cancel`, `Call`, `Reply`, snapshots, ...)",
