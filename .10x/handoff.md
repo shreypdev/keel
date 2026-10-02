@@ -50,8 +50,9 @@ difficulty is in deciding, a cheaper model implements, then an adversarial revie
   generic objects/stores through an alias; sonnet implementing; S34; E0072/E0074.
 - `ts-runtime-16k` — ADR-057 (Fable design, 15 measured levers: 22,100 → 15,958 B, 15,384 with Vite's preload
   helper apart); sonnet implementing; gates: runtime 16,000, first-load 16,600, all-features 42,400.
-- Owed, starts when `ci-green` lands: an Android emulator CI job for `android-adapters`, `android-work` and
-  `undra-compose`. Each implemented piece still gets its adversarial review before the merge.
+- **On hold by the founder (2026-10-02):** the Android emulator CI job for `android-adapters`, `android-work`
+  and `undra-compose`. Do not start it. Finish everything else in flight first, then tell him all is done and
+  ask whether to start it. Priority order: CI green on main, then the other work in progress. Each implemented piece still gets its adversarial review before the merge.
 - A separate session is bisecting a cold-start restore slowdown (two rows 1.7–1.8x the machine baseline).
 
 **Also owed:** the Rust 1.99.0 bump (ci.yml header says how; do it when no worktree is mid-build);
