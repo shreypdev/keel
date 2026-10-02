@@ -16,16 +16,17 @@ name: Two cores
 
 on:
   push:
-    branches: [main]
+    branches: [main, "wt/**"]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A newer push to a pull request or to a piece's branch (`wt/<slug>`, docs/AGENT_WORKFLOW.md) cancels the run it supersedes; a run on main never is.
 concurrency:
-  group: two-cores-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: two-cores-${{ (github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/wt/')) && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/wt/') }}
 
 env:
   CARGO_TERM_COLOR: always

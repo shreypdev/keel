@@ -14,7 +14,9 @@ the integrator writes to it.
 ```text
   brief ──▶ implement in a worktree ──▶ adversarial review ──▶ fix ──▶ re-review
                                                                         │
-             clean up ◀── full matrix green on main ◀── merge ◀─────────┘
+  push the branch ──▶ CI green on its exact head ──▶ fast-forward main ◀┘
+                                                              │
+                              clean up ◀── full matrix green on main
 ```
 
 ### 1. Open a worktree
@@ -45,7 +47,8 @@ an issue). A good brief names, in this order:
 
 Inside the worktree: small `type(scope): summary` commits as you go; never leave
 `TODO`/`unimplemented!()`; end with `git status` clean. Do not merge, rebase onto, or
-push `main` from a worktree — the integrator merges. Do not edit `.10x/status.md` or
+push `main` from a worktree — the integrator merges. Pushing the piece's own `wt/<slug>` branch (which starts its CI
+run, section 4) is the integrator's too, unless the brief says the author does it. Do not edit `.10x/status.md` or
 `.10x/handoff.md` from a worktree (guaranteed conflicts); record your piece in
 `.10x/decisions/<role>/<slug>.md` instead and the integrator folds it in.
 
@@ -73,10 +76,22 @@ is a full cycle. The four v1 cycles in `.10x/reviews/` are the reference for dep
 
 ### 4. Merge — integrator only
 
+**No piece lands on `main` unless CI is green on that branch's exact head.** The order is: the review is
+done, the branch contains `main` (`git merge main` in the worktree), `git push origin wt/my-piece`, and the
+workflows that gate code (`ci.yml`, `bench.yml`, `two-cores.yml`, and `site.yml` when the branch touches the
+files it watches) run on that push; when every one is green on the head's sha, `main` is fast-forwarded to
+it, and the worktree is cleaned up. A piece is not done until that run is green: an author whose run is red
+fixes the cause (not the test) and pushes again; a newer push cancels the run it supersedes, on `wt/**` only
+(`main`'s runs are never cancelled). `scripts/wt.sh merge` enforces it: it refuses unless `main` is an ancestor
+of the branch and `gh run list --branch wt/<slug> --commit <head sha>` shows each required workflow
+completed with success, and says which is missing or red and how to push. `--no-ci` is an explicit, loud
+override for commits that only change state files; code never uses it. The site's deploy job stays `main`-only.
+
 From the primary checkout, on `main`:
 
 ```bash
-scripts/wt.sh merge my-piece
+git push origin wt/my-piece     # then wait for its runs: gh run list --branch wt/my-piece
+scripts/wt.sh merge my-piece    # fast-forward; refuses unless CI is green on the head
 ```
 
 Then the integrator runs the **full matrix**, not just the touched crate:

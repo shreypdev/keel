@@ -9,7 +9,7 @@ name: Site
 
 on:
   push:
-    branches: [main]
+    branches: [main, "wt/**"]
     paths:
       - "site/**"
       - "examples/playground/**"
@@ -50,10 +50,11 @@ permissions:
   id-token: write
 
 # Let an in-flight deployment finish; a newer push waits its turn instead of cancelling it.
-# Pull request builds are disposable and cancel each other.
+# Pull request builds and the builds of a piece's branch (`wt/<slug>`: a piece lands only on a green run of its exact head,
+# docs/AGENT_WORKFLOW.md) are disposable and cancel their predecessors; neither ever deploys.
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('site-pr-{0}', github.ref) || 'pages' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ (github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/wt/')) && format('site-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/wt/') }}
 
 jobs:
   build:
@@ -124,16 +125,16 @@ jobs:
         run: node site/scripts/check-links.mjs --root _site
 
       - uses: actions/configure-pages@v5
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
       - uses: actions/upload-pages-artifact@v3
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:
           path: _site
 
   deploy:
     name: Deploy to GitHub Pages
     needs: build
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:

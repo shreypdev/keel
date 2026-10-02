@@ -2,8 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "wt/**"]
   pull_request:
+
+# A piece's branch `wt/<slug>` is built on every push: a piece lands on main only when CI, Bench, Two cores (and Site, when the
+# branch touches its paths) are green on that branch's exact head (docs/AGENT_WORKFLOW.md, `scripts/wt.sh merge`). A newer push
+# to a wt/** branch cancels the run it supersedes. A run on main is never cancelled: each commit has a group of its own (a pending
+# run in a group shared by main's commits is replaced by the next one, which drops a result that matters;
+# .10x/reviews/2026-10-01-bench-followups-review.md, H2).
+concurrency:
+  group: ci-${{ startsWith(github.ref, 'refs/heads/wt/') && github.ref || github.run_id }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/heads/wt/') }}
 
 # The Rust version is pinned, not "stable": the compile-fail goldens (trybuild) quote rustc's
 # wording and the bench budgets are baselined on one compiler, so a new stable release must land
@@ -39,6 +48,8 @@ jobs:
         run: bash runtimes/swift/scripts/sync-vectors.sh --check
       - name: Device bench report (RESULTS.md's device tables are what the result files say; the blueprint targets match)
         run: node --test scripts/bench-device-report.test.mjs
+      - name: wt.sh merge's CI check (its parsing of `gh run list`, against fixtures)
+        run: bash scripts/wt-ci-check.test.sh
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test

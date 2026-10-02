@@ -1,0 +1,7 @@
+[
+  {"workflowName":"CI","status":"completed","conclusion":"failure","createdAt":"2026-10-02T14:00:00Z","databaseId":301},
+  {"workflowName":"CI","status":"completed","conclusion":"success","createdAt":"2026-10-02T14:30:00Z","databaseId":305},
+  {"workflowName":"Bench","status":"completed","conclusion":"success","createdAt":"2026-10-02T14:00:01Z","databaseId":302},
+  {"workflowName":"Bench","status":"completed","conclusion":"cancelled","createdAt":"2026-10-02T13:00:01Z","databaseId":299},
+  {"workflowName":"Two cores","status":"completed","conclusion":"success","createdAt":"2026-10-02T14:00:02Z","databaseId":303}
+]
