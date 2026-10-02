@@ -168,15 +168,13 @@ private class AndroidDbConnection(
     /** Runs `BEGIN`, `COMMIT`/`END` and `ROLLBACK` through Android's transaction API; `false` for any other statement. */
     private fun transactionControl(statement: String): Boolean {
         when (DatabaseUtils.getSqlStatementType(statement)) {
-            DatabaseUtils.STATEMENT_BEGIN -> database.beginTransactionNonExclusive()
-            DatabaseUtils.STATEMENT_COMMIT -> {
-                if (!database.inTransaction()) throw DbError.Sql("cannot commit - no transaction is active")
-                database.setTransactionSuccessful()
-                database.endTransaction()
-            }
-            DatabaseUtils.STATEMENT_ABORT -> {
-                if (!database.inTransaction()) throw DbError.Sql("cannot rollback - no transaction is active")
-                database.endTransaction()
+            DatabaseUtils.STATEMENT_BEGIN, DatabaseUtils.STATEMENT_COMMIT, DatabaseUtils.STATEMENT_ABORT -> {
+                // Run by SQLite itself, not through Android's per-thread transaction stack: when SQLite refuses a
+                // COMMIT (a deferred foreign key), Android has already popped its transaction while SQLite keeps it
+                // open, so the binding's ROLLBACK would be refused ("no current transaction") and every later `begin`
+                // would fail. A leading `;` keeps the statement out of that path (DatabaseUtils reads it as OTHER);
+                // the database has one connection (no WAL pool), so the transaction spans the statements that follow.
+                database.execSQL(";$statement")
             }
             else -> return false
         }

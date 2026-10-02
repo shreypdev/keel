@@ -246,6 +246,35 @@ class DbOnDeviceTest {
     }
 
     @Test
+    fun a_commit_sqlite_refuses_rolls_the_transaction_back_and_the_next_one_begins() = run {
+        // A deferred foreign key is checked at COMMIT, so SQLite refuses the COMMIT and keeps the transaction open.
+        // Android's own transaction stack has popped it by then: the binding's ROLLBACK must still reach SQLite.
+        val db = port.open(
+            "deferred",
+            listOf(
+                DbMigration(
+                    1u,
+                    "CREATE TABLE parent (id INTEGER PRIMARY KEY); " +
+                        "CREATE TABLE child (pid INTEGER REFERENCES parent (id) DEFERRABLE INITIALLY DEFERRED)",
+                ),
+            ),
+        ).db
+        val tx = port.begin(db)
+        port.execute(tx, "INSERT INTO child VALUES (?)", listOf(DbValue.Integer(-1)))
+        val refused = fails<DbError.Constraint> { port.commit(tx) }
+        assertEquals(DbConstraint.FOREIGN_KEY, refused.kind)
+        val next = port.begin(db)
+        port.execute(next, "INSERT INTO parent VALUES (?)", listOf(DbValue.Integer(1)))
+        port.execute(next, "INSERT INTO child VALUES (?)", listOf(DbValue.Integer(1)))
+        port.commit(next)
+        assertEquals(
+            "only the second transaction's row is kept",
+            listOf(listOf<DbValue>(DbValue.Integer(1))),
+            port.query(db, "SELECT pid FROM child", emptyList()).rows,
+        )
+    }
+
+    @Test
     fun a_transaction_left_open_when_the_port_detaches_is_rolled_back() = run {
         val db = port.open("left", NOTES).db
         port.execute(db, "INSERT INTO notes (title) VALUES ('committed')", emptyList())
