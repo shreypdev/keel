@@ -42,7 +42,7 @@ private class SeenFrame(val fin: Boolean, val opcode: Int, val mask: ByteArray?,
 }
 
 /** The server end of one connection: raw bytes out, frames in. */
-private class HostilePeer(val socket: Socket) {
+private class HostilePeer(val socket: Socket, val head: String = "") {
     val input = DataInputStream(socket.getInputStream())
     private val out: OutputStream = socket.getOutputStream()
 
@@ -109,7 +109,7 @@ private class HostileServer(
                             head.append(b.toChar())
                         }
                         val key = head.lines().first { it.startsWith("Sec-WebSocket-Key:", ignoreCase = true) }.substringAfter(':').trim()
-                        val peer = HostilePeer(socket)
+                        val peer = HostilePeer(socket, head.toString())
                         peers.add(peer)
                         peer.write(respond(key).toByteArray())
                     } catch (e: IOException) {
@@ -129,6 +129,7 @@ private class HostileServer(
 
 private class WsRecorder(private val throwOnBinary: Boolean = false) : WebSocketClient.Listener {
     val messages = LinkedBlockingQueue<ByteArray>()
+    val texts = LinkedBlockingQueue<String>()
     val closes = CopyOnWriteArrayList<Pair<Int, String>>()
     val errors = CopyOnWriteArrayList<Throwable>()
 
@@ -138,6 +139,10 @@ private class WsRecorder(private val throwOnBinary: Boolean = false) : WebSocket
     }
 
     override fun onText() = Unit
+
+    override fun onText(message: String) {
+        texts.add(message)
+    }
 
     override fun onClose(code: Int, reason: String) {
         closes.add(code to reason)
@@ -155,6 +160,25 @@ private class WsRecorder(private val throwOnBinary: Boolean = false) : WebSocket
 
 private fun openHostile(server: HostileServer, recorder: WsRecorder, maxMessageBytes: Int = 1 shl 20, timeoutMillis: Int = 3_000): WebSocketClient =
     WebSocketClient.connect(server.url(), recorder, timeoutMillis, maxMessageBytes)
+
+/** A read gate the test opens: the reader waits at it until [open]. */
+private class LatchGate : WebSocketClient.ReadGate {
+    private val latch = java.util.concurrent.CountDownLatch(1)
+
+    override fun awaitOpen() = latch.await()
+
+    fun open() = latch.countDown()
+}
+
+/** An unmasked server frame. */
+private fun serverFrame(opcode: Int, payload: ByteArray, fin: Boolean = true): ByteArray {
+    val head = if (payload.size < 126) {
+        byteArrayOf(((if (fin) 0x80 else 0) or opcode).toByte(), payload.size.toByte())
+    } else {
+        byteArrayOf(((if (fin) 0x80 else 0) or opcode).toByte(), 126, (payload.size shr 8).toByte(), payload.size.toByte())
+    }
+    return head + payload
+}
 
 /** A self-signed certificate for `localhost` (no IP address in it), made with the JDK's keytool; `null` without one. */
 private object HostileTlsCertificate {
@@ -440,6 +464,136 @@ class WebSocketHostileServerTests : Suite() {
                 // The platform's trust store does not know the certificate: refused.
                 val untrusted = assertThrows<IOException> { WebSocketClient.connect(server.url("localhost", "wss"), WsRecorder(), 5_000) }
                 assertTrue(untrusted is javax.net.ssl.SSLException, "$untrusted")
+            }
+        }
+
+        // ---- what the WebSocket port's adapter needs (ADR-047): text, subprotocols, headers, refusals, the read gate ----
+
+        case("text messages arrive as text once checked to be UTF-8, fragments joined before the check") {
+            HostileServer().use { server ->
+                val recorder = WsRecorder()
+                val ws = openHostile(server, recorder)
+                val peer = server.awaitPeer()
+                peer.write(serverFrame(1, "é😀".toByteArray()))
+                assertEq("é😀", recorder.texts.poll(5, TimeUnit.SECONDS))
+                // A two-byte character split across two fragments is whole once joined.
+                peer.write(serverFrame(1, byteArrayOf(0xC3.toByte()), fin = false))
+                peer.write(serverFrame(0, byteArrayOf(0xA9.toByte())))
+                assertEq("é", recorder.texts.poll(5, TimeUnit.SECONDS))
+                peer.write(serverFrame(1, ByteArray(0)))
+                assertEq("", recorder.texts.poll(5, TimeUnit.SECONDS))
+                ws.abort()
+            }
+        }
+
+        case("a text message that is not UTF-8 (a stray byte, a surrogate, an overlong form) closes with 1007") {
+            for (bad in listOf(byteArrayOf(0xFF.toByte()), byteArrayOf(0xED.toByte(), 0xA0.toByte(), 0x80.toByte()), byteArrayOf(0xC0.toByte(), 0xAF.toByte()), byteArrayOf(0xC3.toByte()))) {
+                HostileServer().use { server ->
+                    val recorder = WsRecorder()
+                    openHostile(server, recorder)
+                    val peer = server.awaitPeer()
+                    peer.write(serverFrame(1, bad))
+                    val error = recorder.awaitError()
+                    assertTrue(error is WebSocketProtocolException && error.code == 1007, "$error")
+                    assertEq(1007, peer.awaitClose()?.closeCode)
+                    assertTrue(recorder.texts.isEmpty())
+                }
+            }
+        }
+
+        case("subprotocols are offered in order; the server's choice is the client's protocol; one never offered is refused") {
+            HostileServer({ upgradeResponse(it, "Sec-WebSocket-Protocol: chat\r\n") }).use { server ->
+                val ws = WebSocketClient.connect(server.url(), WsRecorder(), 3_000, protocols = listOf("chat", "v1"))
+                assertEq("chat", ws.protocol)
+                assertTrue(server.awaitPeer().head.contains("\r\nSec-WebSocket-Protocol: chat, v1\r\n"))
+                ws.abort()
+                val other = assertThrows<WebSocketHandshakeException> { WebSocketClient.connect(server.url(), WsRecorder(), 3_000, protocols = listOf("v1")) }
+                assertTrue(other.message!!.contains("subprotocol"), other.message!!)
+            }
+            HostileServer().use { server ->
+                val ws = WebSocketClient.connect(server.url(), WsRecorder(), 3_000, protocols = listOf("v1"))
+                assertEq("", ws.protocol, "the server may choose none")
+                ws.abort()
+            }
+        }
+
+        case("extra headers go into the upgrade request as given; reserved and broken ones are not allowed") {
+            HostileServer().use { server ->
+                val ws = WebSocketClient.connect(server.url(), WsRecorder(), 3_000, headers = listOf("X-Token" to "t", "Authorization" to "Bearer é"))
+                val head = server.awaitPeer().head
+                assertTrue(head.contains("\r\nX-Token: t\r\n"), head)
+                ws.abort()
+                assertThrows<IllegalArgumentException> { WebSocketClient.connect(server.url(), WsRecorder(), 3_000, headers = listOf("X" to "a\r\nInjected: 1")) }
+            }
+            assertEq(null, WebSocketClient.checkHeader("X-Token", "t"))
+            assertTrue(WebSocketClient.checkHeader("Host", "evil") != null)
+            assertTrue(WebSocketClient.checkHeader("sec-websocket-key", "x") != null)
+            assertTrue(WebSocketClient.checkHeader("bad name", "x") != null)
+            assertTrue(WebSocketClient.checkHeader("X", "a\u0000") != null)
+            assertTrue(WebSocketClient.checkProtocol("chat.v2") == null && WebSocketClient.checkProtocol("a b") != null && WebSocketClient.checkProtocol("") != null)
+        }
+
+        case("a refused upgrade reports its HTTP status") {
+            HostileServer({ "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n" }).use { server ->
+                val refused = assertThrows<WebSocketUpgradeException> { openHostile(server, WsRecorder()) }
+                assertEq(403, refused.status)
+                assertTrue(refused.message!!.contains("403"), refused.message!!)
+            }
+            HostileServer({ "HTTP/1.0 401 Unauthorized\r\n\r\n" }).use { server ->
+                assertEq(401, assertThrows<WebSocketUpgradeException> { openHostile(server, WsRecorder()) }.status)
+            }
+            HostileServer({ "SPDY/9 nonsense\r\n\r\n" }).use { server ->
+                assertEq(-1, assertThrows<WebSocketUpgradeException> { openHostile(server, WsRecorder()) }.status)
+            }
+        }
+
+        case("the read gate pauses the reader: nothing is read while it is closed, the server's writes back up, and the pause is not silence") {
+            HostileServer().use { server ->
+                val recorder = WsRecorder()
+                val gate = LatchGate()
+                val ws = WebSocketClient.connect(server.url(), recorder, 3_000, pingAfterMillis = 300, readGate = gate)
+                val peer = server.awaitPeer()
+                val frame = serverFrame(2, ByteArray(60_000) { 7 })
+                val total = 400
+                val written = java.util.concurrent.atomic.AtomicInteger()
+                val writer = Thread {
+                    try {
+                        repeat(total) {
+                            peer.write(frame)
+                            written.incrementAndGet()
+                        }
+                    } catch (e: IOException) {
+                        // the test ended
+                    }
+                }.also { it.isDaemon = true }
+                writer.start()
+                Thread.sleep(700)
+                assertEq(0, recorder.messages.size, "nothing is read while the gate is closed")
+                assertTrue(written.get() < total, "the server's writes stall once the buffers are full: ${written.get()} of $total")
+                gate.open()
+                repeat(total) { assertTrue(recorder.messages.poll(5, TimeUnit.SECONDS) != null, "message $it arrives") }
+                assertTrue(recorder.errors.isEmpty(), "a paused reader is not a silent server: ${recorder.errors}")
+                assertTrue(ws.isOpen)
+                ws.abort()
+            }
+        }
+
+        case("text goes out as a text frame; the outbound buffer drains; close waits for the server's echo") {
+            HostileServer().use { server ->
+                val ws = openHostile(server, WsRecorder())
+                val peer = server.awaitPeer()
+                peer.socket.soTimeout = 5_000
+                ws.sendText("héllo")
+                val frame = peer.readFrame()!!
+                assertEq(1, frame.opcode)
+                assertEq("héllo", String(frame.payload, Charsets.UTF_8))
+                eventually("the outbound buffer is empty") { ws.bufferedAmount == 0L }
+                ws.close(4000, "bye")
+                val close = peer.awaitClose()!!
+                assertEq(4000, close.closeCode)
+                assertTrue(!ws.awaitFinished(100), "not finished before the server answers")
+                peer.write(0x88, 2, 0x0F, 0xA0)
+                assertTrue(ws.awaitFinished(2_000), "finished once the server echoed the close")
             }
         }
     }

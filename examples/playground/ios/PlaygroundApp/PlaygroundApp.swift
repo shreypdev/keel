@@ -2,12 +2,12 @@ import UndraRuntime
 import PlaygroundCore
 import SwiftUI
 
-/// The playground: four small screens over one Rust core. Everything they show is state that lives
-/// in the core (`Todos`, `Counter`, `BigList`, a cached server list); the views only read it and
-/// call its methods.
+/// The playground: five small screens over one Rust core. Everything they show is state that lives
+/// in the core (`Todos`, `Counter`, `BigList`, a cached server list, notes in SQLite); the views only
+/// read it and call its methods.
 @main
 struct PlaygroundApp: App {
-    /// The stores of the four screens, created once the core is loaded; none in benchmark mode (`-bench`, see
+    /// The stores of the five screens, created once the core is loaded; none in benchmark mode (`-bench`, see
     /// `BenchLaunch`), where the benchmark loads the core itself.
     @State private var model: PlaygroundModel?
 
@@ -67,11 +67,14 @@ final class PlaygroundModel {
     let counter: Counter
     let bigList: BigList
     let inbox: RemoteTodosQueryHandle
+    /// Opened by its screen (`NotesScreen`): the database is the platform's `SQLiteDbAdapter`.
+    let notes: Notes
 
     init() throws {
         todos = try Todos()
         counter = try Counter()
         bigList = try BigList()
         inbox = try RemoteTodosQueryHandle(list: UndraBootstrap.inboxList)
+        notes = try Notes()
     }
 }

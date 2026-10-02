@@ -18,4 +18,4 @@ heck = { workspace = true }
 # The `stdlib` golden case starts from the registrations of the real standard ports, and
 # tests/stdlib.rs checks the standard-library table against them (undra-ports itself
 # dev-depends on this crate, which Cargo allows).
-undra-ports = { workspace = true }
+undra-ports = { workspace = true, features = ["websocket", "sse", "db"] }

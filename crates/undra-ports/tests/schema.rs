@@ -17,10 +17,40 @@ const SCHEMA_HASH: u64 = 0xbbf6_f70d_0c56_7f47;
 
 const GOLDEN: &str = "tests/golden/schema.json";
 
+/// The names of the opt-in items (ADR-047, ADR-048), registered only when their cargo features
+/// are on (`tests/opt_in.rs` locks them).
+const OPT_IN: &[&str] = &[
+    "WebSocket",
+    "WsOpened",
+    "WsMessage",
+    "WsError",
+    "Sse",
+    "SseEvent",
+    "SseError",
+    "Db",
+    "DbMigration",
+    "DbOpened",
+    "DbValue",
+    "DbExecuted",
+    "DbRows",
+    "DbConstraint",
+    "DbError",
+];
+
+/// The standard schema: what this crate registers, without the opt-in items. A workspace build
+/// unifies features (the playground turns them on), so the opt-in items may be registered here;
+/// leaving them out must give back exactly the locked surface and hash, which is the proof that
+/// they are additive and that a core without them keeps its hash.
 fn schema() -> Schema {
     // Referencing a registered type links the crate's registrations into this test binary.
     let _ = HttpMethod::Get;
-    collect_schema("undra-ports")
+    let mut schema = collect_schema("undra-ports");
+    schema
+        .records
+        .retain(|r| !OPT_IN.contains(&r.name.as_str()));
+    schema.enums.retain(|e| !OPT_IN.contains(&e.name.as_str()));
+    schema.ports.retain(|p| !OPT_IN.contains(&p.name.as_str()));
+    schema
 }
 
 fn t(name: &str) -> TypeRef {

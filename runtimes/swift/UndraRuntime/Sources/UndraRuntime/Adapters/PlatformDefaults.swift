@@ -8,13 +8,21 @@
 //   Timer                DispatchQueue                     TimerAdapter
 //   Connectivity         NWPathMonitor                     ConnectivityAdapter
 //   Lifecycle            called by the app                 UndraLifecycle
+//   WebSocket (opt-in)   URLSessionWebSocketTask           URLSessionWebSocketAdapter
+//   Sse (opt-in)         URLSession.bytes + SseParser      URLSessionSseAdapter
+//   Db (opt-in)          the SQLite3 C API                 SQLiteDbAdapter
+//
+// The opt-in ports (ADR-047, ADR-048) are declared only by a core built with the `websocket`,
+// `sse` or `db` feature; registering one a core does not declare is harmless.
 
 extension Adapters {
     /// Every standard port with its Apple-platform implementation.
     ///
     /// Each adapter can be replaced by another `PortImpl` with `replacing(portId:with:)`, or
     /// dropped with `removing(portId:)`. Lifecycle is not here: it is an event the app reports
-    /// with `UndraLifecycle`.
+    /// with `UndraLifecycle`. WebSocket, Sse and Db are here for the cores that enable them; an
+    /// app's own implementation replaces one through its binding
+    /// (`replacing(WebSocketPortAdapter(MyWebSocket()))`).
     public static var platformDefault: Adapters {
         return Adapters([
             HttpAdapter(),
@@ -26,6 +34,9 @@ extension Adapters {
             LogAdapter(),
             TimerAdapter(),
             ConnectivityAdapter(),
+            URLSessionWebSocketAdapter(),
+            URLSessionSseAdapter(),
+            SQLiteDbAdapter(),
         ])
     }
 }

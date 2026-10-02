@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the playground for Android, installs it on an emulator or device, and proves that it runs on the real
-# platform adapters of `android-adapters` (no faked port): every tab is launched and screenshotted, then the Remote
-# tab's offline story is driven through uiautomator:
+# platform adapters of `android-adapters` (no faked port): every tab is launched and screenshotted, a note written on the
+# Notes tab survives a killed process (SQLite through the `Db` port), then the Remote tab's offline story is driven through
+# uiautomator:
 #
 #   1. fetch      the `inbox` list is fetched and persisted to Kv (files/undra/kv)
 #   2. toggle     the Offline switch goes on; an added item is queued by the core (the request fails with a network error)
@@ -151,7 +152,7 @@ adb_ shell dumpsys package "$APP" | grep -E "android.permission.(INTERNET|ACCESS
 
 # ---- 2. every tab launches ----------------------------------------------------------------------------------------
 failed=0
-for tab in todos counter biglist remote; do
+for tab in todos counter biglist remote notes; do
   launch "$tab"
   sleep 4
   screenshot "tab-$tab"
@@ -159,6 +160,29 @@ for tab in todos counter biglist remote; do
 done
 step "the adapters the app installed (logcat, tag Undra)"
 logcat_app | grep "AndroidPlatformDefaults" || { echo "no AndroidPlatformDefaults line"; failed=1; }
+
+# ---- 2b. Notes: SQLite through the Db port, across a killed process -------------------------------------------------
+echo
+echo "## Notes: a note written to SQLite (AndroidDbAdapter) is still there after the process is killed"
+adb_ shell pm clear "$APP" >/dev/null
+launch notes
+notes_ready() { ui has-text "No notes yet. They are kept in SQLite, so they are still here after a restart."; }
+notes_are() { [ "$(ui count notes-row)" = "$1" ]; }
+note_kept() { notes_are 1 && ui has-text "Milk from smoke"; }
+wait_for 20 "the database is open (migrated, empty)" notes_ready || failed=1
+type_into notes-input "Milk from smoke"
+tap notes-add
+wait_for 15 "the note is in the list" note_kept || failed=1
+tap notes-toggle
+sleep 1
+screenshot notes-added
+step "kill the app; relaunch on the Notes tab"
+run adb_ shell am force-stop "$APP"
+launch notes
+wait_for 20 "the note came back from SQLite after the restart" note_kept || failed=1
+echo "database files (run-as $APP ls databases): $(adb_ shell run-as "$APP" ls databases 2>/dev/null | tr '\n' ' ')"
+adb_ shell run-as "$APP" ls databases 2>/dev/null | grep -q "undra-playground.sqlite" || { echo "no undra-playground.sqlite"; failed=1; }
+screenshot notes-restarted
 
 # ---- 3. the offline story on the Remote tab -----------------------------------------------------------------------
 echo

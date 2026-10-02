@@ -2,24 +2,27 @@
 # The React Native playground app's on-device checks on the iOS simulator and an Android emulator or phone: build
 # the core and the Release app, install it, launch it, and wait for the app's own verdict line in the device log,
 #
-#     UNDRA-RN CHECKS 16/16 passed            RN01..RN10, the boundary; RN11..RN16, the default ports through the
-#                                             core (examples/playground/rn/src/checks.ts, ADR-038 amendment B)
+#     UNDRA-RN CHECKS 21/21 passed            RN01..RN10, the boundary; RN11..RN16, the default ports through the
+#                                             core (examples/playground/rn/src/checks.ts, ADR-038 amendment B);
+#                                             RN17..RN19 the native Db (ADR-048), RN20 WebSocket and RN21 Sse
+#                                             (ADR-047) through the core
 #
 # then drive what only the outside of the app can do, each a CHECK line of its own (ADR-038 amendment B, B10):
 #
-#     RN17  SecureStore: the app's secret is not in its files as plain text, while a Kv marker written next to it is
+#     RN22  SecureStore: the app's secret is not in its files as plain text, while a Kv marker written next to it is
 #           (the scan works): the simulator's data container, or /data/data/<package> through `su` on Android
-#     RN18  Kv survives the process: the app is killed and relaunched, and reads the token the first launch wrote
-#     RN19  Lifecycle: the core sees `background` (Home on Android, another app on iOS) and `active` again
-#     RN20  Connectivity (Android): the core sees online = false in airplane mode and true after it
+#     RN23  Kv survives the process: the app is killed and relaunched, and reads the token the first launch wrote
+#     RN24  Lifecycle: the core sees `background` (Home on Android, another app on iOS) and `active` again
+#     RN25  Connectivity (Android): the core sees online = false in airplane mode and true after it
 #
 # and print the total, which is the only thing that counts:
 #
-#     UNDRA-RN CHECKS 20/20 passed            (19/19 on iOS: the simulator has no airplane mode)
+#     UNDRA-RN CHECKS 25/25 passed            (24/24 on iOS: the simulator has no airplane mode)
 #
 # The process exits 0 only when every check passed, and prints the CHECK lines (and the device-log tail when the
-# app's verdict is missing or failed). The Http check (RN14) calls a loopback server this script runs on
-# 127.0.0.1:8737 (the simulator shares the Mac's loopback; Android reaches it through `adb reverse`). The
+# app's verdict is missing or failed). The Http (RN14), WebSocket (RN20) and Sse (RN21) checks call the contract
+# tests' realtime server (contract-tests/servers/realtime-server.mjs, which also answers /undra-rn-check), run here
+# on 127.0.0.1:8737 (the simulator shares the Mac's loopback; Android reaches it through `adb reverse`). The
 # .github/workflows/rn-devices.yml jobs run exactly this.
 #
 #   scripts/rn-device-checks.sh ios                          the iPhone 17 Pro simulator (boots it if needed)
@@ -34,7 +37,7 @@
 #   --target ID       the simulator UDID or the adb serial
 #   --abi ABI         Android only: the one ABI of the app's own native library (default: the device's, else every
 #                     ABI of gradle.properties), which is what keeps the CI build to one architecture
-#   --expect N        the number of the app's own checks that must pass (default 16, RN01..RN16)
+#   --expect N        the number of the app's own checks that must pass (default 21, RN01..RN21)
 #   --app-only        stop after the app's own verdict: no restart, scan, lifecycle or airplane-mode phase
 #   --timeout SEC     how long to wait for the verdict line after the launch (default 240)
 #   --debug-core      build the core without --release (much slower; the checks pass too)
@@ -58,7 +61,7 @@ die() { echo "rn-device-checks: $*" >&2; exit 1; }
 [ "$PLATFORM" != help ] || { usage; exit 0; }
 [ -n "$PLATFORM" ] || die "ios or android is required (see --help)"
 
-BUILD=1 RUN=1 TARGET="" ABI="" EXPECT=16 TIMEOUT=240 RELEASE=(--release) PHASES=1
+BUILD=1 RUN=1 TARGET="" ABI="" EXPECT=21 TIMEOUT=240 RELEASE=(--release) PHASES=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --build-only) RUN=0; shift ;;
@@ -96,34 +99,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ---- the phases outside the app (RN17..RN20) -----------------------------------------------------------------
+# ---- the phases outside the app (RN22..RN25) -----------------------------------------------------------------
 
 LOOPBACK_PORT=8737
 APP_PASSED=0 APP_TOTAL=0 OUT_PASSED=0 OUT_TOTAL=0
 
-# start_loopback: the server of the Http check (RN14): GET /undra-rn-check answers its request's headers as JSON.
+# start_loopback: the contract tests' realtime server (HTTP, WebSocket, server-sent events) for the Http (RN14),
+# WebSocket (RN20) and Sse (RN21) checks; GET /undra-rn-check answers its request's headers as JSON. It prints
+# `READY <port>` once it listens; the cleanup stops it.
 start_loopback() {
   if (exec 3<>"/dev/tcp/127.0.0.1/$LOOPBACK_PORT") 2>/dev/null; then
-    die "127.0.0.1:$LOOPBACK_PORT is taken: the loopback server of the Http check needs it"
+    die "127.0.0.1:$LOOPBACK_PORT is taken: the loopback server of the Http, WebSocket and Sse checks needs it"
   fi
-  node -e '
-    const http = require("http");
-    http.createServer((req, res) => {
-      if (req.url.startsWith("/undra-rn-check")) {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true, path: req.url, headers: req.headers }));
-      } else {
-        res.writeHead(404);
-        res.end();
-      }
-    }).listen(Number(process.argv[1]), "127.0.0.1");' "$LOOPBACK_PORT" >"$WORK/loopback.log" 2>&1 &
+  node "$REPO/contract-tests/servers/realtime-server.mjs" --port "$LOOPBACK_PORT" >"$WORK/loopback.log" 2>&1 &
   BG_PIDS+=("$!")
   local waited=0
-  until (exec 3<>"/dev/tcp/127.0.0.1/$LOOPBACK_PORT") 2>/dev/null; do
+  until grep -q "^READY $LOOPBACK_PORT" "$WORK/loopback.log" 2>/dev/null; do
     sleep 0.2; waited=$((waited + 1))
     [ "$waited" -lt 50 ] || die "the loopback server did not start: $(cat "$WORK/loopback.log")"
   done
-  echo "== loopback server on 127.0.0.1:$LOOPBACK_PORT"
+  echo "== loopback server (contract-tests/servers/realtime-server.mjs) on 127.0.0.1:$LOOPBACK_PORT"
 }
 
 # lines LOG: the number of lines LOG has now (a mark to search after).
@@ -162,17 +157,17 @@ app_verdict() {
   APP_TOTAL="$(echo "$line" | sed -E 's/.*UNDRA-RN CHECKS ([0-9]+)\/([0-9]+) passed.*/\2/')"
 }
 
-# scan_verdict NONCE SECRET_HITS KV_HITS: RN17 from the two scans of the app's files.
+# scan_verdict NONCE SECRET_HITS KV_HITS: RN22 from the two scans of the app's files.
 scan_verdict() {
   local nonce="$1" secret_hits="$2" kv_hits="$3"
   if [ -z "$nonce" ]; then
-    outside RN17 "SecureStore is not plain text in the app's files" 1 "the app logged no marker nonce (RN12)"
+    outside RN22 "SecureStore is not plain text in the app's files" 1 "the app logged no marker nonce (RN12)"
   elif [ "$kv_hits" -lt 1 ]; then
-    outside RN17 "SecureStore is not plain text in the app's files" 1 "the scan did not find the Kv marker either: it cannot see the app's files"
+    outside RN22 "SecureStore is not plain text in the app's files" 1 "the scan did not find the Kv marker either: it cannot see the app's files"
   elif [ "$secret_hits" -ne 0 ]; then
-    outside RN17 "SecureStore is not plain text in the app's files" 1 "UNDRA-SECRET-$nonce found in $secret_hits file(s)"
+    outside RN22 "SecureStore is not plain text in the app's files" 1 "UNDRA-SECRET-$nonce found in $secret_hits file(s)"
   else
-    outside RN17 "SecureStore is not plain text in the app's files" 0 "UNDRA-SECRET-$nonce in no file; the Kv marker next to it in $kv_hits (the scan sees the files)"
+    outside RN22 "SecureStore is not plain text in the app's files" 0 "UNDRA-SECRET-$nonce in no file; the Kv marker next to it in $kv_hits (the scan sees the files)"
   fi
 }
 
@@ -332,11 +327,11 @@ ios() {
   return "$rc"
 }
 
-# ios_phases UDID LOG: RN17..RN19 on the simulator (it has no airplane mode: no RN20).
+# ios_phases UDID LOG: RN22..RN24 on the simulator (it has no airplane mode: no RN25).
 ios_phases() {
   local udid="$1" log="$2" nonce data secret_hits kv_hits wrote previous mark bg fg
   echo "== outside the app"
-  # RN17: the simulator's data container is a directory of this Mac. The Keychain is not in it (it is the
+  # RN22: the simulator's data container is a directory of this Mac. The Keychain is not in it (it is the
   # simulator's own database): a secret written there must not appear in the app's files.
   nonce="$(grep -E 'UNDRA-RN CHECK RN12 PASS' "$log" | tail -n 1 | sed -E 's/.*marker nonce ([a-z0-9]+).*/\1/')"
   data="$(xcrun simctl get_app_container "$udid" "$IOS_BUNDLE" data)"
@@ -345,7 +340,7 @@ ios_phases() {
   kv_hits="$({ grep -r -l -a -F "UNDRA-KVMARK-$nonce" "$data" 2>/dev/null || true; } | wc -l | tr -d ' ')"
   scan_verdict "$nonce" "$secret_hits" "$kv_hits"
 
-  # RN18: kill the app, launch it again; it reads what the first launch wrote.
+  # RN23: kill the app, launch it again; it reads what the first launch wrote.
   wrote="$(grep -E 'UNDRA-RN KV wrote=' "$log" | tail -n 1 | sed -E 's/.*wrote=([a-z0-9]+).*/\1/')"
   xcrun simctl terminate "$udid" "$IOS_BUNDLE" >/dev/null 2>&1 || true
   sleep 1
@@ -353,12 +348,12 @@ ios_phases() {
   xcrun simctl launch "$udid" "$IOS_BUNDLE" >/dev/null
   previous="$(wait_line "$log" "$mark" 'UNDRA-RN KV previous=' 90 | sed -E 's/.*previous=([^ ]+).*/\1/' || true)"
   if [ -n "$wrote" ] && [ "$previous" = "$wrote" ]; then
-    outside RN18 "Kv survives the process" 0 "the first launch wrote $wrote; after the kill the second read $previous"
+    outside RN23 "Kv survives the process" 0 "the first launch wrote $wrote; after the kill the second read $previous"
   else
-    outside RN18 "Kv survives the process" 1 "the first launch wrote '${wrote}', the second read '${previous}'"
+    outside RN23 "Kv survives the process" 1 "the first launch wrote '${wrote}', the second read '${previous}'"
   fi
 
-  # RN19: another app in front (Settings), then this one again. The Device store's signals are no_coalesce, so
+  # RN24: another app in front (Settings), then this one again. The Device store's signals are no_coalesce, so
   # the background report shows even if the app's JavaScript only drains it once it is back.
   wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=active' 60 >/dev/null || true
   mark="$(lines "$log")"
@@ -368,9 +363,9 @@ ios_phases() {
   bg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=background' 30 || true)"
   fg="$(lifecycle_back "$log" "$mark" "$bg")"
   if [ -n "$bg" ] && [ -n "$fg" ]; then
-    outside RN19 "Lifecycle reaches the core" 0 "Settings in front: '$bg'; back: '$fg'"
+    outside RN24 "Lifecycle reaches the core" 0 "Settings in front: '$bg'; back: '$fg'"
   else
-    outside RN19 "Lifecycle reaches the core" 1 "background: '${bg}', active again: '${fg}'"
+    outside RN24 "Lifecycle reaches the core" 1 "background: '${bg}', active again: '${fg}'"
   fi
 }
 
@@ -437,12 +432,12 @@ android() {
   return "$rc"
 }
 
-# android_phases ADB SERIAL LOG: RN17..RN20 on the emulator or phone.
+# android_phases ADB SERIAL LOG: RN22..RN25 on the emulator or phone.
 android_phases() {
   local adb="$1" serial="$2" log="$3" nonce secret_hits kv_hits wrote previous mark bg fg off on
   local app_dir="/data/data/$ANDROID_PACKAGE"
   echo "== outside the app"
-  # RN17: the app's private directory needs root to read from outside (a userdebug emulator image has `su`; a
+  # RN22: the app's private directory needs root to read from outside (a userdebug emulator image has `su`; a
   # release build is not debuggable, so `run-as` cannot).
   nonce="$(grep -E 'UNDRA-RN CHECK RN12 PASS' "$log" | tail -n 1 | sed -E 's/.*marker nonce ([a-z0-9]+).*/\1/')"
   if "$adb" -s "$serial" shell "su 0 true" >/dev/null 2>&1; then
@@ -450,22 +445,22 @@ android_phases() {
     kv_hits="$({ "$adb" -s "$serial" shell "su 0 grep -r -l -F 'UNDRA-KVMARK-$nonce' $app_dir" 2>/dev/null || true; } | tr -d '\r' | { grep -c . || true; })"
     scan_verdict "$nonce" "$secret_hits" "$kv_hits"
   else
-    outside RN17 "SecureStore is not plain text in the app's files" 1 "no root (su) on $serial: the app's files cannot be read from outside"
+    outside RN22 "SecureStore is not plain text in the app's files" 1 "no root (su) on $serial: the app's files cannot be read from outside"
   fi
 
-  # RN18: kill the process, start the app again; it reads what the first launch wrote.
+  # RN23: kill the process, start the app again; it reads what the first launch wrote.
   wrote="$(grep -E 'UNDRA-RN KV wrote=' "$log" | tail -n 1 | sed -E 's/.*wrote=([a-z0-9]+).*/\1/')"
   "$adb" -s "$serial" shell am force-stop "$ANDROID_PACKAGE" >/dev/null 2>&1 || true
   mark="$(lines "$log")"
   "$adb" -s "$serial" shell am start -W -n "$ANDROID_PACKAGE/$ANDROID_ACTIVITY" >/dev/null
   previous="$(wait_line "$log" "$mark" 'UNDRA-RN KV previous=' 90 | sed -E 's/.*previous=([^ ]+).*/\1/' || true)"
   if [ -n "$wrote" ] && [ "$previous" = "$wrote" ]; then
-    outside RN18 "Kv survives the process" 0 "the first launch wrote $wrote; after force-stop the second read $previous"
+    outside RN23 "Kv survives the process" 0 "the first launch wrote $wrote; after force-stop the second read $previous"
   else
-    outside RN18 "Kv survives the process" 1 "the first launch wrote '${wrote}', the second read '${previous}'"
+    outside RN23 "Kv survives the process" 1 "the first launch wrote '${wrote}', the second read '${previous}'"
   fi
 
-  # RN19: Home, then the app again. React Native pauses the JS timers of a backgrounded Android app, so the
+  # RN24: Home, then the app again. React Native pauses the JS timers of a backgrounded Android app, so the
   # app's mirror applies the core's background report when it is back (the Device store's signals are
   # no_coalesce: each report is applied, in order); the core itself received it at Home.
   wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=active' 60 >/dev/null || true
@@ -476,12 +471,12 @@ android_phases() {
   bg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=background' 30 || true)"
   fg="$(lifecycle_back "$log" "$mark" "$bg")"
   if [ -n "$bg" ] && [ -n "$fg" ]; then
-    outside RN19 "Lifecycle reaches the core" 0 "Home: '$bg'; back: '$fg'"
+    outside RN24 "Lifecycle reaches the core" 0 "Home: '$bg'; back: '$fg'"
   else
-    outside RN19 "Lifecycle reaches the core" 1 "background: '${bg}', active again: '${fg}'"
+    outside RN24 "Lifecycle reaches the core" 1 "background: '${bg}', active again: '${fg}'"
   fi
 
-  # RN20: real airplane mode, then out of it (switched off on any exit).
+  # RN25: real airplane mode, then out of it (switched off on any exit).
   CLEANUPS+=("'$adb' -s '$serial' shell cmd connectivity airplane-mode disable")
   mark="$(lines "$log")"
   "$adb" -s "$serial" shell cmd connectivity airplane-mode enable
@@ -490,9 +485,9 @@ android_phases() {
   "$adb" -s "$serial" shell cmd connectivity airplane-mode disable
   on="$(wait_line "$log" "$mark" 'UNDRA-RN CONNECTIVITY online=true' 90 || true)"
   if [ -n "$off" ] && [ -n "$on" ]; then
-    outside RN20 "Connectivity follows airplane mode" 0 "on: '$off'; off: '$on'"
+    outside RN25 "Connectivity follows airplane mode" 0 "on: '$off'; off: '$on'"
   else
-    outside RN20 "Connectivity follows airplane mode" 1 "airplane mode on: '${off}', off: '${on}'"
+    outside RN25 "Connectivity follows airplane mode" 1 "airplane mode on: '${off}', off: '${on}'"
   fi
 }
 

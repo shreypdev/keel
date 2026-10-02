@@ -11,6 +11,9 @@ export default defineConfig({
       // the playground's web app does, so a change to either is tested without a build step.
       // The more specific alias first: the first match wins, and `@undra/runtime` would claim the subpath too.
       "@undra/runtime/worker": at("../../runtimes/ts/@undra/runtime/src/worker.ts"),
+      "@undra/runtime/realtime": at("../../runtimes/ts/@undra/runtime/src/realtime.ts"),
+      "@undra/runtime/db-worker": at("../../runtimes/ts/@undra/runtime/src/db-worker.ts"),
+      "@undra/runtime/db": at("../../runtimes/ts/@undra/runtime/src/db.ts"),
       "@undra/runtime": at("../../runtimes/ts/@undra/runtime/src/index.ts"),
       "@undra/testkit": at("../../runtimes/ts/@undra/testkit/src/index.ts"),
       "@playground/core": at("../../examples/playground/generated/ts/src/index.ts"),

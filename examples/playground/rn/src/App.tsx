@@ -5,13 +5,15 @@ import { runBench } from './bench';
 import { runChecks } from './checks';
 import { BenchScreen, type BenchState } from './screens/BenchScreen';
 import { BigListScreen } from './screens/BigListScreen';
+import { NotesScreen } from './screens/NotesScreen';
 import { TodosScreen } from './screens/TodosScreen';
 import { colors } from './theme';
 import { type Playground, nativeCounters, startUndra } from './undra';
 
-type Tab = 'todos' | 'biglist' | 'bench';
+type Tab = 'todos' | 'notes' | 'biglist' | 'bench';
 const TABS: ReadonlyArray<readonly [Tab, string]> = [
   ['todos', 'Todos'],
+  ['notes', 'Notes'],
   ['biglist', '10k list'],
   ['bench', 'Bench'],
 ];
@@ -21,8 +23,9 @@ const SEED = ['Put Undra under React Native', 'Run the 10k list', 'Read ADR-038'
 
 /**
  * The React Native playground: the playground's one Rust core, linked into the app and reached
- * through JSI by @undra/react-native, under the Todos and 10k-list screens of the web app, plus a
- * Bench screen with on-device self-checks and the measurements of ADR-038.
+ * through JSI by @undra/react-native, under the Todos and 10k-list screens of the web app, a Notes
+ * screen kept in SQLite through the native `Db` port (ADR-048), plus a Bench screen with on-device
+ * self-checks and the measurements of ADR-038.
  */
 export default function App() {
   const [playground, setPlayground] = useState<Playground | null>(null);
@@ -103,6 +106,8 @@ export default function App() {
             <ActivityIndicator style={styles.loading} />
           ) : tab === 'todos' ? (
             <TodosScreen todos={playground.todos} />
+          ) : tab === 'notes' ? (
+            <NotesScreen notes={playground.notes} />
           ) : tab === 'biglist' ? (
             <BigListScreen bigList={playground.bigList} />
           ) : (

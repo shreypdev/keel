@@ -24,6 +24,8 @@
 //! | [`bench`](mod@bench) | the budget-row methods: a primitive call, 1 KB echo, 100 dirty signals, one insert |
 //! | [`stress`](mod@stress) | high-frequency data: a Timer-paced generator (and bursts) of one-write transactions the platforms apply once per frame, and a `no_coalesce` signal they apply step by step |
 //! | [`updates`](mod@updates) | shipping an update (ADR-037): stores and queued mutations a second build changes, the persistence status, and an app sync port (ADR-049) |
+//! | [`live`](mod@live) | real-time through the opt-in `WebSocket` and `Sse` ports: an echo, a connection read on demand (the core's credit), an event-stream reader that resumes |
+//! | [`notes`](mod@notes) | a keyed list kept in SQLite through the opt-in `Db` port: migrations, bound statements, transactions, typed errors |
 //!
 //! The core reads no clock and no random source and starts no thread (R12): identities come from
 //! counters, time from the `Clock` port, delays from `Ctx::sleep` and the network from the
@@ -36,6 +38,8 @@ pub mod bench;
 pub mod biglist;
 pub mod counter;
 pub mod lab;
+pub mod live;
+pub mod notes;
 pub mod platform;
 pub mod remote;
 pub mod stress;
@@ -50,6 +54,8 @@ pub use lab::{
     echo_composite, echo_figure, echo_primitives, explode, explode_later, fail_later, greet,
     parse_count, ping, version,
 };
+pub use live::{Live, SseFollow, sse_follow, ws_echo};
+pub use notes::{DbCells, Note, Notes, db_cells, db_migrate, db_run};
 pub use remote::{
     RemoteConfig, RemoteError, RemoteTodo, configure_remote, create_remote_todo, patch_remote_todo,
     post_remote_todo, remote_todos, set_remote_done,

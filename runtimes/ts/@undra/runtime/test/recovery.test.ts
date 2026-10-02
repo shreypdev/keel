@@ -1,5 +1,13 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DbErrorCodec, DbMigrationCodec, DbOpenedCodec, DbRowsCodec, DbValueCodec, HeaderCodec, WsOpenedCodec } from "../src/adapters/codecs.js";
+import { OptInPortIds } from "../src/adapters/opt-in-ids.js";
+import type { WsMessage } from "../src/adapters/types.js";
 import { UndraCallError, UndraUnhandledError } from "../src/call-error.js";
+import { dbPort, nodeSqliteDb } from "../src/db.js";
+import { type WebSocketAdapter, webSocketPort } from "../src/realtime.js";
 import { UndraCore } from "../src/core.js";
 import { UndraTransportError } from "../src/errors.js";
 import { UndraStore } from "../src/object.js";
@@ -24,6 +32,7 @@ import {
   CallTarget,
   ChangeOp,
   Kind,
+  PortStatus,
   codecs,
   decodeSnapshot,
   decodeValue,
@@ -33,6 +42,7 @@ import {
 } from "../src/wire/index.js";
 import { FakeCoreTransport, SCHEMA } from "./support/fake-core.js";
 import { captureLog, deferred, macrotask, microtasks, track } from "./support/harness.js";
+import { args } from "./support/port-calls.js";
 import { CounterStore, u32 } from "./support/store.js";
 import { STUB, compileStub } from "./support/stub-core.js";
 import { channelWorker } from "./support/worker.js";
@@ -548,6 +558,78 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
   });
 });
 
+describe("ports that hold platform resources across a restart (ADR-047, ADR-048)", () => {
+  const strings = codecs.vec(codecs.string);
+  const headers = codecs.vec(HeaderCodec);
+  const values = codecs.vec(DbValueCodec);
+  const connectArgs = (url: string) =>
+    args((w) => {
+      w.writeStr(url);
+      strings.encode(w, []);
+      headers.encode(w, []);
+    });
+  const statementArgs = (id: number, sql: string) =>
+    args((w) => {
+      w.writeU32(id);
+      w.writeStr(sql);
+      values.encode(w, []);
+    });
+  const openArgs = (name: string) =>
+    args((w) => {
+      w.writeStr(name);
+      codecs.vec(DbMigrationCodec).encode(w, [{ version: 1, sql: "CREATE TABLE t (v INTEGER)" }]);
+    });
+
+  it("a restart closes the WebSocket connections of the instance that trapped (1001), and the port serves the new instance", async () => {
+    const closes: Array<[number, string]> = [];
+    const adapter: WebSocketAdapter = {
+      connect: async () => ({
+        protocol: "",
+        messages: () => ({ [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<WsMessage>>(() => {}) }) }),
+        send: async () => {},
+        close: async (code, reason) => {
+          closes.push([code, reason]);
+        },
+      }),
+    };
+    const ws = OptInPortIds.WebSocket;
+    const t = await recovering({ ports: { [ws.portId]: webSocketPort(adapter) } });
+    const first = await t.fake.callPort(ws.portId, ws.connect, connectArgs("ws://old.test/"));
+    expect(decodeValue(WsOpenedCodec, first.body).conn).toBe(1);
+    t.fake.trap();
+    await until("the restart", () => t.restarts.length === 1);
+    expect(closes, "the connection of the instance that trapped is closed going away").toEqual([[1001, ""]]);
+    const second = await t.fake.callPort(ws.portId, ws.connect, connectArgs("ws://new.test/"));
+    expect(second.status, "the port still serves the new instance").toBe(PortStatus.Ok);
+    expect(decodeValue(WsOpenedCodec, second.body).conn).toBe(2);
+  });
+
+  it("a restart rolls back the transaction the instance that trapped left open: the new instance's begin is not Busy", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "undra-restart-db-"));
+    try {
+      const db = OptInPortIds.Db;
+      const t = await recovering({ ports: { [db.portId]: dbPort(nodeSqliteDb({ directory })) } });
+      const opened = decodeValue(DbOpenedCodec, (await t.fake.callPort(db.portId, db.open, openArgs("app"))).body);
+      const tx = decodeValue(codecs.u32, (await t.fake.callPort(db.portId, db.begin, args((w) => w.writeU32(opened.db)))).body);
+      expect((await t.fake.callPort(db.portId, db.execute, statementArgs(tx, "INSERT INTO t VALUES (1)"))).status).toBe(PortStatus.Ok);
+      t.fake.trap();
+      await until("the restart", () => t.restarts.length === 1);
+      const again = decodeValue(DbOpenedCodec, (await t.fake.callPort(db.portId, db.open, openArgs("app"))).body);
+      const started = Date.now();
+      const begun = await t.fake.callPort(db.portId, db.begin, args((w) => w.writeU32(again.db)));
+      expect(begun.status === PortStatus.Ok ? "ok" : decodeValue(DbErrorCodec, begun.body), "BEGIN IMMEDIATE got the write lock").toBe("ok");
+      expect(Date.now() - started, "at once, not after SQLite's busy timeout").toBeLessThan(1000);
+      const tx2 = decodeValue(codecs.u32, begun.body);
+      const rows = decodeValue(DbRowsCodec, (await t.fake.callPort(db.portId, db.query, statementArgs(tx2, "SELECT COUNT(*) FROM t"))).body);
+      expect(rows.rows, "the uncommitted row is gone").toEqual([[{ kind: "integer", value: 0n }]]);
+      expect((await t.fake.callPort(db.portId, db.commit, args((w) => w.writeU32(tx2)))).status).toBe(PortStatus.Ok);
+      expect((await t.fake.callPort(db.portId, db.close, args((w) => w.writeU32(again.db)))).status).toBe(PortStatus.Ok);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+});
+
 describe("the wasm transports restart over the stub core", () => {
   it("wasm-main: the same compiled module again, the kept snapshot restored, the core usable", async () => {
     const wasm = await compileStub({ snapshot: true });
@@ -652,6 +734,37 @@ describe("the wasm transports restart over the stub core", () => {
       worker?.close();
     },
   );
+
+  it("wasm-worker: the ports of the worker's ports module release what the instance held at a restart, and when the worker closes", async () => {
+    const url = new URL("./support/worker-ports/disposing.mjs", import.meta.url).href;
+    const { disposed } = (await import(url)) as { disposed: string[] };
+    disposed.length = 0;
+    const module = await WebAssembly.compile((await compileStub({ snapshot: true })) as Uint8Array<ArrayBuffer>);
+    const worker = channelWorker();
+    const restarts: UndraCoreRestarted[] = [];
+    const transport = new WasmWorkerTransport({
+      wasm: module,
+      expectedSchemaHash: STUB.SCHEMA_HASH,
+      worker: worker.host,
+      ports: url,
+      recovery: { snapshotEveryMs: 0, maxSnapshotBytes: 1024 },
+    });
+    const core = track(
+      await UndraCore.attach(transport, {
+        expectedSchemaHash: STUB.SCHEMA_HASH,
+        shared: false,
+        adapters: { log: captureLog(), http: null, timer: null },
+        recovery: crashRecovery(),
+        onCoreRestarted: (event) => restarts.push(event),
+      }),
+    );
+    await expect(core.call(FREE, STUB.PANIC, new Uint8Array(0))).rejects.toMatchObject({ reason: "restarted" });
+    await until("the restart", () => restarts.length === 1);
+    expect(disposed, "released at the restart").toEqual(["dispose"]);
+    core.close();
+    await until("the worker to close", () => disposed.length === 2);
+    worker.close();
+  });
 
   it("wasm-worker: the worker keeps the snapshot and restarts the core itself", async () => {
     const module = await WebAssembly.compile((await compileStub({ snapshot: true })) as Uint8Array<ArrayBuffer>);

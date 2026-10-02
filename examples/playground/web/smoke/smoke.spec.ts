@@ -309,3 +309,52 @@ test("a core that cannot be loaded is reported on the page", async ({ page }) =>
   await expect(alert).toContainText("wasm core");
   await expect(page.getByTestId("tab-todos")).toHaveCount(0);
 });
+
+test("live and notes: the core's WebSocket echoes through the browser, and its SQLite keeps notes in OPFS", async ({ page }) => {
+  mkdirSync(PROOF, { recursive: true });
+  const problems: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") problems.push(message.text());
+  });
+  page.on("pageerror", (error) => problems.push(error.message));
+
+  await page.goto("/#live");
+  await expect(page.getByTestId("live-url")).toHaveValue("ws://127.0.0.1:4180/ws/echo");
+  await page.getByTestId("live-connect").click();
+  await expect(page.getByTestId("live-state")).toHaveText("open");
+  await page.getByTestId("live-draft").fill("hello from the core");
+  await page.getByTestId("live-send").click();
+  await expect(page.locator('[data-testid="live-message"][data-direction="out"]')).toHaveText(["→ hello from the core"]);
+  await expect(page.locator('[data-testid="live-message"][data-direction="in"]')).toHaveText(["← hello from the core"]);
+  await page.getByTestId("live-disconnect").click();
+  await expect(page.getByTestId("live-state")).toHaveText("closed");
+  await expect(page.getByTestId("live-error")).toHaveCount(0);
+  await page.screenshot({ path: `${PROOF}web-live.png`, fullPage: true });
+
+  // A refused upgrade is a typed error on the page (a browser hides the status).
+  await page.getByTestId("live-url").fill("ws://127.0.0.1:4180/ws/deny?status=401");
+  await page.getByTestId("live-connect").click();
+  await expect(page.getByTestId("live-error")).toContainText("the WebSocket was refused");
+
+  // Notes: the core's Db port over wa-sqlite in a dedicated worker on OPFS. A row added survives a reload.
+  await page.getByTestId("tab-notes").click();
+  await expect(page.getByTestId("notes-version")).toHaveText("schema version 2");
+  await expect(page.getByTestId("notes-item")).toHaveCount(0);
+  await page.getByTestId("notes-input").fill("Buy milk");
+  await page.getByTestId("notes-add").click();
+  await page.getByTestId("notes-input").fill("Write the report");
+  await page.getByTestId("notes-add").click();
+  await expect(page.getByTestId("notes-item")).toHaveText(["Buy milk", "Write the report"]);
+  // The box follows the database: it is checked once the core's UPDATE ran and the mirror says so.
+  await page.getByTestId("notes-toggle").first().click();
+  await expect(page.getByTestId("notes-toggle").first()).toBeChecked();
+  await expect(page.getByTestId("notes-error")).toHaveCount(0);
+  await page.screenshot({ path: `${PROOF}web-notes.png`, fullPage: true });
+  await page.reload();
+  await expect(page.getByTestId("notes-version")).toHaveText("schema version 2");
+  await expect(page.getByTestId("notes-item"), "the notes are in OPFS, not in the page").toHaveText(["Buy milk", "Write the report"]);
+  await expect(page.getByTestId("notes-toggle").first()).toBeChecked();
+
+  // The refused upgrade is logged by Chromium itself ("WebSocket connection to ... failed"); nothing else may be.
+  expect(problems.filter((text) => !text.includes("WebSocket connection to"))).toEqual([]);
+});

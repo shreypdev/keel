@@ -3,13 +3,14 @@ name: RN devices
 # The React Native playground app on an iPhone simulator and an Android emulator: build the core and the
 # Release app, install it, launch it, and wait for the app's own verdict in the device log,
 #
-#     UNDRA-RN CHECKS 16/16 passed
+#     UNDRA-RN CHECKS 21/21 passed
 #
-# (RN01..RN16, examples/playground/rn/src/checks.ts: the JSI host under Hermes, the C++ module's ownership and
-# threading, the native frame source, panic containment, the schema-hash check, and each default port through the
-# core), then the script's own RN17..RN20 (a secret not in the app's files, Kv across a killed process, Lifecycle to
-# the background and back, Connectivity in airplane mode on Android; ADR-038 amendment B) and the total,
-# `UNDRA-RN CHECKS 19/19 passed` on iOS and `20/20` on Android. scripts/rn-device-checks.sh is
+# (RN01..RN21, examples/playground/rn/src/checks.ts: the JSI host under Hermes, the C++ module's ownership and
+# threading, the native frame source, panic containment, the schema-hash check, each default port through the
+# core, and the opt-in ports of ADR-047/048: Db natively, WebSocket and SSE against the script's realtime server),
+# then the script's own RN22..RN25 (a secret not in the app's files, Kv across a killed process, Lifecycle to the
+# background and back, Connectivity in airplane mode on Android; ADR-038 amendment B) and the total,
+# `UNDRA-RN CHECKS 24/24 passed` on iOS and `25/25` on Android. scripts/rn-device-checks.sh is
 # the whole recipe and runs the same way on a developer's Mac, so a red job here is reproduced with
 # `scripts/rn-device-checks.sh ios` or `... android`. What needs no device (the C++ host under sanitizers, the
 # JSI compile check, the unit tests, the contract column) is the `react-native` job of ci.yml, on every push.

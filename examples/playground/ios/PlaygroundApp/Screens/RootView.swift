@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// The four screens, one per tab. Launch with `-tab remote` (or `todos`, `counter`, `biglist`) to
-/// start on another one: `xcrun simctl launch booted dev.undra.playground -tab remote`.
+/// The five screens, one per tab. Launch with `-tab remote` (or `todos`, `counter`, `biglist`,
+/// `notes`) to start on another one: `xcrun simctl launch booted dev.undra.playground -tab remote`.
 struct RootView: View {
     /// A tab of the app; the raw value is what `-tab` takes.
     enum Tab: String {
-        case todos, counter, biglist, remote
+        case todos, counter, biglist, remote, notes
     }
 
     let model: PlaygroundModel
@@ -25,6 +25,9 @@ struct RootView: View {
             RemoteScreen(inbox: model.inbox)
                 .tabItem { Label("Remote", systemImage: "icloud").accessibilityIdentifier("tab-remote") }
                 .tag(Tab.remote)
+            NotesScreen(notes: model.notes)
+                .tabItem { Label("Notes", systemImage: "note.text").accessibilityIdentifier("tab-notes") }
+                .tag(Tab.notes)
         }
     }
 }

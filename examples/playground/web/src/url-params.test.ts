@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { STRESS_MAX_RATE, parseParams, parseThemeMessage, resolveTab, tabFromHash } from "./url-params";
+import { DEFAULT_LIVE_URL, STRESS_MAX_RATE, parseParams, parseThemeMessage, resolveTab, tabFromHash } from "./url-params";
 
 /** What a query that asks for nothing parses to. */
-const NOTHING = { screen: undefined, stream: false, embed: false, theme: undefined, rate: undefined, mode: undefined, autostart: false };
+const NOTHING = { screen: undefined, stream: false, embed: false, theme: undefined, rate: undefined, mode: undefined, autostart: false, ws: undefined };
 
 describe("parseParams", () => {
   test("an empty query asks for nothing", () => {
@@ -22,7 +22,9 @@ describe("parseParams", () => {
     });
   });
 
-  test("screen names the five views; list is the 10k list (tab id biglist)", () => {
+  test("screen names the seven views; list is the 10k list (tab id biglist)", () => {
+    expect(parseParams("?screen=live").screen).toBe("live");
+    expect(parseParams("?screen=notes").screen).toBe("notes");
     expect(parseParams("?screen=todos").screen).toBe("todos");
     expect(parseParams("?screen=counter").screen).toBe("counter");
     expect(parseParams("?screen=list").screen).toBe("biglist");
@@ -72,6 +74,14 @@ describe("parseParams", () => {
     expect(parseParams("?mode=firehose").mode).toBe("firehose");
     expect(parseParams("?mode=%20PROGRESS%20").mode).toBe("progress");
     for (const bad of ["churn", "board", "", "toString", "__proto__", "0"]) expect(parseParams(`?mode=${bad}`).mode, `mode=${bad}`).toBeUndefined();
+  });
+
+  test("ws is a ws:// or wss:// URL for the Live view; anything else is the default", () => {
+    expect(parseParams("?ws=ws://127.0.0.1:9000/ws/echo").ws).toBe("ws://127.0.0.1:9000/ws/echo");
+    expect(parseParams(`?ws=${encodeURIComponent("wss://echo.example/socket?room=1")}`).ws).toBe("wss://echo.example/socket?room=1");
+    expect(parseParams("?ws=%20ws://h/%20").ws).toBe("ws://h/");
+    for (const bad of ["", "http://h/", "javascript:alert(1)", "ws:", "ws://", "h/ws"]) expect(parseParams(`?ws=${encodeURIComponent(bad)}`).ws, `ws=${bad}`).toBeUndefined();
+    expect(DEFAULT_LIVE_URL).toBe("ws://127.0.0.1:4180/ws/echo");
   });
 
   test("theme is light or dark; anything else follows the system", () => {

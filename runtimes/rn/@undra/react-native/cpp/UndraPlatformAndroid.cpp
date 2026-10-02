@@ -4,7 +4,12 @@
 //    `filesDir/undra/fs`, the directories and names of `android-adapters`;
 //  * `SecureStore`: the same C++ store over `noBackupFilesDir/undra/secure`, each value sealed and
 //    opened by Java (`UndraPlatform.seal`/`open`, the Android Keystore), `android-adapters`' layout;
-//  * `Connectivity`: Java's `NetworkMonitor`, reporting into `nativeConnectivityChanged`.
+//  * `Connectivity`: Java's `NetworkMonitor`, reporting into `nativeConnectivityChanged`;
+//  * `Db` (ADR-048): the binding of `UndraDb.cpp` over Android's own SQLite, through Java's `UndraDatabase`
+//    (`android.database.sqlite`, the file `getDatabasePath("undra-<name>.sqlite")` of `android-adapters`): one
+//    byte array of the wire format crosses per statement each way (`DbWire.java`). The NDK has no public
+//    sqlite3, and Android prepares only the first statement of a string and exposes no parameter count, so
+//    this side tells Java both from the SQL lexer of `UndraDb.cpp` (checked against sqlite3 on the host).
 //
 // JNI only, and robust to how the module is linked: the Java class is loaded through the JS thread's
 // context class loader in `makePlatform` (which `install()` calls on the JS thread), its methods are
@@ -21,9 +26,12 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include "UndraDb.h"
 #include "UndraDefaults.h"
 
 namespace undra::rn {
@@ -43,6 +51,13 @@ struct JavaSide {
   jmethodID startConnectivity = nullptr;
   jclass monitor = nullptr; // global reference
   jmethodID stop = nullptr;
+  jclass database = nullptr; // global reference; null when the Java half has no `UndraDatabase`
+  jmethodID dbDirectory = nullptr;
+  jmethodID dbOpen = nullptr;
+  jmethodID dbFailure = nullptr;
+  jmethodID dbExecute = nullptr;
+  jmethodID dbQuery = nullptr;
+  jmethodID dbClose = nullptr;
 };
 
 std::mutex g_javaMutex;
@@ -233,6 +248,46 @@ bool resolveJava(std::string &error) {
     if (loaderClass != nullptr) env->DeleteLocalRef(loaderClass);
     if (classClass != nullptr) env->DeleteLocalRef(classClass);
   }
+  // The Db port's SQLite, through the same loader; without it `Db` is simply not native (an older Java half).
+  {
+    jclass classClass = env->FindClass("java/lang/Class");
+    jmethodID loaderOf = classClass != nullptr ? env->GetMethodID(classClass, "getClassLoader", "()Ljava/lang/ClassLoader;") : nullptr;
+    jobject loader = loaderOf != nullptr ? env->CallObjectMethod(side.platform, loaderOf) : nullptr;
+    jclass loaderClass = env->FindClass("java/lang/ClassLoader");
+    jmethodID loadClass = loaderClass != nullptr ? env->GetMethodID(loaderClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;") : nullptr;
+    jclass database = nullptr;
+    if (loader != nullptr && loadClass != nullptr && !env->ExceptionCheck()) {
+      jstring name = env->NewStringUTF("dev.undra.reactnative.UndraDatabase");
+      database = static_cast<jclass>(env->CallObjectMethod(loader, loadClass, name));
+      env->DeleteLocalRef(name);
+    }
+    const std::string missing = takeException(env);
+    if (database != nullptr) {
+      auto method = [&](const char *name, const char *signature, bool isStatic) -> jmethodID {
+        jmethodID id = isStatic ? env->GetStaticMethodID(database, name, signature) : env->GetMethodID(database, name, signature);
+        takeException(env);
+        return id;
+      };
+      side.dbDirectory = method("directory", "()Ljava/lang/String;", true);
+      side.dbOpen = method("open", "(Ljava/lang/String;)Ldev/undra/reactnative/UndraDatabase;", true);
+      side.dbFailure = method("failure", "()[B", false);
+      side.dbExecute = method("execute", "(Ljava/lang/String;[BIZ)[B", false);
+      side.dbQuery = method("query", "(Ljava/lang/String;[BIZ)[B", false);
+      side.dbClose = method("close", "()V", false);
+      if (side.dbDirectory != nullptr && side.dbOpen != nullptr && side.dbFailure != nullptr && side.dbExecute != nullptr &&
+          side.dbQuery != nullptr && side.dbClose != nullptr) {
+        side.database = static_cast<jclass>(env->NewGlobalRef(database));
+      } else {
+        __android_log_print(ANDROID_LOG_WARN, kTag, "dev.undra.reactnative.UndraDatabase lacks a method this module calls: Db is not native");
+      }
+      env->DeleteLocalRef(database);
+    } else {
+      __android_log_print(ANDROID_LOG_WARN, kTag, "no dev.undra.reactnative.UndraDatabase (%s): Db is not native", missing.c_str());
+    }
+    if (loader != nullptr) env->DeleteLocalRef(loader);
+    if (loaderClass != nullptr) env->DeleteLocalRef(loaderClass);
+    if (classClass != nullptr) env->DeleteLocalRef(classClass);
+  }
   const JNINativeMethod natives[] = {
       {const_cast<char *>("nativeConnectivityChanged"), const_cast<char *>("(JZI)V"), reinterpret_cast<void *>(&nativeConnectivityChanged)},
   };
@@ -369,10 +424,169 @@ class JavaNetworkSource final : public ConnectivitySource {
   std::unique_ptr<Report> report_;
 };
 
+/// Reads what `UndraDatabase` answered (`DbWire.java`): `0, body` (into `body`) or `1, class, message`.
+std::optional<DbFailure> readDbResult(JNIEnv *env, jbyteArray result, std::vector<uint8_t> &body) {
+  if (result == nullptr) return DbFailure::sql("the Android SQLite answered nothing");
+  const jsize n = env->GetArrayLength(result);
+  std::vector<uint8_t> bytes(static_cast<std::size_t>(n));
+  if (n > 0) env->GetByteArrayRegion(result, 0, n, reinterpret_cast<jbyte *>(bytes.data()));
+  if (bytes.empty()) return DbFailure::sql("the Android SQLite answered nothing");
+  if (bytes[0] == 0) {
+    body.assign(bytes.begin() + 1, bytes.end());
+    return std::nullopt;
+  }
+  WireReader r(bytes.data() + 1, bytes.size() - 1);
+  const std::string className = r.str();
+  const std::string message = r.str();
+  if (!r.finish()) return DbFailure::sql("the Android SQLite answered a malformed failure");
+  return androidDbFailure(className, message);
+}
+
+/// One connection: a global reference to an `UndraDatabase`, used from its database's (attached) thread.
+class JniDbConnection final : public DbConnection {
+ public:
+  JniDbConnection(JavaSide java, jobject db) : java_(java), db_(db) {}
+  ~JniDbConnection() override {
+    close();
+  }
+
+  std::optional<DbFailure> execute(const std::string &sql, const std::vector<DbValue> &params, DbExecuted &out) override {
+    std::vector<uint8_t> body;
+    if (auto failure = statement(java_.dbExecute, sql, params, body)) return failure;
+    WireReader r(body.data(), body.size());
+    out.changes = r.u64();
+    out.lastInsertId = static_cast<int64_t>(r.u64());
+    if (!r.finish()) return DbFailure::sql("the Android SQLite answered a malformed result");
+    return std::nullopt;
+  }
+
+  std::optional<DbFailure> query(const std::string &sql, const std::vector<DbValue> &params, DbRows &out) override {
+    std::vector<uint8_t> body;
+    if (auto failure = statement(java_.dbQuery, sql, params, body)) return failure;
+    WireReader r(body.data(), body.size());
+    out.columns.clear();
+    out.rows.clear();
+    const uint32_t columns = r.u32();
+    for (uint32_t i = 0; i < columns && r.ok(); ++i) out.columns.push_back(r.str());
+    const uint32_t rows = r.u32();
+    for (uint32_t i = 0; i < rows && r.ok(); ++i) {
+      const uint32_t cells = r.u32();
+      std::vector<DbValue> row;
+      row.reserve(cells <= columns ? cells : columns);
+      for (uint32_t c = 0; c < cells && r.ok(); ++c) row.push_back(readDbValue(r));
+      out.rows.push_back(std::move(row));
+    }
+    if (!r.finish()) return DbFailure::sql("the Android SQLite answered malformed rows");
+    return std::nullopt;
+  }
+
+  std::optional<DbFailure> executeScript(const std::string &sql) override {
+    // Android runs one statement per call: the script is split here (SQLite's own rules, `splitSql`).
+    for (const SqlStatement &one : splitSql(sql)) {
+      std::vector<uint8_t> body;
+      if (auto failure = call(java_.dbExecute, sql.substr(one.begin, one.end - one.begin), {}, -1, false, body)) return failure;
+    }
+    return std::nullopt;
+  }
+
+  void close() noexcept override {
+    if (db_ == nullptr) return;
+    if (JNIEnv *env = envOf(java_.vm)) {
+      env->CallVoidMethod(db_, java_.dbClose);
+      takeException(env);
+      env->DeleteGlobalRef(db_);
+    }
+    db_ = nullptr;
+  }
+
+ private:
+  /// One statement of `execute`/`query`: Java gets the first statement, whether SQL follows it, and its
+  /// parameter count, and refuses either after Android compiled it.
+  std::optional<DbFailure> statement(jmethodID method, const std::string &sql, const std::vector<DbValue> &params, std::vector<uint8_t> &body) {
+    const SqlShape shape = sqlShapeOf(sql);
+    if (shape.first.begin == shape.first.end) return DbFailure::sql(db_text::kNoStatement);
+    return call(method, sql.substr(shape.first.begin, shape.first.end - shape.first.begin), params, shape.parameters, shape.trailing, body);
+  }
+
+  std::optional<DbFailure> call(jmethodID method, const std::string &sql, const std::vector<DbValue> &params, int expected, bool trailing,
+      std::vector<uint8_t> &body) {
+    JNIEnv *env = envOf(java_.vm);
+    if (env == nullptr || db_ == nullptr) return DbFailure::unavailable("the database thread is not attached to the Java VM");
+    if (env->PushLocalFrame(8) != JNI_OK) return DbFailure::unavailable("out of JNI local references: " + takeException(env));
+    WireWriter args;
+    args.u32(static_cast<uint32_t>(params.size()));
+    for (const DbValue &value : params) writeDbValue(args, value);
+    std::optional<DbFailure> failure;
+    jstring jsql = javaString(env, sql);
+    jbyteArray jparams = jsql != nullptr ? env->NewByteArray(static_cast<jsize>(args.out.size())) : nullptr;
+    if (jparams != nullptr) {
+      env->SetByteArrayRegion(jparams, 0, static_cast<jsize>(args.out.size()), reinterpret_cast<const jbyte *>(args.out.data()));
+      auto result = static_cast<jbyteArray>(env->CallObjectMethod(db_, method, jsql, jparams, static_cast<jint>(expected), trailing ? JNI_TRUE : JNI_FALSE));
+      const std::string thrown = takeException(env);
+      failure = thrown.empty() ? readDbResult(env, result, body) : DbFailure::sql("the Android SQLite threw " + thrown);
+    } else {
+      failure = DbFailure::unavailable("out of Java memory: " + takeException(env));
+    }
+    env->PopLocalFrame(nullptr);
+    return failure;
+  }
+
+  JavaSide java_;
+  jobject db_;
+};
+
+/// The `Db` backend of Android: `UndraDatabase.open` on the database's thread.
+class JniDbBackend final : public DbBackend {
+ public:
+  JniDbBackend(JavaSide java, std::string directory) : java_(java), directory_(std::move(directory)) {}
+
+  std::unique_ptr<DbConnection> open(const std::string &name, DbFailure &failure) override {
+    JNIEnv *env = envOf(java_.vm);
+    if (env == nullptr) {
+      failure = DbFailure::unavailable("the database thread is not attached to the Java VM");
+      return nullptr;
+    }
+    if (env->PushLocalFrame(8) != JNI_OK) {
+      failure = DbFailure::unavailable("out of JNI local references: " + takeException(env));
+      return nullptr;
+    }
+    std::unique_ptr<DbConnection> connection;
+    jstring jname = javaString(env, name);
+    jobject db = jname != nullptr ? env->CallStaticObjectMethod(java_.database, java_.dbOpen, jname) : nullptr;
+    std::string thrown = takeException(env);
+    if (db == nullptr) {
+      failure = DbFailure::unavailable("the Android SQLite could not open " + name + (thrown.empty() ? "" : ": " + thrown));
+    } else {
+      auto why = static_cast<jbyteArray>(env->CallObjectMethod(db, java_.dbFailure));
+      thrown = takeException(env);
+      if (!thrown.empty()) {
+        failure = DbFailure::unavailable("the Android SQLite could not open " + name + ": " + thrown);
+      } else if (why != nullptr) {
+        std::vector<uint8_t> ignored;
+        failure = readDbResult(env, why, ignored).value_or(DbFailure::unavailable("the Android SQLite could not open " + name));
+      } else if (jobject global = env->NewGlobalRef(db)) {
+        connection = std::make_unique<JniDbConnection>(java_, global);
+      } else {
+        failure = DbFailure::unavailable("out of JNI global references");
+      }
+    }
+    env->PopLocalFrame(nullptr);
+    return connection;
+  }
+
+  std::string describe() const override {
+    return directory_ + "/undra-<name>.sqlite";
+  }
+
+ private:
+  JavaSide java_;
+  std::string directory_;
+};
+
 class AndroidPlatform final : public Platform {
  public:
-  AndroidPlatform(JavaSide java, std::string files, std::string noBackup)
-      : java_(java), files_(std::move(files)), noBackup_(std::move(noBackup)) {}
+  AndroidPlatform(JavaSide java, std::string files, std::string noBackup, std::string databases)
+      : java_(java), files_(std::move(files)), noBackup_(std::move(noBackup)), databases_(std::move(databases)) {}
 
   std::string kvDirectory() override {
     return files_ + "/undra/kv";
@@ -390,6 +604,10 @@ class AndroidPlatform final : public Platform {
     if (java_.stop == nullptr) return nullptr;
     return std::make_unique<JavaNetworkSource>(java_);
   }
+  std::unique_ptr<DbBackend> makeDbBackend() override {
+    if (java_.database == nullptr || databases_.empty()) return nullptr;
+    return std::make_unique<JniDbBackend>(java_, databases_);
+  }
   void workerStarted(const char *name) noexcept override {
     JNIEnv *env = nullptr;
     // The worker's own name (`undra-kv`, ...): attaching renames the thread to the name given here.
@@ -405,6 +623,7 @@ class AndroidPlatform final : public Platform {
   JavaSide java_;
   std::string files_;
   std::string noBackup_;
+  std::string databases_;
   // Per worker thread: whether this thread attached itself.
   static thread_local bool attached_;
 };
@@ -441,7 +660,13 @@ std::unique_ptr<Platform> makePlatform(std::string &error) {
       error = "the app's directories are unknown";
       return nullptr;
     }
-    return std::make_unique<AndroidPlatform>(java, std::move(filesDir), std::move(noBackupDir));
+    std::string databases;
+    if (java.database != nullptr) {
+      auto directory = static_cast<jstring>(env->CallStaticObjectMethod(java.database, java.dbDirectory));
+      if (takeException(env).empty() && directory != nullptr) databases = stdString(env, directory);
+      if (directory != nullptr) env->DeleteLocalRef(directory);
+    }
+    return std::make_unique<AndroidPlatform>(java, std::move(filesDir), std::move(noBackupDir), std::move(databases));
   } catch (const std::exception &e) {
     error = e.what();
     return nullptr;

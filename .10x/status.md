@@ -445,3 +445,12 @@ In flight: `ports` (review resuming: B1 size fix, sub-reviews, matrix), `docs-v1
 
 Matrix at checkpoint 19: Rust 2,993 · TS 1,264 + 32 · Kotlin 682 · Swift 581 · RN 65 · contracts 65/65.
 In flight: `ports` (review resuming).
+
+### Checkpoint 20 (2026-10-02) — ports: WebSocket, SSE and Db
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **ports** (G2+G3, ADR-047/048 Accepted): `WebSocket`, `Sse` and `Db` standard ports behind cargo features (standard hash unchanged `0xbbf6f70d0c567f47`), inbound as a batched pull whose `max` is the credit, typed ends, interactive transactions with a 5 s `Busy` deadline, SQL as `&'static str`; adapters on Swift (`URLSessionWebSocketTask`, SQLite3), Kotlin JVM (own RFC 6455 client, `java.net.http`, JDBC), Android (`android.database.sqlite`), TS (`@undra/runtime/realtime`, `/db` with wa-sqlite in a worker on OPFS), RN (native C++ binding); the playground's Notes and Live tabs; S23–S25; bench rows under budget; the cookbook's `realtime` and Fieldbook's `presence` features on | `50fd54d` | opus review `.10x/reviews/2026-10-02-ports-review.md`: sound after fixes; B1 the hello-world JS 132 B over its gate (`OptInPortIds` moved to the subpaths, dispose on close), H1 a cancelled `connect`/`open`/`begin` orphaned what the platform opened (`owned.rs`), H2 a crash restart kept the trapped instance's connections, H3 two opens ran migrations twice on every binding, H4 Android stuck after a refused `COMMIT`; Rust 3,052 · Swift 668 · Kotlin 753 · TS 1,432 · RN 87 · contracts **74/74**; hello wasm 116.6 KB, JS 25,996/26,000; playground hash `0xb5b7b1dc29182a9d`. Open: a migration containing its own `COMMIT`; the web Db serves one tab per origin |
+
+Matrix at checkpoint 20: Rust 3,052 · TS 1,432 + 32 · Kotlin 753 + 30 · Swift 668 · RN 87 · contracts 74/74 (S01–S26 incl. S23–S25).
+In flight: `objects-callbacks` (ADR-040/041), `ios-floor` (ADR-045), `prod-ops` (ADR-046).

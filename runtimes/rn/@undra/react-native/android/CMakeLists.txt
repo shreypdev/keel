@@ -6,6 +6,8 @@
 # `lib<namespace>.so` (`undra build --platform rn`, or android) the first time JavaScript installs
 # that core (`install(namespace)`, ADR-044), so one build of the module serves every core of the app.
 # The default ports' Java half is the Gradle library next to this file (ADR-038 amendment B, B8).
+# The Db port's SQLite is Android's own, through that Java half: UndraDbSqlite.cpp (the sqlite3 C API,
+# which the NDK does not offer) is iOS's and not built here.
 cmake_minimum_required(VERSION 3.13)
 project(undra_react_native CXX)
 
@@ -14,6 +16,7 @@ set(UNDRA_RN_CPP_DIR ${CMAKE_CURRENT_LIST_DIR}/../cpp)
 add_library(undra_react_native STATIC
   ${UNDRA_RN_CPP_DIR}/UndraApi.cpp
   ${UNDRA_RN_CPP_DIR}/UndraApiAndroid.cpp
+  ${UNDRA_RN_CPP_DIR}/UndraDb.cpp
   ${UNDRA_RN_CPP_DIR}/UndraDefaults.cpp
   ${UNDRA_RN_CPP_DIR}/UndraFrameSource.cpp
   ${UNDRA_RN_CPP_DIR}/UndraHost.cpp

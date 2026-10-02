@@ -27,7 +27,9 @@
 #                                        # space-separated namespace=file pairs, each -Dundra.native.<namespace>.path=<file>
 #
 # Environment: UNDRA_KOTLINX_COROUTINES (kotlinx-coroutines-core-jvm jar; scripts/env.sh sets it),
-# UNDRA_KOTLIN_STDLIB (kotlin-stdlib jar; default: the one inside the kotlinc install).
+# UNDRA_KOTLIN_STDLIB (kotlin-stdlib jar; default: the one inside the kotlinc install), UNDRA_SQLITE_JDBC (the SQLite JDBC
+# driver jar, put on the class path of the test run only: :runtime itself depends on nothing; JdbcDbAdapterTests skips
+# without it, or fails with UNDRA_REQUIRE_TOOLCHAINS=1).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # runtimes/kotlin/undra-runtime
@@ -180,8 +182,13 @@ phase_run() {
       *) echo "error: UNDRA_NATIVE_PATHS takes namespace=file pairs, got: $pair" >&2; exit 2 ;;
     esac
   done
+  local driver="${UNDRA_SQLITE_JDBC:-}"
+  if [ -n "$driver" ] && [ ! -f "$driver" ]; then
+    echo "error: UNDRA_SQLITE_JDBC=$driver is not a file" >&2
+    exit 2
+  fi
   # runtime/src/main/resources is on the classpath as in the jar (the R8 consumer rules, META-INF/proguard).
-  java "${jflags[@]}" -cp "$(join_cp "$OUT/main" "$HERE/runtime/src/main/resources" "$OUT/test" "$STDLIB" "$COROUTINES")" \
+  java "${jflags[@]}" -cp "$(join_cp "$OUT/main" "$HERE/runtime/src/main/resources" "$OUT/test" "$STDLIB" "$COROUTINES" "$driver")" \
     dev.undra.runtime.TestMainKt
 }
 

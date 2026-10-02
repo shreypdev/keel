@@ -21,6 +21,10 @@
 #   3. the JSI layer compiled against React Native's headers, skipped when the playground app's
 #      dependencies are not installed; UNDRA_RN_REQUIRE_JSI=1 (CI) makes that a failure instead;
 #   4. the Apple platform of the default ports compiled against the iOS SDK (macOS with Xcode).
+#
+# The Db port's checks (step 0b and the Db part of steps 1 and 2) run against the system SQLite
+# (`sqlite3.h` and `-lsqlite3`: macOS has both; Linux needs `libsqlite3-dev`) and are skipped without it;
+# UNDRA_RN_REQUIRE_SQLITE=1 makes that a failure.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,12 +67,31 @@ trap 'rm -rf "$out"' EXIT
 flags=(-std=c++20 -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer
   -fno-sanitize-recover=undefined -I "$pkg/cpp" "-DUNDRA_TEST_NAMESPACE=\"$ns1\"" "-DUNDRA_TEST_SECOND_NAMESPACE=\"$ns2\"")
 cflags=(-std=c11 -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -I "$pkg/cpp")
-sources=("$pkg/cpp/UndraApi.cpp" "$pkg/cpp/UndraHost.cpp" "$pkg/cpp/UndraDefaults.cpp" "$pkg/cpp/UndraStores.cpp" "$here/host_test.cpp")
+sources=("$pkg/cpp/UndraApi.cpp" "$pkg/cpp/UndraHost.cpp" "$pkg/cpp/UndraDefaults.cpp" "$pkg/cpp/UndraDb.cpp" "$pkg/cpp/UndraStores.cpp" "$here/host_test.cpp")
 
 # 0. The portable Kv and Fs (UndraStores.cpp), on this machine's file system: no core needed.
 echo "# the portable Kv and Fs stores"
 "${CXX:-clang++}" "${flags[@]}" "$pkg/cpp/UndraStores.cpp" "$here/stores_test.cpp" -o "$out/stores_test"
 "$out/stores_test"
+
+# 0b. The Db port (UndraDb.cpp, the binding; UndraDbSqlite.cpp, the sqlite3 C API backend of iOS) against
+#     the system SQLite, with no core: the binding's semantics, the typed errors, the SQL lexer against sqlite3.
+sqlite=()
+printf '#include <sqlite3.h>\nint main() { return sqlite3_libversion_number() > 0 ? 0 : 1; }\n' >"$out/has_sqlite.cpp"
+if "${CXX:-clang++}" "$out/has_sqlite.cpp" -lsqlite3 -o "$out/has_sqlite" >/dev/null 2>&1 && "$out/has_sqlite"; then
+  echo "# the Db port against the system SQLite"
+  "${CXX:-clang++}" "${flags[@]}" "$pkg/cpp/UndraStores.cpp" "$pkg/cpp/UndraDb.cpp" "$pkg/cpp/UndraDbSqlite.cpp" "$here/db_test.cpp" \
+    -lsqlite3 -o "$out/db_test"
+  "$out/db_test"
+  # Steps 1 and 2 also check the Db port through the core.
+  sources+=("$pkg/cpp/UndraDbSqlite.cpp")
+  sqlite=(-DUNDRA_RN_TEST_SQLITE -lsqlite3)
+elif [ "${UNDRA_RN_REQUIRE_SQLITE:-}" = 1 ]; then
+  echo "not ok - the Db checks need the system SQLite (sqlite3.h and -lsqlite3; on Linux: apt-get install libsqlite3-dev)" >&2
+  exit 1
+else
+  echo "# skipped the Db checks: no system SQLite to build against (sqlite3.h and -lsqlite3; on Linux: libsqlite3-dev)"
+fi
 
 # The fake cores (fake_cores.c): one object for the linked test, one library that the dlopen test
 # opens under each fake namespace.
@@ -108,7 +131,7 @@ if [ "$(uname -s)" = Darwin ]; then
     "$cc" "${objc[@]}" -c "$m" -o "$out/$(basename "$m" .m).o"
   done
   "${CXX:-clang++}" "${flags[@]}" \
-    "$pkg/cpp/UndraApiLinked.cpp" "${sources[@]}" \
+    "$pkg/cpp/UndraApiLinked.cpp" "${sources[@]}" ${sqlite[@]+"${sqlite[@]}"} \
     "$out/table_$ns1.o" "$out/table_$ns2.o" "$out/fake_classes.o" "$out/fake_cores.o" \
     -L "$(dirname "$core")" -l"$ns1" -Wl,-rpath,"$(dirname "$core")" \
     -L "$(dirname "$second")" -l"$ns2" -Wl,-rpath,"$(dirname "$second")" \
@@ -130,7 +153,7 @@ for fake in bad_abi short_table wrong_ns null_entry not_a_core; do
   ln -s "$out/libfake_cores.$ext" "$libs/lib$fake.$ext"
 done
 "${CXX:-clang++}" "${flags[@]}" -DUNDRA_RN_DLOPEN "-DUNDRA_RN_LIBRARY_DIR=\"$libs/\"" "-DUNDRA_RN_LIBRARY_SUFFIX=\".$ext\"" \
-  "$pkg/cpp/UndraApiAndroid.cpp" "${sources[@]}" -ldl \
+  "$pkg/cpp/UndraApiAndroid.cpp" "${sources[@]}" ${sqlite[@]+"${sqlite[@]}"} -ldl \
   -o "$out/host_test_dlopen"
 "$out/host_test_dlopen"
 
@@ -158,6 +181,10 @@ if [ "$(uname -s)" = Darwin ] && xcrun --sdk iphonesimulator --show-sdk-path >/d
   xcrun --sdk iphonesimulator clang++ -std=c++20 -fobjc-arc -x objective-c++ -fsyntax-only -Wall -Wextra -Werror \
     -target arm64-apple-ios17.0-simulator -I "$pkg/cpp" "$pkg/ios/UndraPlatformApple.mm"
   echo "ok - UndraPlatformApple.mm compiles"
+  # The Db backend over the iOS SDK's sqlite3.h (the functions it calls exist at the pod's deployment target).
+  xcrun --sdk iphonesimulator clang++ -std=c++20 -fsyntax-only -Wall -Wextra -Werror \
+    -target arm64-apple-ios17.0-simulator -I "$pkg/cpp" "$pkg/cpp/UndraDbSqlite.cpp" "$pkg/cpp/UndraDb.cpp"
+  echo "ok - UndraDbSqlite.cpp and UndraDb.cpp compile against the iOS SDK"
 else
   echo "# skipped the Apple platform compile check: no iOS SDK on this machine"
 fi

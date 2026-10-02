@@ -644,6 +644,23 @@ No row of its own in section 14; kept so regressions in the hot paths are visibl
 | `query/platform_construct_and_release` | 1.19 µs | 1.18 µs .. 1.22 µs |
 | `query/platform_refetch_call` | 586.1 ns | 585.0 ns .. 587.4 ns |
 
+### Opt-in ports (`bench/benches/ports.rs`, ADR-047, ADR-048)
+
+The core's side of a call through a port proxy: `ports/*` answered by `FakeWebSocket`, `db/*` by `MemDb`, a real
+in-memory SQLite (rusqlite, bundled), so the `db` rows include SQLite's own work but no disk. Budgets-test p50s
+(best of three, 2026-10-01, the reference host while other pieces built); budgets are 5x.
+
+| Row | p50 | Budget | What |
+|---|---|---|---|
+| `ports/ws_roundtrip` | 417 ns | 2.1 µs | one 64-byte text message sent and its echo received (`send`, then `receive` with the credit of 16) |
+| `db/insert_1k` | 1.29 ms | 6.5 ms | one transaction of 1,000 bound three-parameter `INSERT`s (`begin`, 1,000 `execute`, `commit`) |
+| `db/query_10k` | 1.78 ms | 9.0 ms | one `query` of 10,000 rows of three cells, encoded and decoded into `DbRows` |
+
+Web: the browser `Db` adapter is an opt-in worker bundle outside the hello world (ADR-048 §7): its worker script is
+80,932 bytes (26,172 gzipped) and wa-sqlite's sync wasm 558,343 bytes (272,993 gzipped), **299,165 bytes gzipped**
+in all (zlib level 9, the playground's Vite production build). The hello world is unchanged: an app pays this
+only when it imports `@undra/runtime/db`.
+
 ## The CI gate
 
 `bench/budgets.toml` holds a host budget for each of the 56 operations the gate runs (the wire round trips,

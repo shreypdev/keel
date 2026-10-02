@@ -34,10 +34,48 @@ fn every_golden_case_is_listed() {
     assert_eq!(listed, common::CASES);
 }
 
+/// The `stdlib` case as it was before ports-v2 (ADR-047, ADR-048) added the opt-in standard items
+/// (registered here because the dev-dependency enables `undra-ports`' features) and an app record
+/// and three methods that refer to them.
+fn without_ports_v2(mut schema: undra_meta::Schema) -> undra_meta::Schema {
+    const OPT_IN: &[&str] = &[
+        "WebSocket",
+        "Sse",
+        "Db",
+        "WsOpened",
+        "WsMessage",
+        "WsError",
+        "SseEvent",
+        "SseError",
+        "DbMigration",
+        "DbOpened",
+        "DbValue",
+        "DbExecuted",
+        "DbRows",
+        "DbConstraint",
+        "DbError",
+        "Feed",
+    ];
+    schema
+        .records
+        .retain(|r| !OPT_IN.contains(&r.name.as_str()));
+    schema.enums.retain(|e| !OPT_IN.contains(&e.name.as_str()));
+    schema.ports.retain(|p| !OPT_IN.contains(&p.name.as_str()));
+    for object in &mut schema.objects {
+        object.methods.retain(|m| {
+            !(object.name == "Syncer" && ["local", "listen", "push"].contains(&m.name.as_str()))
+        });
+    }
+    schema
+}
+
 #[test]
 fn a_schema_without_no_coalesce_hashes_as_before_the_field_existed() {
     for &(case, before) in HASHES_BEFORE_NO_COALESCE {
         let mut schema = common::case(case);
+        if case == "stdlib" {
+            schema = without_ports_v2(schema);
+        }
         let mut flagged = 0;
         for store in schema.objects.iter_mut().filter_map(|o| o.store.as_mut()) {
             for signal in &mut store.signals {
@@ -57,6 +95,14 @@ fn a_schema_without_no_coalesce_hashes_as_before_the_field_existed() {
         if flagged > 0 {
             // The flag is part of the schema when it is set: the cores differ in what they deliver.
             assert_ne!(common::case(case).hash(), before, "{case}");
+        }
+        if case == "stdlib" {
+            // ports-v2 is additive: its items are the whole difference.
+            assert_ne!(
+                common::case(case).hash(),
+                before,
+                "{case} has the opt-in items"
+            );
         }
     }
 }

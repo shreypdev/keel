@@ -24,7 +24,8 @@ import javax.crypto.SecretKey;
  *       lock screen, so the core can read it in the background after the first unlock), in {@link SecureSeal}'s
  *       layout: the alias, the layout and the directory of {@code android-adapters}' {@code AndroidSecureStoreAdapter},
  *       so either shell of an app opens the other's secrets. The C++ side stores the sealed bytes;</li>
- *   <li>{@link #startConnectivity}: the {@link NetworkMonitor}.</li>
+ *   <li>{@link #startConnectivity}: the {@link NetworkMonitor};</li>
+ *   <li>the {@code Db} port's SQLite is {@link UndraDatabase} (ADR-048), reached from C++ the same way.</li>
  * </ul>
  */
 public final class UndraPlatform {
@@ -47,6 +48,11 @@ public final class UndraPlatform {
     public static void install(Context context) {
         Context app = context.getApplicationContext();
         UndraPlatform.context = app != null ? app : context;
+    }
+
+    /** The application context, or {@code null} before {@link #install}. */
+    static Context context() {
+        return context;
     }
 
     /** {@code {filesDir, noBackupFilesDir}} of the app, or {@code null} before {@link #install}. Called over JNI. */

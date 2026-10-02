@@ -2,8 +2,8 @@
 
 The `:android-adapters` Gradle module of the Kotlin runtime (SPEC section 11): an Android library that depends on
 `:runtime` (never the reverse), so `:runtime` stays plain JVM, stdlib + kotlinx-coroutines only. It holds everything
-that needs an Android API: the platform adapters of the ten standard ports (SPEC section 8) and the Choreographer
-frame pacer. **No third-party dependency**: the Android SDK and `:runtime` are all it uses.
+that needs an Android API: the platform adapters of the ten standard ports (SPEC section 8), the SQLite adapter of the
+opt-in `Db` port (ADR-048) and the Choreographer frame pacer. **No third-party dependency**: the Android SDK and `:runtime` are all it uses.
 
 `settings.gradle.kts` includes it only when an Android SDK is found (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, or `sdk.dir`
 in `local.properties`), so a JVM-only checkout still builds `:runtime`. Its coordinates are
@@ -62,6 +62,9 @@ a typed error, never a crash), and the query layer's persistence and offline que
 | `Lifecycle` | `AndroidLifecycleAdapter` | `Application.ActivityLifecycleCallbacks` | `Active` (an activity resumed), `Inactive` (visible, no focus), `Background` (none started), on the main thread. A move to a less active state is reported after 700 ms if it lasted, so a rotation or one activity giving way to another is not a trip to the background. There is no "terminate" event: `AppState` has none and Android ends a process without notice; the queue and the cache are persisted as they change. `Active` makes the core refetch stale queries (SPEC section 9). |
 | `Log` | `AndroidLogAdapter` | `android.util.Log` | The record's target is the tag; levels trace..fatal map to verbose..assert (fatal is written with `Log.println`, never `Log.wtf`). Unlike `java.util.logging`, which the runtime's default adapter uses, it keeps trace and debug records. |
 | `Clock`, `Rng`, `Timer` | the runtime's own (`ClockAdapter`, `RngAdapter`, `TimerAdapter`) | `System`, `SecureRandom`, a scheduled executor | Plain JVM; `install` registers them too, so one call covers all ten. |
+| `WebSocket` (opt-in, ADR-047) | `WebSocketPortAdapter` over the runtime's `ClientWebSocketAdapter` | `java.net.Socket` (the runtime's RFC 6455 client, the one `undra dev` uses) | Text checked to be UTF-8, subprotocols, upgrade headers, a refused upgrade's status; the reader pauses while the core is not pulling, so TCP pushes back. Raw sockets are not subject to the network security config's cleartext rule: only `ws://` URLs the app passes are used. |
+| `Sse` (opt-in, ADR-047) | `SsePortAdapter` over the runtime's `UrlConnectionSseAdapter` | `HttpURLConnection` | Parsed by the HTML standard's algorithm; `disconnect()` aborts a read in progress here, so closing a silent stream releases the connection. Cleartext follows the network security config. |
+| `Db` (opt-in, ADR-048) | `DbPortAdapter` over `AndroidDbAdapter` | `android.database.sqlite`, `getDatabasePath("undra-<name>.sqlite")` | One connection and one thread per database (Android's WAL pool is off; the binding switches the file to WAL itself); typed binds and `Cursor.getType` cells; errors by the `(code NNNN ...)` suffix of Android's message (no result code is exposed); a corrupt file is `Corrupt` and is kept (Android's default handler would delete it). A cursor window holds about 2 MB per row. |
 
 Each adapter is usable alone: `AndroidKvAdapter(context).portImpl()` is a `PortImpl` for `LoadOptions.adapters` or
 `core.registerPort`; `AndroidConnectivityAdapter(context).attach(core)` starts one event source.
@@ -120,8 +123,13 @@ failure is a typed `Network` error naming the policy. The playground allows only
   and a Kv entry that survive a process killed with SIGKILL (the service in `:writer`), a Kv write interrupted by that kill,
   the default network read from `ConnectivityManager`, lifecycle states from real activities (`ActivityScenario`, Home),
   every port of `AndroidPlatformDefaults.install` answering through its port methods, the Http adapter off the main thread,
-  a value sealed under another Keystore alias answering `Corrupt`, and Android's own `ErrnoException(ENOSPC / EDQUOT)`
-  under the real adapters answering `Full` (`StorageFailureOnDeviceTest`).
+  a value sealed under another Keystore alias answering `Corrupt`, Android's own `ErrnoException(ENOSPC / EDQUOT)`
+  under the real adapters answering `Full` (`StorageFailureOnDeviceTest`), and the `Db` port over `AndroidDbAdapter`
+  (`DbOnDeviceTest`: migrations, typed cells, each constraint kind from Android's `(code NNNN ...)` suffix, busy, a
+  corrupt file kept, unknown ids, the WAL switch). `RealtimeOnDeviceTest` runs the default WebSocket and Sse adapters
+  against the contract tests' realtime server on the host when it is started first and its port passed:
+  `node contract-tests/servers/realtime-server.mjs --port 0`, then
+  `-Pandroid.testInstrumentationRunnerArguments.undra.realtimePort=<port>` (the emulator reaches the host as 10.0.2.2).
   `-Pandroid.testInstrumentationRunnerArguments.undra.networkToggle=true` also runs a test that switches the device's
   Wi-Fi and data off and on to see the Connectivity events; it changes the whole device, so it is off by default.
 * **The playground** (`examples/playground/android/smoke.sh`): the app on the real adapters, including a queued mutation that

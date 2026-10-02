@@ -50,6 +50,10 @@ jobs:
           cargo build -p undra-cli
           target/debug/undra bindgen -C examples/cookbook --check --docs
           target/debug/undra bindgen -C examples/fieldbook --check --docs
+      - name: The real-time recipe and Fieldbook's presence over the opt-in ports (ADR-047)
+        run: |
+          cargo test -p cookbook --features realtime
+          cargo test -p fieldbook-core --features presence
       - name: Cookbook TypeScript lines compile (tsc --strict)
         run: bash examples/cookbook/snippets/check.sh ts
       - name: Fieldbook web (bindings over the real wasm core, then the bundle)
@@ -77,8 +81,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: wasm32 build (core crates)
         run: |
-          for p in undra-meta undra-wire undra-signals undra-runtime undra-ports undra-query undra-ffi undra playground-core cookbook fieldbook-core; do
-          for p in undra-meta undra-wire undra-signals undra-runtime undra-ports undra-query undra-testkit undra-ffi undra playground-core; do
+          for p in undra-meta undra-wire undra-signals undra-runtime undra-ports undra-query undra-testkit undra-ffi undra playground-core cookbook fieldbook-core; do
             cargo build -p $p --target wasm32-unknown-unknown
           done
 
@@ -132,6 +135,11 @@ jobs:
           mkdir -p "$HOME/lib"
           curl -sSfLo "$HOME/lib/kotlinx-coroutines-core-jvm-1.6.4.jar" \
             https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar
+          # The SQLite JDBC driver of the Db port's JVM tests and the Kotlin S25 column (ADR-048);
+          # never a dependency of the runtime module.
+          curl -sSfLo "$HOME/lib/sqlite-jdbc-3.53.4.0.jar" \
+            https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.53.4.0/sqlite-jdbc-3.53.4.0.jar
+          echo "47e21dd53efe1524fe0df6965cb65003ffe17172  $HOME/lib/sqlite-jdbc-3.53.4.0.jar" | sha1sum -c -
       - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
       - name: Build the JNI library (the fixture core, namespace undra_fixture)
@@ -139,6 +147,7 @@ jobs:
       - name: Test (incl. JNI smoke against the real library)
         env:
           UNDRA_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
+          UNDRA_SQLITE_JDBC: /home/runner/lib/sqlite-jdbc-3.53.4.0.jar
           UNDRA_NATIVE_LIB_DIR: ${{ github.workspace }}/crates/undra-ffi/tests/fixture/target/debug
         run: runtimes/kotlin/undra-runtime/scripts/test-local.sh
 
@@ -335,9 +344,15 @@ jobs:
           mkdir -p "$HOME/lib"
           curl -sSfLo "$HOME/lib/kotlinx-coroutines-core-jvm-1.6.4.jar" \
             https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar
+          # The SQLite JDBC driver of the Db port's JVM tests and the Kotlin S25 column (ADR-048);
+          # never a dependency of the runtime module.
+          curl -sSfLo "$HOME/lib/sqlite-jdbc-3.53.4.0.jar" \
+            https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.53.4.0/sqlite-jdbc-3.53.4.0.jar
+          echo "47e21dd53efe1524fe0df6965cb65003ffe17172  $HOME/lib/sqlite-jdbc-3.53.4.0.jar" | sha1sum -c -
       - name: Run the scenario runners
         env:
           UNDRA_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
+          UNDRA_SQLITE_JDBC: /home/runner/lib/sqlite-jdbc-3.53.4.0.jar
           # The Kotlin contract runner requires the stdlib path explicitly (it does not derive
           # it from the kotlinc location the way test-local.sh does).
           UNDRA_KOTLIN_STDLIB: /home/runner/kotlin/kotlinc/lib/kotlin-stdlib.jar
@@ -410,7 +425,8 @@ jobs:
       - name: clang 18 and its sanitizer runtime
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev
+          # libsqlite3-dev: the system SQLite the C++ Db binding's host test links (ADR-048).
+          sudo apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev libsqlite3-dev
           # The runner's kernel randomises mmap with more bits than ASan's shadow layout accepted until
           # recently; 28 is what LLVM's own CI sets (runner-images issue 9491).
           sudo sysctl -w vm.mmap_rnd_bits=28
@@ -442,6 +458,7 @@ jobs:
         env:
           CXX: clang++-18
           UNDRA_RN_REQUIRE_JSI: "1"
+          UNDRA_RN_REQUIRE_SQLITE: "1"
         run: runtimes/rn/@undra/react-native/cpp/test/run.sh
       # The pure Java of the package's Android library (the secure-store seal against an AES-GCM vector, the
       # network classification), with the runner's JDK; the Keystore and ConnectivityManager are device-checked.
