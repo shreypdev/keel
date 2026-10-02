@@ -45,7 +45,8 @@ import type { Handle, HelloPayload } from "../wire/index.js";
  * `envelopes` message; 1 sent one `envelope` message each. A host accepts every
  * shape; a worker batches only for a host that announced 2 or more, and answers
  * ports as protocol 3 says only for a host that announced 3 (before that, every
- * port but Clock, Rng and Log crosses to the host).
+ * port but Clock, Rng and Log crosses to the host). A host given `worker.ports`
+ * refuses a worker that does not announce `"ports"` (an older script) at load.
  */
 export const WORKER_PROTOCOL_VERSION = 3;
 

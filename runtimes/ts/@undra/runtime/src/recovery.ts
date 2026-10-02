@@ -475,6 +475,10 @@ class Recovering implements Transport {
   readonly #recreatable = new Map<Handle, { readonly ref: WeakRef<UndraStore>; readonly call: RecreateCall }>();
   /** While the trapped core is being instantiated again: calls fail with "restarted". */
   #restarting = false;
+  /** The highest floor a restart used: handles that went stale are forgotten, but the app's wrappers keep them (ADR-022). */
+  #floorUsed = 0;
+  /** A trap the transport reported while a restart was under way (the new instance trapped before the restart answered). */
+  #trappedWhileRestarting: UndraTransportError | null = null;
   /** Bumped by every restart: a port reply that settles later belongs to the epoch of its call. */
   #epoch = 0;
   declare readonly callSync?: (payload: Uint8Array) => Uint8Array;
@@ -552,8 +556,13 @@ class Recovering implements Transport {
         });
       },
       closed: (error) => {
-        // A failure while a restart is under way is the restart's to handle (it failed, and says so).
-        if (this.#restarting) return;
+        // A failure while a restart is under way is the restart's to handle: when the restart fails it says so itself;
+        // when it answers anyway (the new instance trapped after its restore, before the restart answered), the trap is
+        // kept here and the restart loop takes it as the next trap instead of a dead core passing for a restarted one.
+        if (this.#restarting) {
+          if (isTrap(error)) this.#trappedWhileRestarting = error;
+          return;
+        }
         if (isTrap(error) && this.#mayRestart()) {
           void this.#recover(error, this.#host.panicked(error));
           return;
@@ -609,13 +618,17 @@ class Recovering implements Transport {
     return this.#times.length < this.#settings.maxRestarts;
   }
 
-  /** The highest handle generation the host holds: the floor a restore must not go below (ADR-022). */
+  /**
+   * The highest handle generation the host holds, and never below the floor of an earlier restart (whose stale handles the
+   * host forgot while wrappers may keep them): the floor a restore must not go below (ADR-022).
+   */
   #floor(): number {
     const host = this.#host;
-    let floor = 0;
+    let floor = this.#floorUsed;
     for (const set of [host.handles, host.observed.keys(), this.#recreatable.keys(), this.#releasedWhileDown]) {
       for (const handle of set) floor = Math.max(floor, handleGeneration(handle));
     }
+    this.#floorUsed = floor;
     return floor;
   }
 
@@ -663,8 +676,12 @@ class Recovering implements Transport {
     let result: RestartResult;
     for (;;) {
       this.#times.push(Date.now());
+      this.#trappedWhileRestarting = null;
       try {
         result = await this.#restart(this.#floor());
+        const late = this.#trappedWhileRestarting as UndraTransportError | null;
+        this.#trappedWhileRestarting = null;
+        if (late !== null) throw late;
         break;
       } catch (error) {
         if (host.core.closed || run !== this.#run) return;

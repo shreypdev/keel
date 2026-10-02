@@ -387,6 +387,25 @@ describe("the worker transport's requests", () => {
     transport.close();
   });
 
+  // Review (2026-10-02): an old worker script (protocol 2: no `ports` feature) ignores `worker.ports`, so the app's
+  // synchronous ports would cross to the main thread and trap the core at their first call: refused at load, typed.
+  it("worker.ports with a worker script that predates protocol 3 is refused at load, typed", async () => {
+    const { worker, received } = silentWorker(["snapshot"]);
+    const transport = new WasmWorkerTransport({ wasm: new Uint8Array(8), expectedSchemaHash: SCHEMA, worker, ports: "./ports.js" });
+    const error = await transport.start(recorder().handler).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(UndraTransportError);
+    expect((error as UndraTransportError).reason).toBe("unsupported");
+    expect((error as Error).message).toMatch(/older than this runtime/);
+    expect(received.map((m) => (m as { t: string }).t), "init, then the worker is closed").toEqual(["init", "close"]);
+    // The same worker without worker.ports still loads (its other features degrade as before).
+    const ok = new WasmWorkerTransport({ wasm: new Uint8Array(8), expectedSchemaHash: SCHEMA, worker: silentWorker(["snapshot"]).worker });
+    await ok.start(recorder().handler);
+    ok.close();
+  });
+
   it("a request that is never answered rejects when the transport closes, never hangs it", async () => {
     const { worker } = silentWorker(["snapshot"]);
     const transport = new WasmWorkerTransport({ wasm: new Uint8Array(8), expectedSchemaHash: SCHEMA, worker });

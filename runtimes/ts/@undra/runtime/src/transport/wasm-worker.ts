@@ -228,6 +228,20 @@ export class WasmWorkerTransport implements Transport {
               });
               return;
             }
+            // Ports answered in the worker need protocol 3 (ADR-049): a worker script older than this runtime would
+            // ignore the module and send the app's synchronous ports across, where the core traps at their first call.
+            if (this.#options.ports !== undefined && message.features?.includes("ports") !== true) {
+              settle(() => {
+                this.close();
+                reject(
+                  new UndraTransportError(
+                    "unsupported",
+                    "the worker script is older than this runtime (it does not answer ports in the worker, worker protocol 3), so LoadOptions.worker.ports cannot be used: serve the worker script of the same @undra/runtime version",
+                  ),
+                );
+              });
+              return;
+            }
             settle(() => {
               this.#open = true;
               this.#canSnapshot = message.features?.includes("snapshot") === true;

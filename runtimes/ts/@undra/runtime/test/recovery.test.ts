@@ -456,6 +456,54 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     expect(t.core.closed).toBe(true);
   });
 
+  // Review (2026-10-02): the new instance can trap after its restore answered but before the restart did (a task the
+  // restore woke panics on its first poll; in wasm-worker the worker posts `closed` before `restarted`). That trap
+  // arrives while the restart is under way; it was dropped, leaving a dead core that answered "restarted" for ever.
+  it("a trap the new instance reports while its restart is still under way restarts it again", async () => {
+    const t = await recovering({ recovery: { maxRestarts: 3 } });
+    t.fake.outcomes.push(async () => {
+      t.fake.trap("the restored state panics in a task");
+      // The trap is delivered while the restart is still under way.
+      for (let i = 0; i < 5; i++) await macrotask();
+      return { hello: { undraVersion: "x", schemaHash: SCHEMA, platform: "p", mode: "m" }, restoredFromAgeMs: 5, storeHandles: [] };
+    });
+    t.fake.trap("first");
+    await until("the second restart", () => t.fake.floors.length === 2);
+    await until("the event", () => t.restarts.length === 1);
+    expect(t.panics.map((p) => p.message)).toEqual(["first", "the restored state panics in a task"]);
+    expect(t.restarts[0]?.report.message).toBe("the restored state panics in a task");
+    expect(t.closed).toEqual([]);
+    await expect(t.core.call(FREE, ECHO, u32(2))).resolves.toEqual(u32(2));
+  });
+
+  it("a trap during the restart that spends the budget ends the core and onClose hears it", async () => {
+    const t = await recovering({ recovery: { maxRestarts: 1 } });
+    t.fake.outcomes.push(async () => {
+      t.fake.trap("again");
+      for (let i = 0; i < 5; i++) await macrotask();
+      return { hello: { undraVersion: "x", schemaHash: SCHEMA, platform: "p", mode: "m" }, restoredFromAgeMs: 5, storeHandles: [] };
+    });
+    t.fake.trap("first");
+    await until("the close", () => t.closed.length === 1);
+    expect(t.closed[0]).toMatchObject({ reason: "trap" });
+    expect(t.core.closed).toBe(true);
+    expect(t.restarts).toEqual([]);
+  });
+
+  // Review (2026-10-02): the floor of a restore is the highest generation the host holds, but a restart forgets the
+  // handles that went stale while the app's wrappers keep them; the next restart must not go below what it already used
+  // (ADR-022), or the new instance can issue a stale wrapper's handle to another object.
+  it("the generation floor never goes down from one restart to the next", async () => {
+    const t = await recovering();
+    await t.core.construct(OBJECT_TYPE, OBJECT_NEW, new Uint8Array(0)); // generation 7, not a store: stale after a restart
+    t.fake.trap("first");
+    await until("restart 1", () => t.restarts.length === 1);
+    expect(t.restarts[0]?.staleObjects).toBe(1);
+    t.fake.trap("second");
+    await until("restart 2", () => t.restarts.length === 2);
+    expect(t.fake.floors).toEqual([7, 7]);
+  });
+
   it("a restart that fails otherwise ends the core at once", async () => {
     const t = await recovering();
     t.fake.outcomes.push(() => Promise.reject(new UndraTransportError("handshake", "could not instantiate the wasm core again")));
