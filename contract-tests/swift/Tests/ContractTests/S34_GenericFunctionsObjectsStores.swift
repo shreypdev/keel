@@ -27,8 +27,10 @@ extension ContractScenarios {
             // 1. A generic function is one function per type.
             try checkEqual(try newest(rows: [todo(5, "five"), todo(9, "nine"), todo(7, "seven")], ctx: core), todo(9, "nine"), "newest of three to-dos")
             try checkEqual(try newest(rows: [note(2, "two"), note(1, "one")], ctx: core), note(2, "two"), "newest of two notes")
-            try check(try newest(rows: [Todo](), ctx: core) == nil, "newest of no to-dos is nothing")
-            try check(try newest(rows: [Note](), ctx: core) == nil, "newest of no notes is nothing")
+            let noTodo = try newest(rows: [Todo](), ctx: core)
+            let noNote = try newest(rows: [Note](), ctx: core)
+            try check(noTodo == nil, "newest of no to-dos is nothing")
+            try check(noNote == nil, "newest of no notes is nothing")
 
             // 2. A type that no argument names is named by the caller.
             let first = try draft(Todo.self, title: "first", ctx: core)
@@ -56,7 +58,7 @@ extension ContractScenarios {
             todos.clear()
             notes.clear()
 
-            func toggled(_ store: RawStore, _ method: UInt32, _ row: some UndraCodec) throws {
+            @MainActor func toggled(_ store: RawStore, _ method: UInt32, _ row: some UndraCodec) throws {
                 try store.callSync(method, encoded { (w: inout UndraWriter) in row.undraEncode(&w) })
             }
             try toggled(todos, todoType.toggle, todo(3, "three"))
@@ -128,7 +130,8 @@ extension ContractScenarios {
             try checkEqual(try recent.rows(), [todo(2, "two"), todo(3, "three")], "the rows after opening one")
             let other = try recentTodos(rows: [], limit: 5, ctx: core)
             try check(other !== recent, "a second object is another wrapper")
-            try check(try other.latest() == nil, "a second object has rows of its own")
+            let otherLatest = try other.latest()
+            try check(otherLatest == nil, "a second object has rows of its own")
             other.close()
             try checkEqual(try recent.latest(), todo(2, "two"), "closing one object leaves the other")
         }
