@@ -4,9 +4,9 @@ import java.io.File
 
 /**
  * What build A hands over to the build-B process (scenarios.md, "Two builds"): the `Kv` contents and the failed POST's
- * `Idempotency-Key` from S14 step 7, the snapshots `P` and `L` and the `Profile` handle from S15 step 11. One small
- * JSON file per scenario in the directory `UNDRA_CONTRACT_HANDOVER` names (`run.sh` sets it to `build/migration` and
- * empties it before the run), else `build/migration` under the working directory.
+ * `Idempotency-Key` from S14 step 7, the snapshots `P` and `L` and the `Profile` handle from S15 step 11, the snapshot and
+ * the query handles from S35 step 2. One small JSON file per scenario in the directory `UNDRA_CONTRACT_HANDOVER` names
+ * (`run.sh` sets it to `build/migration` and empties it before the run), else `build/migration` under the working directory.
  */
 object Handover {
     /** S14 step 7: every key of the `Kv` and its value, and the `Idempotency-Key` of build A's failed `save_note` POST. */
@@ -14,6 +14,12 @@ object Handover {
 
     /** S15 step 11: snapshot `P` (a `Profile` "ada" visited twice), snapshot `L` (`P` plus a `Legacy`), the `Profile` handle. */
     class Snapshots(val profile: ByteArray, val legacy: ByteArray, val profileHandle: Long)
+
+    /**
+     * S35 step 2: the snapshot build B restores in step 10 and the values of the handles of step 1 (the remote, ticker, feed, library
+     * and roster wrappers), which the snapshot re-issues under the same values.
+     */
+    class QueryHandles(val snapshot: ByteArray, val remote: Long, val ticker: Long, val feed: Long, val library: Long, val roster: Long)
 
     private val directory: File
         get() = File(System.getenv("UNDRA_CONTRACT_HANDOVER")?.takeIf { it.isNotEmpty() } ?: "build/migration")
@@ -39,6 +45,16 @@ object Handover {
         )
     }
 
+    /** Writes S35's handover. */
+    fun write(handles: QueryHandles) {
+        fun handle(value: Long) = quote(value.toULong().toString())
+        writeText(
+            "s35",
+            """{"snapshot":${quote(hex(handles.snapshot))},"remote":${handle(handles.remote)},"ticker":${handle(handles.ticker)},""" +
+                """"feed":${handle(handles.feed)},"library":${handle(handles.library)},"roster":${handle(handles.roster)}}""",
+        )
+    }
+
     /** S14's handover, or `null` if build A did not write it. */
     fun readQueue(): Queue? {
         val doc = readObject("s14") ?: return null
@@ -51,6 +67,13 @@ object Handover {
     fun readSnapshots(): Snapshots? {
         val doc = readObject("s15") ?: return null
         return Snapshots(unhex(doc["profile"] as String), unhex(doc["legacy"] as String), (doc["profileHandle"] as String).toULong().toLong())
+    }
+
+    /** S35's handover, or `null` if build A did not write it. */
+    fun readQueryHandles(): QueryHandles? {
+        val doc = readObject("s35") ?: return null
+        fun handle(key: String) = (doc[key] as String).toULong().toLong()
+        return QueryHandles(unhex(doc["snapshot"] as String), handle("remote"), handle("ticker"), handle("feed"), handle("library"), handle("roster"))
     }
 
     private fun writeText(name: String, text: String) {
