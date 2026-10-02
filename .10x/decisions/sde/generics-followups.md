@@ -21,6 +21,12 @@ and stay open as such.
   the unstripped twin must fail it. Established first: on `1e8f33c` (main before ADR-058) the old test passes, with the
   with-symbols x86_64 library 16 bytes smaller; on this branch it is 16 bytes larger. The byte delta is `.text` only.
 
+* **A flake CI found on this branch** (`runtimes/kotlin/.../wire/ChangeSetTests.kt`): "iteration allocates nothing per entry"
+  failed on 7f561c0's runner with 2,120 extra bytes against a fixed bound of 2,048. The bound is now per entry (less than one
+  byte per extra entry, which one allocation per entry exceeds sixteenfold); proved by mutation (a reader per entry in
+  `Payloads.ChangeSet.forEachEntry`: 639,680 bytes, fails), then restored. The Swift and TypeScript siblings count
+  allocation events exactly and have no fixed-bytes bound.
+
 ## Verification (local, macOS, Rust 1.99.0)
 
 | Check | Result |
@@ -30,3 +36,4 @@ and stay open as such.
 | `cargo test -p undra-cli --test symbols shipped_artefacts_do_not_grow_and_no_symbols_writes_none` (emulator booted, NDK r27) | pass on this branch (x86_64 +16 B of `.text`); the old test, on `1e8f33c`, passes |
 | `undra bindgen --check --docs` (playground, two-cores a and b) | up to date |
 | fmt, clippy `-D warnings` on the touched crates | clean |
+| Kotlin runtime (`test-local.sh`) under kotlinc 2.4.20 and 2.0.21 | 881 + 32, 0 failed, each; the mutation fails `ChangeSetTests` |
