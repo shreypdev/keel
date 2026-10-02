@@ -1,4 +1,6 @@
 import Foundation
+import Combine
+import Observation
 import XCTest
 @testable import UndraRuntime
 
@@ -429,6 +431,82 @@ final class ReconnectCoreTests: XCTestCase {
         transport.drop()
         let reconnecting = await waitUntil { core.connection.state == .reconnecting(attempt: 1) }
         XCTAssertTrue(reconnecting)
+    }
+
+    /// ADR-045: the twin for apps below iOS 17, which cannot use the `@Observable` `core.connection`.
+    func testTheConnectionObjectIsTheObservableObjectTwinOfTheObservableConnection() async throws {
+        let transport = FakeTransport(directSync: false)
+        let core = try makeRemoteCore(transport, log: StateLog())
+        var published: [UndraConnectionState] = []
+        let sink = core.connectionObject.$state.sink { published.append($0) }
+        let connected = await waitUntil { core.connectionObject.state == .connected }
+        XCTAssertTrue(connected)
+        transport.drop()
+        let reconnecting = await waitUntil { core.connectionObject.state == .reconnecting(attempt: 1) }
+        XCTAssertTrue(reconnecting)
+        XCTAssertEqual(published.last, .reconnecting(attempt: 1))
+        XCTAssertTrue(published.contains(.connected))
+        // The two follow the same state, one hop behind it.
+        if #available(iOS 17, macOS 14, *) {
+            let same = await waitUntil { core.connection.state == .reconnecting(attempt: 1) }
+            XCTAssertTrue(same)
+        }
+        sink.cancel()
+    }
+
+    /// ADR-045 review: the two observables are one fact. Every state the core goes through reaches both, and
+    /// `core.connection` is the `@Observable` object that SwiftUI on iOS 17 observes (not the floor's twin, and not a
+    /// fallback made on a miss): a change to the state fires an Observation tracker on it.
+    func testBothConnectionObservablesFollowEveryStateAndTheObservationPathIsTheOneChosenOnIOS17() async throws {
+        guard #available(iOS 17, macOS 14, *) else {
+            return
+        }
+        let transport = FakeTransport(directSync: false)
+        let core = try makeRemoteCore(transport, log: StateLog())
+        XCTAssertTrue(core.connection === core.connection, "one object per core")
+        func agree(on state: UndraConnectionState) async -> Bool {
+            return await waitUntil { core.connectionObject.state == state && core.connection.state == state }
+        }
+        let connected = await agree(on: .connected)
+        XCTAssertTrue(connected)
+        let tracked = Guarded<Bool>(false)
+        withObservationTracking({ _ = core.connection.state }, onChange: { tracked.withLock { (flag: inout Bool) -> Void in flag = true } })
+        transport.drop()
+        let reconnecting = await agree(on: .reconnecting(attempt: 1))
+        XCTAssertTrue(reconnecting)
+        XCTAssertTrue(tracked.withLock { (flag: inout Bool) -> Bool in return flag }, "Observation told the tracker")
+        transport.reconnect()
+        let again = await agree(on: .connected)
+        XCTAssertTrue(again)
+        core.shutdown()
+        let closed = await agree(on: .closed(.requested))
+        XCTAssertTrue(closed)
+    }
+
+    /// ADR-045 review: `onConnectionChange` runs before the hop to the main queue, so an app that drops the core
+    /// from there (it loads a new one on `.closed(.sessionLost)`) must not strand a view that holds the connection.
+    func testAConnectionAViewHoldsHearsTheFinalStateEvenWhenTheCoreIsReleasedAtOnce() async throws {
+        weak var released: UndraCore?
+        var object: UndraConnectionObject?
+        var observable: AnyObject?
+        do {
+            let transport = FakeTransport(directSync: false)
+            transport.releasesInboundOnShutdown = true
+            let core = try makeRemoteCore(transport, log: StateLog())
+            released = core
+            object = core.connectionObject
+            if #available(iOS 17, macOS 14, *) {
+                observable = core.connection
+            }
+            core.shutdown()
+        }
+        XCTAssertNil(released, "nothing else keeps the core alive, so the hop must not rely on it")
+        let objectHeard = await waitUntil { object?.state == .closed(.requested) }
+        XCTAssertTrue(objectHeard)
+        if #available(iOS 17, macOS 14, *) {
+            let observableHeard = await waitUntil { (observable as? UndraConnection)?.state == .closed(.requested) }
+            XCTAssertTrue(observableHeard, "the @Observable connection is told too, as the ObservableObject one is")
+        }
     }
 
     func testAnInProcessCoreIsConnectedUntilShutdown() throws {

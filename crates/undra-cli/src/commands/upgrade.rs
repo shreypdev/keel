@@ -132,6 +132,8 @@ pub fn run(env: &Env<'_>, args: &UpgradeArgs) -> Result<()> {
             check: false,
             docs: args.docs,
             crate_name: None,
+            swift_observation: None,
+            ios_deployment_target: None,
         };
         if let Err(e) = super::bindgen::run(env, &bindgen_args) {
             ui.warn("the pins above are already moved; fix what `undra bindgen` reports below and run it again");

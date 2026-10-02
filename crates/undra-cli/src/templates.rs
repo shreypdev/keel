@@ -44,6 +44,35 @@ pub const IOS: &[TemplateFile] = &[
     template!("ios/DevStatusBar.swift" => "ios/@@APP@@/DevStatusBar.swift"),
 ];
 
+/// The three files of the iOS app that differ for an app that supports iOS 15 and 16 (`[ios] deployment_target` below
+/// 17.0, ADR-045): the generated stores are `ObservableObject`s, so the views observe them with `@ObservedObject`, the
+/// navigation is a `NavigationView` and the dev status bar reads `core.connectionObject`. They replace the files of
+/// [`IOS`] with the same paths.
+pub const IOS_OBSERVABLE_OBJECT: &[TemplateFile] = &[
+    template!("ios-floor/App.swift" => "ios/@@APP@@/MainApp.swift"),
+    template!("ios-floor/ContentView.swift" => "ios/@@APP@@/ContentView.swift"),
+    template!("ios-floor/DevStatusBar.swift" => "ios/@@APP@@/DevStatusBar.swift"),
+];
+
+/// The files of the iOS app for the generated Swift `observation` mode: [`IOS`], with the files of
+/// [`IOS_OBSERVABLE_OBJECT`] in place of theirs when stores are `ObservableObject`s.
+#[must_use]
+pub fn ios(observation: undra_bindgen::SwiftObservation) -> Vec<TemplateFile> {
+    IOS.iter()
+        .map(|file| {
+            if observation == undra_bindgen::SwiftObservation::ObservableObject {
+                IOS_OBSERVABLE_OBJECT
+                    .iter()
+                    .find(|replacement| replacement.path == file.path)
+                    .unwrap_or(file)
+            } else {
+                file
+            }
+        })
+        .copied()
+        .collect()
+}
+
 /// The output list of the iOS Run Script phase (a template of its own so the tests can render it
 /// for other simulator architectures).
 #[cfg(test)]

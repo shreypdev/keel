@@ -1316,6 +1316,49 @@ These are the first walls a UniFFI crate meets, so L1 starts with plain data. [S
 
 ---
 
+Source: https://shreypdev.github.io/undra/docs/cookbook/ios-15-16.html
+
+# Supporting iOS 15 and 16
+
+Undra's Swift output is iOS 17 by default, because a generated store is `@Observable`. Lower the deployment target and the same store becomes an `ObservableObject`: the core, the wire and the commands do not change, only how SwiftUI is told to redraw.
+
+## Turn it on
+
+undra.toml
+
+```toml
+[ios]
+deployment_target = "15.0"   # 15.0 or later; below 17.0 the stores are ObservableObjects
+```
+
+Run `undra bindgen`. A new app starts there with `undra init todo --ios-deployment-target 15.0`. `[bindings] swift_observation = "observable-object"` (or `--swift-observation`) picks the shape on any floor; `"observation"` with a target below 17.0 is an error that names both settings. Below iOS 16 the wire `Duration` is the runtime's `UndraDuration` (exact nanoseconds), because `Swift.Duration` is iOS 16.
+
+## Your views
+
+|  | iOS 17+ (observation) | iOS 15 and 16 (observable-object) |
+| --- | --- | --- |
+| owning view | `@State private var todos = try! Todos()` | `@StateObject private var todos = try! Todos()` |
+| child view | `let todos: Todos` | `@ObservedObject var todos: Todos` |
+| environment | `.environment(todos)` | `.environmentObject(todos)` |
+| outside SwiftUI | `withObservationTracking` | `todos.$visible.sink { … }` |
+| connection state | `core.connection.state` | `core.connectionObject` with `@ObservedObject` |
+
+Reading a signal is still a plain property read and a command is still a method call. The `$property` publishers are a gain for UIKit and Combine code on every floor.
+
+## What degrades
+
+- **Granularity.** Observation redraws a view when a property it read changes; an `ObservableObject` redraws every view that observes the store when any of its properties changes. SwiftUI coalesces the events of one drain into one update. Split a big store, or observe a smaller one.
+- **A big list is copied on every patch.** `@Published` has no in-place accessor, so a keyed patch to a list copies the array once, where Observation mutates it in place. Measured on an Apple M5 Pro (release build, 32-byte rows): about 5 µs for 1,000 rows, 48 µs for 10,000 and 0.5 ms for 100,000, against 0.2 µs at any size under Observation. It is linear in the list and paid once per applied patch, not per op (the mirror merges a frame's patches into one apply, so 100 ops cost about what 1 does). It is invisible for lists of thousands; for 100,000 rows that change every frame, [page the list](https://shreypdev.github.io/undra/docs/cookbook/pagination.html) or observe a smaller store.
+- **One name.** A store member called `objectWillChange` is [E0051](https://shreypdev.github.io/undra/docs/errors.html#E0051) in this mode, because `ObservableObject` declares it.
+- **SQLite change counts.** The built-in `SQLiteDbAdapter` counts changes with `sqlite3_changes`, a C `int` (the 64-bit one needs iOS 15.4): a single statement that changes more than 2,147,483,647 rows reports an undefined count.
+- **Nothing else.** The mirror, keyed patches, `no_coalesce` and the error channel are the same code in both modes.
+
+## Raising the floor later
+
+Set `deployment_target = "17.0"`, run `undra bindgen` and make the mechanical edits in the table. No core change, no wire change. The repository's `examples/ios15-sample` is an iOS 15.0 app over a store, a keyed list and a query; [docs/IOS_15_16.md](https://github.com/shreypdev/undra/blob/main/docs/IOS_15_16.md) says how CI proves the floor.
+
+---
+
 Source: https://shreypdev.github.io/undra/docs/sample.html
 
 # Sample app: Fieldbook
@@ -1387,6 +1430,7 @@ undra init todo                              # all three platforms
 undra init todo --platforms ios,web          # only those shells
 undra init todo --id dev.acme.todo           # application id / bundle identifier
 undra init todo --undra-path ~/src/undra       # use a local checkout of Undra
+undra init todo --ios-deployment-target 15.0   # an iOS app that supports iOS 15 and 16 (ObservableObject stores)
 ```
 
 Creates a project directory with `undra.toml`, `core/` (a working to-do store), `generated/` (bindings, already generated), one minimal, real app per platform in `ios/`, `android/` and `web/`, and a CI workflow (`.github/workflows/undra.yml`: a job for the core and one per app, installing `undra` at the version pinned at the top of the file). Nothing is downloaded: the templates are part of the binary. Without `--undra-path` the project depends on released versions of the crates and runtimes; a project that uses a checkout gets no workflow, since CI cannot see the checkout.
@@ -1422,6 +1466,8 @@ Reads the core's schema and writes the bindings the app shells import: a Swift p
 | `--check` | write nothing; exit with an error if the generated files differ from what would be written |
 | `--docs` | keep the core's doc comments in the bindings |
 | `--crate-name <name>` | the core crate's name, for a schema file that has none |
+| `--swift-observation <mode>` | `observation` (`@Observable`, iOS 17 and later) or `observable-object` (iOS 15 and later); overrides `[bindings] swift_observation`, which follows `[ios] deployment_target` |
+| `--ios-deployment-target <version>` | generate the Swift for this iOS floor instead of `[ios] deployment_target` (see [supporting iOS 15 and 16](https://shreypdev.github.io/undra/docs/cookbook/ios-15-16.html)) |
 
 The schema a library exports is the whole schema, doc comments included. `--docs` keeps them in the generated code, so every type, field, variant, method and port carries the text of its `///` comment; without it the generated code has no doc comments. The schema hash covers neither, so both outputs have the same hash and the same wire.
 
@@ -1567,6 +1613,10 @@ version = "0.1"                # path = "…" points at a checkout of the Undra 
 # ts_scope = "app"
 # ts_js_number = false         # i64/u64 as `number` instead of `bigint`
 # swift_typed_throws = true    # port requirements: `throws(E)`; false emits plain `throws`
+# swift_observation = "observable-object"   # Swift stores: "observation" (@Observable, iOS 17+) or "observable-object" (iOS 15+)
+
+[ios]
+deployment_target = "17.0"     # 15.0 or later; below 17.0 the Swift stores are ObservableObjects
 ```
 
 Commit `generated/` or regenerate it in CI, and gate on `undra bindgen --check` so a stale binding cannot ship.
@@ -2208,13 +2258,14 @@ duplicate type name, a type named like something the generated code depends on, 
 
 Raised by schema validation.
 
-a name that collides after case conversion (`a_b` and `aB`), shadows a member of the runtime base classes, or is not an identifier in a target language
+a name that collides after case conversion (`a_b` and `aB`), shadows a member of the runtime base classes, or is not an identifier in a target language; in the iOS 15 / 16 Swift mode also a store member named `objectWillChange` (§10.1, ADR-045)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | at record Todo, `due_date`, `dueDate` all become `dueDate` | field names are converted to camelCase, so names that differ only in case or underscores end up equal | rename one of them so that they stay distinct after conversion |
 | at object Thing, `close` is a name the generated code already uses | the runtime base class or the generated code already declares a member with that name | rename it so that it does not meet that name |
 | at record Todo, `1st` is not a name the generated code can use | every name of the schema becomes an identifier in Swift, Kotlin and TypeScript: ASCII letters, digits and underscores, not starting with a digit | rename it to letters, digits and underscores, starting with a letter |
+| at object Counter, `object_will_change` becomes `objectWillChange`, a name the generated code already uses | with the iOS 15 / 16 store shape (`swift_observation = "observable-object"`, the default for a deployment target below iOS 17) a store is a Combine `ObservableObject`, which declares that member itself | rename it so that it does not meet that name |
 
 ### `E0052` an item named like a standard library item, with another id
 
@@ -3893,7 +3944,7 @@ Comparison
 
 Undra and Kotlin Multiplatform (KMP) both let you write your domain logic once and keep the screens in SwiftUI, Jetpack Compose and React. They bet on different languages, boundaries and toolchains. We build Undra, so read this with that in mind: every statement about KMP is dated to 30 September 2026 and linked to its source, and one section covers when KMP is the better choice.
 
-30 Sep 2026 · 12 min read · Undra team
+30 Sep 2026 · 13 min read · Undra team
 
 > **How to read this page.** Statements about KMP describe its state on 30 September 2026 and link to JetBrains' or Google's documentation where one exists. We have not benchmarked KMP and make no numeric claims about it. If something is wrong or has moved, [open an issue](https://github.com/shreypdev/undra/issues) and we will correct the page with a dated note.
 
@@ -3958,7 +4009,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
 }
 ```
 
-There is no Objective-C in the path. Records are `Sendable` structs, errors are enums thrown as themselves (`catch TodoError.emptyTitle`), and a SwiftUI view reads `todos.visible` like any other observable property. The price is a baseline of Swift 6 and iOS 17, which strict concurrency and `@Observable` need.
+There is no Objective-C in the path. Records are `Sendable` structs, errors are enums thrown as themselves (`catch TodoError.emptyTitle`), and a SwiftUI view reads `todos.visible` like any other observable property. The price is a baseline of Swift 6 and, by default, iOS 17, which `@Observable` needs; an app that supports iOS 15 or 16 lowers its deployment target and gets `ObservableObject` stores ([supporting iOS 15 and 16](https://shreypdev.github.io/undra/docs/cookbook/ios-15-16.html)).
 
 On Android the comparison inverts, in KMP's favour. Shared Kotlin is just Kotlin on Android's runtime, with no cross-language boundary. Undra's Android path crosses JNI into a Rust shared library and surfaces `StateFlow`s, `suspend` functions and sealed error classes that Compose reads with `collectAsState()`. That is idiomatic, but still a boundary.
 

@@ -1,0 +1,4 @@
+$(SRCROOT)/../build/ios/Ios15SampleCore.xcframework/Info.plist
+$(SRCROOT)/../build/ios/Ios15SampleCore.xcframework/ios-arm64/libios15_sample_core.a
+$(SRCROOT)/../build/ios/Ios15SampleCore.xcframework/ios-arm64-simulator/libios15_sample_core.a
+$(SRCROOT)/../build/ios/.undra-configuration-$(CONFIGURATION)

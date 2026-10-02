@@ -17,6 +17,7 @@ members = [
   "examples/playground/core",
   "examples/cookbook/core",
   "examples/fieldbook/core",
+  "examples/ios15-sample/core",
   "bench",
 ]
 

@@ -1,0 +1,4 @@
+$(SRCROOT)/../core/Cargo.toml
+$(SRCROOT)/../core/src
+$(SRCROOT)/../core/src/lib.rs
+$(SRCROOT)/../undra.toml

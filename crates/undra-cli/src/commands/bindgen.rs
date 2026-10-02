@@ -8,7 +8,7 @@ use undra_meta::Schema;
 use crate::bindgen::{self, Plan, canonicalize_lenient};
 use crate::builds::host;
 use crate::cli::BindgenArgs;
-use crate::config::Platform;
+use crate::config::{Platform, ProjectConfig};
 use crate::error::{CliError, Code, Result};
 use crate::names::Names;
 use crate::project::Project;
@@ -165,6 +165,25 @@ fn plan(
     cwd: &Path,
 ) -> Result<Plan> {
     let mut generator = Generator::for_crate(&schema.crate_name);
+    // The iOS floor and the Swift observation mode (ADR-045): the project's, and what the command line says.
+    let observation = match &args.swift_observation {
+        Some(text) => Some(text.parse().map_err(|e: String| {
+            CliError::bad_argument(
+                format!("--swift-observation: {e}"),
+                "the Swift stores are either `@Observable` (iOS 17 and later) or `ObservableObject`s (iOS 15 and later)",
+                "use --swift-observation observation, or --swift-observation observable-object",
+            )
+        })?),
+        None => None,
+    };
+    let standalone = ProjectConfig::new("standalone", "com.example.standalone", Vec::new());
+    let config = session.map_or(&standalone, |s| &s.project.config);
+    bindgen::configure_swift(
+        &mut generator,
+        config,
+        observation,
+        args.ios_deployment_target.as_deref(),
+    )?;
     let mut platforms = Platform::ALL.to_vec();
     let mut runtimes = Runtimes::from_registries(crate::config::UNDRA_VERSION);
     let mut default_out = cwd.join("generated");

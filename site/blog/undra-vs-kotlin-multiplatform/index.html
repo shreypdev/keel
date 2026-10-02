@@ -73,7 +73,7 @@
 <main class="post" id="main"><article>
   <header class="post-header">
     <p class="eyebrow">Comparison</p><h1>Undra vs Kotlin Multiplatform: sharing logic without leaving your platform</h1><p class="lede">Undra and Kotlin Multiplatform (KMP) both let you write your domain logic once and keep the screens in SwiftUI, Jetpack Compose and React. They bet on different languages, boundaries and toolchains. We build Undra, so read this with that in mind: every statement about KMP is dated to 30 September 2026 and linked to its source, and one section covers when KMP is the better choice.</p>
-    <p class="post-meta"><time datetime="2026-09-30">30 Sep 2026</time> · 12 min read · Undra team</p>
+    <p class="post-meta"><time datetime="2026-09-30">30 Sep 2026</time> · 13 min read · Undra team</p>
   </header>
   <nav class="toc" aria-label="On this page"><ol><li><a href="#the-short-version">The short version</a></li><li><a href="#what-each-one-shares">What each one shares</a></li><li><a href="#what-swift-sees">What Swift sees</a></li><li><a href="#the-read-path">The read path</a></li><li><a href="#the-web">The web story</a></li><li><a href="#tooling-weight">Tooling weight</a></li><li><a href="#ecosystem">Ecosystem and backing</a></li><li><a href="#team-fit">Team fit</a></li><li><a href="#side-by-side">Side by side</a></li><li><a href="#when-kmp-is-the-better-choice">When Kotlin Multiplatform is the better choice</a></li><li><a href="#where-undra-fits">Where Undra fits</a></li></ol></nav>
 <aside class="callout note"><p><strong>How to read this page.</strong> Statements about KMP describe its state on 30 September 2026 and link to JetBrains' or Google's documentation where one exists. We have not benchmarked KMP and make no numeric claims about it. If something is wrong or has moved, <a href="https://github.com/shreypdev/undra/issues" rel="noopener">open an issue</a> and we will correct the page with a dated note.</p></aside>
@@ -121,7 +121,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func setFilter(_ filter: Filter) { /* … */ }
 }</code></pre>
-<p>There is no Objective-C in the path. Records are <code>Sendable</code> structs, errors are enums thrown as themselves (<code>catch TodoError.emptyTitle</code>), and a SwiftUI view reads <code>todos.visible</code> like any other observable property. The price is a baseline of Swift 6 and iOS 17, which strict concurrency and <code>@Observable</code> need.</p>
+<p>There is no Objective-C in the path. Records are <code>Sendable</code> structs, errors are enums thrown as themselves (<code>catch TodoError.emptyTitle</code>), and a SwiftUI view reads <code>todos.visible</code> like any other observable property. The price is a baseline of Swift 6 and, by default, iOS 17, which <code>@Observable</code> needs; an app that supports iOS 15 or 16 lowers its deployment target and gets <code>ObservableObject</code> stores (<a href="../../docs/cookbook/ios-15-16.html">supporting iOS 15 and 16</a>).</p>
 <p>On Android the comparison inverts, in KMP's favour. Shared Kotlin is just Kotlin on Android's runtime, with no cross-language boundary. Undra's Android path crosses JNI into a Rust shared library and surfaces <code>StateFlow</code>s, <code>suspend</code> functions and sealed error classes that Compose reads with <code>collectAsState()</code>. That is idiomatic, but still a boundary.</p>
 </section>
 <section id="the-read-path">
