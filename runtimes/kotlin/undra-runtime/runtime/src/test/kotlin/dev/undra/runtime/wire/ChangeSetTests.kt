@@ -236,9 +236,14 @@ class ChangeSetTests : Suite() {
             } else {
                 val extraEntries = 20_000 - 10
                 val extraBytes = largeBytes - smallBytes
+                // The claim is "nothing per entry", so the bound is per entry: less than one byte per extra entry.
+                // An allocation per entry costs at least 16 bytes (an object header), 320 KB over these entries,
+                // and fails it 16 times over; what this thread allocates once in a while whatever the entry count
+                // (a JIT compilation finishing, a TLAB refill: 2,120 bytes once on a CI runner, against a fixed
+                // 2,048 that used to be the bound) is a few KB, which cannot reach 19,990.
                 assertTrue(
-                    extraBytes < 2048,
-                    "iterating $extraEntries more entries allocated $extraBytes more bytes (small=$smallBytes, large=$largeBytes); expected ~0",
+                    extraBytes < extraEntries,
+                    "iterating $extraEntries more entries allocated $extraBytes more bytes (small=$smallBytes, large=$largeBytes); expected less than one byte per entry",
                 )
                 // The counter must be able to see allocation: materializing allocates far more per entry.
                 val materialized = allocatedBytes { Payloads.ChangeSet.decode(large) }
