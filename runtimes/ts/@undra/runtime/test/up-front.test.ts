@@ -27,6 +27,8 @@ const STAYS_OUT: Readonly<Record<string, string>> = {
   "recovery.ts": "crash recovery, for an app that passes `crashRecovery()`",
   "wire/envelope.ts": "the envelope codec: only the framed transports (remote, the worker's) frame messages",
   "wire/session.ts": "the framed transports' session payloads (`Hello`, `Log`, `PortCall`)",
+  "adapters/ids.ts": "`PortIds`, the names and hashes of every standard port: the first chunk spells the nine ids it needs as literals (`adapters/port-literals.ts`)",
+  "fnv.ts": "the hash that `PortIds` is computed with",
 };
 
 describe("what UndraCore loads up front", () => {

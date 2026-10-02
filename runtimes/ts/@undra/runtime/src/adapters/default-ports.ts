@@ -1,5 +1,6 @@
 import type { PortImpl } from "../port.js";
-import { PortIds } from "./ids.js";
+import { QUIETLY_UNAVAILABLE } from "../port-dispatch.js";
+import { FS_PORT, HTTP_PORT, KV_PORT, SECURE_STORE_PORT } from "./port-literals.js";
 import type { AdapterOverrides, FsAdapter, HttpAdapter, KvAdapter } from "./types.js";
 
 /*
@@ -15,24 +16,34 @@ type Method = (args: Uint8Array) => Promise<Uint8Array>;
 
 /** The adapters of {@link AdapterOverrides} that back a default port, with the port each backs. */
 const DEFAULT_PORTS = [
-  ["http", "Http"],
-  ["kv", "Kv"],
-  ["secureStore", "SecureStore"],
-  ["fs", "Fs"],
+  ["http", "Http", HTTP_PORT],
+  ["kv", "Kv", KV_PORT],
+  ["secureStore", "SecureStore", SECURE_STORE_PORT],
+  ["fs", "Fs", FS_PORT],
 ] as const;
 
-/** A port that builds its implementation on the first call and keeps it (a failed build is tried again by the next call). */
-function lazyPort(name: string, ids: Readonly<Record<string, number>>, build: () => Promise<PortImpl>): PortImpl {
+/**
+ * A port that builds its implementation on the first call and keeps it (a failed build is tried again by the next call). It
+ * lists no method ids (they would have to be hashed from names at load, or written out): any id is forwarded to the port once
+ * it is loaded, and one the real port does not have is answered "unavailable", quietly, as a port without that method is.
+ */
+function lazyPort(name: string, build: () => Promise<PortImpl>): PortImpl {
   let built: Promise<PortImpl> | undefined;
   const load = (): Promise<PortImpl> =>
     (built ??= build().catch((error: unknown) => {
       built = undefined;
       throw error;
     }));
-  const methods: Record<number, Method> = {};
-  for (const [key, id] of Object.entries(ids)) {
-    if (key !== "portId") methods[id] = async (args) => (await (await load()).methods[id]?.(args)) ?? new Uint8Array(0);
-  }
+  const methods = new Proxy({} as Record<number, Method>, {
+    get: (_, id) =>
+      typeof id === "string" && Number.isInteger(+id)
+        ? async (args: Uint8Array) => {
+            const method = (await load()).methods[+id];
+            if (method === undefined) throw QUIETLY_UNAVAILABLE;
+            return method(args);
+          }
+        : undefined,
+  });
   return { name, sync: false, methods };
 }
 
@@ -44,11 +55,10 @@ function lazyPort(name: string, ids: Readonly<Record<string, number>>, build: ()
  */
 export function defaultPorts(given: AdapterOverrides | undefined, namespace?: string): Map<number, PortImpl> {
   const ports = new Map<number, PortImpl>();
-  for (const [key, name] of DEFAULT_PORTS) {
+  for (const [key, name, portId] of DEFAULT_PORTS) {
     const adapter: Given = given?.[key];
     if (adapter === null || (adapter === undefined && key === "http" && typeof (globalThis as { fetch?: unknown }).fetch !== "function")) continue;
-    const ids = PortIds[name];
-    ports.set(ids.portId, lazyPort(name, ids, () => import("./standard.js").then((m) => m.standardPort(key, adapter, namespace))));
+    ports.set(portId, lazyPort(name, () => import("./standard.js").then((m) => m.standardPort(key, adapter, namespace))));
   }
   return ports;
 }
