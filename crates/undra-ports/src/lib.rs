@@ -16,6 +16,12 @@
 //! * [`run_background`] is the standard function every core has: a platform calls it with the
 //!   window the OS granted (ADR-046), and it runs the background tasks of the runtime.
 //! * [`fakes`] holds the deterministic fakes and [`fakes::install`].
+//! * Opt-in ports, each behind a cargo feature of this crate and of `undra` (off by default, so a
+//!   core that does not ask for them keeps its schema, hash and size; ADR-047, ADR-048):
+//!   the module `ws` (feature `websocket`: the `WebSocket` port, `ws::WsConnection`), the module
+//!   `sse` (feature `sse`: the `Sse` port, `sse::subscribe`) and the module `db` (feature `db`:
+//!   the `Db` port over SQLite, `db::Database`). [`Backoff`] and [`next()`] serve the cores that
+//!   reconnect and read them.
 //!
 //! # Calling a port from core code
 //!
@@ -51,12 +57,30 @@ mod root {
 }
 
 mod background;
+mod backoff;
 mod ctx_ext;
+#[cfg(feature = "db")]
+pub mod db;
 pub mod fakes;
+mod next;
+#[cfg(any(feature = "websocket", feature = "sse", feature = "db"))]
+mod owned;
 mod ports;
 mod records;
+#[cfg(feature = "sse")]
+pub mod sse;
+#[cfg(feature = "websocket")]
+pub mod ws;
 
 pub use background::run_background;
+pub use backoff::Backoff;
 pub use ctx_ext::CtxPorts;
+#[cfg(feature = "db")]
+pub use db::{DB_DISPATCHER, Db, DbProxy, db};
+pub use next::{Next, next};
 pub use ports::*;
 pub use records::*;
+#[cfg(feature = "sse")]
+pub use sse::{SSE_DISPATCHER, Sse, SseProxy, sse};
+#[cfg(feature = "websocket")]
+pub use ws::{WEB_SOCKET_DISPATCHER, WebSocket, WebSocketProxy, web_socket};

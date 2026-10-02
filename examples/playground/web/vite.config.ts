@@ -14,6 +14,8 @@ export default defineConfig({
       // The Undra runtime, from the Undra checkout's sources: the React adapter first, because an
       // alias matches by prefix and `@undra/runtime` would swallow `@undra/runtime/react`.
       "@undra/runtime/react": here("../../../runtimes/ts/@undra/runtime/src/react.ts"),
+      "@undra/runtime/realtime": here("../../../runtimes/ts/@undra/runtime/src/realtime.ts"),
+      "@undra/runtime/db": here("../../../runtimes/ts/@undra/runtime/src/db.ts"),
       "@undra/runtime": here("../../../runtimes/ts/@undra/runtime/src/index.ts"),
       // The testing kit (docs/TESTING.md), for the stories.
       "@undra/testkit": here("../../../runtimes/ts/@undra/testkit/src/index.ts"),
@@ -27,4 +29,8 @@ export default defineConfig({
     // The wasm core (`undra build --platform web`) and the runtime live outside this directory.
     fs: { allow: [here("../../..")] },
   },
+  // The Db port's worker (`@undra/runtime/db-worker`, wa-sqlite over OPFS) is an ES module worker, and
+  // wa-sqlite finds its wasm next to its own glue, which pre-bundling would move.
+  worker: { format: "es" },
+  optimizeDeps: { exclude: ["wa-sqlite"] },
 });

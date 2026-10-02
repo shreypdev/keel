@@ -5,7 +5,23 @@
 // `@undra/runtime` (the generated bindings do).
 import "./polyfills.js";
 
-export { appStateLifecycle, lifecycleState, nativeDefaultPorts, reactNativeAdapters } from "./adapters.js";
+export {
+  appStateLifecycle,
+  lifecycleState,
+  nativeDefaultPorts,
+  reactNativeAdapters,
+  realtimePorts,
+  type ReactNativeAdapters,
+} from "./adapters.js";
+export {
+  reactNativeSse,
+  reactNativeWebSocket,
+  type ReactNativeSseOptions,
+  type ReactNativeWebSocketConstructor,
+  type ReactNativeWebSocketOptions,
+  type XMLHttpRequestConstructorLike,
+  type XMLHttpRequestLike,
+} from "./realtime.js";
 export { isHttpUrl, reactNativeHttp, type ReactNativeHttpOptions } from "./http.js";
 export { nativeFrameScheduler, type FrameSchedulerOptions } from "./frame.js";
 export { installNative, loadNative, nativePlatformDefaults, type NativeCoreEntry, type NativeLoadOptions } from "./load.js";

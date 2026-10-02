@@ -67,6 +67,7 @@ EXAMPLES
     undra init todo --platforms ios,web               only those shells
     undra init todo --id dev.acme.todo                choose the application id / bundle identifier
     undra init todo --undra-path ~/src/undra            use a local checkout of Undra
+    undra init todo --ios-deployment-target 15.0      an iOS app that supports iOS 15 and 16 (ObservableObject stores)
 
 NEXT
     cd todo && undra dev        then run an app shell (each README says how)"
@@ -314,6 +315,11 @@ pub struct InitArgs {
     /// Create the project inside this directory (default: the current one).
     #[arg(long, value_name = "DIR")]
     pub dir: Option<PathBuf>,
+
+    /// The lowest iOS the app supports (`[ios] deployment_target`): 17.0 by default; 15.0 or 16.0 make
+    /// the Swift stores `ObservableObject`s and the iOS app `@StateObject` based (docs/IOS_15_16.md).
+    #[arg(long, value_name = "VERSION")]
+    pub ios_deployment_target: Option<String>,
 }
 
 /// Arguments of `undra bindgen`.
@@ -346,6 +352,17 @@ pub struct BindgenArgs {
     /// Name of the core crate, for a schema that has none (a canonical schema JSON file).
     #[arg(long, value_name = "NAME")]
     pub crate_name: Option<String>,
+
+    /// How the Swift stores are observed: `observation` (`@Observable`, iOS 17 and later) or
+    /// `observable-object` (`ObservableObject` with `@Published`, iOS 15 and later). Overrides
+    /// `[bindings] swift_observation`, which defaults to what `[ios] deployment_target` allows.
+    #[arg(long, value_name = "MODE")]
+    pub swift_observation: Option<String>,
+
+    /// Generate the Swift for this iOS floor (`15.0`, `16.0`, `17.0`) instead of `[ios]
+    /// deployment_target`: for CI that checks an app's bindings also work at an older iOS.
+    #[arg(long, value_name = "VERSION")]
+    pub ios_deployment_target: Option<String>,
 }
 
 /// Arguments of `undra build`.

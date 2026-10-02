@@ -98,6 +98,10 @@ fn prepare(env: &Env<'_>, args: &InitArgs) -> Result<Setup> {
     }
 
     let mut config = ProjectConfig::new(&args.name, &id, platforms);
+    if let Some(target) = &args.ios_deployment_target {
+        crate::config::check_ios_target(target)?;
+        config.ios.deployment_target.clone_from(target);
+    }
     let repo = match &args.undra_path {
         Some(path) => {
             let repo = path.canonicalize().map_err(|e| {
@@ -378,7 +382,9 @@ fn scaffold(setup: &Setup) -> Result<usize> {
                     &setup.root,
                     &[setup.root.join(&setup.config.core_path)],
                 )?;
-                1 + write_set(&setup.root, templates::IOS, &vars)?
+                // The views differ with how the generated stores are observed (ADR-045).
+                let observation = setup.config.swift_observation(None)?;
+                1 + write_set(&setup.root, &templates::ios(observation), &vars)?
             }
             Platform::Android => write_set(&setup.root, templates::ANDROID, &vars)?,
             Platform::Web => write_set(&setup.root, templates::WEB, &vars)?,
@@ -584,6 +590,7 @@ pub(super) fn generate_bindings(setup: &Setup) -> Result<Generated> {
     let mut generator = Generator::for_crate(&setup.names.core_package);
     generator.swift_module = project.swift_module();
     generator.kotlin_package = project.kotlin_package();
+    bindgen::configure_swift(&mut generator, &setup.config, None, None)?;
     let plan = Plan {
         generator,
         platforms: setup.config.platforms.clone(),
@@ -690,7 +697,73 @@ mod tests {
             id: None,
             undra_path: None,
             dir: None,
+            ios_deployment_target: None,
         }
+    }
+
+    #[test]
+    fn an_ios_15_project_gets_observable_object_stores_and_views_that_observe_them() {
+        let parent = fsutil::unique_temp_dir("init-ios15");
+        create_dir_all(&parent).unwrap();
+        let mut floor = args("floor-app", "ios");
+        floor.ios_deployment_target = Some("15.0".to_owned());
+        run(&env(&parent), &floor).unwrap();
+        let root = parent.canonicalize().unwrap().join("floor-app");
+        let read = |path: &str| std::fs::read_to_string(root.join(path)).unwrap();
+        // The config says so, and Xcode gets the same target.
+        assert!(read("undra.toml").contains("deployment_target = \"15.0\""));
+        assert!(
+            read("ios/FloorApp.xcodeproj/project.pbxproj")
+                .contains("IPHONEOS_DEPLOYMENT_TARGET = 15.0;")
+        );
+        // The bindings follow the floor: ObservableObject stores, the runtime's UndraDuration, an iOS 15 package.
+        let stores = read("generated/swift/Sources/FloorAppCore/Generated/Stores.swift");
+        assert!(
+            stores.contains("import Combine")
+                && stores.contains("ObservableObject, @unchecked Sendable")
+        );
+        assert!(stores.contains("@Published public private(set) var todos: [Todo]"));
+        assert!(!stores.contains("@Observable"));
+        assert!(
+            read("generated/swift/Package.swift").contains("platforms: [.iOS(.v15), .macOS(.v12)]")
+        );
+        // The views observe an ObservableObject, use nothing newer than iOS 15 and say why.
+        let views = [
+            read("ios/FloorApp/MainApp.swift"),
+            read("ios/FloorApp/ContentView.swift"),
+            read("ios/FloorApp/DevStatusBar.swift"),
+        ]
+        .join("\n");
+        assert!(views.contains("@ObservedObject var todos: Todos"));
+        assert!(views.contains("@ObservedObject var connection: UndraConnectionObject"));
+        assert!(
+            views.contains("NavigationView {") && views.contains(".navigationViewStyle(.stack)")
+        );
+        for newer in [
+            "NavigationStack",
+            "@Observable",
+            "Task.sleep(for:",
+            "core.connection.state",
+        ] {
+            assert!(!views.contains(newer), "{newer} is newer than iOS 15");
+        }
+        // The bootstrap is shared by both modes.
+        assert!(read("ios/FloorApp/UndraBootstrap.swift").contains("UndraBootstrap"));
+        let _ = std::fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn an_ios_target_below_the_runtimes_floor_is_refused_before_anything_is_written() {
+        let parent = fsutil::unique_temp_dir("init-ios14");
+        create_dir_all(&parent).unwrap();
+        for (target, needle) in [("14.0", "15.0"), ("latest", "not an iOS version")] {
+            let mut bad = args("old-app", "ios");
+            bad.ios_deployment_target = Some(target.to_owned());
+            let e = run(&env(&parent), &bad).unwrap_err();
+            assert!(e.what.contains(needle) || e.fix.contains(needle), "{e:?}");
+        }
+        assert!(!parent.join("old-app").exists());
+        let _ = std::fs::remove_dir_all(parent);
     }
 
     #[test]

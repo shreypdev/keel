@@ -320,9 +320,15 @@ class AdapterTests : Suite() {
                     setOf(
                         StandardPorts.Clock.PORT_ID, StandardPorts.Rng.PORT_ID, StandardPorts.Log.PORT_ID, StandardPorts.Timer.PORT_ID,
                         StandardPorts.Http.PORT_ID, StandardPorts.Kv.PORT_ID, StandardPorts.SecureStore.PORT_ID, StandardPorts.Fs.PORT_ID,
+                        // The opt-in ports of ADR-047 and ADR-048, registered whether or not a core enables them.
+                        StandardPorts.WebSocket.PORT_ID, StandardPorts.Sse.PORT_ID, StandardPorts.Db.PORT_ID,
                     ),
                     all.keys,
                 )
+                assertEq(4, all.getValue(StandardPorts.WebSocket.PORT_ID).methods.size)
+                assertEq(3, all.getValue(StandardPorts.Sse.PORT_ID).methods.size)
+                assertEq(7, all.getValue(StandardPorts.Db.PORT_ID).methods.size)
+                assertTrue(all.getValue(StandardPorts.Db.PORT_ID).detach != null, "the stateful ports release what they hold when the core closes")
                 val sync = setOf(StandardPorts.Clock.PORT_ID, StandardPorts.Rng.PORT_ID, StandardPorts.Log.PORT_ID, StandardPorts.Timer.PORT_ID)
                 for ((id, impl) in all) assertEq(id in sync, impl.sync, "sync flag of port $id")
                 assertEq(sync, JvmAdapters.portable { }.keys)

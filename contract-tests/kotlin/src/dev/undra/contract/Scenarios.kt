@@ -6,6 +6,9 @@ package dev.undra.contract
  */
 class Scenario(val id: String, val title: String, val body: (Bootstrap) -> Unit)
 
+/** A scenario that cannot run here: `Main` prints `SCENARIO <id> SKIP <reason>` (scenarios.md lists every allowed skip). */
+class Skipped(val reason: String) : RuntimeException(reason)
+
 /** A scenario that needs the loaded core; it fails at once if S16 did not manage to load it. */
 private fun scenario(id: String, title: String, body: (World) -> Unit): Scenario =
     Scenario(id, title) { boot -> body(boot.world ?: fail("the core is not loaded (S16 failed to load it)")) }
@@ -14,8 +17,8 @@ private fun scenario(id: String, title: String, body: (World) -> Unit): Scenario
  * The scenarios in the order they run. S16 is first because it is the one that loads the core:
  * its failing load has to come before the load the others use (`UndraCore.load` leaves nothing behind when
  * it fails), and the others need the core it loads. S17 is last because its last steps shut that core down
- * (S17.6) and load and close a fresh one (S17.7), so S18, S19, S20, S29, S30 and S26 run before it. The build-B steps of S14 and S15
- * run in a second JVM ([migrationBuildB]).
+ * (S17.6) and load and close a fresh one (S17.7), so S18, S19, S20, S29, S30, the opt-in ports' S23 to S25 and S26 run before
+ * it. The build-B steps of S14 and S15 run in a second JVM ([migrationBuildB]).
  */
 val SCENARIOS: List<Scenario> = listOf(
     Scenario("S16", "schema mismatch rejection", ::s16SchemaMismatch),
@@ -43,6 +46,9 @@ val SCENARIOS: List<Scenario> = listOf(
     // optimistic placeholder of the process (id u32::MAX), which S30's creations would use up.
     scenario("S29", "panic report", ::s29PanicReport),
     scenario("S30", "background run", ::s30BackgroundRun),
+    scenario("S23", "websocket", ::s23WebSocket),
+    scenario("S24", "server-sent events", ::s24Sse),
+    scenario("S25", "db", ::s25Db),
     // S26 loads two other cores (other namespaces) next to the playground core, and closes them again.
     scenario("S26", "two cores", ::s26TwoCores),
     scenario("S17", "panic containment", ::s17Panic),

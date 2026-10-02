@@ -377,8 +377,9 @@ public open class UndraCore protected constructor() : AutoCloseable {
 
     /**
      * Registers the platform's implementation of a port; later registrations for the same [portId]
-     * replace earlier ones. Ports can also be supplied up front through [LoadOptions.adapters], which
-     * is the better choice when the core calls ports while starting (for example to hydrate caches).
+     * replace earlier ones (the replaced one is detached: [PortImpl.detach]). Ports can also be supplied up front
+     * through [LoadOptions.adapters], which is the better choice when the core calls ports while starting (for example
+     * to hydrate caches). When the core closes, every registered implementation is detached.
      */
     public open fun registerPort(portId: UInt, impl: PortImpl): Unit = throw unsupported("registerPort")
 

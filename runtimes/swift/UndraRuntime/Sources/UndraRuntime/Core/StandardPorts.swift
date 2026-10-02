@@ -89,6 +89,38 @@ enum StandardPorts {
         static let panicked: UInt32 = fnv1a32("Diagnostics.panicked")
     }
 
+    // The opt-in ports (ADR-047, ADR-048): a core declares them only when it is built with the
+    // `websocket`, `sse` or `db` feature. Registering one the core does not declare is harmless.
+
+    /// `WebSocket` (ADR-047): `0x7388b95f`.
+    enum WebSocket {
+        static let portId: UInt32 = fnv1a32("port.WebSocket")
+        static let connect: UInt32 = fnv1a32("WebSocket.connect")
+        static let send: UInt32 = fnv1a32("WebSocket.send")
+        static let receive: UInt32 = fnv1a32("WebSocket.receive")
+        static let close: UInt32 = fnv1a32("WebSocket.close")
+    }
+
+    /// `Sse` (ADR-047): `0x75d2ef19`.
+    enum Sse {
+        static let portId: UInt32 = fnv1a32("port.Sse")
+        static let open: UInt32 = fnv1a32("Sse.open")
+        static let next: UInt32 = fnv1a32("Sse.next")
+        static let close: UInt32 = fnv1a32("Sse.close")
+    }
+
+    /// `Db` (ADR-048): `0x559eda82`.
+    enum Db {
+        static let portId: UInt32 = fnv1a32("port.Db")
+        static let open: UInt32 = fnv1a32("Db.open")
+        static let execute: UInt32 = fnv1a32("Db.execute")
+        static let query: UInt32 = fnv1a32("Db.query")
+        static let begin: UInt32 = fnv1a32("Db.begin")
+        static let commit: UInt32 = fnv1a32("Db.commit")
+        static let rollback: UInt32 = fnv1a32("Db.rollback")
+        static let close: UInt32 = fnv1a32("Db.close")
+    }
+
     // MARK: Names, for diagnostics
 
     /// Every standard port and method, by name: `"Kv"`, `"Kv.get"`, ...
@@ -104,6 +136,9 @@ enum StandardPorts {
         "Connectivity": ["changed"],
         "Lifecycle": ["changed"],
         "Diagnostics": ["panicked"],
+        "WebSocket": ["connect", "send", "receive", "close"],
+        "Sse": ["open", "next", "close"],
+        "Db": ["open", "execute", "query", "begin", "commit", "rollback", "close"],
     ]
 
     private static let namesById: (ports: [UInt32: String], methods: [UInt32: String]) = {

@@ -71,7 +71,7 @@ todos.close()                             // or let the cleaner release it if yo
 | `UndraObject`, `UndraStore` | `AutoCloseable` handles; a `java.lang.ref.Cleaner` (or a phantom-reference fallback where it does not exist, Android below API 33) releases leaked ones. `UndraStore.signal(initial)` makes the `MutableStateFlow` that `apply(signalId, op, reader)` updates. The mirror holds stores weakly: keep a reference to the store while you use its flows |
 | `Mirror` | Per-handle registry of `apply` callbacks. Change-sets are applied on `UndraDispatchers.main` in batches (one hop for a burst) with per-batch coalescing of superseded full values; a throwing callback is logged and skipped, a malformed change-set is dropped whole |
 | `UndraDispatchers` | `main`: `Dispatchers.Main.immediate` on Android (found by reflection), else a daemon thread named `undra-main` |
-| `PortImpl(sync, methods)` | What generated `<trait>PortImpl(...)` returns and `LoadOptions.adapters` / `registerPort` take. Sync ports are answered inline (they must not suspend or call Undra); async ports run off the core's threads and answer through `portReply` |
+| `PortImpl(sync, methods, detach)` | What generated `<trait>PortImpl(...)` returns and `LoadOptions.adapters` / `registerPort` take. Sync ports are answered inline (they must not suspend or call Undra); async ports run off the core's threads and answer through `portReply`. `detach` (optional) runs once when the implementation stops serving its core (the core closed, or another one was registered for the port): the WebSocket, Sse and Db bindings close what they hold |
 | Errors | `UndraException` (base of generated errors, and of everything below), `UndraCallError` (sealed: `CancelledByCore`, `Panicked`, `Refused`, `Unavailable`, `Malformed`; what a generated call throws besides its own `E` and `CancellationException`), `UndraUnhandledError(operation, error)` (what `LoadOptions.onError` receives), `UndraReplyException(status, body)` (+ `panicInfo`, `badRequestReason`), `UndraTransportException(reason, ...)`, `UndraProtocolException`, `UndraRestoreException(code)`, `UndraModeException`, `UndraSchemaMismatchException(expected, got)`, `UndraPortException(body)`, `WireException` (sealed) A stream that fails ends with the same set (`UndraCallError.mappedStream`): `E` for its own typed error (flag 2), and for a failure the core ends it with (flag 3) `CancelledByCore`, `Panicked` or `Refused` by the failure's status (ADR-036), `Malformed` for an item or failure body the runtime cannot read |
 
 ### Panic reports and background runs (ADR-046)
@@ -182,6 +182,26 @@ values migrate to this build's types. `Payloads.Snapshot` decodes one for tools 
 `UndraRestoreException(code)`: `PANICKED` (2), `BAD_SNAPSHOT` (5, a layout-1 snapshot included), `UNAVAILABLE` (6) or
 `INCOMPATIBLE` (7, values that migrate neither by name nor through a hook; `isIncompatible`).
 
+### The opt-in ports: WebSocket, Sse, Db (ADR-047, ADR-048)
+
+A core that enables the cargo features `websocket`, `sse` or `db` calls three more ports; the runtime ships their twelve
+records (`WsOpened`, `WsMessage`, `WsError`, `SseEvent`, `SseError`, `DbMigration`, `DbOpened`, `DbValue`, `DbExecuted`,
+`DbRows`, `DbConstraint`, `DbError`, in `dev.undra.runtime.adapters`, where generated bindings look for them), an adapter
+interface an app can implement, a **binding** that turns an adapter into the port (`WebSocketPortAdapter`, `SsePortAdapter`,
+`DbPortAdapter`, or `webSocketPort(adapter)`, `ssePort(adapter)`, `dbPort(adapter)`), and defaults, which `JvmAdapters.standard`
+registers (`AndroidPlatformDefaults.install` on Android):
+
+| Port | Adapter interface | JVM default | Android default |
+|---|---|---|---|
+| `WebSocket` | `WebSocketAdapter` / `WebSocketConnection` (`messages: Flow<WsMessage>`) | `ClientWebSocketAdapter`: the runtime's own RFC 6455 client (text checked to be UTF-8, subprotocols, headers, a read gate) | the same class |
+| `Sse` | `SseAdapter` / `SseStream` (`events: Flow<SseEvent>`), parsed by `SseParser` (HTML standard) | `JdkHttpSseAdapter` (`java.net.http`; the JDK's `HttpURLConnection` cannot abort a blocked read) | `UrlConnectionSseAdapter` (`HttpURLConnection`) |
+| `Db` | `DbAdapter` / `DbConnection` (one statement per call, `SqlText` splits scripts) | `JdbcDbAdapter` over `java.sql` in `<dataDir>/db` (the app adds `org.xerial:sqlite-jdbc`; without it every open is `Unavailable`) | `AndroidDbAdapter` (`android.database.sqlite`) |
+
+The bindings own the ids, the pull (`receive` / `next` answer at most `max`, a burst as one reply; the default adapters read
+ahead at most the room of the binding's buffer, so a core that stops reading stops the socket and TCP pushes back), the Db
+migrations, the per-database serial queue and the transaction slot (`DbPortAdapter(busyTimeoutMillis = ...)` shortens the 5 s
+busy timeout for tests). Errors are the ports' typed errors; SQLite failures map by result code (`DbError.fromSqliteCode`).
+
 ## The wire layer
 
 | Type | What it is |
@@ -260,7 +280,7 @@ case that cannot run here (the JNI smoke test without the native library) is rep
 Each phase is incremental (`scripts/test-local.sh check|main|test|run`), so a slow machine or a per-command time
 limit can run them one at a time.
 Knobs: `UNDRA_FUZZ_ITERATIONS=50000`, `UNDRA_FUZZ_SEED=123`, `UNDRA_WERROR=0`, `UNDRA_FORCE=1`, `UNDRA_BUILD_DIR=<dir>`
-(default `build/local`), `UNDRA_SKIP_GOLDEN=1`, `UNDRA_KOTLINX_COROUTINES`, `UNDRA_KOTLIN_STDLIB`, and for the JNI smoke
+(default `build/local`), `UNDRA_SKIP_GOLDEN=1`, `UNDRA_KOTLINX_COROUTINES`, `UNDRA_KOTLIN_STDLIB`, `UNDRA_SQLITE_JDBC` (the SQLite JDBC driver of the Db tests, test class path only), and for the JNI smoke
 test `UNDRA_NATIVE_LIB_DIR` (`-Djava.library.path`) or `UNDRA_NATIVE_PATHS="undra_fixture=/abs/libundra_fixture.dylib"`
 (space-separated `namespace=file` pairs, each `-Dundra.native.<namespace>.path`). To run the smoke test for real:
 
@@ -282,6 +302,10 @@ What runs (see `TestMain.kt`): the wire suites, then
 | `RemoteTransportTests` | the WebSocket transport against `WsTestServer`, a small RFC 6455 server: handshake, schema mismatch, framing and fragmentation, streams, ports, logs, drops and protocol errors |
 | `AdapterTests`, `FileAdapterTests`, `HttpAdapterTests` | port ids, record codecs (`StorageError` and `FsError` byte for byte with `undra-ports`), Clock / Rng / Log / Timer, Kv / SecureStore / Fs (traversal and symlink escapes), Http against a JDK `HttpServer` |
 | `StorageFailureTests` | ADR-049's failure injection: every `Kv` / `SecureStore` method with every `StorageError` through the real port registry (exact `PortReply` bytes: status 1 and the error), an untyped throw (status 2, one ERROR record, `onError`), and `FileKv` / `FsAdapter` over `test-support`'s `FaultyFileSystem` (a full disk is `Full`, a damaged entry `Corrupt`, the rest `Io`) |
+| `PortsV2RecordTests`, `PortsV2TextTests` | the twelve records of the opt-in ports (the Rust unit tests' exact bytes, round trips, `#[error]` texts, ids), SQLite result codes; the event-stream parser and SQL statement splitting / parameter counts |
+| `PortsV2BindingTests` | the WebSocket, Sse and Db bindings over scripted adapters: ids, the window and one pending pull, burst coalescing, ends, close and detach, migrations, transactions and `Busy`, the serial queue |
+| `RealtimeAdapterTests` | the default WebSocket and Sse adapters against `contract-tests/servers/realtime-server.mjs` (Node): echo, subprotocols and headers, refusals with status, peer close, drop, invalid UTF-8, a flood under a stalled reader, the SSE feed and resume, `/sse/hang` closed. Skipped without Node (failed with `UNDRA_REQUIRE_TOOLCHAINS=1`) |
+| `JdbcDbAdapterTests` | `JdbcDbAdapter` through the binding against real SQLite: constraint kinds, busy, a corrupt file, migrations, typed cells, one statement, the parameter count. Needs `UNDRA_SQLITE_JDBC` (the driver jar, on the test class path only); skipped without it (failed with `UNDRA_REQUIRE_TOOLCHAINS=1`) |
 | `ErrorTests`, `StatsTests`, `CleanerTests`, `DispatcherTests` | exception shapes, the statistics parser, both cleaner backends, main-thread and delivery dispatchers |
 | `NativeShapeTests`, `NativeSmokeTests` | the JNI descriptors of SPEC 6.1 on a core's `UndraCoreNative` (the fixture's and the golden bindings'), `NativeCallbacks`, the R8 rules, `NativeLibrary` reporting a missing library; a smoke test against `undra-ffi`'s fixture core (`libundra_fixture`), skipped unless it is loadable |
 

@@ -1,6 +1,6 @@
 # Swift contract runner: notes
 
-`run.sh` runs the twenty-three scenarios of `../scenarios.md` that Swift runs (S01 to S20, S26, S29 and S30: `UndraRuntime` over
+`run.sh` runs the scenarios of `../scenarios.md` that Swift runs (S01 to S20, S23 to S26, S29 and S30: `UndraRuntime` over
 the C ABI table, the real playground core through `libplayground_core.dylib` and, for S26, `libplayground_a.dylib` and
 `libplayground_b.dylib` in the same process, the bindings `undra bindgen` generated) and pipes the `SCENARIO` lines
 through `../check.sh swift`. The build-B steps of S14 and S15 run in a second process over the second build of the
@@ -10,7 +10,7 @@ core (see "Two builds" below).
 
 | Path | What |
 |---|---|
-| `Tests/ContractTests/Harness/` | the fakes of scenarios.md: `ManualClock`, `FakeServer` (the `Http` port), `MemoryKv` (records every operation, fails on demand with a `StorageError`), `CapturingLog`, `PortCalls` (`CountingAdapter`, which counts the calls each adapter receives), `Fixture` (the one core of the process, its adapters and its `LoadOptions`) and `Handover` (what build A leaves for the build-B process) |
+| `Tests/ContractTests/Harness/` | the fakes of scenarios.md: `ManualClock`, `FakeServer` (the `Http` port), `MemoryKv` (records every operation, fails on demand with a `StorageError`), `CapturingLog`, `PortCalls` (`CountingAdapter`, which counts the calls each adapter receives), `RealtimeServer` (starts `../servers/realtime-server.mjs` with Node for S23 and S24 and reads its `/stats`), `Fixture` (the one core of the process, its adapters and its `LoadOptions`) and `Handover` (what build A leaves for the build-B process) |
 | `Tests/ContractTests/MigrationBuildB.swift` | not a scenario of its own: the build-B steps of S14 (8, 9) and S15 (12 to 14), run by `run.sh` in a second process and skipped in the main run |
 | `Tests/ContractTests/ApplyReportTests.swift` | not a scenario: a generated store skips a change it cannot decode and reports it through `onError` (ADR-032, decision 6); it runs before the scenarios, on the core they share |
 | `Tests/ContractTests/ContractScenarios.swift` and `S*.swift` | one XCTest per scenario, `testS07_streamWithBackpressure` and so on, in one class so that XCTest's alphabetical order is the order of the ids |
@@ -131,6 +131,26 @@ delivered on the main thread (`Fixture.panics`). S29 reads it; its step "a repor
 * **S10.8** runs on a fresh `BigList` (after the earlier steps the list has no single missing first item).
 * **S15.5.** `Todo.id` is a `UUID` whose first eight bytes are the core's counter, so "an id above
   `b`'s" is compared byte-wise (`UndraUUID` is `Comparable`).
+
+* **S23, S24 and S25 run on the runtime's default adapters**, as scenarios.md asks: `URLSessionWebSocketAdapter`
+  and `URLSessionSseAdapter` against `../servers/realtime-server.mjs` (started once, on first use, by `Fixture.realtime()`;
+  it exits with this process through `--exit-on-stdin-close`), and `SQLiteDbAdapter` rooted in a fresh temporary
+  directory (`Fixture.databases`, deleted when S25 ends). They run last, on the core S18 loaded.
+* **S23.3 "pulls is at most 2" holds because the Swift binding answers a burst at once.** URLSession hands a burst to
+  the binding one `receive()` at a time, tens of microseconds apart, as fast as the core pulls; answering each pull
+  with the one message that happened to be there made `read(5)` cost five or six pulls. The binding's pull therefore
+  waits for a burst that is still arriving (it answers once `max` messages are there, once no message arrived for
+  2 ms, at the latest 8 ms after its first message, or at the stream's end), so the first pull of `read(5)` gets 16.
+  This is ADR-047 §3's "a burst of 16 frames is one crossing"; a lone message waits 2 ms
+  (`runtimes/swift/UndraRuntime/Sources/UndraRuntime/Ports/PulledInbox.swift`).
+* **S24.3 `sse_follow(HTTP/sse/hang, nil, 0)`** never polls its stream, so the request goes out when `close()` finishes
+  the pending open (crates/undra-ports/src/sse.rs); the runner waits up to 1 s for the server's `clientClosed`.
+* **S25.2 "a keyed patch each" is checked on a second add.** The first note added to an empty list reaches the mirror
+  as a full value, not a keyed patch: `Notes.add` writes with `Signal::update`, which the core diffs against the
+  host's baseline, and the diff sends the full value when no key overlaps (crates/undra-signals/src/store.rs, the
+  doc of the keyed baseline). The runner checks the generated store's notes after each add, and the op on a raw
+  store over `":memory:"`: the second add onto a one-note list is a keyed patch. (Reported to the integrator: the
+  scenario text promises a patch for the first add too.)
 
 ## Findings in merged code
 

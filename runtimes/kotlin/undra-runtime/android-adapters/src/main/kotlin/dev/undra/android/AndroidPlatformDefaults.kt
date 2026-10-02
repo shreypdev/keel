@@ -3,10 +3,15 @@ package dev.undra.android
 import android.content.Context
 import android.util.Log
 import dev.undra.runtime.UndraCore
+import dev.undra.runtime.adapters.ClientWebSocketAdapter
 import dev.undra.runtime.adapters.ClockAdapter
+import dev.undra.runtime.adapters.DbPortAdapter
 import dev.undra.runtime.adapters.RngAdapter
+import dev.undra.runtime.adapters.SsePortAdapter
 import dev.undra.runtime.adapters.StandardPorts
 import dev.undra.runtime.adapters.TimerAdapter
+import dev.undra.runtime.adapters.UrlConnectionSseAdapter
+import dev.undra.runtime.adapters.WebSocketPortAdapter
 import java.util.WeakHashMap
 
 /**
@@ -20,6 +25,9 @@ import java.util.WeakHashMap
  * @property log the `Log` adapter.
  * @property connectivity the `Connectivity` event source.
  * @property lifecycle the `Lifecycle` event source.
+ * @property webSocket the binding of the opt-in `WebSocket` port (ADR-047), over the runtime's [ClientWebSocketAdapter].
+ * @property sse the binding of the opt-in `Sse` port (ADR-047), over [UrlConnectionSseAdapter] (`HttpURLConnection`).
+ * @property db the binding of the opt-in `Db` port (ADR-048), over [AndroidDbAdapter].
  */
 public class AndroidPlatform internal constructor(
     public val http: AndroidHttpAdapter,
@@ -30,6 +38,9 @@ public class AndroidPlatform internal constructor(
     public val connectivity: AndroidConnectivityAdapter,
     public val lifecycle: AndroidLifecycleAdapter,
     private val timer: TimerAdapter,
+    public val webSocket: WebSocketPortAdapter,
+    public val sse: SsePortAdapter,
+    public val db: DbPortAdapter,
 ) : AutoCloseable {
     /**
      * Stops reporting `Connectivity` and `Lifecycle` events and cancels pending timers. The ports stay registered (a
@@ -73,6 +84,12 @@ public class AndroidPlatform internal constructor(
  * | `Lifecycle` | [AndroidLifecycleAdapter] | `Application.ActivityLifecycleCallbacks` (`reportLifecycle = false` opts out) |
  * | `Log` | [AndroidLogAdapter] | `android.util.Log` |
  * | `Clock`, `Rng`, `Timer` | the runtime's own | `System`, `SecureRandom`, a scheduled executor |
+ * | `WebSocket` (opt-in, ADR-047) | [WebSocketPortAdapter] over the runtime's [ClientWebSocketAdapter] | `java.net.Socket` (RFC 6455 client of the runtime) |
+ * | `Sse` (opt-in, ADR-047) | [SsePortAdapter] over [UrlConnectionSseAdapter] | `HttpURLConnection` |
+ * | `Db` (opt-in, ADR-048) | [DbPortAdapter] over [AndroidDbAdapter] | `android.database.sqlite`, `getDatabasePath("undra-<name>.sqlite")` |
+ *
+ * The three opt-in ports are registered whatever the core enables (cargo features `websocket`, `sse`, `db`): a core that
+ * does not declare one never calls it. When the core closes, their connections and databases are closed.
  *
  * Call it once, right after the core is loaded (`Undra<Namespace>.load`) and before any store is created. The core reads its persisted query cache
  * and offline queue through `Kv` while it starts and waits up to five seconds for the adapter to appear, which is why
@@ -91,7 +108,8 @@ public object AndroidPlatformDefaults {
     private val installed = WeakHashMap<UndraCore, AndroidPlatform>()
 
     /**
-     * Registers the adapters of all ten standard ports with [core] and starts reporting `Connectivity` and `Lifecycle`.
+     * Registers the adapters of all ten standard ports and of the three opt-in ones (WebSocket, Sse, Db) with [core] and
+     * starts reporting `Connectivity` and `Lifecycle`.
      * Installing again on the same core stops the earlier event sources first.
      *
      * @param core the core its load (`Undra<Namespace>.load`) returned.
@@ -124,7 +142,10 @@ public object AndroidPlatformDefaults {
         val timer = TimerAdapter(core::timerFired)
         val connectivity = AndroidConnectivityAdapter(app, requireValidated = requireValidatedNetwork)
         val lifecycle = AndroidLifecycleAdapter(app)
-        val platform = AndroidPlatform(http, kv, secureStore, fs, log, connectivity, lifecycle, timer)
+        val webSocket = WebSocketPortAdapter(ClientWebSocketAdapter())
+        val sse = SsePortAdapter(UrlConnectionSseAdapter())
+        val db = DbPortAdapter(AndroidDbAdapter(app))
+        val platform = AndroidPlatform(http, kv, secureStore, fs, log, connectivity, lifecycle, timer, webSocket, sse, db)
 
         // Installing again replaces the event sources; timers the core armed through the earlier adapter still fire.
         synchronized(installed) { installed.put(core, platform) }?.stopEventSources()
@@ -138,12 +159,15 @@ public object AndroidPlatformDefaults {
         core.registerPort(StandardPorts.Rng.PORT_ID, RngAdapter().portImpl())
         core.registerPort(StandardPorts.Log.PORT_ID, log.portImpl())
         core.registerPort(StandardPorts.Timer.PORT_ID, timer.portImpl())
+        core.registerPort(StandardPorts.WebSocket.PORT_ID, webSocket.portImpl())
+        core.registerPort(StandardPorts.Sse.PORT_ID, sse.portImpl())
+        core.registerPort(StandardPorts.Db.PORT_ID, db.portImpl())
         connectivity.attach(core)
         if (reportLifecycle) lifecycle.attach(core, onBackgroundWorkPending)
         Log.i(
             TAG,
-            "AndroidPlatformDefaults: registered Kv, SecureStore, Fs, Http, Clock, Rng, Log and Timer; reporting Connectivity" +
-                if (reportLifecycle) " and Lifecycle" else " (Lifecycle is left to the app)",
+            "AndroidPlatformDefaults: registered Kv, SecureStore, Fs, Http, Clock, Rng, Log, Timer, WebSocket, Sse and Db; " +
+                "reporting Connectivity" + if (reportLifecycle) " and Lifecycle" else " (Lifecycle is left to the app)",
         )
         return platform
     }

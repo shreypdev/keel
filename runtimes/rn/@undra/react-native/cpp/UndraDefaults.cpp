@@ -77,6 +77,7 @@ std::vector<uint32_t> nativePortsOf(Platform &platform) {
   if (platform.makeSecretStore() != nullptr) out.push_back(ports::kSecureStore);
   if (!platform.fsRoot().empty()) out.push_back(ports::kFs);
   if (platform.makeConnectivity() != nullptr) out.push_back(ports::kConnectivity);
+  if (platform.makeDbBackend() != nullptr) out.push_back(ports::kDb);
   return out;
 }
 
@@ -169,6 +170,9 @@ NativeDefaults::NativeDefaults(const Api &api, std::shared_ptr<Platform> shared,
     } else if (id == ports::kConnectivity) {
       monitor_ = platform.makeConnectivity();
       connectivity_ = monitor_ != nullptr;
+    } else if (id == ports::kDb) {
+      dbBackend_ = platform.makeDbBackend();
+      db_ = dbBackend_ != nullptr;
     }
   }
 }
@@ -178,10 +182,36 @@ NativeDefaults::~NativeDefaults() {
 }
 
 bool NativeDefaults::answers(uint32_t portId) const noexcept {
-  return (portId == ports::kKv && kv_) || (portId == ports::kSecureStore && secureStore_) || (portId == ports::kFs && fs_);
+  return (portId == ports::kKv && kv_) || (portId == ports::kSecureStore && secureStore_) || (portId == ports::kFs && fs_) ||
+      (portId == ports::kDb && db_);
 }
 
-uint8_t NativeDefaults::post(uint32_t portId, uint32_t methodId, uint32_t portCallId, const uint8_t *args, uint32_t len) noexcept {
+uint8_t NativeDefaults::post(uint32_t portId, uint32_t methodId, uint32_t portCallId, const uint8_t *args, uint32_t len, UndraBuf *out) noexcept {
+  if (portId == ports::kDb) {
+    if (!db_) return kUnavailable;
+    std::shared_ptr<DbPort> port;
+    try {
+      std::lock_guard<std::mutex> lock(dbMutex_);
+      if (dbStopped_) return kUnavailable;
+      if (dbPort_ == nullptr) {
+        Platform *platform = platform_.get();
+        DbThreadHooks hooks{
+            [platform](const char *name) { platform->workerStarted(name); },
+            [platform] { platform->workerEnded(); },
+        };
+        // From a database's thread (host contract 4); after `undra_shutdown` it reaches no runtime, and
+        // `stop()` joins those threads before another core can exist (B3).
+        dbPort_ = std::make_shared<DbPort>(dbBackend_, [this](const uint8_t *data, std::size_t size) {
+          api_.port_reply(data, static_cast<uint32_t>(size));
+        }, std::move(hooks), dbOptions_);
+      }
+      port = dbPort_;
+    } catch (...) {
+      return kUnavailable; // out of memory
+    }
+    // Outside the lock (a post never waits for I/O, but it may start a database's thread).
+    return port->post(methodId, portCallId, args, len, out);
+  }
   Worker *worker = portId == ports::kKv ? &kvWorker_ : portId == ports::kSecureStore ? &secureWorker_ : portId == ports::kFs ? &fsWorker_ : nullptr;
   if (worker == nullptr || !answers(portId)) return kUnavailable;
   try {
@@ -418,6 +448,13 @@ void NativeDefaults::stop() noexcept {
   kvWorker_.stop();
   secureWorker_.stop();
   fsWorker_.stop();
+  std::shared_ptr<DbPort> db;
+  {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    dbStopped_ = true;
+    db = std::move(dbPort_);
+  }
+  if (db != nullptr) db->stop();
 }
 
 } // namespace undra::rn

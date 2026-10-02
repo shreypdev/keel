@@ -1,6 +1,6 @@
 # Notes on the TypeScript column
 
-`run.sh` runs S01..S22 and S26 of `../scenarios.md` against the real wasm build of the playground core
+`run.sh` runs S01..S26 of `../scenarios.md` against the real wasm build of the playground core
 (`examples/playground/build/web/playground_core.wasm`, built by `undra build -C examples/playground --platform web`)
 through `@undra/runtime` in `wasm-main` mode (S17 step 6 and S21 in `wasm-worker` mode), on Node, under vitest. `src/reporter.ts` prints one
 `SCENARIO Sxx PASS|FAIL|SKIP <title>` line per scenario; `../check.sh ts` grades them. `NOTE` lines carry
@@ -98,6 +98,43 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
   logged nothing.
 * S17: the stores of the restarted core are built over the handle the restore brought back with
   `adoptTodos` (see the gap below); the restart itself is `bootRaw()` plus `Kind.Restore`.
+
+## The opt-in ports: S23, S24, S25 (ADR-047, ADR-048)
+
+* The ports are registered the way an app registers them, one line each through `LoadOptions.ports`
+  (`boot({ ports })` in `src/harness.ts`): `webSocketPort(nodeWebSocket())`, `ssePort(fetchSse())`,
+  `dbPort(nodeSqliteDb({ directory }))` from `@undra/runtime/realtime` and `@undra/runtime/db`. S23 and S24 import
+  `startRealtimeServer` from `../servers/realtime-server.mjs` in process (`src/realtime-server.ts`), one server per
+  file; S25 roots its adapter in a fresh `mkdtemp` directory deleted after the file.
+* Each file also runs its port once in `wasm-worker` mode (`bootWorker`, tests not named after a scenario, so they
+  count in vitest's totals only): `wsEcho`, `sseFollow` and `dbCells` answered by the main thread's binding
+  (ADR-049 §2).
+* **S23 uses `nodeWebSocket()`, not Node's global `WebSocket`** (scenarios.md names the global). Measured on Node
+  24.21 (undici 7.29) against the realtime server: the global `WebSocket` reports a refused upgrade as an `error` and a
+  1006 close with no status (step 4's "status 401 where the platform reports it": it does not), throws
+  `InvalidAccessError` for `close(1001)` and `close(1008)` (scripts may only send 1000 and 3000-4999, so step 5's 1001
+  cannot be sent), and reports a text frame that is not UTF-8 exactly like a drop (1006, no close frame). The runtime's
+  `nodeWebSocket()` (Node's `http` upgrade and the runtime's own RFC 6455 framing) reports `Refused(401)`, sends 1001,
+  ends a bad text frame with `Protocol` (closing 1007), and stops reading the socket while the core is not pulling, so
+  TCP pushes back on the server as on Swift and Kotlin. `browserWebSocket()` over the global runs the runtime's
+  failure-injection suite with those three readings (`runtimes/ts/@undra/runtime/test/realtime-adapters.test.ts`),
+  and its flood ends `Closed(1008, "the core did not keep up")` after 16 MiB as the brief says (the close frame
+  itself carries no code where 1008 is refused to scripts).
+* S23.3 reads `live.pulls()` as at most 2 (measured: 1). The binding answers a burst as one reply (a pull with fewer
+  than `max` waits for `max`, 2 ms of quiet or 8 ms after its first item), the rule the Swift runner needed.
+* S24 runs `fetchSse()` on Node's `fetch` (undici); the body is read only when the core pulls, so `/sse/hang` closed by
+  the core is a client that leaves (the server sees it within the second).
+* S25 step 2: "a keyed patch each" is not asserted (the first `add` onto an empty list arrives as a full value, SPEC
+  3.8); the step checks that the mirror holds both notes, then the toggle.
+* S25's steps also run once on the browser's adapter, `waSqliteDb()` (wa-sqlite behind its worker protocol), with the
+  worker served in process over a `MessageChannel` by `startDbWorker(port, { storage: "memory" })` from
+  `@undra/runtime/db-worker`: wa-sqlite's in-memory VFS, because OPFS exists only in a browser's dedicated workers (the
+  web playground's smoke test covers OPFS in Chromium). That test is not named after the scenario: `node:sqlite` is the
+  column's S25 adapter. wa-sqlite's `bind_text` cuts text at U+0000 and its `bind_blob` stores an empty array as NULL,
+  so the engine binds text and blobs itself with their length (the runtime's Db suite asserts both).
+* `node:sqlite` binds a JavaScript `number` as REAL, so `Integer` cells bind as `bigint` and read back as `bigint`
+  (`setReadBigInts`); S25.3's `-9007199254740993` crosses exactly. Node's SQLite is built without double-quoted string
+  literals (`SQLITE_DQS=0`): `"x"` is an identifier, never a string.
 
 ## Gaps and defects found (for the integrator)
 

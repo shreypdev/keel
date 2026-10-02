@@ -518,6 +518,8 @@ internal class ConnectedCore(
         UndraCore.forget(this)
         setConnection(ConnectionState.Closed(reason, cause))
         failAll(closedException(cause))
+        // Ports that hold platform resources for this core (WebSocket connections, Db files) let them go.
+        ports.detachAll()
         scope.cancel()
         try {
             transport.close()

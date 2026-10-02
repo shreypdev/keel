@@ -445,3 +445,22 @@ In flight: `ports` (review resuming: B1 size fix, sub-reviews, matrix), `docs-v1
 
 Matrix at checkpoint 19: Rust 2,993 · TS 1,264 + 32 · Kotlin 682 · Swift 581 · RN 65 · contracts 65/65.
 In flight: `ports` (review resuming).
+
+### Checkpoint 20 (2026-10-02) — ports: WebSocket, SSE and Db
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **ports** (G2+G3, ADR-047/048 Accepted): `WebSocket`, `Sse` and `Db` standard ports behind cargo features (standard hash unchanged `0xbbf6f70d0c567f47`), inbound as a batched pull whose `max` is the credit, typed ends, interactive transactions with a 5 s `Busy` deadline, SQL as `&'static str`; adapters on Swift (`URLSessionWebSocketTask`, SQLite3), Kotlin JVM (own RFC 6455 client, `java.net.http`, JDBC), Android (`android.database.sqlite`), TS (`@undra/runtime/realtime`, `/db` with wa-sqlite in a worker on OPFS), RN (native C++ binding); the playground's Notes and Live tabs; S23–S25; bench rows under budget; the cookbook's `realtime` and Fieldbook's `presence` features on | `50fd54d` | opus review `.10x/reviews/2026-10-02-ports-review.md`: sound after fixes; B1 the hello-world JS 132 B over its gate (`OptInPortIds` moved to the subpaths, dispose on close), H1 a cancelled `connect`/`open`/`begin` orphaned what the platform opened (`owned.rs`), H2 a crash restart kept the trapped instance's connections, H3 two opens ran migrations twice on every binding, H4 Android stuck after a refused `COMMIT`; Rust 3,052 · Swift 668 · Kotlin 753 · TS 1,432 · RN 87 · contracts **74/74**; hello wasm 116.6 KB, JS 25,996/26,000; playground hash `0xb5b7b1dc29182a9d`. Open: a migration containing its own `COMMIT`; the web Db serves one tab per origin |
+
+Matrix at checkpoint 20: Rust 3,052 · TS 1,432 + 32 · Kotlin 753 + 30 · Swift 668 · RN 87 · contracts 74/74 (S01–S26 incl. S23–S25).
+In flight: `objects-callbacks` (ADR-040/041), `ios-floor` (ADR-045), `prod-ops` (ADR-046).
+
+### Checkpoint 21 (2026-10-02) — the dev-reload flake, iOS 15/16
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **dev-reload-flake**: the integration tests' raw client never answered the server's pings during a long rebuild, so the server dropped it as dead at 15 s under load; the client now has a reader thread like a runtime's, plus a transport test that a late reader still finds the Close frame first | `a3c4b93` | 90/90 loaded runs (load 22–83); contracts 74/74; the server still logs no reason when it drops a dead peer (open) |
+| **ios-floor** (ADR-045 Accepted): `[ios] deployment_target` below 17 generates `ObservableObject` + `@Published` stores (default output byte-identical), the runtime's floor is iOS 15 / macOS 12 with `UndraConnectionObject` as the pre-17 twin and `UndraDuration` in nanoseconds, `undra init --ios-deployment-target 15.0`, `examples/ios15-sample`, the Swift contract grid in floor mode, an `ios-floor` CI job with a runtime probe | `e69ff1c` | sonnet review `.10x/reviews/2026-10-02-ios-floor-review.md`: sound with fixes; M1 a weak capture left the iOS 17 connection object stale, M2 the config diagnostics lost their why; `@Published` copies the array once per patch (48 µs at 10k rows, documented); 24/24 at the floor and the default; Swift 674; Rust 3,078; proven by compilation and a 26.5 runtime probe, no 15/16 runtime installed |
+
+Matrix at checkpoint 21: Rust 3,078 · TS 1,432 + 32 · Kotlin 753 + 30 · Swift 674 · RN 87 · contracts 74/74.
+In flight: `ns-storage` (review), `objects-callbacks`, `prod-ops`, `ts-size-e4`.

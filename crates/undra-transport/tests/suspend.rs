@@ -772,3 +772,52 @@ fn every_tap_racing_the_suspend_is_answered_or_not_run_and_only_answered_ones_ar
         );
     }
 }
+
+#[test]
+fn a_client_that_keeps_sending_and_reads_late_still_finds_the_close_frame() {
+    // The raw client of `undra dev`'s tests reads nothing while a rebuild runs and sends calls
+    // meanwhile; what the server wrote before it hung up must be the first thing it finds when it
+    // reads again, however long it was away and whatever it sent into the closed socket.
+    let f = resuming();
+    let mut client = f.session_client("tok-sends", false);
+    let counter = client.new_counter(0);
+    let call = |client: &mut TestClient| {
+        let id = client.next_call_id();
+        let payload = undra::runtime::testing::call_payload(
+            undra::wire::payload::CallTarget::Method {
+                handle: undra::wire::Handle(counter),
+                method_id: ADD,
+            },
+            id,
+            &enc(&1_i32),
+        );
+        client.try_send(Kind::Call, &payload)
+    };
+
+    let started = std::time::Instant::now();
+    let suspended = std::thread::scope(|scope| {
+        let suspending = scope.spawn(|| f.server.suspend(SETTLE));
+        while !suspending.is_finished() {
+            call(&mut client);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        suspending.join().expect("the suspend finished")
+    });
+    assert!(
+        started.elapsed() >= Duration::from_millis(500),
+        "the client never answered the Close frame, so the server waited out `close_timeout` ({:?})",
+        started.elapsed()
+    );
+    assert!(suspended.dropped_calls > 0, "{suspended:?}");
+    // Still sending into the socket the server has closed: the answer to each is a reset.
+    for _ in 0..10 {
+        call(&mut client);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let (code, reason) = client
+        .expect_close()
+        .expect("a Close frame, not a bare reset");
+    assert_eq!(code, close::GOING_AWAY);
+    assert!(reason.contains("reloading"), "{reason}");
+}

@@ -101,13 +101,19 @@ pub struct Project {
 
 /// Creates a project named `name` for `platforms` ("web", "ios,android,web", ...).
 pub fn init_project(name: &str, platforms: &str) -> Project {
+    init_project_with(name, platforms, &[])
+}
+
+/// [`init_project`] with more `undra init` arguments (`--ios-deployment-target 15.0`).
+pub fn init_project_with(name: &str, platforms: &str, extra: &[&str]) -> Project {
     let dir = TempDir::new(name);
     run_ok(
         undra()
             .args(["init", name, "--platforms", platforms, "--undra-path"])
             .arg(repo_root())
             .arg("--dir")
-            .arg(dir.path()),
+            .arg(dir.path())
+            .args(extra),
     );
     let root = dir.path().join(name);
     // Pin the dependency versions the workspace itself was tested with, so the tests resolve the
@@ -149,7 +155,7 @@ fn write_playground(root: &Path, own_workspace: bool) {
         root.join("core/Cargo.toml"),
         format!(
             "[package]\nname = \"playground-core\"\nversion = \"0.1.0\"\nedition = \"2024\"\nrust-version = \"1.85\"\npublish = false\n\n\
-[dependencies]\nundra = {{ path = \"{}\" }}\nserde = {{ version = \"1\", features = [\"derive\"] }}\nserde_json = \"1\"\n{}",
+[dependencies]\nundra = {{ path = \"{}\", features = [\"websocket\", \"sse\", \"db\"] }}\nserde = {{ version = \"1\", features = [\"derive\"] }}\nserde_json = \"1\"\n{}",
             repo.join("crates/undra").display(),
             // Below this repository's `target/`, the copy would be taken for a member of its workspace.
             if own_workspace { "\n[workspace]\n" } else { "" }

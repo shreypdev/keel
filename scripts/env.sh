@@ -44,6 +44,11 @@ fi
 if [ -f "$_UNDRA_TOOLS/lib/kotlinx-coroutines-core-jvm-1.6.4.jar" ]; then
   export UNDRA_KOTLINX_COROUTINES="$_UNDRA_TOOLS/lib/kotlinx-coroutines-core-jvm-1.6.4.jar"
 fi
+# The SQLite JDBC driver the JVM tests of the Db port and the Kotlin contract column (S25) put on
+# their class path (ADR-048; never a dependency of the runtime module).
+if [ -f "$_UNDRA_TOOLS/lib/sqlite-jdbc-3.53.4.0.jar" ]; then
+  export UNDRA_SQLITE_JDBC="$_UNDRA_TOOLS/lib/sqlite-jdbc-3.53.4.0.jar"
+fi
 # Homebrew kotlinc is a wrapper script, which defeats test-local.sh's stdlib guess; point at
 # the Cellar jar directly.
 if [ -z "${UNDRA_KOTLIN_STDLIB:-}" ]; then

@@ -184,6 +184,19 @@ pub const CASES: &[&str] = &[
     "recursive",
 ];
 
+/// The cases whose Swift output is also locked in the iOS 15 / 16 mode (`ObservableObject` stores,
+/// `UndraDuration`; ADR-045), as `tests/golden/<case>/swift-observable-object/`. They are the cases that
+/// have stores or query handles, and the one with a `Duration` field.
+pub const FLOOR_CASES: &[&str] = &["stores", "queries", "full"];
+
+/// `generator_for` in the iOS 15 mode: `ObservableObject` stores and a floor of iOS 15 (the strictest one).
+pub fn floor_generator_for(case: &str, schema: &Schema) -> Generator {
+    let mut generator = generator_for(case, schema);
+    generator.swift_observation = undra_bindgen::SwiftObservation::ObservableObject;
+    generator.swift_min_ios = 15;
+    generator
+}
+
 /// The generator configuration of a case: default names, and a Kotlin package
 /// per case so every case can be compiled together.
 pub fn generator_for(case: &str, schema: &Schema) -> Generator {
@@ -1115,6 +1128,17 @@ fn stdlib() -> Schema {
             field("extra", vec_of(named("Header"))),
         ],
     ));
+    // The opt-in standard types (ADR-047, ADR-048) resolve to the runtimes' own as well.
+    s.records.push(record(
+        "Feed",
+        "What a live screen keeps.",
+        vec![
+            field("last", named("WsMessage")),
+            field("event", opt(named("SseEvent"))),
+            field("cells", vec_of(named("DbValue"))),
+            field("page", opt(named("DbRows"))),
+        ],
+    ));
     // A user type may share the name of a standard *port*: the ports are not generated.
     s.records.push(record(
         "Connectivity",
@@ -1176,6 +1200,30 @@ fn stdlib() -> Schema {
                 "",
                 vec![],
                 err_result(TypeRef::Unit, "SyncError"),
+                true,
+            ),
+            method(
+                "Syncer",
+                "local",
+                "Reads the local database.",
+                vec![param("sql", TypeRef::String)],
+                err_result(named("DbRows"), "DbError"),
+                true,
+            ),
+            method(
+                "Syncer",
+                "listen",
+                "Streams the server's events.",
+                vec![],
+                TypeRef::result(TypeRef::stream(named("SseEvent")), named("SseError")),
+                true,
+            ),
+            method(
+                "Syncer",
+                "push",
+                "Sends one message on the live connection.",
+                vec![param("message", named("WsMessage"))],
+                err_result(TypeRef::Unit, "WsError"),
                 true,
             ),
         ],

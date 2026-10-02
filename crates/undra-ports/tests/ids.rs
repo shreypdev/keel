@@ -89,6 +89,80 @@ const TABLE: &[PortRow] = &[
     ),
 ];
 
+/// The opt-in ports (ADR-047, ADR-048), each behind the cargo feature named first. The platform
+/// runtimes hard-code their ids whatever a core enables.
+const OPT_IN: &[(&str, PortRow)] = &[
+    (
+        "websocket",
+        (
+            "WebSocket",
+            0x7388_b95f,
+            PortKind::Async,
+            &[
+                ("connect", 0x8347_7638),
+                ("send", 0x117b_2158),
+                ("receive", 0x8f31_f08f),
+                ("close", 0x6015_4b86),
+            ],
+        ),
+    ),
+    (
+        "sse",
+        (
+            "Sse",
+            0x75d2_ef19,
+            PortKind::Async,
+            &[
+                ("open", 0xc003_3c14),
+                ("next", 0x4035_cbed),
+                ("close", 0x5bfe_2c88),
+            ],
+        ),
+    ),
+    (
+        "db",
+        (
+            "Db",
+            0x559e_da82,
+            PortKind::Async,
+            &[
+                ("open", 0xee6f_26db),
+                ("execute", 0xffac_2f0a),
+                ("query", 0x3a4d_eefd),
+                ("begin", 0xae2b_a428),
+                ("commit", 0xf866_d5ae),
+                ("rollback", 0x3e7b_24b3),
+                ("close", 0xde3d_c7ed),
+            ],
+        ),
+    ),
+];
+
+/// Whether this test binary was built with `feature`.
+fn enabled(feature: &str) -> bool {
+    (feature == "websocket" && cfg!(feature = "websocket"))
+        || (feature == "sse" && cfg!(feature = "sse"))
+        || (feature == "db" && cfg!(feature = "db"))
+}
+
+/// Every port row: the ten, then the three opt-in ones.
+fn all_rows() -> impl Iterator<Item = &'static PortRow> {
+    TABLE.iter().chain(OPT_IN.iter().map(|(_, row)| row))
+}
+
+/// The rows the schema of this build registers.
+fn registered_rows() -> Vec<&'static PortRow> {
+    TABLE
+        .iter()
+        .chain(
+            OPT_IN
+                .iter()
+                .filter(|(f, _)| enabled(f))
+                .map(|(_, row)| row),
+        )
+        .collect()
+}
+
 #[test]
 fn port_ids_are_the_hard_coded_values() {
     assert_eq!(<dyn Clock as Port>::PORT_ID, 0xcd99_c48e);
@@ -123,7 +197,7 @@ fn port_names_and_kinds_are_the_traits() {
 
 #[test]
 fn every_id_is_the_fnv1a32_of_its_name() {
-    for (name, expected_port, _, methods) in TABLE {
+    for (name, expected_port, _, methods) in all_rows() {
         assert_eq!(
             fnv1a32(&format!("port.{name}")),
             *expected_port,
@@ -143,16 +217,16 @@ fn every_id_is_the_fnv1a32_of_its_name() {
 
 #[test]
 fn ids_are_unique_across_the_standard_ports() {
-    let mut ports: Vec<u32> = TABLE.iter().map(|row| row.1).collect();
+    let mut ports: Vec<u32> = all_rows().map(|row| row.1).collect();
     ports.sort_unstable();
     ports.dedup();
-    assert_eq!(ports.len(), TABLE.len(), "port ids collide");
+    assert_eq!(ports.len(), TABLE.len() + OPT_IN.len(), "port ids collide");
     // Method ids only need to be unique within a port, but the shared ones (get/set/delete/list)
     // must differ between Kv and SecureStore because the trait name is part of the hash.
     let kv: Vec<u32> = TABLE[4].3.iter().map(|m| m.1).collect();
     let secure: Vec<u32> = TABLE[5].3.iter().map(|m| m.1).collect();
     assert!(kv.iter().all(|id| !secure.contains(id)));
-    for (name, _, _, methods) in TABLE {
+    for (name, _, _, methods) in all_rows() {
         let mut ids: Vec<u32> = methods.iter().map(|m| m.1).collect();
         ids.sort_unstable();
         ids.dedup();
@@ -165,8 +239,9 @@ fn the_registered_schema_agrees_with_the_table() {
     // Referencing the fakes links the crate's registrations into this test binary.
     let _ = fakes::Fakes::new();
     let schema = collect_schema("undra-ports");
-    assert_eq!(schema.ports.len(), TABLE.len(), "unexpected port count");
-    for (name, expected_port, kind, methods) in TABLE {
+    let rows = registered_rows();
+    assert_eq!(schema.ports.len(), rows.len(), "unexpected port count");
+    for (name, expected_port, kind, methods) in rows {
         let port = schema
             .ports
             .iter()
@@ -230,7 +305,7 @@ fn the_kotlin_runtime_hard_codes_the_same_ids() {
         eprintln!("runtimes/ not found next to this crate; skipping the Kotlin parity check");
         return;
     };
-    for (name, expected_port, _, methods) in TABLE {
+    for (name, expected_port, _, methods) in all_rows() {
         assert_eq!(
             kotlin_constant(&source, name, "PORT_ID"),
             *expected_port,

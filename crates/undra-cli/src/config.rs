@@ -17,7 +17,9 @@
 
 use std::path::Path;
 
-use crate::error::{CliError, Result};
+use undra_bindgen::SwiftObservation;
+
+use crate::error::{CliError, Code, Result};
 use crate::toml_lite::{self, Document, Entry, Value, quote};
 
 /// A platform an app is built for.
@@ -104,12 +106,17 @@ pub struct BindingsConfig {
     /// Emit `throws(E)` on Swift port requirements (calls always use plain
     /// `throws`, ADR-032); `true` unless turned off.
     pub swift_typed_throws: Option<bool>,
+    /// How generated Swift stores are observed (ADR-045): `observation` (`@Observable`, iOS 17 and later) or
+    /// `observable-object` (`ObservableObject` with `@Published`, iOS 15 and later). Absent: chosen by
+    /// `[ios] deployment_target`, `observable-object` below 17.0.
+    pub swift_observation: Option<SwiftObservation>,
 }
 
 /// iOS build settings.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IosConfig {
-    /// The minimum iOS version (`IPHONEOS_DEPLOYMENT_TARGET`).
+    /// The minimum iOS version (`IPHONEOS_DEPLOYMENT_TARGET`): 15.0 or later. Below 17.0 the generated Swift
+    /// stores are `ObservableObject`s and not `@Observable` (ADR-045, [`ProjectConfig::swift_observation`]).
     pub deployment_target: String,
     /// Simulator architectures: `arm64` and/or `x86_64`.
     pub simulator_archs: Vec<String>,
@@ -336,6 +343,7 @@ impl ProjectConfig {
                 "ts_package",
                 "ts_js_number",
                 "swift_typed_throws",
+                "swift_observation",
             ],
         )?;
         cfg.bindings = BindingsConfig {
@@ -347,12 +355,43 @@ impl ProjectConfig {
                 .opt_bool("bindings", "ts_js_number")?
                 .unwrap_or(false),
             swift_typed_throws: reader.opt_bool("bindings", "swift_typed_throws")?,
+            swift_observation: match reader.get("bindings", "swift_observation") {
+                None => None,
+                Some(entry) => match &entry.value {
+                    Value::Str(text) => Some(text.parse::<SwiftObservation>().map_err(|e| {
+                        CliError::bad_config(
+                            file,
+                            format!("line {}: {e}", entry.line),
+                            "write swift_observation = \"observation\" (`@Observable`, iOS 17 and later) or \"observable-object\" (`ObservableObject`, iOS 15 and later), or leave it out to follow [ios] deployment_target",
+                        )
+                    })?),
+                    _ => {
+                        return Err(CliError::bad_config(
+                            file,
+                            format!("line {}: swift_observation must be a string", entry.line),
+                            "write it in quotes: swift_observation = \"observable-object\"",
+                        ));
+                    }
+                },
+            },
         };
 
         reader.check_keys("ios", &["deployment_target", "simulator_archs"])?;
-        if let Some(v) = reader.opt_str("ios", "deployment_target")? {
-            cfg.ios.deployment_target = v;
+        if let Some(entry) = reader.get("ios", "deployment_target") {
+            let Value::Str(target) = &entry.value else {
+                return Err(CliError::bad_config(
+                    file,
+                    format!("line {}: deployment_target must be a string", entry.line),
+                    "write it in quotes: deployment_target = \"15.0\"",
+                ));
+            };
+            check_ios_target(target)
+                .map_err(|e| in_file(file, format!("line {}: {}", entry.line, e.what), e))?;
+            cfg.ios.deployment_target.clone_from(target);
         }
+        // `observation` with a floor below iOS 17 would generate code that does not compile (ADR-045).
+        cfg.swift_observation(None)
+            .map_err(|e| in_file(file, e.what.clone(), e))?;
         if let Some(entry) = reader.get("ios", "simulator_archs") {
             let archs = reader.as_str_list(entry, "ios", "simulator_archs")?;
             for arch in &archs {
@@ -439,6 +478,47 @@ impl ProjectConfig {
         Ok(cfg)
     }
 
+    /// The major version of `[ios] deployment_target`: the floor the generated Swift is written for (ADR-045).
+    #[must_use]
+    pub fn ios_floor(&self) -> u32 {
+        ios_major(&self.ios.deployment_target).unwrap_or(SwiftObservation::OBSERVATION_MIN_IOS)
+    }
+
+    /// How the generated Swift stores are observed: `requested` (the command line's
+    /// `--swift-observation`), else `[bindings] swift_observation`, else what the deployment target allows
+    /// (`@Observable` from iOS 17, `ObservableObject` below).
+    ///
+    /// # Errors
+    ///
+    /// `observation` with a deployment target below iOS 17.0: Observation does not exist there, so the
+    /// generated stores would not compile. The message names both settings.
+    pub fn swift_observation(
+        &self,
+        requested: Option<SwiftObservation>,
+    ) -> Result<SwiftObservation> {
+        let floor = self.ios_floor();
+        let chosen = requested
+            .or(self.bindings.swift_observation)
+            .unwrap_or_else(|| SwiftObservation::for_ios(floor));
+        if chosen == SwiftObservation::Observation && floor < SwiftObservation::OBSERVATION_MIN_IOS
+        {
+            let from = if requested.is_some() {
+                "`--swift-observation observation`"
+            } else {
+                "`swift_observation = \"observation\"` in [bindings]"
+            };
+            return Err(CliError::bad_argument(
+                format!(
+                    "{from} needs iOS 17, but `deployment_target = \"{}\"` in [ios] is lower",
+                    self.ios.deployment_target
+                ),
+                "`@Observable` is Observation, which is iOS 17.0 and later; the generated stores would not compile for an older iOS",
+                "raise [ios] deployment_target to \"17.0\", or use swift_observation = \"observable-object\" (the default below 17.0: `ObservableObject` stores with `@Published` properties, which work from iOS 15, docs/IOS_15_16.md)",
+            ));
+        }
+        Ok(chosen)
+    }
+
     /// The text `undra init` writes: every setting that matters, with comments.
     #[must_use]
     pub fn render(&self) -> String {
@@ -517,7 +597,8 @@ impl ProjectConfig {
              # kotlin_package = \"com.example.todo.core\"\n\
              # ts_scope = \"app\"\n\
              # ts_js_number = false        # i64/u64 as `number` instead of `bigint`\n\
-             # swift_typed_throws = true   # port requirements: `throws(E)`; false emits plain `throws`"
+             # swift_typed_throws = true   # port requirements: `throws(E)`; false emits plain `throws`\n\
+             # swift_observation = \"observable-object\"   # Swift stores: \"observation\" (@Observable, iOS 17+) or \"observable-object\" (iOS 15+); default follows [ios] deployment_target"
         );
         if let Some(v) = &self.bindings.swift_module {
             let _ = writeln!(out, "swift_module = {}", quote(v));
@@ -537,6 +618,9 @@ impl ProjectConfig {
         if let Some(v) = self.bindings.swift_typed_throws {
             let _ = writeln!(out, "swift_typed_throws = {v}");
         }
+        if let Some(v) = self.bindings.swift_observation {
+            let _ = writeln!(out, "swift_observation = {}", quote(v.as_str()));
+        }
         let archs = self
             .ios
             .simulator_archs
@@ -554,6 +638,8 @@ impl ProjectConfig {
         let _ = writeln!(
             out,
             "\n[ios]\n\
+             # The lowest iOS the app runs on, 15.0 or later. From 17.0 the generated Swift stores are `@Observable`;\n\
+             # below it they are `ObservableObject`s (docs/IOS_15_16.md).\n\
              deployment_target = {}\n\
              # Simulator slices of the XCFramework. Add \"x86_64\" for Intel Macs.\n\
              simulator_archs = [{archs}]\n\
@@ -586,6 +672,63 @@ impl ProjectConfig {
             }
         }
         out
+    }
+}
+
+/// `problem` (a diagnostic about a setting, with its own why and fix) as a `C0002` about `file`: the file's name in front
+/// of what is wrong, and the why and the fix kept (`CliError::bad_config` would replace the why with its general one).
+fn in_file(file: &Path, what: String, problem: CliError) -> CliError {
+    CliError::new(
+        Code::BadConfig,
+        format!("{}: {what}", file.display()),
+        problem.why,
+        problem.fix,
+    )
+}
+
+/// The lowest iOS version the Swift runtime supports (ADR-045), as `[ios] deployment_target`.
+pub const MIN_IOS_TARGET: &str = "15.0";
+
+/// The major version of an iOS deployment target (`"15.0"` is 15, `"17"` is 17), or `None` when the text is
+/// not `<major>[.<minor>[.<patch>]]`.
+#[must_use]
+pub fn ios_major(target: &str) -> Option<u32> {
+    // Digits only: `u32::from_str` also takes a leading `+`, which Xcode and cargo's IPHONEOS_DEPLOYMENT_TARGET do not.
+    let numbers: Option<Vec<u32>> = target
+        .split('.')
+        .map(|part| {
+            if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+                None
+            } else {
+                part.parse().ok()
+            }
+        })
+        .collect();
+    let numbers = numbers?;
+    if numbers.len() > 3 {
+        return None;
+    }
+    numbers.first().copied()
+}
+
+/// Checks `[ios] deployment_target`: a version, iOS 15.0 or later (the floor of the Swift runtime, ADR-045).
+///
+/// # Errors
+///
+/// What is wrong with it and the fix.
+pub fn check_ios_target(target: &str) -> Result<()> {
+    match ios_major(target) {
+        None => Err(CliError::bad_argument(
+            format!("`{target}` is not an iOS version"),
+            "the deployment target is passed to Xcode and to the core's build as IPHONEOS_DEPLOYMENT_TARGET",
+            "write the version as in Xcode: \"15.0\", \"16.0\", \"17.0\"",
+        )),
+        Some(major) if major < SwiftObservation::RUNTIME_MIN_IOS => Err(CliError::bad_argument(
+            format!("iOS {target} is below the lowest iOS Undra supports, {MIN_IOS_TARGET}"),
+            "the Swift runtime uses concurrency and the Combine framework, and the generated stores need ObservableObject at the very least (ADR-045)",
+            format!("set deployment_target = \"{MIN_IOS_TARGET}\" (or later) in [ios]"),
+        )),
+        Some(_) => Ok(()),
     }
 }
 
@@ -776,6 +919,167 @@ mod tests {
         let cfg = sample();
         let text = cfg.render();
         assert_eq!(ProjectConfig::parse(&text, file()).unwrap(), cfg, "{text}");
+    }
+
+    fn with_ios(toml: &str) -> Result<ProjectConfig> {
+        ProjectConfig::parse(
+            &format!("[project]\nname = \"a\"\nid = \"com.example.a\"\n{toml}"),
+            file(),
+        )
+    }
+
+    #[test]
+    fn the_ios_floor_decides_how_swift_stores_are_observed_unless_the_file_says_otherwise() {
+        use SwiftObservation::{ObservableObject, Observation};
+        let mode = |toml: &str| {
+            let cfg = with_ios(toml).unwrap();
+            (cfg.ios_floor(), cfg.swift_observation(None).unwrap())
+        };
+        assert_eq!(mode(""), (17, Observation));
+        assert_eq!(
+            mode("[ios]\ndeployment_target = \"17.2\"\n"),
+            (17, Observation)
+        );
+        assert_eq!(
+            mode("[ios]\ndeployment_target = \"16.0\"\n"),
+            (16, ObservableObject)
+        );
+        assert_eq!(
+            mode("[ios]\ndeployment_target = \"15.0\"\n"),
+            (15, ObservableObject)
+        );
+        // The mode can be chosen on a newer floor, and a round trip keeps it.
+        let cfg = with_ios("[bindings]\nswift_observation = \"observable-object\"\n").unwrap();
+        assert_eq!(cfg.swift_observation(None).unwrap(), ObservableObject);
+        assert_eq!(ProjectConfig::parse(&cfg.render(), file()).unwrap(), cfg);
+        let floor = with_ios("[ios]\ndeployment_target = \"15.0\"\n").unwrap();
+        assert_eq!(
+            ProjectConfig::parse(&floor.render(), file()).unwrap(),
+            floor
+        );
+    }
+
+    #[test]
+    fn observation_below_ios_17_is_an_error_that_names_both_settings() {
+        let e = with_ios(
+            "[bindings]\nswift_observation = \"observation\"\n[ios]\ndeployment_target = \"16.0\"\n",
+        )
+        .unwrap_err();
+        let text = format!("{} {} {}", e.what, e.why, e.fix);
+        assert!(
+            text.contains("swift_observation") && text.contains("deployment_target"),
+            "{text}"
+        );
+        assert!(
+            text.contains("observable-object") && text.contains("17.0"),
+            "{text}"
+        );
+        // Not an error when the floor allows it, nor when the mode is left to the floor.
+        assert!(with_ios("[bindings]\nswift_observation = \"observation\"\n").is_ok());
+        assert!(with_ios("[ios]\ndeployment_target = \"15.0\"\n").is_ok());
+    }
+
+    #[test]
+    fn a_deployment_target_the_runtime_cannot_run_on_is_refused() {
+        for (toml, needle) in [
+            (
+                "[ios]\ndeployment_target = \"14.0\"\n",
+                "below the lowest iOS Undra supports, 15.0",
+            ),
+            (
+                "[ios]\ndeployment_target = \"fifteen\"\n",
+                "not an iOS version",
+            ),
+            ("[ios]\ndeployment_target = 15\n", "must be a string"),
+            (
+                "[bindings]\nswift_observation = \"combine\"\n",
+                "not a Swift observation mode",
+            ),
+            ("[bindings]\nswift_observation = true\n", "must be a string"),
+        ] {
+            let e = with_ios(toml).unwrap_err();
+            assert!(e.what.contains(needle), "{toml}: {e:?}");
+        }
+        assert_eq!(ios_major("15"), Some(15));
+        assert_eq!(ios_major("16.4.1"), Some(16));
+        assert_eq!(ios_major("16."), None);
+        // Only what Xcode itself takes: digits, at most three parts, no sign, no spaces.
+        for bad in [
+            "+15", "-15", " 15", "15 ", "15.+1", "15.0.1.2", "", ".", "1e1", "15.x",
+        ] {
+            assert_eq!(ios_major(bad), None, "{bad:?}");
+        }
+    }
+
+    /// R8 for the iOS floor settings, one row per input the review named: the diagnostic has a code, what is wrong
+    /// (naming the setting and the value), why it matters (specific, not the general sentence of `bad_config`), a fix
+    /// and the docs link, once through `undra.toml` and, for the command line's spelling, through `check_ios_target`.
+    #[test]
+    fn every_ios_floor_mistake_teaches_what_why_fix_and_where_to_read_more() {
+        // (undra.toml text, what it must name, what the why must say, what the fix must offer)
+        let rows: &[(&str, &str, &str, &str)] = &[
+            (
+                "[ios]\ndeployment_target = \"14.0\"\n",
+                "iOS 14.0 is below the lowest iOS Undra supports, 15.0",
+                "Combine",
+                "deployment_target = \"15.0\"",
+            ),
+            (
+                "[ios]\ndeployment_target = \"sixteen\"\n",
+                "`sixteen` is not an iOS version",
+                "IPHONEOS_DEPLOYMENT_TARGET",
+                "\"16.0\"",
+            ),
+            (
+                "[bindings]\nswift_observation = \"observation\"\n[ios]\ndeployment_target = \"16.4\"\n",
+                "`swift_observation = \"observation\"` in [bindings] needs iOS 17, but `deployment_target = \"16.4\"` in [ios] is lower",
+                "Observation, which is iOS 17.0 and later",
+                "swift_observation = \"observable-object\"",
+            ),
+        ];
+        for (toml, what, why, fix) in rows {
+            let e = with_ios(toml).unwrap_err();
+            assert_eq!(e.code, Code::BadConfig, "{toml}");
+            assert!(
+                e.what.contains("undra.toml") && e.what.contains(what),
+                "{toml}: {e}"
+            );
+            assert!(e.why.contains(why), "{toml}: the why is `{}`", e.why);
+            assert!(e.fix.contains(fix), "{toml}: the fix is `{}`", e.fix);
+            let text = e.to_string();
+            assert!(
+                text.starts_with("error[undra::C0002]")
+                    && text.contains("= note: ")
+                    && text.contains("= help: ")
+                    && text.contains("errors.html#C0002"),
+                "{text}"
+            );
+        }
+        // `observation` is not refused as such: on the first iOS that has it, it is the default and may be said outright.
+        assert!(
+            with_ios("[bindings]\nswift_observation = \"observation\"\n[ios]\ndeployment_target = \"17.0\"\n")
+                .is_ok()
+        );
+        // Targets that are fine, whatever their spelling: a major alone, three parts, the first iOS with Observation.
+        for ok in ["15", "15.0", "15.0.1", "16.4", "17.0", "26.0"] {
+            assert!(
+                with_ios(&format!("[ios]\ndeployment_target = \"{ok}\"\n")).is_ok(),
+                "{ok}"
+            );
+        }
+        // The command line says the same thing as a bad argument (C0009), with the same why.
+        for (target, what) in [
+            ("14.0", "below the lowest iOS"),
+            ("x", "not an iOS version"),
+        ] {
+            let e = check_ios_target(target).unwrap_err();
+            assert_eq!(e.code, Code::BadArgument);
+            assert!(e.what.contains(what) && !e.why.is_empty() && !e.fix.is_empty());
+            assert!(e.to_string().contains("errors.html#C0009"));
+        }
+        for ok in ["15", "15.0.1", "17.0"] {
+            assert!(check_ios_target(ok).is_ok(), "{ok}");
+        }
     }
 
     #[test]

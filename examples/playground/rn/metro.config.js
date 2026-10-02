@@ -15,6 +15,7 @@ const generated = path.resolve(__dirname, '../generated/ts/src');
 
 const aliases = {
   '@undra/runtime/react': path.join(runtime, 'react.ts'),
+  '@undra/runtime/realtime': path.join(runtime, 'realtime.ts'),
   '@undra/runtime': path.join(runtime, 'index.ts'),
   '@undra/react-native': path.join(reactNative, 'index.ts'),
   '@playground/core': path.join(generated, 'index.ts'),

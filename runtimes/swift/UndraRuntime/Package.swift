@@ -22,8 +22,8 @@ import PackageDescription
 let package = Package(
     name: "UndraRuntime",
     platforms: [
-        .iOS(.v17),
-        .macOS(.v14),
+        .iOS(.v15),
+        .macOS(.v12),
     ],
     products: [
         .library(name: "UndraRuntime", targets: ["UndraRuntime"]),

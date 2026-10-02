@@ -9,7 +9,7 @@ import javax.crypto.spec.SecretKeySpec;
 /**
  * The pure parts of the package's Android library on the JVM (ADR-038 amendment B, B10): the secure-store seal with a
  * software key, against a vector computed independently with Node's AES-256-GCM (the layout of android-adapters and
- * the web adapter), and the network classification. The Keystore and ConnectivityManager themselves are exercised on
+ * the web adapter), the network classification, and the bytes the Db port's JNI calls carry ({@link DbWire}). The Keystore and ConnectivityManager themselves are exercised on
  * the device (scripts/rn-device-checks.sh). Run by android/test/run.sh; prints {@code ok - <name>} per check.
  */
 public final class PureTest {
@@ -87,6 +87,62 @@ public final class PureTest {
         check(NetworkClassifier.classify(true, false, false, false) == NetworkClassifier.UNKNOWN, "else unknown");
         check(NetworkClassifier.WIFI == 0 && NetworkClassifier.NONE == 4, "NetKind wire indices");
         ok("the network classification is android-adapters' (and NWPath's)");
+
+        // The Db port's bytes across JNI (DbWire): the wire format of docs/SPEC.md section 3, as UndraDb.cpp writes it.
+        byte[] params = hex("05000000" + "0000" + "0100feffffffffffffff" + "0200000000000000f03f" + "030002000000c3a9" + "04000100000009");
+        Object[] values = DbWire.readParams(params);
+        check(values.length == 5 && values[0] == null, "Null is null");
+        check(Long.valueOf(-2).equals(values[1]), "Integer(-2) is a Long");
+        check(Double.valueOf(1.0).equals(values[2]), "Real(1.0) is a Double");
+        check("\u00e9".equals(values[3]), "Text is a String, from UTF-8");
+        check(values[4] instanceof byte[] blob && Arrays.equals(blob, new byte[] {9}), "Blob is a byte[]");
+        check(DbWire.readParams(hex("00000000")).length == 0, "no parameters");
+        for (String bad : new String[] {"01000000", "010000000900", "0100000001000000", "00000000ff"}) {
+            boolean refused = false;
+            try {
+                DbWire.readParams(hex(bad));
+            } catch (IllegalArgumentException e) {
+                refused = true;
+            }
+            check(refused, "malformed parameters are refused: " + bad);
+        }
+        ok("DbWire reads the parameters of a statement (every DbValue variant; malformed input refused)");
+
+        check(Arrays.equals(DbWire.executed(3, -1), hex("00" + "0300000000000000" + "ffffffffffffffff")), "OK, DbExecuted { 3, -1 }");
+        check(Arrays.equals(DbWire.failure("C", "m"), hex("01" + "0100000043" + "010000006d")), "FAILED, class, message");
+        DbWire.Rows rows = new DbWire.Rows(new String[] {"a", "b"});
+        rows.beginRow();
+        rows.integer(1);
+        rows.text("x");
+        rows.beginRow();
+        rows.nullCell();
+        rows.blob(new byte[0]);
+        rows.beginRow();
+        rows.real(-0.5);
+        rows.blob(new byte[] {0, (byte) 0xff});
+        byte[] expected = hex("00" + "02000000" + "0100000061" + "0100000062" + "03000000"
+                + "02000000" + "01000100000000000000" + "03000100000078"
+                + "02000000" + "0000" + "040000000000"
+                + "02000000" + "0200000000000000e0bf" + "04000200000000ff");
+        check(Arrays.equals(rows.finish(), expected), "OK, DbRows: the columns, then each row's cells");
+        check(Arrays.equals(new DbWire.Rows(new String[0]).finish(), hex("00" + "00000000" + "00000000")), "no columns, no rows");
+        ok("DbWire writes DbExecuted, DbRows and a failure as the C++ side reads them");
+
+        // JNI's classic traps: modified UTF-8 writes U+0000 as C0 80 and a supplementary character as two 3-byte
+        // surrogates (CESU-8). DbWire carries standard UTF-8 both ways, so the wire's String is the core's.
+        String tricky = "a\u0000b🌍é";
+        byte[] standard = hex("61" + "00" + "62" + "f09f8c8d" + "c3a9");
+        Object[] text = DbWire.readParams(hex("01000000" + "0300" + "09000000" + "610062f09f8c8dc3a9"));
+        check(tricky.equals(text[0]), "U+0000 and an emoji arrive from C++ as one String");
+        DbWire.Rows cell = new DbWire.Rows(new String[] {"t\u0000🌍"});
+        cell.beginRow();
+        cell.text(tricky);
+        byte[] out = cell.finish();
+        byte[] expectedCell = hex("00" + "01000000" + "06000000" + "7400f09f8c8d" + "01000000" + "01000000" + "0300" + "09000000");
+        check(Arrays.equals(Arrays.copyOfRange(out, 0, expectedCell.length), expectedCell)
+                && Arrays.equals(Arrays.copyOfRange(out, expectedCell.length, out.length), standard),
+                "U+0000 and an emoji leave as standard UTF-8 (no C0 80, no CESU-8 surrogates): " + Arrays.toString(out));
+        ok("DbWire carries U+0000 and supplementary characters as standard UTF-8 in both directions");
 
         System.out.println("# " + checks + " checks passed");
     }

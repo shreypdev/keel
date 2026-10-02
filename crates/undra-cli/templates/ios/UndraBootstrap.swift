@@ -7,7 +7,7 @@ enum UndraBootstrap {
     /// The dev server this process uses (`UNDRA_DEV_URL`, debug builds), or `nil` for the in-process core.
     @MainActor static var devURL: String?
 
-    /// The core `start()` loaded, so a view can show what its connection is doing (`core.connection`).
+    /// The core `start()` loaded, so a view can show what its connection is doing (`core.connection`, or `core.connectionObject` below iOS 17).
     @MainActor static var core: UndraCore?
 
     /// Called when `undra dev` restarted the core and could not carry its state over (a schema change, a state over the

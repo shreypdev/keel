@@ -3,15 +3,16 @@
  * Node. The landing page embeds the playground in an iframe and steers it with these:
  *
  *   playground/?screen=list&stream=1&embed=1&theme=dark
+ *   playground/?screen=live&ws=wss://echo.example/socket
  *
  * Nothing here throws: a malformed or unknown value is ignored and the page behaves as if the
  * parameter were absent.
  */
 
-/** The ids of the five views; `biglist` is the "10k list" tab. */
-export const TAB_IDS = ["todos", "counter", "biglist", "remote", "stress"] as const;
+/** The ids of the seven views; `biglist` is the "10k list" tab. */
+export const TAB_IDS = ["todos", "counter", "biglist", "remote", "stress", "live", "notes"] as const;
 
-/** One of the five views. */
+/** One of the seven views. */
 export type TabId = (typeof TAB_IDS)[number];
 
 /** The names `screen=` accepts, and the view each one shows. `list` is the 10k list, whose tab id is `biglist`. */
@@ -21,6 +22,8 @@ const SCREENS: Readonly<Record<string, TabId>> = {
   list: "biglist",
   remote: "remote",
   stress: "stress",
+  live: "live",
+  notes: "notes",
 };
 
 /** What the stress generator writes: the merged `value` signal or the `no_coalesce` `progress` one. */
@@ -34,6 +37,13 @@ export const STRESS_MAX_RATE = 1_000_000;
 
 /** A forced colour scheme. */
 export type Theme = "light" | "dark";
+
+/**
+ * Where the Live view connects when the URL does not say (`?ws=`): the echo route of the shared
+ * realtime server (contract-tests/servers/realtime-server.mjs) on port 4180, which the smoke test
+ * starts and a developer starts with `node contract-tests/servers/realtime-server.mjs --port 4180`.
+ */
+export const DEFAULT_LIVE_URL = "ws://127.0.0.1:4180/ws/echo";
 
 /** What the query string asked for. */
 export interface PlaygroundParams {
@@ -51,6 +61,8 @@ export interface PlaygroundParams {
   readonly mode: StressModeParam | undefined;
   /** `autostart=1`: the stress screen starts its generator on its own. */
   readonly autostart: boolean;
+  /** `ws=ws://…` or `ws=wss://…`: where the Live view connects; `undefined` when absent or not a WebSocket URL. */
+  readonly ws: string | undefined;
 }
 
 /** A flag is on for `1` or `true`; anything else, including a missing value, is off. */
@@ -73,6 +85,18 @@ function rateOf(value: string | null): number | undefined {
   return rate >= 1 && rate <= STRESS_MAX_RATE ? rate : undefined;
 }
 
+/** A `ws://` or `wss://` URL that parses, as given (trimmed); anything else is `undefined`. */
+function webSocketUrlOf(value: string | null): string | undefined {
+  const url = value?.trim() ?? "";
+  if (!/^wss?:\/\//i.test(url)) return undefined;
+  try {
+    new URL(url);
+  } catch {
+    return undefined;
+  }
+  return url;
+}
+
 /** The `theme` values, as a table for {@link lookup}. */
 const THEMES: Readonly<Record<string, Theme>> = { light: "light", dark: "dark" };
 
@@ -82,7 +106,7 @@ const THEMES: Readonly<Record<string, Theme>> = { light: "light", dark: "dark" }
  *
  * ```ts
  * parseParams("?screen=list&stream=1&embed=1");
- * // { screen: "biglist", stream: true, embed: true, theme: undefined, rate: undefined, mode: undefined, autostart: false }
+ * // { screen: "biglist", stream: true, embed: true, theme: undefined, rate: undefined, mode: undefined, autostart: false, ws: undefined }
  *
  * parseParams("?screen=stress&embed=1&rate=100k&mode=progress&autostart=1");
  * // { screen: "stress", embed: true, rate: 100000, mode: "progress", autostart: true, ... }
@@ -103,6 +127,7 @@ export function parseParams(search: string): PlaygroundParams {
     rate: rateOf(query.get("rate")),
     mode: lookup(STRESS_MODES, query.get("mode")),
     autostart: isOn(query.get("autostart")),
+    ws: webSocketUrlOf(query.get("ws")),
   };
 }
 

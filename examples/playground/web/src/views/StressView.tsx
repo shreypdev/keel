@@ -131,12 +131,14 @@ function StressPanel({
     }
   };
 
-  // `?autostart=1`, and the cleanup that matters: leaving the screen stops the generator. (The
-  // store is released right after, and the core ends a generator whose store is gone anyway.)
+  // `?autostart=1`, and the cleanup that matters: leaving the screen stops the generator. React
+  // unmounts `StressView` (whose `useUndra` releases the store) before this panel, so the store may
+  // already be closed here; then the core has ended its generator with it, and a `stop` on the
+  // released handle would only be refused (and reported as a failure).
   useEffect(() => {
     if (autostart) void start(initialMode, initialRate, true);
     return () => {
-      void stress.stop(); // a command: it never rejects
+      if (!stress.closed) void stress.stop(); // a command: it never rejects
     };
     // Once per store: the controls below call `start` themselves.
   }, [stress]);

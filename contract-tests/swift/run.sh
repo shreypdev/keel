@@ -2,8 +2,11 @@
 # Runs the Swift column of the contract scenarios (contract-tests/scenarios.md): the Swift runtime
 # over the C ABI, against the real playground core, through the generated bindings.
 #
-#   contract-tests/swift/run.sh                 all twenty-three (S01 to S20, S26, S29, S30), then the check
+#   contract-tests/swift/run.sh                 all of them (S01 to S20, S23 to S26, S29, S30), then the check
 #   contract-tests/swift/run.sh --filter ContractScenarios/testS07_streamWithBackpressure
+#   contract-tests/swift/run.sh --floor         the same grid against bindings generated for an iOS 15 floor (ADR-045):
+#                                               `ObservableObject` stores and `UndraDuration` (the first argument; it may
+#                                               be followed by --filter ...)
 #
 # What it does:
 #   1. builds the cores for the host with the undra CLI (`undra build --platform host`, incremental):
@@ -18,9 +21,15 @@
 #      (`swift test --skip-build`, UNDRA_CONTRACT_PHASE=B), which prints `SCENARIO S14|S15 FAIL` lines
 #      if build B's steps fail, then puts build A's library back (also when something fails),
 #   5. pipes the `SCENARIO` lines of both processes through contract-tests/check.sh.
-# The exit status is non-zero if the tests fail or any of the twenty-three scenarios is not a PASS.
+# The exit status is non-zero if the tests fail or any scenario is not a PASS.
 # A filtered run skips step 4 (the build-B steps need the whole of S14 and S15).
+# S23 and S24 start contract-tests/servers/realtime-server.mjs with Node (it exits with this run).
 set -euo pipefail
+FLOOR=0
+if [ "${1:-}" = "--floor" ]; then
+  FLOOR=1
+  shift
+fi
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 PROJECT="$REPO/examples/playground"
@@ -66,6 +75,23 @@ for ns in a b; do
   "$UNDRA" build -C "$REPO/examples/two-cores/$ns" --platform host >&2
   stage "$REPO/examples/two-cores/$ns/build/host/libplayground_$ns.dylib" "$STAGE"
 done
+
+# 2b. --floor: bindings for an iOS 15 floor in place of the committed ones. Each is generated beside this package at the
+#     depth of Packages/ (the generated Package.swift names the runtime relative to where it is written, and the symlink
+#     in PackagesFloor/ must sit as deep), from the same cores; the committed bindings are not touched.
+if [ "$FLOOR" = 1 ]; then
+  rm -rf "$HERE/PackagesFloor" "$HERE"/floor-*
+  mkdir -p "$HERE/PackagesFloor"
+  for entry in "PlaygroundCore:$PROJECT" "PlaygroundA:$REPO/examples/two-cores/a" "PlaygroundB:$REPO/examples/two-cores/b"; do
+    name="${entry%%:*}"
+    project="${entry#*:}"
+    "$UNDRA" bindgen -C "$project" --out "$HERE/floor-$name" --platforms ios \
+      --swift-observation observable-object --ios-deployment-target 15.0 >&2
+    ln -s "../floor-$name/swift" "$HERE/PackagesFloor/$name"
+  done
+  export UNDRA_SWIFT_FLOOR=1
+  echo "run.sh: the scenarios run against bindings generated for iOS 15.0 (ObservableObject stores, UndraDuration)" >&2
+fi
 
 # 3. The scenarios. The runner prints one `SCENARIO Sxx PASS|FAIL|SKIP <title>` line each. S19 step 9
 #    replays the derived-list recording (written when missing or stale).

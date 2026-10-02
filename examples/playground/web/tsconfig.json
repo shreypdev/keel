@@ -32,6 +32,12 @@
       "@undra/runtime/react": [
         "../../../runtimes/ts/@undra/runtime/src/react.ts"
       ],
+      "@undra/runtime/realtime": [
+        "../../../runtimes/ts/@undra/runtime/src/realtime.ts"
+      ],
+      "@undra/runtime/db": [
+        "../../../runtimes/ts/@undra/runtime/src/db.ts"
+      ],
       "@undra/runtime": [
         "../../../runtimes/ts/@undra/runtime/src/index.ts"
       ],

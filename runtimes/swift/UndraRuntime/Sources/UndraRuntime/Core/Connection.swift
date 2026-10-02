@@ -3,6 +3,7 @@
 // Only a remote core (`undra dev`) ever leaves `.connected`; an in-process core is `.connected`
 // from `load` until `shutdown()`.
 
+import Combine
 import Observation
 
 /// Why a core is ``UndraConnectionState/closed(_:)``.
@@ -63,8 +64,8 @@ public enum UndraConnectionState: Sendable, Equatable, CustomStringConvertible {
     }
 }
 
-/// The connection state of a core, for SwiftUI: an `@Observable` object, updated on the main
-/// actor.
+/// The connection state of a core, for SwiftUI on iOS 17 / macOS 14 and later: an `@Observable` object,
+/// updated on the main actor. A floor below iOS 17 (ADR-045) uses ``UndraConnectionObject`` instead.
 ///
 /// ```swift
 /// struct DevBanner: View {
@@ -75,12 +76,36 @@ public enum UndraConnectionState: Sendable, Equatable, CustomStringConvertible {
 ///     }
 /// }
 /// ```
+@available(iOS 17, macOS 14, *)
 @MainActor
 @Observable
 public final class UndraConnection {
     /// The state the main actor has been told of. It trails ``UndraCore/connectionState`` by one
     /// hop to the main queue.
     public internal(set) var state: UndraConnectionState = .connecting
+
+    nonisolated init() {}
+}
+
+/// The connection state of a core, for SwiftUI on every iOS and macOS version: an `ObservableObject`
+/// whose `state` is `@Published`, updated on the main actor. It is the twin of ``UndraConnection``
+/// (which needs iOS 17) and the one to use when the app supports iOS 15 or 16 (ADR-045).
+///
+/// ```swift
+/// struct DevBanner: View {
+///     @ObservedObject var connection: UndraConnectionObject // UndraCore.shared.connectionObject
+///     var body: some View {
+///         if case .reconnecting(let attempt) = connection.state {
+///             Text("Reconnecting to the dev server (attempt \(attempt))")
+///         }
+///     }
+/// }
+/// ```
+@MainActor
+public final class UndraConnectionObject: ObservableObject {
+    /// The state the main actor has been told of. It trails ``UndraCore/connectionState`` by one
+    /// hop to the main queue.
+    @Published public internal(set) var state: UndraConnectionState = .connecting
 
     nonisolated init() {}
 }

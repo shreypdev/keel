@@ -1,11 +1,12 @@
 # Kotlin column of the contract tests
 
-`run.sh` runs the twenty-one scenarios of `../scenarios.md` that Kotlin runs (S01 to S20 and S26) on the JVM, through
-`dev.undra.runtime.UndraCore` over the real JNI shim and the real `libplayground_core` of `examples/playground/core`, and
-pipes the verdicts through `../check.sh kotlin`. Sources are in `src/dev/undra/contract/`: one file per scenario
-(`S01Primitives.kt` ... `S19DerivedKeyedList.kt`, `S20Storage.kt`, `S26TwoCores.kt`), the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`, `Handover.kt`),
-the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `MemoryKv`, `CapturingLog`) and the build-B
-process of S14 and S15 (`MigrationBuildB.kt`).
+`run.sh` runs the scenarios of `../scenarios.md` that Kotlin runs (S01 to S20, S23 to S25 for the opt-in ports, and
+S26) on the JVM, through `dev.undra.runtime.UndraCore` over the real JNI shim and the real `libplayground_core` of
+`examples/playground/core`, and pipes the verdicts through `../check.sh kotlin`. Sources are in `src/dev/undra/contract/`:
+one file per scenario (`S01Primitives.kt` ... `S19DerivedKeyedList.kt`, `S20Storage.kt`, `S23`..`S25`, `S26TwoCores.kt`),
+the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`, `Handover.kt`), the fakes of scenarios.md's harness
+section (`ManualClock`, `FakeServer`, `MemoryKv`, `CapturingLog`) and the build-B process of S14 and S15
+(`MigrationBuildB.kt`).
 
 ## How it is arranged
 
@@ -131,6 +132,37 @@ after the load, and drives the core through `UndraCore`'s raw API (`configure_re
   when S16 loaded the core) and 5; step 3 prints nothing. Step 1 also checks that a write of the `s20` entry was
   attempted and failed `Full`. The entry's key is computed (`undra.query.cache2.<query id>.<fnv1a64 of the encoded
   arguments>`). S20 runs after S18 and before S17, which shuts the core down.
+
+## The opt-in ports (S23, S24, S25; ADR-047, ADR-048)
+
+* **Adapters.** S23 and S24 use the defaults `UndraCore.load` installs on a JVM (`JvmAdapters.standard`):
+  `ClientWebSocketAdapter`, the runtime's own RFC 6455 client, and `JdkHttpSseAdapter` (`java.net.http`). Both are served by
+  the runtime's bindings (`WebSocketPortAdapter`, `SsePortAdapter`). S25 registers `dbPort(JdbcDbAdapter(<temp dir>))` itself
+  (`core.registerPort`) and deletes the directory afterwards. The scenarios run after S18 and before S17 (which ends the core).
+* **The server.** `RealtimeServer` starts `contract-tests/servers/realtime-server.mjs` with Node on first use
+  (`--port 0 --exit-on-stdin-close`, `READY <port>`); the runner closes its stdin before exiting. `/stats` is read with the
+  runner's `Json`.
+* **S23.3 (credit).** The default adapter's reader thread reads ahead at most the room of the binding's buffer (the window of
+  the core's latest pull, 16 before the first), and a `receive` answers a burst as one reply (it waits until `max` are there,
+  2 ms pass with nothing new, or 8 ms after the first). Without the coalescing the first pull raced the reader and saw a few
+  messages, and the core pulled 3 times; with it `pulls()` is 1 or 2. A flood of 2,000 messages of 64 KiB under a stalled
+  reader lets the server write only what fits in the socket buffers (the runtime's `RealtimeAdapterTests`).
+* **S23.4.** The refused upgrade's status is the HTTP status line's (`WebSocketUpgradeException`): 401.
+* **S23.5.** `Live.abandon()` drops the Rust connection, whose `Drop` closes it through the port with 1001; the binding's close
+  waits for the server's echo, so `/stats` shows 1001 at once.
+* **S24.** On the JVM the SSE adapter is `java.net.http`, not `HttpURLConnection`: the JDK's `HttpURLConnection.disconnect()`
+  waits for a blocked read of a chunked body to return (measured: it was still blocked after 3 s against `/sse/hang`), so
+  step 3's "the server saw the client leave" could not hold. Android's `HttpURLConnection` aborts the read
+  (`UrlConnectionSseAdapter`, the Android default; `android-adapters`' `RealtimeOnDeviceTest` checks it on the emulator).
+  The parser starts its last event id from the request's `Last-Event-ID` (the HTML standard keeps it across reconnections),
+  which is why step 2's `three` carries id `"2"`. An `id` field with an empty value resets it: the event's `id` is then `null`.
+* **S25** needs the SQLite JDBC driver on the class path (`org.xerial:sqlite-jdbc`, which `:runtime` does not depend on):
+  `run.sh` adds `$UNDRA_SQLITE_JDBC` (scripts/env.sh sets it). Without it S25 reports `SKIP no SQLite JDBC driver on the class
+  path`, or fails with `UNDRA_REQUIRE_TOOLCHAINS=1`. sqlite-jdbc reports the extended result code through
+  `org.sqlite.SQLiteException.getResultCode()` (read by reflection: no compile-time dependency) and wraps SQLite's message as
+  `[SQLITE_X] description (message)`; `DbError` carries the inner message. Its `executeQuery` refuses a statement without a
+  result set (`PRAGMA foreign_keys = ON`), so the adapter runs every query with `execute()`.
+* **S25.2.** The scenario checks that the mirror holds both notes (the first `add`, onto an empty list, arrives as a full value).
 
 ## Findings about what the runner needs from the runtime
 

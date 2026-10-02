@@ -23,6 +23,10 @@ fn updating() -> bool {
 /// With `UPDATE_GOLDEN=1`, `UPDATE_GOLDEN_LANG=kotlin,ts` limits the regeneration to those languages
 /// (`swift`, `kotlin`, `ts`); the others are neither written nor checked. Unset: all three.
 fn skipped_while_updating(language: &str) -> bool {
+    // `swift-observable-object` is the second Swift tree: it follows `swift`.
+    let language = language
+        .strip_suffix("-observable-object")
+        .unwrap_or(language);
     updating()
         && std::env::var("UPDATE_GOLDEN_LANG")
             .is_ok_and(|only| !only.split(',').any(|l| l.trim() == language))
@@ -126,6 +130,16 @@ fn run(case: &str) {
             .swift(&schema)
             .unwrap_or_else(|e| panic!("{}", show(e))),
     );
+    // The iOS 15 / 16 mode (ADR-045): the cases with stores, query handles or a Duration are locked in it too.
+    if common::FLOOR_CASES.contains(&case) {
+        check_tree(
+            case,
+            "swift-observable-object",
+            &common::floor_generator_for(case, &schema)
+                .swift(&schema)
+                .unwrap_or_else(|e| panic!("{}", show(e))),
+        );
+    }
     check_tree(
         case,
         "kotlin",

@@ -201,7 +201,7 @@ undra build --platform ios,android,web --release
 
 `undra init` also writes `.github/workflows/undra.yml`: a job for the core (format, clippy, tests, `undra bindgen --check`) and one per app, each installing `undra` at the version pinned once at the top of the file. When a newer Undra is out, `undra upgrade` moves every pin of the project (the core's dependency, the runtimes, the workflow) in step, regenerates the bindings and prints the migration notes of every release it crosses; `undra upgrade --dry-run` shows the lines first.
 
-Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 116.8 KB gzipped (budget 120 KB, gated in CI) and an Android `.so` is 831 KB per ABI.
+Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 116.6 KB gzipped (budget 120 KB, gated in CI) and an Android `.so` is 831 KB per ABI.
 
 ## Prefer to explore first?
 
@@ -907,80 +907,6 @@ Build the old and the new core, write the data with one and read it with the oth
 
 ---
 
-Source: https://shreypdev.github.io/undra/docs/production.html
-
-# Operating in production
-
-Three things a shipped app needs that nobody should write for themselves: a crash report that names the Rust frame, the symbol files to read it with, and a way to finish the offline queue while the app is not on screen.
-
-## Crash reports
-
-A panic in the core never crashes the app: the call that was running fails with `UndraCallError.panicked` and the core goes on. Your crash reporter still wants to know. Set `onPanic` when you load the core and it receives one structured report for every panic the core contained (a call, a detached task, a computed, a background task, an init or migration hook), once, in order, on the main thread. Nothing is linked for you: forward the report to the reporter you already use. Without `onPanic` the runtime logs one line, so a panic is never silent.
-
-| Field | What it holds |
-| --- | --- |
-| The panic | `message` and `location` (`file:line:column`; release builds remap your home directory to `~`, so no path names your machine). |
-| The context | `operation`, what was running (`Todos.add`, `task`, `computed Todos.visible`), and the Rust `thread`. |
-| The backtrace | `frames`, innermost first, at most 48. Always the `address` of each instruction as an offset into the core's image; a debug build also has `symbol`, `file` and `line`. |
-| The build | `namespace`, `coreVersion` and `schemaHash`: which core. |
-| The image | `imageId`: the Mach-O UUID, ELF build id or wasm SHA-256 of the image the addresses belong to, which is what symbol files are keyed by. |
-
-Crashlytics takes the frames as `StackFrame(address:)` on iOS and as synthetic stack trace elements on Android, Sentry as an event whose frames carry `instruction_addr` and whose debug image is `imageId`. The recipes are three lines each and Undra links no reporter.
-
-On the web a panic traps the module, which cannot call out of its last moments. The runtime builds the same report from what the core logged before it trapped and the trap's stack, and calls `onPanic` before it restarts anything ([crash recovery](https://shreypdev.github.io/undra/docs/web.html#recovering-from-a-crash)). A wasm frame's `address` is the module offset in the stack line (`wasm-function[41]:0x1a2b`), its `symbol` the function name when the build has one. The generated entry passes `namespace`; the module carries no version, so pass `coreVersion` in the load options if you want it in the report. In tests, `CaptureDiagnostics` (the Rust fakes and each testing kit) records the reports.
-
-## Symbol files
-
-A release build keeps line tables and nothing else: the code, the optimisation and the size of what ships are the same. `undra build --release` strips the copies it ships, keeps the unstripped ones below `build/symbols/` and writes `manifest.json` there (per image: namespace, core version, schema hash and the image id a report carries). `--no-symbols` skips all of it.
-
-| Platform | Ships | Symbols to keep (and upload) |
-| --- | --- | --- |
-| iOS | `build/ios/<Ns>Core.xcframework` | The **app's own dSYM**: Xcode's Release configuration already asks for one, and it now contains the Rust frames. Crashlytics and Sentry upload it as for Swift. A static library has no dSYM of its own. |
-| Android | `build/android/jniLibs/<abi>/lib<ns>.so`, stripped | `build/symbols/android/<abi>/lib<ns>.so`, and `native-debug-symbols.zip` in the Play Console layout (Crashlytics: `unstrippedNativeLibsDir`). The libraries carry a GNU build id. |
-| Web | `build/web/<ns>.wasm` | `build/symbols/web/<ns>.debug.wasm` (the same code with its names), `<ns>.wasm.functions.txt` (the function map) and `<ns>.dwarf.wasm` for the browser's debugger. |
-| Host (JVM, macOS) | `build/host/lib<ns>.{dylib,so}` | A `.dSYM` or `.debug` file next to it. |
-
-The generated CI workflows upload `build/symbols/` next to the app build, so every release keeps the files its crashes need. To read a report by hand, give it to `undra symbolicate`:
-
-sh
-
-```sh
-undra symbolicate report.json              # a report as onPanic received it, serialised
-undra symbolicate --platform android --image-id <build id> 0x2f3a1c
-undra symbolicate --dsym App.app.dSYM report.json     # iOS: the app's dSYM
-```
-
-It finds the image by `imageId` in the manifest and prints one line per frame, `address symbol (file:line)`: `atos` with the dSYM on Apple platforms, `llvm-symbolizer` on the Android twin, the function map and the debug module on the web.
-
-## Background runs
-
-The OS gives an app a window to work in while it is not on screen: iOS `BGTaskScheduler`, Android WorkManager, a page about to hide. The core spends it on what is worth finishing: the offline queue replays, stale queries refetch, and what waits to be written is written. The platform calls `runInBackground` with the window it was given; the core runs its background tasks inside it and reports back.
-
-| Report | Meaning |
-| --- | --- |
-| Finished | `finished`: every task was done in time and nothing is pending. Tell the OS it succeeded only then. |
-| Work done | `replayed` queued mutations sent, `refetched` queries fetched again. |
-| Work left | `stillPending`: queued mutations and unfinished fetches. |
-
-A run returns when its tasks are done, or half a second before the deadline so you can still tell the OS. Whatever a task did stays done: the queue persists per item, a request in flight is the client's and goes on, so a run that is cut short, or cancelled when the OS takes the window back, loses nothing and sends nothing twice. Offline, a run ends at once and says what is pending; it does not hold the window for a network that may not return.
-
-On iOS the identifiers are `<id>.processing` and `<id>.refresh`; `undra init` writes them to `Info.plist` with the `processing` and `fetch` background modes. **BackgroundTasks does not run in the simulator**: test the handler with the fakes in the Swift package, and on a device with the debugger command Apple documents. On Android the worker returns `retry()` while work is pending, and the web has no background beyond the page's own life yet: Background Sync in a service worker needs the core inside the worker and is a follow-up.
-
-Your own work joins the run with `undra::background::register(ctx, name, pending, run)` in Rust: `pending` says cheaply how much is waiting, `run` does it and reports progress to the `Deadline` as it goes. The core's statistics carry `background.pending`, which is what the platforms read to decide whether a window is worth asking for.
-
-## Debugging into Rust
-
-| Where | How |
-| --- | --- |
-| Xcode | A debug build keeps full DWARF in the core: step from a Swift call into Rust, and set breakpoints by `breakpoint set -f todos.rs -l 42`. `undra init` writes an `.lldbinit` that loads the toolchain's Rust formatters; `undra doctor` checks it. |
-| Android Studio | The *Dual (Java + Native)* debugger with the unstripped debug `.so` (the generated Gradle module keeps its symbols in debug); `build/symbols/android` is the symbol directory for a release reproduction. `doctor` checks the NDK's LLDB. |
-| Chrome | The C/C++ DevTools Support (DWARF) extension reads the debug module the dev build serves; breakpoints in `.rs` files. A browser extension is not something `doctor` can check, so it prints the link. |
-| Host tests | `rust-lldb` or CodeLLDB on `cargo test`. |
-
-The same panic that reaches your crash reporter is in the console during development: with `undra dev` the report goes to the app attached to the dev server like any port call.
-
----
-
 Source: https://shreypdev.github.io/undra/docs/several-cores.html
 
 # One core or several
@@ -1390,6 +1316,49 @@ These are the first walls a UniFFI crate meets, so L1 starts with plain data. [S
 
 ---
 
+Source: https://shreypdev.github.io/undra/docs/cookbook/ios-15-16.html
+
+# Supporting iOS 15 and 16
+
+Undra's Swift output is iOS 17 by default, because a generated store is `@Observable`. Lower the deployment target and the same store becomes an `ObservableObject`: the core, the wire and the commands do not change, only how SwiftUI is told to redraw.
+
+## Turn it on
+
+undra.toml
+
+```toml
+[ios]
+deployment_target = "15.0"   # 15.0 or later; below 17.0 the stores are ObservableObjects
+```
+
+Run `undra bindgen`. A new app starts there with `undra init todo --ios-deployment-target 15.0`. `[bindings] swift_observation = "observable-object"` (or `--swift-observation`) picks the shape on any floor; `"observation"` with a target below 17.0 is an error that names both settings. Below iOS 16 the wire `Duration` is the runtime's `UndraDuration` (exact nanoseconds), because `Swift.Duration` is iOS 16.
+
+## Your views
+
+|  | iOS 17+ (observation) | iOS 15 and 16 (observable-object) |
+| --- | --- | --- |
+| owning view | `@State private var todos = try! Todos()` | `@StateObject private var todos = try! Todos()` |
+| child view | `let todos: Todos` | `@ObservedObject var todos: Todos` |
+| environment | `.environment(todos)` | `.environmentObject(todos)` |
+| outside SwiftUI | `withObservationTracking` | `todos.$visible.sink { … }` |
+| connection state | `core.connection.state` | `core.connectionObject` with `@ObservedObject` |
+
+Reading a signal is still a plain property read and a command is still a method call. The `$property` publishers are a gain for UIKit and Combine code on every floor.
+
+## What degrades
+
+- **Granularity.** Observation redraws a view when a property it read changes; an `ObservableObject` redraws every view that observes the store when any of its properties changes. SwiftUI coalesces the events of one drain into one update. Split a big store, or observe a smaller one.
+- **A big list is copied on every patch.** `@Published` has no in-place accessor, so a keyed patch to a list copies the array once, where Observation mutates it in place. Measured on an Apple M5 Pro (release build, 32-byte rows): about 5 µs for 1,000 rows, 48 µs for 10,000 and 0.5 ms for 100,000, against 0.2 µs at any size under Observation. It is linear in the list and paid once per applied patch, not per op (the mirror merges a frame's patches into one apply, so 100 ops cost about what 1 does). It is invisible for lists of thousands; for 100,000 rows that change every frame, [page the list](https://shreypdev.github.io/undra/docs/cookbook/pagination.html) or observe a smaller store.
+- **One name.** A store member called `objectWillChange` is [E0051](https://shreypdev.github.io/undra/docs/errors.html#E0051) in this mode, because `ObservableObject` declares it.
+- **SQLite change counts.** The built-in `SQLiteDbAdapter` counts changes with `sqlite3_changes`, a C `int` (the 64-bit one needs iOS 15.4): a single statement that changes more than 2,147,483,647 rows reports an undefined count.
+- **Nothing else.** The mirror, keyed patches, `no_coalesce` and the error channel are the same code in both modes.
+
+## Raising the floor later
+
+Set `deployment_target = "17.0"`, run `undra bindgen` and make the mechanical edits in the table. No core change, no wire change. The repository's `examples/ios15-sample` is an iOS 15.0 app over a store, a keyed list and a query; [docs/IOS_15_16.md](https://github.com/shreypdev/undra/blob/main/docs/IOS_15_16.md) says how CI proves the floor.
+
+---
+
 Source: https://shreypdev.github.io/undra/docs/sample.html
 
 # Sample app: Fieldbook
@@ -1461,6 +1430,7 @@ undra init todo                              # all three platforms
 undra init todo --platforms ios,web          # only those shells
 undra init todo --id dev.acme.todo           # application id / bundle identifier
 undra init todo --undra-path ~/src/undra       # use a local checkout of Undra
+undra init todo --ios-deployment-target 15.0   # an iOS app that supports iOS 15 and 16 (ObservableObject stores)
 ```
 
 Creates a project directory with `undra.toml`, `core/` (a working to-do store), `generated/` (bindings, already generated), one minimal, real app per platform in `ios/`, `android/` and `web/`, and a CI workflow (`.github/workflows/undra.yml`: a job for the core and one per app, installing `undra` at the version pinned at the top of the file). Nothing is downloaded: the templates are part of the binary. Without `--undra-path` the project depends on released versions of the crates and runtimes; a project that uses a checkout gets no workflow, since CI cannot see the checkout.
@@ -1496,6 +1466,8 @@ Reads the core's schema and writes the bindings the app shells import: a Swift p
 | `--check` | write nothing; exit with an error if the generated files differ from what would be written |
 | `--docs` | keep the core's doc comments in the bindings |
 | `--crate-name <name>` | the core crate's name, for a schema file that has none |
+| `--swift-observation <mode>` | `observation` (`@Observable`, iOS 17 and later) or `observable-object` (iOS 15 and later); overrides `[bindings] swift_observation`, which follows `[ios] deployment_target` |
+| `--ios-deployment-target <version>` | generate the Swift for this iOS floor instead of `[ios] deployment_target` (see [supporting iOS 15 and 16](https://shreypdev.github.io/undra/docs/cookbook/ios-15-16.html)) |
 
 The schema a library exports is the whole schema, doc comments included. `--docs` keeps them in the generated code, so every type, field, variant, method and port carries the text of its `///` comment; without it the generated code has no doc comments. The schema hash covers neither, so both outputs have the same hash and the same wire.
 
@@ -1641,6 +1613,10 @@ version = "0.1"                # path = "…" points at a checkout of the Undra 
 # ts_scope = "app"
 # ts_js_number = false         # i64/u64 as `number` instead of `bigint`
 # swift_typed_throws = true    # port requirements: `throws(E)`; false emits plain `throws`
+# swift_observation = "observable-object"   # Swift stores: "observation" (@Observable, iOS 17+) or "observable-object" (iOS 15+)
+
+[ios]
+deployment_target = "17.0"     # 15.0 or later; below 17.0 the Swift stores are ObservableObjects
 ```
 
 Commit `generated/` or regenerate it in CI, and gate on `undra bindgen --check` so a stale binding cannot ship.
@@ -2282,13 +2258,14 @@ duplicate type name, a type named like something the generated code depends on, 
 
 Raised by schema validation.
 
-a name that collides after case conversion (`a_b` and `aB`), shadows a member of the runtime base classes, or is not an identifier in a target language
+a name that collides after case conversion (`a_b` and `aB`), shadows a member of the runtime base classes, or is not an identifier in a target language; in the iOS 15 / 16 Swift mode also a store member named `objectWillChange` (§10.1, ADR-045)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | at record Todo, `due_date`, `dueDate` all become `dueDate` | field names are converted to camelCase, so names that differ only in case or underscores end up equal | rename one of them so that they stay distinct after conversion |
 | at object Thing, `close` is a name the generated code already uses | the runtime base class or the generated code already declares a member with that name | rename it so that it does not meet that name |
 | at record Todo, `1st` is not a name the generated code can use | every name of the schema becomes an identifier in Swift, Kotlin and TypeScript: ASCII letters, digits and underscores, not starting with a digit | rename it to letters, digits and underscores, starting with a letter |
+| at object Counter, `object_will_change` becomes `objectWillChange`, a name the generated code already uses | with the iOS 15 / 16 store shape (`swift_observation = "observable-object"`, the default for a deployment target below iOS 17) a store is a Combine `ObservableObject`, which declares that member itself | rename it so that it does not meet that name |
 
 ### `E0052` an item named like a standard library item, with another id
 
@@ -3204,11 +3181,195 @@ The runtime is testable without a browser: over the `remote` transport against a
 
 ---
 
+Source: https://shreypdev.github.io/undra/docs/db.html
+
+# Local database
+
+Structured local data with SQLite, written once in the core. The platform owns the file and the thread; the core sends bound statements and gets typed rows back.
+
+## Turn it on
+
+`Db` is an opt-in port over the SQLite each platform already has: the system library on iOS, `android.database.sqlite` on Android, a JDBC driver on the JVM, `node:sqlite` in Node and wa-sqlite in a worker on the web. The core stays small and never blocks: the platform owns the database and its thread. On the web the files live in the origin private file system, which one tab holds at a time: a second tab of the same app gets `Unavailable`.
+
+core/Cargo.toml
+
+```toml
+[dependencies]
+undra = { version = "0.1", features = ["db"] }
+```
+
+## Open and migrate
+
+Migrations are numbered SQL. The platform runs every one the database has not seen yet, in one transaction: if one fails, none of them happened.
+
+core/src/notes.rs
+
+```rust
+const MIGRATIONS: &[Migration] = &[
+    Migration::new(1, "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0)"),
+    Migration::new(2, "CREATE INDEX notes_done ON notes (done)"),
+];
+
+let db = Database::open(&ctx, "notes", MIGRATIONS).await?;
+```
+
+## Values are parameters
+
+SQL is a `&'static str`, so a value can only reach a statement as a bound parameter. Cells come back typed.
+
+rust
+
+```rust
+db.execute("INSERT INTO notes (title) VALUES (?)", params![title]).await?;
+let rows = db.query("SELECT id, title, done FROM notes WHERE done = ?", params![false]).await?;
+for row in rows.iter() {
+    let id: i64 = row.get("id")?;
+    let title: String = row.get("title")?;
+}
+```
+
+## Transactions
+
+A transaction commits when its body returns `Ok` and rolls back on `Err`, or when its task is dropped half-way.
+
+rust
+
+```rust
+db.transaction(|tx| async move {
+    for title in titles {
+        tx.execute("INSERT INTO notes (title) VALUES (?)", params![title]).await?;
+    }
+    Ok(())
+}).await?;
+```
+
+## Errors you can match
+
+| Error | When |
+| --- | --- |
+| `Constraint { kind, .. }` | a `UNIQUE`, `NOT NULL`, foreign-key or `CHECK` constraint failed |
+| `Busy` | the database stayed locked past five seconds |
+| `Migration { version, .. }` | a migration failed and everything rolled back, or the file is newer than the app |
+| `Sql` | a syntax error, a missing table, a cell read as the wrong type |
+| `Corrupt`, `Full`, `Unavailable` | the file, the disk, or no database to talk to |
+
+## In tests
+
+`FakeDb` answers by SQL fragment, injects failures and records every statement, migration and transaction, so the core's database logic is tested without a device.
+
+rust
+
+```rust
+fakes.db.fail_on("INSERT", DbError::Full);
+assert_eq!(notes.add("milk".into()).await, Err(DbError::Full));
+```
+
+Design: [ADR-048](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-048-db-port.md).
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/realtime.html
+
+# WebSocket & server-sent events
+
+Live data comes into the core like everything else: through a port. The core reads at its own pace and decides when to reconnect; the platform owns the socket.
+
+## Turn it on
+
+`WebSocket` and `Sse` are opt-in ports: a core asks for them with a cargo feature, and a core that does not keeps the schema hash and the wasm size it had. Each platform answers with its own client: `URLSessionWebSocketTask`, the Kotlin runtime's client on the JVM and Android, the browser's `WebSocket`.
+
+core/Cargo.toml
+
+```toml
+[dependencies]
+undra = { version = "0.1", features = ["websocket", "sse"] }
+```
+
+## A connection
+
+The core connects, sends and reads. Messages arrive as a stream the core pulls: it asks for 16 at a time, so a core that stops reading stops the socket, on the platforms that can pause one.
+
+core/src/chat.rs
+
+```rust
+use undra::ports::ws::{WsConnection, WsError, WsMessage, WsOptions};
+
+let conn = WsConnection::connect(&ctx, "wss://chat.example.com/room", WsOptions::default()).await?;
+conn.send_text("hello").await?;
+let mut messages = conn.messages();
+while let Some(next) = undra::ports::next(&mut messages).await {
+    match next {
+        Ok(WsMessage::Text(text)) => room.push(text),
+        Ok(WsMessage::Binary(_)) => {}
+        Err(WsError::Closed { code: 1000, .. }) => break, // the server said goodbye
+        Err(error) => return Err(error),
+    }
+}
+```
+
+## Every end is typed
+
+| What happened | The stream ends with |
+| --- | --- |
+| the core called `close` | nothing: it simply ends |
+| the server sent a close frame | `Closed { code, reason }` |
+| the connection dropped | `Network` |
+| the server broke the protocol | `Protocol` |
+| the upgrade was refused | `Refused { status }` (from `connect`) |
+
+Browsers cannot send headers with a WebSocket, so the browser adapter refuses a connect that has some instead of dropping them: put the credential in the URL or a subprotocol.
+
+## Reconnecting is yours
+
+The port never reconnects on its own: which close codes to retry, how long to wait and what to resend are your app's rules, and they run in the core, where a test drives them with a fake clock. `Backoff` gives the delay, a weak context sleeps.
+
+rust
+
+```rust
+let backoff = Backoff::default(); // 500 ms doubling to 30 s, with jitter from the Rng port
+let mut attempt = 0;
+while weak.sleep(backoff.delay(attempt, &*ctx.rng())).await.is_ok() {
+    attempt += 1;
+    // connect again, re-subscribe, reset `attempt` once a message arrives
+}
+```
+
+## Server-sent events
+
+`sse::subscribe` is a stream of events parsed as the HTML standard says. It ends with `Ended` when the server finishes the response; subscribe again with the last event id to resume.
+
+rust
+
+```rust
+let mut events = sse::subscribe(&ctx, "https://api.example.com/feed", vec![], last_id.clone());
+while let Some(Ok(event)) = undra::ports::next(&mut events).await {
+    last_id = event.id.clone().or(last_id);
+    feed.apply(event.data);
+}
+```
+
+## In tests
+
+`FakeWebSocket` and `FakeSse` are scripted servers: accept or refuse, push, close, drop, echo. They record what the core sent and how much it pulled, so backpressure is an assertion.
+
+rust
+
+```rust
+let fakes = fakes::install(&t);
+fakes.web_socket.echo(true);
+// ... the core connects and sends ...
+assert!(fakes.web_socket.delivered(conn) <= consumed + 24);
+```
+
+On the web the adapters are an opt-in import, `@undra/runtime/realtime`, so an app that does not use them ships none of them. Design: [ADR-047](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-047-websocket-and-sse-ports.md).
+
+---
+
 Source: https://shreypdev.github.io/undra/reference/swift.html
 
 # Swift reference
 
-Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x53241303b2d08c5e`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb5b7b1dc29182a9d`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3222,7 +3383,7 @@ The core's entry, named after its namespace: `load` starts the core and checks i
 
 A struct for each record, an enum for each enum, with the wire codec beside it.
 
-`Composite` `Item` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
@@ -3234,13 +3395,13 @@ An enum for each `#[undra::error]`, conforming to `Error`.
 
 A class for each object, and a function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeDetached` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `storageStatus` `version`
+`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
 
 ## Stores
 
 An `@Observable` class for each `#[undra::store]`: its signals, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Profile` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Stress` `Todos`
 
 ## Ports
 
@@ -3268,7 +3429,7 @@ Source: https://shreypdev.github.io/undra/reference/kotlin.html
 
 # Kotlin reference
 
-Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x53241303b2d08c5e`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb5b7b1dc29182a9d`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3282,7 +3443,7 @@ The core's entry, named after its namespace: `load` starts the core and checks i
 
 A data class for each record, an enum or sealed interface for each enum, each with its codec.
 
-`Composite` `Item` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
@@ -3294,13 +3455,13 @@ A sealed class for each `#[undra::error]`, one subclass per variant.
 
 A class for each object, and a function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeDetached` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `storageStatus` `version`
+`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `StateFlow`, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Profile` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Stress` `Todos`
 
 ## Ports
 
@@ -3328,7 +3489,7 @@ Source: https://shreypdev.github.io/undra/reference/typescript.html
 
 # TypeScript reference
 
-Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x53241303b2d08c5e`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb5b7b1dc29182a9d`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3346,7 +3507,7 @@ The core's entry, named after its namespace: `load` starts the core and checks i
 
 An interface for each record, a union for each enum, each with a codec.
 
-`Composite` `Item` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
@@ -3358,13 +3519,13 @@ An abstract class for each `#[undra::error]`, one subclass per variant.
 
 A class for each object, and an async function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeDetached` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `storageStatus` `version`
+`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `Signal`, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Profile` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Stress` `Todos`
 
 ## Ports
 
@@ -3441,6 +3602,7 @@ Landed in the day after v1.0, each behind an ADR and an adversarial review.
 - Devtools (ADR-054)A page served by undra dev: live stores, a change-set timeline with time travel, port and query logs, counters; behind a per-run token.
 - Persisted-state migrations and typed storage (ADR-037, ADR-049)A changed schema still restores what the last version stored; storage ports fail with typed errors on every platform; a crashed web core restarts from its last snapshot.
 - A testing kit for apps (ADR-055)Previews run the real core in process with scripted ports and a manual clock; a session recorded once with undra dev --record replays deterministically in tests on every platform.
+- WebSocket, SSE and Db ports (ADR-047, ADR-048)Real-time streams with the core's credit as backpressure, and SQL over SQLite on every platform with the same deterministic fake; opt-in, so nothing grows for apps that do not use them.
 
 Now
 
@@ -3463,7 +3625,6 @@ planned
 
 Planned for the releases after v1.0. The order may change with what the benchmarks show.
 
-- Db and WebSocket portsSQL over SQLite on every platform with the same deterministic fake; bidirectional backpressured streams.
 - Objects as parameters, host callbacks, generics and Decimal (ADR-040 to 042)The boundary types a production app reaches for, each with a schema description and generated code that reads as native.
 - crates.io and Maven CentralPublish the crates under a registry-safe prefix (its own ADR) and the Kotlin runtime without a local build.
 - Windows CLIRelease binaries and docs for the undra command on Windows.
@@ -3783,7 +3944,7 @@ Comparison
 
 Undra and Kotlin Multiplatform (KMP) both let you write your domain logic once and keep the screens in SwiftUI, Jetpack Compose and React. They bet on different languages, boundaries and toolchains. We build Undra, so read this with that in mind: every statement about KMP is dated to 30 September 2026 and linked to its source, and one section covers when KMP is the better choice.
 
-30 Sep 2026 · 12 min read · Undra team
+30 Sep 2026 · 13 min read · Undra team
 
 > **How to read this page.** Statements about KMP describe its state on 30 September 2026 and link to JetBrains' or Google's documentation where one exists. We have not benchmarked KMP and make no numeric claims about it. If something is wrong or has moved, [open an issue](https://github.com/shreypdev/undra/issues) and we will correct the page with a dated note.
 
@@ -3848,7 +4009,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
 }
 ```
 
-There is no Objective-C in the path. Records are `Sendable` structs, errors are enums thrown as themselves (`catch TodoError.emptyTitle`), and a SwiftUI view reads `todos.visible` like any other observable property. The price is a baseline of Swift 6 and iOS 17, which strict concurrency and `@Observable` need.
+There is no Objective-C in the path. Records are `Sendable` structs, errors are enums thrown as themselves (`catch TodoError.emptyTitle`), and a SwiftUI view reads `todos.visible` like any other observable property. The price is a baseline of Swift 6 and, by default, iOS 17, which `@Observable` needs; an app that supports iOS 15 or 16 lowers its deployment target and gets `ObservableObject` stores ([supporting iOS 15 and 16](https://shreypdev.github.io/undra/docs/cookbook/ios-15-16.html)).
 
 On Android the comparison inverts, in KMP's favour. Shared Kotlin is just Kotlin on Android's runtime, with no cross-language boundary. Undra's Android path crosses JNI into a Rust shared library and surfaces `StateFlow`s, `suspend` functions and sealed error classes that Compose reads with `collectAsState()`. That is idiomatic, but still a boundary.
 
@@ -3868,7 +4029,7 @@ For scale: 49.8 ns for a synchronous call through the C ABI and 6.31 µs for one
 
 KMP has two web targets. Kotlin/JS compiles Kotlin to JavaScript ([docs](https://kotlinlang.org/docs/js-overview.html)). Kotlin/Wasm targets WebAssembly with garbage collection in the browser, and its documentation still calls it Beta ([docs](https://kotlinlang.org/docs/wasm-overview.html)). If your organisation writes Kotlin on the web, that is coherent. If your web team writes TypeScript and React, the questions are what the seam looks like and what the bundle carries.
 
-Undra's web output is a wasm module built from your Rust core plus `@undra/runtime`, a TypeScript package with no runtime dependencies. Each store field becomes a `Signal<T>` with `get`, `peek` and `subscribe`; `@undra/runtime/react` exports `useUndra` and `useSignal` (built on `useSyncExternalStore`), and Vue, Svelte and Solid adapters exist too. The core can run on the main thread, in a worker, or remotely over a WebSocket. The repository measures 116.8 KB gzipped for the wasm module of Undra's runtime plus a hello-world core, against a budget of 120 KB that CI enforces; it grows with your code.
+Undra's web output is a wasm module built from your Rust core plus `@undra/runtime`, a TypeScript package with no runtime dependencies. Each store field becomes a `Signal<T>` with `get`, `peek` and `subscribe`; `@undra/runtime/react` exports `useUndra` and `useSignal` (built on `useSyncExternalStore`), and Vue, Svelte and Solid adapters exist too. The core can run on the main thread, in a worker, or remotely over a WebSocket. The repository measures 116.6 KB gzipped for the wasm module of Undra's runtime plus a hello-world core, against a budget of 120 KB that CI enforces; it grows with your code.
 
 Playground code, abbreviated: examples/playground/web/src/views/TodosView.tsx
 
@@ -4175,7 +4336,7 @@ Every number here comes from [bench/RESULTS.md](https://github.com/shreypdev/und
 | Decoding that change-set, borrowed | 253.9 ns | [Signals and stores](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#signals-and-stores) |
 | Decoding and replaying a one-operation patch on 10,000 rows (Rust wire crate) | 2.57 µs | [Keyed patch](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#wire-keyed-patch-undra-wire) |
 | Cold start, restoring 100 KB of state | 70.87 µs | [Snapshot](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#snapshot-and-restore) |
-| Wasm runtime plus hello-world core, gzipped | 116.8 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
+| Wasm runtime plus hello-world core, gzipped | 116.6 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
 | Android core, per ABI, release | 831 KB | [README](https://github.com/shreypdev/undra#why-its-fast) |
 
 Read these for what they are. They are core-side, on a host faster than the phones the design targets, so within budget here is necessary and not sufficient. The per-device targets (an iPhone with an A15, a 2022 mid-range Android phone, Chromium) are measured in a later device phase, and the platform half of a crossing, meaning the Swift, JNI or JavaScript side and applying a change-set to a mirror, is not in these numbers. The 46 operations covered by the CI gate have budgets about five times what they measure, so the gate catches an operation that becomes several times slower, not a few percent ([the gate](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#the-ci-gate)). We have not published a stress benchmark for sustained very high write rates, and we have not compared Undra against other tools, so this page makes no such comparison.

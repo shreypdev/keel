@@ -122,7 +122,7 @@ export interface BootOptions extends Partial<World> {
   readonly expectedSchemaHash?: bigint;
   /** Which build of the core to load. Default A. */
   readonly build?: Build;
-  /** More ports to register (on the main thread). */
+  /** More ports to register (on the main thread), by port id: the opt-in WebSocket, Sse and Db ports of S23 to S25, ... */
   readonly ports?: Readonly<Record<number, PortImpl>>;
   /** Options of `UndraCore.load` a scenario needs besides the harness's (`recovery`, `onCoreRestarted`, `onPanic`, `namespace`, `coreVersion`). */
   readonly load?: Pick<LoadOptions, "recovery" | "onCoreRestarted" | "onPanic" | "namespace" | "coreVersion" | "backgroundRun">;

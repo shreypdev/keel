@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The Kotlin column of the contract tests: runs S01..S20, S26, S29 and S30 of contract-tests/scenarios.md on the JVM
+# The Kotlin column of the contract tests: runs S01..S20, S23..S26, S29 and S30 of contract-tests/scenarios.md on the JVM
 # over JNI against the real libplayground_core of the playground core (and, for S26, libplayground_a and
-# libplayground_b: the same core under two more namespaces, examples/two-cores), then checks all twenty-three passed.
+# libplayground_b: the same core under two more namespaces, examples/two-cores), then checks every one passed.
 #
 #   contract-tests/kotlin/run.sh
 #
@@ -21,8 +21,11 @@
 #   6. pipes the output of both through contract-tests/check.sh kotlin (the last line of an id counts)
 #
 # Output goes under contract-tests/kotlin/build (git-ignored); UNDRA_BUILD_DIR moves it. Needs the toolchain
-# scripts/env.sh sets up (JDK 17, kotlinc, UNDRA_KOTLINX_COROUTINES, UNDRA_KOTLIN_STDLIB) and cargo. kotlinc is
-# the one on PATH (put another first to compile with it; use a separate UNDRA_BUILD_DIR per compiler).
+# scripts/env.sh sets up (JDK 17, kotlinc, UNDRA_KOTLINX_COROUTINES, UNDRA_KOTLIN_STDLIB), cargo, and Node for the
+# local server of S23 and S24 (contract-tests/servers/realtime-server.mjs). kotlinc is the one on PATH (put another
+# first to compile with it; use a separate UNDRA_BUILD_DIR per compiler). S25 needs the SQLite JDBC driver
+# (org.xerial:sqlite-jdbc, which the runtime does not depend on): UNDRA_SQLITE_JDBC=/path/to/sqlite-jdbc.jar puts it on
+# the class path; without it S25 reports `SKIP no SQLite JDBC driver on the class path`.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"            # contract-tests/kotlin
@@ -130,8 +133,13 @@ export UNDRA_DERIVED_VECTORS="${UNDRA_DERIVED_VECTORS:-$PLAYGROUND/build/derived
 HANDOVER="$OUT/migration"
 rm -rf "$HANDOVER"
 export UNDRA_CONTRACT_HANDOVER="$HANDOVER"
-CP="$OUT/runtime/main:$CLASSES:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES"
-echo "==> running S01..S20, S26, S29 and S30 against build A (${CORE_A#"$REPO"/}, and playground_a, playground_b)"
+DRIVER=""
+if [ -n "${UNDRA_SQLITE_JDBC:-}" ]; then
+  [ -f "$UNDRA_SQLITE_JDBC" ] || { echo "error: UNDRA_SQLITE_JDBC=$UNDRA_SQLITE_JDBC is not a file" >&2; exit 2; }
+  DRIVER=":$UNDRA_SQLITE_JDBC"
+fi
+CP="$OUT/runtime/main:$CLASSES:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES$DRIVER"
+echo "==> running S01..S20, S23..S26, S29 and S30 against build A (${CORE_A#"$REPO"/}, and playground_a, playground_b)"
 mkdir -p "$OUT"
 status=0
 java -Xmx1g -Djava.library.path="$CORE_A:$LIB_DIR_A:$LIB_DIR_B" -cp "$CP" dev.undra.contract.MainKt 2>&1 | tee "$OUT/run.log" || status=$?

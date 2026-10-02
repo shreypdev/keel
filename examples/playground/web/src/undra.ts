@@ -1,4 +1,5 @@
 import {
+  type PortImpl,
   type UndraCore,
   UndraCoreRestarted,
   crashRecovery,
@@ -7,6 +8,8 @@ import {
   type UndraUnhandledError,
   emitConnectivity,
 } from "@undra/runtime";
+import { OptInPortIds, dbPort, waSqliteDb } from "@undra/runtime/db";
+import { browserWebSocket, fetchSse, ssePort, webSocketPort } from "@undra/runtime/realtime";
 import { BigList, RemoteTodosQueryHandle, Todos, UndraPlaygroundCore, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
 import wasmUrl from "../../build/web/playground_core.wasm?url";
@@ -69,8 +72,9 @@ function onPanic(report: UndraPanicReport, panics: PanicLog): void {
  *
  * The app supplies its own `Http` port (an in-memory server, so the playground needs no backend)
  * and `Kv` port (in memory, so a reload starts from the server's seed again); the other ports are
- * the browser's defaults. The wasm core runs with crash recovery on (ADR-049): a panic restarts it
- * from its last snapshot, and the debug panel lists the restarts.
+ * the browser's defaults, plus the opt-in ones this core enables (see {@link optInPorts}). The wasm core runs
+ * with crash recovery on (ADR-049): a panic restarts it from its last snapshot, and the debug panel lists the
+ * restarts.
  */
 export async function startUndra(): Promise<Playground> {
   const server = new PlaygroundServer();
@@ -78,6 +82,7 @@ export async function startUndra(): Promise<Playground> {
   const panics = new PanicLog();
   let inbox: RemoteTodosQueryHandle | undefined;
   const adapters = { http: server, kv: memoryKv() };
+  const ports = optInPorts();
   // Development builds only (`vite dev`): a production page that took its core's address from a link would hand
   // whoever wrote the link its ports (Kv, Http, SecureStore) and its screen. Android and iOS gate it the same way.
   const devUrl = import.meta.env.DEV
@@ -89,6 +94,7 @@ export async function startUndra(): Promise<Playground> {
       mode: "remote",
       url: devUrl,
       adapters,
+      ports,
       onError,
       // A native core reports each panic it contained through its Diagnostics port.
       onPanic: (report) => onPanic(report, panics),
@@ -107,6 +113,7 @@ export async function startUndra(): Promise<Playground> {
       mode: "wasm-main",
       wasm: new URL(wasmUrl, location.href),
       adapters,
+      ports,
       onError,
       onPanic: (report) => onPanic(report, panics),
       // The core's name for the panic report (a wasm module does not carry it).
@@ -130,6 +137,25 @@ export async function startUndra(): Promise<Playground> {
   ]);
   inbox = inboxQuery;
   return { todos, bigList, inbox: inboxQuery, server, restarts, panics, core };
+}
+
+/**
+ * The opt-in ports the playground core enables (`undra = { features = ["websocket", "sse", "db"] }`,
+ * ADR-047 and ADR-048), registered before the first use. They live in `@undra/runtime/realtime` and
+ * `@undra/runtime/db`, out of the main entry, so an app that does not use them does not ship them.
+ *
+ * * `WebSocket`: the browser's `WebSocket` (the Live view). A browser cannot send headers with the
+ *   upgrade, so a connect with headers is refused rather than sent without them.
+ * * `Sse`: `fetch` with a streamed body.
+ * * `Db`: SQLite (wa-sqlite) in a dedicated worker over the origin private file system (the Notes
+ *   view); the web has no WAL.
+ */
+function optInPorts(): Record<number, PortImpl> {
+  return {
+    [OptInPortIds.WebSocket.portId]: webSocketPort(browserWebSocket()),
+    [OptInPortIds.Sse.portId]: ssePort(fetchSse()),
+    [OptInPortIds.Db.portId]: dbPort(waSqliteDb(), { wal: false }),
+  };
 }
 
 /**
