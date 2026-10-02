@@ -15,7 +15,7 @@ use std::time::Duration;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use undra_meta::{
     ClosureRoot, ClosureSignal, DispatchCall, DispatchFn, DispatchOutcome, Schema, StoresClosure,
-    TypeClosure,
+    TypeClosure, TypeRef,
 };
 use undra_signals::ChangeSink;
 use undra_wire::payload::{
@@ -645,6 +645,7 @@ fn convert_signal(
     let Some(hook) = hook else {
         return Err(error.to_string());
     };
+    let hook = returning(hook, &signal.ty)?;
     (hook.support.offer)(hook, Some((bytes, &old_signal.ty, old)))
         .map(Some)
         .map_err(|e| e.to_string())
@@ -661,6 +662,7 @@ fn missing_signal(
         return Ok(None);
     }
     if let Some(hook) = persist::signal_hook(store, &signal.name, fingerprint) {
+        let hook = returning(hook, &signal.ty)?;
         return (hook.support.offer)(hook, None)
             .map(Some)
             .map_err(|e| e.to_string());
@@ -669,6 +671,24 @@ fn missing_signal(
         "the snapshot has no such signal and it has no `#[undra(default)]` or migration hook"
             .to_owned(),
     )
+}
+
+/// `hook`, if it returns `ty`. A store-and-signal hook's return type is not checked by the compiler
+/// (the macro cannot see the store); the runtime reports a mismatch with an E0066 ERROR at start-up,
+/// and a restore never splices its bytes into a signal of another type, where they could decode as
+/// a wrong value of the same width (the misdecode ADR-037 exists to prevent).
+fn returning(
+    hook: &'static persist::Migration,
+    ty: &TypeRef,
+) -> Result<&'static persist::Migration, String> {
+    match &hook.returns {
+        Some(returns) if TypeRef::from(returns) != *ty => Err(format!(
+            "the migration hook `{}` returns {} but the signal is {ty} (E0066)",
+            hook.name,
+            TypeRef::from(returns)
+        )),
+        _ => Ok(hook),
+    }
 }
 
 impl Runtime {
