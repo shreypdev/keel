@@ -2,7 +2,8 @@
 
 **Date:** 2026-10-02 · **Reviewer:** senior-engineer (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/reload-handles` at
 `a9bd725` (38 commits from `main` `a309e9f`), reviewed against `main` `12dafe2`, then merged with `main` `fc326d6` (the CI piece),
-`1e8f33c` (diagram-rn) and `ae362ac` (generics-fn-obj: S34, so the grid is 35 scenarios and 101 cells) · **Fixes:** one review-test
+`1e8f33c` (diagram-rn) and `ae362ac` (generics-fn-obj: S34, so the grid is 35 scenarios and 101 cells), and with
+`wt/generics-followups` `3c279a6` (it lands just before this piece; no conflicts, bindings and site unchanged by a rebuild) · **Fixes:** one review-test
 commit, eight `fix(reload-handles): review fixes` commits (two of them for CI red on the first pushed head), three merges, two `bench`
 commits (the size record), this record · **Read:** `CLAUDE.md` (R1-R12),
 ADR-059 with its implementation note, `.10x/decisions/architect/reload-handles.md`, `.10x/decisions/sde/reload-handles.md`, ADR-022,
@@ -154,6 +155,8 @@ budgets 6 passed; site `build-all` and `check-links --words` (347 words); `main`
 * `fc326d6` (the CI piece): conflicts in the SDE index, `contract-tests/README.md` and `site/search-index.json` (regenerated); the
   dev tests inherit its turn-taking and 900 s build deadline; M2 fixed after it.
 * `1e8f33c` (diagram-rn): no conflicts.
+* `3c279a6` (`wt/generics-followups`, on `ae362ac`): no conflicts; `undra bindgen --check --docs` and `build-all` find nothing to
+  regenerate.
 * `ae362ac` (generics-fn-obj, S34): S34 and S35 reconciled in `scenarios.md`, the README, `check.sh`, `run-all.sh`, the Kotlin and
   Swift runners and NOTES, the React Native include list and SPEC 14 (35 scenarios, 101 cells); generated bindings of the playground
   and two-cores a/b regenerated with `undra bindgen --docs` (schema hash `0x3c17cd5f59bb6f68`, which the testkit fixtures record);
