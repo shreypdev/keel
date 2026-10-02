@@ -11,7 +11,7 @@
 # skipped silently, and `--list` shows every step's disposition without running anything.
 #
 #   ci-local.rb --root DIR [--workflows ci,bench,site,two-cores] [--only ci/rust,ci/ts] [--skip ci/android]
-#                          [--slow [--rounds 3] [--burners 16]] [--list] [-v] [--logs DIR]
+#                          [--slow [--rounds 3] [--burners 8]] [--list] [-v] [--logs DIR]
 #
 # `--slow` is the slow-runner pass: only the steps in SLOW_STEPS (the timing-sensitive test suites: the Swift, Kotlin and
 # TypeScript runtime tests and the contract grid's runners) and the Rust test targets in SLOW_EXTRA (bench/tests, the dev-reload

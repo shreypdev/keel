@@ -36,6 +36,8 @@ fails there.
 | Swift: `testTheSwitchToWalWaitsForTheBusyTimeoutThenIsBusy` | `waited < 0.6` with 300 ms | `>= 0.29` kept; less than 150 ms after a 300 ms sleep started beside the open | the retry deadline doubled: `300.9` fails |
 | Swift `PortTests`: `testAnAsyncPortDoesNotBlockTheCallerAndSeveralCallsOverlap` | six calls return in under 50 ms (the port's work was a 60 ms sleep) | the six calls are held at a gate the test opens (a 10 s hang detector): none is answered when the callback returned, all six have begun (they overlap), then they are answered | the callback waiting for the work: fails (`6` replies where `0`) |
 | Swift `DbBindingTests`: `testOperationsOnOneDatabaseRunOneAtATimeInArrivalOrder` | 20 ms is enough for the slow statement's task to start (lost, the fast one is first) | `eventually`: the slow statement is in the recorder's log | n/a (removes a race) |
+| React Native `test/realtime.test.ts`: the binding's lone message | median of five round trips under 25 ms (the same bound as the TS runtime's test) | the same wrapped adapter and quiet-period timer as the TS runtime's test (20 rounds, median under 4 ms) | the quiet period of 8 ms: 6.5 ms after the reference, fails |
+| React Native `test/load.test.ts`: the unhandled native failure | 10 ms is enough for the inbox record to be read and reported | waits for the report (4 s, a hang detector) | n/a (a condition) |
 
 ## `scripts/ci-local.rb`
 
@@ -74,7 +76,8 @@ Each reads a clock but cannot fail for speed, or a bound is a hang detector size
   253/285/307/345/364, `SseBindingTests` 149/182, `PortsV2ReviewTests`' second concurrent receive, `DbBindingTests` 283, …) and a
   few Kotlin ones (`CoreCallTests` 196: a reply 150 ms after the caller suspends; `AdapterTests` 270): there is nothing the test can
   observe that says the task is now waiting (the pending state is the binding's), so no condition to wait on. A task that does not
-  start in 20 to 50 ms is a machine stalled that long; no run of the loops here (60 loaded runs of the Swift ones, 100 of the
-  Kotlin) showed one.
+  start in 20 to 50 ms is a machine stalled that long; none of the loaded loops of this piece (eight `yes` burners) showed one, but
+  they ran the touched tests, not these. They are the next thing a slow pass would find, if any: the fix would be a test seam in
+  the binding (a probe that says a pull is pending), which is a product change and not made here.
 * The burst test's residual: a pull that is not scheduled for 2 ms after it saw a message answers early (its quiet period is
   measured from when it last looked). The recorded arrivals cannot see that, so the case asks for one whole burst in forty.
