@@ -430,6 +430,55 @@ fn an_unreadable_queue_is_never_overwritten_and_replays_once_readable() {
     assert!(take(&second).unwrap().is_ok());
 }
 
+/// ADR-049 decision 1.4 / ADR-037 implementation notes: a queue the store reports `Corrupt` (the key
+/// is there, its bytes cannot be read back) is not transient: it becomes a dead letter (with no bytes,
+/// since none could be read) and reported, and the queue counts as read, so the client goes on and
+/// new offline mutations are persisted again. (Review, 2026-10-02: this path had no test.)
+#[test]
+fn a_queue_the_store_reports_corrupt_is_dead_lettered_and_counts_as_read() {
+    let fakes = Fakes::new();
+    fakes.kv.insert(QUEUE_KEY, vec![2, 0, 1, 2, 3]);
+    fakes.kv.fail(
+        FailOn::Get,
+        StorageError::Corrupt("the ciphertext failed authentication".into()),
+    );
+    let h = Harness::with_fakes(fakes);
+    h.fakes.connectivity.go_offline();
+    h.settle();
+    assert_eq!(
+        query_stats(&h)["queue"],
+        "hydrated",
+        "Corrupt is not retried"
+    );
+    let dead = h.query().dead_letters();
+    let queue = dead
+        .iter()
+        .find(|d| d.reason.contains("offline queue cannot be read back"))
+        .unwrap_or_else(|| panic!("{dead:?}"));
+    assert!(queue.raw.is_empty(), "no bytes could be read");
+    assert!(
+        queue.reason.contains("failed authentication"),
+        "{}",
+        queue.reason
+    );
+
+    // The store works again: a new offline mutation is queued and persisted (the key is not unread).
+    h.fakes.kv.heal();
+    h.fakes
+        .http
+        .fail(post_todos(), HttpError::Network("down".into()));
+    let _pending = spawn(&h, h.ctx().mutate::<AddTodoMutation>(("later".to_owned(),)));
+    h.t.run_pending();
+    h.advance_ms(5_000);
+    assert_eq!(h.query().pending_mutations(), 1);
+    let written = h.fakes.kv.value(QUEUE_KEY).expect("the queue is written");
+    assert_ne!(
+        written,
+        vec![2, 0, 1, 2, 3],
+        "rewritten with the new mutation"
+    );
+}
+
 #[test]
 fn a_failed_read_is_tried_again_after_a_backoff() {
     let fakes = Fakes::new();
