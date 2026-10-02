@@ -956,7 +956,9 @@ do not change) through the raw API with the ids it knows. The server serves `GET
 3. **Same wrappers, nothing blinked.** The counter shows 5; the remote handle's wrapper is the same object with
    the same handle value; the entries the mirror applied to the remote and feed wrappers during the restore are
    none (the runner records them: `data` never became absent and nothing was sent for the handle); the GET count
-   did not move; the feed still has 100 rows; `live_handles` is what it was before the restore.
+   did not move; the feed still has 100 rows; `live_handles` is what it was before the restore less one (the
+   `Probe`, the one object the restore makes stale, step 7): no query handle was dropped and the restore made no
+   handle of its own.
 4. **`refetch` is accepted** on the same remote wrapper: the GET count grows by 1 and `data` is the two items.
 5. **Polling continues.** The ticker advances within 2.5 s with no call from the runner (the core's timer was
    not touched).

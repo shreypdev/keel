@@ -30,7 +30,7 @@ export default defineConfig({
   test: {
     root: at("../../../.."),
     include: [
-      "contract-tests/ts/test/s{01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,18,19,27,28,30,31,32,33}-*.test.ts",
+      "contract-tests/ts/test/s{01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,18,19,27,28,30,31,32,33,35}-*.test.ts",
       "runtimes/rn/@undra/react-native/test/contract/s{17,29}-native.test.ts",
     ],
     environment: "node",
