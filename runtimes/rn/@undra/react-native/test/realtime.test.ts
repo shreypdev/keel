@@ -364,7 +364,12 @@ describe("reactNativeSse over XMLHttpRequest progress events", () => {
 
   test("a flood under a stalled reader stays bounded at the default limit (4,096 events), then Network", async () => {
     const stream = await sse.open(`${server.url}/sse/flood?n=6000&size=8`, [], null);
-    await eventually(() => lastConnection("/sse/flood").written === 6000);
+    // The flood has arrived when the request is over: the adapter gave up at the 4,097th event and aborted it, or the whole
+    // body came first. (Not when the server has written 6,000 events: whether Node's HTTP write path accepts all of them at
+    // once or pauses for `drain`, and so whether the client's abort comes before the last write, depends on the Node and the
+    // OS, and the reader must still be stalled when it is over: reading earlier would keep up with the flood.)
+    const request = NodeXhr.made[NodeXhr.made.length - 1];
+    await eventually(() => request?.readyState === 4);
     await tick(100);
     const read = await drain(stream.events());
     expect(read.items.length).toBe(4096);

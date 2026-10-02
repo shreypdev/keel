@@ -114,6 +114,29 @@ impl Dev {
         }
     }
 
+    /// Waits for the restart that an edit of the schema causes: the first `Restarted:` line whose schema hash is not `old`.
+    /// A restart that leaves the schema as it was (a rebuild of what had not changed, which a loaded machine can add: the
+    /// watcher sees a save in two bursts further apart than its debounce, and the first rebuild reads the file before the
+    /// write) is not the one under test, and is skipped, said on stderr.
+    pub fn wait_restart_changing_schema(&self, old: u64, limit: Duration) -> String {
+        let deadline = Instant::now() + limit;
+        loop {
+            let line = self.wait_line(
+                "Restarted: ws://",
+                deadline.saturating_duration_since(Instant::now()),
+            );
+            let hash = line
+                .split("schema hash ")
+                .nth(1)
+                .and_then(|rest| rest.split(')').next())
+                .and_then(|hash| u64::from_str_radix(hash.trim_start_matches("0x"), 16).ok());
+            if hash.is_some_and(|hash| hash != old) {
+                return line;
+            }
+            eprintln!("(skipped a restart that left the schema as it was: {line})");
+        }
+    }
+
     /// Waits for a line containing `needle`.
     pub fn wait_for(&self, needle: &str, limit: Duration) {
         let deadline = Instant::now() + limit;

@@ -517,7 +517,7 @@ fn an_additive_schema_change_keeps_the_state() {
     );
     assert_ne!(original, edited, "the edit applies");
     std::fs::write(&counter_rs, edited).unwrap();
-    let restarted = dev.wait_line("Restarted: ws://", BUILD);
+    let restarted = dev.wait_restart_changing_schema(dev.hash, BUILD);
     eprintln!("{restarted}");
     assert!(restarted.contains("state kept (1 store,"), "{restarted}");
     let new_hash = restarted
@@ -575,7 +575,7 @@ fn a_schema_change_the_state_cannot_follow_resets_it_and_says_why() {
     let edited = original.replace("changes", "edits");
     assert_ne!(original, edited, "the edit applies");
     std::fs::write(&counter_rs, edited).unwrap();
-    let restarted = dev.wait_line("Restarted: ws://", BUILD);
+    let restarted = dev.wait_restart_changing_schema(dev.hash, BUILD);
     eprintln!("{restarted}");
     assert!(
         restarted.contains("state reset: the core refused the snapshot")
@@ -808,7 +808,7 @@ fn a_snapshot_the_new_core_refuses_falls_back_to_fresh_state_and_says_why() {
     ) + "\nimpl Counter {\n    fn refuse(_ctx: Ctx, _count: Signal<i32>, _changes: Signal<u32>) -> Self {\n        panic!(\"this build refuses every snapshot\")\n    }\n}\n";
     assert_ne!(original, edited);
     std::fs::write(&counter_rs, edited).unwrap();
-    let restarted = dev.wait_line("Restarted: ws://", BUILD);
+    let restarted = dev.wait_restart_changing_schema(dev.hash, BUILD);
     eprintln!("{restarted}");
     assert!(
         restarted.contains("state reset: the core refused the snapshot"),
