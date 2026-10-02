@@ -22,7 +22,7 @@ import type { PortImpl } from "./port.js";
 import { dispatchPortCall, portOperation } from "./port-dispatch.js";
 import { Signal } from "./signal.js";
 import { StreamCall } from "./stream.js";
-import { type ReconnectOptions, RemoteTransport, type WebSocketFactory } from "./transport/remote.js";
+import type { ReconnectOptions, WebSocketFactory } from "./transport/remote.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport/transport.js";
 import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
 import type { WorkerLike } from "./transport/wasm-worker.js";
@@ -410,6 +410,8 @@ export class UndraCore {
       }
       case "remote": {
         if (options.url === undefined) throw new UndraError("options", "mode 'remote' needs the `url` option");
+        // Fetched when an app asks for this mode (a development page served by `undra dev`, a native core over a socket), not by every page.
+        const { RemoteTransport } = await import("./transport/remote.js");
         transport = new RemoteTransport({
           url: options.url,
           expectedSchemaHash: options.expectedSchemaHash,
