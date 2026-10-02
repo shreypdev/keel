@@ -113,7 +113,12 @@ describe("which ports the module answers natively", () => {
 describe("loadNative and the native defaults", () => {
   test("passes the native defaults to start, and the module's report is readable", async () => {
     const native = new FakeNative();
-    native.defaults = { ports: ALL, kv: "/data/kv", fs: "/data/fs", secureStore: "Keychain service dev.undra.securestore" };
+    native.defaults = {
+      ports: ALL,
+      kv: "/data/undra/playground_core/kv",
+      fs: "/data/undra/playground_core/fs",
+      secureStore: "Keychain service playground_core.dev.undra.securestore",
+    };
     installFake(native);
     expect(nativePlatformDefaults(native.namespace)).toEqual(native.defaults);
     const core = await loadNative(entryOf(native));

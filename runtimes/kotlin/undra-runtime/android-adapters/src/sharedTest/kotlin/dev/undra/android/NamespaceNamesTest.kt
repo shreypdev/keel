@@ -16,8 +16,9 @@ class NamespaceNamesTest {
     @Test
     fun the_database_file_of_a_core_carries_its_namespace() {
         assertEquals("undra-playground_a-notes.sqlite", AndroidDbAdapter.fileNameOf("playground_a", "notes"))
-        // A namespace has no `-`, so the file name says which namespace and which database whatever the database is called.
-        assertEquals("undra-a-b-c.sqlite", AndroidDbAdapter.fileNameOf("a", "b-c"))
-        assertNotEquals(AndroidDbAdapter.fileNameOf("a", "b-c"), AndroidDbAdapter.fileNameOf("a-b", "c"))
+        // A namespace has no `-`, so the first one after `undra-` ends it, whatever the database is called.
+        val file = AndroidDbAdapter.fileNameOf("a", "b-c")
+        assertEquals("undra-a-b-c.sqlite", file)
+        assertEquals("a", file.removePrefix("undra-").substringBefore('-'))
     }
 }

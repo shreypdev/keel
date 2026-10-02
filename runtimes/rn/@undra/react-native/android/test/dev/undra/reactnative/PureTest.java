@@ -144,6 +144,14 @@ public final class PureTest {
                 "U+0000 and an emoji leave as standard UTF-8 (no C0 80, no CESU-8 surrogates): " + Arrays.toString(out));
         ok("DbWire carries U+0000 and supplementary characters as standard UTF-8 in both directions");
 
+        // ADR-044 amendment A: every default store is per core namespace, named as android-adapters names it.
+        check("playground_a.dev.undra.securestore".equals(StoreNames.keyAlias("playground_a")), "the Keystore alias is <namespace>.dev.undra.securestore");
+        check(!StoreNames.keyAlias("playground_a").equals(StoreNames.keyAlias("playground_b")), "two namespaces, two Keystore keys");
+        check("undra/playground_a/secure".equals(StoreNames.securePath("playground_a")), "the sealed secrets are in undra/<namespace>/secure");
+        check("undra-playground_a-notes.sqlite".equals(StoreNames.databaseFileName("playground_a", "notes")), "the database file is undra-<namespace>-<name>.sqlite");
+        String file = StoreNames.databaseFileName("a", "b-c");
+        check("a".equals(file.substring("undra-".length(), file.indexOf('-', "undra-".length()))), "a namespace has no '-': the first one after undra- ends it, whatever the database is called");
+        ok("the store names carry the core's namespace: Keystore alias, secure directory, database file");
         System.out.println("# " + checks + " checks passed");
     }
 }

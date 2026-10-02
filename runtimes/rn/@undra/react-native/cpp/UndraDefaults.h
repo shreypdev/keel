@@ -108,7 +108,14 @@ class Platform {
 /// The platform of a phone: `ios/UndraPlatformApple.mm` on Apple platforms, `UndraPlatformAndroid.cpp`
 /// on Android (call it on the JS thread: Android resolves its Java class there). Null elsewhere, or when
 /// the platform cannot be reached (`error` says why).
-std::unique_ptr<Platform> makePlatform(std::string &error);
+///
+/// `name_space` is the namespace of the core the platform serves (the table's `name_space`): every default
+/// store is per namespace (ADR-044 amendment A), so two cores of one app never share one. Kv, Fs and the
+/// databases live under `.../undra/<name_space>/...` (Android's databases are
+/// `undra-<name_space>-<name>.sqlite`), the Keychain service and the Keystore alias are
+/// `<name_space>.dev.undra.securestore`: the Swift runtime's and `android-adapters`' layouts, with the
+/// namespace in the same place.
+std::unique_ptr<Platform> makePlatform(const std::string &name_space, std::string &error);
 
 /// The ports of `ids` the platform can answer natively (`Kv`, `SecureStore`, `Fs`, `Connectivity`, `Db`).
 std::vector<uint32_t> nativePortsOf(Platform &platform);

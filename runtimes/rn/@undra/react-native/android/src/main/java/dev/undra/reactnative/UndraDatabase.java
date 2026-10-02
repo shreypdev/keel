@@ -16,9 +16,10 @@ import java.io.File;
  * transaction to the thread that began it.
  *
  * <ul>
- *   <li>The file is {@code getDatabasePath("undra-<name>.sqlite")}, the one {@code android-adapters}'
- *       {@code AndroidDbAdapter} opens, so either shell of an app reads the other's database; {@code ":memory:"} is a
- *       private in-memory database.</li>
+ *   <li>The file is {@code getDatabasePath("undra-<namespace>-<name>.sqlite")}, the namespace being the core's (a
+ *       namespace has no {@code -}; ADR-044 amendment A: two cores of one app never share a database), the one
+ *       {@code android-adapters}' {@code AndroidDbAdapter} opens, so either shell of an app reads the other's database;
+ *       {@code ":memory:"} is a private in-memory database.</li>
  *   <li>Opened with {@code NO_LOCALIZED_COLLATORS} (no {@code android_metadata} table in the app's schema), an error
  *       handler that keeps a corrupt file (Android's default deletes it; the core gets {@code DbError.Corrupt}), and
  *       Android's own write-ahead logging off: it would give the database a pool of connections, and the binding needs
@@ -62,8 +63,8 @@ final class UndraDatabase {
         return parent == null ? null : parent.getPath();
     }
 
-    /** Opens database {@code name}; never throws: {@link #failure} says why it did not open. */
-    static UndraDatabase open(String name) {
+    /** Opens database {@code name} of the core {@code namespace}; never throws: {@link #failure} says why it did not open. */
+    static UndraDatabase open(String namespace, String name) {
         try {
             String path;
             if (":memory:".equals(name)) {
@@ -74,7 +75,7 @@ final class UndraDatabase {
                     return failed("android.database.sqlite.SQLiteCantOpenDatabaseException",
                             "UndraPlatform has no context: keep its provider in the manifest, or call UndraPlatform.install(context)");
                 }
-                File file = app.getDatabasePath("undra-" + name + ".sqlite");
+                File file = app.getDatabasePath(StoreNames.databaseFileName(namespace, name));
                 File directory = file.getParentFile();
                 if (directory != null && !directory.isDirectory() && !directory.mkdirs() && !directory.isDirectory()) {
                     return failed("android.database.sqlite.SQLiteCantOpenDatabaseException", "cannot create " + directory);

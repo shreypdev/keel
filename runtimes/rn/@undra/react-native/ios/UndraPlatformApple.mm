@@ -1,16 +1,17 @@
 // The Apple platform of @undra/react-native's default ports (ADR-038 amendment B, B1): Objective-C++
 // over the C APIs of Foundation, Security and Network.framework; no Swift.
 //
-//  * `Kv` and `Fs`: the portable C++ stores over `<Application Support>/<bundle id>/Undra/kv` (FNV
-//    names) and `.../Undra/fs`: the directories and names of the Swift runtime's `KvAdapter` and
-//    `FsAdapter`, so a value the SwiftUI shell of an app wrote is read here and the reverse;
-//  * `SecureStore`: Keychain generic passwords, service `dev.undra.securestore`, account = key,
-//    `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: the Swift `SecureStoreAdapter`'s items;
+//  * `Kv` and `Fs`: the portable C++ stores over `<Application Support>/<bundle id>/undra/<namespace>/kv`
+//    (FNV names) and `.../undra/<namespace>/fs`: the directories and names of the Swift runtime's
+//    `KvAdapter` and `FsAdapter` for the core's namespace (ADR-044 amendment A: two cores of one app never
+//    share a store), so a value the SwiftUI shell of an app wrote is read here and the reverse;
+//  * `SecureStore`: Keychain generic passwords, service `<namespace>.dev.undra.securestore`, account =
+//    key, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: the Swift `SecureStoreAdapter`'s items;
 //  * `Connectivity`: `nw_path_monitor` on a serial queue of its own, classified as the Swift
 //    `ConnectivityAdapter` does (online when the path is satisfied; Wi-Fi, cellular, wired, unknown);
 //  * `Db` (ADR-048): the sqlite3 C API of the system `libsqlite3` (`cpp/UndraDbSqlite.cpp`) over
-//    `<Application Support>/<bundle id>/Undra/db/<name>.sqlite`, the Swift `SQLiteDbAdapter`'s files (the root of
-//    its `KvAdapter.defaultDirectory(named: "db")`), so either shell reads the other's database.
+//    `<Application Support>/<bundle id>/undra/<namespace>/db/<name>.sqlite`, the Swift `SQLiteDbAdapter`'s
+//    files (`SQLiteDbAdapter.defaultDirectory(namespace:)`), so either shell reads the other's database.
 #import <Foundation/Foundation.h>
 #import <Network/Network.h>
 #import <Security/Security.h>
@@ -27,33 +28,38 @@ namespace undra::rn {
 
 namespace {
 
-/// `<Application Support>/<bundle id>/Undra/<name>` (the Swift `KvAdapter.defaultDirectory(named:)`).
-std::string undraDirectory(NSString *name) {
+NSString *nsString(const std::string &text) {
+  return [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
+}
+
+/// `<Application Support>/<bundle id>/undra/<namespace>/<name>` (the Swift
+/// `KvAdapter.defaultDirectory(namespace:named:)`).
+std::string undraDirectory(const std::string &name_space, NSString *name) {
   @autoreleasepool {
     NSURL *base = [[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
     if (base == nil) {
       base = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
     }
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier ?: @"app";
-    NSURL *url = [[[base URLByAppendingPathComponent:bundle isDirectory:YES] URLByAppendingPathComponent:@"Undra" isDirectory:YES]
-        URLByAppendingPathComponent:name
-                        isDirectory:YES];
+    NSURL *url = [[[[base URLByAppendingPathComponent:bundle isDirectory:YES] URLByAppendingPathComponent:@"undra" isDirectory:YES]
+        URLByAppendingPathComponent:nsString(name_space)
+                        isDirectory:YES] URLByAppendingPathComponent:name
+                                                         isDirectory:YES];
     const char *path = url.fileSystemRepresentation;
     return path != nullptr ? std::string(path) : std::string();
   }
-}
-
-NSString *nsString(const std::string &text) {
-  return [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
 }
 
 std::string osStatus(const char *what, OSStatus status) {
   return std::string(what) + " (OSStatus " + std::to_string(static_cast<int>(status)) + ")";
 }
 
-/// The Keychain, one generic-password item per key.
+/// The Keychain, one generic-password item per key, in the service `<namespace>.dev.undra.securestore` (the Swift
+/// `StorageLocations.keychainService(namespace:)`).
 class Keychain final : public SecretStore {
  public:
+  explicit Keychain(const std::string &name_space) : service_(nsString(name_space + ".dev.undra.securestore")) {}
+
   bool get(const std::string &key, std::optional<std::vector<uint8_t>> &value, std::string &error) override {
     @autoreleasepool {
       NSString *account = nsString(key);
@@ -150,18 +156,20 @@ class Keychain final : public SecretStore {
   }
 
   std::string describe() const override {
-    return "Keychain service dev.undra.securestore";
+    return std::string("Keychain service ") + service_.UTF8String;
   }
 
  private:
-  static NSMutableDictionary *baseQuery(NSString *account) {
+  NSMutableDictionary *baseQuery(NSString *account) const {
     NSMutableDictionary *query = [@{
       (__bridge id)kSecClass : (__bridge id)kSecClassGenericPassword,
-      (__bridge id)kSecAttrService : @"dev.undra.securestore",
+      (__bridge id)kSecAttrService : service_,
     } mutableCopy];
     if (account != nil) query[(__bridge id)kSecAttrAccount] = account;
     return query;
   }
+
+  NSString *service_;
 };
 
 /// `nw_path_monitor` on a queue of its own.
@@ -224,33 +232,39 @@ class PathMonitor final : public ConnectivitySource {
 
 class ApplePlatform final : public Platform {
  public:
+  explicit ApplePlatform(std::string name_space) : namespace_(std::move(name_space)) {}
+
   std::string kvDirectory() override {
-    return undraDirectory(@"kv");
+    return undraDirectory(namespace_, @"kv");
   }
   KvNaming kvNaming() override {
     return KvNaming::Fnv;
   }
   std::string fsRoot() override {
-    return undraDirectory(@"fs");
+    return undraDirectory(namespace_, @"fs");
   }
   std::unique_ptr<SecretStore> makeSecretStore() override {
-    return std::make_unique<Keychain>();
+    return std::make_unique<Keychain>(namespace_);
   }
   std::unique_ptr<ConnectivitySource> makeConnectivity() override {
     return std::make_unique<PathMonitor>();
   }
   std::unique_ptr<DbBackend> makeDbBackend() override {
     // Created on the first open.
-    const std::string directory = undraDirectory(@"db");
+    const std::string directory = undraDirectory(namespace_, @"db");
     if (directory.empty()) return nullptr;
     return makeSqliteDbBackend(directory);
   }
+
+ private:
+  /// The namespace of the core this platform serves: every default store is under it (ADR-044 amendment A).
+  std::string namespace_;
 };
 
 } // namespace
 
-std::unique_ptr<Platform> makePlatform(std::string & /*error*/) {
-  return std::make_unique<ApplePlatform>();
+std::unique_ptr<Platform> makePlatform(const std::string &name_space, std::string & /*error*/) {
+  return std::make_unique<ApplePlatform>(name_space);
 }
 
 } // namespace undra::rn

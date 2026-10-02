@@ -1,9 +1,11 @@
 // The Android platform of @undra/react-native's default ports (ADR-038 amendment B, B1 and B8).
 //
-//  * `Kv` and `Fs`: the portable C++ stores over `filesDir/undra/kv` (SHA-256 names) and
-//    `filesDir/undra/fs`, the directories and names of `android-adapters`;
-//  * `SecureStore`: the same C++ store over `noBackupFilesDir/undra/secure`, each value sealed and
-//    opened by Java (`UndraPlatform.seal`/`open`, the Android Keystore), `android-adapters`' layout;
+//  * `Kv` and `Fs`: the portable C++ stores over `filesDir/undra/<namespace>/kv` (SHA-256 names) and
+//    `filesDir/undra/<namespace>/fs`, the directories and names of `android-adapters` for the core's namespace
+//    (ADR-044 amendment A: every default store is per core namespace);
+//  * `SecureStore`: the same C++ store over `noBackupFilesDir/undra/<namespace>/secure`, each value sealed and
+//    opened by Java (`UndraPlatform.seal`/`open`, the Android Keystore key `<namespace>.dev.undra.securestore`),
+//    `android-adapters`' layout;
 //  * `Connectivity`: Java's `NetworkMonitor`, reporting into `nativeConnectivityChanged`;
 //  * `Db` (ADR-048): the binding of `UndraDb.cpp` over Android's own SQLite, through Java's `UndraDatabase`
 //    (`android.database.sqlite`, the file `getDatabasePath("undra-<name>.sqlite")` of `android-adapters`): one
@@ -217,8 +219,8 @@ bool resolveJava(std::string &error) {
     return id;
   };
   side.directories = lookup("directories", "()[Ljava/lang/String;");
-  side.seal = lookup("seal", "(Ljava/lang/String;[B)[B");
-  side.open = lookup("open", "(Ljava/lang/String;[B)[B");
+  side.seal = lookup("seal", "(Ljava/lang/String;Ljava/lang/String;[B)[B");
+  side.open = lookup("open", "(Ljava/lang/String;Ljava/lang/String;[B)[B");
   side.startConnectivity = lookup("startConnectivity", "(J)Ldev/undra/reactnative/NetworkMonitor;");
   if (side.directories == nullptr || side.seal == nullptr || side.open == nullptr || side.startConnectivity == nullptr) {
     error = "dev.undra.reactnative.UndraPlatform does not have the methods this module calls (" + why + "): the Java and C++ halves of the package differ";
@@ -269,7 +271,7 @@ bool resolveJava(std::string &error) {
         return id;
       };
       side.dbDirectory = method("directory", "()Ljava/lang/String;", true);
-      side.dbOpen = method("open", "(Ljava/lang/String;)Ldev/undra/reactnative/UndraDatabase;", true);
+      side.dbOpen = method("open", "(Ljava/lang/String;Ljava/lang/String;)Ldev/undra/reactnative/UndraDatabase;", true);
       side.dbFailure = method("failure", "()[B", false);
       side.dbExecute = method("execute", "(Ljava/lang/String;[BIZ)[B", false);
       side.dbQuery = method("query", "(Ljava/lang/String;[BIZ)[B", false);
@@ -304,7 +306,9 @@ bool resolveJava(std::string &error) {
 /// The `SecureStore` of Android: sealed values in the portable C++ store.
 class SealedStore final : public SecretStore {
  public:
-  SealedStore(JavaSide java, std::string directory) : java_(java), files_(std::move(directory), KvNaming::Sha256) {}
+  /// `name_space` is the core's: the Keystore key is `<namespace>.dev.undra.securestore`, and Java gets it with every call.
+  SealedStore(JavaSide java, std::string name_space, std::string directory)
+      : java_(java), namespace_(std::move(name_space)), files_(std::move(directory), KvNaming::Sha256) {}
 
   bool get(const std::string &key, std::optional<std::vector<uint8_t>> &value, std::string &error) override {
     std::optional<std::vector<uint8_t>> sealed;
@@ -334,7 +338,7 @@ class SealedStore final : public SecretStore {
   }
 
   std::string describe() const override {
-    return "Android Keystore key dev.undra.securestore, sealed files in " + files_.directory();
+    return "Android Keystore key " + namespace_ + ".dev.undra.securestore, sealed files in " + files_.directory();
   }
 
  private:
@@ -349,10 +353,11 @@ class SealedStore final : public SecretStore {
       error = "out of JNI local references: " + takeException(env);
       return false;
     }
-    jstring jkey = javaString(env, key);
+    jstring jnamespace = javaString(env, namespace_);
+    jstring jkey = jnamespace != nullptr ? javaString(env, key) : nullptr;
     jbyteArray jin = jkey != nullptr ? env->NewByteArray(static_cast<jsize>(in.size())) : nullptr;
     if (jin != nullptr && !in.empty()) env->SetByteArrayRegion(jin, 0, static_cast<jsize>(in.size()), reinterpret_cast<const jbyte *>(in.data()));
-    auto result = jin != nullptr ? static_cast<jbyteArray>(env->CallStaticObjectMethod(java_.platform, method, jkey, jin)) : nullptr;
+    auto result = jin != nullptr ? static_cast<jbyteArray>(env->CallStaticObjectMethod(java_.platform, method, jnamespace, jkey, jin)) : nullptr;
     const std::string thrown = takeException(env);
     bool ok = false;
     if (!thrown.empty()) {
@@ -370,6 +375,7 @@ class SealedStore final : public SecretStore {
   }
 
   JavaSide java_;
+  std::string namespace_;
   KvStore files_;
 };
 
@@ -538,7 +544,8 @@ class JniDbConnection final : public DbConnection {
 /// The `Db` backend of Android: `UndraDatabase.open` on the database's thread.
 class JniDbBackend final : public DbBackend {
  public:
-  JniDbBackend(JavaSide java, std::string directory) : java_(java), directory_(std::move(directory)) {}
+  JniDbBackend(JavaSide java, std::string name_space, std::string directory)
+      : java_(java), namespace_(std::move(name_space)), directory_(std::move(directory)) {}
 
   std::unique_ptr<DbConnection> open(const std::string &name, DbFailure &failure) override {
     JNIEnv *env = envOf(java_.vm);
@@ -551,8 +558,9 @@ class JniDbBackend final : public DbBackend {
       return nullptr;
     }
     std::unique_ptr<DbConnection> connection;
-    jstring jname = javaString(env, name);
-    jobject db = jname != nullptr ? env->CallStaticObjectMethod(java_.database, java_.dbOpen, jname) : nullptr;
+    jstring jnamespace = javaString(env, namespace_);
+    jstring jname = jnamespace != nullptr ? javaString(env, name) : nullptr;
+    jobject db = jname != nullptr ? env->CallStaticObjectMethod(java_.database, java_.dbOpen, jnamespace, jname) : nullptr;
     std::string thrown = takeException(env);
     if (db == nullptr) {
       failure = DbFailure::unavailable("the Android SQLite could not open " + name + (thrown.empty() ? "" : ": " + thrown));
@@ -575,30 +583,35 @@ class JniDbBackend final : public DbBackend {
   }
 
   std::string describe() const override {
-    return directory_ + "/undra-<name>.sqlite";
+    return directory_ + "/undra-" + namespace_ + "-<name>.sqlite";
   }
 
  private:
   JavaSide java_;
+  std::string namespace_;
   std::string directory_;
 };
 
 class AndroidPlatform final : public Platform {
  public:
-  AndroidPlatform(JavaSide java, std::string files, std::string noBackup, std::string databases)
-      : java_(java), files_(std::move(files)), noBackup_(std::move(noBackup)), databases_(std::move(databases)) {}
+  AndroidPlatform(JavaSide java, std::string name_space, std::string files, std::string noBackup, std::string databases)
+      : java_(java),
+        namespace_(std::move(name_space)),
+        files_(std::move(files)),
+        noBackup_(std::move(noBackup)),
+        databases_(std::move(databases)) {}
 
   std::string kvDirectory() override {
-    return files_ + "/undra/kv";
+    return files_ + "/undra/" + namespace_ + "/kv";
   }
   KvNaming kvNaming() override {
     return KvNaming::Sha256;
   }
   std::string fsRoot() override {
-    return files_ + "/undra/fs";
+    return files_ + "/undra/" + namespace_ + "/fs";
   }
   std::unique_ptr<SecretStore> makeSecretStore() override {
-    return std::make_unique<SealedStore>(java_, noBackup_ + "/undra/secure");
+    return std::make_unique<SealedStore>(java_, namespace_, noBackup_ + "/undra/" + namespace_ + "/secure");
   }
   std::unique_ptr<ConnectivitySource> makeConnectivity() override {
     if (java_.stop == nullptr) return nullptr;
@@ -606,7 +619,7 @@ class AndroidPlatform final : public Platform {
   }
   std::unique_ptr<DbBackend> makeDbBackend() override {
     if (java_.database == nullptr || databases_.empty()) return nullptr;
-    return std::make_unique<JniDbBackend>(java_, databases_);
+    return std::make_unique<JniDbBackend>(java_, namespace_, databases_);
   }
   void workerStarted(const char *name) noexcept override {
     JNIEnv *env = nullptr;
@@ -621,6 +634,8 @@ class AndroidPlatform final : public Platform {
 
  private:
   JavaSide java_;
+  /// The namespace of the core this platform serves: every default store is under it (ADR-044 amendment A).
+  std::string namespace_;
   std::string files_;
   std::string noBackup_;
   std::string databases_;
@@ -632,7 +647,7 @@ thread_local bool AndroidPlatform::attached_ = false;
 
 } // namespace
 
-std::unique_ptr<Platform> makePlatform(std::string &error) {
+std::unique_ptr<Platform> makePlatform(const std::string &name_space, std::string &error) {
   try {
     if (!resolveJava(error)) return nullptr;
     JNIEnv *env = facebook::jni::Environment::current();
@@ -666,7 +681,7 @@ std::unique_ptr<Platform> makePlatform(std::string &error) {
       if (takeException(env).empty() && directory != nullptr) databases = stdString(env, directory);
       if (directory != nullptr) env->DeleteLocalRef(directory);
     }
-    return std::make_unique<AndroidPlatform>(java, std::move(filesDir), std::move(noBackupDir), std::move(databases));
+    return std::make_unique<AndroidPlatform>(java, name_space, std::move(filesDir), std::move(noBackupDir), std::move(databases));
   } catch (const std::exception &e) {
     error = e.what();
     return nullptr;

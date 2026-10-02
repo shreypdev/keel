@@ -95,8 +95,9 @@ export interface NativePlatformDefaults {
   /** Where `SecureStore` keeps its values (a Keychain service, a Keystore key and a directory). */
   readonly secureStore?: string;
   /**
-   * Where `Db` keeps its databases (ADR-048): `<Application Support>/<bundle id>/Undra/db/<name>.sqlite` on iOS (the
-   * Swift runtime's), `getDatabasePath("undra-<name>.sqlite")` on Android (`android-adapters`').
+   * Where `Db` keeps its databases (ADR-048): `<Application Support>/<bundle id>/undra/<namespace>/db/<name>.sqlite` on iOS (the
+   * Swift runtime's), `getDatabasePath("undra-<namespace>-<name>.sqlite")` on Android (`android-adapters`'): per core
+   * namespace, as every default store is (ADR-044 amendment A).
    */
   readonly db?: string;
   /** Why the platform has no native defaults (Android: the package's Java library or its context is missing). */
