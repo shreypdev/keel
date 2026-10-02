@@ -764,6 +764,9 @@ public final class Mirror: @unchecked Sendable {
                     continue
                 }
                 folded.units.append(.single(entry))
+                // A barrier: what arrived after the call is not folded into what came before it, so
+                // the implementation sees the stores as they were when the core called it.
+                index.removeAll(keepingCapacity: true)
                 continue
             }
             let key = entry.key
