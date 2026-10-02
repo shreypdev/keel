@@ -1100,12 +1100,12 @@ fn shipped_artefacts_do_not_grow_and_no_symbols_writes_none() {
         let b = plain.root.join("build/web/playground_core.wasm");
         // `wasm-opt` breaks ties between functions by name, so the run that keeps the names (it makes the
         // function map the shipped module's frames resolve with) orders them differently from the nameless
-        // one, and it folds about twenty functions fewer (3,098 against 3,079 on main at `a309e9f`, 3,072
-        // against 3,052 after wt/cold-restore-regression; rustc 1.99.0, binaryen 133). That is 0.22% of the
-        // playground's module on main and 0.26% after that piece, which changed no build step and no symbol
-        // code: one function more or less folded is 0.04%. Half a percent is the margin (it was a quarter,
-        // set when the playground measured smaller with names); names or line tables left in the shipped
-        // module would be several percent.
+        // one, and its module has about twenty functions more (3,098 against 3,079 on main at `a309e9f`,
+        // 3,072 against 3,052 after wt/cold-restore-regression; rustc 1.99.0, binaryen 133; why the run with
+        // names is left with more is not known). That is 0.22% of the playground's module on main and 0.26%
+        // after that piece, which changed no build step and no symbol code: one function more or less is
+        // 0.04%. Half a percent is the margin (it was a quarter, set when the playground measured smaller
+        // with names); the names left in the shipped module would be 38%, the line tables several times it.
         let margin = |bytes: u64| bytes / 200;
         before_after("web wasm", size(&b) + margin(size(&b)), size(&a));
         before_after(
@@ -1128,9 +1128,15 @@ fn shipped_artefacts_do_not_grow_and_no_symbols_writes_none() {
         build("android", true);
         for abi in ["arm64-v8a", "x86_64"] {
             let rel = format!("build/android/jniLibs/{abi}/libplayground_core.so");
+            // A build with debug info compiles to a few bytes of other code, so the two stripped
+            // libraries differ by some tens of bytes in either direction (main at `a309e9f`: x86_64 32
+            // and arm64 16 bytes smaller with symbols; after wt/cold-restore-regression: x86_64 16 bytes
+            // larger, arm64 equal). The difference is in `.text` (`llvm-readelf -S`: every other section
+            // has the same size). 256 bytes is the tolerance; a symbol table or a debug section left in
+            // is hundreds of kilobytes.
             before_after(
                 &format!("android {abi}"),
-                size(&plain.root.join(&rel)),
+                size(&plain.root.join(&rel)) + 256,
                 size(&with.root.join(&rel)),
             );
         }
