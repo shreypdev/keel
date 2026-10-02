@@ -5,7 +5,6 @@ import Foundation
 import UndraRuntime
 import Combine
 
-/// The to-do list: what the UI observes (`todos`, `filter`, `visible`, `remaining`) and calls.
 @MainActor
 public final class Todos: UndraStore, ObservableObject, @unchecked Sendable {
     @Published public private(set) var todos: [Todo] = []
@@ -20,7 +19,6 @@ public final class Todos: UndraStore, ObservableObject, @unchecked Sendable {
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
 
-    /// An empty list showing every item.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = UndraIos15SampleCore.core) throws {
         let handle: UndraHandle
@@ -36,7 +34,6 @@ public final class Todos: UndraStore, ObservableObject, @unchecked Sendable {
         self.init(adopting: handle, core: ctx)
     }
 
-    /// Adds an item at the end of the list.
     /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
     public func add(title: String) async throws -> Todo {
         var w = UndraWriter()
@@ -53,7 +50,6 @@ public final class Todos: UndraStore, ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Removes every finished item.
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func clearDone() {
         do {
@@ -67,7 +63,6 @@ public final class Todos: UndraStore, ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Chooses which items `visible` holds.
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func setFilter(_ filter: Filter) {
         var w = UndraWriter()
@@ -83,7 +78,6 @@ public final class Todos: UndraStore, ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Flips the `done` flag of the item with `id`; unknown ids are ignored.
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func toggle(id: UUID) {
         var w = UndraWriter()

@@ -4,13 +4,9 @@
 import Foundation
 import UndraRuntime
 
-/// One item of the to-do list.
 public struct Todo: UndraRecord, Sendable, Hashable, Codable {
-    /// Identity of the item; the list is updated by key, so the UI diffs by it.
     public var id: UUID
-    /// What has to be done.
     public var title: String
-    /// Whether it is finished.
     public var done: Bool
 
     public init(id: UUID, title: String, done: Bool) {
@@ -34,13 +30,9 @@ public struct Todo: UndraRecord, Sendable, Hashable, Codable {
     }
 }
 
-/// Which items the list shows.
 public enum Filter: UInt16, UndraEnum, CaseIterable, Sendable, Codable {
-    /// Every item.
     case all = 0
-    /// Items that are not finished.
     case active = 1
-    /// Items that are finished.
     case done = 2
 
     public static func undraDecode(_ r: inout UndraReader) throws -> Filter {

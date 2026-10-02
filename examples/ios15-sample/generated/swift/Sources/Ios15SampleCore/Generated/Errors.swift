@@ -4,9 +4,7 @@
 import Foundation
 import UndraRuntime
 
-/// Why the tips could not be fetched (never, here: the tips are the core's own).
 public enum TipsError: UndraError, Error, Sendable, Hashable {
-    /// There are no tips.
     case empty
 
     public static func undraDecode(_ r: inout UndraReader) throws -> TipsError {
@@ -41,9 +39,7 @@ extension TipsError: CustomStringConvertible, LocalizedError {
     }
 }
 
-/// Why an item could not be added.
 public enum TodoError: UndraError, Error, Sendable, Hashable {
-    /// The title is empty once spaces are trimmed.
     case emptyTitle
 
     public static func undraDecode(_ r: inout UndraReader) throws -> TodoError {

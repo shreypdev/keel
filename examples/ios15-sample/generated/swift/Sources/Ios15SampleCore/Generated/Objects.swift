@@ -4,7 +4,6 @@
 import Foundation
 import UndraRuntime
 
-/// A greeting, to show a plain function crossing the boundary.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
 public func greeting(name: String, ctx: UndraCore = UndraIos15SampleCore.core) throws -> String {
     var w = UndraWriter()
