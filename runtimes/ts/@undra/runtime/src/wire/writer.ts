@@ -5,6 +5,8 @@ const ENCODER = new TextEncoder();
 const U32_MAX = 0xffff_ffff;
 const TWO_POW_32 = 0x1_0000_0000;
 const MIN_GROWTH = 64;
+/** The default initial capacity: V8 allocates a typed array of at most this many bytes on its heap (no backing store, no `ArrayBuffer`). */
+const DEFAULT_CAPACITY = 64;
 
 /**
  * Strings of at most this many UTF-16 code units are encoded by a hand-written
@@ -16,7 +18,6 @@ const MIN_GROWTH = 64;
 const SHORT_STRING_UNITS = 48;
 
 const EMPTY_BUFFER = new Uint8Array(0);
-const EMPTY_VIEW = new DataView(EMPTY_BUFFER.buffer);
 
 function outOfRange(ty: string, value: unknown): RangeError {
   return new RangeError(`${ty} out of range: ${String(value)}`);
@@ -41,21 +42,24 @@ function outOfRange(ty: string, value: unknown): RangeError {
  */
 export class UndraWriter {
   #buf: Uint8Array;
-  #view: DataView;
+  /** Over `#buf`, made on first use: only the 64-bit and floating-point writers need one (the integer writers store bytes). */
+  #dv: DataView | null = null;
   #pos = 0;
 
-  /** @param initialCapacity Bytes to allocate up front; the buffer grows on demand beyond it. */
-  constructor(initialCapacity = 256) {
+  /**
+   * @param initialCapacity Bytes to allocate up front; the buffer grows on demand beyond it. The default
+   *   (64) is what V8 keeps on the JavaScript heap, so the writer of a small call allocates no backing store.
+   */
+  constructor(initialCapacity = DEFAULT_CAPACITY) {
     if (!Number.isInteger(initialCapacity) || initialCapacity < 0 || initialCapacity > U32_MAX) {
       throw outOfRange("initial capacity", initialCapacity);
     }
-    if (initialCapacity === 0) {
-      this.#buf = EMPTY_BUFFER;
-      this.#view = EMPTY_VIEW;
-    } else {
-      this.#buf = new Uint8Array(initialCapacity);
-      this.#view = new DataView(this.#buf.buffer);
-    }
+    this.#buf = initialCapacity === 0 ? EMPTY_BUFFER : new Uint8Array(initialCapacity);
+  }
+
+  /** A `DataView` over the buffer, for the writers that cannot store bytes one by one cheaply. */
+  #view(): DataView {
+    return (this.#dv ??= new DataView(this.#buf.buffer, this.#buf.byteOffset, this.#buf.byteLength));
   }
 
   /** Number of bytes written so far. */
@@ -91,9 +95,30 @@ export class UndraWriter {
     if (cap < need) cap = need;
     if (cap > U32_MAX) cap = U32_MAX;
     const next = new Uint8Array(cap);
-    next.set(this.#buf.subarray(0, this.#pos));
+    next.set(this.#buf);
     this.#buf = next;
-    this.#view = new DataView(next.buffer);
+    this.#dv = null;
+  }
+
+  /** Stores `v` (any 32-bit integer) as four little-endian bytes. */
+  #put32(v: number): void {
+    this.#ensure(4);
+    const b = this.#buf;
+    const p = this.#pos;
+    b[p] = v;
+    b[p + 1] = v >>> 8;
+    b[p + 2] = v >>> 16;
+    b[p + 3] = v >>> 24;
+    this.#pos = p + 4;
+  }
+
+  /** Stores `v` as four little-endian bytes at `at` (inside what was written already). */
+  #put32At(at: number, v: number): void {
+    const b = this.#buf;
+    b[at] = v;
+    b[at + 1] = v >>> 8;
+    b[at + 2] = v >>> 16;
+    b[at + 3] = v >>> 24;
   }
 
   /** Writes an unsigned 8-bit integer. */
@@ -107,47 +132,48 @@ export class UndraWriter {
   writeI8(v: number): void {
     if (((v << 24) >> 24) !== v) throw outOfRange("i8", v);
     this.#ensure(1);
-    this.#view.setInt8(this.#pos, v);
-    this.#pos += 1;
+    this.#buf[this.#pos++] = v;
   }
 
   /** Writes an unsigned 16-bit integer. */
   writeU16(v: number): void {
     if ((v & 0xffff) !== v) throw outOfRange("u16", v);
     this.#ensure(2);
-    this.#view.setUint16(this.#pos, v, true);
-    this.#pos += 2;
+    const b = this.#buf;
+    const p = this.#pos;
+    b[p] = v;
+    b[p + 1] = v >>> 8;
+    this.#pos = p + 2;
   }
 
   /** Writes a signed 16-bit integer. */
   writeI16(v: number): void {
     if (((v << 16) >> 16) !== v) throw outOfRange("i16", v);
     this.#ensure(2);
-    this.#view.setInt16(this.#pos, v, true);
-    this.#pos += 2;
+    const b = this.#buf;
+    const p = this.#pos;
+    b[p] = v;
+    b[p + 1] = v >>> 8;
+    this.#pos = p + 2;
   }
 
   /** Writes an unsigned 32-bit integer. */
   writeU32(v: number): void {
     if (v >>> 0 !== v) throw outOfRange("u32", v);
-    this.#ensure(4);
-    this.#view.setUint32(this.#pos, v, true);
-    this.#pos += 4;
+    this.#put32(v);
   }
 
   /** Writes a signed 32-bit integer. */
   writeI32(v: number): void {
     if ((v | 0) !== v) throw outOfRange("i32", v);
-    this.#ensure(4);
-    this.#view.setInt32(this.#pos, v, true);
-    this.#pos += 4;
+    this.#put32(v);
   }
 
   /** Writes an unsigned 64-bit integer given as a `bigint`. */
   writeU64(v: bigint): void {
     if (BigInt.asUintN(64, v) !== v) throw outOfRange("u64", v);
     this.#ensure(8);
-    this.#view.setBigUint64(this.#pos, v, true);
+    this.#view().setBigUint64(this.#pos, v, true);
     this.#pos += 8;
   }
 
@@ -155,7 +181,7 @@ export class UndraWriter {
   writeI64(v: bigint): void {
     if (BigInt.asIntN(64, v) !== v) throw outOfRange("i64", v);
     this.#ensure(8);
-    this.#view.setBigInt64(this.#pos, v, true);
+    this.#view().setBigInt64(this.#pos, v, true);
     this.#pos += 8;
   }
 
@@ -166,10 +192,9 @@ export class UndraWriter {
    */
   writeU64Number(n: number): void {
     if (!Number.isSafeInteger(n) || n < 0) throw outOfRange("u64 (number)", n);
-    this.#ensure(8);
-    this.#view.setUint32(this.#pos, n >>> 0, true);
-    this.#view.setUint32(this.#pos + 4, (n - (n >>> 0)) / TWO_POW_32, true);
-    this.#pos += 8;
+    const lo = n >>> 0;
+    this.#put32(lo);
+    this.#put32((n - lo) / TWO_POW_32);
   }
 
   /**
@@ -179,23 +204,21 @@ export class UndraWriter {
   writeI64Number(n: number): void {
     if (!Number.isSafeInteger(n)) throw outOfRange("i64 (number)", n);
     const lo = n >>> 0;
-    this.#ensure(8);
-    this.#view.setUint32(this.#pos, lo, true);
-    this.#view.setInt32(this.#pos + 4, (n - lo) / TWO_POW_32, true);
-    this.#pos += 8;
+    this.#put32(lo);
+    this.#put32((n - lo) / TWO_POW_32);
   }
 
   /** Writes an IEEE 754 binary32 (the value is rounded to `f32`). */
   writeF32(v: number): void {
     this.#ensure(4);
-    this.#view.setFloat32(this.#pos, v, true);
+    this.#view().setFloat32(this.#pos, v, true);
     this.#pos += 4;
   }
 
   /** Writes an IEEE 754 binary64. */
   writeF64(v: number): void {
     this.#ensure(8);
-    this.#view.setFloat64(this.#pos, v, true);
+    this.#view().setFloat64(this.#pos, v, true);
     this.#pos += 8;
   }
 
@@ -217,9 +240,7 @@ export class UndraWriter {
       }
       throw outOfRange("length", n);
     }
-    this.#ensure(4);
-    this.#view.setUint32(this.#pos, n, true);
-    this.#pos += 4;
+    this.#put32(n);
   }
 
   /**
@@ -248,16 +269,29 @@ export class UndraWriter {
       this.#ensure((n - first.read) * 3);
       end += ENCODER.encodeInto(s.slice(first.read), this.#buf.subarray(end)).written;
     }
-    this.#view.setUint32(lenPos, end - lenPos - 4, true);
+    this.#put32At(lenPos, end - lenPos - 4);
     this.#pos = end;
   }
 
   #writeShortStr(s: string, n: number): void {
-    this.#ensure(4 + n * 3);
-    const buf = this.#buf;
+    // ASCII first: one byte a unit, so room for the length and the text is all it needs.
+    this.#ensure(4 + n);
+    let buf = this.#buf;
     const start = this.#pos + 4;
     let p = start;
-    for (let i = 0; i < n; i++) {
+    let i = 0;
+    while (i < n) {
+      const c = s.charCodeAt(i);
+      if (c >= 0x80) break;
+      buf[p++] = c;
+      i++;
+    }
+    if (i < n) {
+      // Something else: room for the rest at three bytes a unit (what was written stays: a grow copies the buffer).
+      this.#ensure(p - this.#pos + (n - i) * 3);
+      buf = this.#buf;
+    }
+    for (; i < n; i++) {
       const c = s.charCodeAt(i);
       if (c < 0x80) {
         buf[p++] = c;
@@ -287,7 +321,7 @@ export class UndraWriter {
         buf[p++] = 0x80 | (c & 0x3f);
       }
     }
-    this.#view.setUint32(this.#pos, p - start, true);
+    this.#put32At(this.#pos, p - start);
     this.#pos = p;
   }
 
@@ -352,9 +386,10 @@ export class UndraWriter {
    * bytes, and `slice()` it if it will be retained for long.
    */
   finish(): Uint8Array {
-    const out = this.#buf.subarray(0, this.#pos);
+    // A small result is copied out exactly: `subarray` would give the 64-byte on-heap buffer a backing store of its own.
+    const out = this.#pos <= DEFAULT_CAPACITY ? this.#buf.slice(0, this.#pos) : this.#buf.subarray(0, this.#pos);
     this.#buf = EMPTY_BUFFER;
-    this.#view = EMPTY_VIEW;
+    this.#dv = null;
     this.#pos = 0;
     return out;
   }

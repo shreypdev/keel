@@ -9,6 +9,9 @@ import { type Uuid, decodeUuid } from "./types.js";
  */
 const DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
+/** Strings of at most this many bytes are decoded by a loop when they are ASCII; longer ones amortise `TextDecoder`'s fixed cost. */
+const SHORT_ASCII = 24;
+
 const TWO_POW_32 = 0x1_0000_0000;
 /** Largest `hi` word of a non-negative 64-bit value that is still a safe integer. */
 const MAX_SAFE_HI = 0x1f_ffff;
@@ -33,13 +36,18 @@ const MIN_UNSAFE_HI = -0x20_0000;
  */
 export class UndraReader {
   readonly #bytes: Uint8Array;
-  readonly #view: DataView;
+  /** Over `#bytes`, made on first use: only the 64-bit and floating-point readers need one (the integer readers load bytes). */
+  #dv: DataView | null = null;
   #pos = 0;
 
   /** @param bytes The message to read. The reader keeps a reference; it never copies or modifies the bytes. */
   constructor(bytes: Uint8Array) {
     this.#bytes = bytes;
-    this.#view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  }
+
+  /** A `DataView` over the input, for the readers that cannot load bytes one by one cheaply. */
+  #view(): DataView {
+    return (this.#dv ??= new DataView(this.#bytes.buffer, this.#bytes.byteOffset, this.#bytes.byteLength));
   }
 
   /** Offset of the next unread byte, relative to the start of the input. */
@@ -61,12 +69,18 @@ export class UndraReader {
     });
   }
 
+  /** The little-endian `u32` at `p` (in range: the caller checked). */
+  #u32(p: number): number {
+    const b = this.#bytes;
+    return ((b[p] as number) | ((b[p + 1] as number) << 8) | ((b[p + 2] as number) << 16) | ((b[p + 3] as number) << 24)) >>> 0;
+  }
+
   /** Reads an unsigned 8-bit integer. */
   readU8(): number {
     const p = this.#pos;
     if (p + 1 > this.#bytes.length) this.#eof(1);
     this.#pos = p + 1;
-    return this.#view.getUint8(p);
+    return this.#bytes[p] as number;
   }
 
   /** Reads a signed 8-bit integer. */
@@ -74,7 +88,7 @@ export class UndraReader {
     const p = this.#pos;
     if (p + 1 > this.#bytes.length) this.#eof(1);
     this.#pos = p + 1;
-    return this.#view.getInt8(p);
+    return ((this.#bytes[p] as number) << 24) >> 24;
   }
 
   /** Reads an unsigned 16-bit integer. */
@@ -82,7 +96,8 @@ export class UndraReader {
     const p = this.#pos;
     if (p + 2 > this.#bytes.length) this.#eof(2);
     this.#pos = p + 2;
-    return this.#view.getUint16(p, true);
+    const b = this.#bytes;
+    return (b[p] as number) | ((b[p + 1] as number) << 8);
   }
 
   /** Reads a signed 16-bit integer. */
@@ -90,7 +105,8 @@ export class UndraReader {
     const p = this.#pos;
     if (p + 2 > this.#bytes.length) this.#eof(2);
     this.#pos = p + 2;
-    return this.#view.getInt16(p, true);
+    const b = this.#bytes;
+    return (((b[p] as number) | ((b[p + 1] as number) << 8)) << 16) >> 16;
   }
 
   /** Reads an unsigned 32-bit integer. */
@@ -98,7 +114,7 @@ export class UndraReader {
     const p = this.#pos;
     if (p + 4 > this.#bytes.length) this.#eof(4);
     this.#pos = p + 4;
-    return this.#view.getUint32(p, true);
+    return this.#u32(p);
   }
 
   /** Reads a signed 32-bit integer. */
@@ -106,7 +122,7 @@ export class UndraReader {
     const p = this.#pos;
     if (p + 4 > this.#bytes.length) this.#eof(4);
     this.#pos = p + 4;
-    return this.#view.getInt32(p, true);
+    return this.#u32(p) | 0;
   }
 
   /** Reads an unsigned 64-bit integer as a `bigint`. */
@@ -114,7 +130,7 @@ export class UndraReader {
     const p = this.#pos;
     if (p + 8 > this.#bytes.length) this.#eof(8);
     this.#pos = p + 8;
-    return this.#view.getBigUint64(p, true);
+    return this.#view().getBigUint64(p, true);
   }
 
   /** Reads a signed 64-bit integer as a `bigint`. */
@@ -122,7 +138,7 @@ export class UndraReader {
     const p = this.#pos;
     if (p + 8 > this.#bytes.length) this.#eof(8);
     this.#pos = p + 8;
-    return this.#view.getBigInt64(p, true);
+    return this.#view().getBigInt64(p, true);
   }
 
   /**
@@ -133,10 +149,10 @@ export class UndraReader {
   readU64Number(): number {
     const p = this.#pos;
     if (p + 8 > this.#bytes.length) this.#eof(8);
-    const lo = this.#view.getUint32(p, true);
-    const hi = this.#view.getUint32(p + 4, true);
+    const lo = this.#u32(p);
+    const hi = this.#u32(p + 4);
     if (hi > MAX_SAFE_HI) {
-      throw new WireError({ code: "unsafe_integer", value: this.#view.getBigUint64(p, true), at: p });
+      throw new WireError({ code: "unsafe_integer", value: this.#view().getBigUint64(p, true), at: p });
     }
     this.#pos = p + 8;
     return hi * TWO_POW_32 + lo;
@@ -150,10 +166,10 @@ export class UndraReader {
   readI64Number(): number {
     const p = this.#pos;
     if (p + 8 > this.#bytes.length) this.#eof(8);
-    const lo = this.#view.getUint32(p, true);
-    const hi = this.#view.getInt32(p + 4, true);
+    const lo = this.#u32(p);
+    const hi = this.#u32(p + 4) | 0;
     if (hi > MAX_SAFE_HI || hi < MIN_UNSAFE_HI || (hi === MIN_UNSAFE_HI && lo === 0)) {
-      throw new WireError({ code: "unsafe_integer", value: this.#view.getBigInt64(p, true), at: p });
+      throw new WireError({ code: "unsafe_integer", value: this.#view().getBigInt64(p, true), at: p });
     }
     this.#pos = p + 8;
     return hi * TWO_POW_32 + lo;
@@ -164,7 +180,7 @@ export class UndraReader {
     const p = this.#pos;
     if (p + 4 > this.#bytes.length) this.#eof(4);
     this.#pos = p + 4;
-    return this.#view.getFloat32(p, true);
+    return this.#view().getFloat32(p, true);
   }
 
   /** Reads an IEEE 754 binary64. */
@@ -172,14 +188,14 @@ export class UndraReader {
     const p = this.#pos;
     if (p + 8 > this.#bytes.length) this.#eof(8);
     this.#pos = p + 8;
-    return this.#view.getFloat64(p, true);
+    return this.#view().getFloat64(p, true);
   }
 
   /** Reads a boolean. Any byte other than 0 or 1 is `invalid_tag`. */
   readBool(): boolean {
     const p = this.#pos;
     if (p + 1 > this.#bytes.length) this.#eof(1);
-    const v = this.#view.getUint8(p);
+    const v = this.#bytes[p] as number;
     if (v > 1) throw new WireError({ code: "invalid_tag", tag: v, at: p, ty: "bool" });
     this.#pos = p + 1;
     return v === 1;
@@ -207,7 +223,7 @@ export class UndraReader {
   readLen(minItemSize = 1): number {
     const at = this.#pos;
     if (at + 4 > this.#bytes.length) this.#eof(4);
-    const n = this.#view.getUint32(at, true);
+    const n = this.#u32(at);
     if (n * minItemSize > this.#bytes.length - at - 4) {
       throw new WireError({ code: "length_too_large", len: n, at });
     }
@@ -221,7 +237,22 @@ export class UndraReader {
     const n = this.readLen();
     const start = this.#pos;
     const end = start + n;
-    let s: string;
+    let s = "";
+    if (n <= SHORT_ASCII) {
+      // ASCII is the common case for the short strings of names and keys: build it here, not through `TextDecoder`.
+      const b = this.#bytes;
+      let i = start;
+      while (i < end) {
+        const c = b[i] as number;
+        if (c >= 0x80) break;
+        s += String.fromCharCode(c);
+        i++;
+      }
+      if (i === end) {
+        this.#pos = end;
+        return s;
+      }
+    }
     try {
       s = DECODER.decode(this.#bytes.subarray(start, end));
     } catch {
