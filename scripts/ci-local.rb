@@ -14,9 +14,10 @@
 #                          [--slow [--rounds 3] [--burners 16]] [--list] [-v] [--logs DIR]
 #
 # `--slow` is the slow-runner pass: only the steps in SLOW_STEPS (the timing-sensitive test suites) run, each under
-# `taskpolicy -b` (background QoS: efficiency cores, lowest priority) with CPU burners (`yes`) occupying the cores,
-# RUST_TEST_THREADS=4 and CARGO_BUILD_JOBS=4 (a hosted runner has four vCPUs), repeated `--rounds` times. A test that
-# fails only there depends on the speed of the machine: fix it at its cause.
+# `taskpolicy -b` (background QoS: efficiency cores, lowest priority) with CPU burners (`yes`) occupying the cores for the
+# length of the step, RUST_TEST_THREADS=4 and CARGO_BUILD_JOBS=4 (a hosted runner has four vCPUs), repeated `--rounds`
+# times. It reuses what a normal pass built and installed in the same clone (run that first), so what is throttled is the
+# tests and not the compiler. A test that fails only there depends on the speed of the machine: fix it at its cause.
 
 require "fileutils"
 require "json"
@@ -226,7 +227,7 @@ module CiLocal
           list << { wf: wf, id: id, key: "#{wf}/#{id}", job: job, wf_env: yaml["env"] || {} }
         end
       end
-      list.select { |j| selected?(j[:key], j[:id]) }
+      list.select { |j| selected?(j[:key], j[:id]) && (!@opts[:slow] || SLOW_STEPS.key?(j[:key])) }
     end
 
     def selected?(key, id)
@@ -287,7 +288,6 @@ module CiLocal
       end
       rounds = @opts[:slow] ? @opts[:rounds] : 1
       install_traps
-      start_burners if @opts[:slow] && !@opts[:list]
       (1..rounds).each do |round|
         puts "\n=== slow-runner pass, round #{round} of #{rounds} ===" if @opts[:slow]
         list.each { |j| run_job(j, round) }
@@ -496,6 +496,7 @@ module CiLocal
       @last_log = File.join(@logs, "#{j[:wf]}-#{j[:id]}-#{format("%02d", index)}-#{name.gsub(/[^A-Za-z0-9]+/, "-")[0, 40]}.log")
       cmd = ["bash", "--noprofile", "--norc", "-eo", "pipefail", script]
       cmd = ["taskpolicy", "-b", *cmd] if @opts[:slow] && system("command -v taskpolicy >/dev/null 2>&1")
+      start_burners if @opts[:slow]
       t0 = Time.now
       tail = []
       status = nil
@@ -519,6 +520,7 @@ module CiLocal
         end
       end
       @child = nil
+      stop_burners
       apply_exports(env_target: job_env, path: gh_path, env_file: gh_env, output: gh_out, step: step)
       ok = status.success?
       unless ok || @opts[:verbose]
@@ -556,7 +558,6 @@ module CiLocal
     def start_burners
       n = @opts[:burners]
       n.times { @burners << Process.spawn("yes", out: File::NULL, err: File::NULL) }
-      puts "ci-local: #{n} CPU burners (`yes`) started: #{@burners.join(" ")}; steps run under taskpolicy -b, RUST_TEST_THREADS=4"
     end
 
     def install_traps
