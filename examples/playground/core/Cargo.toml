@@ -16,7 +16,13 @@ migration-v2 = []
 
 [dependencies]
 # The opt-in ports (ADR-047, ADR-048): `live` uses WebSocket and Sse, `notes` uses Db.
-undra = { workspace = true, features = ["websocket", "sse", "db"] }
+undra = { workspace = true, features = ["websocket", "sse", "db", "uuid", "chrono", "rust_decimal", "bytes"] }
+# The crates whose types `ledger` spells (ADR-042): no clock and no randomness feature, so the core
+# still builds for wasm32-unknown-unknown, iOS and Android.
+uuid = { version = "1", default-features = false }
+chrono = { version = "0.4", default-features = false }
+rust_decimal = { version = "1", default-features = false }
+bytes = { version = "1", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
