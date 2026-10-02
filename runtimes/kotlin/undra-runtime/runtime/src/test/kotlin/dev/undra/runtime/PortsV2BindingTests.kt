@@ -579,6 +579,47 @@ class PortsV2BindingTests : Suite() {
 
         // ---- Db ---------------------------------------------------------------------------------------------------------
 
+        case("Db: the version is read again under the write lock, so an open that meets another connection's migration runs none") {
+            val db = ScriptedDb()
+            // Another connection to the file (a second open, another core) migrates it while this one waits for the lock.
+            db.onBegin = { name -> db.versions[name] = 2L }
+            val port = DbPortAdapter(db)
+            blocking {
+                val migrations = listOf(DbMigration(1u, "CREATE TABLE a (x)"), DbMigration(2u, "CREATE TABLE b (y)"))
+                assertEq(DbOpened(1u, 2u), port.open("app", migrations))
+                assertEq(emptyList<String>(), db.calls("script").map { it.sql }, "no migration ran twice")
+                assertEq(
+                    listOf("execute BEGIN IMMEDIATE", "query PRAGMA user_version", "execute ROLLBACK"),
+                    db.calls.map { "${it.kind} ${it.sql}" }.takeLast(3),
+                )
+            }
+        }
+
+        case("Db: the switch to WAL is retried while SQLite answers Busy (it does not wait by itself), until the busy timeout") {
+            val db = ScriptedDb()
+            db.walBusy.set(3)
+            val port = DbPortAdapter(db, busyTimeoutMillis = 1_000)
+            blocking {
+                assertEq(DbOpened(1u, 1u), port.open("app", listOf(DbMigration(1u, "CREATE TABLE a (x)"))))
+                assertEq(4, db.calls("query").count { it.sql == "PRAGMA journal_mode = WAL" }, "three Busy, then the switch")
+            }
+            val stuck = ScriptedDb()
+            stuck.walBusy.set(Int.MAX_VALUE)
+            val started = System.nanoTime()
+            blocking {
+                val busy = runCatching { DbPortAdapter(stuck, busyTimeoutMillis = 100).open("app", emptyList()) }.exceptionOrNull()
+                assertEq(DbError.Busy, busy)
+            }
+            assertTrue((System.nanoTime() - started) / 1_000_000 >= 90, "Busy at the busy timeout, not at once")
+        }
+
+        case("Db: a migration version above SQLite's user_version range (a signed 32-bit integer) is refused") {
+            val refused = runCatching { DbPortAdapter.validateMigrations(listOf(DbMigration(1u, "a"), DbMigration(3_000_000_000u, "b"))) }
+                .exceptionOrNull()
+            assertTrue(refused is DbError.Migration && refused.version == 3_000_000_000u, "refused: $refused")
+            DbPortAdapter.validateMigrations(listOf(DbMigration(2_147_483_647u, "a")))
+        }
+
         case("Db: open sets the pragmas, runs pending migrations in one BEGIN IMMEDIATE, and answers the version") {
             val db = ScriptedDb()
             val port = DbPortAdapter(db)
@@ -589,7 +630,8 @@ class PortsV2BindingTests : Suite() {
                 assertEq(
                     listOf(
                         "query PRAGMA foreign_keys = ON", "query PRAGMA busy_timeout = 5000", "query PRAGMA journal_mode = WAL",
-                        "query PRAGMA user_version", "execute BEGIN IMMEDIATE", "script CREATE TABLE a (x)",
+                        // the version is read again under the write lock: another connection may have migrated meanwhile
+                        "query PRAGMA user_version", "execute BEGIN IMMEDIATE", "query PRAGMA user_version", "script CREATE TABLE a (x)",
                         "script CREATE TABLE b (y); CREATE INDEX i ON b (y)", "execute PRAGMA user_version = 2", "execute COMMIT",
                     ),
                     sequence,

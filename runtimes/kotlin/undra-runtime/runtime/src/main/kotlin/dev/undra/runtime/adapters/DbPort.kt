@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -161,16 +162,26 @@ public class DbPortAdapter(
     private suspend fun prepare(connection: DbConnection, name: String, migrations: List<DbMigration>): UInt {
         connection.query("PRAGMA foreign_keys = ON", emptyList())
         connection.query("PRAGMA busy_timeout = $busyTimeoutMillis", emptyList())
-        if (wal && name != MEMORY) connection.query("PRAGMA journal_mode = WAL", emptyList())
-        val current = (connection.query("PRAGMA user_version", emptyList()).rows.firstOrNull()?.firstOrNull() as? DbValue.Integer)
-            ?.value?.coerceIn(0L, UInt.MAX_VALUE.toLong())?.toUInt() ?: 0u
+        if (wal && name != MEMORY) walOn(connection)
+        val current = userVersion(connection)
         val newest = migrations.lastOrNull()?.version ?: return current
-        if (current > newest) {
-            throw DbError.Migration(current, "the database is at version $current, newer than the newest migration ($newest)")
-        }
-        val pending = migrations.filter { it.version > current }
-        if (pending.isEmpty()) return current
+        refuseNewer(current, newest)
+        if (current >= newest) return current
         connection.execute("BEGIN IMMEDIATE", emptyList())
+        // Another connection to the file (a second open of it, another core) may have migrated it while this one waited
+        // for the write lock: what is pending is decided again under it, so two opens at once migrate the file once.
+        val pending = try {
+            val locked = userVersion(connection)
+            refuseNewer(locked, newest)
+            migrations.filter { it.version > locked }
+        } catch (e: Throwable) {
+            rollbackQuietly(connection)
+            throw e
+        }
+        if (pending.isEmpty()) {
+            rollbackQuietly(connection)
+            return newest
+        }
         for (migration in pending) {
             try {
                 connection.executeScript(migration.sql)
@@ -189,6 +200,33 @@ public class DbPortAdapter(
             throw DbError.Migration(pending.last().version, e.message ?: describe(e))
         }
         return pending.last().version
+    }
+
+    /**
+     * `PRAGMA journal_mode = WAL`. While another connection switches the same new file to WAL, SQLite answers BUSY at once
+     * instead of calling its busy handler: the switch is retried until the busy timeout, as any other lock is waited for.
+     */
+    private suspend fun walOn(connection: DbConnection) {
+        val deadline = System.nanoTime() + busyTimeoutMillis * 1_000_000L
+        while (true) {
+            try {
+                connection.query("PRAGMA journal_mode = WAL", emptyList())
+                return
+            } catch (e: DbError.Busy) {
+                if (System.nanoTime() >= deadline) throw e
+                delay(2)
+            }
+        }
+    }
+
+    private suspend fun userVersion(connection: DbConnection): UInt =
+        (connection.query("PRAGMA user_version", emptyList()).rows.firstOrNull()?.firstOrNull() as? DbValue.Integer)
+            ?.value?.coerceIn(0L, UInt.MAX_VALUE.toLong())?.toUInt() ?: 0u
+
+    private fun refuseNewer(current: UInt, newest: UInt) {
+        if (current > newest) {
+            throw DbError.Migration(current, "the database is at version $current, newer than the newest migration ($newest)")
+        }
     }
 
     /**
@@ -415,16 +453,26 @@ public class DbPortAdapter(
             }
         }
 
+        /** The largest migration version: `PRAGMA user_version` is a signed 32-bit integer and stores a larger one as 0. */
+        public val MAX_MIGRATION_VERSION: UInt = Int.MAX_VALUE.toUInt()
+
         /**
          * Checks that migration versions strictly increase from 1.
          *
-         * @throws DbError.Migration naming the first version out of order.
+         * @throws DbError.Migration naming the first version out of order or above [MAX_MIGRATION_VERSION].
          */
         public fun validateMigrations(migrations: List<DbMigration>) {
             var last = 0u
             for (migration in migrations) {
                 if (migration.version <= last) {
                     throw DbError.Migration(migration.version, "migration versions must strictly increase, starting at 1")
+                }
+                if (migration.version > MAX_MIGRATION_VERSION) {
+                    throw DbError.Migration(
+                        migration.version,
+                        "migration versions must be at most $MAX_MIGRATION_VERSION: SQLite keeps the version in a signed 32-bit " +
+                            "integer (PRAGMA user_version)",
+                    )
                 }
                 last = migration.version
             }

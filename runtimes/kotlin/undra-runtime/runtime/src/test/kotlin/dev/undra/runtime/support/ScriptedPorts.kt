@@ -2,6 +2,7 @@ package dev.undra.runtime.support
 
 import dev.undra.runtime.adapters.DbAdapter
 import dev.undra.runtime.adapters.DbConnection
+import dev.undra.runtime.adapters.DbError
 import dev.undra.runtime.adapters.DbExecuted
 import dev.undra.runtime.adapters.DbRows
 import dev.undra.runtime.adapters.DbValue
@@ -187,6 +188,13 @@ class ScriptedDb : DbAdapter {
     /** How many opens began (before the gate). */
     val opensStarted = AtomicInteger(0)
 
+    /** Called when a connection runs `BEGIN IMMEDIATE`, before it answers (another connection's work in between). */
+    @Volatile
+    var onBegin: ((name: String) -> Unit)? = null
+
+    /** How many `PRAGMA journal_mode = WAL` answer `Busy` before one succeeds (another connection switching the file). */
+    val walBusy = AtomicInteger(0)
+
     /** Statements (and scripts) whose SQL contains [fragment] fail with [error]. */
     fun failOn(fragment: String, error: Throwable) {
         failures.add(fragment to error)
@@ -217,6 +225,7 @@ class ScriptedDb : DbAdapter {
         }
 
         override suspend fun execute(sql: String, params: List<DbValue>): DbExecuted = step("execute", sql, params) {
+            if (sql == "BEGIN IMMEDIATE") onBegin?.invoke(name)
             Regex("PRAGMA user_version = (\\d+)").find(sql)?.let { versions[name] = it.groupValues[1].toLong() }
             DbExecuted(if (sql.startsWith("INSERT")) 1uL else 0uL, if (sql.startsWith("INSERT")) 42L else 0L)
         }
@@ -224,7 +233,10 @@ class ScriptedDb : DbAdapter {
         override suspend fun query(sql: String, params: List<DbValue>): DbRows = step("query", sql, params) {
             when (sql) {
                 "PRAGMA user_version" -> DbRows(listOf("user_version"), listOf(listOf(DbValue.Integer(versions[name] ?: 0L))))
-                "PRAGMA journal_mode = WAL" -> DbRows(listOf("journal_mode"), listOf(listOf(DbValue.Text("wal"))))
+                "PRAGMA journal_mode = WAL" -> {
+                    if (walBusy.getAndUpdate { if (it > 0) it - 1 else 0 } > 0) throw DbError.Busy
+                    DbRows(listOf("journal_mode"), listOf(listOf(DbValue.Text("wal"))))
+                }
                 else -> DbRows(listOf("n"), listOf(listOf(DbValue.Integer(params.size.toLong()))))
             }
         }

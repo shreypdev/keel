@@ -54,4 +54,18 @@ describe("two cores, one database name", () => {
     ok(await a.close(da.db));
     ok(await b.close(db.db));
   }, 20_000);
+
+  it("opening one new database from both at once migrates it once: both open at the newest version", async () => {
+    const a = dbCalls(dbPort(nodeSqliteDb({ directory })));
+    const b = dbCalls(dbPort(nodeSqliteDb({ directory })));
+    const migrations = [
+      { version: 1, sql: "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT)" },
+      { version: 2, sql: "CREATE INDEX notes_title ON notes (title)" },
+    ];
+    const [x, y] = await Promise.all([a.open("together", migrations), b.open("together", migrations)]);
+    expect(ok(x).version).toBe(2);
+    expect(ok(y).version, "the second open finds the first one's migrations done, under the write lock").toBe(2);
+    ok(await a.close(ok(x).db));
+    ok(await b.close(ok(y).db));
+  });
 });

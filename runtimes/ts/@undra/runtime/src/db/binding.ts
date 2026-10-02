@@ -65,9 +65,18 @@ export function validateMigrations(migrations: readonly DbMigration[]): void {
   let last = 0;
   for (const { version } of migrations) {
     if (version <= last) throw new DbError.Migration(version, "migration versions must strictly increase, starting at 1");
+    if (version > MAX_MIGRATION_VERSION) {
+      throw new DbError.Migration(
+        version,
+        `migration versions must be at most ${MAX_MIGRATION_VERSION}: SQLite keeps the version in a signed 32-bit integer (PRAGMA user_version)`,
+      );
+    }
     last = version;
   }
 }
+
+/** The largest migration version: `PRAGMA user_version` is a signed 32-bit integer and stores a larger one as 0. */
+const MAX_MIGRATION_VERSION = 2_147_483_647;
 
 /** What the binding keeps per open database. */
 interface Database {
@@ -234,6 +243,23 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
     return enqueue(db, () => quietly(() => db.conn.close()));
   };
 
+  /**
+   * `PRAGMA journal_mode = WAL`. While another connection switches the same new file to WAL, SQLite answers BUSY at once
+   * instead of calling its busy handler: the switch is retried until the busy timeout, as any other lock is waited for.
+   */
+  const walOn = async (conn: DbConnection): Promise<void> => {
+    const deadline = Date.now() + busyTimeoutMs;
+    for (;;) {
+      try {
+        await conn.query("PRAGMA journal_mode = WAL", []);
+        return;
+      } catch (error) {
+        if (!(error instanceof DbError.Busy) || Date.now() >= deadline) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+    }
+  };
+
   const open = async (name: string, wanted: readonly DbMigration[]): Promise<{ db: number; version: number }> => {
     validateDbName(name);
     validateMigrations(wanted);
@@ -242,31 +268,47 @@ export function dbPort(adapter: DbAdapter, options: DbPortOptions = {}): PortImp
     try {
       await conn.query("PRAGMA foreign_keys = ON", []);
       await conn.query("PRAGMA busy_timeout = 5000", []);
-      if (wal) await conn.query("PRAGMA journal_mode = WAL", []);
-      const current = firstInteger(await conn.query("PRAGMA user_version", []));
+      if (wal) await walOn(conn);
       const newest = wanted.at(-1)?.version ?? 0;
-      if (wanted.length > 0 && current > newest) {
-        throw new DbError.Migration(current, `the database is at version ${current}, newer than the newest migration (${newest})`);
-      }
-      const pending = wanted.filter((m) => m.version > current);
-      let version = current;
-      const last = pending.at(-1);
-      if (last !== undefined) {
+      const refuseNewer = (current: number): void => {
+        if (wanted.length > 0 && current > newest) {
+          throw new DbError.Migration(current, `the database is at version ${current}, newer than the newest migration (${newest})`);
+        }
+      };
+      let version = firstInteger(await conn.query("PRAGMA user_version", []));
+      refuseNewer(version);
+      if (version < newest) {
         await conn.execute("BEGIN IMMEDIATE", []);
-        let at = last.version;
+        // Another connection to the file (a second open of it, another core) may have migrated it while this one waited
+        // for the write lock: what is pending is decided again under it, so two opens at once migrate the file once.
+        let pending: DbMigration[];
         try {
-          for (const migration of pending) {
-            at = migration.version;
-            await conn.executeScript(migration.sql);
-          }
-          at = last.version;
-          await conn.execute(`PRAGMA user_version = ${last.version}`, []);
-          await conn.execute("COMMIT", []);
+          version = firstInteger(await conn.query("PRAGMA user_version", []));
+          refuseNewer(version);
+          pending = wanted.filter((m) => m.version > version);
         } catch (error) {
           await quietly(() => conn.execute("ROLLBACK", []));
-          throw new DbError.Migration(at, errorMessage(error));
+          throw error;
         }
-        version = last.version;
+        const last = pending.at(-1);
+        if (last === undefined) {
+          await quietly(() => conn.execute("ROLLBACK", []));
+        } else {
+          let at = last.version;
+          try {
+            for (const migration of pending) {
+              at = migration.version;
+              await conn.executeScript(migration.sql);
+            }
+            at = last.version;
+            await conn.execute(`PRAGMA user_version = ${last.version}`, []);
+            await conn.execute("COMMIT", []);
+          } catch (error) {
+            await quietly(() => conn.execute("ROLLBACK", []));
+            throw new DbError.Migration(at, errorMessage(error));
+          }
+          version = last.version;
+        }
       }
       if (epoch !== asked) throw new DbError.Unavailable("the core went away while the database opened");
       const id = next++;

@@ -110,6 +110,48 @@ describe("dbPort: open", () => {
     expect(err(await api.open("a", [M(2, "x"), M(2, "y")]))).toEqual(new DbError.Migration(2, "migration versions must strictly increase, starting at 1"));
   });
 
+  it("reads the version again under the write lock: an open that meets another connection's migration does not run it twice", async () => {
+    const db = new ScriptedDb();
+    const api = dbCalls(dbPort(db));
+    const release = db.gate("BEGIN IMMEDIATE");
+    const opening = api.open("app", [M(1, "CREATE a"), M(2, "CREATE b")]);
+    await settle();
+    // Another connection to the file (a second open of it, another core) migrated it while this one waited for the lock.
+    db.versions.set("app", 2);
+    release();
+    expect(ok(await opening)).toEqual({ db: 1, version: 2 });
+    expect(db.log.filter((l) => l.startsWith("script")), "no migration ran twice").toEqual([]);
+    expect(db.log.slice(-3)).toEqual(["execute BEGIN IMMEDIATE", "query PRAGMA user_version", "execute ROLLBACK"]);
+  });
+
+  it("retries the switch to WAL while SQLite answers BUSY (it does not wait by itself), until the busy timeout", async () => {
+    const db = new ScriptedDb();
+    let busy = 3;
+    db.fail("journal_mode", new DbError.Busy());
+    const original = db.failures[0];
+    const api = dbCalls(dbPort(db, { busyTimeoutMs: 1_000 }));
+    const opening = api.open("app", [M(1, "CREATE a")]);
+    const healer = setInterval(() => {
+      if (--busy === 0 && original !== undefined) db.failures.splice(db.failures.indexOf(original), 1);
+    }, 5);
+    expect(ok(await opening)).toEqual({ db: 1, version: 1 });
+    clearInterval(healer);
+    expect(db.log.filter((l) => l.includes("journal_mode")).length, "retried").toBeGreaterThan(1);
+    const stuck = new ScriptedDb();
+    stuck.fail("journal_mode", new DbError.Busy());
+    const started = Date.now();
+    expect(err(await dbCalls(dbPort(stuck, { busyTimeoutMs: 100 })).open("app"))).toBeInstanceOf(DbError.Busy);
+    expect(Date.now() - started, "Busy at the busy timeout, not at once").toBeGreaterThanOrEqual(90);
+  });
+
+  it("refuses a migration version above SQLite's user_version range (a signed 32-bit integer)", async () => {
+    const api = dbCalls(dbPort(new ScriptedDb()));
+    const error = err(await api.open("a", [M(1, "x"), M(3_000_000_000, "y")]));
+    expect(error).toBeInstanceOf(DbError.Migration);
+    expect((error as DbError.Migration).version).toBe(3_000_000_000);
+    ok(await api.open("b", [M(2_147_483_647, "x")]));
+  });
+
   it("sets the PRAGMAs, runs the pending migrations in one transaction, and answers the version", async () => {
     const db = new ScriptedDb();
     const api = dbCalls(dbPort(db));
@@ -121,6 +163,8 @@ describe("dbPort: open", () => {
       "query PRAGMA journal_mode = WAL",
       "query PRAGMA user_version",
       "execute BEGIN IMMEDIATE",
+      // Read again under the write lock: another connection may have migrated meanwhile.
+      "query PRAGMA user_version",
       "script CREATE a",
       "script CREATE b",
       "execute PRAGMA user_version = 2",
