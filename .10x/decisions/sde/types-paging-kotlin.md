@@ -142,3 +142,43 @@ Seams found (nothing of the generated ledger Kotlin is wrong; none fixed here):
 * Observation, not a bug of the scenario: the generated `value class Price` implements `Comparable<Price>` through `BigDecimal.compareTo`
   (`examples/playground/generated/kotlin/.../Types.kt:258`), which ignores the scale while its `equals` (BigDecimal's) does not, so
   `Price("1.10") == Price("1.1")` is false but `compareTo` is 0 (the same wart `BigDecimal` has).
+
+## S32, S33 and the playground Android screens
+
+`wt/types-paging` merged again (clean). `contract-tests/kotlin/src/dev/undra/contract/S32Paging.kt` and `S33Polling.kt` are registered after
+S31 (before S17). Both pass on Kotlin 2.4.20 and 2.0.21 against the real core: 29 of 29 scenarios (S01-S20, S23-S28, S31-S33).
+
+* **Page calls are counted at the boundary the runner loads**: the generated entry hides its `NativeApi`, so the runner reads the core's
+  own `crossings.calls` (every call that reaches it, page calls included: `serve_sync` counts them) and subtracts the calls the step
+  made itself (`PageCalls.own`). A step that only reads rows makes page calls and nothing else, so the difference is exact: 4 for rows 0 and
+  9,999, 3 for the first read of row 120 (a fresh `Library`), +3 for the window after `add_rows(1)`.
+* **Holding the frame**: the main thread is blocked by a posted task while the scenario's thread makes three `add_rows(1)` calls; the
+  mirror queues their change-sets, and one drain on release delivers one op-2 entry (the last length and version, checked against a raw
+  page reply). The generated `Library()` only returns after its first drain, so "an `add_rows` before the first drain" cannot be made
+  through its constructor: the runner re-observes instead (observe off, then on from a second thread while the frame is held; `observe`
+  waits for the main thread; `add_rows` commits behind the re-sent values) and the held drain applies `[Full, Inv]` together, after which
+  `count` is right and `books[0]` readable. The `fetchingNextPage` true is seen by making the call on the main thread (a synchronous call
+  drains before it returns).
+* **A contract wording note** (not a bug): S32 step 2 says reading "any row of those pages afterwards makes none". `UndraLazyList` (and
+  the Swift engine) request the neighbours of every row read, so reading a row of page 1 requests page 0 if it is not cached; the Kotlin
+  column asserts none for rows of the middle page (rows 100..149 after row 120).
+* New public `UndraLazyList.version` (the contract says the list's `version` equals the page reply's); `currentVersion()` is gone.
+* S33 uses the harness `LifecycleEvents` and `ConnectivityEvents` with the real Timer: first two fetches at least 0.9 s apart (measured
+  by polling `ticker_fetches()` every 3 ms), pause and resume on Background / Active and offline / online, the error and its clearing, a
+  3 s override (the gap after the next fetch is at least 2.9 s) and its clearing (about a second again), and no fetch for 2.5 s after the
+  handle is closed. It takes about 21 s.
+
+**The playground app** (`examples/playground/android`): `LibraryScreen` (`items(library.books) { index, book -> .. }` with placeholder rows
+while a page loads; a second `LazyColumn` over `evens`; Add 100, Rename, Remove, Reset, Jump to the end), `FeedScreen` (`FeedQueryHandle`,
+`LoadMoreWhenNearEnd`, a footer, Refresh), `TickerScreen` (`TickerQueryHandle` made when the screen is shown and closed when it leaves, a
+switch for `setPollInterval(5 s)` while visible, a switch that makes fetches fail), three new `Tab`s, `implementation("dev.undra:undra-compose:...")`
+in `app/build.gradle.kts` (the composite build resolves it; `:undra-compose` is included under the same SDK condition). Nine tabs do not fit a
+`NavigationBar` (equal shares, a clipped indicator), so the bottom bar is now a `ScrollableTabRow` (tags `tab-<id>` kept). One Compose
+pitfall found on the device: a footer `item(key = "footer")` that is the only item is the one `LazyColumn` keeps in place by its key when the
+rows arrive above it, so the first page scrolled to its end and the near-end helper fetched a second page at once; the footer is now emitted
+only once there are rows. `smoke.sh` launches the three tabs and has a step for each (test tags `library-*`, `feed-*`, `ticker-*`). Run on
+emulator-5554 (arm64, API 35) with the release core (`undra build -C examples/playground --platform android --release`): `SMOKE PASSED`, 0
+crash markers; screenshots in `examples/playground/.proof/android-adapters-{library,feed,ticker}*.png`.
+
+Seam still open from before: `testkit/fixtures/*.json` carry an old schema hash (`TESTKIT FAIL T4`, which makes `contract-tests/kotlin/run.sh`
+exit 1 although every scenario passes), and the app's debug previews use the same fixture.

@@ -81,6 +81,8 @@ dependencies {
     implementation("dev.undra:runtime:0.1.0-SNAPSHOT")
     // The Android half of the runtime: the Choreographer frame pacer (ADR-031).
     implementation("dev.undra:android-adapters:0.1.0-SNAPSHOT")
+    // The optional Compose half (ADR-043): `items(list)` for a lazily paged list and `LoadMoreWhenNearEnd` for an infinite query.
+    implementation("dev.undra:undra-compose:0.1.0-SNAPSHOT")
     implementation(project(":core-bindings"))
 
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
