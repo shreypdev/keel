@@ -12,6 +12,14 @@ const DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 /** Strings of at most this many bytes are decoded by a loop when they are ASCII; longer ones amortise `TextDecoder`'s fixed cost. */
 const SHORT_ASCII = 24;
 
+/**
+ * Eight bytes shared by every reader: a 64-bit or floating-point value is copied here to be read by a `DataView`, which
+ * costs a copy of a few bytes where a `DataView` over each input would cost an object (and, for a small input V8 keeps on
+ * its heap, an `ArrayBuffer`) per reader. Nothing yields between the copy and the read.
+ */
+const SCRATCH = new DataView(new ArrayBuffer(8));
+const SCRATCH_BYTES = new Uint8Array(SCRATCH.buffer);
+
 const TWO_POW_32 = 0x1_0000_0000;
 /** Largest `hi` word of a non-negative 64-bit value that is still a safe integer. */
 const MAX_SAFE_HI = 0x1f_ffff;
@@ -36,8 +44,6 @@ const MIN_UNSAFE_HI = -0x20_0000;
  */
 export class UndraReader {
   private readonly _bytes: Uint8Array;
-  /** Over `_bytes`, made on first use: only the 64-bit and floating-point readers need one (the integer readers load bytes). */
-  private _dv: DataView | null = null;
   private _pos = 0;
 
   /** @param bytes The message to read. The reader keeps a reference; it never copies or modifies the bytes. */
@@ -45,9 +51,11 @@ export class UndraReader {
     this._bytes = bytes;
   }
 
-  /** A `DataView` over the input, for the readers that cannot load bytes one by one cheaply. */
-  private _view(): DataView {
-    return (this._dv ??= new DataView(this._bytes.buffer, this._bytes.byteOffset, this._bytes.byteLength));
+  /** Copies the `n` bytes at `p` into the shared scratch and returns its `DataView`: for the 64-bit and floating-point reads. */
+  private _scratch(p: number, n: number): DataView {
+    const b = this._bytes;
+    for (let i = 0; i < n; i++) SCRATCH_BYTES[i] = b[p + i] as number;
+    return SCRATCH;
   }
 
   /** Offset of the next unread byte, relative to the start of the input. */
@@ -130,7 +138,7 @@ export class UndraReader {
     const p = this._pos;
     if (p + 8 > this._bytes.length) this._eof(8);
     this._pos = p + 8;
-    return this._view().getBigUint64(p, true);
+    return this._scratch(p, 8).getBigUint64(0, true);
   }
 
   /** Reads a signed 64-bit integer as a `bigint`. */
@@ -138,7 +146,7 @@ export class UndraReader {
     const p = this._pos;
     if (p + 8 > this._bytes.length) this._eof(8);
     this._pos = p + 8;
-    return this._view().getBigInt64(p, true);
+    return this._scratch(p, 8).getBigInt64(0, true);
   }
 
   /**
@@ -152,7 +160,7 @@ export class UndraReader {
     const lo = this._u32(p);
     const hi = this._u32(p + 4);
     if (hi > MAX_SAFE_HI) {
-      throw new WireError({ code: "unsafe_integer", value: this._view().getBigUint64(p, true), at: p });
+      throw new WireError({ code: "unsafe_integer", value: this._scratch(p, 8).getBigUint64(0, true), at: p });
     }
     this._pos = p + 8;
     return hi * TWO_POW_32 + lo;
@@ -169,7 +177,7 @@ export class UndraReader {
     const lo = this._u32(p);
     const hi = this._u32(p + 4) | 0;
     if (hi > MAX_SAFE_HI || hi < MIN_UNSAFE_HI || (hi === MIN_UNSAFE_HI && lo === 0)) {
-      throw new WireError({ code: "unsafe_integer", value: this._view().getBigInt64(p, true), at: p });
+      throw new WireError({ code: "unsafe_integer", value: this._scratch(p, 8).getBigInt64(0, true), at: p });
     }
     this._pos = p + 8;
     return hi * TWO_POW_32 + lo;
@@ -180,7 +188,7 @@ export class UndraReader {
     const p = this._pos;
     if (p + 4 > this._bytes.length) this._eof(4);
     this._pos = p + 4;
-    return this._view().getFloat32(p, true);
+    return this._scratch(p, 4).getFloat32(0, true);
   }
 
   /** Reads an IEEE 754 binary64. */
@@ -188,7 +196,7 @@ export class UndraReader {
     const p = this._pos;
     if (p + 8 > this._bytes.length) this._eof(8);
     this._pos = p + 8;
-    return this._view().getFloat64(p, true);
+    return this._scratch(p, 8).getFloat64(0, true);
   }
 
   /** Reads a boolean. Any byte other than 0 or 1 is `invalid_tag`. */

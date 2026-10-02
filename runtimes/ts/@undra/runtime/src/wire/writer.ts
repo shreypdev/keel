@@ -19,6 +19,14 @@ const SHORT_STRING_UNITS = 48;
 
 const EMPTY_BUFFER = new Uint8Array(0);
 
+/**
+ * Eight bytes shared by every writer: a 64-bit or floating-point value is encoded here by a `DataView` and copied into the
+ * buffer, instead of a `DataView` over every buffer (an object, and for a small buffer V8 keeps on its heap, an
+ * `ArrayBuffer`, per writer). Nothing yields between the write and the copy.
+ */
+const SCRATCH = new DataView(new ArrayBuffer(8));
+const SCRATCH_BYTES = new Uint8Array(SCRATCH.buffer);
+
 function outOfRange(ty: string, value: unknown): RangeError {
   return new RangeError(`${ty} out of range: ${String(value)}`);
 }
@@ -42,8 +50,6 @@ function outOfRange(ty: string, value: unknown): RangeError {
  */
 export class UndraWriter {
   private _buf: Uint8Array;
-  /** Over `_buf`, made on first use: only the 64-bit and floating-point writers need one (the integer writers store bytes). */
-  private _dv: DataView | null = null;
   private _pos = 0;
 
   /**
@@ -57,9 +63,13 @@ export class UndraWriter {
     this._buf = initialCapacity === 0 ? EMPTY_BUFFER : new Uint8Array(initialCapacity);
   }
 
-  /** A `DataView` over the buffer, for the writers that cannot store bytes one by one cheaply. */
-  private _view(): DataView {
-    return (this._dv ??= new DataView(this._buf.buffer, this._buf.byteOffset, this._buf.byteLength));
+  /** Appends the `n` bytes of the shared scratch that a `DataView` write just filled. */
+  private _fromScratch(n: number): void {
+    this._ensure(n);
+    const b = this._buf;
+    const p = this._pos;
+    for (let i = 0; i < n; i++) b[p + i] = SCRATCH_BYTES[i] as number;
+    this._pos = p + n;
   }
 
   /** Number of bytes written so far. */
@@ -97,7 +107,6 @@ export class UndraWriter {
     const next = new Uint8Array(cap);
     next.set(this._buf);
     this._buf = next;
-    this._dv = null;
   }
 
   /** Stores `v` (any 32-bit integer) as four little-endian bytes. */
@@ -172,17 +181,15 @@ export class UndraWriter {
   /** Writes an unsigned 64-bit integer given as a `bigint`. */
   writeU64(v: bigint): void {
     if (BigInt.asUintN(64, v) !== v) throw outOfRange("u64", v);
-    this._ensure(8);
-    this._view().setBigUint64(this._pos, v, true);
-    this._pos += 8;
+    SCRATCH.setBigUint64(0, v, true);
+    this._fromScratch(8);
   }
 
   /** Writes a signed 64-bit integer given as a `bigint`. */
   writeI64(v: bigint): void {
     if (BigInt.asIntN(64, v) !== v) throw outOfRange("i64", v);
-    this._ensure(8);
-    this._view().setBigInt64(this._pos, v, true);
-    this._pos += 8;
+    SCRATCH.setBigInt64(0, v, true);
+    this._fromScratch(8);
   }
 
   /**
@@ -210,16 +217,14 @@ export class UndraWriter {
 
   /** Writes an IEEE 754 binary32 (the value is rounded to `f32`). */
   writeF32(v: number): void {
-    this._ensure(4);
-    this._view().setFloat32(this._pos, v, true);
-    this._pos += 4;
+    SCRATCH.setFloat32(0, v, true);
+    this._fromScratch(4);
   }
 
   /** Writes an IEEE 754 binary64. */
   writeF64(v: number): void {
-    this._ensure(8);
-    this._view().setFloat64(this._pos, v, true);
-    this._pos += 8;
+    SCRATCH.setFloat64(0, v, true);
+    this._fromScratch(8);
   }
 
   /** Writes a boolean as one byte, `0` or `1`. */
@@ -389,7 +394,6 @@ export class UndraWriter {
     // A small result is copied out exactly: `subarray` would give the 64-byte on-heap buffer a backing store of its own.
     const out = this._pos <= DEFAULT_CAPACITY ? this._buf.slice(0, this._pos) : this._buf.subarray(0, this._pos);
     this._buf = EMPTY_BUFFER;
-    this._dv = null;
     this._pos = 0;
     return out;
   }
