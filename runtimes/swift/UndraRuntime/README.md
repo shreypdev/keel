@@ -18,7 +18,8 @@ Sources/
                            include/module.modulemap, undra.c (the one source file SwiftPM needs)
   UndraRuntime/
     Wire/                  WireError, UndraWriter, UndraReader, UndraCodec, UndraTypes, Envelope,
-                           Payloads (Wire.Call, Wire.Reply, ...), KeyedPatch, FNV, Foundation+Undra
+                           Payloads (Wire.Call, Wire.Reply, ...), LazyPayloads (UndraLazyValue,
+                           UndraLazyInvalidated, UndraLazyPageHeader), KeyedPatch, FNV, Foundation+Undra
     Core/
       UndraCore.swift       load/shared, callSync, call, stream, construct, observe, release, event,
                            registerPort, snapshot/restore, stats, shutdown; the transport callbacks
@@ -48,6 +49,8 @@ Sources/
       UndraStats.swift      stats() and its small JSON walker
       Protocols.swift      UndraRecord, UndraEnum, UndraError, UndraPort
       Observe.swift        Observe.allSignals
+    Lazy/                  UndraLazyList (@Observable) and UndraLazyListObject (ObservableObject) over one
+                           paging engine, UndraLazyListError (ADR-043)
     Ports/                 the opt-in ports' adapter interfaces and bindings: WebSocketPort (WebSocketAdapter,
                            WebSocketConnection, WebSocketPortAdapter), SsePort (SseAdapter, SseStream,
                            SsePortAdapter, SseParser), DbPort (DbAdapter, DbConnection, DbPortAdapter),
@@ -90,6 +93,22 @@ A remote core **reconnects by itself** when its connection drops (ADR-051, `docs
 ### iOS 15 and 16
 
 The package's floor is iOS 15 / macOS 12 (ADR-045, `docs/IOS_15_16.md`). Three things in the runtime are newer than that and are written around: `Swift.Duration` and the clock types are iOS 16 / macOS 13 (a drain is timed with `DispatchTime`, `DrainStats.durationNanoseconds` is the field and `duration` an iOS 16 accessor, `UndraDuration` holds exact nanoseconds), and Observation is iOS 17 / macOS 14, so every runtime type that SwiftUI observes comes in two forms: `UndraConnection` (`@Observable`, `@available(iOS 17, macOS 14, *)`, `core.connection`) and its twin `UndraConnectionObject` (`ObservableObject`, `core.connectionObject`). Generated stores follow the app: `undra bindgen` writes `@Observable` classes for a deployment target of 17.0 or later and `ObservableObject`s with `@Published` properties below it (`UndraStore`, the mirror and the apply code underneath are the same). `scripts/ios-floor.sh runtime` builds this package for the iOS 15.0 simulator.
+
+### Lazy lists (`Lazy<T>`)
+
+A `Lazy<T>` store signal is a list the core owns and the host pages through (ADR-043): the generated store holds an `UndraLazyList<Item>` (iOS 17 / macOS 14, `@Observable`) or, in the `ObservableObject` mode, an `UndraLazyListObject<Item>` (every floor) and hands it the signal's change-set entries (`try books.applyFull(&reader)`, `try books.applyInvalidated(&reader)`). Both are `RandomAccessCollection`s of `Item?` and share one engine, so they cannot drift.
+
+```swift
+List(0..<library.books.count, id: \.self) { index in
+    if let book = library.books[index] { BookRow(book) } else { BookRow.placeholder }
+}
+```
+
+* **Reading never blocks and never crosses the boundary.** `list[index]` returns the cached row or `nil`, and *queues* a request for its page and one page on each side; the requests of a main-actor turn are sent together after it (one `callSync` page call per page in process, one `call` per page over a remote core), pages already cached or in flight are not asked for again, and indexes outside `0..<count` return `nil` and ask for nothing. `prefetch(_:)` asks for the pages of a range; `pageSize` (50) and `maxCachedPages` (24) are settable.
+* **Observation.** `count` and `list[index]` register dependencies: `count` changes with the length, and a read of a row also depends on pages arriving or being replaced, so a view that reads them updates. The twin sends `objectWillChange` once per change.
+* **The core changes the list.** The new length and version are taken at once; the rows already cached stay visible, stale, while the pages read since the previous change (the window, at most `maxCachedPages`, the least recently read pages go first) are asked for again: O(window), never O(list). A reply older than the list's version is dropped and asked for again, a newer one raises the length and version, a new page-server handle (a restored snapshot) drops the cache.
+* **Hostile replies** (more items than the limit, truncated items, a total the page does not explain, trailing bytes) are `UndraLazyListError`s reported through `LoadOptions.onError`; the row stays `nil` and the next read asks again. Nothing traps.
+* The list holds only the page server's handle number and the core; it releases nothing, the core's store owns the page server. `LazyListTests`, `LazyListHostileTests` and `LazyListObservationTests` run it against a fake page server.
 
 ### Threading, in one paragraph
 
