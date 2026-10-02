@@ -6,6 +6,7 @@ import { DbErrorCodec, DbMigrationCodec, DbOpenedCodec, DbRowsCodec, DbValueCode
 import { OptInPortIds } from "../src/adapters/opt-in-ids.js";
 import type { WsMessage } from "../src/adapters/types.js";
 import { UndraCallError, UndraUnhandledError } from "../src/call-error.js";
+import { type CallbackInterface, callbacks, lend } from "../src/callbacks.js";
 import { dbPort, nodeSqliteDb } from "../src/db.js";
 import { type WebSocketAdapter, webSocketPort } from "../src/realtime.js";
 import { UndraCore } from "../src/core.js";
@@ -33,6 +34,7 @@ import {
   ChangeOp,
   Kind,
   PortStatus,
+  UndraWriter,
   codecs,
   decodeSnapshot,
   decodeValue,
@@ -793,5 +795,75 @@ describe("the wasm transports restart over the stub core", () => {
     await expect(core.call(FREE, STUB.ECHO, u32(5))).resolves.toEqual(u32(5));
     core.close();
     worker.close();
+  });
+});
+
+describe("host callbacks across a restart (ADR-041)", () => {
+  const PORT = 0x7000_0101;
+  const NOTE = 0x21;
+  const ASK = 0x22;
+  interface Listener {
+    note(line: string): void;
+    ask(question: string, signal: AbortSignal): Promise<boolean>;
+  }
+  const spec: CallbackInterface<Listener> = {
+    name: "Listener",
+    portId: PORT,
+    releaseInstance: 0x2e,
+    cancelCall: 0x2f,
+    methods: {
+      [NOTE]: {
+        name: "note",
+        notify: (r) => {
+          const line = r.readStr();
+          return (impl) => impl.note(line);
+        },
+      },
+      [ASK]: {
+        name: "ask",
+        call: (r) => {
+          const question = r.readStr();
+          return async (impl, signal) => encodeValue(codecs.bool, await impl.ask(question, signal));
+        },
+      },
+    },
+  };
+  const into = (instance: bigint, text: string): Uint8Array => {
+    const w = new UndraWriter();
+    w.writeU64(instance);
+    w.writeStr(text);
+    return w.finish();
+  };
+
+  it("a restart drops the callbacks the instance that trapped held: what runs is aborted, what it queued is not delivered", async () => {
+    const t = await recovering();
+    const heard: string[] = [];
+    let aborted = false;
+    const listener: Listener = {
+      note: (line) => heard.push(line),
+      ask: (_question, signal) =>
+        new Promise((_, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(signal.reason);
+          });
+        }),
+    };
+    const instance = lend(t.core, listener, spec);
+    void t.fake.callPort(PORT, ASK, into(instance, "go on?"));
+    await macrotask();
+    expect(callbacks(t.core).liveCount).toBe(1);
+    t.fake.burst(() => {
+      void t.fake.notifyPort(PORT, NOTE, into(instance, "queued by the instance that trapped"));
+      t.fake.trap();
+    });
+    await until("the restart", () => t.restarts.length === 1);
+    await macrotask();
+    expect(callbacks(t.core).liveCount, "the restored instance holds none of them").toBe(0);
+    expect(aborted, "the running implementation's signal aborted").toBe(true);
+    expect(heard, "nothing the trapped instance queued reaches the app").toEqual([]);
+    // Lent again, the listener is a new instance of the new core.
+    expect(lend(t.core, listener, spec)).not.toBe(instance);
+    expect(callbacks(t.core).liveCount).toBe(1);
   });
 });

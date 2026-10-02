@@ -201,7 +201,7 @@ undra build --platform ios,android,web --release
 
 `undra init` also writes `.github/workflows/undra.yml`: a job for the core (format, clippy, tests, `undra bindgen --check`) and one per app, each installing `undra` at the version pinned once at the top of the file. When a newer Undra is out, `undra upgrade` moves every pin of the project (the core's dependency, the runtimes, the workflow) in step, regenerates the bindings and prints the migration notes of every release it crosses; `undra upgrade --dry-run` shows the lines first.
 
-Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 116.7 KB gzipped (budget 120 KB, gated in CI) and an Android `.so` is 831 KB per ABI.
+Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 119.1 KB gzipped (budget 120 KB, gated in CI) and an Android `.so` is 831 KB per ABI.
 
 ## Prefer to explore first?
 
@@ -3228,6 +3228,8 @@ export function add(a: number, b: number): Promise<number>;
 
 Release an object with `close()` (idempotent) or with `using` where `Symbol.dispose` exists (Node 20+ and current browsers); a `FinalizationRegistry` is the backstop.
 
+Objects also cross as parameters and results ([Objects and identity](https://shreypdev.github.io/undra/docs/objects.html)), and host callbacks as parameters ([Host callbacks](https://shreypdev.github.io/undra/docs/callbacks.html)): there is one wrapper per object, so `===` compares the core's objects, and an object of another core is refused with `UndraCallError.Refused` before anything is sent. The generated classes do this through **free functions of `@undra/runtime` that take the core first**, not methods of `UndraCore`, so a page that uses neither feature does not ship them (the size budget of the up-front chunk): `adopt(core, handle, Type)`, `adoptObject`, `adoptOptional`, `adoptList` and `requireOwn(core, object)` for objects; `lend(core, impl, callback)`, `lending(core, send, signal)` and `giveBack(core, instance)` for callbacks. App code does not call them. `callbacks(core)` is the registry of the callbacks the core holds (`liveCount`, `count(impl)`), which a test reads to check that nothing is left behind.
+
 ## Stores and signals
 
 A store extends `UndraStore`. Every signal is a read-only `Signal<T>`: `get()` returns the current value, `peek()` reads without subscribing, and `subscribe(fn)` calls you on change and returns an unsubscribe function. Computed signals are written by the core.
@@ -3744,6 +3746,7 @@ Landed in the day after v1.0, each behind an ADR and an adversarial review.
 - Persisted-state migrations and typed storage (ADR-037, ADR-049)A changed schema still restores what the last version stored; storage ports fail with typed errors on every platform; a crashed web core restarts from its last snapshot.
 - A testing kit for apps (ADR-055)Previews run the real core in process with scripted ports and a manual clock; a session recorded once with undra dev --record replays deterministically in tests on every platform.
 - WebSocket, SSE and Db ports (ADR-047, ADR-048)Real-time streams with the core's credit as backpressure, and SQL over SQLite on every platform with the same deterministic fake; opt-in, so nothing grows for apps that do not use them.
+- Objects as parameters, host callbacks (ADR-040, ADR-041)Generated classes cross the boundary as themselves, one wrapper per handle; the core calls back into app code through typed callback interfaces that never unwind into it.
 
 Now
 
@@ -3766,12 +3769,12 @@ planned
 
 Planned for the releases after v1.0. The order may change with what the benchmarks show.
 
-- Objects as parameters, host callbacks, generics and Decimal (ADR-040 to 042)The boundary types a production app reaches for, each with a schema description and generated code that reads as native.
 - crates.io and Maven CentralPublish the crates under a registry-safe prefix (its own ADR) and the Kotlin runtime without a local build.
 - Windows CLIRelease binaries and docs for the undra command on Windows.
 - Migration guidesFrom Kotlin Multiplatform and from UniFFI; a production-shaped sample beyond the playground.
 - A custom domainA home for the site and docs that is ours.
 - Flutter and DartDecided after React Native ships.
+- Newtypes, generics, Decimal; paged and lazy lists; polling (ADR-042, ADR-043)In flight.
 
 Later
 
@@ -4170,7 +4173,7 @@ For scale: 49.8 ns for a synchronous call through the C ABI and 6.31 µs for one
 
 KMP has two web targets. Kotlin/JS compiles Kotlin to JavaScript ([docs](https://kotlinlang.org/docs/js-overview.html)). Kotlin/Wasm targets WebAssembly with garbage collection in the browser, and its documentation still calls it Beta ([docs](https://kotlinlang.org/docs/wasm-overview.html)). If your organisation writes Kotlin on the web, that is coherent. If your web team writes TypeScript and React, the questions are what the seam looks like and what the bundle carries.
 
-Undra's web output is a wasm module built from your Rust core plus `@undra/runtime`, a TypeScript package with no runtime dependencies. Each store field becomes a `Signal<T>` with `get`, `peek` and `subscribe`; `@undra/runtime/react` exports `useUndra` and `useSignal` (built on `useSyncExternalStore`), and Vue, Svelte and Solid adapters exist too. The core can run on the main thread, in a worker, or remotely over a WebSocket. The repository measures 116.7 KB gzipped for the wasm module of Undra's runtime plus a hello-world core, against a budget of 120 KB that CI enforces; it grows with your code.
+Undra's web output is a wasm module built from your Rust core plus `@undra/runtime`, a TypeScript package with no runtime dependencies. Each store field becomes a `Signal<T>` with `get`, `peek` and `subscribe`; `@undra/runtime/react` exports `useUndra` and `useSignal` (built on `useSyncExternalStore`), and Vue, Svelte and Solid adapters exist too. The core can run on the main thread, in a worker, or remotely over a WebSocket. The repository measures 119.1 KB gzipped for the wasm module of Undra's runtime plus a hello-world core, against a budget of 120 KB that CI enforces; it grows with your code.
 
 Playground code, abbreviated: examples/playground/web/src/views/TodosView.tsx
 
@@ -4477,7 +4480,7 @@ Every number here comes from [bench/RESULTS.md](https://github.com/shreypdev/und
 | Decoding that change-set, borrowed | 253.9 ns | [Signals and stores](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#signals-and-stores) |
 | Decoding and replaying a one-operation patch on 10,000 rows (Rust wire crate) | 2.57 µs | [Keyed patch](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#wire-keyed-patch-undra-wire) |
 | Cold start, restoring 100 KB of state | 70.87 µs | [Snapshot](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#snapshot-and-restore) |
-| Wasm runtime plus hello-world core, gzipped | 116.7 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
+| Wasm runtime plus hello-world core, gzipped | 119.1 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
 | Android core, per ABI, release | 831 KB | [README](https://github.com/shreypdev/undra#why-its-fast) |
 
 Read these for what they are. They are core-side, on a host faster than the phones the design targets, so within budget here is necessary and not sufficient. The per-device targets (an iPhone with an A15, a 2022 mid-range Android phone, Chromium) are measured in a later device phase, and the platform half of a crossing, meaning the Swift, JNI or JavaScript side and applying a change-set to a mirror, is not in these numbers. The 46 operations covered by the CI gate have budgets about five times what they measure, so the gate catches an operation that becomes several times slower, not a few percent ([the gate](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#the-ci-gate)). We have not published a stress benchmark for sustained very high write rates, and we have not compared Undra against other tools, so this page makes no such comparison.

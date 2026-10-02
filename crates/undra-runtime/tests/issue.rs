@@ -193,3 +193,40 @@ proptest! {
         }
     }
 }
+
+/// A snapshot that main's layout 2 wrote (its generation floor a `u32`, before ADR-040 widened it to
+/// a `u64` without a new layout tag) is refused with a typed error, and the refusal changes nothing:
+/// the dev-reload ring and a dev machine's persisted snapshots start fresh instead of misreading.
+#[test]
+fn a_snapshot_with_the_old_u32_floor_is_refused_typed_and_releases_nothing() {
+    let t = TestRuntime::new();
+    let rt = t.runtime();
+    let mut scope = rt.issue_scope();
+    let held = scope.issue(Arc::new(Thing(1))).unwrap();
+    scope.commit();
+
+    let current = rt.snapshot();
+    // Layout 2 before this change: `count u32, generation_floor u32, schema_hash u64, ...`. A floor
+    // under 2^32 (every floor main could write) has a zero high word: dropping it gives main's bytes.
+    assert_eq!(&current[8..12], &[0, 0, 0, 0]);
+    let mut old = current.clone();
+    old.drain(8..12);
+
+    let refused = rt.restore(&old);
+    assert!(
+        matches!(
+            refused,
+            Err(undra_runtime::RestoreError::Decode(_)
+                | undra_runtime::RestoreError::GenerationFloor { .. })
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(
+        rt.objects().host_refs_of(held),
+        Some(1),
+        "nothing was released"
+    );
+    assert_eq!(rt.objects().live(), 1);
+    // The current layout still restores.
+    rt.restore(&current).unwrap();
+}

@@ -738,7 +738,7 @@ measured = 1.43
 # links the standard ports' Rust dispatchers by use (ADR-052 note): 116,731; 116,800 with devtools' inspector seam.
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 116706
+measured_gzip_bytes = 119055
 tolerance = 0.05
 
 # What a hello-world app loads up front of the JavaScript runtime: `@undra/runtime` as the template's
@@ -752,10 +752,12 @@ tolerance = 0.05
 # -> 24,335 by that change of what is measured alone) and cuts it to 21,159: the remote transport, the default
 # ports and the framed transports' wire code load on demand (-4,686), the call path's levers (ADR-056) cost 1,510.
 # The 16 KB the first restatement aimed at is not reached: what is left is the runtime itself (the amendment says
-# what). Gated like the wasm.
+# what). Gated like the wasm. Restated at 21,800 by the objects-callbacks review (ADR-052, note of 2026-10-02): every
+# generated constructor adopts through the identity map of ADR-040, and the mirror carries ADR-041's callback
+# entries, in the up-front chunk; loading the identity map lazily was measured and rejected (the note says why).
 [size."web/hello-runtime-js"]
-budget_gzip_bytes = 21500
-measured_gzip_bytes = 21173
+budget_gzip_bytes = 21800
+measured_gzip_bytes = 21672
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------
