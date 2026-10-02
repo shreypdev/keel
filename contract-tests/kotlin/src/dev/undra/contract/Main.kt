@@ -8,10 +8,13 @@ import kotlin.system.exitProcess
 private const val SCENARIO_LIMIT_MS: Long = 120_000L
 
 /**
- * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S20 and S26 on the JVM
+ * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S20, S26, S29 and S30 on the JVM
  * over JNI against the real `libplayground_core` of the playground core (and, for S26, `libplayground_a` and
  * `libplayground_b`) and prints one line per scenario,
  * `SCENARIO S07 PASS|FAIL <title>`, which `contract-tests/check.sh kotlin` reads. Exits 1 if any fails.
+ *
+ * With `UNDRA_CONTRACT_ONLY=S29,S30` it runs only those scenarios (and S16, which loads the core): for working on one scenario; the
+ * run is not a verdict, `check.sh` reports the others missing.
  *
  * With `UNDRA_CONTRACT_PHASE=B` (and build B's library on `java.library.path`) it runs only the build-B steps of S14
  * and S15 instead ([migrationBuildB]), which print nothing but `FAIL` lines for those two ids.
@@ -28,8 +31,10 @@ fun main() {
         exitProcess(2)
     }
     val boot = Bootstrap()
+    val only = System.getenv("UNDRA_CONTRACT_ONLY")?.split(',')?.map { it.trim() }?.toSet()
     var failures = 0
     for (scenario in SCENARIOS) {
+        if (only != null && scenario.id !in only && scenario.id != "S16") continue
         val started = System.nanoTime()
         val problem = run(scenario, boot)
         val ms = (System.nanoTime() - started) / 1_000_000L
