@@ -730,6 +730,7 @@ fn query_handle(query: &QueryDef) -> ObjectDef {
         takes_ctx: false,
         coalesce: false,
         docs: docs.to_owned(),
+        generic: None,
     };
     // An infinite query's `data` is the list of every row loaded, keyed by the item's key so that
     // the next page arrives as a patch of appended rows (ADR-043); any other query's is the
@@ -801,6 +802,7 @@ fn query_handle(query: &QueryDef) -> ObjectDef {
             takes_ctx: false,
             coalesce: false,
             docs: String::new(),
+            generic: None,
         }],
         methods,
         store: Some(StoreDef { signals }),
@@ -817,6 +819,7 @@ fn mutation_function(query: &QueryDef) -> FunctionDef {
         is_async: true,
         takes_ctx: false,
         docs: format!("Runs the `{}` mutation.", query.name),
+        generic: None,
     }
 }
 

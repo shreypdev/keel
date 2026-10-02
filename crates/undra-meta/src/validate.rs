@@ -174,6 +174,15 @@ pub enum SchemaError {
         /// What is wrong, in a few words.
         problem: &'static str,
     },
+    /// A `generic` label (ADR-058) that does not describe its definition, or definitions that
+    /// share a label's `of` but are not one function with one type replaced (E0072).
+    BadGeneric {
+        /// What the problem is about: ``the generic function `newest<Todo>` `` or
+        /// ``the instantiations of `newest` ``.
+        subject: String,
+        /// What is wrong, as a predicate of the subject.
+        problem: String,
+    },
 }
 
 impl SchemaError {
@@ -195,6 +204,7 @@ impl SchemaError {
             SchemaError::BadCallbackMethod { .. } => "E0071",
             SchemaError::BadTransparentRecord { .. } => "E0007",
             SchemaError::BadInfiniteQuery { .. } => "E0073",
+            SchemaError::BadGeneric { .. } => "E0072",
         }
     }
 }
@@ -288,6 +298,11 @@ impl fmt::Display for SchemaError {
                 format!("the infinite query `{query}` {problem}"),
                 "an infinite query's handle shows its pages as one keyed list of `T`, so the schema needs `T` to be a record with the `item_key` field, and a cursor the core can store".to_owned(),
                 "return `Page<T, C>` where `T` is an `#[undra::api]` record, and set `item_key` to one of its fields".to_owned(),
+            ),
+            SchemaError::BadGeneric { subject, problem } => (
+                format!("{subject} {problem}"),
+                "the generators put the instantiations of one generic function under one name, so they must be the same function with one type replaced".to_owned(),
+                "regenerate the schema from the core (`undra build`); a schema is not edited by hand".to_owned(),
             ),
         };
         f.write_str(&crate::diag::message(code, what, why, fix))
@@ -610,7 +625,11 @@ impl Schema {
     ///   as `Option` or `Vec` (E0064, ADR-040);
     /// * a `Callback` names a port of kind `Callback`, stands only as a parameter of a method,
     ///   constructor or function, alone or as `Option`, and a callback port's methods are
-    ///   fire-and-forget or `async` with a `Result` (E0004, E0071, ADR-041).
+    ///   fire-and-forget or `async` with a `Result` (E0004, E0071, ADR-041);
+    /// * a `generic` label (ADR-058) names an identifier and one type parameter, its definition is
+    ///   called `of<Type>` for a named value type of the schema, the definitions that share an `of`
+    ///   are one function with one type replaced, and only functions and methods of objects carry
+    ///   a label (E0072).
     ///
     /// It does not check that ids match their names or that they are free of
     /// hash collisions; `undra-bindgen` owns collision detection.
@@ -775,12 +794,277 @@ impl Schema {
             }
         }
 
+        self.check_generic_labels(&mut checker.errors);
+
         if checker.errors.is_empty() {
             Ok(())
         } else {
             Err(checker.errors)
         }
     }
+}
+
+/// What the `generic` labels of a family of definitions are checked on: a free function or a
+/// method of an object, without caring which.
+struct Member<'a> {
+    name: &'a str,
+    generic: Option<&'a crate::GenericOf>,
+    params: &'a [crate::ParamDef],
+    returns: &'a TypeRef,
+    is_async: bool,
+    takes_ctx: bool,
+}
+
+impl<'a> Member<'a> {
+    fn of_function(f: &'a crate::FunctionDef) -> Member<'a> {
+        Member {
+            name: &f.name,
+            generic: f.generic.as_ref(),
+            params: &f.params,
+            returns: &f.returns,
+            is_async: f.is_async,
+            takes_ctx: f.takes_ctx,
+        }
+    }
+
+    fn of_method(m: &'a crate::MethodDef) -> Member<'a> {
+        Member {
+            name: &m.name,
+            generic: m.generic.as_ref(),
+            params: &m.params,
+            returns: &m.returns,
+            is_async: m.is_async,
+            takes_ctx: m.takes_ctx,
+        }
+    }
+}
+
+/// Whether two types have the same shape when the names of the types they mention are ignored:
+/// the instantiations of one generic function differ by the type that replaced the parameter.
+fn same_shape(a: &TypeRef, b: &TypeRef) -> bool {
+    match (a, b) {
+        (TypeRef::Named(_), TypeRef::Named(_)) | (TypeRef::Object(_), TypeRef::Object(_)) => true,
+        (TypeRef::Option(x), TypeRef::Option(y))
+        | (TypeRef::Vec(x), TypeRef::Vec(y))
+        | (TypeRef::Lazy(x), TypeRef::Lazy(y))
+        | (TypeRef::Stream(x), TypeRef::Stream(y)) => same_shape(x, y),
+        (TypeRef::Map(k, v), TypeRef::Map(k2, v2))
+        | (TypeRef::Result(k, v), TypeRef::Result(k2, v2)) => {
+            same_shape(k, k2) && same_shape(v, v2)
+        }
+        _ => a == b,
+    }
+}
+
+/// Whether `name` is a Rust identifier of the plain kind a schema holds.
+fn is_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+        && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+}
+
+impl Schema {
+    /// The rules of the `generic` labels (ADR-058), E0072: a label names an identifier and a type
+    /// parameter, its definition's `name` is `of<arg>`, its argument is a named value type of this
+    /// schema, and the definitions that share an `of` (the functions of the schema, or the
+    /// methods of one object) are one function: the same parameter names and `inferred` flags,
+    /// the same parameters, `is_async` and `takes_ctx`, and the same shape of types with the names
+    /// erased. A constructor and a port method carry no label.
+    fn check_generic_labels(&self, errors: &mut Vec<SchemaError>) {
+        let functions: Vec<Member<'_>> = self.functions.iter().map(Member::of_function).collect();
+        self.check_family("function", "", &functions, errors);
+        for object in &self.objects {
+            let methods: Vec<Member<'_>> = object.methods.iter().map(Member::of_method).collect();
+            self.check_family("method", &format!("{}.", object.name), &methods, errors);
+            for ctor in &object.constructors {
+                if ctor.generic.is_some() {
+                    errors.push(SchemaError::BadGeneric {
+                        subject: format!("the constructor `{}.{}`", object.name, ctor.name),
+                        problem: "carries a `generic` label, which only a function or a method of an object may".to_owned(),
+                    });
+                }
+            }
+        }
+        for port in &self.ports {
+            for method in &port.methods {
+                if method.generic.is_some() {
+                    errors.push(SchemaError::BadGeneric {
+                        subject: format!("the port method `{}.{}`", port.name, method.name),
+                        problem: "carries a `generic` label, which only a function or a method of an object may".to_owned(),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Checks the labels of `members` (`kind` is "function" or "method", `owner` the `Object.`
+    /// prefix of a method's name) one by one, then the agreement of each family.
+    fn check_family(
+        &self,
+        kind: &str,
+        owner: &str,
+        members: &[Member<'_>],
+        errors: &mut Vec<SchemaError>,
+    ) {
+        let mut families: Vec<(&str, Vec<&Member<'_>>)> = Vec::new();
+        for member in members {
+            let Some(label) = member.generic else {
+                continue;
+            };
+            let subject = format!("the generic {kind} `{owner}{}`", member.name);
+            let mut bad = |problem: String| {
+                errors.push(SchemaError::BadGeneric {
+                    subject: subject.clone(),
+                    problem,
+                });
+            };
+            if !is_identifier(&label.of) {
+                bad(format!(
+                    "is labelled as an instantiation of `{}`, which is not an identifier",
+                    label.of
+                ));
+            }
+            match label.args.as_slice() {
+                [arg] => {
+                    if !is_identifier(&arg.param) {
+                        bad(format!(
+                            "has the type parameter `{}`, which is not an identifier",
+                            arg.param
+                        ));
+                    }
+                    match &arg.ty {
+                        TypeRef::Named(name) => {
+                            let value = self.records.iter().any(|r| &r.name == name)
+                                || self.enums.iter().any(|e| &e.name == name);
+                            if !value {
+                                bad(format!(
+                                    "is instantiated with `{name}`, which is not a record, an enum or a newtype of this schema"
+                                ));
+                            }
+                        }
+                        other => bad(format!(
+                            "is instantiated with `{other}`, which is not a named value type"
+                        )),
+                    }
+                    if member.name != label.name() {
+                        let shown = match &arg.ty {
+                            TypeRef::Named(name) => name.clone(),
+                            other => other.to_string(),
+                        };
+                        bad(format!(
+                            "is not `{}` with `{} = {shown}`",
+                            label.of, arg.param
+                        ));
+                    }
+                }
+                args => bad(format!(
+                    "has {} type arguments in its label, and a generic {kind} crosses with one",
+                    args.len()
+                )),
+            }
+            match families.iter_mut().find(|(of, _)| *of == label.of) {
+                Some((_, family)) => family.push(member),
+                None => families.push((&label.of, vec![member])),
+            }
+        }
+        for (of, family) in &families {
+            let (first, rest) = family.split_first().expect("a family has a member");
+            for other in rest {
+                if let Some(problem) = disagreement(first, other) {
+                    errors.push(SchemaError::BadGeneric {
+                        subject: format!("the instantiations of `{owner}{of}`"),
+                        problem: format!("disagree: {problem}"),
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// How `other` differs from `first`, two members of one generic family, if it does.
+fn disagreement(first: &Member<'_>, other: &Member<'_>) -> Option<String> {
+    let (a, b) = (first.generic?, other.generic?);
+    let pair = |what: &str, x: String, y: String| {
+        format!(
+            "`{}` has {x} {what} and `{}` has {y}",
+            other.name, first.name
+        )
+    };
+    let (arg_a, arg_b) = (a.args.first()?, b.args.first()?);
+    if arg_a.ty == arg_b.ty {
+        return Some(format!(
+            "`{}` and `{}` are instantiated with the same type",
+            other.name, first.name
+        ));
+    }
+    if arg_a.param != arg_b.param {
+        return Some(format!(
+            "`{}` has the type parameter `{}` and `{}` has `{}`",
+            other.name, arg_b.param, first.name, arg_a.param
+        ));
+    }
+    if arg_a.inferred != arg_b.inferred {
+        return Some(format!(
+            "`{}` says the type parameter {} fixed by the arguments and `{}` says it {}",
+            other.name,
+            if arg_b.inferred { "is" } else { "is not" },
+            first.name,
+            if arg_a.inferred { "is" } else { "is not" },
+        ));
+    }
+    if first.params.len() != other.params.len() {
+        return Some(pair(
+            "parameters",
+            other.params.len().to_string(),
+            first.params.len().to_string(),
+        ));
+    }
+    for (x, y) in first.params.iter().zip(other.params) {
+        if x.name != y.name {
+            return Some(format!(
+                "`{}` has the parameter `{}` where `{}` has `{}`",
+                other.name, y.name, first.name, x.name
+            ));
+        }
+        if !same_shape(&x.ty, &y.ty) {
+            return Some(format!(
+                "the parameter `{}` of `{}` is not the shape it has in `{}`",
+                x.name, other.name, first.name
+            ));
+        }
+    }
+    if first.is_async != other.is_async {
+        let shown = |is_async: bool| if is_async { "`async`" } else { "not `async`" };
+        return Some(format!(
+            "`{}` is {} and `{}` is {}",
+            other.name,
+            shown(other.is_async),
+            first.name,
+            shown(first.is_async),
+        ));
+    }
+    if first.takes_ctx != other.takes_ctx {
+        return Some(format!(
+            "`{}` {} a `Ctx` and `{}` {}",
+            other.name,
+            if other.takes_ctx {
+                "takes"
+            } else {
+                "does not take"
+            },
+            first.name,
+            if first.takes_ctx { "does" } else { "does not" },
+        ));
+    }
+    if !same_shape(first.returns, other.returns) {
+        return Some(format!(
+            "the return type of `{}` is not the shape it has in `{}`",
+            other.name, first.name
+        ));
+    }
+    None
 }
 
 impl Schema {
@@ -995,6 +1279,7 @@ mod tests {
             is_async: false,
             takes_ctx: false,
             docs: String::new(),
+            generic: None,
         }
     }
 
@@ -1452,6 +1737,7 @@ mod tests {
                 is_async: false,
                 takes_ctx: false,
                 docs: String::new(),
+                generic: None,
             });
         });
         assert_eq!(schema.validate(), Ok(()));
@@ -2340,5 +2626,307 @@ mod tests {
         let mut mutation = infinite_query(TypeRef::vec(TypeRef::named("Post")), "id");
         mutation.queries[0].kind = QueryKind::Mutation;
         assert_eq!(mutation.validate().unwrap_err()[0].code(), "E0073");
+    }
+    // ----- generic labels (ADR-058, E0072) ---------------------------------------------------
+
+    /// `newest<arg>` over `Vec<arg>`, the way the macros describe one instantiation.
+    fn instance(of: &str, arg: &str) -> FunctionDef {
+        FunctionDef {
+            name: format!("{of}<{arg}>"),
+            method_id: ids::function_id(&format!("{of}<{arg}>")),
+            params: vec![param("rows", TypeRef::vec(TypeRef::named(arg)))],
+            returns: TypeRef::option(TypeRef::named(arg)),
+            is_async: false,
+            takes_ctx: false,
+            generic: Some(crate::GenericOf {
+                of: of.into(),
+                args: vec![crate::GenericArg {
+                    param: "T".into(),
+                    ty: TypeRef::named(arg),
+                    inferred: true,
+                }],
+            }),
+            docs: String::new(),
+        }
+    }
+
+    /// `Known`, `Other` and the two instantiations of `newest` over them.
+    fn generic_schema(edit: impl FnOnce(&mut Schema)) -> Schema {
+        base(|s| {
+            s.records
+                .push(record("Other", vec![field("y", TypeRef::U8)]));
+            s.functions.push(instance("newest", "Known"));
+            s.functions.push(instance("newest", "Other"));
+            edit(s);
+        })
+    }
+
+    /// The text of the one E0072 the schema reports.
+    fn generic_error(s: &Schema) -> String {
+        let errs = errors(s);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert_eq!(errs[0].code(), "E0072");
+        errs[0].to_string()
+    }
+
+    #[test]
+    fn instantiations_of_one_function_pass() {
+        assert_eq!(generic_schema(|_| {}).validate(), Ok(()));
+        // The generic methods of an object, one family per object.
+        let s = generic_schema(|s| {
+            let mut library = object("Library", vec![], vec![]);
+            for arg in ["Known", "Other"] {
+                let mut m = method(
+                    "Library",
+                    &format!("pinned<{arg}>"),
+                    vec![],
+                    TypeRef::vec(TypeRef::named(arg)),
+                    false,
+                );
+                m.generic = Some(crate::GenericOf {
+                    of: "pinned".into(),
+                    args: vec![crate::GenericArg {
+                        param: "T".into(),
+                        ty: TypeRef::named(arg),
+                        inferred: false,
+                    }],
+                });
+                library.methods.push(m);
+            }
+            s.objects.push(library);
+        });
+        assert_eq!(s.validate(), Ok(()));
+        // A newtype is a named value type; so is an enum.
+        let mut s = generic_schema(|_| {});
+        s.records[0].transparent = true;
+        s.records[0].fields = vec![field("value", TypeRef::Uuid)];
+        assert_eq!(s.validate(), Ok(()));
+    }
+
+    #[test]
+    fn a_label_must_describe_its_definition() {
+        // The name says `Known`, the label says `Other`.
+        let s = generic_schema(|s| {
+            s.functions[0].generic.as_mut().unwrap().args[0].ty = TypeRef::named("Other");
+        });
+        let errs = errors(&s);
+        let text = errs[0].to_string();
+        assert!(
+            text.starts_with(
+                "error[undra::E0072]: the generic function `newest<Known>` is not `newest` with `T = Other`"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("the same function with one type replaced"),
+            "{text}"
+        );
+        assert!(
+            text.contains("regenerate the schema from the core (`undra build`)"),
+            "{text}"
+        );
+        assert!(text.contains("errors.html#E0072"), "{text}");
+        // Two definitions with one argument type are one instantiation twice.
+        let s = generic_schema(|s| {
+            s.functions[1] = instance("newest", "Known");
+            s.functions[1].name = "newest<Known>".into();
+        });
+        assert!(errors(&s).iter().any(|e| {
+            e.to_string()
+                .contains("are instantiated with the same type")
+        }));
+    }
+
+    #[test]
+    fn a_label_names_identifiers_and_a_named_value_type() {
+        for (edit, expect) in [
+            (
+                Box::new(|f: &mut FunctionDef| f.generic.as_mut().unwrap().of = "new est".into())
+                    as Box<dyn Fn(&mut FunctionDef)>,
+                "is labelled as an instantiation of `new est`, which is not an identifier",
+            ),
+            (
+                Box::new(|f| f.generic.as_mut().unwrap().args[0].param = "T<U>".into()),
+                "has the type parameter `T<U>`, which is not an identifier",
+            ),
+            (
+                Box::new(|f| {
+                    f.generic.as_mut().unwrap().args[0].ty = TypeRef::U32;
+                    f.name = "newest<u32>".into();
+                }),
+                "is instantiated with `u32`, which is not a named value type",
+            ),
+            (
+                Box::new(|f| {
+                    f.generic.as_mut().unwrap().args[0].ty = TypeRef::vec(TypeRef::named("Known"));
+                    f.name = "newest<vec<Known>>".into();
+                }),
+                "which is not a named value type",
+            ),
+            (
+                Box::new(|f| {
+                    f.generic.as_mut().unwrap().args[0].ty = TypeRef::named("Ghost");
+                    f.name = "newest<Ghost>".into();
+                }),
+                "is instantiated with `Ghost`, which is not a record, an enum or a newtype of this schema",
+            ),
+            (
+                Box::new(|f| f.generic.as_mut().unwrap().args.clear()),
+                "has 0 type arguments in its label, and a generic function crosses with one",
+            ),
+        ] {
+            let s = generic_schema(|s| edit(&mut s.functions[0]));
+            let all: String = errors(&s)
+                .iter()
+                .filter(|e| e.code() == "E0072")
+                .map(ToString::to_string)
+                .collect();
+            assert!(all.contains(expect), "{expect}: {all}");
+        }
+        // An object is not a value type.
+        let s = generic_schema(|s| {
+            s.objects.push(object("Mailbox", vec![], vec![]));
+            s.functions[0].generic.as_mut().unwrap().args[0].ty = TypeRef::named("Mailbox");
+            s.functions[0].name = "newest<Mailbox>".into();
+        });
+        assert!(
+            errors(&s)
+                .iter()
+                .any(|e| e.to_string().contains("not a record, an enum or a newtype")),
+        );
+    }
+
+    #[test]
+    fn the_instantiations_of_a_function_must_agree() {
+        for (edit, expect) in [
+            (
+                Box::new(|f: &mut FunctionDef| {
+                    f.params.push(param("extra", TypeRef::U8));
+                }) as Box<dyn Fn(&mut FunctionDef)>,
+                "the instantiations of `newest` disagree: `newest<Other>` has 2 parameters and `newest<Known>` has 1",
+            ),
+            (
+                Box::new(|f| f.params[0].name = "items".into()),
+                "`newest<Other>` has the parameter `items` where `newest<Known>` has `rows`",
+            ),
+            (
+                Box::new(|f| f.params[0].ty = TypeRef::U8),
+                "the parameter `rows` of `newest<Other>` is not the shape it has in `newest<Known>`",
+            ),
+            (
+                Box::new(|f| f.returns = TypeRef::vec(TypeRef::named("Other"))),
+                "the return type of `newest<Other>` is not the shape it has in `newest<Known>`",
+            ),
+            (
+                Box::new(|f| f.is_async = true),
+                "`newest<Other>` is `async` and `newest<Known>` is not `async`",
+            ),
+            (
+                Box::new(|f| f.takes_ctx = true),
+                "`newest<Other>` takes a `Ctx` and `newest<Known>` does not",
+            ),
+            (
+                Box::new(|f| f.generic.as_mut().unwrap().args[0].param = "U".into()),
+                "`newest<Other>` has the type parameter `U` and `newest<Known>` has `T`",
+            ),
+            (
+                Box::new(|f| f.generic.as_mut().unwrap().args[0].inferred = false),
+                "`newest<Other>` says the type parameter is not fixed by the arguments and `newest<Known>` says it is",
+            ),
+        ] {
+            let s = generic_schema(|s| edit(&mut s.functions[1]));
+            let text = generic_error(&s);
+            assert!(text.contains(expect), "{expect}: {text}");
+        }
+        // The names of the types are what differs between instantiations, so they are erased,
+        // everywhere a type can stand; an object's name too.
+        let s = generic_schema(|s| {
+            s.objects.push(object("A", vec![], vec![]));
+            s.objects.push(object("B", vec![], vec![]));
+            s.functions[0]
+                .params
+                .push(param("one", TypeRef::object("A")));
+            s.functions[1]
+                .params
+                .push(param("one", TypeRef::object("B")));
+            s.functions[0].returns = TypeRef::result(
+                TypeRef::map(TypeRef::String, TypeRef::vec(TypeRef::named("Known"))),
+                TypeRef::named("Known"),
+            );
+            s.functions[1].returns = TypeRef::result(
+                TypeRef::map(TypeRef::String, TypeRef::vec(TypeRef::named("Other"))),
+                TypeRef::named("Other"),
+            );
+        });
+        assert_eq!(s.validate(), Ok(()));
+        // Two families do not disturb each other.
+        let s = generic_schema(|s| {
+            s.functions.push(instance("oldest", "Known"));
+            s.functions.push(instance("oldest", "Other"));
+            s.functions[3].is_async = true;
+            s.functions[2].is_async = true;
+        });
+        assert_eq!(s.validate(), Ok(()));
+    }
+
+    #[test]
+    fn methods_agree_per_object_and_constructors_and_port_methods_carry_no_label() {
+        let label = |arg: &str| {
+            Some(crate::GenericOf {
+                of: "pinned".into(),
+                args: vec![crate::GenericArg {
+                    param: "T".into(),
+                    ty: TypeRef::named(arg),
+                    inferred: false,
+                }],
+            })
+        };
+        // Two objects may have a family of the same `of` with different shapes.
+        let s = generic_schema(|s| {
+            for (owner, returns) in [("One", TypeRef::U8), ("Two", TypeRef::String)] {
+                let mut m = method(owner, "pinned<Known>", vec![], returns, false);
+                m.generic = label("Known");
+                s.objects.push(object(owner, vec![], vec![m]));
+            }
+        });
+        assert_eq!(s.validate(), Ok(()));
+        // Within one object they must agree.
+        let s = generic_schema(|s| {
+            let mut a = method("One", "pinned<Known>", vec![], TypeRef::U8, false);
+            a.generic = label("Known");
+            let mut b = method("One", "pinned<Other>", vec![], TypeRef::String, false);
+            b.generic = label("Other");
+            s.objects.push(object("One", vec![], vec![a, b]));
+        });
+        let text = generic_error(&s);
+        assert!(
+            text.contains("the instantiations of `One.pinned` disagree"),
+            "{text}"
+        );
+        // A constructor and a port method are never generic.
+        let s = generic_schema(|s| {
+            let mut ctor = method("One", "new", vec![], TypeRef::named("One"), false);
+            ctor.generic = label("Known");
+            s.objects.push(object("One", vec![ctor], vec![]));
+        });
+        assert!(
+            generic_error(&s).contains("the constructor `One.new` carries a `generic` label"),
+            "{s:?}"
+        );
+        let s = generic_schema(|s| {
+            let mut m = method("Clock", "now", vec![], TypeRef::Timestamp, false);
+            m.generic = label("Known");
+            s.ports.push(PortDef {
+                name: "Clock".into(),
+                port_id: ids::port_id("Clock"),
+                kind: PortKind::Sync,
+                background: false,
+                methods: vec![m],
+                docs: String::new(),
+            });
+        });
+        assert!(
+            generic_error(&s).contains("the port method `Clock.now` carries a `generic` label")
+        );
     }
 }

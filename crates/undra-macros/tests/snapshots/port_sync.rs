@@ -23,6 +23,7 @@ static __UNDRA_META_port_Clock: ::undra::meta::PortMeta = ::undra::meta::PortMet
             is_async: false,
             takes_ctx: false,
             coalesce: false,
+            generic: ::core::option::Option::None,
             docs: "",
         },
         ::undra::meta::MethodMeta {
@@ -42,6 +43,7 @@ static __UNDRA_META_port_Clock: ::undra::meta::PortMeta = ::undra::meta::PortMet
             is_async: false,
             takes_ctx: false,
             coalesce: false,
+            generic: ::core::option::Option::None,
             docs: "",
         },
     ],

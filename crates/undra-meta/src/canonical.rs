@@ -999,6 +999,7 @@ mod tests {
                 is_async: false,
                 takes_ctx: false,
                 docs: String::new(),
+                generic: None,
             });
         }
         for i in 0..3 {
@@ -1084,6 +1085,123 @@ mod tests {
             reversed.canonicalized(),
             canonicalized_with_std_sort(&reversed)
         );
+    }
+
+    /// `newest<Todo>` and `newest<Note>`: the two instantiations of one generic function.
+    fn newest(of: &str, arg: &str) -> crate::FunctionDef {
+        crate::FunctionDef {
+            name: format!("{of}<{arg}>"),
+            method_id: crate::ids::function_id(&format!("{of}<{arg}>")),
+            params: vec![crate::ParamDef {
+                name: "rows".into(),
+                ty: TypeRef::vec(TypeRef::named(arg)),
+            }],
+            returns: TypeRef::option(TypeRef::named(arg)),
+            is_async: false,
+            takes_ctx: false,
+            generic: Some(crate::GenericOf {
+                of: of.into(),
+                args: vec![crate::GenericArg {
+                    param: "T".into(),
+                    ty: TypeRef::named(arg),
+                    inferred: true,
+                }],
+            }),
+            docs: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_generic_label_is_written_only_when_set() {
+        // ADR-058 decision 5: a schema without a generic function or method serializes, and so
+        // hashes, as it did before the label existed (the representative schema's hash is the
+        // golden above).
+        let base = representative_schema();
+        assert!(!base.canonical_json().contains("generic"));
+        assert!(!base.to_json_pretty().contains("generic"));
+        assert_eq!(base.hash(), 0xd5b8_c3a3_afbd_bc33);
+
+        let mut generic = base.clone();
+        generic.functions.push(newest("newest", "Todo"));
+        let canonical = generic.canonical_json();
+        assert!(
+            canonical.contains(
+                r#""takes_ctx":false,"generic":{"of":"newest","args":[{"param":"T","ty":{"kind":"named","of":"Todo"},"inferred":true}]}}"#
+            ),
+            "{canonical}"
+        );
+        assert_ne!(generic.hash(), base.hash());
+        // Both exchange forms read it back.
+        assert_eq!(Schema::from_json(&generic.to_json()).unwrap(), generic);
+        assert_eq!(
+            Schema::from_json(&generic.to_json_pretty()).unwrap(),
+            generic
+        );
+        // The label is not documentation: stripping docs keeps it, and the hash.
+        assert_eq!(generic.without_docs().functions, generic.functions);
+        // A method carries it the same way, after `coalesce`.
+        let mut with_method = base.clone();
+        let object = &mut with_method.objects[0];
+        let mut pinned = crate::fixtures::method(
+            &object.name,
+            "pinned<Todo>",
+            vec![],
+            TypeRef::vec(TypeRef::named("Todo")),
+            false,
+        );
+        pinned.generic = Some(crate::GenericOf {
+            of: "pinned".into(),
+            args: vec![crate::GenericArg {
+                param: "T".into(),
+                ty: TypeRef::named("Todo"),
+                inferred: false,
+            }],
+        });
+        object.methods.push(pinned);
+        let canonical = with_method.canonical_json();
+        assert!(
+            canonical.contains(
+                r#""takes_ctx":false,"generic":{"of":"pinned","args":[{"param":"T","ty":{"kind":"named","of":"Todo"},"inferred":false}]}}"#
+            ),
+            "{canonical}"
+        );
+        assert_ne!(with_method.hash(), base.hash());
+        assert_eq!(
+            Schema::from_json(&with_method.to_json()).unwrap(),
+            with_method
+        );
+    }
+
+    #[test]
+    fn adding_an_instantiation_moves_the_hash_and_reordering_does_not() {
+        let mut two = Schema::new("t");
+        two.functions.push(newest("newest", "Todo"));
+        two.functions.push(newest("newest", "Note"));
+        let mut reordered = two.clone();
+        reordered.functions.reverse();
+        assert_eq!(two.hash(), reordered.hash());
+        assert_eq!(two.canonical_json(), reordered.canonical_json());
+        let mut three = two.clone();
+        three.functions.push(newest("newest", "Draft"));
+        assert_ne!(three.hash(), two.hash());
+        // Removing one moves it back to the schema of the other: the instantiations that were
+        // already there keep their ids and their definitions, which is all the hash covers.
+        let mut one = two.clone();
+        one.functions.retain(|f| f.name != "newest<Note>");
+        assert_ne!(one.hash(), two.hash());
+        assert_eq!(
+            two.functions[0].method_id,
+            crate::ids::function_id("newest<Todo>")
+        );
+        // The label itself is wire-relevant to the generated API, so it is hashed: the same
+        // function without it is another schema.
+        let mut unlabelled = two.clone();
+        unlabelled.functions[0].generic = None;
+        assert_ne!(unlabelled.hash(), two.hash());
+        // `inferred` is a fact the generators read, so it is hashed too.
+        let mut flipped = two.clone();
+        flipped.functions[0].generic.as_mut().unwrap().args[0].inferred = false;
+        assert_ne!(flipped.hash(), two.hash());
     }
 
     #[test]

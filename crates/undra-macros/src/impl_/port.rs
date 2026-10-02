@@ -527,6 +527,7 @@ pub(crate) fn expand_trait(
                 is_async: #is_async,
                 takes_ctx: false,
                 coalesce: #coalesce,
+                generic: ::core::option::Option::None,
                 docs: #mdocs,
             }
         }

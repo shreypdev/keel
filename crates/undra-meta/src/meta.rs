@@ -36,8 +36,9 @@
 
 use crate::dispatch::DispatchFn;
 use crate::{
-    EnumDef, FieldDef, FunctionDef, InfiniteDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind,
-    QueryDef, QueryKind, RecordDef, SignalDef, StoreDef, TypeRef, VariantDef,
+    EnumDef, FieldDef, FunctionDef, GenericArg, GenericOf, InfiniteDef, MethodDef, ObjectDef,
+    ParamDef, PortDef, PortKind, QueryDef, QueryKind, RecordDef, SignalDef, StoreDef, TypeRef,
+    VariantDef,
 };
 
 /// Converts a slice of `*Meta` into a `Vec` of owned `*Def`.
@@ -305,6 +306,8 @@ pub struct MethodMeta {
     pub takes_ctx: bool,
     /// `#[undra(coalesce)]`, see [`MethodDef::coalesce`].
     pub coalesce: bool,
+    /// The generic method this is one instantiation of (ADR-058), see [`MethodDef::generic`].
+    pub generic: Option<&'static GenericOfMeta>,
     /// Doc comment (empty if none).
     pub docs: &'static str,
 }
@@ -319,7 +322,48 @@ impl From<&MethodMeta> for MethodDef {
             is_async: m.is_async,
             takes_ctx: m.takes_ctx,
             coalesce: m.coalesce,
+            generic: m.generic.map(GenericOf::from),
             docs: m.docs.to_owned(),
+        }
+    }
+}
+
+/// Mirror of [`GenericOf`] (ADR-058): the label of one instantiation of a generic function or
+/// method.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GenericOfMeta {
+    /// The generic function's own name.
+    pub of: &'static str,
+    /// The type parameter and its type, one entry in v1.x.
+    pub args: &'static [GenericArgMeta],
+}
+
+impl From<&GenericOfMeta> for GenericOf {
+    fn from(m: &GenericOfMeta) -> GenericOf {
+        GenericOf {
+            of: m.of.to_owned(),
+            args: convert_all(m.args),
+        }
+    }
+}
+
+/// Mirror of [`GenericArg`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GenericArgMeta {
+    /// The type parameter's name in the Rust source.
+    pub param: &'static str,
+    /// The type this instantiation replaces it with.
+    pub ty: TypeRefMeta,
+    /// Whether the parameter stands in the type of a parameter of the function.
+    pub inferred: bool,
+}
+
+impl From<&GenericArgMeta> for GenericArg {
+    fn from(m: &GenericArgMeta) -> GenericArg {
+        GenericArg {
+            param: m.param.to_owned(),
+            ty: (&m.ty).into(),
+            inferred: m.inferred,
         }
     }
 }
@@ -408,6 +452,8 @@ pub struct FunctionMeta {
     pub is_async: bool,
     /// Whether the first Rust parameter is a `Ctx`.
     pub takes_ctx: bool,
+    /// The generic function this is one instantiation of (ADR-058), see [`FunctionDef::generic`].
+    pub generic: Option<&'static GenericOfMeta>,
     /// Doc comment (empty if none).
     pub docs: &'static str,
     /// The generated dispatcher for this function.
@@ -423,6 +469,7 @@ impl From<&FunctionMeta> for FunctionDef {
             returns: (&m.returns).into(),
             is_async: m.is_async,
             takes_ctx: m.takes_ctx,
+            generic: m.generic.map(GenericOf::from),
             docs: m.docs.to_owned(),
         }
     }
@@ -560,6 +607,7 @@ mod tests {
             is_async: false,
             takes_ctx: true,
             coalesce: false,
+            generic: None,
             docs: "Creates a counter.",
         }],
         methods: &[MethodMeta {
@@ -573,6 +621,7 @@ mod tests {
             is_async: true,
             takes_ctx: false,
             coalesce: false,
+            generic: None,
             docs: "",
         }],
         store: Some(StoreMeta {
@@ -732,6 +781,7 @@ mod tests {
             returns: TypeRefMeta::String,
             is_async: false,
             takes_ctx: false,
+            generic: None,
             docs: "Greets.",
             dispatch: no_dispatch,
         };
@@ -751,6 +801,7 @@ mod tests {
                 is_async: false,
                 takes_ctx: false,
                 coalesce: false,
+                generic: None,
                 docs: "",
             }],
             docs: "",

@@ -376,6 +376,7 @@ pub fn method(
         takes_ctx: false,
         coalesce: false,
         docs: docs.into(),
+        generic: None,
     }
 }
 
@@ -450,6 +451,7 @@ pub fn function(
         is_async,
         takes_ctx: false,
         docs: docs.into(),
+        generic: None,
     }
 }
 

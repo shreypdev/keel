@@ -1700,6 +1700,7 @@ fn method_meta(root: &Root, m: &FnModel, method_id: &TokenStream) -> TokenStream
             is_async: #is_async,
             takes_ctx: #takes_ctx,
             coalesce: false,
+            generic: ::core::option::Option::None,
             docs: #docs,
         }
     }
@@ -2366,6 +2367,7 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
             returns: #returns,
             is_async: #is_async,
             takes_ctx: #takes_ctx,
+            generic: ::core::option::Option::None,
             docs: #docs_text,
             dispatch: #dispatch_fn,
         };
