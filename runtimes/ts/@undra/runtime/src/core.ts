@@ -228,6 +228,28 @@ interface PendingCall {
   cleanup: (() => void) | undefined;
 }
 
+/**
+ * A call on a core that answers inside `send` (`wasm-main`): its reply is usually there before `send` returns, so it
+ * is recorded here, with no promise, executor or closures built, and only a call that is still waiting after `send`
+ * gets a promise (`UndraCore.call`).
+ */
+class DirectCall implements PendingCall {
+  readonly kind = "call";
+  cleanup: (() => void) | undefined = undefined;
+  done = false;
+  failed = false;
+  value: unknown;
+  resolve(body: Uint8Array): void {
+    this.done = true;
+    this.value = body;
+  }
+  reject(error: unknown): void {
+    this.done = true;
+    this.failed = true;
+    this.value = error;
+  }
+}
+
 interface PendingStream {
   readonly kind: "stream";
   readonly stream: StreamCall;
@@ -619,7 +641,11 @@ export class UndraCore {
    * settles, so the code after `await` sees them.
    */
   call(target: CallTargetArg, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
-    if (signal?.aborted === true) return Promise.reject(abortReason(signal));
+    if (signal === undefined) {
+      if (this.#transport.synchronous && !this.#reporting && !this.#closed) return this.#callDirect(target, methodId, args);
+    } else if (signal.aborted) {
+      return Promise.reject(abortReason(signal));
+    }
     return this.#request((callId) => encodeTarget(target, methodId, callId, args), signal);
   }
 
@@ -1099,6 +1125,29 @@ export class UndraCore {
           reject(error);
         }
       }
+    });
+  }
+
+  /**
+   * `call` for a core that answers inside `send`, without a signal: the reply to a synchronous method is recorded by
+   * `#onReply` before `send` returns, and the promise handed back is already settled; a call the core answers later
+   * (an asynchronous method) gets its promise after `send`, which is before anything can reply (`undra_poll` runs from
+   * a microtask). The change-sets that arrived before the reply are still applied before the caller resumes.
+   */
+  #callDirect(target: CallTargetArg, methodId: number, args: Uint8Array): Promise<Uint8Array> {
+    const callId = this.#allocCallId();
+    const entry = new DirectCall();
+    this.#pending.set(callId, entry);
+    try {
+      this.#transport.send(Kind.Call, encodeTarget(target, methodId, callId, args));
+    } catch (error) {
+      if (this.#pending.get(callId) === entry) this.#pending.delete(callId);
+      return Promise.reject(error);
+    }
+    if (entry.done) return entry.failed ? Promise.reject(entry.value) : Promise.resolve(entry.value as Uint8Array);
+    return new Promise<Uint8Array>((resolve, reject) => {
+      entry.resolve = resolve;
+      entry.reject = reject;
     });
   }
 
