@@ -3028,6 +3028,7 @@ Landed in the day after v1.0, each behind an ADR and an adversarial review.
 - Derived keyed lists (ADR-039)A filtered, sorted view over a 10,000-row list costs what changed: one row edit is 158 bytes on the wire where it was 353 KB.
 - Devtools (ADR-054)A page served by undra dev: live stores, a change-set timeline with time travel, port and query logs, counters; behind a per-run token.
 - Persisted-state migrations and typed storage (ADR-037, ADR-049)A changed schema still restores what the last version stored; storage ports fail with typed errors on every platform; a crashed web core restarts from its last snapshot.
+- A testing kit for apps (ADR-055)Previews run the real core in process with scripted ports and a manual clock; a session recorded once with undra dev --record replays deterministically in tests on every platform.
 
 Now
 
@@ -3052,7 +3053,6 @@ Planned for the releases after v1.0. The order may change with what the benchmar
 
 - Db and WebSocket portsSQL over SQLite on every platform with the same deterministic fake; bidirectional backpressured streams.
 - Objects as parameters, host callbacks, generics and Decimal (ADR-040 to 042)The boundary types a production app reaches for, each with a schema description and generated code that reads as native.
-- A testing kit for appsPreviews against an in-memory core; port traffic recorded once and replayed in tests.
 - crates.io and Maven CentralPublish the crates under a registry-safe prefix (its own ADR) and the Kotlin runtime without a local build.
 - Windows CLIRelease binaries and docs for the undra command on Windows.
 - Migration guidesFrom Kotlin Multiplatform and from UniFFI; a production-shaped sample beyond the playground.

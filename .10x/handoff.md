@@ -33,10 +33,6 @@ ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5)
 `/Users/shrey/Desktop/src/.work/<name>` with its record in `.10x/decisions/sde/<name>.md` there. State on
 2026-10-02 when the usage budget ran low (5-hour cap, then the weekly cap; agents stop mid-step and resume
 with their context when told to):
-2. `testkit` (F1/F2, ADR-055): **implemented and complete** at `ea5cc38` (18 commits, main `1b9b605` is an
-   ancestor, matrix green: Rust 2,756, Swift 551, Kotlin 656, TS 1,133 + kit 26, contracts 60/60; `undra dev
-   --record`, the three kits, `docs/TESTING.md`, a site page). Needs its review (sonnet is enough), then
-   fast-forward. The `dev_reload` tests are load-sensitive on a busy machine (fail on main too under load 13+).
 3. `ports-v2` → record as **ports** (G2/G3): implemented; **opus review interrupted mid-way** at `adab13f`
    (main `e3573f7` merged; 31 conflicts resolved; the three ports on `dispatcher_by_use`; playground hash
    `0xb5b7b1dc29182a9d`). Done in the review: a Major Rust bug fixed (a cancelled `connect`/`open`/`begin`
