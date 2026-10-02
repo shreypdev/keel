@@ -21,15 +21,12 @@ jobs:
           node --version
           swift --version
           uname -a
-      - name: Both servers, both clients, one VM
+      - name: When is the session let go? Four variants in one VM
         continue-on-error: true
         run: |
-          node contract-tests/servers/realtime-server.mjs --port 0 > "$RUNNER_TEMP/plain.out" 2>&1 &
-          (sleep 900 | node contract-tests/servers/realtime-server.mjs --port 0 --exit-on-stdin-close > "$RUNNER_TEMP/flag.out" 2>&1) &
+          node contract-tests/servers/realtime-server.mjs --port 0 > "$RUNNER_TEMP/s.out" 2>&1 &
           sleep 2
-          PLAIN="$(grep READY "$RUNNER_TEMP/plain.out" | cut -d' ' -f2)"
-          FLAG="$(grep READY "$RUNNER_TEMP/flag.out" | cut -d' ' -f2)"
-          echo "plain server $PLAIN, flag server $FLAG"
+          PORT="$(grep READY "$RUNNER_TEMP/s.out" | cut -d' ' -f2)"
           cat > "$RUNNER_TEMP/main.swift" <<'SWIFT'
           import Foundation
 
@@ -37,34 +34,42 @@ jobs:
               var opened: CheckedContinuation<Void, Never>?
               func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol p: String?) { opened?.resume(); opened = nil }
           }
-          let label = CommandLine.arguments[1]
-          let port = CommandLine.arguments[2]
-          for _ in 0..<4 {
+
+          func record(_ port: String) async -> String {
+              var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/stats")!)
+              req.cachePolicy = .reloadIgnoringLocalCacheData
+              guard let (d, _) = try? await URLSession.shared.data(for: req),
+                    let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                    let cs = j["connections"] as? [[String: Any]],
+                    let last = cs.last(where: { ($0["path"] as? String) == "/ws/echo" }) else { return "?" }
+              return last["closeCode"] is NSNull ? "NO-FRAME" : "frame \(last["closeCode"]!)"
+          }
+
+          func trial(_ port: String, invalidate: String) async -> String {
               let d = Delegate()
               let session = URLSession(configuration: .default, delegate: d, delegateQueue: OperationQueue())
               let task = session.webSocketTask(with: URL(string: "ws://127.0.0.1:\(port)/ws/echo")!)
               task.maximumMessageSize = 16 * 1024 * 1024
               await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in d.opened = c; task.resume() }
               task.cancel(with: .normalClosure, reason: Data("done".utf8))
-              session.finishTasksAndInvalidate()
-              try? await Task.sleep(nanoseconds: 500_000_000)
+              switch invalidate {
+              case "at once": session.finishTasksAndInvalidate()
+              case "after 500ms": try? await Task.sleep(nanoseconds: 500_000_000); session.finishTasksAndInvalidate()
+              case "after 500ms (cancel)": try? await Task.sleep(nanoseconds: 500_000_000); session.invalidateAndCancel()
+              default: break   // never in the trial
+              }
+              try? await Task.sleep(nanoseconds: 700_000_000)
+              let r = await record(port)
+              if invalidate == "never" { session.finishTasksAndInvalidate() }
+              return r
           }
-          print("standalone client done against \(label)")
+
+          let port = CommandLine.arguments[1]
+          for variant in ["at once", "after 500ms", "after 500ms (cancel)", "never"] {
+              var out: [String] = []
+              for _ in 0..<4 { out.append(await trial(port, invalidate: variant)) }
+              print("session let go \(variant): " + out.joined(separator: " | "))
+          }
           SWIFT
           swiftc -swift-version 5 -o "$RUNNER_TEMP/diag" "$RUNNER_TEMP/main.swift"
-          for round in 1 2; do
-            "$RUNNER_TEMP/diag" plain "$PLAIN"
-            "$RUNNER_TEMP/diag" flag "$FLAG"
-          done
-          cd runtimes/swift/UndraRuntime
-          UNDRA_DIAG_PORT="$PLAIN" swift test --filter DiagRawTests 2>&1 | grep -E "DIAGRAW echo=false" | head -3
-          UNDRA_DIAG_PORT="$FLAG" swift test --filter DiagRawTests 2>&1 | grep -E "DIAGRAW echo=false" | head -3
-          cd ../../..
-          echo "---- plain server's view (frames received / socket ends):"
-          grep -cE "opcode=8" "$RUNNER_TEMP/plain.out" || true
-          grep -cE "socket end" "$RUNNER_TEMP/plain.out" || true
-          echo "---- flag server's view:"
-          grep -cE "opcode=8" "$RUNNER_TEMP/flag.out" || true
-          grep -cE "socket end" "$RUNNER_TEMP/flag.out" || true
-          echo "---- plain server log:"; grep -E "upgrade|opcode=8|socket (end|close)" "$RUNNER_TEMP/plain.out" | head -40
-          echo "---- flag server log:"; grep -E "upgrade|opcode=8|socket (end|close)" "$RUNNER_TEMP/flag.out" | head -40
+          "$RUNNER_TEMP/diag" "$PORT"
