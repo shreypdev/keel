@@ -93,7 +93,9 @@ on the fix.
 **Generic data types** (`#[undra::api(generic)]`, see `src/impl_/generic.rs`) keep names where they resolve:
 the template's own types are checked once, in the template's module, and an instantiation checks only its
 type arguments, because a `macro_rules!` resolves names at the place it is invoked. An alias of one
-instantiation twice, or outside the crate of its template, is E0070.
+instantiation twice, or outside the crate of its template, is E0070. The template's macro calls
+`<root>::__instantiate!`, so a `crate = ".."` path has to reach a crate that re-exports it (the `undra`
+facade does).
 
 **Persisted state.** A newtype has the bytes of its inner type, so wrapping an existing field in a newtype
 (`id: Uuid` becoming `id: UserId`), or unwrapping it, migrates without a hook (the structural step `T`

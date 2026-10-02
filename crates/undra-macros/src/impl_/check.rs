@@ -395,6 +395,22 @@ impl Checks {
     /// that is a type parameter is checked by each instantiation.
     fn map_key(&mut self, key: &Type) {
         let argument = matches!(key, Type::Group(_));
+        // `Box<K>` is transparent in the schema, so the key is what the box holds.
+        let mut key = key;
+        loop {
+            match key {
+                Type::Paren(inner) => key = &inner.elem,
+                Type::Group(inner) => key = &inner.elem,
+                Type::Path(path) if path.qself.is_none() => {
+                    let boxed = path.path.segments.last().filter(|seg| seg.ident == "Box");
+                    match boxed.map(|seg| type_args(&seg.arguments)) {
+                        Some(args) if args.len() == 1 => key = args[0],
+                        _ => break,
+                    }
+                }
+                _ => break,
+            }
+        }
         if self.scope == Scope::Instance && !argument && self.in_arg == 0 {
             return;
         }
@@ -983,6 +999,13 @@ mod tests {
             ),
             "{out}"
         );
+    }
+
+    #[test]
+    fn a_boxed_key_is_the_key_it_boxes() {
+        let out = emitted("HashMap<Box<UserId>, u8>");
+        assert!(has(&out, "__undra_map_key::<UserId>();"), "{out}");
+        assert!(!has(&out, "__undra_map_key::<Box"), "{out}");
     }
 
     #[test]
