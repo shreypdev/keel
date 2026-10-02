@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::*;
+use undra::background::{BackgroundFuture, BackgroundOutcome, Deadline};
 use undra_ports::fakes::{FailOn, Fakes};
 use undra_ports::{
     AppState, BackgroundReport, Clock, Http, HttpError, HttpRequest, HttpResponse, NetKind,
@@ -15,7 +16,6 @@ use undra_ports::{
 };
 use undra_query::{CtxQuery, QUEUE_KEY};
 use undra_runtime::Port;
-use undra_runtime::background::{BackgroundFuture, BackgroundOutcome, Deadline};
 
 fn post_todos() -> undra_ports::fakes::Matcher {
     undra_ports::fakes::Matcher::post(format!("{API}/todos"))
@@ -336,7 +336,8 @@ fn a_run_fetches_stale_persisted_queries_again_and_writes_them() {
 fn a_task_that_panics_is_contained_reported_and_incomplete() {
     let h = Harness::new();
     h.settle();
-    h.t.runtime().add_background_task(
+    undra::background::register(
+        &h.ctx(),
         "test.explode",
         |_| 1,
         |_ctx: &undra_runtime::Ctx, _deadline: Deadline| -> BackgroundFuture {
