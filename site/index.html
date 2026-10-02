@@ -107,7 +107,7 @@
         </div>
 <svg class="dg dg-wide is-static" viewBox="0 0 1200 608" role="img" aria-labelledby="dgw-t dgw-d" data-by="268" focusable="false">
     <title id="dgw-t">How Undra works</title>
-    <desc id="dgw-d">Three native UIs (SwiftUI, Compose, React) sit above the Rust core. A write from any UI crosses the boundary once per transaction. The core commits one binary change-set, which fans out to every UI's local mirror. Reads never cross the boundary.</desc>
+    <desc id="dgw-d">Four native UIs (SwiftUI, Compose, React, React Native) sit above the Rust core. A write from any UI crosses the boundary once per transaction. The core commits one binary change-set, which fans out to every UI's local mirror. Reads never cross the boundary.</desc>
     <defs>
       <radialGradient id="dgw-halo" cx="50%" cy="50%" r="50%"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.34"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></radialGradient>
       <radialGradient id="dgw-core" cx="50%" cy="0%" r="75%"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.42"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></radialGradient>
@@ -115,74 +115,94 @@
     <rect class="band" x="0" y="246" width="1200" height="44"/>
     <line class="bline" x1="0" y1="268" x2="1200" y2="268"/>
     <g class="beams">
-      <path class="beam" data-beam="w0" d="M180,222 V360"/>
-      <path class="beam" data-beam="w1" d="M540,222 V360"/>
-      <path class="beam" data-beam="w2" d="M900,222 V360"/>
-      <path class="beam" data-beam="c0" d="M600,384 H312 Q300,384 300,372 V222"/>
-      <path class="beam" data-beam="c1" d="M600,384 H648 Q660,384 660,372 V222"/>
-      <path class="beam" data-beam="c2" d="M600,384 H1008 Q1020,384 1020,372 V222"/>
+      <path class="beam" data-beam="w0" d="M188,222 V360"/>
+      <path class="beam" data-beam="w1" d="M452,222 V360"/>
+      <path class="beam" data-beam="w2" d="M716,222 V360"/>
+      <path class="beam" data-beam="w3" d="M980,222 V360"/>
+      <path class="beam" data-beam="c0" d="M600,384 H232 Q220,384 220,372 V222"/>
+      <path class="beam" data-beam="c1" d="M600,384 H496 Q484,384 484,372 V222"/>
+      <path class="beam" data-beam="c2" d="M600,384 H736 Q748,384 748,372 V222"/>
+      <path class="beam" data-beam="c3" d="M600,384 H1000 Q1012,384 1012,372 V222"/>
     </g>
     <g class="dots">
-      <circle class="dot" cx="180" cy="222" r="4"/><circle class="dot" cx="180" cy="360" r="4"/>
-      <circle class="dot" cx="300" cy="222" r="4"/><circle class="dot" cx="300" cy="360" r="4"/>
-      <circle class="dot" cx="540" cy="222" r="4"/><circle class="dot" cx="540" cy="360" r="4"/>
-      <circle class="dot" cx="660" cy="222" r="4"/><circle class="dot" cx="660" cy="360" r="4"/>
-      <circle class="dot" cx="900" cy="222" r="4"/><circle class="dot" cx="900" cy="360" r="4"/>
-      <circle class="dot" cx="1020" cy="222" r="4"/><circle class="dot" cx="1020" cy="360" r="4"/>
+      <circle class="dot" cx="188" cy="222" r="4"/><circle class="dot" cx="188" cy="360" r="4"/>
+      <circle class="dot" cx="220" cy="222" r="4"/><circle class="dot" cx="220" cy="360" r="4"/>
+      <circle class="dot" cx="452" cy="222" r="4"/><circle class="dot" cx="452" cy="360" r="4"/>
+      <circle class="dot" cx="484" cy="222" r="4"/><circle class="dot" cx="484" cy="360" r="4"/>
+      <circle class="dot" cx="716" cy="222" r="4"/><circle class="dot" cx="716" cy="360" r="4"/>
+      <circle class="dot" cx="748" cy="222" r="4"/><circle class="dot" cx="748" cy="360" r="4"/>
+      <circle class="dot" cx="980" cy="222" r="4"/><circle class="dot" cx="980" cy="360" r="4"/>
+      <circle class="dot" cx="1012" cy="222" r="4"/><circle class="dot" cx="1012" cy="360" r="4"/>
     </g>
     <g class="band-labels">
       <g transform="translate(20,257)"><rect class="chip-bg" width="146" height="22" rx="11"/><circle cx="11" cy="11" r="3" class="bnum"/><text class="chip-tx mono" x="21" y="15" style="font-size:11px">reads never cross</text></g>
-      <g transform="translate(312,257)"><rect class="chip-bg" width="216" height="22" rx="11"/><circle cx="11" cy="11" r="3" class="bnum"/><text class="chip-tx mono" x="21" y="15" style="font-size:11px">one crossing per transaction</text></g>
-      <g transform="translate(692,257)"><rect class="chip-bg" width="176" height="22" rx="11"/><circle cx="11" cy="11" r="3" class="bnum"/><text class="chip-tx mono" x="21" y="15" style="font-size:11px">binary change-sets</text></g>
+      <g transform="translate(228,257)"><rect class="chip-bg" width="216" height="22" rx="11"/><circle cx="11" cy="11" r="3" class="bnum"/><text class="chip-tx mono" x="21" y="15" style="font-size:11px">one crossing per transaction</text></g>
+      <g transform="translate(524,257)"><rect class="chip-bg" width="152" height="22" rx="11"/><circle cx="11" cy="11" r="3" class="bnum"/><text class="chip-tx mono" x="21" y="15" style="font-size:11px">binary change-sets</text></g>
       <text class="h-lbl mono" x="1180" y="272" text-anchor="end" style="font-size:10.5px">the boundary</text>
     </g>
     <g data-node="0">
-      <rect class="halo" data-role="halo" x="46" y="-6" width="388" height="262" fill="url(#dgw-halo)"/>
-      <rect class="frame" x="80" y="28" width="320" height="194" rx="18"/>
-      <rect class="frame-hot" data-role="hot" x="80" y="28" width="320" height="194" rx="18"/>
-      <text class="t-title" x="102" y="64">SwiftUI</text>
-      <text class="t-tag mono" x="378" y="63" text-anchor="end">@Observable</text>
-      <g data-role="call"><rect class="call-bg" x="100" y="78" width="191" height="24" rx="7"/><text class="call-tx mono" x="112" y="94.5">store.add(title: &quot;milk&quot;)</text></g>
-      <text data-role="idle" class="t-dim mono" x="102" y="95" opacity="0">reads stay local</text>
-      <text data-role="badge" data-before="1 left" data-after="2 left" class="t-badge mono" x="378" y="95" text-anchor="end">2 left</text>
-      <rect class="mirror" x="94" y="112" width="292" height="102" rx="10"/>
-      <g class="row"><circle class="check check-on" cx="114" cy="137" r="6"/><path d="M111 137 l2.2 2.4 l3.8 -4.6" fill="none" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><text class="t-row" x="130" y="142">Write the spec</text></g>
-      <line class="sep" x1="104" x2="376" y1="150" y2="150"/>
-      <g class="row"><circle class="check" cx="114" cy="163" r="6"/><text class="t-row" x="130" y="168">Ship the core</text></g>
-      <line class="sep" x1="104" x2="376" y1="176" y2="176"/>
-      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="97" y="176" width="286" height="26" rx="6"/><circle class="check" cx="114" cy="189" r="6"/><text class="t-row" x="130" y="194">Buy milk</text></g>
+      <rect class="halo" data-role="halo" x="52" y="-6" width="304" height="262" fill="url(#dgw-halo)"/>
+      <rect class="frame" x="80" y="28" width="248" height="194" rx="18"/>
+      <rect class="frame-hot" data-role="hot" x="80" y="28" width="248" height="194" rx="18"/>
+      <text class="t-title" x="98" y="64">SwiftUI</text>
+      <text class="t-tag mono" x="310" y="63" text-anchor="end">@Observable</text>
+      <g data-role="call"><rect class="call-bg" x="96" y="78" width="155" height="24" rx="7"/><text class="call-tx mono" x="106" y="94.5">add(title: &quot;milk&quot;)</text></g>
+      <text data-role="idle" class="t-dim mono" x="98" y="95" opacity="0">reads stay local</text>
+      <text data-role="badge" data-before="1 left" data-after="2 left" class="t-badge mono" x="310" y="95" text-anchor="end">2 left</text>
+      <rect class="mirror" x="90" y="112" width="228" height="102" rx="10"/>
+      <g class="row"><circle class="check check-on" cx="110" cy="137" r="6"/><path d="M107 137 l2.2 2.4 l3.8 -4.6" fill="none" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><text class="t-row" x="126" y="142">Write the spec</text></g>
+      <line class="sep" x1="100" x2="308" y1="150" y2="150"/>
+      <g class="row"><circle class="check" cx="110" cy="163" r="6"/><text class="t-row" x="126" y="168">Ship the core</text></g>
+      <line class="sep" x1="100" x2="308" y1="176" y2="176"/>
+      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="93" y="176" width="222" height="26" rx="6"/><circle class="check" cx="110" cy="189" r="6"/><text class="t-row" x="126" y="194">Buy milk</text></g>
     </g>
     <g data-node="1">
-      <rect class="halo" data-role="halo" x="406" y="-6" width="388" height="262" fill="url(#dgw-halo)"/>
-      <rect class="frame" x="440" y="28" width="320" height="194" rx="18"/>
-      <rect class="frame-hot" data-role="hot" x="440" y="28" width="320" height="194" rx="18"/>
-      <text class="t-title" x="462" y="64">Compose</text>
-      <text class="t-tag mono" x="738" y="63" text-anchor="end">StateFlow</text>
-      <g data-role="call" opacity="0"><rect class="call-bg" x="460" y="78" width="142" height="24" rx="7"/><text class="call-tx mono" x="472" y="94.5">store.add(&quot;milk&quot;)</text></g>
-      <text data-role="idle" class="t-dim mono" x="462" y="95">reads stay local</text>
-      <text data-role="badge" data-before="1 left" data-after="2 left" class="t-badge mono" x="738" y="95" text-anchor="end">2 left</text>
-      <rect class="mirror" x="454" y="112" width="292" height="102" rx="10"/>
-      <g class="row"><circle class="check check-on" cx="474" cy="137" r="6"/><path d="M471 137 l2.2 2.4 l3.8 -4.6" fill="none" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><text class="t-row" x="490" y="142">Write the spec</text></g>
-      <line class="sep" x1="464" x2="736" y1="150" y2="150"/>
-      <g class="row"><circle class="check" cx="474" cy="163" r="6"/><text class="t-row" x="490" y="168">Ship the core</text></g>
-      <line class="sep" x1="464" x2="736" y1="176" y2="176"/>
-      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="457" y="176" width="286" height="26" rx="6"/><circle class="check" cx="474" cy="189" r="6"/><text class="t-row" x="490" y="194">Buy milk</text></g>
+      <rect class="halo" data-role="halo" x="316" y="-6" width="304" height="262" fill="url(#dgw-halo)"/>
+      <rect class="frame" x="344" y="28" width="248" height="194" rx="18"/>
+      <rect class="frame-hot" data-role="hot" x="344" y="28" width="248" height="194" rx="18"/>
+      <text class="t-title" x="362" y="64">Compose</text>
+      <text class="t-tag mono" x="574" y="63" text-anchor="end">StateFlow</text>
+      <g data-role="call" opacity="0"><rect class="call-bg" x="360" y="78" width="103" height="24" rx="7"/><text class="call-tx mono" x="370" y="94.5">add(&quot;milk&quot;)</text></g>
+      <text data-role="idle" class="t-dim mono" x="362" y="95">reads stay local</text>
+      <text data-role="badge" data-before="1 left" data-after="2 left" class="t-badge mono" x="574" y="95" text-anchor="end">2 left</text>
+      <rect class="mirror" x="354" y="112" width="228" height="102" rx="10"/>
+      <g class="row"><circle class="check check-on" cx="374" cy="137" r="6"/><path d="M371 137 l2.2 2.4 l3.8 -4.6" fill="none" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><text class="t-row" x="390" y="142">Write the spec</text></g>
+      <line class="sep" x1="364" x2="572" y1="150" y2="150"/>
+      <g class="row"><circle class="check" cx="374" cy="163" r="6"/><text class="t-row" x="390" y="168">Ship the core</text></g>
+      <line class="sep" x1="364" x2="572" y1="176" y2="176"/>
+      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="357" y="176" width="222" height="26" rx="6"/><circle class="check" cx="374" cy="189" r="6"/><text class="t-row" x="390" y="194">Buy milk</text></g>
     </g>
     <g data-node="2">
-      <rect class="halo" data-role="halo" x="766" y="-6" width="388" height="262" fill="url(#dgw-halo)"/>
-      <rect class="frame" x="800" y="28" width="320" height="194" rx="18"/>
-      <rect class="frame-hot" data-role="hot" x="800" y="28" width="320" height="194" rx="18"/>
-      <text class="t-title" x="822" y="64">React</text>
-      <text class="t-tag mono" x="1098" y="63" text-anchor="end">useSignal</text>
-      <g data-role="call" opacity="0"><rect class="call-bg" x="820" y="78" width="142" height="24" rx="7"/><text class="call-tx mono" x="832" y="94.5">store.add(&quot;milk&quot;)</text></g>
-      <text data-role="idle" class="t-dim mono" x="822" y="95">reads stay local</text>
-      <text data-role="badge" data-before="1 left" data-after="2 left" class="t-badge mono" x="1098" y="95" text-anchor="end">2 left</text>
-      <rect class="mirror" x="814" y="112" width="292" height="102" rx="10"/>
-      <g class="row"><circle class="check check-on" cx="834" cy="137" r="6"/><path d="M831 137 l2.2 2.4 l3.8 -4.6" fill="none" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><text class="t-row" x="850" y="142">Write the spec</text></g>
-      <line class="sep" x1="824" x2="1096" y1="150" y2="150"/>
-      <g class="row"><circle class="check" cx="834" cy="163" r="6"/><text class="t-row" x="850" y="168">Ship the core</text></g>
-      <line class="sep" x1="824" x2="1096" y1="176" y2="176"/>
-      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="817" y="176" width="286" height="26" rx="6"/><circle class="check" cx="834" cy="189" r="6"/><text class="t-row" x="850" y="194">Buy milk</text></g>
+      <rect class="halo" data-role="halo" x="580" y="-6" width="304" height="262" fill="url(#dgw-halo)"/>
+      <rect class="frame" x="608" y="28" width="248" height="194" rx="18"/>
+      <rect class="frame-hot" data-role="hot" x="608" y="28" width="248" height="194" rx="18"/>
+      <text class="t-title" x="626" y="64">React</text>
+      <text class="t-tag mono" x="838" y="63" text-anchor="end">useSignal</text>
+      <g data-role="call" opacity="0"><rect class="call-bg" x="624" y="78" width="103" height="24" rx="7"/><text class="call-tx mono" x="634" y="94.5">add(&quot;milk&quot;)</text></g>
+      <text data-role="idle" class="t-dim mono" x="626" y="95">reads stay local</text>
+      <text data-role="badge" data-before="1 left" data-after="2 left" class="t-badge mono" x="838" y="95" text-anchor="end">2 left</text>
+      <rect class="mirror" x="618" y="112" width="228" height="102" rx="10"/>
+      <g class="row"><circle class="check check-on" cx="638" cy="137" r="6"/><path d="M635 137 l2.2 2.4 l3.8 -4.6" fill="none" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><text class="t-row" x="654" y="142">Write the spec</text></g>
+      <line class="sep" x1="628" x2="836" y1="150" y2="150"/>
+      <g class="row"><circle class="check" cx="638" cy="163" r="6"/><text class="t-row" x="654" y="168">Ship the core</text></g>
+      <line class="sep" x1="628" x2="836" y1="176" y2="176"/>
+      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="621" y="176" width="222" height="26" rx="6"/><circle class="check" cx="638" cy="189" r="6"/><text class="t-row" x="654" y="194">Buy milk</text></g>
+    </g>
+    <g data-node="3">
+      <rect class="halo" data-role="halo" x="844" y="-6" width="304" height="262" fill="url(#dgw-halo)"/>
+      <rect class="frame" x="872" y="28" width="248" height="194" rx="18"/>
+      <rect class="frame-hot" data-role="hot" x="872" y="28" width="248" height="194" rx="18"/>
+      <text class="t-title" x="890" y="64">React Native</text>
+      <text class="t-tag mono" x="1102" y="63" text-anchor="end">useSignal</text>
+      <g data-role="call" opacity="0"><rect class="call-bg" x="888" y="78" width="103" height="24" rx="7"/><text class="call-tx mono" x="898" y="94.5">add(&quot;milk&quot;)</text></g>
+      <text data-role="idle" class="t-dim mono" x="890" y="95">reads stay local</text>
+      <text data-role="badge" data-before="1 left" data-after="2 left" class="t-badge mono" x="1102" y="95" text-anchor="end">2 left</text>
+      <rect class="mirror" x="882" y="112" width="228" height="102" rx="10"/>
+      <g class="row"><circle class="check check-on" cx="902" cy="137" r="6"/><path d="M899 137 l2.2 2.4 l3.8 -4.6" fill="none" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><text class="t-row" x="918" y="142">Write the spec</text></g>
+      <line class="sep" x1="892" x2="1100" y1="150" y2="150"/>
+      <g class="row"><circle class="check" cx="902" cy="163" r="6"/><text class="t-row" x="918" y="168">Ship the core</text></g>
+      <line class="sep" x1="892" x2="1100" y1="176" y2="176"/>
+      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="885" y="176" width="222" height="26" rx="6"/><circle class="check" cx="902" cy="189" r="6"/><text class="t-row" x="918" y="194">Buy milk</text></g>
     </g>
     <g data-role="core">
       <rect data-role="core-glow" x="80" y="340" width="1040" height="140" fill="url(#dgw-core)" opacity=".5"/>
@@ -207,93 +227,110 @@
     </g>
     <g class="pulses" data-role="pulses"></g>
   </svg>
-<svg class="dg dg-narrow is-static" viewBox="0 0 360 474" role="img" aria-labelledby="dgn-t dgn-d" data-by="186" focusable="false">
+<svg class="dg dg-narrow is-static" viewBox="0 0 360 628" role="img" aria-labelledby="dgn-t dgn-d" data-by="340" focusable="false">
     <title id="dgn-t">How Undra works</title>
-    <desc id="dgn-d">Three native UIs (SwiftUI, Compose, React) sit above the Rust core. A write from any UI crosses the boundary once per transaction. The core commits one binary change-set, which fans out to every UI's local mirror. Reads never cross the boundary.</desc>
+    <desc id="dgn-d">Four native UIs (SwiftUI, Compose, React, React Native) sit above the Rust core. A write from any UI crosses the boundary once per transaction. The core commits one binary change-set, which fans out to every UI's local mirror. Reads never cross the boundary.</desc>
     <defs>
       <radialGradient id="dgn-halo" cx="50%" cy="50%" r="50%"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.34"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></radialGradient>
       <radialGradient id="dgn-core" cx="50%" cy="0%" r="75%"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.42"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></radialGradient>
     </defs>
-    <rect class="band" x="0" y="172" width="360" height="28"/>
-    <line class="bline" x1="0" y1="186" x2="360" y2="186"/>
+    <rect class="band" x="0" y="326" width="360" height="28"/>
+    <line class="bline" x1="0" y1="340" x2="360" y2="340"/>
     <g class="beams">
-      <path class="beam" data-beam="w0" d="M38,152 V236"/>
-      <path class="beam" data-beam="w1" d="M158,152 V236"/>
-      <path class="beam" data-beam="w2" d="M278,152 V236"/>
-      <path class="beam" data-beam="c0" d="M180,258 H94 Q82,258 82,246 V152"/>
-      <path class="beam" data-beam="c1" d="M180,258 H190 Q202,258 202,246 V152"/>
-      <path class="beam" data-beam="c2" d="M180,258 H310 Q322,258 322,246 V152"/>
+      <path class="beam" data-beam="w0" d="M140,124 Q152,124 152,136 V390"/>
+      <path class="beam" data-beam="w1" d="M220,124 Q208,124 208,136 V390"/>
+      <path class="beam" data-beam="w2" d="M46,306 V390"/>
+      <path class="beam" data-beam="w3" d="M258,306 V390"/>
+      <path class="beam" data-beam="c0" d="M180,412 H176 Q164,412 164,400 V116 Q164,104 152,104 H140"/>
+      <path class="beam" data-beam="c1" d="M180,412 H184 Q196,412 196,400 V116 Q196,104 208,104 H220"/>
+      <path class="beam" data-beam="c2" d="M180,412 H114 Q102,412 102,400 V306"/>
+      <path class="beam" data-beam="c3" d="M180,412 H302 Q314,412 314,400 V306"/>
     </g>
     <g class="dots">
-      <circle class="dot" cx="38" cy="152" r="3.2"/><circle class="dot" cx="38" cy="236" r="3.2"/>
-      <circle class="dot" cx="82" cy="152" r="3.2"/><circle class="dot" cx="82" cy="236" r="3.2"/>
-      <circle class="dot" cx="158" cy="152" r="3.2"/><circle class="dot" cx="158" cy="236" r="3.2"/>
-      <circle class="dot" cx="202" cy="152" r="3.2"/><circle class="dot" cx="202" cy="236" r="3.2"/>
-      <circle class="dot" cx="278" cy="152" r="3.2"/><circle class="dot" cx="278" cy="236" r="3.2"/>
-      <circle class="dot" cx="322" cy="152" r="3.2"/><circle class="dot" cx="322" cy="236" r="3.2"/>
+      <circle class="dot" cx="140" cy="124" r="3.2"/><circle class="dot" cx="152" cy="390" r="3.2"/>
+      <circle class="dot" cx="140" cy="104" r="3.2"/><circle class="dot" cx="164" cy="390" r="3.2"/>
+      <circle class="dot" cx="220" cy="124" r="3.2"/><circle class="dot" cx="208" cy="390" r="3.2"/>
+      <circle class="dot" cx="220" cy="104" r="3.2"/><circle class="dot" cx="196" cy="390" r="3.2"/>
+      <circle class="dot" cx="46" cy="306" r="3.2"/><circle class="dot" cx="46" cy="390" r="3.2"/>
+      <circle class="dot" cx="102" cy="306" r="3.2"/><circle class="dot" cx="102" cy="390" r="3.2"/>
+      <circle class="dot" cx="258" cy="306" r="3.2"/><circle class="dot" cx="258" cy="390" r="3.2"/>
+      <circle class="dot" cx="314" cy="306" r="3.2"/><circle class="dot" cx="314" cy="390" r="3.2"/>
     </g>
     <g class="band-labels">
-      <g><circle class="bnum" cx="18" cy="186" r="9"/><text class="bnum-tx mono" x="18" y="190" text-anchor="middle">1</text></g>
-      <g><circle class="bnum" cx="120" cy="186" r="9"/><text class="bnum-tx mono" x="120" y="190" text-anchor="middle">2</text></g>
-      <g><circle class="bnum" cx="240" cy="186" r="9"/><text class="bnum-tx mono" x="240" y="190" text-anchor="middle">3</text></g>
+      <g><circle class="bnum" cx="24" cy="340" r="9"/><text class="bnum-tx mono" x="24" y="344" text-anchor="middle">1</text></g>
+      <g><circle class="bnum" cx="127" cy="340" r="9"/><text class="bnum-tx mono" x="127" y="344" text-anchor="middle">2</text></g>
+      <g><circle class="bnum" cx="233" cy="340" r="9"/><text class="bnum-tx mono" x="233" y="344" text-anchor="middle">3</text></g>
     </g>
     <g data-node="0">
-      <rect class="halo" data-role="halo" x="-14" y="-8" width="148" height="182" fill="url(#dgn-halo)"/>
-      <rect class="frame" x="8" y="14" width="104" height="138" rx="14"/>
-      <rect class="frame-hot" data-role="hot" x="8" y="14" width="104" height="138" rx="14"/>
+      <rect class="halo" data-role="halo" x="-14" y="-8" width="176" height="182" fill="url(#dgn-halo)"/>
+      <rect class="frame" x="8" y="14" width="132" height="138" rx="14"/>
+      <rect class="frame-hot" data-role="hot" x="8" y="14" width="132" height="138" rx="14"/>
       <text class="t-title" x="19" y="38" style="font-size:13px">SwiftUI</text>
-      <text data-role="badge" data-before="1" data-after="2" class="t-badge mono" x="100" y="38" text-anchor="end" style="font-size:12px;fill:var(--accent)">2</text>
+      <text data-role="badge" data-before="1" data-after="2" class="t-badge mono" x="128" y="38" text-anchor="end" style="font-size:12px;fill:var(--accent)">2</text>
       <g data-role="call"><text class="call-tx mono" x="19" y="57" style="font-size:10.5px">store.add()</text></g>
       <text data-role="idle" class="t-dim mono" x="19" y="57" style="font-size:10.5px" opacity="0">local reads</text>
-      <rect class="mirror" x="16" y="68" width="88" height="76" rx="8"/>
-      <g class="row"><circle class="check check-on" cx="30" cy="86" r="4.6"/><rect class="bar" x="42" y="82.5" width="56" height="7" rx="3.5"/></g>
-      <g class="row"><circle class="check" cx="30" cy="110" r="4.6"/><rect class="bar" x="42" y="106.5" width="44" height="7" rx="3.5"/></g>
-      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="18" y="123" width="84" height="22" rx="5"/><circle class="check" cx="30" cy="134" r="4.6"/><rect class="bar" x="42" y="130.5" width="50" height="7" rx="3.5"/></g>
+      <rect class="mirror" x="16" y="68" width="116" height="76" rx="8"/>
+      <g class="row"><circle class="check check-on" cx="30" cy="86" r="4.6"/><rect class="bar" x="42" y="82.5" width="81" height="7" rx="3.5"/></g>
+      <g class="row"><circle class="check" cx="30" cy="110" r="4.6"/><rect class="bar" x="42" y="106.5" width="64" height="7" rx="3.5"/></g>
+      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="18" y="123" width="112" height="22" rx="5"/><circle class="check" cx="30" cy="134" r="4.6"/><rect class="bar" x="42" y="130.5" width="73" height="7" rx="3.5"/></g>
     </g>
     <g data-node="1">
-      <rect class="halo" data-role="halo" x="106" y="-8" width="148" height="182" fill="url(#dgn-halo)"/>
-      <rect class="frame" x="128" y="14" width="104" height="138" rx="14"/>
-      <rect class="frame-hot" data-role="hot" x="128" y="14" width="104" height="138" rx="14"/>
-      <text class="t-title" x="139" y="38" style="font-size:13px">Compose</text>
-      <text data-role="badge" data-before="1" data-after="2" class="t-badge mono" x="220" y="38" text-anchor="end" style="font-size:12px;fill:var(--accent)">2</text>
-      <g data-role="call" opacity="0"><text class="call-tx mono" x="139" y="57" style="font-size:10.5px">store.add()</text></g>
-      <text data-role="idle" class="t-dim mono" x="139" y="57" style="font-size:10.5px">local reads</text>
-      <rect class="mirror" x="136" y="68" width="88" height="76" rx="8"/>
-      <g class="row"><circle class="check check-on" cx="150" cy="86" r="4.6"/><rect class="bar" x="162" y="82.5" width="56" height="7" rx="3.5"/></g>
-      <g class="row"><circle class="check" cx="150" cy="110" r="4.6"/><rect class="bar" x="162" y="106.5" width="44" height="7" rx="3.5"/></g>
-      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="138" y="123" width="84" height="22" rx="5"/><circle class="check" cx="150" cy="134" r="4.6"/><rect class="bar" x="162" y="130.5" width="50" height="7" rx="3.5"/></g>
+      <rect class="halo" data-role="halo" x="198" y="-8" width="176" height="182" fill="url(#dgn-halo)"/>
+      <rect class="frame" x="220" y="14" width="132" height="138" rx="14"/>
+      <rect class="frame-hot" data-role="hot" x="220" y="14" width="132" height="138" rx="14"/>
+      <text class="t-title" x="231" y="38" style="font-size:13px">Compose</text>
+      <text data-role="badge" data-before="1" data-after="2" class="t-badge mono" x="340" y="38" text-anchor="end" style="font-size:12px;fill:var(--accent)">2</text>
+      <g data-role="call" opacity="0"><text class="call-tx mono" x="231" y="57" style="font-size:10.5px">store.add()</text></g>
+      <text data-role="idle" class="t-dim mono" x="231" y="57" style="font-size:10.5px">local reads</text>
+      <rect class="mirror" x="228" y="68" width="116" height="76" rx="8"/>
+      <g class="row"><circle class="check check-on" cx="242" cy="86" r="4.6"/><rect class="bar" x="254" y="82.5" width="81" height="7" rx="3.5"/></g>
+      <g class="row"><circle class="check" cx="242" cy="110" r="4.6"/><rect class="bar" x="254" y="106.5" width="64" height="7" rx="3.5"/></g>
+      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="230" y="123" width="112" height="22" rx="5"/><circle class="check" cx="242" cy="134" r="4.6"/><rect class="bar" x="254" y="130.5" width="73" height="7" rx="3.5"/></g>
     </g>
     <g data-node="2">
-      <rect class="halo" data-role="halo" x="226" y="-8" width="148" height="182" fill="url(#dgn-halo)"/>
-      <rect class="frame" x="248" y="14" width="104" height="138" rx="14"/>
-      <rect class="frame-hot" data-role="hot" x="248" y="14" width="104" height="138" rx="14"/>
-      <text class="t-title" x="259" y="38" style="font-size:13px">React</text>
-      <text data-role="badge" data-before="1" data-after="2" class="t-badge mono" x="340" y="38" text-anchor="end" style="font-size:12px;fill:var(--accent)">2</text>
-      <g data-role="call" opacity="0"><text class="call-tx mono" x="259" y="57" style="font-size:10.5px">store.add()</text></g>
-      <text data-role="idle" class="t-dim mono" x="259" y="57" style="font-size:10.5px">local reads</text>
-      <rect class="mirror" x="256" y="68" width="88" height="76" rx="8"/>
-      <g class="row"><circle class="check check-on" cx="270" cy="86" r="4.6"/><rect class="bar" x="282" y="82.5" width="56" height="7" rx="3.5"/></g>
-      <g class="row"><circle class="check" cx="270" cy="110" r="4.6"/><rect class="bar" x="282" y="106.5" width="44" height="7" rx="3.5"/></g>
-      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="258" y="123" width="84" height="22" rx="5"/><circle class="check" cx="270" cy="134" r="4.6"/><rect class="bar" x="282" y="130.5" width="50" height="7" rx="3.5"/></g>
+      <rect class="halo" data-role="halo" x="-14" y="146" width="176" height="182" fill="url(#dgn-halo)"/>
+      <rect class="frame" x="8" y="168" width="132" height="138" rx="14"/>
+      <rect class="frame-hot" data-role="hot" x="8" y="168" width="132" height="138" rx="14"/>
+      <text class="t-title" x="19" y="192" style="font-size:13px">React</text>
+      <text data-role="badge" data-before="1" data-after="2" class="t-badge mono" x="128" y="192" text-anchor="end" style="font-size:12px;fill:var(--accent)">2</text>
+      <g data-role="call" opacity="0"><text class="call-tx mono" x="19" y="211" style="font-size:10.5px">store.add()</text></g>
+      <text data-role="idle" class="t-dim mono" x="19" y="211" style="font-size:10.5px">local reads</text>
+      <rect class="mirror" x="16" y="222" width="116" height="76" rx="8"/>
+      <g class="row"><circle class="check check-on" cx="30" cy="240" r="4.6"/><rect class="bar" x="42" y="236.5" width="81" height="7" rx="3.5"/></g>
+      <g class="row"><circle class="check" cx="30" cy="264" r="4.6"/><rect class="bar" x="42" y="260.5" width="64" height="7" rx="3.5"/></g>
+      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="18" y="277" width="112" height="22" rx="5"/><circle class="check" cx="30" cy="288" r="4.6"/><rect class="bar" x="42" y="284.5" width="73" height="7" rx="3.5"/></g>
+    </g>
+    <g data-node="3">
+      <rect class="halo" data-role="halo" x="198" y="146" width="176" height="182" fill="url(#dgn-halo)"/>
+      <rect class="frame" x="220" y="168" width="132" height="138" rx="14"/>
+      <rect class="frame-hot" data-role="hot" x="220" y="168" width="132" height="138" rx="14"/>
+      <text class="t-title" x="231" y="192" style="font-size:13px">React Native</text>
+      <text data-role="badge" data-before="1" data-after="2" class="t-badge mono" x="340" y="192" text-anchor="end" style="font-size:12px;fill:var(--accent)">2</text>
+      <g data-role="call" opacity="0"><text class="call-tx mono" x="231" y="211" style="font-size:10.5px">store.add()</text></g>
+      <text data-role="idle" class="t-dim mono" x="231" y="211" style="font-size:10.5px">local reads</text>
+      <rect class="mirror" x="228" y="222" width="116" height="76" rx="8"/>
+      <g class="row"><circle class="check check-on" cx="242" cy="240" r="4.6"/><rect class="bar" x="254" y="236.5" width="81" height="7" rx="3.5"/></g>
+      <g class="row"><circle class="check" cx="242" cy="264" r="4.6"/><rect class="bar" x="254" y="260.5" width="64" height="7" rx="3.5"/></g>
+      <g data-row="new" class="row-new"><rect class="hl" data-role="hl" x="230" y="277" width="112" height="22" rx="5"/><circle class="check" cx="242" cy="288" r="4.6"/><rect class="bar" x="254" y="284.5" width="73" height="7" rx="3.5"/></g>
     </g>
     <g data-role="core">
-      <rect data-role="core-glow" x="8" y="220" width="344" height="110" fill="url(#dgn-core)" opacity=".5"/>
-      <rect class="core" x="8" y="236" width="344" height="226" rx="18"/>
-      <text class="t-core" x="22" y="296" style="font-size:22px">Rust core</text>
-      <text class="h-lbl mono" x="22" y="322" style="font-size:9.5px">store · Todos</text>
-      <g data-chip="todos"><rect class="chip" x="22" y="328" width="54" height="24" rx="7"/><rect class="chip-on dirty" data-role="on" x="22" y="328" width="54" height="24" rx="7"/><text class="chip-t mono" x="49" y="344" text-anchor="middle" style="font-size:10.5px">todos</text></g>
-      <g data-chip="filter"><rect class="chip" x="82" y="328" width="54" height="24" rx="7"/><rect class="chip-on" data-role="on" x="82" y="328" width="54" height="24" rx="7"/><text class="chip-t mono" x="109" y="344" text-anchor="middle" style="font-size:10.5px">filter</text></g>
-      <g data-chip="visible"><rect class="chip" x="142" y="328" width="62" height="24" rx="7"/><rect class="chip-on dirty" data-role="on" x="142" y="328" width="62" height="24" rx="7"/><text class="chip-t mono" x="173" y="344" text-anchor="middle" style="font-size:10.5px">visible</text></g>
-      <g data-chip="remaining"><rect class="chip" x="210" y="328" width="78" height="24" rx="7"/><rect class="chip-on dirty" data-role="on" x="210" y="328" width="78" height="24" rx="7"/><text class="chip-t mono" x="249" y="344" text-anchor="middle" style="font-size:10.5px">remaining</text></g>
-      <text class="h-lbl mono" x="22" y="376" style="font-size:9.5px">change-set</text>
-      <g data-cell="0"><rect class="cell" x="22" y="382" width="76" height="24" rx="6"/><rect class="cell-on" data-role="on" x="22" y="382" width="76" height="24" rx="6" opacity=".9"/><text class="cell-t mono" x="60" y="398" text-anchor="middle" data-role="t" style="font-size:10px">ChangeSet</text></g>
-      <g data-cell="1"><rect class="cell" x="104" y="382" width="50" height="24" rx="6"/><rect class="cell-on" data-role="on" x="104" y="382" width="50" height="24" rx="6" opacity=".9"/><text class="cell-t mono" x="129" y="398" text-anchor="middle" data-role="t" style="font-size:10px">todos</text></g>
-      <g data-cell="2"><rect class="cell" x="160" y="382" width="60" height="24" rx="6"/><rect class="cell-on" data-role="on" x="160" y="382" width="60" height="24" rx="6" opacity=".9"/><text class="cell-t mono" x="190" y="398" text-anchor="middle" data-role="t" style="font-size:10px">visible</text></g>
-      <g data-cell="3"><rect class="cell" x="226" y="382" width="78" height="24" rx="6"/><rect class="cell-on" data-role="on" x="226" y="382" width="78" height="24" rx="6" opacity=".9"/><text class="cell-t mono" x="265" y="398" text-anchor="middle" data-role="t" style="font-size:10px">remaining</text></g>
-      <line class="core-line" x1="22" x2="338" y1="422" y2="422"/>
-      <text class="t-dim mono" x="22" y="437" style="font-size:9.5px">ports  Http · Kv · SecureStore · Fs · Clock ·</text>
-      <text class="t-dim mono" x="22" y="450" style="font-size:9.5px">Rng · Log · Timer · Connectivity · Lifecycle</text>
-      <g data-role="commit"><rect class="commit-bg" x="144" y="244" width="72" height="28" rx="8"/><rect class="commit-on" data-role="on" x="144" y="244" width="72" height="28" rx="8" opacity="1"/><text class="commit-t mono" x="180" y="262" text-anchor="middle" style="font-size:11px">commit</text><text class="commit-t-on mono" data-role="t" x="180" y="262" text-anchor="middle" opacity="1" style="font-size:11px">commit</text></g>
+      <rect data-role="core-glow" x="8" y="374" width="344" height="110" fill="url(#dgn-core)" opacity=".5"/>
+      <rect class="core" x="8" y="390" width="344" height="226" rx="18"/>
+      <text class="t-core" x="22" y="450" style="font-size:22px">Rust core</text>
+      <text class="h-lbl mono" x="22" y="476" style="font-size:9.5px">store · Todos</text>
+      <g data-chip="todos"><rect class="chip" x="22" y="482" width="54" height="24" rx="7"/><rect class="chip-on dirty" data-role="on" x="22" y="482" width="54" height="24" rx="7"/><text class="chip-t mono" x="49" y="498" text-anchor="middle" style="font-size:10.5px">todos</text></g>
+      <g data-chip="filter"><rect class="chip" x="82" y="482" width="54" height="24" rx="7"/><rect class="chip-on" data-role="on" x="82" y="482" width="54" height="24" rx="7"/><text class="chip-t mono" x="109" y="498" text-anchor="middle" style="font-size:10.5px">filter</text></g>
+      <g data-chip="visible"><rect class="chip" x="142" y="482" width="62" height="24" rx="7"/><rect class="chip-on dirty" data-role="on" x="142" y="482" width="62" height="24" rx="7"/><text class="chip-t mono" x="173" y="498" text-anchor="middle" style="font-size:10.5px">visible</text></g>
+      <g data-chip="remaining"><rect class="chip" x="210" y="482" width="78" height="24" rx="7"/><rect class="chip-on dirty" data-role="on" x="210" y="482" width="78" height="24" rx="7"/><text class="chip-t mono" x="249" y="498" text-anchor="middle" style="font-size:10.5px">remaining</text></g>
+      <text class="h-lbl mono" x="22" y="530" style="font-size:9.5px">change-set</text>
+      <g data-cell="0"><rect class="cell" x="22" y="536" width="76" height="24" rx="6"/><rect class="cell-on" data-role="on" x="22" y="536" width="76" height="24" rx="6" opacity=".9"/><text class="cell-t mono" x="60" y="552" text-anchor="middle" data-role="t" style="font-size:10px">ChangeSet</text></g>
+      <g data-cell="1"><rect class="cell" x="104" y="536" width="50" height="24" rx="6"/><rect class="cell-on" data-role="on" x="104" y="536" width="50" height="24" rx="6" opacity=".9"/><text class="cell-t mono" x="129" y="552" text-anchor="middle" data-role="t" style="font-size:10px">todos</text></g>
+      <g data-cell="2"><rect class="cell" x="160" y="536" width="60" height="24" rx="6"/><rect class="cell-on" data-role="on" x="160" y="536" width="60" height="24" rx="6" opacity=".9"/><text class="cell-t mono" x="190" y="552" text-anchor="middle" data-role="t" style="font-size:10px">visible</text></g>
+      <g data-cell="3"><rect class="cell" x="226" y="536" width="78" height="24" rx="6"/><rect class="cell-on" data-role="on" x="226" y="536" width="78" height="24" rx="6" opacity=".9"/><text class="cell-t mono" x="265" y="552" text-anchor="middle" data-role="t" style="font-size:10px">remaining</text></g>
+      <line class="core-line" x1="22" x2="338" y1="576" y2="576"/>
+      <text class="t-dim mono" x="22" y="591" style="font-size:9.5px">ports  Http · Kv · SecureStore · Fs · Clock ·</text>
+      <text class="t-dim mono" x="22" y="604" style="font-size:9.5px">Rng · Log · Timer · Connectivity · Lifecycle</text>
+      <g data-role="commit"><rect class="commit-bg" x="144" y="398" width="72" height="28" rx="8"/><rect class="commit-on" data-role="on" x="144" y="398" width="72" height="28" rx="8" opacity="1"/><text class="commit-t mono" x="180" y="416" text-anchor="middle" style="font-size:11px">commit</text><text class="commit-t-on mono" data-role="t" x="180" y="416" text-anchor="middle" opacity="1" style="font-size:11px">commit</text></g>
     </g>
     <g class="pulses" data-role="pulses"></g>
   </svg>
