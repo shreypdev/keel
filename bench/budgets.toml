@@ -892,21 +892,23 @@ tolerance = 0.05
 # `restore` run at the call (their order with the calls around them is their meaning), the page's background window
 # calls `run_background` itself (a page being left, or offline, cannot fetch a chunk), and a port error's field and a
 # close frame's reason are sentences in both builds. Recorded after it: 15,811 (190 under the budget), with the helper
-# 16,333, all features 40,221 (27,455 + 12,766). The next change that grows the chunk by 190 bytes is over the budget:
-# make room (ADR-057's levers not taken: host events by use first, about 530) or restate it in an ADR.
+# 16,333, all features 40,221 (27,455 + 12,766). After L3 (the framed channel) and the merge of reload-handles (ADR-059:
+# no query-handle re-creation in recovery): 15,774 (226 under), with the helper 16,285, all features 39,922 (27,064 +
+# 12,858). The next change that grows the chunk by 226 bytes is over the budget: make room (ADR-057's levers not taken:
+# host events by use first, about 530) or restate it in an ADR.
 [size."web/hello-runtime-js"]
 budget_gzip_bytes = 16000
-measured_gzip_bytes = 15811
+measured_gzip_bytes = 15774
 tolerance = 0.05
 
 [size."web/hello-runtime-js-with-helper"]
 budget_gzip_bytes = 16600
-measured_gzip_bytes = 16333
+measured_gzip_bytes = 16285
 tolerance = 0.05
 
 [size."web/all-features-runtime-js"]
 budget_gzip_bytes = 42400
-measured_gzip_bytes = 40221
+measured_gzip_bytes = 39922
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------

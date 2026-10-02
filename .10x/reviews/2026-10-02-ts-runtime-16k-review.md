@@ -45,6 +45,9 @@ one moment a page cannot make one (H3), and text that leaves the runtime as data
 **Sizes** (`scripts/wasm-size.sh` on `124cb34` + `main`, zlib 9): `web/hello-runtime-js` **15,680**, with the helper **16,191**, all features
 **40,100** (27,355 + 12,745): the implementer's numbers to the byte, the module list unchanged. After the fixes (`--record`): **15,811**,
 **16,333**, **40,221** (27,455 + 12,766); the wasm line stays `main`'s (this host's rustc 1.99.0 measures 116,471 by path).
+After L3 and the merges of `main` (`14a4689`, test-pacing) and `wt/reload-handles` (`7e5d238`, ADR-059, which removed the query-handle
+re-creation from recovery): **15,774** (226 under the budget), **16,285**, **39,922** (27,064 + 12,858), recorded; the wasm line is the one
+reload-handles recorded (118,409; this host measures 118,482).
 
 **What a hello page loads before it shows state**: the whole template app built with the production package and opened in Chromium (the
 Browser pane): `index.js`, the shared `payloads` chunk (modulepreloaded), the CSS and the wasm; "0 left" painted, a todo added, no on-demand
@@ -76,8 +79,11 @@ Local, on this machine (load 6 to 15 from other agents' builds):
   allocation flake, N6; Bench, Two cores, Site green), `aff1e5f` (CI red: the Swift S14 build-B wait on the iOS floor job, N7; Bench, Two
   cores, Site green). After the third merge of `main` (`3c279a6`): the three JavaScript rows re-measured unchanged (15,811 / 16,333 /
   40,221; the wasm is main's 117,165), the golden test green, and `ci/rust` in a clone green up to the cdylib step when the session closed.
-* **Not done when the session closed:** a green CI run on the final head (pushed at the end, not watched), `ci-local` for the other jobs on
-  that head, and a fix of N7 (main's S14 wait) if it recurs. The verdict stands on the findings; landing waits for that run.
+* **The resumed session** closed L3, L5 and L6 (each test failed first), merged `main` `14a4689` and `wt/reload-handles` `7e5d238` (conflicts in
+  `recovery.ts`, its test and the payload docs resolved for ADR-059 over the typed channel; codes 166 and 167, said only by the removed
+  re-creation, retired), re-recorded the rows, and ran `ci-local` for `ci/ts`, `ci/wasm-ffi`, `ci/contracts`, `ci/react-native`,
+  `ci/playground-web`, `two-cores/jvm-and-node`, `ci/rust`, `bench/size` and `site/build` before the final push; the hosted run of the
+  pushed head is in the report.
 * `node site/scripts/build-all.mjs` (current) and `node site/scripts/check-links.mjs --words` (347 of 350).
 * Not verified here: the Swift column and the iOS jobs (macOS 15 runners; the piece touches no Swift), webpack and Metro resolution (not
   installed; the conditions were read, and Node's `--conditions` reproduce them), the device bench in Chromium (the Node call path was measured

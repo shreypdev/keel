@@ -353,6 +353,12 @@ the first two items), with the helper **16,333** (16,600), all features **40,221
 on-demand chunks). The call path on Node, base and this tree alternating four times on one host (load 11): awaited call 313 to 316 ns
 before, 325 to 333 after (+4%), `callSync` 162 to 168 both (budgets 1,600 and 800).
 
+The review's lows changed two public edges: `attach` refuses a transport that has some of the seven control methods and not the
+others (`UndraError("options")`, T0246; every transport but the in-process host goes through `framed.ts`'s `channel()`), and
+`mirrorWaiters` is exported, so a mirror without waiters (`new Mirror()`, an in-process core's) gets `whenObserved` by installing them;
+without them it refuses typed and says so. After those and the merge of ADR-059 (no query-handle re-creation in recovery): **15,774**,
+with the helper **16,285**, all features **39,922**.
+
 ## Levers measured and not taken
 
 | Lever | Worth | Why not |

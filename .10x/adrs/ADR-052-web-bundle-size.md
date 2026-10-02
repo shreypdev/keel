@@ -649,4 +649,5 @@ ports) stand, and ADR-057's rows 1 to 15 are what came after. `scripts/wasm-size
 `scripts/web-size-all-features.ts`, `bench/budgets.toml` (three `[size]` tables for the JavaScript, comments with the history) and the
 size job of `bench.yml` follow. The wasm line is unchanged by this piece.
 The piece's review moved 131 bytes back into the first chunk (`snapshot`/`restore` at the call, the background window without a
-fetch: ADR-057, "Review"): recorded **15,811**, with the helper 16,333, all features 40,221.
+fetch: ADR-057, "Review"): recorded **15,811**, with the helper 16,333, all features 40,221; after its lows and the merge of ADR-059,
+**15,774**, 16,285 and 39,922.
