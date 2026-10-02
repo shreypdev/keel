@@ -106,7 +106,7 @@ impl Ctx<'_> {
             w,
             &format!(
                 "{docs}The app implements it and passes it to the core, which keeps it until it lets go of it.\n\
-                 {delivery} [weak] wraps an implementation without keeping it alive."
+                 {delivery}\n[weak] wraps an implementation without keeping it alive."
             ),
             &[],
         );

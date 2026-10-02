@@ -16,7 +16,8 @@ import java.lang.ref.WeakReference
  *
  * The app implements it and passes it to the core, which keeps it until it lets go of it.
  * The core calls it off the main thread, one call at a time per instance, in the order
- * it made the calls. [weak] wraps an implementation without keeping it alive.
+ * it made the calls.
+ * [weak] wraps an implementation without keeping it alive.
  */
 interface TokenProvider {
     /**
@@ -92,7 +93,8 @@ internal object TokenProviderBridge : UndraCallbackBridge<TokenProvider>(
  *
  * The app implements it and passes it to the core, which keeps it until it lets go of it.
  * The core calls it on the main thread, in order with the stores' changes: a method sees
- * the stores as they were when the core called it. [weak] wraps an implementation without keeping it alive.
+ * the stores as they were when the core called it.
+ * [weak] wraps an implementation without keeping it alive.
  */
 interface UploadListener {
     /** Bytes sent so far. */
