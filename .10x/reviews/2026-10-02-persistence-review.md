@@ -11,8 +11,9 @@ R7, R9, R11, R12), ADR-037 and ADR-049 with their implementation notes, ADR-022,
 the Swift, Kotlin and `android-adapters` storage adapters, the contract columns (S14, S15, S20–S22) and the dev reload
 (`undra-cli` `reload.rs`, the runner template). Two read-only sub-audits (the storage adapters of every platform; the
 web recovery sequence) fed findings H2 and H3, each then reproduced here with a failing test before it was fixed.
-**Merge:** `main` `5f5c3fb` (the ABI table, ADR-044, S26, the two-core app) merged at `cf6e13a`. **Fixes:**
-`ea81c3c`, `ee9a66e`, `7fda3b7`, `a0ebff2`, `a9c6999`, `TBD-q`; tests `96895a5`; size record `TBD-size`.
+**Merges:** `main` `5f5c3fb` (the ABI table, ADR-044, S26, the two-core app) at `cf6e13a`; `main` `f35c038` (devtools,
+ADR-054) at `586624b`. **Fixes:** `ea81c3c`, `ee9a66e`, `7fda3b7`, `a0ebff2`, `a9c6999`, `a3f1e91`, `e22b153`,
+`db1f334`; tests `96895a5`; the site's merged pages `fafd2c6`; size records `30cb08f`, `a1229cf`.
 
 ## Verdict
 
@@ -23,7 +24,7 @@ migration agree on thousands of random (type, value, schema-evolution) triples, 
 the new type; the hand-written closure JSON writer is `serde_json::to_string` on generated closures (every escape,
 control characters, astral characters, the numeric limits), its reader reads both back and never accepts a spelling
 that means something else; the schema hash of every schema that does not use the standard ports is unchanged by this
-piece (all ten non-stdlib bindgen goldens keep their hash; only `stdlib`'s moved, by the storage signatures).
+piece (all nine non-stdlib bindgen goldens keep their hash; only `stdlib`'s moved, by the storage signatures).
 
 Three Highs, all fixed with a test that fails without the fix:
 
@@ -38,10 +39,13 @@ Three Highs, all fixed with a test that fails without the fix:
   dead core that answered "restarted" for ever (and, with nothing observed, even fired `onCoreRestarted`).
 
 One blocking merge finding: after `main`'s ABI table the hello-world web core was **120,188 bytes gzipped, 188 over the
-120,000 budget** (F1). The implementer's lever is applied (the standard ports' dispatchers linked by use): **116,677**,
-3,323 bytes of headroom. Two Mediums fixed (the web restore floor could go down across restarts; an old worker script
-with `worker.ports` trapped instead of refusing at load), and the record's open item 2 is done: `undra dev` now carries
-the state across a schema change it can migrate (M3).
+120,000 budget** (F1). The implementer's lever is applied (the standard ports' dispatchers linked by use): **116,677** (now **116,800** with H1's check and devtools' inspector seam), 3,200 bytes of headroom.
+Four Mediums fixed: the web restore floor could go down across restarts (M1); an old worker script with `worker.ports`
+trapped instead of refusing at load (M2); the React Native contract column, which CI runs, failed S14 and S15 because
+its harness never loaded build B (M4); and the record's open item 2 is done: `undra dev` now carries the state across a
+schema change it can migrate (M3). Three merge interactions fixed: the Swift column's build-B process still called the C
+ABI v1 `undra_schema_hash` (it did not compile, so the second process ran a stale binary), `main`'s reserved-entry test
+caught this piece's two new TypeScript `Undra…` names, and the cross-merge's site pages are merged three-way.
 
 ## Findings
 
@@ -57,7 +61,9 @@ instead, and `Runtime::bind_dyn_port_with` / `Ctx::bind_dyn_port_with` bind a Ru
 dispatcher raw calls run through (`fakes::install` and the dev runner's `Clock`/`Rng`/`Log` do). The accessors
 (`undra_ports::kv(&ctx)`) never needed one; app ports are unchanged. Tests: the standard ports register no dispatcher;
 a binding without one answers raw calls unavailable, with one it runs them; the macro's by-use expansion. Measured
-**273,685 bytes, 116,677 gzipped** (−3,511); re-recorded (`TBD-size`). SPEC 16.1, an ADR-052 note.
+**273,685 bytes, 116,677 gzipped** (−3,511); with H1's check 116,731, re-recorded (`30cb08f`). SPEC 16.1, an ADR-052 note.
+The JavaScript runtime is the tighter one: **25,984 of 26,000** after M2 (whose first wording put it at 26,032, 32 over;
+the message was shortened).
 
 ### H1 — a mistyped store-and-signal hook restored wrong values with `Ok` (fixed, `ee9a66e`)
 
@@ -124,10 +130,31 @@ rebuild removed counts among the objects not carried over. The notice says `Relo
 gives 6) and `a_schema_change_the_state_cannot_follow_resets_it_and_says_why` (a signal renamed); the `reload.rs`
 unit test; SPEC 5.10 and `docs/DEV_LOOP.md`.
 
+### M4 — the React Native contract column failed S14 and S15 (fixed, `db1f334`)
+
+CI runs `npm run test:contract` in `runtimes/rn/@undra/react-native`: `contract-tests/ts`'s scenario files with the
+harness swapped for the module's. That harness ignored `boot({ build: "B" })` and loaded build A, so S14 step 8 timed out
+("waiting for build B to read build A's queue") and S15 asserted "build B is another schema than the bindings'". It now
+has `playgroundModule(build)`, `PLAYGROUND_WASM_B` (what `contract-tests/ts/run.sh` builds) and loads build B with the hash
+it reports: 18 passed, 1 skipped (was 2 failed). The column still excludes S20 and S26 (open item).
+
+### Merge interactions (fixed)
+
+* **The Swift column's build B** (`e22b153`): `MigrationBuildB.swift` called `undra_schema_hash()`, gone with ABI v2, so
+  the test target did not compile and `run.sh`'s second process ran a stale binary ("the core in .build/core is build
+  A"). It reads the hash from the `playground_core` table and loads through `.inproc(api:)`; the S20 method is
+  `testS20_`. Swift column 21/21 with "MIGRATION S14/S15 build B ok".
+* **Reserved entries** (`a3f1e91`): `main`'s ADR-044 test, every `Undra…` name a runtime declares is a reserved
+  namespace entry, failed on the merged tree for `UndraCoreRestarted` and `UndraPanicReport`.
+* **The site** (`fafd2c6`): the cross-merge took `main`'s side of the conflicted pages for regeneration, which dropped
+  this piece's prose; they are merged three-way (`docs.json` lists both new pages) and regenerated.
+* **The runners**: build B beside S26's two cores in all three `run.sh`, the libraries renamed `lib<namespace>`, the
+  Kotlin build-B process loading through the bindings' `UndraCoreNative` (`cf6e13a`).
+
 ### Lows and coverage added
 
 * L1 — the `Corrupt`-queue path (`queue.rs:398`: a queue the store reports `Corrupt` becomes a dead letter with no
-  bytes and counts as read) had no test anywhere; `crates/undra-query/tests/storage.rs` now has one (`TBD-q`).
+  bytes and counts as read) had no test anywhere; `crates/undra-query/tests/storage.rs` now has one (`a3f1e91`).
 * Coverage (`96895a5`): the damaged-snapshot fuzz, the streamed-vs-tree differential on random schema evolutions plus
   a hostile-bytes proptest, and the closure-JSON differential against `serde_json` (all described under the attacks).
 
@@ -208,7 +235,17 @@ unit test; SPEC 5.10 and `docs/DEV_LOOP.md`.
   per round; a trap during the restart counts against the budget; the fourth trap within `perMs` (`maxRestarts` 3)
   leaves the core closed with `UndraTransportError("trap")` and `onClose` once. Found: H3, M1.
 * **The snapshot keeper at 10k commits/s:** O(1) per change-set (a flag; one timer per period; `requestIdleCallback`
-  where there is one), one O(state) snapshot per `snapshotEveryMs`. TBD-stress.
+  where there is one), one O(state) snapshot per `snapshotEveryMs`. Measured on the built playground (`vite preview`,
+  the browser pane, recovery on, the Stress screen at 10k/s): 9,996 generated and 10,078 change-sets received a second,
+  83 drains a second, drain p50 under the 0.1 ms clock step and p99 300 µs, 734 ns per change-set, 0 dropped frames in
+  5 s, JS heap 18.7 MB. "Crash the core" while it ran: restarted from a snapshot 894 ms old, 0 calls failed, 0 objects
+  stale; the firehose, a core task, is not in a snapshot and reads "stopped" (as designed).
+* **The live demo** (Counter): 3, "Crash the core" → "the call failed: restarted", "1 restart: crashed on purpose from
+  the debug panel, stores restored from a snapshot 967 ms old", the counter still 3, then 4. (Read through the page's
+  text; the pane was not displayed, so a screenshot could not be taken.)
+* **The web bench rows** (`npm run bench:recovery`, headless Chromium, 3 runs): `ts/snapshot_take_100kb` p50
+  0.039–0.040 ms, p99 ≤ 0.053 ms (budget 2 ms); `ts/recovery_restart_100kb` p50 1.70–1.73 ms, p99 ≤ 5.93 ms (budget
+  50 ms), 101,446-byte snapshot.
 * **The Rng canary:** `UndraCore.load` rejects `UndraTransportError("unsupported", "WebCrypto is required ...")` before
   instantiating in both wasm modes when `crypto.getRandomValues` is missing; when it throws later the guarded `random`
   import writes nothing and no exception crosses wasm frames, the canary trips and `Rng.fill` answers unavailable. As
@@ -227,10 +264,71 @@ starts a thread (`persist*`, `closure*`, `undra-query` storage, `snapshot.rs`): 
 
 ## Suites (after the merge and the fixes)
 
-TBD-suites
+Host: Apple M5 Pro, macOS 26.5, shared with other agents' builds. Unless said otherwise, on the tree with both merges
+(`586624b` and later); `UNDRA_REQUIRE_TOOLCHAINS=1`.
+
+| Suite | Result |
+|---|---|
+| `cargo fmt --check`; `clippy --workspace --all-targets -D warnings`; `clippy -p undra-ffi --target wasm32-unknown-unknown -D warnings`; `cargo doc --no-deps -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | **2,891 passed, 0 failed, 15 ignored** (`dev_reload` 9/9 and `dev_devtools` 3/3 in the parallel run). The first run, before the devtools merge, failed 19 `undra-bindgen` TypeScript-toolchain cases only because `tsc` was not on its `PATH` (green with it) and the reserved-entry test (fixed, `a3f1e91`) |
+| `crates/undra-ffi/tests/wasm/run.sh` | raw 22/22, ts-runtime 32/32 |
+| Swift `swift test` (runtime) | 553, 0 failures |
+| Kotlin `test-local.sh`, kotlinc 2.4.20 and 2.0.21 | 652 cases each, 0 failed, 2 skipped (no fixture library) |
+| `./gradlew :android-adapters:test` | 142 + 142 (debug, release), 1 skipped each, 0 failed |
+| `:android-adapters:connectedAndroidTest` on the `undra` AVD (`emulator-5554`) | 125 tests: 124 passed, 1 skipped (the network toggle), 0 failed |
+| TypeScript runtime `npm test` + typecheck | 1,264 in 36 files; clean |
+| React Native `npm test` + typecheck; `test:contract`; `cpp/test/run.sh` | 65; clean; 18 passed, 1 skipped; 74 ok (`UndraPlatformApple.mm` compiles against the iOS SDK) |
+| `bash contract-tests/run-all.sh` | **65/65**: S01–S20 and S26 on TypeScript, Kotlin and Swift, S21 and S22 on TypeScript; build B "MIGRATION S14/S15 ok" on both native columns |
+| interop `run.sh ts`, `run.sh kotlin` | OK, OK |
+| `undra bindgen -C examples/playground --check --docs` | up to date, **0xfa536b9ac6f06149** (unchanged by both merges) |
+| `schema_docs --ignored`; `schema_retention --include-ignored` | 1 passed; 1 passed |
+| `cargo test --release -p undra-bench --test budgets` | 6 passed, 1 ignored; `snapshot/restore_100kb` 27.1 µs, `restore_100kb_migrated` 75.2 µs p50, ratio **2.77** (max 10), cold start with restore 84.6 µs |
+| `sync_alloc`, `commit_alloc` (release) | 2 + 5 passed |
+| `npm run bench:recovery` (playground web) | `ts/snapshot_take_100kb` p50 0.039–0.040 ms; `ts/recovery_restart_100kb` p50 1.70–1.73 ms, p99 ≤ 5.93 ms |
+| `scripts/wasm-size.sh --record` | hello wasm **116,800** of 120,000; hello JS runtime **25,984** of 26,000; both gates ok |
+| playground web `npm test` / `tsc` / `npm run build`; the live demo | 117; clean; built; Counter 3 → crash → restored 3 → 4 (above) |
+| `node site/scripts/build-all.mjs`; `check-links.mjs --words` | up to date after regeneration; links OK, landing 342 words |
+
+Not run: `runtimes/ts/devtools` (`main`'s new package, untouched here), the React Native module's `android/test/run.sh`
+and a React Native app on a simulator or device (the RN change is in portable C++ that `cpp/test/run.sh` covers under
+ASan/UBSan, and in the Apple file it compiles).
 
 ## Open items
 
-TBD-open
+* **Size headroom.** The hello JavaScript runtime is 16 bytes under its 26,000 budget: the next change to what the hello
+  app imports pays for itself, or `ts-runtime-size` (ADR-052) lands first. The record's measured lever (the gate folds the
+  lazily imported worker transport into the measured chunk) still stands.
+* **React Native `SecureStore`** answers every Keychain/Keystore failure as `StorageError::Io` with the platform's text:
+  the platform layer (`UndraPlatformApple.mm`, `UndraPlatformAndroid.cpp`, `SecureSeal.java`) passes a string, not a
+  variant, so `Locked` (`errSecInteractionNotAllowed`, `UserNotAuthenticatedException`) and `Corrupt` (an invalidated key,
+  a failed tag) are not told apart there yet (`Kv`, which `undra-query` uses, is classified).
+* **The React Native contract column** excludes S20 and S26, never reaches the C++ defaults (it runs over a stand-in of
+  the native module), and CI does not run `check.sh rn`; the C++ defaults are covered by `cpp/test/run.sh` only.
+* **Native S20** (Kotlin, Swift): step 4 only checks the `Locked` read injected at load, a later good read and no write
+  between; nothing is queued while unreadable and no replay is checked, and step 3 is skipped (one core per process).
+  TypeScript covers the whole of ADR-049 1.4.
+* **Web recovery, Lows from the sub-audit, not fixed:** the port-reply epoch is bumped once per recovery, not per restart
+  attempt (a reply of an instance that trapped during its restart can reach the next one); `#mayRestart` ignores the
+  worker transport's `canRestart` (a worker that does not announce `recovery` spends a budget slot before the core is
+  lost); the rate limits use `Date.now` (a clock jump stalls snapshots or empties the window early); `rejectedCalls`
+  omits, in `wasm-main`, the call whose send trapped; a re-created query handle's mirror registration drops its
+  `noCoalesce` options; `#restarting` ends before `#reattach` has moved the query wrappers (a call in that window gets a
+  stale `BadRequest`); a `crashRecovery()` is not released by a `load` that failed; the import guard's `onError` reaches
+  the app's Log adapter unguarded; the worker mode's WebCrypto check is not waived when `worker.ports` supplies `Rng`.
+* **Worker protocol**: no version handshake beyond features; protocol 3 renamed the snapshot payloads `bytes` → `data`
+  under the same `"snapshot"` feature, harmless only because both sides ship in one package and nothing is published.
+* **`Rng` after WebCrypto dies** (ADR-049 2.5 by design): `Rng.fill` answers unavailable and the proxy's E0062 traps the
+  core; with recovery on, a page whose WebCrypto stays broken restarts until the budget ends it.
+* **Quadratic paths on crafted input**: the insertion sorts over a snapshot description's stores, signals and variants,
+  and the streamer's `SortedEntries` (binary search + `Vec::insert`), are O(n²) on adversarial order; only a crafted
+  snapshot reaches them. A damaged description is refused as 7 (incompatible) rather than 5.
+* **Dev reload across a schema change** keeps the state in the core and the session for a client that resumes it on the
+  new bindings; a web page that reloads onto new bindings starts a new session, so the kept stores are reachable only if
+  the app re-finds them (a reloaded page re-creates its stores). The dev bar says "state kept (the schema changed)".
+* **Android**: the invalidated-Keystore-key path is tested through a fake key source only, and the invalidated key stays
+  cached (`set` cannot recover until `delete`). **Swift**: `EPERM` maps to `Locked` broadly; `list` skips entries whose
+  read fails with `Io`; `delete` can report success through a `fileExists` that cannot search the directory.
+* From the record, unchanged: ADR-046's panic-report fields; `remote` has no snapshot/restore; `dev_reload` under heavy
+  parallel load (this run: 9/9 in the parallel workspace run, and the two new tests alone).
 
-HEAD: TBD-head.
+HEAD: the commit that adds this review, on top of `a1229cf` (`main` `f35c038` is an ancestor).
