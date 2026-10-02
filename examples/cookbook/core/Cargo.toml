@@ -1,0 +1,19 @@
+[package]
+name = "cookbook"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The Undra cookbook: one recipe per module (auth, pagination, forms, upload, offline-first), each tested against the test runtime and the fakes. The site's cookbook pages quote it."
+
+[features]
+# The real-time recipe (src/realtime.rs) needs the opt-in `WebSocket` and `Sse` ports of the
+# `undra` crate (ADR-047: `undra = { features = ["websocket", "sse"] }`); this feature turns the
+# module on and is what asks `undra` for them.
+realtime = []
+
+[dependencies]
+undra = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
