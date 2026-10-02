@@ -815,7 +815,7 @@ extension Wire {
     /// same layout is the payload of a `Restore` (kind 16) message and of `undra_restore`.
     ///
     /// ```text
-    /// count u32, generation_floor u32,                              ADR-022's two leading words
+    /// count u32, generation_floor u64,                              ADR-022's two leading words (the floor u64, ADR-040)
     /// schema_hash u64,                                              of the core that wrote it
     /// type_count u32, types x { type_id u32, fingerprint u64 },     each store type once
     /// description_len u32, description bytes,                       canonical JSON (UTF-8)
@@ -833,7 +833,7 @@ extension Wire {
         /// restore resumes the core's generation counter above it, so no handle issued before the
         /// snapshot (or between it and the restore) is issued again to another object (ADR-022).
         /// Opaque to the host: pass it back unchanged.
-        public var generationFloor: UInt32
+        public var generationFloor: UInt64
         /// The schema hash of the core that took the snapshot.
         public var schemaHash: UInt64
         /// Each store type of the snapshot, once, with its fingerprint.
@@ -853,7 +853,7 @@ extension Wire {
 
         /// Creates a snapshot.
         public init(
-            generationFloor: UInt32,
+            generationFloor: UInt64,
             schemaHash: UInt64,
             types: [SnapshotType],
             description: String,
@@ -884,7 +884,7 @@ extension Wire {
 
         public static func undraDecode(_ r: inout UndraReader) throws -> Snapshot {
             let storeCount = try readCount(&r, minimumSize: storeMinimumSize)
-            let generationFloor = try r.readU32()
+            let generationFloor = try r.readU64()
             let schemaHash = try r.readU64()
             let typeCount = try readCount(&r, minimumSize: typeSize)
             var types: [SnapshotType] = []
@@ -937,7 +937,7 @@ extension Wire {
 
         public func undraEncode(_ w: inout UndraWriter) {
             w.writeLen(stores.count)
-            w.writeU32(generationFloor)
+            w.writeU64(generationFloor)
             w.writeU64(schemaHash)
             w.writeLen(types.count)
             for type in types {
