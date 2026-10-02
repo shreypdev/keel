@@ -782,7 +782,7 @@ class Recovering implements Transport {
       for (let i = 0; i < count; i++) core._giveBack(handle);
     }
     this.#releasedWhileDown.clear();
-    core._restarts++;
+    core._era++;
     const observing: Array<Promise<void>> = [];
     for (const [handle, signals] of [...host.observed]) {
       if (recreated.has(handle)) continue;

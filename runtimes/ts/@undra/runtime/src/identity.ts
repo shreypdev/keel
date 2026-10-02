@@ -161,14 +161,14 @@ export function requireOwn(core: UndraCore, object: UndraObject): Handle {
 
 /**
  * Releases the reference of a wrapper that was garbage-collected without `close()`: its handle too (mirror, observed
- * signals), unless a newer wrapper adopted the handle meanwhile, which keeps them. `epoch` is the number of restarts
+ * signals), unless a newer wrapper adopted the handle meanwhile, which keeps them. `era` is the number of restarts
  * (crash recovery) the core had made when the wrapper was made: a newer wrapper of the handle keeps what a wrapper from
  * before a restart owned, because the restored core may not count that reference at all, and giving it back could
  * release the newer wrapper's only one (a leak until the core closes is the lesser harm).
  *
  * @internal The finalizer of `UndraObject`.
  */
-export function collected(core: UndraCore, handle: Handle, epoch: number): void {
+export function collected(core: UndraCore, handle: Handle, era: number): void {
   if (wrapperOf(core, handle) === undefined) core.release(handle);
-  else if (epoch === core._restarts) core._giveBack(handle);
+  else if (era === core._era) core._giveBack(handle);
 }

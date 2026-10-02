@@ -15,7 +15,7 @@ const DISPOSE: typeof Symbol.dispose = Symbol.dispose ?? (Symbol.for("Symbol.dis
 interface Leak {
   readonly core: WeakRef<UndraCore>;
   readonly handle: Handle;
-  readonly epoch: number;
+  readonly era: number;
 }
 
 /**
@@ -28,7 +28,7 @@ const leaks: FinalizationRegistry<Leak> | null =
     ? new FinalizationRegistry<Leak>((leak) => {
         try {
           const core = leak.core.deref();
-          if (core !== undefined) collected(core, leak.handle, leak.epoch);
+          if (core !== undefined) collected(core, leak.handle, leak.era);
         } catch {
           // The core is closed or going away; there is nothing left to release.
         }
@@ -60,7 +60,7 @@ export abstract class UndraObject {
   protected constructor(core: UndraCore, handle: Handle) {
     this.core = core;
     this.handle = handle;
-    leaks?.register(this, { core: new WeakRef(core), handle, epoch: core._restarts }, this);
+    leaks?.register(this, { core: new WeakRef(core), handle, era: core._era }, this);
   }
 
   /** Whether `close()` has been called. */
@@ -91,7 +91,7 @@ export abstract class UndraObject {
 export function _rebindObject(object: UndraObject, handle: Handle): void {
   leaks?.unregister(object);
   (object as { handle: Handle }).handle = handle;
-  leaks?.register(object, { core: new WeakRef(object.core), handle, epoch: object.core._restarts }, object);
+  leaks?.register(object, { core: new WeakRef(object.core), handle, era: object.core._era }, object);
 }
 
 /** What a generated store tells its base class about itself. */

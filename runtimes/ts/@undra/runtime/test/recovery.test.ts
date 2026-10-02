@@ -453,16 +453,16 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     t.fake.store(handle, new Map([[0, u32(1)]]));
     const wrapper = adopt(t.core, handle, CounterStore);
     await t.core.observe(handle, ALL_SIGNALS, true);
-    const born = t.core._restarts;
+    const born = t.core._era;
     t.fake.trap();
     await until("the restart", () => t.restarts.length === 1);
-    expect(t.core._restarts).toBe(born + 1);
+    expect(t.core._era).toBe(born + 1);
     // The finalizer of a wrapper made before the restart runs now: a live wrapper holds the handle, whose count the
     // restored core took from the snapshot.
     collected(t.core, handle, born);
     expect(t.fake.released, "the pre-restart finalizer leaks rather than frees the live wrapper").toEqual([]);
     // A wrapper made after the restart gives back normally.
-    collected(t.core, handle, t.core._restarts);
+    collected(t.core, handle, t.core._era);
     expect(t.fake.released).toEqual([handle]);
     // Nothing wraps a handle: a full release whatever the epoch.
     t.fake.released.length = 0;

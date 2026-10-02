@@ -601,7 +601,7 @@ export class UndraCore {
   /** References given back while the connection was down, one per reference: released in the core once it is back. */
   private readonly _releasedWhileDown: Handle[] = [];
   /** @internal How many times crash recovery restarted the core: a wrapper's finalizer compares it with the count at its birth. */
-  _restarts = 0;
+  _era = 0;
   private readonly _connection = new Signal<ConnectionState>({ kind: "connecting" });
   /** The header of the call being sent, reused: an in-process transport copies it before it returns (`Transport.sendCall`). */
   private readonly _head = new Uint8Array(HEAD_LEN);
@@ -1305,20 +1305,18 @@ export class UndraCore {
         const onAbort = (): void => {
           if (this._pending.get(callId) !== entry) return;
           // Before the cancel goes out: a transport that answers a cancel inside the send (`wasm-main`) must find
-          // the call already abandoned, so the caller sees its abort reason and not the core's `CancelledByCore`.
+          // the call already abandoned, so the caller sees its abort reason and not the core's `CancelledByCore`:
+          // the promise is settled first, so any later answer finds it so (rejecting it again does nothing).
+          reject(abortReason(signal));
+          // The core may have answered before it saw the cancel: that reply, if it is a success, still carries
+          // references the host owns. It is the entry's answer, and `orphan` gives them back.
           if (orphan === undefined) this._pending.delete(callId);
-          else {
-            // The core may have answered before it saw the cancel: that reply, if it is a success, still carries
-            // references the host owns. It is the entry's answer, and `orphan` gives them back.
-            entry.resolve = orphan;
-            entry.reject = () => {};
-          }
+          else entry.resolve = orphan;
           try {
             this._transport.send(Kind.Cancel, encodeCancel({ callId }));
           } catch {
             // The channel is gone; the core cancels with it.
           }
-          reject(abortReason(signal));
         };
         signal.addEventListener("abort", onAbort, { once: true });
         entry.cleanup = () => {
