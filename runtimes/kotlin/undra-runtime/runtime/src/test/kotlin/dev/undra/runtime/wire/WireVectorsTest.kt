@@ -11,6 +11,8 @@ import dev.undra.runtime.testing.directBuffer
 import dev.undra.runtime.testing.fail
 import dev.undra.runtime.testing.unhex
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
+import java.math.BigInteger
 import java.util.UUID
 import kotlin.time.Duration.Companion.nanoseconds
 
@@ -65,6 +67,10 @@ class WireVectorsTest : Suite() {
             "duration" -> codec(v, Codecs.duration, value.asLong().nanoseconds)
             "timestamp" -> codec(v, Codecs.timestamp, Timestamp(value.asLong()))
             "uuid" -> codec(v, Codecs.uuid, UUID.fromString(value.asString()))
+            "decimal" -> decimal(v)
+            "lazy value" -> lazyValue(v)
+            "lazy invalidated" -> lazyInvalidated(v)
+            "lazy page (item i32)" -> lazyPage(v)
             "handle" -> handle(v)
             "record Todo{id:uuid,title:string,done:bool}" -> {
                 val o = value.asObj()
@@ -144,12 +150,65 @@ class WireVectorsTest : Suite() {
     private fun <T> codec(v: WireVector, c: UndraCodec<T>, expected: T) =
         verify(v, expected, { c.encode(it, expected) }, { c.decodeAll(it) }, { c.decode(it) })
 
+    /** A decimal vector: the number and its scale, or a rejection every decoder must make. */
+    private fun decimal(v: WireVector) {
+        val expected = v.hex
+        if (v.error != null) {
+            val e = assertWire<WireException.InvalidTag> { Codecs.decimal.decodeAll(unhex(expected)) }
+            assertEq(v.error, e.type, "${v.name} error type")
+            return
+        }
+        val o = v.value.asObj()
+        val mantissa = o["mantissa"].let { (it as? JV.Num)?.text ?: it.asString() }
+        val number = BigDecimal(BigInteger(mantissa), o["scale"].asInt())
+        assertEq(o["text"].asString(), number.toPlainString(), "${v.name} text")
+        codec(v, Codecs.decimal, number)
+    }
+
+    /** The value of a `Lazy<T>` signal: the page server, the length and the version. */
+    private fun lazyValue(v: WireVector) {
+        val o = v.value.asObj()
+        val expected = Payloads.LazyValue(Handle(o["handle"].asLong()), o["len"].asLong().toUInt(), o["version"].asULong())
+        verify(v, expected, { expected.encode(it) }, { Payloads.LazyValue.decode(it) }, { Payloads.LazyValue.decode(it) })
+        assertEq(expected, Payloads.LazyValue.decode(expected.toByteArray()), "${v.name}: toByteArray round trip")
+    }
+
+    /** The value of change-set op 2: the new length and version. */
+    private fun lazyInvalidated(v: WireVector) {
+        val o = v.value.asObj()
+        val expected = Payloads.LazyInvalidated(o["len"].asLong().toUInt(), o["version"].asULong())
+        verify(v, expected, { expected.encode(it) }, { Payloads.LazyInvalidated.decode(it) }, { Payloads.LazyInvalidated.decode(it) })
+    }
+
+    /** A page reply: the header, then `count` items of the item type (`i32` here). */
+    private fun lazyPage(v: WireVector) {
+        val o = v.value.asObj()
+        val items = o["items"].asList().map { it.asInt() }
+        val header = Payloads.LazyPageHeader(o["version"].asULong(), o["total"].asLong().toUInt(), items.size.toUInt())
+        val expected: Pair<Payloads.LazyPageHeader, List<Int>> = header to items
+        val decode = { r: UndraReader ->
+            val h = Payloads.LazyPageHeader.decode(r)
+            val rows = ArrayList<Int>()
+            for (i in 0 until r.readLenOf(h.count)) rows.add(Codecs.i32.decode(r))
+            h to (rows as List<Int>)
+        }
+        verify(v, expected, { w ->
+            header.encode(w)
+            for (x in items) Codecs.i32.encode(w, x)
+        }, { bytes -> UndraReader(bytes).let { r -> decode(r).also { r.finish() } } }, decode)
+    }
+
+    private fun UndraReader.readLenOf(count: UInt): Int {
+        if (count.toLong() * 4 > remaining) throw WireException.LengthTooLarge(count, position)
+        return count.toInt()
+    }
+
     private fun handle(v: WireVector) {
         val raw = v.value.asLong()
         codec(v, Codecs.handle, raw)
         val h = Handle(raw)
         assertEq(1u, h.index, "index (vector note: index 1, generation 1)")
-        assertEq(1u, h.generation, "generation")
+        assertEq(1uL, h.generation, "generation")
         assertEq(h, Handle.make(1u, 1u))
     }
 
@@ -288,7 +347,7 @@ class WireVectorsTest : Suite() {
             }
             Payloads.Snapshot.Store(Handle(so["handle"].asLong()), so["type_id"].asLong().toUInt(), signals)
         }
-        val expected = Payloads.Snapshot(o["generation_floor"].asLong().toUInt(), o["schema_hash"].asULong(), types, o["description"].asString(), stores)
+        val expected = Payloads.Snapshot(o["generation_floor"].asULong(), o["schema_hash"].asULong(), types, o["description"].asString(), stores)
         verify(v, expected, { expected.encode(it) }, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
         val decoded = Payloads.Snapshot.decode(unhex(v.hex))
         for (t in types) assertEq(t.fingerprint, decoded.fingerprint(t.typeId), "${v.name}: fingerprint of ${t.typeId}")

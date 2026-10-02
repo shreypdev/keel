@@ -1,6 +1,7 @@
 package dev.undra.android
 
 import android.content.Context
+import dev.undra.runtime.CoreNamespace
 import dev.undra.runtime.PortImpl
 import dev.undra.runtime.adapters.FileKv
 import dev.undra.runtime.adapters.KeyValueBackend
@@ -10,7 +11,8 @@ import java.io.File
 import java.nio.file.Path
 
 /**
- * The `Kv` port over files in the app's private storage: `<filesDir>/undra/kv`.
+ * The `Kv` port over files in the app's private storage: `<filesDir>/undra/<namespace>/kv` (the core's namespace, so two
+ * cores of one app never see each other's keys: ADR-044 amendment A).
  *
  * Each key is one file, named after the SHA-256 of the key and holding `key length u32, key, value` (the format of
  * `FileKv`, which does the work, and of the Swift adapter's files), so any string is a valid key whatever the file
@@ -34,8 +36,8 @@ public class AndroidKvAdapter internal constructor(directory: Path) : KeyValueBa
     /** The adapter over [directory]; created on the first write. */
     public constructor(directory: File) : this(directory.toPath())
 
-    /** The adapter over `<filesDir>/undra/kv` of [context]'s application. */
-    public constructor(context: Context) : this(File(context.applicationContext.filesDir, DEFAULT_PATH))
+    /** The adapter over `<filesDir>/undra/<namespace>/kv` of [context]'s application: [namespace] is the core's (`UndraCore.namespace`). */
+    public constructor(context: Context, namespace: String) : this(directoryOf(context, namespace))
 
     private val store = FileKv(directory)
 
@@ -72,7 +74,10 @@ public class AndroidKvAdapter internal constructor(directory: Path) : KeyValueBa
     /** This adapter as an async [PortImpl] for [dev.undra.runtime.adapters.StandardPorts.Kv]; a failure answers the core with its [StorageError]. */
     public fun portImpl(): PortImpl = StoragePort.KV.portImpl(this)
 
-    private companion object {
-        const val DEFAULT_PATH = "undra/kv"
+    /** Where the default adapter keeps a core's keys. */
+    public companion object {
+        /** `<filesDir>/undra/<namespace>/kv`: the directory of [context]'s application for the core [namespace]. */
+        public fun directoryOf(context: Context, namespace: String): File =
+            File(context.applicationContext.filesDir, "undra/${CoreNamespace.requireForStores(namespace)}/kv")
     }
 }

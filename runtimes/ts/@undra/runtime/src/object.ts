@@ -1,5 +1,6 @@
 import { UndraCallError } from "./call-error.js";
 import type { UndraCore } from "./core.js";
+import { collected } from "./identity.js";
 import type { Signal } from "./signal.js";
 import { ALL_SIGNALS, type ChangeOp, type Handle } from "./wire/index.js";
 
@@ -14,6 +15,7 @@ const DISPOSE: typeof Symbol.dispose = Symbol.dispose ?? (Symbol.for("Symbol.dis
 interface Leak {
   readonly core: WeakRef<UndraCore>;
   readonly handle: Handle;
+  readonly era: number;
 }
 
 /**
@@ -25,7 +27,8 @@ const leaks: FinalizationRegistry<Leak> | null =
   typeof FinalizationRegistry === "function"
     ? new FinalizationRegistry<Leak>((leak) => {
         try {
-          leak.core.deref()?.release(leak.handle);
+          const core = leak.core.deref();
+          if (core !== undefined) collected(core, leak.handle, leak.era);
         } catch {
           // The core is closed or going away; there is nothing left to release.
         }
@@ -34,7 +37,9 @@ const leaks: FinalizationRegistry<Leak> | null =
 
 /**
  * A core object addressed by handle: the base class of generated objects and
- * stores. Owns exactly one handle; `close()` (idempotent) releases it.
+ * stores. Owns exactly one reference to its handle; `close()` (idempotent)
+ * releases it. There is one wrapper per handle (`adopt`, ADR-040), so `===`
+ * between wrappers is identity of the core's objects.
  *
  * ```ts
  * using calc = await Calculator.create();
@@ -49,24 +54,24 @@ export abstract class UndraObject {
    * (ADR-049): code that keeps the raw handle instead of the object goes stale then.
    */
   readonly handle: Handle;
-  #closed = false;
+  private _undraClosed = false;
 
   /** @param core The core that issued `handle`. @param handle A live handle the caller owns and hands over. */
   protected constructor(core: UndraCore, handle: Handle) {
     this.core = core;
     this.handle = handle;
-    leaks?.register(this, { core: new WeakRef(core), handle }, this);
+    leaks?.register(this, { core: new WeakRef(core), handle, era: core._era }, this);
   }
 
   /** Whether `close()` has been called. */
   get closed(): boolean {
-    return this.#closed;
+    return this._undraClosed;
   }
 
   /** Releases the handle. Later calls on the object fail in the core with a stale handle. Idempotent. */
   close(): void {
-    if (this.#closed) return;
-    this.#closed = true;
+    if (this._undraClosed) return;
+    this._undraClosed = true;
     leaks?.unregister(this);
     this.core.release(this.handle);
   }
@@ -86,7 +91,7 @@ export abstract class UndraObject {
 export function _rebindObject(object: UndraObject, handle: Handle): void {
   leaks?.unregister(object);
   (object as { handle: Handle }).handle = handle;
-  leaks?.register(object, { core: new WeakRef(object.core), handle }, object);
+  leaks?.register(object, { core: new WeakRef(object.core), handle, era: object.core._era }, object);
 }
 
 /** What a generated store tells its base class about itself. */

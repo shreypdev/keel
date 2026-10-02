@@ -1,0 +1,44 @@
+error: error[undra::E0073]: the infinite query `no_cursor` has no `#[undra(cursor)]` parameter
+         = note: the core asks for each page with the cursor the previous one returned: exactly one parameter carries it, `None` for the first page
+         = help: mark one parameter `#[undra(cursor)] cursor: Option<String>` (or the cursor type your server uses)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+ --> tests/ui/e0073_cursor_parameter.rs:9:14
+  |
+9 | pub async fn no_cursor(ctx: &Ctx, tag: String) -> Result<undra::query::Page<Post>, FeedError> {
+  |              ^^^^^^^^^
+
+error: error[undra::E0073]: the infinite query `two_cursors` has 2 `#[undra(cursor)]` parameters
+         = note: the core asks for each page with the cursor the previous one returned: exactly one parameter carries it, `None` for the first page
+         = help: mark one parameter `#[undra(cursor)] cursor: Option<String>` (or the cursor type your server uses)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_cursor_parameter.rs:14:14
+   |
+14 | pub async fn two_cursors(
+   |              ^^^^^^^^^^^
+
+error: error[undra::E0073]: the cursor `cursor` of `not_an_option` is `String`, not an `Option<C>`
+         = note: the cursor is `None` for the first page and the previous page's `next` after it
+         = help: write `#[undra(cursor)] cursor: Option<String>`, or another value type for the cursor your server uses
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_cursor_parameter.rs:26:30
+   |
+26 |     #[undra(cursor)] cursor: String,
+   |                              ^^^^^^
+
+error: error[undra::E0073]: the cursor `cursor` is in the `key` of the infinite query `in_the_key`
+         = note: every page of one list shares one cache entry, so the cursor, which differs per page, cannot be part of its key
+         = help: remove the placeholder from `key`; the key holds the parameters that distinguish lists
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_cursor_parameter.rs:31:18
+   |
+31 | #[k::query(key = "feed/{tag}/{cursor}", infinite, item_key = "id")]
+   |                  ^^^^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0073]: `#[undra(cursor)]` on `cursor`, which is not a parameter of an `infinite` query
+         = note: the cursor is how an infinite query asks for its next page; an ordinary query has no pages
+         = help: remove the attribute, or add `infinite` and `item_key = ".."` to the query
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0073
+  --> tests/ui/e0073_cursor_parameter.rs:43:5
+   |
+43 |     #[undra(cursor)] cursor: Option<String>,
+   |     ^

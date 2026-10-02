@@ -33,6 +33,14 @@ afterEach(() => {
 });
 
 const tick = (ms = 0): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Waits until `ready()`: a reply through a default port waits for the code of the port, which the runtime loads on the port's
+ * first call (ADR-052, `import()`; the time it takes is the module loader's, not a number of ticks). A failed test that stops
+ * waiting too early leaves its core open and takes the next tests with it (one run in six, before this).
+ */
+async function until(ready: () => boolean, ms = 5000): Promise<void> {
+  for (const start = Date.now(); !ready(); await tick(1)) if (Date.now() - start > ms) throw new Error(`not ready after ${ms} ms`);
+}
 
 /** An in-memory `Kv`: the deterministic stand-in an app passes to replace the native default in a test. */
 function memoryKv(): KvAdapter & { readonly entries: Map<string, Uint8Array> } {
@@ -113,7 +121,12 @@ describe("which ports the module answers natively", () => {
 describe("loadNative and the native defaults", () => {
   test("passes the native defaults to start, and the module's report is readable", async () => {
     const native = new FakeNative();
-    native.defaults = { ports: ALL, kv: "/data/kv", fs: "/data/fs", secureStore: "Keychain service dev.undra.securestore" };
+    native.defaults = {
+      ports: ALL,
+      kv: "/data/undra/playground_core/kv",
+      fs: "/data/undra/playground_core/fs",
+      secureStore: "Keychain service playground_core.dev.undra.securestore",
+    };
     installFake(native);
     expect(nativePlatformDefaults(native.namespace)).toEqual(native.defaults);
     const core = await loadNative(entryOf(native));
@@ -135,7 +148,7 @@ describe("loadNative and the native defaults", () => {
     const args = new UndraWriter(8);
     args.writeStr("k");
     native.queue(RecordKind.PortCall, new Uint8Array([...le([PortIds.Kv.portId, "u32"], [PortIds.Kv.get, "u32"], [31, "u32"]), ...args.finish()]), "core");
-    await tick(5);
+    await until(() => native.portReplies.length > 0);
     const reply = decodePortReply(native.portReplies[0]!);
     expect(reply.portCallId).toBe(31);
     expect(reply.status).toBe(PortStatus.Ok);
@@ -168,7 +181,7 @@ describe("loadNative and the native defaults", () => {
     w.writeU8(0); // no body
     w.writeU8(0); // no timeout
     native.queue(RecordKind.PortCall, new Uint8Array([...le([PortIds.Http.portId, "u32"], [PortIds.Http.request, "u32"], [5, "u32"]), ...w.finish()]), "core");
-    await tick(20);
+    await until(() => native.portReplies.length > 0);
     expect(scripted.calls.map((c) => c.url)).toEqual(["http://127.0.0.1:8737/ping"]);
     const reply = decodePortReply(native.portReplies[0]!);
     expect(reply.status).toBe(PortStatus.Ok);

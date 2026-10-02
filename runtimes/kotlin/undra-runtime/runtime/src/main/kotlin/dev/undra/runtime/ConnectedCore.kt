@@ -1,7 +1,10 @@
 package dev.undra.runtime
 
+import dev.undra.runtime.adapters.DiagnosticsAdapter
 import dev.undra.runtime.adapters.JulLog
 import dev.undra.runtime.adapters.JvmAdapters
+import dev.undra.runtime.adapters.StandardPorts
+import dev.undra.runtime.adapters.UndraPanicReport
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.UndraWriter
@@ -13,6 +16,7 @@ import dev.undra.runtime.wire.WireException
 import dev.undra.runtime.wire.decodeAll
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -53,10 +57,12 @@ internal class ConnectedCore(
     private val blockingTimeout: Duration,
     initialCallId: Int = 0,
     mirrorOptions: MirrorOptions = MirrorOptions(),
-    main: MainThread = UndraDispatchers.mainThread(),
+    private val main: MainThread = UndraDispatchers.mainThread(),
     private val onConnectionChange: ((ConnectionState) -> Unit)? = null,
     private val onError: ((UndraUnhandledError) -> Unit)? = null,
     private val onDevNotice: ((String) -> Unit)? = null,
+    override val namespace: String = UNNAMED_NAMESPACE,
+    private val onPanic: ((UndraPanicReport) -> Unit)? = null,
 ) : UndraCore(), TransportEvents {
 
     private sealed interface Pending {
@@ -84,16 +90,11 @@ internal class ConnectedCore(
     @Volatile
     private var closeCause: Throwable? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("undra-ports"))
-    private val ports = PortRegistry(scope, ::reportPortFailure) { payload ->
-        if (!closed.get()) {
-            try {
-                transport.portReply(payload)
-            } catch (e: Exception) {
-                reportFromCore(e, "port reply")
-            }
-        }
-    }
+    private val ports = PortRegistry(scope, ::reportPortFailure, ::sendPortReply)
     private val liveMirror = Mirror(main, mirrorOptions, ::resync, ::report)
+
+    /** The core's calls into the app's callback implementations (ADR-041). */
+    private val callbackHost = CallbackHost(callbacks, liveMirror, scope, main.dispatcher, ::sendPortReply, ::report)
 
     // What a reconnect needs to put the core back where the app left it (ADR-051).
 
@@ -104,8 +105,8 @@ internal class ConnectedCore(
     /** The objects the app's constructors made and it has not released: what the server is asked to keep for it. */
     private val constructed = ConcurrentHashMap.newKeySet<Long>()
 
-    /** Handles released while the connection was down: released at the server once it is back. */
-    private val releasedWhileDown = ConcurrentHashMap.newKeySet<Long>()
+    /** References given back while the connection was down (a handle once per reference): released at the server once it is back. */
+    private val releasedWhileDown = ConcurrentLinkedQueue<Long>()
 
     /** Counts the times the connection was lost, so that a replay that a newer loss overtook does not announce a connection. */
     private val lossEpoch = AtomicInteger(0)
@@ -123,12 +124,32 @@ internal class ConnectedCore(
 
     // ---- setup -------------------------------------------------------------------------------------------
 
-    /** Registers the ports of [options]: the defaults for what is missing, then the explicit adapters. */
+    /**
+     * Registers the ports of [options]: this core's own `Diagnostics` adapter (which feeds `onPanic`, so it is there whatever
+     * `defaultAdapters` says), the defaults for what is missing, then the explicit adapters.
+     */
     fun installPorts(options: LoadOptions) {
+        ports.register(StandardPorts.Diagnostics.PORT_ID, DiagnosticsAdapter(::panicReported).portImpl())
         if (options.defaultAdapters) {
-            for ((id, impl) in JvmAdapters.defaults(this::timerFired)) ports.register(id, impl)
+            for ((id, impl) in JvmAdapters.defaults(namespace, this::timerFired)) ports.register(id, impl)
         }
         for ((id, impl) in options.adapters) ports.register(id, impl)
+    }
+
+    /** Registers the callback interfaces of the bindings: their calls are routed to [callbackHost]. */
+    override fun installCallbacks(bridges: List<UndraCallbackBridge<*>>) {
+        for (bridge in bridges) callbackHost.install(bridge)
+    }
+
+    /** Sends a port's or a callback's answer, unless the core is closed. */
+    private fun sendPortReply(payload: ByteArray) {
+        if (!closed.get()) {
+            try {
+                transport.portReply(payload)
+            } catch (e: Exception) {
+                reportFromCore(e, "port reply")
+            }
+        }
     }
 
     /** Tears down a core whose start failed. */
@@ -319,9 +340,13 @@ internal class ConnectedCore(
     }
 
     override fun release(handle: Long) {
-        liveMirror.unregister(handle)
-        constructed.remove(handle)
-        synchronized(observedLock) { observed.remove(handle) }
+        // A reference given back while an open wrapper still owns the handle (a duplicate of a return, ADR-040)
+        // leaves its routing alone.
+        identity.unlessLive(handle) {
+            liveMirror.unregister(handle)
+            constructed.remove(handle)
+            synchronized(observedLock) { observed.remove(handle) }
+        }
         if (closed.get()) return
         if (connection.value is ConnectionState.Reconnecting) {
             // The server keeps the object for us (ADR-051); it is released when the connection is back.
@@ -333,6 +358,11 @@ internal class ConnectedCore(
         } catch (e: UndraException) {
             if (connection.value is ConnectionState.Reconnecting) releasedWhileDown.add(handle) else throw e
         }
+    }
+
+    override fun adopted(handle: Long) {
+        // What the server is asked to keep for this core across a reconnect (ADR-051), like a constructed object.
+        constructed.add(handle)
     }
 
     /** Remembers what the app observes, so that a reconnect can observe it again. */
@@ -394,6 +424,34 @@ internal class ConnectedCore(
             UndraLog.warn("the onError handler threw while handling \"${unhandled.message}\"", e)
         } finally {
             reporting.set(false)
+        }
+    }
+
+    /**
+     * A panic report from the core (the `Diagnostics` port, ADR-046), arriving on the thread the core panicked on with its lock
+     * possibly held: it only queues. The handler runs on the main thread, in the order the reports arrived (the main thread's queue is
+     * first in, first out), so the core is never blocked on application code.
+     */
+    private fun panicReported(panic: UndraPanicReport) {
+        try {
+            main.post { handlePanic(panic) }
+        } catch (e: Exception) {
+            // A main thread that cannot take a task (an Android looper that is quitting): the report must not be lost.
+            UndraLog.error("the Undra core panicked in ${panic.summary}; it could not be handed to the main thread for onPanic", e)
+        }
+    }
+
+    /** Hands [panic] to `onPanic`, or logs it when there is none. An `Exception` of the handler is logged and reported to `onError`. */
+    private fun handlePanic(panic: UndraPanicReport) {
+        val handler = onPanic
+        if (handler == null) {
+            UndraLog.error("the Undra core panicked in ${panic.summary}")
+            return
+        }
+        try {
+            handler(panic)
+        } catch (e: Exception) {
+            report(e, "onPanic")
         }
     }
 
@@ -485,6 +543,7 @@ internal class ConnectedCore(
         // Ports that hold platform resources for this core (WebSocket connections, Db files) let them go.
         ports.detachAll()
         scope.cancel()
+        callbackHost.clear()
         try {
             transport.close()
         } catch (e: Exception) {
@@ -637,7 +696,7 @@ internal class ConnectedCore(
     }
 
     override fun onPortCall(portId: UInt, methodId: UInt, portCallId: UInt, args: ByteArray): PortOutcome =
-        ports.dispatch(portId, methodId, portCallId, args)
+        callbackHost.dispatch(portId, methodId, portCallId, args) ?: ports.dispatch(portId, methodId, portCallId, args)
 
     override fun onLog(level: UByte, target: String, message: String) {
         JulLog.log(level, target, message)
@@ -680,6 +739,9 @@ internal class ConnectedCore(
                     cause,
                 ),
             )
+            // What the core asked of the callbacks over this connection is cancelled; the registry keeps its entries
+            // for the session's return (ADR-041, ADR-051): they go with the core's closing.
+            callbackHost.connectionLost()
         }
         setConnection(ConnectionState.Reconnecting(attempt, cause))
     }
@@ -699,7 +761,8 @@ internal class ConnectedCore(
     private fun observeAgain(epoch: Int) {
         if (closed.get() || lossEpoch.get() != epoch) return
         try {
-            for (handle in releasedWhileDown.toList()) {
+            while (true) {
+                val handle = releasedWhileDown.peek() ?: break
                 transport.release(handle)
                 releasedWhileDown.remove(handle)
             }

@@ -1,7 +1,8 @@
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach } from "vitest";
-import { type AdapterOverrides, type AttachOptions, type PortImpl, UndraCore, type LoadOptions, WasmMainTransport, type WorkerLike } from "@undra/runtime";
+import { type AdapterOverrides, type PortImpl, UndraCore, type LoadOptions, WasmMainTransport, type WorkerLike } from "@undra/runtime";
 import { runWorker, type WorkerScope } from "@undra/runtime/worker";
 import { UndraIds } from "@playground/core";
 import { CapturingLog } from "./capturing-log.js";
@@ -12,6 +13,17 @@ import { MemoryKv } from "./memory-kv.js";
 /** The playground core, built by `undra build -C examples/playground --platform web`. `UNDRA_PLAYGROUND_WASM` overrides the path. */
 export const PLAYGROUND_WASM: string =
   process.env["UNDRA_PLAYGROUND_WASM"] ?? fileURLToPath(new URL("../../../examples/playground/build/web/playground_core.wasm", import.meta.url));
+
+/**
+ * The version of the playground core (its crate's: `version.workspace = true` in examples/playground/core/Cargo.toml, so the
+ * workspace's), which a wasm module does not carry: a scenario that wants it in a panic report passes it as `LoadOptions.coreVersion`.
+ */
+export const PLAYGROUND_CORE_VERSION: string = (() => {
+  const manifest = readFileSync(fileURLToPath(new URL("../../../Cargo.toml", import.meta.url)), "utf8");
+  const version = /\[workspace\.package\][^[]*?\bversion\s*=\s*"([^"]+)"/s.exec(manifest)?.[1];
+  if (version === undefined) throw new Error("cannot read [workspace.package] version from the repository's Cargo.toml");
+  return version;
+})();
 
 /** The base URL every scenario that talks to the server configures (scenarios.md, "Server fixtures"). */
 export const BASE_URL = "https://playground.test";
@@ -112,8 +124,13 @@ export interface BootOptions extends Partial<World> {
   readonly build?: Build;
   /** More ports to register (on the main thread), by port id: the opt-in WebSocket, Sse and Db ports of S23 to S25, ... */
   readonly ports?: Readonly<Record<number, PortImpl>>;
-  /** Options of `UndraCore.load` a scenario needs besides the harness's (`recovery`, `onCoreRestarted`, `onPanic`). */
-  readonly load?: Pick<AttachOptions, "recovery" | "onCoreRestarted" | "onPanic">;
+  /** Options of `UndraCore.load` a scenario needs besides the harness's (`recovery`, `onCoreRestarted`, `onPanic`, `namespace`, `coreVersion`). */
+  readonly load?: Pick<LoadOptions, "recovery" | "onCoreRestarted" | "onPanic" | "namespace" | "coreVersion" | "backgroundRun">;
+  /**
+   * Give the runtime the module's bytes instead of the compiled module (the default, compiled once per file): only bytes can be
+   * hashed for the image id of a panic report (S29).
+   */
+  readonly wasmBytes?: boolean;
 }
 
 /** The schema hash `options` asks for: given, else the bindings' for build A, else what build B reports. */
@@ -175,7 +192,7 @@ export async function boot(options: BootOptions = {}): Promise<Booted> {
   const load: LoadOptions = {
     ...options.load,
     mode: "wasm-main",
-    wasm: await playgroundModule(options.build),
+    wasm: options.wasmBytes === true ? await readFile(options.build === "B" ? PLAYGROUND_WASM_B : PLAYGROUND_WASM) : await playgroundModule(options.build),
     expectedSchemaHash: await expectedHash(options),
     shared: false,
     adapters: adaptersOf(world),

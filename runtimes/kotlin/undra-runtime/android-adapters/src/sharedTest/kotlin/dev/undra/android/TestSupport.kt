@@ -1,10 +1,15 @@
 package dev.undra.android
 
+import dev.undra.runtime.BackgroundStats
 import dev.undra.runtime.PortImpl
+import dev.undra.runtime.UndraStats
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.wire.UndraWriter
 import java.io.File
 import kotlinx.coroutines.runBlocking
+
+/** The namespace of the cores the tests use: what the default stores are kept under (ADR-044 amendment A). */
+const val TEST_NAMESPACE: String = "ns_test"
 
 /** Whether the tests run on an Android runtime (instrumented) rather than a desktop JVM (unit tests). */
 val isAndroidRuntime: Boolean = "Dalvik" == System.getProperty("java.vm.name")
@@ -13,7 +18,7 @@ val isAndroidRuntime: Boolean = "Dalvik" == System.getProperty("java.vm.name")
  * An [UndraCore] that records what the adapters tell it: the ports they register and the events they send.
  * (`UndraCore` is open with a protected constructor so that tests can do this.)
  */
-class RecordingCore : UndraCore() {
+class RecordingCore(override val namespace: String = TEST_NAMESPACE) : UndraCore() {
     /** A host-to-core event of an event port. */
     class Event(val portId: UInt, val methodId: UInt, val payload: ByteArray)
 
@@ -30,6 +35,12 @@ class RecordingCore : UndraCore() {
 
     /** The timers the core was told came due. */
     val timers: List<UInt> get() = synchronized(lock) { firedTimers.toList() }
+
+    /** What `stats().background.pending` answers: the work a background window would drain (ADR-046). */
+    @Volatile
+    var backgroundPending: Int = 0
+
+    override fun stats(): UndraStats = UndraStats(0, background = BackgroundStats(3, backgroundPending, 0L, 0L, 0L, 0L))
 
     override fun registerPort(portId: UInt, impl: PortImpl) {
         synchronized(lock) { registeredPorts[portId] = impl }

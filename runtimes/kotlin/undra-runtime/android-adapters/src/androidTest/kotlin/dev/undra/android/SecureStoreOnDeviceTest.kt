@@ -29,14 +29,14 @@ import org.junit.Test
 class SecureStoreOnDeviceTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val secret = "plain-text-secret-4f9a1c7e-do-not-leak".toByteArray()
-    private val secureDir = File(context.noBackupFilesDir, "undra/secure")
-    private val kvDir = File(context.filesDir, "undra/kv")
+    private val secureDir = File(context.noBackupFilesDir, "undra/$TEST_NAMESPACE/secure")
+    private val kvDir = File(context.filesDir, "undra/$TEST_NAMESPACE/kv")
 
     @Before
     fun clean() {
         secureDir.deleteRecursively()
         kvDir.deleteRecursively()
-        File(context.filesDir, "undra/fs").deleteRecursively()
+        File(context.filesDir, "undra/$TEST_NAMESPACE/fs").deleteRecursively()
         context.deleteSharedPreferences("plain")
     }
 
@@ -57,7 +57,7 @@ class SecureStoreOnDeviceTest {
 
     @Test
     fun a_secret_round_trips_through_the_real_keystore() = runBlocking {
-        val secure = AndroidSecureStoreAdapter(context)
+        val secure = AndroidSecureStoreAdapter(context, TEST_NAMESPACE)
         secure.set("session.token", secret)
         assertArrayEquals(secret, secure.get("session.token"))
         assertNull(secure.get("absent"))
@@ -68,10 +68,13 @@ class SecureStoreOnDeviceTest {
 
     @Test
     fun the_aes_key_lives_in_the_android_keystore_and_cannot_be_read_out() = runBlocking {
-        AndroidSecureStoreAdapter(context).set("k", secret)
+        AndroidSecureStoreAdapter(context, TEST_NAMESPACE).set("k", secret)
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        assertTrue(keyStore.containsAlias(AndroidSecureStoreAdapter.DEFAULT_KEY_ALIAS))
-        val key = keyStore.getKey(AndroidSecureStoreAdapter.DEFAULT_KEY_ALIAS, null) as SecretKey
+        // The default alias is the core's: `<namespace>.dev.undra.securestore` (ADR-044 amendment A).
+        val alias = AndroidSecureStoreAdapter.keyAliasOf(TEST_NAMESPACE)
+        assertEquals("ns_test.dev.undra.securestore", alias)
+        assertTrue(keyStore.containsAlias(alias))
+        val key = keyStore.getKey(alias, null) as SecretKey
         assertNull("the key material is not extractable", key.encoded)
         assertEquals("AES", key.algorithm)
         val info = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore").getKeySpec(key, KeyInfo::class.java) as KeyInfo
@@ -83,15 +86,15 @@ class SecureStoreOnDeviceTest {
 
     @Test
     fun the_secret_is_in_no_file_of_the_app_in_clear_and_not_in_shared_preferences() = runBlocking {
-        AndroidSecureStoreAdapter(context).set("session.token", secret)
+        AndroidSecureStoreAdapter(context, TEST_NAMESPACE).set("session.token", secret)
         assertEquals("the sealed value must not contain the secret", emptyList<String>(), filesContaining(secret))
         // The scanner would see it if it were there: a plain SharedPreferences and the plain Kv both hold it in clear.
         context.getSharedPreferences("plain", Context.MODE_PRIVATE).edit().putString("token", String(secret)).commit()
-        AndroidKvAdapter(context).set("plain.kv", secret)
+        AndroidKvAdapter(context, TEST_NAMESPACE).set("plain.kv", secret)
         val found = filesContaining(secret)
         assertTrue(found.toString(), found.any { it.startsWith("shared_prefs/") })
-        assertTrue(found.toString(), found.any { it.startsWith("files/undra/kv/") })
-        assertFalse(found.toString(), found.any { it.contains("undra/secure") })
+        assertTrue(found.toString(), found.any { it.startsWith("files/undra/$TEST_NAMESPACE/kv/") })
+        assertFalse(found.toString(), found.any { it.contains("undra/$TEST_NAMESPACE/secure") })
     }
 
     /** The app's own logcat lines (an app without `READ_LOGS` sees only those), as one text. */
@@ -104,7 +107,7 @@ class SecureStoreOnDeviceTest {
     fun the_secret_is_in_no_log_line_after_a_write_a_read_and_a_failing_read() = runBlocking {
         val marker = "undra-secure-log-scan-${System.nanoTime()}"
         Log.i("UndraTest", marker)
-        val secure = AndroidSecureStoreAdapter(context)
+        val secure = AndroidSecureStoreAdapter(context, TEST_NAMESPACE)
         secure.set("session.token", secret)
         assertArrayEquals(secret, secure.get("session.token"))
         // The failure path: the exception the runtime logs (message, cause and stack) must not carry the value either.
@@ -126,16 +129,16 @@ class SecureStoreOnDeviceTest {
 
     @Test
     fun the_sealed_file_is_in_the_no_backup_directory_and_not_in_the_backed_up_one() = runBlocking {
-        AndroidSecureStoreAdapter(context).set("session.token", secret)
+        AndroidSecureStoreAdapter(context, TEST_NAMESPACE).set("session.token", secret)
         assertTrue(secureDir.listFiles { f -> f.isFile && !f.name.startsWith(".") }!!.isNotEmpty())
         assertTrue(secureDir.canonicalPath.startsWith(context.noBackupFilesDir.canonicalPath))
-        assertFalse(File(context.filesDir, "undra/secure").exists())
+        assertFalse(File(context.filesDir, "undra/$TEST_NAMESPACE/secure").exists())
     }
 
     @Test
     fun a_new_adapter_instance_reads_what_another_wrote() = runBlocking {
-        AndroidSecureStoreAdapter(context).set("k", secret)
-        assertArrayEquals(secret, AndroidSecureStoreAdapter(context).get("k"))
+        AndroidSecureStoreAdapter(context, TEST_NAMESPACE).set("k", secret)
+        assertArrayEquals(secret, AndroidSecureStoreAdapter(context, TEST_NAMESPACE).get("k"))
     }
 
     @Test
@@ -169,9 +172,9 @@ class SecureStoreOnDeviceTest {
         assertTrue("the writer process died", waitFor(20_000) { !isAlive(pid) })
 
         runBlocking {
-            assertArrayEquals(ProcessDeathService.SECRET_VALUE, AndroidSecureStoreAdapter(context).get(ProcessDeathService.SECRET_KEY))
-            assertArrayEquals(ProcessDeathService.KV_VALUE, AndroidKvAdapter(context).get(ProcessDeathService.KV_KEY))
-            assertArrayEquals(ProcessDeathService.FS_VALUE, AndroidFsAdapter(context).read(ProcessDeathService.FS_PATH))
+            assertArrayEquals(ProcessDeathService.SECRET_VALUE, AndroidSecureStoreAdapter(context, TEST_NAMESPACE).get(ProcessDeathService.SECRET_KEY))
+            assertArrayEquals(ProcessDeathService.KV_VALUE, AndroidKvAdapter(context, TEST_NAMESPACE).get(ProcessDeathService.KV_KEY))
+            assertArrayEquals(ProcessDeathService.FS_VALUE, AndroidFsAdapter(context, TEST_NAMESPACE).read(ProcessDeathService.FS_PATH))
         }
         assertEquals(emptyList<String>(), filesContaining(ProcessDeathService.SECRET_VALUE))
     }
@@ -185,7 +188,7 @@ class SecureStoreOnDeviceTest {
         assertTrue("the writer process died", waitFor(20_000) { !isAlive(pid) })
 
         runBlocking {
-            val kv = AndroidKvAdapter(context)
+            val kv = AndroidKvAdapter(context, TEST_NAMESPACE)
             val value = kv.get(ProcessDeathService.LOOP_KEY)
             assertNotNull(value)
             assertEquals(ProcessDeathService.LOOP_SIZE, value!!.size)

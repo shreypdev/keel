@@ -12,18 +12,21 @@ public enum UndraIds {
             public static let new: UInt32 = 0x2bb5eff3
             public static let refetch: UInt32 = 0x21d1b9e2
             public static let invalidate: UInt32 = 0x44cec2fa
+            public static let setPollInterval: UInt32 = 0xe327e53b
         }
         public enum TodoCountQueryHandle {
             public static let typeId: UInt32 = 0xcb26daa7
             public static let new: UInt32 = 0xcb26daa7
             public static let refetch: UInt32 = 0x21d1b9e2
             public static let invalidate: UInt32 = 0x44cec2fa
+            public static let setPollInterval: UInt32 = 0xe327e53b
         }
         public enum TodosQueryHandle {
             public static let typeId: UInt32 = 0x54209c7c
             public static let new: UInt32 = 0x54209c7c
             public static let refetch: UInt32 = 0x21d1b9e2
             public static let invalidate: UInt32 = 0x44cec2fa
+            public static let setPollInterval: UInt32 = 0xe327e53b
         }
     }
 

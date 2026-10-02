@@ -25,6 +25,7 @@ use undra_wire::payload::{
 use undra_wire::{Handle, Reader, Writer};
 
 use crate::blocking::{Blocking, BlockingTask, default_pool_size};
+use crate::callbacks::CallbackRegistry;
 use crate::config::{
     DroppedStore, InitError, MODE_DEV, MODE_INPROC, RestoreError, RestoreReport, RuntimeConfig,
 };
@@ -38,10 +39,14 @@ use crate::executor::{
 use crate::ext::{Extensions, InitHook, InspectFn, Inspectors};
 use crate::guard::{self, PanicReport, drop_guarded, encode_panic_body};
 use crate::host::{Host, PortCallOutcome};
-use crate::lazy::LazyList;
+use crate::issue::{IssueScope, OriginScope, Origins, WithOrigin};
+use crate::lazy::{LazyList, page_server};
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
+
+/// The `port_call_id` of a fire-and-forget port call: no answer is expected (SPEC 6, host contract 6).
+const FIRE_AND_FORGET: u32 = 0;
 use crate::object::{AnyObject, StoreObject, StoreRestorer, UndraObject, erased, store};
-use crate::object_table::{BadHandle, GENERATION_CEILING, ObjectTable};
+use crate::object_table::{BadHandle, GENERATION_CEILING, ObjectTable, Released};
 use crate::persist::{self, RegisteredHooks};
 use crate::ports::{
     Completion, Events, PortBinding, PortDispatch, PortDispatcher, PortError, PortFuture,
@@ -83,6 +88,11 @@ thread_local! {
     /// Ids of the runtimes whose `Host` callback this thread is currently inside, innermost
     /// last (ADR-023, finding M2).
     static IN_HOST: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+    /// The object parameters `Runtime::param` resolved for the call being dispatched on this
+    /// thread: what an asynchronous call or a stream holds, which a restore must check
+    /// (ADR-023). They belong to the call `RESOLVED_FOR` names (`0`: none).
+    static RESOLVED: Cell<Held> = const { Cell::new(NO_PARAMS) };
+    static RESOLVED_FOR: Cell<u32> = const { Cell::new(0) };
     /// Nesting depth of `testing::unchecked_writes` scopes on this thread.
     static UNCHECKED_WRITES: Cell<u32> = const { Cell::new(0) };
     /// This thread created a `TestRuntime`, so it is that test's driver.
@@ -149,15 +159,47 @@ impl Drop for HostCall {
     }
 }
 
+/// The call the runtime is running, for the FATAL record of a panic on wasm, where nothing can
+/// catch the panic and so nothing at a guard can name it (ADR-046 decision 4.4). Only wasm sets it
+/// (single-threaded; the cost is not paid on native, where the guards know).
+static RUNNING: std::sync::Mutex<Option<CallTarget>> = std::sync::Mutex::new(None);
+
+fn set_running(target: Option<CallTarget>) {
+    if let Ok(mut running) = RUNNING.lock() {
+        *running = target;
+    }
+}
+
+/// What the runtime was running when it panicked on wasm, as `Todos.add`.
+pub(crate) fn running_operation() -> Option<String> {
+    let target = RUNNING.lock().ok().and_then(|running| *running)?;
+    current_or_global().map(|rt| rt.operation_of(&target))
+}
+
 /// The runtime executing on this thread, else the global one.
 pub(crate) fn current_or_global() -> Option<Arc<Runtime>> {
     current_runtime().or_else(|| GLOBAL.lock().clone())
+}
+
+/// Reports a panic contained where no runtime is at hand (a timer thread, a waker, a migration
+/// hook): through the runtime this thread is in, else the global one. Nothing happens without one.
+pub(crate) fn report_current(what: &str, operation: &str, report: &PanicReport) {
+    if let Some(rt) = current_or_global() {
+        rt.log_panic(what, operation, report);
+    }
 }
 
 /// Logs a fatal record through the current runtime (the wasm panic hook).
 pub(crate) fn log_fatal_current(target: &str, message: &str) {
     if let Some(rt) = current_or_global() {
         rt.log(FATAL, target, message);
+    }
+}
+
+/// Logs an error record through the current runtime.
+pub(crate) fn log_error_current(target: &str, message: &str) {
+    if let Some(rt) = current_or_global() {
+        rt.log(ERROR, target, message);
     }
 }
 
@@ -338,7 +380,56 @@ struct CallEntry {
     /// The handle of the receiver the call was made on (null for free functions and
     /// constructors): what a restore must check before the call may go on running.
     receiver: Handle,
+    /// What the call is, to name it in a panic report (ADR-046).
+    target: CallTarget,
+    /// The objects the call took as parameters (resolved before its body ran): a restore that
+    /// replaced or invalidated one of them cancels the call as it does for the receiver, since
+    /// the call would finish on an object the handle no longer names.
+    params: Held,
     stream: Option<Arc<StreamState>>,
+}
+
+/// The object parameters of one call, inline, unused slots null: the first four are named, and a
+/// fifth makes the last slot read [`MANY_PARAMS`]. A call that holds more objects than it can name
+/// is cancelled by *any* restore, because the restore cannot tell that none of them was replaced:
+/// cancelled is a status the host handles, a call finished on a replaced store is not. Plain data
+/// (`Copy`), so a call table entry has nothing to free.
+type Held = [Handle; 5];
+
+/// A call with no object parameter.
+const NO_PARAMS: Held = [Handle::NULL; 5];
+
+/// The last slot of a [`Held`] when the call took more object parameters than the four it names.
+const MANY_PARAMS: Handle = Handle(u64::MAX);
+
+/// Remembers that call `call_id` took the object `handle` as a parameter. A call's parameters
+/// are resolved one after the other, straight before its dispatch returns the future or stream
+/// that holds them, so one slot per thread is enough: a dispatch is not re-entered on its thread
+/// (the core lock refuses a nested call into the same runtime, which is `Reentrant`; a stream
+/// function's body that calls *another* core would replace the slot, and the outer stream would go
+/// unchecked by a restore: a missed cancel, never a wrong one).
+#[inline(never)]
+fn note_param(call_id: u32, handle: Handle) {
+    let mut held = if RESOLVED_FOR.replace(call_id) == call_id {
+        RESOLVED.get()
+    } else {
+        NO_PARAMS
+    };
+    match held.iter().position(|held| held.is_null()) {
+        Some(free) if free < 4 => held[free] = handle,
+        _ => held[4] = MANY_PARAMS,
+    }
+    RESOLVED.set(held);
+}
+
+/// The object parameters call `call_id` took (and forgets them).
+#[inline(never)]
+fn take_params(call_id: u32) -> Held {
+    if RESOLVED_FOR.replace(0) == call_id {
+        RESOLVED.get()
+    } else {
+        NO_PARAMS
+    }
 }
 
 /// Credit accounting for one open stream (SPEC 3.7).
@@ -405,7 +496,7 @@ pub struct Runtime {
     exec: Executor,
     pub(crate) ports: Arc<PortTable>,
     events: Events,
-    timers: Arc<Timers>,
+    pub(crate) timers: Arc<Timers>,
     blocking: Blocking,
     table: DispatchTable,
     restorers: HashMap<u32, &'static StoreRestorer>,
@@ -419,7 +510,9 @@ pub struct Runtime {
     stats_sections: Mutex<Vec<crate::ext::StatsSection>>,
     port_dispatchers: HashMap<u32, &'static PortDispatcher>,
     calls: Mutex<HashMap<u32, CallEntry>>,
-    stats: Stats,
+    pub(crate) stats: Stats,
+    /// The background tasks registered on this runtime (ADR-046).
+    pub(crate) background: crate::background::Registry,
     extensions: Extensions,
     inspectors: Inspectors,
     shut_down: AtomicBool,
@@ -436,6 +529,25 @@ pub struct Runtime {
     /// The computed signals currently held back because they panicked, as `(store handle,
     /// signal id)` (ADR-019 amendment): what `stats_json` reports as `poisoned_signals`.
     poisoned_signals: Mutex<HashSet<(u64, u32)>>,
+    /// What each client origin holds of the references the core handed out (ADR-040): what an
+    /// `undra dev` session's disconnect gives back.
+    origins: Origins,
+    /// The live proxies of the host's callback instances, for interning (ADR-041).
+    callbacks: CallbackRegistry,
+    /// The client origin whose callbacks are delivered (`0`: none is attached): see
+    /// [`set_client_origin`](Runtime::set_client_origin).
+    client_origin: AtomicU64,
+}
+
+/// The report of a call that failed in the core without a panic: its reason, nothing else.
+fn failed_report(reason: String) -> PanicReport {
+    PanicReport {
+        message: reason,
+        backtrace: String::new(),
+        location: String::new(),
+        thread: String::new(),
+        frames: Vec::new(),
+    }
 }
 
 /// Where an object lives: equal addresses are the same object.
@@ -798,6 +910,7 @@ impl Runtime {
             port_dispatchers,
             calls: Mutex::new(HashMap::new()),
             stats: Stats::default(),
+            background: crate::background::Registry::default(),
             extensions: Extensions::default(),
             inspectors: Inspectors::default(),
             shut_down: AtomicBool::new(false),
@@ -806,6 +919,9 @@ impl Runtime {
             core_thread: Mutex::new(None),
             lifeline: Arc::new(Lifeline::default()),
             poisoned_signals: Mutex::new(HashSet::new()),
+            origins: Origins::default(),
+            callbacks: CallbackRegistry::default(),
+            client_origin: AtomicU64::new(0),
         });
 
         register_runtime(rt.id, Arc::downgrade(&rt));
@@ -881,7 +997,11 @@ impl Runtime {
             }
             ran.push(hook.name);
             if let Err(report) = guard::guarded(|| (hook.run)(&ctx)) {
-                self.log_panic(&format!("init hook `{}` panicked", hook.name), &report);
+                self.log_panic(
+                    &format!("init hook `{}` panicked", hook.name),
+                    &format!("init hook {}", hook.name),
+                    &report,
+                );
             }
         }
     }
@@ -1094,6 +1214,7 @@ impl Runtime {
             crate::ext::Answer::Panicked(report) => {
                 self.log_panic(
                     &format!("inspector `{name}` panicked and is skipped from now on"),
+                    &format!("inspector {name}"),
                     &report,
                 );
                 None
@@ -1132,7 +1253,7 @@ impl Runtime {
         }) {
             Ok(value) => Some(value),
             Err(report) => {
-                self.log_panic(&format!("{what} panicked"), &report);
+                self.log_panic(&format!("{what} panicked"), what, &report);
                 None
             }
         }
@@ -1151,18 +1272,130 @@ impl Runtime {
         .unwrap_or(PortCallOutcome::Unavailable)
     }
 
-    fn log_panic(&self, what: &str, report: &PanicReport) {
+    /// A panic the runtime contained: the FATAL record, the counter, and the structured report
+    /// for the app's crash reporter (ADR-046 decision 4). `what` is the sentence of the record,
+    /// `operation` what was running (`Todos.add`, `task`).
+    pub(crate) fn log_panic(&self, what: &str, operation: &str, report: &PanicReport) {
         Stats::inc(&self.stats.panics);
         self.log(
             FATAL,
             "undra::panic",
             &format!("{what}: {}\n{}", report.message, report.backtrace),
         );
+        self.emit_report(operation, report);
+    }
+
+    /// Reports a panic an embedder contained at its own boundary (`undra-ffi`'s entries): the
+    /// report names `entry` as the operation and carries no frames.
+    pub fn report_boundary_panic(&self, entry: &str, message: &str) {
+        Stats::inc(&self.stats.panics);
+        let report = PanicReport {
+            message: message.to_owned(),
+            backtrace: String::new(),
+            location: String::new(),
+            thread: std::thread::current()
+                .name()
+                .unwrap_or("unnamed")
+                .to_owned(),
+            frames: Vec::new(),
+        };
+        self.emit_report(entry, &report);
+    }
+
+    /// Hands the report of a contained panic to the `Diagnostics` port, fire and forget: to a
+    /// Rust binding (a fake) if there is one, else to the platform with `port_call_id` 0, like a
+    /// log record. A report that itself panics, or one made while a report is being delivered,
+    /// is dropped: there is nowhere left to say so but the log, which already has it.
+    fn emit_report(&self, operation: &str, report: &PanicReport) {
+        // A wasm core aborts on a panic: there is nothing to report from here (the host builds the
+        // report from the FATAL record, ADR-046 decision 4.4), and nothing of this is linked.
+        if cfg!(target_family = "wasm") {
+            return;
+        }
+        thread_local! {
+            static REPORTING: Cell<bool> = const { Cell::new(false) };
+        }
+        if REPORTING.with(|flag| flag.replace(true)) {
+            return;
+        }
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                let _ = REPORTING.try_with(|flag| flag.set(false));
+            }
+        }
+        let _reset = Reset;
+        Stats::inc(&self.stats.panic_reports);
+        let bytes = crate::diagnostics::encode_report(report, operation, self.schema_hash);
+        let (port, method) = (
+            crate::diagnostics::DIAGNOSTICS_PORT,
+            crate::diagnostics::PANICKED_METHOD,
+        );
+        match self.ports.binding(port) {
+            PortBinding::Rust(imp, own) => {
+                let _ = guard::guarded(|| self.dispatch_to_rust(&imp, own, port, method, &bytes));
+            }
+            PortBinding::Foreign => {
+                let _ = self.host_port_call(port, method, FIRE_AND_FORGET, &bytes);
+            }
+        }
+    }
+
+    /// `verb` and the type of the store at `handle`, for a panic report: `observe Todos`.
+    fn store_operation(&self, verb: &str, handle: Handle) -> String {
+        match self.objects.type_of(handle) {
+            Ok((_, type_name)) => format!("{verb} {type_name}"),
+            Err(_) => verb.to_owned(),
+        }
+    }
+
+    /// What `target` is, for a panic report: `Todos.add`, `add_later`, `Todos.new`.
+    fn operation_of(&self, target: &CallTarget) -> String {
+        let named = |name: &str, id: u32| {
+            if name == "?" {
+                format!("{id:#010x}")
+            } else {
+                name.to_owned()
+            }
+        };
+        match *target {
+            CallTarget::Function { method_id } => self
+                .table
+                .functions
+                .get(&method_id)
+                .map_or_else(|| format!("fn {method_id:#010x}"), |m| m.name.to_owned()),
+            CallTarget::Method { handle, method_id } => match self.objects.type_of(handle) {
+                Ok((type_id, type_name)) => {
+                    let method = self
+                        .table
+                        .objects
+                        .get(&type_id)
+                        .map_or("?", |entry| entry.name_of(method_id, false));
+                    format!("{type_name}.{}", named(method, method_id))
+                }
+                Err(_) => format!("method {method_id:#010x}"),
+            },
+            CallTarget::Constructor { type_id, method_id } => {
+                match self.table.objects.get(&type_id) {
+                    Some(entry) => format!(
+                        "{}.{}",
+                        entry.meta.name,
+                        named(entry.name_of(method_id, true), method_id)
+                    ),
+                    None => format!("constructor {method_id:#010x}"),
+                }
+            }
+            CallTarget::LazyPage { .. } => "lazy page".to_owned(),
+        }
     }
 
     fn drop_guarded_logged<T>(&self, what: &str, value: T) {
         if let Err(report) = drop_guarded(value) {
-            self.log_panic(&format!("dropping {what} panicked"), &report);
+            self.log_panic(
+                &format!("dropping {what} panicked"),
+                &format!("drop of {what}"),
+                &report,
+            );
         }
     }
 
@@ -1308,6 +1541,19 @@ impl Runtime {
     /// (no `call_id` to answer), `call_id == 0`, a `call_id` that is already in flight, a
     /// shut-down runtime, or a re-entrant call.
     pub fn call(&self, payload: &[u8]) -> u32 {
+        self.call_from(0, payload)
+    }
+
+    /// [`call`](Runtime::call) on behalf of a client that is not in this process (an `undra dev`
+    /// session): `origin` (non-zero) names it, so that the references the call hands out
+    /// (ADR-040) are recorded against it and [`release_origin`](Runtime::release_origin) can
+    /// give them back when the client disconnects, and the callback instances it lends are its
+    /// own ([`set_client_origin`](Runtime::set_client_origin)). What a *constructor* returns is
+    /// not recorded ([`IssueScope::commit_constructed`]): it is the one reference its client made,
+    /// which the caller counts (the transport's session). `origin` 0 is the process's own embedder.
+    pub fn call_from(&self, origin: u64, payload: &[u8]) -> u32 {
+        // Set for the dispatch of a synchronous method and, through the spawned future, for every
+        // poll of an asynchronous one.
         Stats::inc(&self.stats.calls);
         let call = match Call::decode(&mut Reader::new(payload)) {
             Ok(call) => call,
@@ -1321,6 +1567,7 @@ impl Runtime {
                 return 5;
             }
         };
+        let _origin = (origin != 0).then(|| OriginScope::enter(origin));
         let call_id = call.call_id;
         if call_id == 0 {
             Stats::inc(&self.stats.bad_requests);
@@ -1340,6 +1587,9 @@ impl Runtime {
             Stats::inc(&self.stats.bad_requests);
             return 5;
         }
+        // The parameters a refused call left in the slot (`Runtime::param` noted them, then another
+        // failed to resolve) are nobody's: a call that reuses its id must not inherit them.
+        RESOLVED_FOR.set(0);
         if self.calls.lock().contains_key(&call_id) {
             Stats::inc(&self.stats.bad_requests);
             self.log(
@@ -1351,16 +1601,33 @@ impl Runtime {
         }
         match self.dispatch(&call, false) {
             Dispatched::Bad(reason) => self.reply_bad(call_id, &reason),
-            Dispatched::Panicked(report, handle) => self.reply_panic(call_id, handle, &report),
+            Dispatched::Panicked(report, handle) => {
+                self.reply_panic(call_id, handle, &call.target, &report);
+            }
             Dispatched::Done(result, handle) => match result {
                 DispatchResult::Sync(Ok(body)) => self.send_reply(call_id, ReplyStatus::Ok, &body),
                 DispatchResult::Sync(Err(body)) => {
                     self.send_reply(call_id, ReplyStatus::Error, &body);
                 }
-                DispatchResult::Async(future) => self.spawn_call(call_id, handle, future),
-                DispatchResult::Stream(stream) => self.open_stream(call_id, handle, stream),
-                DispatchResult::Unknown | DispatchResult::BadRequest(_) => {
-                    // `dispatch` maps both to `Dispatched::Bad`.
+                DispatchResult::Async(future) => {
+                    if origin == 0 {
+                        self.spawn_call(call_id, handle, call.target, future);
+                    } else {
+                        self.spawn_call(
+                            call_id,
+                            handle,
+                            call.target,
+                            Box::pin(WithOrigin::new(origin, future)),
+                        );
+                    }
+                }
+                DispatchResult::Stream(stream) => {
+                    self.open_stream(call_id, handle, call.target, stream);
+                }
+                DispatchResult::Unknown
+                | DispatchResult::BadRequest(_)
+                | DispatchResult::Failed(_) => {
+                    // `dispatch` maps these to `Dispatched::Bad` and `Dispatched::Panicked`.
                     self.reply_bad(call_id, "internal: unmapped dispatch result");
                 }
             },
@@ -1454,7 +1721,12 @@ impl Runtime {
             },
             Dispatched::Bad(reason) => bad(&reason),
             Dispatched::Panicked(report, handle) => {
-                self.note_panic("call_sync", handle, &report);
+                self.note_panic(
+                    "call_sync",
+                    &self.operation_of(&call.target),
+                    handle,
+                    &report,
+                );
                 SyncReply::Owned(reply_payload(
                     call_id,
                     ReplyStatus::Panic,
@@ -1526,6 +1798,17 @@ impl Runtime {
     /// the core lock. `sync_only` rejects async-shaped methods (by their metadata) before
     /// running anything.
     fn dispatch(&self, call: &Call<'_>, sync_only: bool) -> Dispatched {
+        if cfg!(target_family = "wasm") {
+            set_running(Some(call.target));
+            let dispatched = self.dispatch_inner(call, sync_only);
+            set_running(None);
+            dispatched
+        } else {
+            self.dispatch_inner(call, sync_only)
+        }
+    }
+
+    fn dispatch_inner(&self, call: &Call<'_>, sync_only: bool) -> Dispatched {
         let async_reason = |name: &str| {
             Dispatched::Bad(format!(
                 "`{name}` is asynchronous; call it with call(), not call_sync()"
@@ -1533,71 +1816,63 @@ impl Runtime {
         };
         // The route is the generated dispatcher the static table names, or, when the table has
         // no entry, the reason to report if no layer serves the call either.
-        let (route, method_id, handle): (Result<DispatchFn, String>, u32, Handle) = match call
-            .target
-        {
-            CallTarget::Function { method_id } => match self.table.functions.get(&method_id) {
-                Some(meta) => {
-                    if sync_only && needs_async(meta.is_async, &meta.returns) {
-                        return async_reason(meta.name);
-                    }
-                    (Ok(meta.dispatch), method_id, Handle::NULL)
-                }
-                None => (
-                    Err(format!("unknown function {method_id:#010x}")),
-                    method_id,
-                    Handle::NULL,
-                ),
-            },
-            CallTarget::Method { handle, method_id } => {
-                let (type_id, type_name) = match self.objects.type_of(handle) {
-                    Ok(found) => found,
-                    Err(e) => return Dispatched::Bad(e.to_string()),
-                };
-                match self.table.objects.get(&type_id) {
-                    Some(entry) => {
-                        if sync_only && entry.method_needs_async(method_id) {
-                            return async_reason(entry.name_of(method_id, false));
+        let (route, method_id, handle): (Result<DispatchFn, String>, u32, Handle) =
+            match call.target {
+                CallTarget::Function { method_id } => match self.table.functions.get(&method_id) {
+                    Some(meta) => {
+                        if sync_only && needs_async(meta.is_async, &meta.returns) {
+                            return async_reason(meta.name);
                         }
-                        (Ok(entry.meta.dispatch), method_id, handle)
+                        (Ok(meta.dispatch), method_id, Handle::NULL)
                     }
                     None => (
-                        Err(format!(
-                            "no dispatcher is registered for `{type_name}` ({type_id:#010x})"
-                        )),
-                        method_id,
-                        handle,
-                    ),
-                }
-            }
-            CallTarget::Constructor { type_id, method_id } => {
-                match self.table.objects.get(&type_id) {
-                    Some(entry) => {
-                        if sync_only && entry.constructor_needs_async(method_id) {
-                            return async_reason(entry.name_of(method_id, true));
-                        }
-                        (Ok(entry.meta.dispatch), method_id, Handle::NULL)
-                    }
-                    None => (
-                        Err(format!("unknown object type {type_id:#010x}")),
+                        Err(format!("unknown function {method_id:#010x}")),
                         method_id,
                         Handle::NULL,
                     ),
-                }
-            }
-            CallTarget::LazyPage {
-                handle,
-                offset,
-                limit,
-            } => {
-                return match self.objects.get::<LazyList>(handle) {
-                    Ok(list) => {
-                        Dispatched::Done(DispatchResult::Sync(Ok(list.page(offset, limit))), handle)
+                },
+                CallTarget::Method { handle, method_id } => {
+                    let (type_id, type_name) = match self.objects.type_of(handle) {
+                        Ok(found) => found,
+                        Err(e) => return Dispatched::Bad(e.to_string()),
+                    };
+                    match self.table.objects.get(&type_id) {
+                        Some(entry) => {
+                            if sync_only && entry.method_needs_async(method_id) {
+                                return async_reason(entry.name_of(method_id, false));
+                            }
+                            (Ok(entry.meta.dispatch), method_id, handle)
+                        }
+                        None => (
+                            Err(format!(
+                                "no dispatcher is registered for `{type_name}` ({type_id:#010x})"
+                            )),
+                            method_id,
+                            handle,
+                        ),
                     }
-                    Err(e) => Dispatched::Bad(e.to_string()),
-                };
-            }
-        };
+                }
+                CallTarget::Constructor { type_id, method_id } => {
+                    match self.table.objects.get(&type_id) {
+                        Some(entry) => {
+                            if sync_only && entry.constructor_needs_async(method_id) {
+                                return async_reason(entry.name_of(method_id, true));
+                            }
+                            (Ok(entry.meta.dispatch), method_id, Handle::NULL)
+                        }
+                        None => (
+                            Err(format!("unknown object type {type_id:#010x}")),
+                            method_id,
+                            Handle::NULL,
+                        ),
+                    }
+                }
+                CallTarget::LazyPage {
+                    handle,
+                    offset,
+                    limit,
+                } => return self.serve_page(handle, offset, limit),
+            };
         let dispatch_call = DispatchCall {
             method_id,
             call_id: call.call_id,
@@ -1619,6 +1894,29 @@ impl Runtime {
                 Dispatched::Bad(miss)
             }
         }
+    }
+
+    /// Answers a `LazyPage` call (SPEC 3.3, ADR-043) through the built-in dispatcher of the page
+    /// servers, so it runs under the same panic guard and is classified like any other call: the
+    /// source's encoders and a view's pipeline closures are user code.
+    fn serve_page(&self, handle: Handle, offset: u32, limit: u32) -> Dispatched {
+        let mut args = [0_u8; 8];
+        args[..4].copy_from_slice(&offset.to_le_bytes());
+        args[4..].copy_from_slice(&limit.to_le_bytes());
+        let call = DispatchCall {
+            method_id: 0,
+            call_id: 0,
+            handle: handle.0,
+            args: &args,
+        };
+        // Set by the first store with a `Lazy` field; without one nothing is served (and the core does
+        // not link the dispatcher, ADR-052).
+        let unserved = || Dispatched::Bad("not a lazy list".to_owned());
+        let Some(dispatch) = self.objects.lazy_dispatch() else {
+            return unserved();
+        };
+        self.run_dispatcher("lazy list", dispatch, call, handle, false)
+            .unwrap_or_else(unserved)
     }
 
     /// Runs one dispatcher under the panic guard and classifies what it answered. A layer
@@ -1652,6 +1950,11 @@ impl Runtime {
     ) -> Option<Dispatched> {
         match outcome.downcast::<DispatchResult>() {
             Ok(DispatchResult::BadRequest(reason)) => Some(Dispatched::Bad(reason)),
+            // The call took its arguments and failed without unwinding: contained and reported like a
+            // panic (status 2, the reason as the message), without a backtrace.
+            Ok(DispatchResult::Failed(reason)) => {
+                Some(Dispatched::Panicked(failed_report(reason), Handle::NULL))
+            }
             Ok(DispatchResult::Unknown) if layered => None,
             Ok(DispatchResult::Unknown) => Some(Dispatched::Bad(format!(
                 "unknown method {:#010x}, or its arguments or receiver were not valid",
@@ -1688,6 +1991,19 @@ impl Runtime {
                  delivered) and evaluated again when its inputs change"
             ),
         );
+        // (A wasm core never gets here: nothing catches a panic there, and the report is not built.)
+        if !cfg!(target_family = "wasm") {
+            let signal = self
+                .schema
+                .objects
+                .iter()
+                .find(|o| o.name == store)
+                .and_then(|o| o.store.as_ref())
+                .and_then(|s| s.signals.iter().find(|s| s.signal_id == signal_id))
+                .map_or_else(|| signal_id.to_string(), |s| s.name.clone());
+            let report = guard::caught_elsewhere(message);
+            self.emit_report(&format!("computed {store}.{signal}"), &report);
+        }
     }
 
     /// A held-back computed evaluated again and was delivered.
@@ -1703,15 +2019,15 @@ impl Runtime {
     }
 
     /// Accounts for a caught panic: log level 5, counters, store poisoning.
-    fn note_panic(&self, what: &str, handle: Handle, report: &PanicReport) {
-        self.log_panic(&format!("{what} panicked"), report);
+    fn note_panic(&self, what: &str, operation: &str, handle: Handle, report: &PanicReport) {
+        self.log_panic(&format!("{what} panicked"), operation, report);
         if !handle.is_null() {
             self.objects.mark_poisoned(handle);
         }
     }
 
-    fn reply_panic(&self, call_id: u32, handle: Handle, report: &PanicReport) {
-        self.note_panic("call", handle, report);
+    fn reply_panic(&self, call_id: u32, handle: Handle, target: &CallTarget, report: &PanicReport) {
+        self.note_panic("call", &self.operation_of(target), handle, report);
         self.send_reply(call_id, ReplyStatus::Panic, &encode_panic_body(report));
     }
 
@@ -1719,6 +2035,7 @@ impl Runtime {
         &self,
         call_id: u32,
         handle: Handle,
+        target: CallTarget,
         future: Pin<Box<dyn Future<Output = DispatchBytes> + Send>>,
     ) {
         // The task holds the runtime weakly (ADR-034): the executor owns the task, so a strong
@@ -1750,6 +2067,8 @@ impl Runtime {
             CallEntry {
                 task,
                 receiver: handle,
+                target,
+                params: take_params(call_id),
                 stream: None,
             },
         );
@@ -1758,6 +2077,13 @@ impl Runtime {
     /// A call's task finished with `result`: reply, unless the call was cancelled meanwhile.
     fn finish_call(&self, call_id: u32, result: DispatchBytes) {
         if self.calls.lock().remove(&call_id).is_none() {
+            return;
+        }
+        // Shutdown began while the call's last poll ran: answered as cancelled, as shutdown answers
+        // every call still in flight. Its result may not be whole: a method that returns objects
+        // lowers them through a `WeakCtx` that no longer upgrades, so it issued nothing (ADR-040).
+        if self.is_shut_down() {
+            self.send_reply(call_id, ReplyStatus::Cancelled, &[]);
             return;
         }
         match result {
@@ -1770,6 +2096,7 @@ impl Runtime {
         &self,
         call_id: u32,
         handle: Handle,
+        target: CallTarget,
         stream: Pin<Box<dyn futures_core::Stream<Item = DispatchBytes> + Send>>,
     ) {
         let state = Arc::new(StreamState::default());
@@ -1799,6 +2126,8 @@ impl Runtime {
             CallEntry {
                 task,
                 receiver: handle,
+                target,
+                params: take_params(call_id),
                 stream: Some(state),
             },
         );
@@ -1825,10 +2154,11 @@ impl Runtime {
         }
     }
 
-    /// Cancels the in-flight calls and streams whose receiver a restore replaced or invalidated:
-    /// a plain call is answered with status 3, a stream ends with an error item saying so, and
-    /// the task is dropped, each exactly once (the call table is the gate). Calls with no
-    /// receiver, and calls on an object that is still the one its handle names, go on.
+    /// Cancels the in-flight calls and streams whose receiver, or any object they took as a
+    /// parameter, a restore replaced or invalidated: a plain call is answered with status 3, a
+    /// stream ends with an error item saying so, and the task is dropped, each exactly once (the
+    /// call table is the gate). Calls that hold no object (a free function, a constructor with no
+    /// object parameter), and calls whose objects are still the ones their handles name, go on.
     ///
     /// `before` maps every handle that was live before the restore to its object's address.
     /// A call is affected when its handle was live before or is live now and does not name the
@@ -1836,29 +2166,37 @@ impl Runtime {
     /// rebuilt); a call on an object that had already been released, whose handle the restore did
     /// not touch, is not.
     fn cancel_calls_replaced_by_restore(&self, before: &HashMap<u64, usize>) {
-        let affected: Vec<u32> = {
-            let calls = self.calls.lock();
-            calls
-                .iter()
-                .filter(|(_, entry)| !entry.receiver.is_null())
-                .filter(|(_, entry)| {
-                    let was = before.get(&entry.receiver.0).copied();
-                    let now = self
-                        .objects
-                        .get_dyn(entry.receiver)
-                        .ok()
-                        .map(|object| object_address(&object));
-                    (was.is_some() || now.is_some()) && was != now
-                })
-                .map(|(&call_id, _)| call_id)
-                .collect()
-        };
+        let mut affected: Vec<u32> = Vec::new();
+        for (&call_id, entry) in self.calls.lock().iter() {
+            // The receiver, then the objects it took as parameters.
+            for &handle in std::iter::once(&entry.receiver).chain(&entry.params) {
+                if !handle.is_null() && self.replaced_by_restore(before, handle) {
+                    affected.push(call_id);
+                    break;
+                }
+            }
+        }
         for call_id in affected {
             self.abort_call(
                 call_id,
                 "the object it was running on was replaced by a restore",
             );
         }
+    }
+
+    /// Whether the object `handle` names is not the one it named before the restore (`before`
+    /// maps every handle that was live to its object's address).
+    fn replaced_by_restore(&self, before: &HashMap<u64, usize>, handle: Handle) -> bool {
+        if handle == MANY_PARAMS {
+            return true;
+        }
+        let was = before.get(&handle.0).copied();
+        let now = self
+            .objects
+            .get_dyn(handle)
+            .ok()
+            .map(|object| object_address(&object));
+        (was.is_some() || now.is_some()) && was != now
     }
 
     /// Ends every in-flight call and stream from the runtime's side ([`abort_call`](Runtime::abort_call)
@@ -1951,26 +2289,137 @@ impl Runtime {
                 self.objects
                     .with_observed(handle, |o| o.record(signal_id, true, signal_count));
             }
-            Err(report) => self.note_panic("observe", handle, &report),
+            Err(report) => {
+                self.note_panic(
+                    "observe",
+                    &self.store_operation("observe", handle),
+                    handle,
+                    &report,
+                );
+            }
         }
     }
 
-    /// Releases a handle. The object is dropped once no task holds it; a released store stops
-    /// delivering change-sets. Stale handles are ignored.
+    /// Gives one host reference to `handle` back (ADR-040). The object is dropped, and a store
+    /// stops delivering change-sets, once the last reference is gone and no task holds it. A
+    /// stale handle is ignored. Every runtime wrapper releases the one reference it owns, once.
     pub fn release(&self, handle: u64) {
         let Ok(_guard) = self.enter_core() else {
             self.reentrant("release");
             return;
         };
-        match self.objects.release(Handle(handle)) {
-            Ok(object) => {
+        self.release_inner(Handle(handle));
+    }
+
+    /// [`release`](Runtime::release) for a client origin: also forgets the reference in what
+    /// the origin holds, so [`release_origin`](Runtime::release_origin) does not give it back a
+    /// second time.
+    pub fn release_from(&self, origin: u64, handle: u64) {
+        let Ok(_guard) = self.enter_core() else {
+            self.reentrant("release");
+            return;
+        };
+        if origin != 0 {
+            self.origins.forget_one(origin, Handle(handle));
+        }
+        self.release_inner(Handle(handle));
+    }
+
+    /// Gives back every reference `origin` still holds of what its calls returned (a client
+    /// that disconnected without releasing, ADR-040). Returns how many references it gave back.
+    pub fn release_origin(&self, origin: u64) -> usize {
+        let held = self.origins.take(origin);
+        if held.is_empty() {
+            return 0;
+        }
+        let Ok(_guard) = self.enter_core() else {
+            self.reentrant("release_origin");
+            return 0;
+        };
+        let mut given = 0;
+        for (handle, count) in held {
+            for _ in 0..count {
+                self.release_inner(handle);
+                given += 1;
+            }
+        }
+        given
+    }
+
+    /// Rolls back one issued reference (the core lock is held by the caller).
+    pub(crate) fn release_issued(&self, handle: Handle) {
+        self.release_inner(handle);
+    }
+
+    /// One reference back, with the core lock held.
+    fn release_inner(&self, handle: Handle) {
+        match self.objects.release(handle) {
+            Ok(Released::Kept { .. }) => {}
+            Ok(Released::Removed(object)) => {
                 if let Some(cell) = object.as_store() {
+                    // The object may be issued again, to a host that has not mirrored it yet:
+                    // it starts clean (ADR-040 decision 5).
+                    cell.observe(undra_meta::ids::ALL_SIGNALS, false, &mut Writer::new());
                     cell.set_handle(0);
                 }
                 self.drop_guarded_logged("a released object", object);
             }
             Err(e) => self.log(DEBUG, "undra::runtime", &format!("release: {e}")),
         }
+    }
+
+    /// Starts an issue scope for the call being served: the references handed to the host by
+    /// the objects a method returns, which a dropped (uncommitted) scope gives back. See
+    /// [`IssueScope`].
+    pub fn issue_scope(&self) -> IssueScope<'_> {
+        IssueScope::new(self)
+    }
+
+    pub(crate) fn origins(&self) -> &Origins {
+        &self.origins
+    }
+
+    pub(crate) fn callbacks(&self) -> &CallbackRegistry {
+        &self.callbacks
+    }
+
+    /// Names the remote client that is attached (`undra dev`, `origin` as for
+    /// [`call_from`](Runtime::call_from)): the calls the core makes to the callback instances that
+    /// client lent are delivered, and those of any other origin are not. Every client numbers its
+    /// instances from 1, so what a session that left lent (objects kept for its return, or held by
+    /// something that outlived it) must never reach the instance of the same number in another.
+    pub fn set_client_origin(&self, origin: u64) {
+        self.client_origin.store(origin, Ordering::Release);
+    }
+
+    /// The client `origin` left: its callbacks are not delivered to whoever attaches next. A
+    /// client that has attached since is left alone.
+    pub fn clear_client_origin(&self, origin: u64) {
+        let _ = self
+            .client_origin
+            .compare_exchange(origin, 0, Ordering::AcqRel, Ordering::Acquire);
+    }
+
+    /// Whether a callback instance lent by `origin` can be called: the process's own embedder
+    /// (`0`) always, a remote client while it is the attached one.
+    pub(crate) fn callback_deliverable(&self, origin: u64) -> bool {
+        origin == 0 || self.client_origin.load(Ordering::Acquire) == origin
+    }
+
+    /// Calls a fire-and-forget method of a host callback instance: a port call with
+    /// `port_call_id 0` (SPEC 6 host contract 6), whose answer, if the host gives one, is
+    /// ignored. After [`shutdown`](Runtime::shutdown) it does nothing.
+    pub fn port_notify(&self, port_id: u32, method_id: u32, args: Vec<u8>) {
+        if self.is_shut_down() {
+            return;
+        }
+        Stats::inc(&self.stats.port_calls);
+        if let PortBinding::Rust(imp, own) = self.ports.binding(port_id) {
+            // A fake bound in Rust (a test): the answer is not read.
+            let _ = self.dispatch_to_rust(&imp, own, port_id, method_id, &args);
+            return;
+        }
+        let _ = self.host_port_call(port_id, method_id, 0, &args);
     }
 
     /// Stores `object` and returns its handle. Generated constructors call this (or
@@ -2001,12 +2450,38 @@ impl Runtime {
     /// Stores a [`LazyList`] (sharing its state) and returns its handle, which platforms page
     /// through with `LazyPage` calls.
     pub fn insert_lazy_list(&self, list: &LazyList) -> Handle {
-        self.insert_object(Arc::new(list.clone()))
+        self.insert_lazy_source(Arc::new(list.clone()))
+    }
+
+    /// Stores a page server for any [`LazySource`](undra_signals::LazySource) and returns its handle, which platforms page
+    /// through with `LazyPage` calls (the host owns one reference to it, as to any object it
+    /// constructs). A store's `Lazy<T>` signals are registered by the runtime when the store is
+    /// inserted; this is for a core that serves a list of its own.
+    pub fn insert_lazy_source(&self, source: Arc<dyn undra_signals::LazySource>) -> Handle {
+        self.objects.serve_page_calls();
+        self.objects.insert(page_server(source))
     }
 
     /// Resolves a raw handle to a `T`: what a generated dispatcher does for its receiver.
     pub fn object<T: Send + Sync + 'static>(&self, handle: u64) -> Result<Arc<T>, BadHandle> {
         self.objects.get::<T>(Handle(handle))
+    }
+
+    /// [`object`](Runtime::object) for an object **parameter** of a call that outlives its
+    /// dispatch (an `async` method, a stream): also remembers the handle for call `call_id`, which
+    /// holds the object while it runs, so that a restore that replaces or invalidates it cancels
+    /// the call, as it does for one running on a replaced receiver (ADR-023). What a generated
+    /// dispatcher calls for each `&T`, `Arc<T>`, `Option` and `Vec` parameter of such a method.
+    pub fn param<T: Send + Sync + 'static>(
+        &self,
+        call_id: u32,
+        handle: u64,
+    ) -> Result<Arc<T>, BadHandle> {
+        let resolved = self.objects.get::<T>(Handle(handle));
+        if resolved.is_ok() {
+            note_param(call_id, Handle(handle));
+        }
+        resolved
     }
 
     // ----- executor ----------------------------------------------------------------------
@@ -2182,7 +2657,20 @@ impl Runtime {
         };
         Stats::inc(&self.stats.polls);
         let mut cx = Context::from_waker(&waker);
-        match guard::guarded(|| future.as_mut().poll(&mut cx)) {
+        if cfg!(target_family = "wasm") {
+            let target = match kind {
+                TaskKind::Call { call_id, .. } | TaskKind::Stream { call_id, .. } => {
+                    self.calls.lock().get(&call_id).map(|entry| entry.target)
+                }
+                TaskKind::Detached => None,
+            };
+            set_running(target);
+        }
+        let polled = guard::guarded(|| future.as_mut().poll(&mut cx));
+        if cfg!(target_family = "wasm") {
+            set_running(None);
+        }
+        match polled {
             Ok(Poll::Pending) => {
                 if let EndPoll::Gone(future) = self.exec.end_poll(id, Some(future)) {
                     self.drop_task_future(future);
@@ -2207,16 +2695,20 @@ impl Runtime {
     }
 
     fn task_panicked(&self, kind: TaskKind, report: &PanicReport) {
+        let operation = |call_id: u32| {
+            let target = self.calls.lock().get(&call_id).map(|entry| entry.target);
+            target.map_or_else(|| "async call".to_owned(), |t| self.operation_of(&t))
+        };
         match kind {
-            TaskKind::Detached => self.log_panic("a spawned task panicked", report),
+            TaskKind::Detached => self.log_panic("a spawned task panicked", "task", report),
             TaskKind::Call { call_id, handle } => {
-                self.note_panic("async call", handle, report);
+                self.note_panic("async call", &operation(call_id), handle, report);
                 if self.calls.lock().remove(&call_id).is_some() {
                     self.send_reply(call_id, ReplyStatus::Panic, &encode_panic_body(report));
                 }
             }
             TaskKind::Stream { call_id, handle } => {
-                self.note_panic("stream", handle, report);
+                self.note_panic("stream", &operation(call_id), handle, report);
                 if self.calls.lock().remove(&call_id).is_some() {
                     self.send_stream_failure(
                         call_id,
@@ -2434,6 +2926,12 @@ impl Runtime {
             PortStatus::Error => Err(PortError::Failed(reply.body.to_vec())),
             PortStatus::Unavailable => Err(PortError::Unavailable),
         };
+        // The answer to a fire-and-forget call (a log record, a panic report) is of no interest to
+        // anyone, and acting on it would log "no port call 0 is pending": one more record (SPEC 6,
+        // host contract 6). A remote client answers these like any port call.
+        if reply.port_call_id == FIRE_AND_FORGET {
+            return;
+        }
         Stats::inc(&self.stats.port_replies);
         let id = reply.port_call_id;
         match self.finish_port_call(id, result) {
@@ -2473,7 +2971,7 @@ impl Runtime {
         let ctx = self.ctx();
         for callback in callbacks {
             if let Err(report) = guard::guarded(|| callback(&ctx, payload)) {
-                self.log_panic("an event subscriber panicked", &report);
+                self.log_panic("an event subscriber panicked", "event subscriber", &report);
             }
         }
     }
@@ -2500,7 +2998,7 @@ impl Runtime {
     /// does not change.
     fn snapshot_description(&self, type_ids: &[u32]) -> Arc<str> {
         let mut key = type_ids.to_vec();
-        key.sort_unstable();
+        undra_signals::sort_ids(&mut key);
         let mut cache = self.description.lock();
         if let Some((cached, text)) = cache.as_ref() {
             if *cached == key {
@@ -2540,7 +3038,8 @@ impl Runtime {
             match guard::guarded(|| cell.encode_snapshot(&mut w)) {
                 Ok(()) => {}
                 Err(report) => {
-                    self.note_panic("snapshot", handle, &report);
+                    let operation = self.store_operation("snapshot", handle);
+                    self.note_panic("snapshot", &operation, handle, &report);
                     continue;
                 }
             }
@@ -2579,7 +3078,7 @@ impl Runtime {
         out.write_len(u32::try_from(chunks.len()).unwrap_or(u32::MAX));
         // Read after the stores were listed: the counter only grows, so the floor is at least
         // every generation in the snapshot (and every one issued before it was taken).
-        out.write_u32(self.objects.generation_floor());
+        out.write_u64(self.objects.generation_floor());
         out.write_u64(self.schema_hash);
         // The type table (`SnapshotType`s): each store type once, with its fingerprint.
         out.write_len(u32::try_from(type_ids.len()).unwrap_or(u32::MAX));
@@ -2610,11 +3109,11 @@ impl Runtime {
     /// Restoring into a fresh runtime (after a crash) has no memory of observations: the host
     /// re-observes what it mirrors. Detached tasks keep the objects they already hold; those
     /// stores are detached and no longer deliver change-sets. **In-flight calls and streams
-    /// whose receiver the restore replaced or invalidated are cancelled** (ADR-023): a plain
-    /// call is answered with status 3, exactly once, a stream ends with a failed item (flag 3,
-    /// status 3; ADR-036), and their tasks are dropped, so none can report success for a write
-    /// the restored store never saw. Calls without a receiver (free functions, constructors)
-    /// carry on.
+    /// whose receiver, or any object they took as a parameter, the restore replaced or
+    /// invalidated are cancelled** (ADR-023): a plain call is answered with status 3, exactly
+    /// once, a stream ends with a failed item (flag 3, status 3; ADR-036), and their tasks are
+    /// dropped, so none can report success for a write the restored store never saw. Calls that
+    /// hold no object (a free function or constructor without object parameters) carry on.
     ///
     /// All stores are built before anything is replaced: on error the runtime is unchanged.
     ///
@@ -2733,7 +3232,11 @@ impl Runtime {
                 Ok(Ok(any)) => any,
                 Ok(Err(source)) => return Err(RestoreError::Store { type_id, source }),
                 Err(report) => {
-                    self.log_panic("a store's restore panicked", &report);
+                    self.log_panic(
+                        "a store's restore panicked",
+                        &format!("restore {}", self.store_name(type_id)),
+                        &report,
+                    );
                     return Err(RestoreError::Panicked {
                         type_id,
                         message: report.message,
@@ -2785,8 +3288,18 @@ impl Runtime {
         let mut observed = HashMap::new();
         // Which object each handle named before the restore (by address, for the check below).
         let mut before: HashMap<u64, usize> = HashMap::new();
+        // The references the host held to each handle (ADR-040): a store the snapshot puts back
+        // under its handle keeps them, because the host's wrappers (one per reference given out:
+        // a second `Arc<Self>` construction, a reply whose extra reference is still on its way
+        // back) each give exactly one back later. Starting from one would let the first of them
+        // remove the store the others still use.
+        // (A list, not a map: a handful of entries, and no second map type in the wasm.)
+        let mut refs_before: Vec<(u64, u32)> = Vec::new();
         for cleared in self.objects.clear() {
             before.insert(cleared.handle.0, object_address(&cleared.object));
+            if cleared.host_refs > 1 {
+                refs_before.push((cleared.handle.0, cleared.host_refs));
+            }
             if let Some(cell) = cleared.object.as_store() {
                 cell.set_handle(0);
                 observed.insert(
@@ -2797,7 +3310,14 @@ impl Runtime {
             self.drop_guarded_logged("an object replaced by restore", cleared.object);
         }
         for (handle, object) in &built {
-            if let Err(e) = self.objects.insert_at(*handle, object.clone()) {
+            let refs = refs_before
+                .iter()
+                .find(|(h, _)| *h == handle.0)
+                .map_or(1, |(_, n)| *n);
+            if let Err(e) = self
+                .objects
+                .insert_at_with_refs(*handle, object.clone(), refs)
+            {
                 self.log(
                     ERROR,
                     "undra::runtime",
@@ -2842,7 +3362,8 @@ impl Runtime {
                         if let Err(report) =
                             guard::guarded(|| self.deliver_observed(cell, &signal_ids))
                         {
-                            self.note_panic("restore", *handle, &report);
+                            let operation = self.store_operation("restore", *handle);
+                            self.note_panic("restore", &operation, *handle, &report);
                         }
                     }
                     self.objects
@@ -2853,6 +3374,7 @@ impl Runtime {
         if let Err(panic) = phase3 {
             self.log_panic(
                 "restore: committing the writes of the re-observed stores panicked",
+                "restore",
                 &panic,
             );
         }
@@ -2899,10 +3421,13 @@ impl Runtime {
         out.push_str(",\"mode\":");
         push_json_string(&mut out, &self.config.mode);
         out.push_str(&format!(
-            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"poisoned_signals\":{},\"transactions\":{},\"panics\":{},\"off_core_writes\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}}}",
+            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"host_refs\":{},\"live_callbacks\":{},\"origin_refs\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"poisoned_signals\":{},\"transactions\":{},\"panics\":{},\"off_core_writes\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}",
             self.schema_hash,
             strong_refs,
             self.objects.live(),
+            self.objects.host_refs(),
+            self.callbacks.live(),
+            self.origins.total(),
             self.objects.store_count(),
             self.objects.poisoned_stores(),
             self.exec.live(),
@@ -2929,6 +3454,12 @@ impl Runtime {
             Stats::get(&s.events),
             Stats::get(&s.bad_requests),
             Stats::get(&s.cancelled),
+        ));
+        // ADR-046: the reports delivered to `Diagnostics`. (The background tasks have a section of
+        // their own, added when the first is registered: `background::stats_section`.)
+        out.push_str(&format!(
+            ",\"panic_reports\":{}}}",
+            Stats::get(&s.panic_reports)
         ));
         // Sections of layered crates (`undra-query`'s persistence counters), before the closing
         // brace of the document.
@@ -3052,7 +3583,7 @@ fn core_loop(weak: &Weak<Runtime>, shared: &Shared) {
             // `undra-core` thread would silently stall every async call.
             Some(rt) => {
                 if let Err(report) = guard::guarded(|| rt.run_batch(batch)) {
-                    rt.log_panic("the executor loop panicked", &report);
+                    rt.log_panic("the executor loop panicked", "executor", &report);
                 }
             }
             None => break,

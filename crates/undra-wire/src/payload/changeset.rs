@@ -22,7 +22,8 @@ wire_u8_enum! {
         Full = 0,
         /// `value` is a keyed patch (SPEC 3.8) for a `Signal<Vec<T>>`.
         KeyedPatch = 1,
-        /// A lazy list was invalidated; `value` is empty and the host re-pages.
+        /// A lazy list changed (ADR-043); `value` is a [`LazyInvalidated`](super::LazyInvalidated)
+        /// (`len u32, version u64`) and the host re-pages the window it shows.
         LazyInvalidated = 2,
     }
 }

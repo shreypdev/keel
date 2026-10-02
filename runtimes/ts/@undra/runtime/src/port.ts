@@ -5,7 +5,8 @@
  * with `UndraCore.registerPort(portId, impl)`.
  *
  * `methods` maps a method id (`fnv1a32("<Trait>.<method>")`) to a function
- * from the encoded arguments to the encoded return value. A function may
+ * from the encoded arguments (and the call's `port_call_id`, 0 for a call that
+ * expects no reply) to the encoded return value. A function may
  * throw `UndraPortError(body)` to fail with the port's typed error (the core
  * gets status 1 and `body`); any other exception is logged and answered as
  * "unavailable".
@@ -29,8 +30,11 @@ export interface PortImpl {
   readonly name?: string;
   /** Whether every method answers synchronously. */
   readonly sync: boolean;
-  /** Implementations by method id. */
-  readonly methods: Readonly<Record<number, (args: Uint8Array) => Uint8Array | Promise<Uint8Array>>>;
+  /**
+   * Implementations by method id. The second argument is the core's id of the call: `0` for a call nobody waits for
+   * (a fire-and-forget callback method, ADR-041), and absent when a test calls the method directly.
+   */
+  readonly methods: Readonly<Record<number, (args: Uint8Array, portCallId?: number) => Uint8Array | Promise<Uint8Array>>>;
   /**
    * Called when the core that registered this port closes, and when a wasm core restarts after a
    * trap (`crashRecovery`, ADR-049): a port that holds platform resources for the core (the
@@ -41,6 +45,19 @@ export interface PortImpl {
    * Optional; it must not throw (the main entry carries no handler for it, ADR-052).
    */
   readonly dispose?: () => void;
+  /**
+   * Called by the core that registers this port (`LoadOptions.ports`, `registerPort`), before any call reaches it, with
+   * what the port may need to know about its core: its namespace (ADR-044 amendment A), which the default location of
+   * a store is made from (`dbPort` passes it to its adapter, so `waSqliteDb()` keeps its files in
+   * `undra/<namespace>/db`). Optional; a port that is registered with two cores is told by the last. It must not throw.
+   */
+  readonly bind?: (host: PortHost) => void;
+}
+
+/** What a core tells a port implementation that registers with it ({@link PortImpl.bind}). */
+export interface PortHost {
+  /** The namespace of the core (`UndraCore.namespace`). */
+  readonly namespace: string;
 }
 
 /**

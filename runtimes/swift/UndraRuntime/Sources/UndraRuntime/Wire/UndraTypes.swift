@@ -296,10 +296,11 @@ public struct UndraUUID: UndraCodec, Sendable, Hashable, Comparable, CustomStrin
 
 // MARK: - Handle
 
-/// An object or store handle (docs/SPEC.md section 1.2): a `u64` whose low 32 bits are the slot
-/// index and whose high 32 bits are the generation (starting at 1). `0` is the null handle.
+/// An object or store handle (docs/SPEC.md section 1.2): a `u64` whose low 24 bits are the slot
+/// index and whose high 40 bits are the generation (starting at 1, ADR-040). `0` is the null handle.
 ///
-/// Handles are only meaningful inside the runtime instance that issued them.
+/// Handles are only meaningful inside the runtime instance that issued them: two cores issue the
+/// same numbers (ADR-044), which is why the bindings never pass one core's object to another.
 public struct UndraHandle: UndraCodec, Sendable, Hashable, CustomStringConvertible {
     /// The raw `u64` as it appears on the wire.
     public var rawValue: UInt64
@@ -307,24 +308,28 @@ public struct UndraHandle: UndraCodec, Sendable, Hashable, CustomStringConvertib
     /// The null handle (`0`).
     public static let null = UndraHandle(rawValue: 0)
 
+    /// Bits of the slot index.
+    static let indexBits: UInt64 = 24
+
     /// Wraps a raw wire value.
     public init(rawValue: UInt64) {
         self.rawValue = rawValue
     }
 
-    /// Builds a handle from a slot index and a generation.
-    public init(index: UInt32, generation: UInt32) {
-        self.rawValue = (UInt64(generation) << 32) | UInt64(index)
+    /// Builds a handle from a slot index (its low 24 bits) and a generation (its low 40 bits).
+    public init(index: UInt32, generation: UInt64) {
+        let slot = UInt64(index) & ((1 << UndraHandle.indexBits) - 1)
+        self.rawValue = (generation << UndraHandle.indexBits) | slot
     }
 
-    /// The slot index (low 32 bits).
+    /// The slot index (low 24 bits).
     public var index: UInt32 {
-        return UInt32(truncatingIfNeeded: rawValue)
+        return UInt32(truncatingIfNeeded: rawValue & ((1 << UndraHandle.indexBits) - 1))
     }
 
-    /// The generation (high 32 bits).
-    public var generation: UInt32 {
-        return UInt32(truncatingIfNeeded: rawValue >> 32)
+    /// The generation (high 40 bits).
+    public var generation: UInt64 {
+        return rawValue >> UndraHandle.indexBits
     }
 
     /// Whether this is the null handle (`rawValue == 0`).

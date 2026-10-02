@@ -12,6 +12,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -105,10 +106,40 @@ class Platform {
   virtual void workerEnded() noexcept {}
 };
 
+/// Whether `name_space` may name a core's stores: a lowercase letter, then lowercase letters, digits and `_`, at most 32
+/// bytes, the rule of `undra.toml` (SPEC 13). `loadApi` only needs a C identifier (a class or library name), but the default
+/// stores put the namespace in a directory, a Keychain service, a Keystore alias and a file name, on file systems that
+/// are case-insensitive (Apple's), so `makePlatform` refuses anything else before it makes a path.
+inline bool validStorageNamespace(const std::string &name_space) noexcept {
+  if (name_space.empty() || name_space.size() > 32) return false;
+  for (std::size_t i = 0; i < name_space.size(); ++i) {
+    const char c = name_space[i];
+    const bool lower = c >= 'a' && c <= 'z';
+    const bool digit = c >= '0' && c <= '9';
+    if (!(lower || (i > 0 && (digit || c == '_')))) return false;
+  }
+  return true;
+}
+
+/// What `makePlatform` says when `name_space` is not one (`validStorageNamespace`).
+inline std::string invalidStorageNamespace(const std::string &name_space) {
+  return "the Undra core namespace `" + (name_space.size() > 40 ? name_space.substr(0, 40) + "..." : name_space) +
+      "` cannot name the default stores: lowercase letters, digits and `_`, starting with a letter, at most 32 characters (undra.toml [core] namespace)";
+}
+
 /// The platform of a phone: `ios/UndraPlatformApple.mm` on Apple platforms, `UndraPlatformAndroid.cpp`
 /// on Android (call it on the JS thread: Android resolves its Java class there). Null elsewhere, or when
-/// the platform cannot be reached (`error` says why).
-std::unique_ptr<Platform> makePlatform(std::string &error);
+/// the platform cannot be reached (`error` says why), or when `name_space` is not a core namespace
+/// (`validStorageNamespace`).
+///
+/// `name_space` is the namespace of the core the platform serves (the table's `name_space`): every default
+/// store is per namespace (ADR-044 amendment A), so two cores of one app never share one. Kv, Fs and the
+/// databases live under `.../Undra/<name_space>/...` on Apple platforms (the casing the Swift runtime has always
+/// used on disk) and `.../undra/<name_space>/...` on Android (the latter's databases are
+/// `undra-<name_space>-<name>.sqlite`), the Keychain service and the Keystore alias are
+/// `<name_space>.dev.undra.securestore`: the Swift runtime's and `android-adapters`' layouts, with the
+/// namespace in the same place.
+std::unique_ptr<Platform> makePlatform(const std::string &name_space, std::string &error);
 
 /// The ports of `ids` the platform can answer natively (`Kv`, `SecureStore`, `Fs`, `Connectivity`, `Db`).
 std::vector<uint32_t> nativePortsOf(Platform &platform);

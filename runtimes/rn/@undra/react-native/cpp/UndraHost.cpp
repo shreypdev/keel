@@ -22,6 +22,8 @@ static_assert(ports::kClockNowMs == 0xccc94d90u, "Clock.now_ms method id");
 static_assert(ports::kClockMonotonicNs == 0x2cb2b4bfu, "Clock.monotonic_ns method id");
 static_assert(ports::kRng == 0x25135bf5u, "Rng port id");
 static_assert(ports::kRngFill == 0x2832b8edu, "Rng.fill method id");
+static_assert(ports::kDiagnostics == 0xab68cd7cu, "Diagnostics port id (ADR-046)");
+static_assert(ports::kDiagnosticsPanicked == 0xbd147e2eu, "Diagnostics.panicked method id (ADR-046)");
 
 namespace {
 
@@ -193,15 +195,16 @@ uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<Port
     }
   }
   // Registered before `undra_init`, so the start-up hooks (query hydration reads Kv) never race a
-  // late registration (docs/SPEC.md section 6). Clock, Rng and Log are answered here, on whatever
-  // thread asks; Timer keeps the core's own timer thread.
-  for (uint32_t id : {ports::kClock, ports::kRng, ports::kLog}) {
+  // late registration (docs/SPEC.md section 6). Clock, Rng, Log and Diagnostics are answered here, on whatever
+  // thread asks (a panic is reported from the thread that panicked, which may be a core thread: JavaScript cannot run
+  // there, so the report is queued for the JS thread, once); Timer keeps the core's own timer thread.
+  for (uint32_t id : {ports::kClock, ports::kRng, ports::kLog, ports::kDiagnostics}) {
     api_.port_register(id, &Host::nativePortTrampoline, this);
     registered_.push_back(id);
   }
   for (const PortSpec &spec : specs) {
     const uint32_t id = spec.portId;
-    if (id == ports::kClock || id == ports::kRng || id == ports::kLog || id == ports::kTimer) {
+    if (id == ports::kClock || id == ports::kRng || id == ports::kLog || id == ports::kTimer || id == ports::kDiagnostics) {
       continue;
     }
     const bool native = defaults_ != nullptr && defaults_->answers(id);
@@ -497,6 +500,26 @@ uint8_t Host::answerNative(
         return 1;
       }
       return replyOk(portCallId, nullptr, 0, out);
+    case ports::kDiagnostics: {
+      if (methodId != ports::kDiagnosticsPanicked || args == nullptr || len == 0) {
+        return 2;
+      }
+      // The report goes to the JS thread as a `PortCall` record of this very port, which the transport hands to the
+      // app's `onPanic` (once, in the order the panics happened: one inbox for every thread). Its answer is ignored:
+      // the core does not wait for one.
+      uint8_t head[12];
+      putU32(head, portId);
+      putU32(head + 4, methodId);
+      putU32(head + 8, 0);
+      if (!append(RecordKind::PortCall, head, sizeof(head), args, len)) {
+        return 2; // not queued (shutting down, or out of memory)
+      }
+      // Port call id 0 is the core's own fire-and-forget report: nothing waits for an answer (host contract 6).
+      if (portCallId == 0) {
+        return 1;
+      }
+      return replyOk(portCallId, nullptr, 0, out);
+    }
     default:
       return 2;
   }

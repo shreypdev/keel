@@ -4,7 +4,7 @@ import { RECOVERY, RestartLog, describeRestart } from "./recovery-log";
 
 /** A restart event as the runtime hands it to `onCoreRestarted`. */
 function restarted(message: string, info: { restoredFromAgeMs: number | null; rejectedCalls: number; staleObjects: number }): UndraCoreRestarted {
-  const report = { message, location: "", operation: "wasm-main: RuntimeError: unreachable", frames: [], schemaHash: 1n, trap: "RuntimeError: unreachable" };
+  const report = { message, location: "", operation: "", thread: "main", frames: [], namespace: "", coreVersion: "", schemaHash: 1n, imageId: "" };
   return new UndraCoreRestarted({ report, ...info }, new UndraTransportError("trap", "the wasm core trapped: unreachable"));
 }
 

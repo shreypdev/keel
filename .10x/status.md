@@ -464,3 +464,49 @@ In flight: `objects-callbacks` (ADR-040/041), `ios-floor` (ADR-045), `prod-ops` 
 
 Matrix at checkpoint 21: Rust 3,078 · TS 1,432 + 32 · Kotlin 753 + 30 · Swift 674 · RN 87 · contracts 74/74.
 In flight: `ns-storage` (review), `objects-callbacks`, `prod-ops`, `ts-size-e4`.
+
+### Checkpoint 22 (2026-10-02) — the web call path, per-namespace storage
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **ts-size-e4** (ADR-056 + an ADR-052 amendment): the JS gate measures the chunk loaded up front (lazy chunks reported); the remote transport and the four default ports load on first use; the call path allocates nothing on the hot path (byte-level writer/reader, one-allocation call payload, a direct call that returns a settled promise, a shared scratch `DataView`, optional `Transport.sendCall`/`callSyncParts`), the Vite plugin defaults `build.target` to es2022; web budgets as tests (`[web."id"]` rows read by the device bench and a runtime test) | `ab7c6b3` | sonnet review `.10x/reviews/2026-10-02-ts-size-e4-review.md`: sound with fixes (M1 a throw after a sync answer rejected the call, M2 an explicit Timer adapter on a remote core registered too late, M3 flaky RN waits); ordering under 46 cases + a mutant; a 12,000-payload differential wire fuzz against main; Chromium: handle call 3.2 µs → 0.47 µs, callSync 3.6 → 0.3 µs, 100-signal change-set 88 → 17 µs, frame 4.0 → 1.1 ms; Hermes mirror work per frame at 100k patches/s 22 → 5 ms; hello JS 25,996 → 21,173 (gate 21,500; a hello app that calls Kv loads 25,318 over its life); 16 KB not reachable without removing required behaviour (recorded) |
+| **ns-storage** (ADR-044 Amendment A as built): every default store under `…/undra/<ns>/…` (Apple `Undra/<ns>/`), Keychain/Keystore items prefixed, browser names `undra.<ns>.*`, the namespace from the generated entry at load and validated on every host before it becomes a path; two cores write to distinct places on iOS, Android, JVM and Node | `1625dfe` | sonnet review `.10x/reviews/2026-10-02-ns-storage-review.md`: F1 an unvalidated namespace path component on every host (fixed), F2 the bindgen TS fixtures (fixed); JS 21,336 of 21,500 after crossing ts-size-e4; TS 1,580 · Swift 686 · Kotlin 756 · adapters 147 instrumented · RN 88 · contracts 74/74 |
+
+Matrix at checkpoint 22: Rust 3,079 · TS 1,580 + 32 · Kotlin 756 + 30 · Swift 686 · RN 88 · contracts 74/74.
+In flight: `objects-callbacks` (ADR-040/041, final matrix), `prod-ops` (ADR-046, final matrix); drafted: `default-choice-post` (fact-check pending).
+
+### Checkpoint 23 (2026-10-02) — objects as parameters, host callbacks
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **objects-callbacks** (ADR-040 + ADR-041 Accepted): handles are 24-bit slot + 40-bit generation with a `u64` floor; `TypeRef::Object`/`Callback`; `Arc<T>`/`&T`/`Option`/`Vec<Arc<T>>` parameters and returns, `Arc<Self>` constructors; the object table counts host references, interns by address, an RAII `IssueScope` gives back what a reply did not carry; one wrapper per handle on every platform; a foreign core's handle refused host-side; `#[undra::callback]` traits as ports with instances (`main` delivery through the mirror drain, `background` on a serial executor), typed errors status 1, anything else `onError` + status 2, cancellation to `Task`/`Job`/`AbortSignal`; the playground's Workshop tab; S27/S28 on all columns; bench rows (object param 48.7 ns ≈ `add`; return 84 ns; callback round trip 183 ns) | `848d3a7` | opus review `.10x/reviews/2026-10-02-objects-callbacks-review.md`: merge; F1 (High) a collected wrapper's handle returned later threw in TS, F2 restore reset host refs, F3 a return racing shutdown answered status 0, F4 the callback registry survived a crash restart, F5 Swift ran `onCancel` under the core lock; the JS gate restated at 21,800 (record 21,672; lazy-loading the identity map would cost 2.6–3.8 ms on the first `create()`); the stress-screen smoke failure was a stale build; O1–O10 to `objects-followups`; Rust 3,133 · Swift 705 · Kotlin 782 · TS 1,613 · RN 92 · contracts 80/80 (S01–S28) |
+
+Matrix at checkpoint 23: Rust 3,133 · TS 1,613 + 32 · Kotlin 782 + 30 · Swift 705 · RN 92 · contracts 80/80.
+In flight: `prod-ops` (ADR-046, opus review), `types-paging` (ADR-042/043), `objects-followups` (O1–O8), `default-choice-post` (drafted).
+
+### Checkpoint 24 (2026-10-02) — production operations
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **prod-ops** (ADR-046 Accepted, 19-point amendment): every contained panic is a FATAL `undra::panic` record plus one `PanicReport` (message, location, operation, thread, frames with image-relative addresses, namespace, core version, schema hash, image id) to the standard `Diagnostics.panicked` port, delivered to `onPanic` in order on every platform (wasm builds it host-side from the trap); `run_background(deadline)` runs per-runtime tasks (the query client's replay/refetch/flush) with iOS `UndraBackground`, Android `android-work`, the web page window; the CLI keeps line-table symbols, writes `build/symbols/manifest.json`, `undra symbolicate`, `.lldbinit`; S29/S30 | `4d6effd` | opus review `.10x/reviews/2026-10-02-prod-ops-review.md`: sound with fixes; H1 the hello wasm went over its gate after the cross (the panic path is linked by use on wasm — `guarded()` is `Ok(f())` under `panic=abort`; 119,654 of 120,000), M1 two `SAFETY` claims held only for images `undra build` makes (bounded ELF/Mach-O reads with the real load bias, Miri-checked), M2 two containment sites reported nothing, M4 an empty image id right after load; the JS gate reconciled at 22,100 (main 21,336 + objects 336 + prod-ops 333, `runInBackground` and the Diagnostics registration lazy); symbolication proven on iOS Release, Android, host and web (`lab.rs:222/221/236`); Rust 3,229 · Swift 772 · Kotlin 810 · TS 1,681 · RN 104 · contracts 86/86; hash `0xcc36d9fa84455aef` |
+
+Matrix at checkpoint 24: Rust 3,229 · TS 1,681 + 37 · Kotlin 810 + 32 · Swift 772 · RN 104 · contracts 86/86 (S01–S30).
+In flight: `types-paging` (ADR-042/043), `objects-followups` (O1–O8); drafted: `default-choice-post`.
+
+### Checkpoint 25 (2026-10-02) — newtypes, generics, Decimal; paged and lazy lists; polling
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **types-paging** (ADR-042 + ADR-043 Accepted): newtypes cross transparently with native wrappers (Swift struct, Kotlin value class, TS branded type), `#[undra::api(generic)]` instantiations (E0070), `Decimal` as a 16-byte i128 mantissa + scale ≤ 38, leaf features (`uuid`, `chrono`, `time`, `rust_decimal`, `bytes`) with a CI job; infinite queries (`fetch_next_page`, `has_next_page`), `Lazy<T>` lists with a transient page server and `Lazy::over(&derived)` (Swift `UndraLazyList` + pre-17 twin, Kotlin `UndraLazyList` + `undra-compose`, TS `useLazyList`), polling with pause on Background/offline; the playground's Ledger, Library (10,000 lazy rows), Feed and Ticker screens; S31–S33; ADR-031 amended (a lazy invalidation supersedes only earlier invalidations of its signal) with model tests in all three mirrors | `686a983` | opus review `.10x/reviews/2026-10-02-types-paging-review.md`: sound with fixes; H1 Kotlin/Swift saturated any mantissa over 127 bits to i128::MAX (off by 38 orders), M1 page sizes over 4,096 broke the list on every platform, M2 the TS mirror applied an invalidation while waiting for a full value; mutants of the amendment fail in each mirror; Rust 3,518 · Swift 862 · Kotlin 880 · TS 1,847 · RN 109 · contracts **95/95** (S01–S33); hello wasm 116,480, JS 22,068 of 22,100; hash `0xaa836fffb918e598`. Open: L2–L6 (refused page reporting differs, retry limits differ, poll resume timing, `undra-compose` tests not in CI, `rust_decimal` scale 28) |
+
+Matrix at checkpoint 25: Rust 3,518 · TS 1,847 + 37 · Kotlin 880 + 32 · Swift 862 · RN 109 · contracts 95/95.
+Every ADR from 029 to 056 is implemented and merged. In flight: `objects-followups` (review + the path-independent size gate); drafted: `default-choice-post`.
+
+### Checkpoint 26 (2026-10-02) — the objects follow-ups; every code piece of the v1.x program is merged
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **objects-followups** (O1–O8 of the objects review): streams that take objects or callbacks lend and give back on every platform, one Swift wrapper per handle with cleanup under the identity map's lock, restore cancels calls holding a replaced store as a parameter, TS crash-restart replay distinguishes give-backs from releases, per-origin dev-session accounting, a constructor failing after taking callbacks answers status 2 without a double release, an abort racing a success reply reclaims the reference on every transport, Kotlin `invoke` for every `new`, the Swift weak wrapper fails rather than hangs; release builds remap `~`, `CARGO_HOME`, the registry, the checkout and the project so the module does not depend on where it was built | `14aae90` | sonnet review `.10x/reviews/2026-10-02-objects-followups-review.md`: merge; F1 (High) a pre-existing deadlock in Swift's identity map (a weak load under the lock deallocating a wrapper whose `deinit` takes the lock — found by an 8-thread stress), F3 StrictMode double effects closed a live object, F4/F5 parameter-slot gaps; Rust 3,536 · Swift 870 · Kotlin 881 · TS 1,856 · RN 110 · contracts 95/95; hash `0xcaec1b9d8ea1f199`; wasm 116,690 of 120,000, JS 22,100 of 22,100 (zero headroom: the next JS change makes room or restates ADR-052) |
+
+Matrix at checkpoint 26: Rust 3,536 · TS 1,856 + 37 · Kotlin 881 + 32 · Swift 870 · RN 110 · contracts 95/95 (S01–S33).
+**Every code piece of the v1.1/v1.2 program is merged.** Left: the `default-choice-post` fact-check and publication, the Rust 1.99 bump (needs `rustup update stable`), the final state pass.

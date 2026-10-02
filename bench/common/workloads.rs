@@ -17,37 +17,45 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use undra::meta::ids;
-use undra::runtime::testing::{call_payload, drive_from_this_thread};
+use undra::runtime::testing::{call_payload, decode_reply, drive_from_this_thread};
 use undra::runtime::{Runtime, RuntimeConfig};
 use undra::signals::{ALL_SIGNALS, ChangeSink, Computed, Signal, StoreCell, txn, with_sink};
 use undra::wire::payload::{CallTarget, ChangeSetRef};
-use undra::wire::{Bytes, Decode, Encode, Handle, KeyedPatch, Reader, Timestamp, Uuid, Writer};
+use undra::wire::{
+    Bytes, Decimal, Decode, Encode, Handle, KeyedPatch, Reader, Timestamp, Uuid, Writer,
+};
 use undra_bench::workload::{Bench, Workload, plain, with_reset};
 
 use super::fixtures::{self, Item, Shape};
-use super::host::{Core, CountingHost, call_ok, construct, method_call, runtime};
+use super::host::{Core, CountingHost, call_ok, construct, method_call, runtime, runtime_with};
 
 /// Every operation the budgets test gates: one per wire type (the round trip), plus dispatch,
-/// signals, snapshot and the per-operation rows of the harsh-conditions scenarios (`stress`).
+/// signals, lazy lists, snapshot and the per-operation rows of the harsh-conditions scenarios (`stress`).
 pub fn all() -> Vec<Workload> {
     let mut all = wire();
     all.extend(dispatch());
+    all.extend(boundary());
     all.extend(signals());
+    all.extend(lazy());
     all.extend(snapshot());
     all.extend(super::stress::workloads());
+    all.extend(super::query_rows::rows_group());
     all.extend(super::ports::ports());
     all.extend(super::ports::db());
     all
 }
 
-/// The operations of one group (`wire`, `dispatch`, `signals`, `snapshot`, `stress`, `ports`, `db`).
+/// The operations of one group (`wire`, `dispatch`, `signals`, `lazy`, `snapshot`, `stress`, `query`, `ports`, `db`).
 pub fn group(name: &str) -> Vec<Workload> {
     match name {
         "wire" => wire(),
         "dispatch" => dispatch(),
+        "boundary" => boundary(),
         "signals" => signals(),
+        "lazy" => lazy(),
         "snapshot" => snapshot(),
         "stress" => super::stress::workloads(),
+        "query" => super::query_rows::rows_group(),
         "ports" => super::ports::ports(),
         "db" => super::ports::db(),
         other => panic!("no benchmark group `{other}`"),
@@ -107,6 +115,10 @@ fn wire_types(halves: bool) -> Vec<Workload> {
             0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
             0xde, 0xf0,
         ])
+    });
+    // ADR-042: a money amount at the largest scale the wire holds (16 bytes of mantissa, 1 of scale).
+    add_wire(out, halves, "decimal", || {
+        Decimal::new(-1_999_999_999_999_999_999_i128, 38)
     });
     add_wire(out, halves, "record5", fixtures::record5);
     add_wire(out, halves, "record1k", || {
@@ -302,6 +314,52 @@ pub fn dispatch() -> Vec<Workload> {
                 black_box(rt.call_sync(black_box(&payload)));
             })
         }),
+        // ADR-040: an object handed to the host. `return_object` issues a handle that did not
+        // exist (a new entry, one reference); the release that gives it back runs outside the
+        // clock. `return_interned_object` returns the object the host already holds: the same
+        // handle, one more reference (released outside the clock too).
+        Workload::new("dispatch/call_sync/return_object", || {
+            let (rt, _host) = runtime();
+            let calc = construct(&rt, "Calculator", &enc(&7_i64));
+            let payload = method_call(calc, "Calculator", "fresh_dock", 2, &[]);
+            let handle = Handle::decode_exact(&reply_body(&call_ok(&rt, &payload))).unwrap();
+            assert!(rt.objects().host_refs_of(handle).is_some());
+            rt.release(handle.0);
+            let last = std::rc::Rc::new(std::cell::Cell::new(0_u64));
+            let (rt_run, rt_reset) = (rt.clone(), rt);
+            let (last_run, last_reset) = (last.clone(), last);
+            with_reset(
+                move || {
+                    let reply = rt_run.call_sync(black_box(&payload));
+                    last_run.set(u64::from_le_bytes(reply[5..13].try_into().unwrap()));
+                },
+                move || rt_reset.release(last_reset.replace(0)),
+            )
+        }),
+        Workload::new("dispatch/call_sync/return_interned_object", || {
+            let (rt, _host) = runtime();
+            let calc = construct(&rt, "Calculator", &enc(&7_i64));
+            let payload = method_call(calc, "Calculator", "held_dock", 2, &[]);
+            let held = Handle::decode_exact(&reply_body(&call_ok(&rt, &payload))).unwrap();
+            let rt_reset = rt.clone();
+            with_reset(
+                move || {
+                    black_box(rt.call_sync(black_box(&payload)));
+                },
+                move || rt_reset.release(held.0),
+            )
+        }),
+        Workload::new("dispatch/call_sync/object_param", || {
+            let (rt, _host) = runtime();
+            let calc = construct(&rt, "Calculator", &enc(&7_i64));
+            let held = method_call(calc, "Calculator", "held_dock", 2, &[]);
+            let dock = Handle::decode_exact(&reply_body(&call_ok(&rt, &held))).unwrap();
+            let payload = method_call(calc, "Calculator", "dock_slots", 3, &enc(&dock));
+            call_ok(&rt, &payload);
+            plain(move || {
+                black_box(rt.call_sync(black_box(&payload)));
+            })
+        }),
         Workload::new("dispatch/call_async/ready_add", || {
             let (rt, host) = runtime();
             let calc = construct(&rt, "Calculator", &enc(&7_i64));
@@ -322,6 +380,104 @@ pub fn dispatch() -> Vec<Workload> {
             })
         }),
     ]
+}
+
+/// The body of a `Reply` payload (`call_id u32, status u8, body`).
+fn reply_body(reply: &[u8]) -> Vec<u8> {
+    reply[5..].to_vec()
+}
+
+// ---------------------------------------------------------------------------------------------
+// boundary: calls from the core into the host (ADR-041)
+// ---------------------------------------------------------------------------------------------
+
+/// A host that answers port calls the way a platform's synchronous adapter does: it counts them
+/// and, for an `echo`, replies at once with the number it was given.
+#[derive(Default)]
+struct PingHost {
+    calls: AtomicU64,
+}
+
+impl undra::runtime::Host for PingHost {
+    fn reply(&self, _: u32, _: &[u8]) {}
+    fn change_set(&self, _: &[u8]) {}
+    fn stream_item(&self, _: u32, _: &[u8]) {}
+    fn port_call(
+        &self,
+        _port: u32,
+        method: u32,
+        id: u32,
+        args: &[u8],
+    ) -> undra::runtime::PortCallOutcome {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        if method == ids::port_method_id("Pinger", "echo") {
+            // `instance u64, n u32` -> the `Ok` body is `n`.
+            let mut reply = Vec::with_capacity(9 + 4);
+            reply.extend_from_slice(&id.to_le_bytes());
+            reply.push(0);
+            reply.extend_from_slice(&args[8..12]);
+            return undra::runtime::PortCallOutcome::Sync(reply);
+        }
+        undra::runtime::PortCallOutcome::Sync(Vec::new())
+    }
+    fn log(&self, _: u8, _: &str, _: &str) {}
+}
+
+/// What calling a host callback instance costs the core: the proxy a dispatcher makes for an
+/// instance handle, called as Rust code calls it. The round trip is the core's half only: the host
+/// here answers at once, so there is no wait and no thread hop.
+pub fn boundary() -> Vec<Workload> {
+    vec![
+        // The primitive every port call is made of: a fire-and-forget call with no proxy.
+        Workload::new("boundary/port_call/notify", || {
+            let host = Arc::new(PingHost::default());
+            let rt = runtime_with(host.clone(), 0);
+            let port = ids::port_id("Pinger");
+            let method = ids::port_method_id("Pinger", "ping");
+            let args = [enc(&1_u64), enc(&7_u32)].concat();
+            rt.port_notify(port, method, args.clone());
+            assert_eq!(host.calls.load(Ordering::Relaxed), 1);
+            plain(move || {
+                rt.port_notify(black_box(port), black_box(method), black_box(args.clone()));
+            })
+        }),
+        // The same through the generated proxy of a callback interface: the instance handle, the
+        // weak context, the writer.
+        Workload::new("boundary/callback/notify", || {
+            let host = Arc::new(PingHost::default());
+            let rt = runtime_with(host.clone(), 0);
+            let pinger = rt.callback::<dyn fixtures::Pinger>(1);
+            pinger.ping(7);
+            assert_eq!(host.calls.load(Ordering::Relaxed), 1);
+            plain(move || {
+                // The runtime is shut down when `rt` drops: it must outlive the loop.
+                black_box(&rt);
+                black_box(&pinger).ping(black_box(7));
+            })
+        }),
+        // An `async` callback method answered at once: encode, port call, the reply, decode.
+        Workload::new("boundary/callback/async_roundtrip", || {
+            let host = Arc::new(PingHost::default());
+            let rt = runtime_with(host.clone(), 0);
+            let pinger = rt.callback::<dyn fixtures::Pinger>(1);
+            let answer = poll_ready(pinger.echo(7));
+            assert_eq!(answer, Ok(7));
+            plain(move || {
+                black_box(&rt);
+                black_box(poll_ready(black_box(&pinger).echo(black_box(7))).ok());
+            })
+        }),
+    ]
+}
+
+/// Polls a future that is already complete.
+fn poll_ready<F: std::future::Future>(future: F) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    match future.as_mut().poll(&mut cx) {
+        std::task::Poll::Ready(value) => value,
+        std::task::Poll::Pending => panic!("the host answers at once, so the call is ready"),
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -401,6 +557,143 @@ pub fn signals() -> Vec<Workload> {
             computed_recompute_chain_10,
         ),
     ]
+}
+
+// ---------------------------------------------------------------------------------------------
+// lazy lists (ADR-043)
+// ---------------------------------------------------------------------------------------------
+
+/// Lazy lists the host pages through: a window of 50 rows out of a list of 100,000, the change
+/// that tells the host to ask again (12 bytes whatever the list holds), and a window of a filtered,
+/// sorted view of a 100,000-row list (`Lazy::over`, through the derived index).
+pub fn lazy() -> Vec<Workload> {
+    vec![
+        Workload::new("lazy/page_50_of_100k", || lazy_page(100_000, false)),
+        Workload::new("lazy/page_50_of_10k", || lazy_page(10_000, false)),
+        Workload::new("lazy/view_page_50_of_100k", || lazy_page(100_000, true)),
+        Workload::new("lazy/invalidate", || lazy_invalidate(100_000)),
+        Workload::new("lazy/invalidate_10k", || lazy_invalidate(10_000)),
+    ]
+}
+
+/// The signals of `fixtures::Shelf`.
+const SHELF_BOOKS: u32 = 0;
+const SHELF_OPEN: u32 = 2;
+
+/// Observes `signal` of `shelf` and returns its page server's handle and the stamp it was sent at.
+fn shelf_server(
+    rt: &Runtime,
+    host: &InspectingHost,
+    shelf: Handle,
+    signal: u32,
+) -> (Handle, undra::wire::payload::LazyValue) {
+    use undra::wire::payload::{ChangeOp, LazyValue};
+    host.keeping(true);
+    rt.observe(shelf.0, signal, true);
+    host.keeping(false);
+    let entries = host.last_entries();
+    assert_eq!(entries.len(), 1, "one entry for the one signal observed");
+    let (id, op, value) = &entries[0];
+    assert_eq!((*id, *op), (signal, ChangeOp::Full), "op 0 on observe");
+    assert_eq!(
+        value.len(),
+        20,
+        "a LazyValue: handle u64, len u32, version u64"
+    );
+    let value = LazyValue::decode(&mut Reader::new(value)).expect("a LazyValue");
+    (value.handle, value)
+}
+
+/// One page call for 50 rows from the middle of a list of `rows` (of the view with `view`):
+/// dispatch, the page server's lookup, the encoding of the 50 rows, the reply. The rows are
+/// checked before anything is timed.
+fn lazy_page(rows: u32, view: bool) -> Box<dyn Bench> {
+    use undra::wire::payload::LazyPage;
+    let host = Arc::new(InspectingHost::default());
+    let rt = super::host::runtime_with(host.clone(), 0);
+    let shelf = construct(&rt, "Shelf", &[]);
+    call_ok(&rt, &method_call(shelf, "Shelf", "seed", 2, &enc(&rows)));
+    let signal = if view { SHELF_OPEN } else { SHELF_BOOKS };
+    let (server, stamp) = shelf_server(&rt, &host, shelf, signal);
+    let shown = if view { rows / 4 * 3 } else { rows };
+    assert_eq!(stamp.len, shown, "the length the host is told");
+    let offset = shown / 2;
+    let page = call_payload(
+        CallTarget::LazyPage {
+            handle: server,
+            offset,
+            limit: 50,
+        },
+        3,
+        &[],
+    );
+
+    // What a page is: the header, then 50 rows that decode as the rows of the list.
+    let reply = decode_reply(&rt.call_sync(&page));
+    assert_eq!(reply.status, undra::wire::payload::ReplyStatus::Ok);
+    let mut r = Reader::new(&reply.body);
+    let header = LazyPage::decode(&mut r).expect("a page header");
+    assert_eq!((header.total, header.count), (shown, 50));
+    assert_eq!(
+        header.version, stamp.version,
+        "read at the version it was announced at"
+    );
+    let items: Vec<Item> = (0..50)
+        .map(|_| Item::decode(&mut r).expect("a row"))
+        .collect();
+    r.finish().expect("exactly 50 rows");
+    let expected = if view {
+        // The view: the rows not done, by title.
+        let mut open: Vec<Item> = fixtures::views_rows(rows)
+            .into_iter()
+            .filter(|row| !row.done)
+            .collect();
+        open.sort_by(|a, b| a.title.cmp(&b.title));
+        open
+    } else {
+        fixtures::views_rows(rows)
+    };
+    assert_eq!(items, expected[offset as usize..offset as usize + 50]);
+
+    plain(move || {
+        black_box(rt.call_sync_with(black_box(&page), |reply| black_box(reply.len())));
+    })
+}
+
+/// A change to a list of `rows` rows the host pages: one method call that `update_at`s a row of an
+/// observed `Lazy<Item>`, and the commit, which sends 12 bytes however long the list is. The
+/// change-set is checked (one entry, op 2, 12 bytes, the new length and version) before it is
+/// timed.
+fn lazy_invalidate(rows: u32) -> Box<dyn Bench> {
+    use undra::wire::payload::{ChangeOp, LazyInvalidated};
+    let host = Arc::new(InspectingHost::default());
+    let rt = super::host::runtime_with(host.clone(), 0);
+    let shelf = construct(&rt, "Shelf", &[]);
+    call_ok(&rt, &method_call(shelf, "Shelf", "seed", 2, &enc(&rows)));
+    let (_, stamp) = shelf_server(&rt, &host, shelf, SHELF_BOOKS);
+    let toggle = method_call(shelf, "Shelf", "toggle", 3, &enc(&(rows / 2)));
+
+    host.keeping(true);
+    call_ok(&rt, &toggle);
+    host.keeping(false);
+    let entries = host.last_entries();
+    assert_eq!(entries.len(), 1, "only the list changed");
+    let (id, op, value) = &entries[0];
+    assert_eq!((*id, *op), (SHELF_BOOKS, ChangeOp::LazyInvalidated));
+    assert_eq!(
+        value.len(),
+        12,
+        "an invalidation is 12 bytes, whatever the list holds"
+    );
+    let invalidated = LazyInvalidated::decode(&mut Reader::new(value)).expect("a LazyInvalidated");
+    assert_eq!(
+        (invalidated.len, invalidated.version),
+        (stamp.len, stamp.version + 1)
+    );
+
+    plain(move || {
+        black_box(rt.call_sync(black_box(&toggle)));
+    })
 }
 
 /// One write to a signal of a published store (owner recorded, handle set) and its implicit

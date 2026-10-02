@@ -22,7 +22,21 @@ const HASHES_BEFORE_NO_COALESCE: &[(&str, u64)] = &[
 /// standard surface ADR-049 changed on purpose (`StorageError`, the storage ports' signatures,
 /// two `FsError` variants): it had `0x6b46_38c4_a5e3_4313` before, and no longer has a hash from
 /// before the field to compare with.
-const CASES_AFTER_NO_COALESCE: &[&str] = &["stdlib", "recursive"];
+/// `object_graph` and `callbacks` (ADR-040, ADR-041) are new: they use the types and port kind that
+/// no earlier schema had; so are the cases of ADR-042 and ADR-043 (`newtypes`, `generics`, `decimal`,
+/// `polling`, `infinite`, `lazy`).
+const CASES_AFTER_NO_COALESCE: &[&str] = &[
+    "stdlib",
+    "recursive",
+    "object_graph",
+    "callbacks",
+    "newtypes",
+    "generics",
+    "decimal",
+    "polling",
+    "infinite",
+    "lazy",
+];
 
 #[test]
 fn every_golden_case_is_listed() {
@@ -31,7 +45,10 @@ fn every_golden_case_is_listed() {
         .map(|(case, _)| *case)
         .collect();
     listed.extend(CASES_AFTER_NO_COALESCE);
-    assert_eq!(listed, common::CASES);
+    let mut cases = common::CASES.to_vec();
+    listed.sort_unstable();
+    cases.sort_unstable();
+    assert_eq!(listed, cases);
 }
 
 /// The `stdlib` case as it was before ports-v2 (ADR-047, ADR-048) added the opt-in standard items

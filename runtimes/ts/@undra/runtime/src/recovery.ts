@@ -1,8 +1,11 @@
 import { UndraCallError, UndraUnhandledError } from "./call-error.js";
 import type { UndraCore } from "./core.js";
 import { UndraRestoreError, UndraTransportError } from "./errors.js";
+import { wrapperOf } from "./identity.js";
 import { type RecreateCall, type UndraStore, _rebindObject } from "./object.js";
-import { type UndraPanicReport, isTrap } from "./panic.js";
+import type { UndraPanicFrame, UndraPanicReport } from "./adapters/types.js";
+import { isTrap } from "./panic.js";
+import { type PanicSupport, panicSupport } from "./panic-report.js";
 import type { PortImpl } from "./port.js";
 import { errorMessage } from "./platform.js";
 import type { Transport, TransportHandler } from "./transport/transport.js";
@@ -190,18 +193,19 @@ export class SnapshotKeeper {
   }
 }
 
-/** A copy of `snapshot` whose generation floor (the u32 after the store count, SPEC 5.9) is at least `floor` (ADR-022). */
+/** A copy of `snapshot` whose generation floor (the u64 after the store count, SPEC 5.9; ADR-040 widened it) is at least `floor` (ADR-022). */
 export function withGenerationFloor(snapshot: Uint8Array, floor: number): Uint8Array {
   const copy = snapshot.slice();
-  if (copy.byteLength < 8) return copy;
+  if (copy.byteLength < 12) return copy;
   const view = new DataView(copy.buffer, copy.byteOffset, copy.byteLength);
-  if (view.getUint32(4, true) < floor) view.setUint32(4, floor >>> 0, true);
+  const wanted = BigInt(Math.max(0, Math.floor(floor)));
+  if (view.getBigUint64(4, true) < wanted) view.setBigUint64(4, wanted, true);
   return copy;
 }
 
 /** A snapshot with no stores whose only effect is to raise the generation counter of a fresh core to `floor`. */
 export function emptySnapshot(schemaHash: bigint, floor: number): Uint8Array {
-  return encodeSnapshot({ generationFloor: floor >>> 0, schemaHash, types: [], description: "", stores: [] });
+  return encodeSnapshot({ generationFloor: Math.max(0, Math.floor(floor)), schemaHash, types: [], description: "", stores: [] });
 }
 
 /** The handles of the stores in a snapshot, or `null` when it does not decode (a layout this runtime does not read). */
@@ -234,6 +238,11 @@ export function restartedError(trap: Error): UndraTransportError {
 
 // ----- the event ------------------------------------------------------------------------------------
 
+/** A frame of a trap's stack as a line: `symbol (0xoffset)`. */
+function formatFrame(frame: UndraPanicFrame): string {
+  return `${frame.symbol ?? "<unknown>"} (0x${frame.address.toString(16)})`;
+}
+
 /** What `LoadOptions.onCoreRestarted` receives (ADR-049 decision 3.4.6). */
 export interface CoreRestartInfo {
   /** The panic that trapped the core. */
@@ -264,7 +273,7 @@ export class UndraCoreRestarted extends UndraUnhandledError implements CoreResta
 
   /** @param info What happened. @param trap The trap. */
   constructor(info: CoreRestartInfo, trap: Error) {
-    super("wasm core", new UndraCallError.Panicked(info.report.message, info.report.frames.join("\n"), { cause: trap }), trap);
+    super("wasm core", new UndraCallError.Panicked(info.report.message, info.report.frames.map(formatFrame).join("\n"), { cause: trap }), trap);
     this.message = `the wasm core trapped (${info.report.message}) and was restarted from ${
       info.restoredFromAgeMs === null ? "no snapshot" : `a snapshot ${info.restoredFromAgeMs} ms old`
     }`;
@@ -373,7 +382,7 @@ export interface RecoveryHost {
   lose(error: Error): void;
   /** Hands `error` to `onError`, guarded as the core's own reports are. */
   deliver(error: UndraUnhandledError): void;
-  /** Builds the panic report of `trap` and hands it to `onPanic`. */
+  /** Builds the panic report of `trap` and hands it to `onPanic`; the host has what builds it (`CrashRecovery.panics`) by now. */
   panicked(trap: Error): UndraPanicReport;
   /**
    * The registered ports. Each one releases at a restart what the instance that trapped held through it
@@ -392,6 +401,13 @@ export interface CrashRecovery {
   readonly options: ResolvedRecovery;
   /** The last snapshot kept on this thread (`wasm-main`; in `wasm-worker` mode the worker keeps it), or `null`. For devtools, tests and benchmarks. */
   readonly lastSnapshot: KeptSnapshot | null;
+  /**
+   * What builds the panic report of a trap (`UndraCoreRestarted.report` carries one): a core with recovery has it from the
+   * start, where a core that only has `onPanic` loads it when it starts.
+   *
+   * @internal Read by `UndraCore`.
+   */
+  readonly panics: PanicSupport;
   /** Takes and keeps a snapshot now (`wasm-main`), whatever the schedule says: returns its size, or `null` when none could be taken. For tests and benchmarks. */
   keepSnapshotNow(): number | null;
   /**
@@ -434,6 +450,7 @@ export function crashRecovery(options: RecoveryOptions = {}): CrashRecovery {
   let attached: Recovering | null = null;
   return {
     options: settings,
+    panics: panicSupport,
     get lastSnapshot() {
       return attached?.keeper?.last ?? null;
     },
@@ -473,8 +490,8 @@ class Recovering implements Transport {
   /** The core's handler, and what the transport is given instead (see `start`). */
   #handler: TransportHandler | null = null;
   #wrapped: TransportHandler | null = null;
-  /** The handles released while the core restarted: released once it is back. */
-  readonly #releasedWhileDown = new Set<Handle>();
+  /** The releases sent while the core restarted, per handle (a give-back or a wrapper's own): sent once it is back. */
+  readonly #releasedWhileDown = new Map<Handle, number>();
   /** When the restarts within the budget's window happened (`Date.now`). */
   #times: number[] = [];
   /** Counts recoveries: a re-attach that a newer trap overtook stops. */
@@ -588,7 +605,8 @@ class Recovering implements Transport {
     } else if (this.#restarting) {
       if (kind !== Kind.Release) throw restarting();
       // The core keeps the object meanwhile; it is released once the core is back.
-      this.#releasedWhileDown.add(decodeRelease(payload).handle);
+      const handle = decodeRelease(payload).handle;
+      this.#releasedWhileDown.set(handle, (this.#releasedWhileDown.get(handle) ?? 0) + 1);
       return;
     }
     this.#guard(() => {
@@ -633,7 +651,7 @@ class Recovering implements Transport {
   #floor(): number {
     const host = this.#host;
     let floor = this.#floorUsed;
-    for (const set of [host.handles, host.observed.keys(), this.#recreatable.keys(), this.#releasedWhileDown]) {
+    for (const set of [host.handles, host.observed.keys(), this.#recreatable.keys(), this.#releasedWhileDown.keys()]) {
       for (const handle of set) floor = Math.max(floor, handleGeneration(handle));
     }
     this.#floorUsed = floor;
@@ -752,10 +770,19 @@ class Recovering implements Transport {
       host.handles.delete(handle);
       host.observed.delete(handle);
     }
-    for (const handle of [...this.#releasedWhileDown]) {
-      this.#releasedWhileDown.delete(handle);
-      core.release(handle);
+    // What was released meanwhile goes to the restored core as the references it was: each one a bare release (what
+    // `core.release` did locally, unregistering and forgetting, ran when the wrapper closed). A handle an open wrapper
+    // holds now is one whose queued releases were give-backs of extra references (a superseded wrapper's finalizer, a
+    // reply that carried the handle again): the restored core counts what the snapshot held, which may not include
+    // them, and sending them could release the live wrapper's only reference, so they are dropped (a leaked reference
+    // until the core closes, at worst).
+    for (const [handle, count] of this.#releasedWhileDown) {
+      const live = wrapperOf(core, handle);
+      if (live !== undefined && !live.closed) continue;
+      for (let i = 0; i < count; i++) core._giveBack(handle);
     }
+    this.#releasedWhileDown.clear();
+    core._era++;
     const observing: Array<Promise<void>> = [];
     for (const [handle, signals] of [...host.observed]) {
       if (recreated.has(handle)) continue;

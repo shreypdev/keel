@@ -16,7 +16,7 @@ public final class Outline: UndraStore, @unchecked Sendable {
     public private(set) var lastError: ParseError? = nil
     public private(set) var total: Sum = Sum.zero
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }

@@ -27,6 +27,21 @@ pub trait UndraObject: Send + Sync + 'static {
     const TYPE_ID: u32;
     /// The Rust type name.
     const NAME: &'static str;
+
+    /// The signal cell, when the object is a `#[undra::store]` (`None` for any other). Generated
+    /// by `#[undra::api(store)]`; the runtime uses it to hand a store the host did not construct
+    /// to the host (ADR-040).
+    #[doc(hidden)]
+    fn __undra_store_cell(&self) -> Option<&Arc<StoreCell>> {
+        None
+    }
+
+    /// Attaches a store's signals to its cell (idempotent; a no-op for any other object). Called
+    /// before the runtime publishes an object a method returned.
+    #[doc(hidden)]
+    fn __undra_attach(&self) -> Result<(), undra_signals::SignalsError> {
+        Ok(())
+    }
 }
 
 /// An object with signal fields that platforms mirror (implemented by `#[undra::store]`).
@@ -75,6 +90,12 @@ pub trait UndraObjectDyn: Send + Sync + 'static {
 pub trait AnyObject: Any + Send + Sync + UndraObjectDyn {
     /// The object as a shared `dyn Any`, for downcasting to its concrete type.
     fn shared(&self) -> Arc<dyn Any + Send + Sync>;
+
+    /// Where the object lives: the address of the `Arc` the runtime holds (what the object table
+    /// keys an object's single handle by, ADR-040). Equal addresses are the same object.
+    fn address(&self) -> usize {
+        Arc::as_ptr(&self.shared()).cast::<()>() as usize
+    }
 }
 
 impl dyn AnyObject {
@@ -128,6 +149,15 @@ pub(crate) fn erased(
         name,
         cell,
     })
+}
+
+/// Wraps an object (a store or not, as `T` says) for the object table: what `issue` uses for an
+/// object a method returned (ADR-040).
+pub(crate) fn any_object<T: UndraObject>(obj: Arc<T>) -> Arc<dyn AnyObject> {
+    fn cell_of<T: UndraObject>(any: &(dyn Any + Send + Sync)) -> Option<&Arc<StoreCell>> {
+        any.downcast_ref::<T>().and_then(T::__undra_store_cell)
+    }
+    erased(obj, T::TYPE_ID, T::NAME, Some(cell_of::<T>))
 }
 
 /// Wraps a plain object for the object table.

@@ -42,6 +42,11 @@ public struct LoadOptions: Sendable {
     /// generated entry fill it in; ``UndraCore/load(_:)`` throws
     /// ``UndraLoadError/missingSchemaHash`` without one.
     public var expectedSchemaHash: UInt64?
+    /// The namespace of the core (`UndraIds.namespace`), which the default `Kv`, `Fs`, `SecureStore`
+    /// and `Db` adapters keep their data under (`<Application Support>/<bundle id>/Undra/<namespace>/…`,
+    /// ADR-044 amendment A). `nil` lets the generated entry fill it in; an in-process core
+    /// without one takes its table's namespace. An adapter given its own directory or service ignores it.
+    public var namespace: String? = nil
     /// The lowest level of core log records forwarded to the Log port (0 trace ... 5 fatal).
     public var logLevel: UInt8
     /// Seconds to wait for the remote handshake (`remote` only).
@@ -89,6 +94,35 @@ public struct LoadOptions: Sendable {
     /// touching UI.
     public var onDevNotice: (@Sendable (String) -> Void)?
 
+    /// Called once for every panic the core contained: a call, a stream, a detached task, an effect, a
+    /// computed value, a port or callback dispatcher, a background task (ADR-046). The report is what an
+    /// app hands to its crash reporter: the message, `file:line:column`, what the core was running, the
+    /// Rust stack as addresses (and names, in debug builds) relative to the core's image, and the
+    /// identity of the build. The call that panicked still fails with ``UndraCallError/panicked(message:backtrace:)``;
+    /// this is the structured report of the same panic, and the only one of a panic in a task nobody awaits.
+    ///
+    /// The core reports from the thread that panicked, possibly while it holds its lock, so the runtime
+    /// answers the core at once and runs the handler later **on the main thread**: once per report and in
+    /// the order the panics happened. It may call into Undra and into the app's crash reporter freely.
+    /// The default (`nil`) logs one error line (the operation, the message, the location) so that a panic is
+    /// never silent; the core has already logged its own fatal record.
+    ///
+    /// ```swift
+    /// // Hand the report to the app's crash reporter (any: Crashlytics, Sentry, your own).
+    /// var options = LoadOptions.inproc()
+    /// options.onPanic = { report in
+    ///     MyCrashReporter.recordNonFatal(
+    ///         name: "UndraPanic in \(report.operation)",
+    ///         reason: report.message,
+    ///         location: report.location,                    // file:line:column
+    ///         frames: report.frames.map(\.address),         // offsets into the core's image
+    ///         imageId: report.imageId                       // which build's symbol files resolve them
+    ///     )
+    /// }
+    /// let core = try UndraPlaygroundCore.load(options)
+    /// ```
+    public var onPanic: (@Sendable (UndraPanicReport) -> Void)?
+
     private var table: TableAddress
 
     /// Creates options with every setting spelled out; prefer `inproc(...)` and `remote(...)`.
@@ -105,7 +139,8 @@ public struct LoadOptions: Sendable {
         onError: (@Sendable (UndraUnhandledError) -> Void)? = nil,
         reconnect: UndraReconnectPolicy? = .default,
         onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil,
-        onDevNotice: (@Sendable (String) -> Void)? = nil
+        onDevNotice: (@Sendable (String) -> Void)? = nil,
+        onPanic: (@Sendable (UndraPanicReport) -> Void)? = nil
     ) {
         self.mode = mode
         self.table = TableAddress(pointer: api)
@@ -120,6 +155,7 @@ public struct LoadOptions: Sendable {
         self.reconnect = reconnect
         self.onConnectionChange = onConnectionChange
         self.onDevNotice = onDevNotice
+        self.onPanic = onPanic
     }
 
     /// A core linked into this process, reached through its table `api` (filled in by the
@@ -128,14 +164,16 @@ public struct LoadOptions: Sendable {
         api: UnsafeRawPointer? = nil,
         adapters: Adapters = .platformDefault,
         expectedSchemaHash: UInt64? = nil,
-        onError: (@Sendable (UndraUnhandledError) -> Void)? = nil
+        onError: (@Sendable (UndraUnhandledError) -> Void)? = nil,
+        onPanic: (@Sendable (UndraPanicReport) -> Void)? = nil
     ) -> LoadOptions {
         return LoadOptions(
             mode: .inproc,
             api: api,
             adapters: adapters,
             expectedSchemaHash: expectedSchemaHash,
-            onError: onError
+            onError: onError,
+            onPanic: onPanic
         )
     }
 
@@ -147,7 +185,8 @@ public struct LoadOptions: Sendable {
         onError: (@Sendable (UndraUnhandledError) -> Void)? = nil,
         reconnect: UndraReconnectPolicy? = .default,
         onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil,
-        onDevNotice: (@Sendable (String) -> Void)? = nil
+        onDevNotice: (@Sendable (String) -> Void)? = nil,
+        onPanic: (@Sendable (UndraPanicReport) -> Void)? = nil
     ) -> LoadOptions {
         return LoadOptions(
             mode: .remote(url: url),
@@ -156,7 +195,8 @@ public struct LoadOptions: Sendable {
             onError: onError,
             reconnect: reconnect,
             onConnectionChange: onConnectionChange,
-            onDevNotice: onDevNotice
+            onDevNotice: onDevNotice,
+            onPanic: onPanic
         )
     }
 }

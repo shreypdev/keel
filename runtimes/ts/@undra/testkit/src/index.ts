@@ -1,4 +1,4 @@
-export { FakeClock, FakeHttp, MemFs, MemKv, MemSecureStore, CaptureLog, ScriptedConnectivity, ScriptedLifecycle, SeededRng, TimerStormError, createFakes, matches, response } from "./fakes.js";
+export { FakeClock, FakeHttp, MemFs, MemKv, MemSecureStore, CaptureDiagnostics, CaptureLog, ScriptedConnectivity, ScriptedLifecycle, SeededRng, TimerStormError, createFakes, matches, response } from "./fakes.js";
 export type { Fakes, LogEntry, Matcher, StoreOp } from "./fakes.js";
 export { compareUtf8, fromHex, toHex } from "./hex.js";
 export { methodId, portId, standardName } from "./names.js";

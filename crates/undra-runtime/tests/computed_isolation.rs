@@ -257,3 +257,36 @@ fn a_no_op_write_to_a_failed_computeds_input_evaluates_it_again_without_a_second
     assert_eq!(delivered(&t), vec![vec![LABEL]]);
     assert_eq!(gauge.evaluations.load(Ordering::SeqCst), evaluations + 1);
 }
+
+#[test]
+fn a_panicking_computed_reaches_the_diagnostics_port_once_with_where_it_panicked() {
+    // ADR-046 (prod-ops review): the computed's panic is caught by `undra-signals`, not by a runtime
+    // guard, so its report is the one the panic hook recorded on this thread (`caught_elsewhere`):
+    // with the panic's location, named after the store and the signal.
+    let t = TestRuntime::new();
+    t.runtime()
+        .bind_foreign_port(undra_runtime::DIAGNOSTICS_PORT);
+    let handle = t.runtime().insert_store(Arc::new(Gauge::new(1)));
+    t.runtime().observe(handle.0, ALL_SIGNALS, true);
+    let reply = call(&t, handle, SET_LEVEL, &0_i32.encode_to_vec());
+    assert_eq!(reply.status, ReplyStatus::Ok, "{reply:?}");
+    let reports: Vec<_> = t
+        .host()
+        .take_port_calls()
+        .into_iter()
+        .filter(|c| c.port_id == undra_runtime::DIAGNOSTICS_PORT)
+        .collect();
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    assert_eq!(reports[0].port_call_id, 0, "fire and forget");
+    let mut r = Reader::new(&reports[0].args);
+    let message = r.read_str().unwrap();
+    let location = r.read_str().unwrap();
+    let operation = r.read_str().unwrap();
+    assert!(message.contains("divide by zero"), "{message}");
+    assert!(
+        location.contains("computed_isolation.rs:"),
+        "the hook's location: {location:?}"
+    );
+    assert!(operation.starts_with("computed Gauge."), "{operation}");
+    assert_eq!(stat(&t, "panic_reports"), 1);
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The Kotlin column of the contract tests: runs S01..S20 and S23..S26 of contract-tests/scenarios.md on the JVM
+# The Kotlin column of the contract tests: runs S01..S20 and S23..S33 of contract-tests/scenarios.md on the JVM
 # over JNI against the real libplayground_core of the playground core (and, for S26, libplayground_a and
-# libplayground_b: the same core under two more namespaces, examples/two-cores), then checks every one passed.
+# libplayground_b: the same core under two more namespaces, examples/two-cores, which S27 uses again), then checks they passed.
 #
 #   contract-tests/kotlin/run.sh
 #
@@ -139,7 +139,7 @@ if [ -n "${UNDRA_SQLITE_JDBC:-}" ]; then
   DRIVER=":$UNDRA_SQLITE_JDBC"
 fi
 CP="$OUT/runtime/main:$CLASSES:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES$DRIVER"
-echo "==> running S01..S20 and S23..S26 against build A (${CORE_A#"$REPO"/}, and playground_a, playground_b)"
+echo "==> running S01..S20 and S23..S33 against build A (${CORE_A#"$REPO"/}, and playground_a, playground_b)"
 mkdir -p "$OUT"
 status=0
 java -Xmx1g -Djava.library.path="$CORE_A:$LIB_DIR_A:$LIB_DIR_B" -cp "$CP" dev.undra.contract.MainKt 2>&1 | tee "$OUT/run.log" || status=$?

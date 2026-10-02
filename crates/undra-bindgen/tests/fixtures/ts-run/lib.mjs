@@ -19,6 +19,8 @@ export async function setup(pkg) {
   for (const name of ["types", "errors", "objects", "stores", "ports", "queries", "ids", "core"]) {
     modules[name] = await load(`dist/${name}.js`);
   }
+  // Only a schema with callbacks has them (ADR-041).
+  modules.callbacks = await load("dist/callbacks.js").catch(() => ({}));
   return { rt, ...modules, UndraIds: modules.ids.UndraIds };
 }
 
@@ -37,13 +39,24 @@ export function fakeCoreClass(rt) {
     /** The `no_coalesce` signal ids each store registered with (ADR-031). */
     noCoalesce = new Map();
     nextHandle = 7n;
+    /** Host callback invocations queued for the drain (ADR-041, `main` delivery); `drain()` runs them. */
+    queuedCalls = [];
     mirror = {
       register: (handle, fn, options) => {
         this.mirrorFns.set(handle, fn);
         this.noCoalesce.set(handle, [...(options?.noCoalesce ?? [])]);
       },
       unregister: (handle) => this.mirrorFns.delete(handle),
+      enqueueCall: (call) => {
+        this.queuedCalls.push(call);
+      },
     };
+
+    /** Runs the queued callback invocations, in order, as the mirror's drain does; returns how many delivered. */
+    drain() {
+      const calls = this.queuedCalls.splice(0);
+      return calls.filter((call) => call()).length;
+    }
 
     async call(target, methodId, args, signal) {
       this.calls.push({ target, methodId, args: hex(args), signal });

@@ -3,7 +3,7 @@
 # the real wasm build of the playground core, in wasm-main mode (and wasm-worker where a scenario says so),
 # under vitest on Node.
 #
-#   contract-tests/ts/run.sh              # build the cores if missing or stale, run S01..S26, grade
+#   contract-tests/ts/run.sh              # build the cores if missing or stale, run S01..S28 and S31..S33, grade
 #   contract-tests/ts/run.sh -t S07       # extra arguments go to vitest (here: only scenario S07)
 #
 # Builds with the undra CLI (`undra build -C examples/playground --platform web`, which writes
@@ -13,7 +13,7 @@
 # same command with UNDRA_PLAYGROUND_V2=1; its wasm is copied to build/b/playground_core.wasm (not committed) before
 # build A is built again, so the default wasm stays build A. UNDRA_PLAYGROUND_WASM_B overrides its path.
 # Prints `SCENARIO Sxx PASS|FAIL|SKIP <title>` lines (src/reporter.ts) and pipes them through
-# contract-tests/check.sh, so the exit status is non-zero unless every one (S01..S26) passes.
+# contract-tests/check.sh, so the exit status is non-zero unless every one (S01..S33) passes.
 # UNDRA_CLI overrides the path of the undra binary (default target/debug/undra, built if missing).
 set -euo pipefail
 
@@ -77,7 +77,15 @@ done
 "$root/contract-tests/derived-vectors.sh" >&2
 
 # 2. The dependencies (vitest, typescript), from the lockfile.
+#    Never through a symlink: `npm ci` empties the directory a linked `node_modules` points at (another
+#    checkout's, typically a worktree's link to the main checkout's), so a link that needs an install is refused.
 if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
+  if [ -L node_modules ]; then
+    echo "run.sh: node_modules is a symlink (to $(readlink node_modules)) and the lockfile needs an install;" >&2
+    echo "        refusing to run npm ci through it. Remove the link and rerun (npm ci installs a copy here)," >&2
+    echo "        or link a node_modules installed from this package-lock.json." >&2
+    exit 2
+  fi
   echo "==> installing dependencies" >&2
   npm ci --no-audit --no-fund >&2
 fi

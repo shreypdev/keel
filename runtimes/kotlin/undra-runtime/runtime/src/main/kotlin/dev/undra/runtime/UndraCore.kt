@@ -1,6 +1,13 @@
 package dev.undra.runtime
 
+import dev.undra.runtime.adapters.StandardFunctions
+import dev.undra.runtime.adapters.UndraBackgroundReport
+import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.Payloads.CallTarget
+import dev.undra.runtime.wire.Codecs
+import dev.undra.runtime.wire.UndraReader
+import dev.undra.runtime.wire.UndraWriter
+import dev.undra.runtime.wire.decodeAll
 import java.net.URI
 import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicBoolean
@@ -43,6 +50,13 @@ public open class UndraCore protected constructor() : AutoCloseable {
     /** Loading a core and the process-wide shared one. */
     public companion object {
         private val slot = AtomicReference<UndraCore?>(null)
+
+        /**
+         * The [namespace] of a core that was loaded without one (a test double, a [Mode.REMOTE] core loaded without its
+         * generated entry): `_`, which no real namespace is (a namespace starts with a lowercase letter), so it never
+         * collides with a core's. Two cores loaded without one share the stores of `_`; a generated entry always sets one.
+         */
+        public const val UNNAMED_NAMESPACE: String = "_"
 
         /** The placeholder [shared] returns while no core is loaded. */
         private val unloaded: UndraCore by lazy { UnloadedCore(null) }
@@ -115,21 +129,29 @@ public open class UndraCore protected constructor() : AutoCloseable {
          * handshake, and [native] is not used; see [Mode.REMOTE] for its limits.
          *
          * @throws UndraSchemaMismatchException if the core's schema hash differs.
-         * @throws UndraModeException if [LoadOptions.expectedSchemaHash] is not set, or [options] contradict each other.
+         * @throws UndraModeException if [LoadOptions.expectedSchemaHash] is not set, [options] contradict each other, or
+         *   [LoadOptions.namespace] (or the natives') is not a core namespace ([CoreNamespace]): it names the default stores.
          * @throws UndraException if the core cannot be started or reached (its library is missing, it speaks another
          *   ABI version, or a core with its namespace is already loaded).
          */
-        public fun load(options: LoadOptions, native: NativeApi): UndraCore = start(options) { native }
+        public fun load(options: LoadOptions, native: NativeApi): UndraCore = start(options, { native })
 
         /**
          * Starts a core: in process over the natives [native] returns (called only for [Mode.INPROC]), or over
          * `undra dev`.
          */
-        internal fun start(options: LoadOptions, native: (() -> NativeApi)?): UndraCore {
+        internal fun start(
+            options: LoadOptions,
+            native: (() -> NativeApi)?,
+            callbacks: List<UndraCallbackBridge<*>> = emptyList(),
+        ): UndraCore {
             checkModeOptions(options)
+            checkNamespace(options.namespace)
             if (options.expectedSchemaHash == null) throw missingSchemaHash()
             val transport = createTransport(options, native)
-            return attach(transport, options, makeShared = true)
+            // The namespace the default stores are kept under: the entry's, else the natives' own.
+            val named = if (options.namespace == null && transport is InprocTransport) options.withNamespaceDefault(transport.namespace) else options
+            return attach(transport, named, makeShared = true, callbacks)
         }
 
         /**
@@ -142,14 +164,21 @@ public open class UndraCore protected constructor() : AutoCloseable {
          */
         @UndraEmbeddingApi
         public fun attachTransport(transport: Transport, options: LoadOptions, makeShared: Boolean = true): UndraCore =
-            attach(transport, options, makeShared)
+            attach(transport, options, makeShared, emptyList())
 
         /**
          * Connects a core over [transport] and runs the handshake: registers the ports of [options]
          * (explicit adapters first, then the defaults for the rest), asks the transport for the core's
-         * schema hash and compares it with [LoadOptions.expectedSchemaHash].
+         * schema hash and compares it with [LoadOptions.expectedSchemaHash]. The [callbacks] interfaces of the
+         * bindings are registered before the core starts (ADR-041).
          */
-        internal fun attach(transport: Transport, options: LoadOptions, makeShared: Boolean): UndraCore {
+        internal fun attach(
+            transport: Transport,
+            options: LoadOptions,
+            makeShared: Boolean,
+            callbacks: List<UndraCallbackBridge<*>> = emptyList(),
+        ): UndraCore {
+            checkNamespace(options.namespace)
             val core = ConnectedCore(
                 transport,
                 options.remoteTimeout,
@@ -157,10 +186,13 @@ public open class UndraCore protected constructor() : AutoCloseable {
                 onConnectionChange = options.onConnectionChange,
                 onError = options.onError,
                 onDevNotice = options.onDevNotice,
+                namespace = options.namespace ?: UNNAMED_NAMESPACE,
+                onPanic = options.onPanic,
             )
             try {
                 val expected = options.expectedSchemaHash ?: throw missingSchemaHash()
                 core.installPorts(options)
+                core.installCallbacks(callbacks)
                 val got = transport.connect(core, expected)
                 if (got != expected) {
                     throw UndraSchemaMismatchException(expected, got)
@@ -198,6 +230,16 @@ public open class UndraCore protected constructor() : AutoCloseable {
             }
         }
 
+        /** The namespace names the default stores' directories (ADR-044 amendment A): refused before anything starts. */
+        private fun checkNamespace(namespace: String?) {
+            if (namespace == null) return
+            try {
+                CoreNamespace.require(namespace)
+            } catch (e: IllegalArgumentException) {
+                throw UndraModeException("LoadOptions.namespace: ${e.message}")
+            }
+        }
+
         private fun remoteUri(options: LoadOptions): URI {
             val url = options.remoteUrl ?: throw UndraModeException("Mode.REMOTE needs LoadOptions.remoteUrl (for example ws://localhost:7350)")
             val uri = try {
@@ -229,6 +271,14 @@ public open class UndraCore protected constructor() : AutoCloseable {
 
     /** The mode this core runs in. */
     public open val mode: Mode get() = throw unsupported("mode")
+
+    /**
+     * The namespace of the core (`[core] namespace` in `undra.toml`, `UndraIds.NAMESPACE`): the one its generated entry
+     * loaded it under ([LoadOptions.namespace]), else its natives'. The default `Kv`, `SecureStore`, `Fs` and `Db`
+     * adapters (the JVM's and `android-adapters`') keep their data under it (ADR-044, amendment A), so two cores of one
+     * app never share a store. [UNNAMED_NAMESPACE] for a core that was loaded without one.
+     */
+    public open val namespace: String get() = UNNAMED_NAMESPACE
 
     private val inertConnection: StateFlow<ConnectionState> by lazy { MutableStateFlow(ConnectionState.Connected) }
 
@@ -278,6 +328,37 @@ public open class UndraCore protected constructor() : AutoCloseable {
         throw unsupported("call")
 
     /**
+     * Gives the core a window of [deadlineMs] milliseconds to do the work that can wait for the app to be in the background, and
+     * returns what it did (ADR-046): replays the queued offline mutations, refetches the stale persisted queries and flushes
+     * pending persistence, together, until all of them finished or `deadlineMs - 500` ms have passed, whichever comes first.
+     * It is the standard function `run_background`, called like any generated `suspend` function.
+     *
+     * An OS that grants a window calls this (the `android-work` module's `UndraWorker` does, with a deadline a little under
+     * WorkManager's 10 minutes), and the core must be loaded for it first: a worker started by the OS in a process the app never
+     * opened loads it itself. The core never fails the run: [UndraBackgroundReport.finished] says whether it got through, and
+     * [UndraBackgroundReport.stillPending] how much is left; progress is kept per item, so a run that did not finish loses nothing.
+     * [UndraStats.background] says, without a run, whether one is worth asking the OS for (`pending > 0`).
+     *
+     * Cancelling the coroutine cancels the call (a host about to lose its window does): the caller sees
+     * [kotlinx.coroutines.CancellationException] at once and the core drops the run; what was already done is kept.
+     *
+     * @param deadlineMs the window, in milliseconds; a negative value counts as zero.
+     * @throws UndraCallError when the core is closed or cannot be reached ([UndraCallError.Unavailable]), refuses the call, or
+     *   cancels it ([UndraCallError.CancelledByCore], a restore or a shutdown meanwhile). Never a panic into the caller's OS callback.
+     * @throws kotlinx.coroutines.CancellationException if the calling coroutine is cancelled.
+     */
+    public suspend fun runInBackground(deadlineMs: Long): UndraBackgroundReport {
+        val w = UndraWriter(8)
+        w.writeU64(deadlineMs.coerceAtLeast(0L).toULong())
+        try {
+            val body = call(CallTarget.FreeFunction(StandardFunctions.RUN_BACKGROUND), StandardFunctions.RUN_BACKGROUND, w.toByteArray())
+            return UndraBackgroundReport.decodeAll(body)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e)
+        }
+    }
+
+    /**
      * Opens a stream and returns its items as a cold [Flow]: every collection starts a new call. Items
      * are delivered with back-pressure: the collector grants the core 16 items when the stream opens
      * and 8 more each time fewer than 8 remain granted, so a slow collector slows the core down.
@@ -325,8 +406,97 @@ public open class UndraCore protected constructor() : AutoCloseable {
      */
     public open fun observe(handle: Long, signalId: UInt, on: Boolean): Unit = throw unsupported("observe")
 
-    /** Releases the object [handle] in the core and stops routing its change-sets. Called by [UndraObject.close]. */
+    /**
+     * Gives back one reference to the object [handle] (ADR-040: every handle the core hands out is one reference) and,
+     * once no open wrapper owns the handle, stops routing its change-sets. Called by [UndraObject.close] and by
+     * [adopt] for a duplicate.
+     */
     public open fun release(handle: Long): Unit = throw unsupported("release")
+
+    // ---- objects as parameters and returns (ADR-040) ------------------------------------------------
+
+    /** One wrapper per handle; see [adopt]. */
+    internal val identity: IdentityMap = IdentityMap()
+
+    /**
+     * The wrapper of the object [handle], whose one reference the caller owns (a constructor's or a method's reply):
+     * the open wrapper this core already has for it, after giving the extra reference back at once, or a new one
+     * made with [make] (and, for a store, observing its signals). So an object the app already holds comes back as
+     * the same wrapper (`===`), and closing a wrapper releases exactly the reference it owns. Thread-safe.
+     * Generated code calls it; an app never needs to.
+     *
+     * @throws UndraProtocolException for the null handle.
+     * @throws UndraCallError if a new store cannot observe its signals (the store is closed).
+     */
+    public fun <T : UndraObject> adopt(handle: Long, make: (UndraCore, Long) -> T): T = identity.adopt(this, handle, make)
+
+    /**
+     * [adopt]s the one handle a reply [body] holds (an `Arc<T>` return).
+     *
+     * @throws dev.undra.runtime.wire.WireException if [body] is not exactly one handle.
+     */
+    public fun <T : UndraObject> adoptObject(body: ByteArray, make: (UndraCore, Long) -> T): T {
+        val r = UndraReader(body)
+        val handle = r.readI64()
+        r.finish()
+        return adopt(handle, make)
+    }
+
+    /**
+     * [adopt]s the handle a reply [body] holds, if any (an `Option<Arc<T>>` return).
+     *
+     * @throws dev.undra.runtime.wire.WireException if [body] is not an optional handle.
+     */
+    public fun <T : UndraObject> adoptOptional(body: ByteArray, make: (UndraCore, Long) -> T): T? {
+        val handle = OPTIONAL_HANDLE.decodeAll(body) ?: return null
+        return adopt(handle, make)
+    }
+
+    /**
+     * [adopt]s every handle of a reply [body] (a `Vec<Arc<T>>` return), each as it is read, so a body that turns out
+     * malformed part of the way leaves wrappers (whose cleaners give their references back), not orphans.
+     *
+     * @throws dev.undra.runtime.wire.WireException if [body] is not a list of handles.
+     */
+    public fun <T : UndraObject> adoptList(body: ByteArray, make: (UndraCore, Long) -> T): List<T> {
+        val r = UndraReader(body)
+        val count = r.readLen(8)
+        val out = ArrayList<T>(count)
+        for (i in 0 until count) out.add(adopt(r.readI64(), make))
+        r.finish()
+        return out
+    }
+
+    /**
+     * Refuses an object of another core as an argument of a call on this one: a handle means something only to the
+     * core that issued it, and two cores hand out the same numbers (ADR-044). `null` passes.
+     *
+     * @throws UndraCallError.Refused naming the object's class, before anything is sent.
+     */
+    public fun requireOwn(value: UndraObject?) {
+        if (value != null && value.core !== this) {
+            throw UndraCallError.Refused(
+                "the ${value.javaClass.simpleName} passed (${Handle(value.handle)}) belongs to another core; " +
+                    "an object can only be passed to calls on the core that made it",
+            )
+        }
+    }
+
+    /** [requireOwn] for every object of [values]. */
+    public fun requireOwn(values: Iterable<UndraObject>) {
+        for (value in values) requireOwn(value)
+    }
+
+    /** Called once per new wrapper [adopt] made for [handle]. */
+    internal open fun adopted(handle: Long) {}
+
+    // ---- host callbacks (ADR-041) ---------------------------------------------------------------------
+
+    /** The app objects this core holds as callback instances; see [UndraCallbacks]. */
+    public val callbacks: UndraCallbacks = UndraCallbacks()
+
+    /** Registers the callback interfaces of the bindings (their generated bridges) before the core starts. */
+    internal open fun installCallbacks(bridges: List<UndraCallbackBridge<*>>) {}
 
     /** Sends a host-to-core event of an event port (`Connectivity.changed`, `Lifecycle.changed`, ...). */
     public open fun event(portId: UInt, methodId: UInt, payload: ByteArray): Unit = throw unsupported("event")
@@ -417,3 +587,6 @@ public open class UndraCore protected constructor() : AutoCloseable {
             "UndraCore.$member is not implemented by this UndraCore; load a core (Undra<Namespace>.load(...)) or override it in your test double",
         )
 }
+
+/** `Option<handle>`, what [UndraCore.adoptOptional] reads. */
+private val OPTIONAL_HANDLE = Codecs.option(Codecs.handle)

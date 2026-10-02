@@ -423,6 +423,7 @@ mod tests {
                     docs: String::new(),
                 },
             ],
+            transparent: false,
             docs: "An item.".into(),
         });
         schema
@@ -578,6 +579,7 @@ mod tests {
             returns: TypeRef::Unit,
             is_async: false,
             takes_ctx: false,
+            coalesce: false,
             docs: format!("Docs of {name}."),
         };
         let mut schema = Schema::new("demo-core");

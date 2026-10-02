@@ -1,6 +1,8 @@
 // Objects and stores: the host-side owners of core handles (docs/SPEC.md sections 10.1, 11 and
 // 17.3).
 
+import Foundation
+
 /// The base class of every generated object: it owns one handle of the core's object table.
 ///
 /// `close()` releases the handle explicitly. `deinit` is only a backstop for objects that go out
@@ -17,11 +19,13 @@ open class UndraObject: @unchecked Sendable {
 
     private let closedFlag = Guarded<Bool>(false)
 
-    /// Adopts `handle`, which `core` issued and which this object now owns.
+    /// Adopts `handle`, which `core` issued and which this object now owns, and makes this object the
+    /// wrapper of the handle in `core`'s identity map (ADR-040) unless a live one already is.
     public init(core: UndraCore, handle: UndraHandle) {
         self.core = core
         self.handle = handle
         core.noteHandleAdopted()
+        core.identities.register(self)
     }
 
     /// Whether `close()` has run.
@@ -44,10 +48,53 @@ open class UndraObject: @unchecked Sendable {
         if !first {
             return
         }
-        core.mirror.unregister(handle)
-        core.release(handle)
+        stopHoldingTheHandle()
+        core.releaseExtraReference(handle)
         core.noteHandleReleased()
     }
+
+    /// Gives this wrapper's reference back without touching what the handle's other, kept wrapper
+    /// `kept` registered (``UndraCore/adopt(_:_:)`` found two for one handle).
+    func discardAsDuplicate(of kept: UndraObject) {
+        let first = closedFlag.withLock { (closed: inout Bool) -> Bool in
+            if closed {
+                return false
+            }
+            closed = true
+            return true
+        }
+        if !first {
+            return
+        }
+        stopHoldingTheHandle()
+        core.releaseExtraReference(handle)
+        core.noteHandleReleased()
+    }
+
+    /// Stops being a wrapper of the handle: this wrapper's own routing goes, and the handle's state (what the app
+    /// observes, that the host holds it) goes only with the **last** wrapper of the handle, decided under the identity
+    /// map's lock. A wrapper of the same handle that another thread adopted while this one was closing therefore
+    /// keeps its routing and its observed signals (it used to lose both: the unregister and the release that
+    /// followed `forget` were not atomic with it).
+    private func stopHoldingTheHandle() {
+        #if DEBUG
+        UndraObject.testHookAfterMarkedClosed?(self)
+        #endif
+        let core = self.core
+        let handle = self.handle
+        core.identities.leave(self) { last in
+            core.mirror.unregister(handle, owner: self)
+            if last {
+                core.forgetHandleState(handle)
+            }
+        }
+    }
+
+    #if DEBUG
+    /// Runs when a wrapper has been marked closed and has not yet left the identity map: lets a test play the other
+    /// thread that adopts the handle at exactly that moment.
+    nonisolated(unsafe) static var testHookAfterMarkedClosed: ((UndraObject) -> Void)?
+    #endif
 
     deinit {
         close()
@@ -75,8 +122,19 @@ open class UndraStore: UndraObject, @unchecked Sendable {
     /// the last one per drain. SwiftUI still renders once per frame whatever the model does, so a
     /// view may not show each intermediate value; the store's properties take every one.
     public init(core: UndraCore, handle: UndraHandle, noCoalesce: Set<UInt32> = []) {
+        self.noCoalesce = noCoalesce
         super.init(core: core, handle: handle)
-        core.mirror.register(handle, noCoalesce: noCoalesce) { [weak self] signal, op, reader in
+        registerWithMirror()
+    }
+
+    /// The store's `no_coalesce` signals, as registered.
+    private let noCoalesce: Set<UInt32>
+
+    /// Registers this wrapper's own function with the mirror, next to the other wrappers' of the same handle: an
+    /// `Arc<Self>` constructor that returns an object the host already wraps makes a second wrapper (a Swift
+    /// initializer cannot return the first), and the first must keep receiving the changes.
+    private func registerWithMirror() {
+        core.mirror.register(handle, owner: self, noCoalesce: noCoalesce) { [weak self] signal, op, reader in
             guard let store = self else {
                 return
             }

@@ -22,6 +22,10 @@ export default defineConfig({
     },
   },
   build: {
+    // The runtime is ES2022: at Vite 6's default target (es2020) its class fields become helper calls, and the call path is
+    // several times slower (bench/RESULTS.md, "How the rows are timed"). `undra()` of `@undra/runtime/vite` sets this
+    // for an app that uses it and sets no target of its own; this config has its own aliases and no plugin.
+    target: "es2022",
     // Two pages: the app, and the stories (`stories.html`, a plain renderer of src/stories/*.stories.tsx).
     rollupOptions: { input: { main: here("index.html"), stories: here("stories.html") } },
   },

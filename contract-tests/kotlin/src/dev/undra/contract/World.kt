@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicLong
  * @property log the `Log` port: the records the core emitted.
  * @property portCalls how many calls the four adapters above received (S17.7).
  * @property options the options [core] was loaded with; S17.7 loads a fresh core with them after the shutdown.
+ * @property panics what `LoadOptions.onPanic` received (S29).
  * @property unhandled what `LoadOptions.onError` received: the failures of commands and of changes that could not be
  *   applied (ADR-032, amendment A). A scenario that causes one asserts it and then calls [takeUnhandled].
  */
@@ -40,6 +41,7 @@ class World(
     val portCalls: PortCallCounter,
     val options: LoadOptions,
     val unhandled: CopyOnWriteArrayList<UndraUnhandledError> = CopyOnWriteArrayList(),
+    val panics: PanicLog = PanicLog(),
 ) {
     /** What `onError` received since the last call, oldest first; the list is empty afterwards. */
     fun takeUnhandled(): List<UndraUnhandledError> = unhandled.toList().also { unhandled.clear() }
@@ -95,6 +97,9 @@ class Bootstrap {
     /** What `LoadOptions.onError` received. */
     val unhandled = CopyOnWriteArrayList<UndraUnhandledError>()
 
+    /** What `LoadOptions.onPanic` received. */
+    val panics = PanicLog()
+
     /** The loaded core, or `null` while S16 has not loaded it (yet, or successfully). */
     var world: World? = null
         private set
@@ -109,9 +114,9 @@ class Bootstrap {
 
     /** Loads the core through the bindings' entry (which brings the schema hash) with the harness adapters. */
     fun load(): World {
-        val options = LoadOptions(adapters = adapters(), onError = { unhandled.add(it) })
+        val options = LoadOptions(adapters = adapters(), onError = { unhandled.add(it) }, onPanic = panics::record)
         val core = UndraPlaygroundCore.load(options)
-        return World(core, clock, server, kv, log, portCalls, options, unhandled).also { world = it }
+        return World(core, clock, server, kv, log, portCalls, options, unhandled, panics).also { world = it }
     }
 }
 

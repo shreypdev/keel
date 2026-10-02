@@ -28,7 +28,7 @@ use crate::signal::Signal;
 use crate::value::SignalValue;
 
 pub(crate) mod index;
-mod node;
+pub(crate) mod node;
 mod pipeline;
 pub(crate) mod slot;
 pub(crate) mod tap;

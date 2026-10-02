@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.ScrollView
 import android.widget.TextView
+import dev.undra.android.AndroidPlatformDefaults
 import dev.undra.android.ChoreographerFramePacer
 import dev.undra.runtime.LoadOptions
 import dev.undra.runtime.MirrorOptions
@@ -16,15 +17,27 @@ import dev.undra.twocores.b.UndraPlaygroundB
 import dev.undra.twocores.a.Counter as CounterA
 import dev.undra.twocores.a.UndraIds as IdsA
 import dev.undra.twocores.a.add as addA
+import dev.undra.twocores.a.kvGet as kvGetA
+import dev.undra.twocores.a.kvKeys as kvKeysA
+import dev.undra.twocores.a.kvPut as kvPutA
+import dev.undra.twocores.a.kvRemove as kvRemoveA
 import dev.undra.twocores.b.Counter as CounterB
 import dev.undra.twocores.b.UndraIds as IdsB
 import dev.undra.twocores.b.add as addB
+import dev.undra.twocores.b.kvGet as kvGetB
+import dev.undra.twocores.b.kvKeys as kvKeysB
+import dev.undra.twocores.b.kvPut as kvPutB
+import dev.undra.twocores.b.kvRemove as kvRemoveB
+import java.io.File
+import kotlinx.coroutines.runBlocking
 
 /**
  * The two-core test app on Android (ADR-044): two copies of the playground core, `libplayground_a.so` and
  * `libplayground_b.so`, in one APK and one process, each registering its natives on its own `UndraCoreNative`
  * and loaded through its own generated entry. It gives each a call and an observed change, compares their
- * statistics, closes one and checks the other keeps working. Every check is a `two-cores android:` line in
+ * statistics, closes one and checks the other keeps working. Both get the platform's default adapters
+ * (`AndroidPlatformDefaults.install`), whose `Kv` is per core namespace (ADR-044 amendment A): each writes the same key
+ * and reads its own value back, and the files are in two directories. Every check is a `two-cores android:` line in
  * logcat (tag `TwoCores`) and on screen.
  */
 class MainActivity : Activity() {
@@ -79,6 +92,11 @@ class MainActivity : Activity() {
             val newA = a.stats().liveHandles - handlesA
             val newB = b.stats().liveHandles - handlesB
             check("independent statistics: A has $newA new handle, B has $newB", newA == 1 && newB == 1)
+            val platformA = AndroidPlatformDefaults.install(a, this)
+            val platformB = AndroidPlatformDefaults.install(b, this)
+            checkStorage(::check)
+            platformA.close()
+            platformB.close()
             a.close()
             counterB.add(1)
             val unavailable = try {
@@ -100,6 +118,48 @@ class MainActivity : Activity() {
         }
         Log.i(TAG, "two-cores android: ${if (lines.none { "FAIL" in it }) "passed" else "FAILED"}")
         return lines
+    }
+
+    /**
+     * The default stores of two cores are two stores (ADR-044 amendment A): the same `Kv` key written through each core
+     * reads back that core's own value, a key one core wrote is not the other's, and the files are in
+     * `<filesDir>/undra/<namespace>/kv`. Runs on a thread of its own, which waits for the cores' port replies.
+     */
+    private fun checkStorage(check: (String, Boolean) -> Unit) {
+        var failure: Throwable? = null
+        val worker = Thread {
+            try {
+                runBlocking {
+                    val nonce = System.nanoTime().toString(16)
+                    val key = "two-cores.key"
+                    val onlyInA = "two-cores.only-a"
+                    kvPutA(key, "value-of-a-$nonce".toByteArray())
+                    kvPutB(key, "value-of-b-$nonce".toByteArray())
+                    kvPutA(onlyInA, byteArrayOf(1))
+                    val readA = kvGetA(key)?.decodeToString()
+                    val readB = kvGetB(key)?.decodeToString()
+                    check(
+                        "Kv: both wrote $key and read their own value back: A has $readA, B has $readB",
+                        readA == "value-of-a-$nonce" && readB == "value-of-b-$nonce",
+                    )
+                    val keysA = kvKeysA("two-cores.")
+                    val keysB = kvKeysB("two-cores.")
+                    check("Kv: a key only A wrote is not B's: A lists $keysA, B lists $keysB", onlyInA in keysA && onlyInA !in keysB && key in keysB)
+                    val root = File(filesDir, "undra")
+                    val a = File(root, "${UndraPlaygroundA.NAMESPACE}/kv")
+                    val b = File(root, "${UndraPlaygroundB.NAMESPACE}/kv")
+                    check("Kv files: ${a.path} and ${b.path}, and none in ${root.path}/kv", a.isDirectory && b.isDirectory && !File(root, "kv").exists())
+                    kvRemoveA(key)
+                    kvRemoveA(onlyInA)
+                    kvRemoveB(key)
+                }
+            } catch (e: Throwable) {
+                failure = e
+            }
+        }
+        worker.start()
+        worker.join()
+        failure?.let { check("Kv: the check failed: $it", false) }
     }
 
     private companion object {

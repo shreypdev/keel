@@ -1,0 +1,10 @@
+# LLDB's startup file for this project, written by `undra init` (ADR-046): it loads the Rust formatters of the toolchain
+# on this machine (`rustc --print sysroot`), so Rust values (String, Vec, Option, ...) read as values when you step into
+# the core from Xcode or `lldb`, and says nothing when the toolchain has none.
+#
+# LLDB reads a project's .lldbinit only from the directory it starts in, and only when told it may:
+#   echo 'settings set target.load-cwd-lldbinit true' >> ~/.lldbinit
+# Then, in the Xcode console or `lldb` started here, set a breakpoint on a Rust line and step in from Swift:
+#   breakpoint set -f todos.rs -l 42
+# Chrome DevTools, Android Studio and `cargo test` have their own pages in docs/ONBOARDING.md ("Debugging into Rust").
+script import os, subprocess; root = subprocess.run(["rustc", "--print", "sysroot"], capture_output=True, text=True).stdout.strip() + "/lib/rustlib/etc"; [lldb.debugger.HandleCommand(c) for c in ('command script import "%s/lldb_lookup.py"' % root, 'command source -s 0 "%s/lldb_commands"' % root) if os.path.exists(c.split('"')[1])]

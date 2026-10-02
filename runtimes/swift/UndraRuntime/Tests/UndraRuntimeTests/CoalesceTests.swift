@@ -32,8 +32,18 @@ private func patchEntry(_ signal: UInt32, _ value: [UInt8], handle: UndraHandle 
     return Wire.ChangeEntry(handle: handle, signalId: signal, op: .keyedPatch, value: ArraySlice(value))
 }
 
-private func invalidationEntry(_ signal: UInt32, handle: UndraHandle = storeHandle) -> Wire.ChangeEntry {
-    return Wire.ChangeEntry(handle: handle, signalId: signal, op: .lazyListInvalidated)
+private func invalidationEntry(_ signal: UInt32, _ value: [UInt8] = [], handle: UndraHandle = storeHandle) -> Wire.ChangeEntry {
+    return Wire.ChangeEntry(handle: handle, signalId: signal, op: .lazyListInvalidated, value: ArraySlice(value))
+}
+
+/// The value of a `Lazy<T>` signal (op 0).
+private func lazyValue(handle: UInt64, len: UInt32, version: UInt64) -> [UInt8] {
+    return UndraLazyValue(handle: UndraHandle(rawValue: handle), len: len, version: version).undraEncoded()
+}
+
+/// The value of a lazy invalidation (op 2).
+private func lazyInvalidation(len: UInt32, version: UInt64) -> [UInt8] {
+    return UndraLazyInvalidated(len: len, version: version).undraEncoded()
 }
 
 private func changeSet(_ entries: Wire.ChangeEntry...) -> Wire.ChangeSet {
@@ -513,21 +523,231 @@ final class CoalesceTests: XCTestCase {
         XCTAssertEqual((host.store.applies[0] ?? 0) - before, 2, "the full value, then one merged patch")
     }
 
-    func testALazyInvalidationSupersedesWhatCameBeforeIt() throws {
+    // MARK: Lazy invalidations (ADR-043, the ADR-031 amendment)
+
+    /// A lazy invalidation supersedes only earlier lazy invalidations of its signal: the full value of a `Lazy<T>` carries the page
+    /// server's handle, so the invalidations that follow it are delivered after it, never instead of it.
+    func testALazyInvalidationNeverSupersedesTheFullValueBeforeIt() throws {
         let transport = FakeTransport()
         let core = try makeCore(transport, frames: ManualFrameScheduler())
         let log = ApplyLog()
         recordApplies(core, into: log)
-        transport.deliverChangeSet(changeSet(fullEntry(0, u32(1))))
-        transport.deliverChangeSet(changeSet(patchEntry(0, patchBytes([PatchOp<UInt32>.clear]))))
-        transport.deliverChangeSet(changeSet(invalidationEntry(0)))
+        // [Full, Inv]: both.
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 7, len: 10, version: 1))))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 11, version: 2))))
+        core.mirror.flush()
+        XCTAssertEqual(log.ops, [.fullValue, .lazyListInvalidated])
+        XCTAssertEqual(log.applied[1].value, lazyInvalidation(len: 11, version: 2))
+        // [Full, Inv, Inv]: the full value and the last invalidation.
+        log.applied = []
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 8, len: 10, version: 3))))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 11, version: 4))))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 12, version: 5))))
+        core.mirror.flush()
+        XCTAssertEqual(log.ops, [.fullValue, .lazyListInvalidated])
+        XCTAssertEqual(log.applied[0].value, lazyValue(handle: 8, len: 10, version: 3))
+        XCTAssertEqual(log.applied[1].value, lazyInvalidation(len: 12, version: 5))
+        // [Inv, Inv]: the last one.
+        log.applied = []
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 13, version: 6))))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 14, version: 7))))
         core.mirror.flush()
         XCTAssertEqual(log.ops, [.lazyListInvalidated])
-        // A full value after an invalidation supersedes it in turn.
-        transport.deliverChangeSet(changeSet(invalidationEntry(0)))
-        transport.deliverChangeSet(changeSet(fullEntry(0, u32(2))))
+        XCTAssertEqual(log.applied[0].value, lazyInvalidation(len: 14, version: 7))
+    }
+
+    func testAFullValueSupersedesTheLazyInvalidationsBeforeIt() throws {
+        let transport = FakeTransport()
+        let core = try makeCore(transport, frames: ManualFrameScheduler())
+        let log = ApplyLog()
+        recordApplies(core, into: log)
+        // [Inv, Full]: the full value alone.
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 5, version: 2))))
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 7, len: 6, version: 3))))
         core.mirror.flush()
-        XCTAssertEqual(log.ops, [.lazyListInvalidated, .fullValue])
+        XCTAssertEqual(log.ops, [.fullValue])
+        // [Inv, Full, Inv]: the full value and the invalidation after it.
+        log.applied = []
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 7, version: 4))))
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 8, len: 8, version: 5))))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 9, version: 6))))
+        core.mirror.flush()
+        XCTAssertEqual(log.ops, [.fullValue, .lazyListInvalidated])
+        XCTAssertEqual(log.applied[0].value, lazyValue(handle: 8, len: 8, version: 5))
+        XCTAssertEqual(log.applied[1].value, lazyInvalidation(len: 9, version: 6))
+        // [Full, Full, Inv]: the second full value supersedes the first.
+        log.applied = []
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 9, len: 1, version: 7))))
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 10, len: 2, version: 8))))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 3, version: 9))))
+        core.mirror.flush()
+        XCTAssertEqual(log.applied.map { $0.value }, [lazyValue(handle: 10, len: 2, version: 8), lazyInvalidation(len: 3, version: 9)])
+    }
+
+    func testARestoresNewHandleFollowedByAnInvalidationInOneDrainDeliversBoth() throws {
+        // A restore re-sends op 0 with the new page server, and the next commit invalidates: one drain folds both.
+        let transport = FakeTransport()
+        let core = try makeCore(transport, frames: ManualFrameScheduler())
+        let log = ApplyLog()
+        recordApplies(core, into: log)
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 7, len: 100, version: 4))))
+        core.mirror.flush()
+        log.applied = []
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 70, len: 100, version: 0))))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 101, version: 1))))
+        core.mirror.flush()
+        XCTAssertEqual(log.ops, [.fullValue, .lazyListInvalidated])
+        XCTAssertEqual(log.applied[0].value, lazyValue(handle: 70, len: 100, version: 0))
+        XCTAssertEqual(log.applied[1].value, lazyInvalidation(len: 101, version: 1))
+    }
+
+    func testKeyedSignalsAreUnaffectedByTheLazyRule() throws {
+        let transport = FakeTransport()
+        let core = try makeCore(transport, frames: ManualFrameScheduler())
+        let log = ApplyLog()
+        recordApplies(core, into: log)
+        // Signal 1 is a keyed list, signal 0 a lazy one, in one drain.
+        transport.deliverChangeSet(changeSet(
+            fullEntry(1, [UInt32(1), 2].undraEncoded()),
+            fullEntry(0, lazyValue(handle: 7, len: 3, version: 1))
+        ))
+        transport.deliverChangeSet(changeSet(
+            patchEntry(1, patchBytes([PatchOp<UInt32>.insert(index: 2, item: 3)])),
+            invalidationEntry(0, lazyInvalidation(len: 4, version: 2))
+        ))
+        transport.deliverChangeSet(changeSet(
+            patchEntry(1, patchBytes([PatchOp<UInt32>.insert(index: 3, item: 4)])),
+            invalidationEntry(0, lazyInvalidation(len: 5, version: 3))
+        ))
+        core.mirror.flush()
+        XCTAssertEqual(log.applied.map { "\($0.signal):\($0.op)" }, ["1:fullValue", "1:keyedPatch", "0:fullValue", "0:lazyListInvalidated"])
+        XCTAssertEqual(log.applied[3].value, lazyInvalidation(len: 5, version: 3))
+        var merged = UndraReader(log.applied[1].value)
+        let ops: [PatchOp<UInt32>] = try decodePatch(&merged)
+        XCTAssertEqual(ops.count, 2, "the two patches merged into one, as before")
+    }
+
+    func testAnInvalidationIsAppliedAfterThePatchesOfItsSignal() throws {
+        // A signal is a keyed list or a lazy list, never both; a stream that mixes them is still applied in a fixed order.
+        let transport = FakeTransport()
+        let core = try makeCore(transport, frames: ManualFrameScheduler())
+        let log = ApplyLog()
+        recordApplies(core, into: log)
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 1, version: 1))))
+        transport.deliverChangeSet(changeSet(patchEntry(0, patchBytes([PatchOp<UInt32>.clear]))))
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 7, len: 1, version: 2))))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 2, version: 3))))
+        transport.deliverChangeSet(changeSet(patchEntry(0, patchBytes([PatchOp<UInt32>.clear]))))
+        core.mirror.flush()
+        XCTAssertEqual(log.ops, [.fullValue, .keyedPatch, .lazyListInvalidated])
+    }
+
+    func testNoCoalesceLazySignalsSeeEveryEntry() throws {
+        let transport = FakeTransport()
+        let core = try makeCore(transport, frames: ManualFrameScheduler())
+        let log = ApplyLog()
+        recordApplies(core, noCoalesce: [0], into: log)
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 7, len: 1, version: 1))))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 2, version: 2))))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 3, version: 3))))
+        core.mirror.flush()
+        XCTAssertEqual(log.ops, [.fullValue, .lazyListInvalidated, .lazyListInvalidated])
+    }
+
+    func testACompactionKeepsTheFullValueAndTheLastInvalidation() throws {
+        let transport = FakeTransport()
+        let core = try makeCore(transport, frames: ManualFrameScheduler(), maxPendingEntries: 4)
+        let log = ApplyLog()
+        recordApplies(core, into: log)
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 7, len: 1, version: 1))))
+        for version in UInt64(2) ... 40 {
+            transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: UInt32(version), version: version))))
+        }
+        XCTAssertGreaterThan(core.mirror.stats().compactions, 3)
+        XCTAssertLessThanOrEqual(core.mirror.stats().pendingEntries, 8, "the backlog was folded, not kept")
+        core.mirror.flush()
+        XCTAssertEqual(log.ops, [.fullValue, .lazyListInvalidated])
+        XCTAssertEqual(log.applied[0].value, lazyValue(handle: 7, len: 1, version: 1), "the handle survived the compactions")
+        XCTAssertEqual(log.applied[1].value, lazyInvalidation(len: 40, version: 40))
+    }
+
+    func testASignalWaitingForAFullValueIgnoresInvalidationsToo() throws {
+        // A keyed patch that cannot be merged (shorter than its count) drops the signal's content: it waits for a full value, and
+        // only a full value ends the wait.
+        let transport = FakeTransport()
+        let core = try makeCore(transport, frames: ManualFrameScheduler())
+        let log = ApplyLog()
+        recordApplies(core, into: log)
+        transport.deliverChangeSet(changeSet(patchEntry(0, [1, 2])))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 5, version: 2))))
+        transport.deliverChangeSet(changeSet(fullEntry(0, lazyValue(handle: 7, len: 6, version: 3))))
+        transport.deliverChangeSet(changeSet(invalidationEntry(0, lazyInvalidation(len: 7, version: 4))))
+        core.mirror.flush()
+        XCTAssertEqual(log.ops, [.fullValue, .lazyListInvalidated])
+        XCTAssertEqual(log.applied[1].value, lazyInvalidation(len: 7, version: 4))
+    }
+
+    /// Whatever the drain and compaction points, the state a lazy signal ends in is the state of applying every entry in order.
+    func testLazyHistoriesConvergeWhateverTheDrainAndCompactionPoints() throws {
+        struct LazyState: Equatable {
+            var handle: UInt64 = 0
+            var len: UInt32 = 0
+            var version: UInt64 = 0
+        }
+        @MainActor final class Holder {
+            var state = LazyState()
+            func apply(_ op: ChangeOp, _ value: [UInt8]) {
+                switch op {
+                case .fullValue:
+                    if let decoded = try? UndraLazyValue.decode(value) {
+                        state = LazyState(handle: decoded.handle.rawValue, len: decoded.len, version: decoded.version)
+                    }
+                case .lazyListInvalidated:
+                    if let decoded = try? UndraLazyInvalidated.decode(value) {
+                        state.len = decoded.len
+                        state.version = decoded.version
+                    }
+                case .keyedPatch:
+                    break
+                }
+            }
+        }
+        for seed in 0 ..< 60 {
+            var rng = SplitMix64(seed: UInt64(seed) &+ 0x1A2B)
+            let bounds = [2, 3, 8, 65_536]
+            let transport = FakeTransport()
+            let core = try makeCore(transport, frames: ManualFrameScheduler(), maxPendingEntries: bounds[rng.below(bounds.count)])
+            let folded = Holder()
+            let reference = Holder()
+            core.mirror.register(storeHandle) { _, op, reader in
+                folded.apply(op, Array(reader.readRemaining()))
+            }
+            var version: UInt64 = 0
+            var handle: UInt64 = 1
+            for _ in 0 ..< 80 {
+                var entries: [Wire.ChangeEntry] = []
+                for _ in 0 ... rng.below(3) {
+                    version += 1
+                    let len = UInt32(rng.below(1000))
+                    if rng.below(5) == 0 {
+                        handle += 1
+                        let value = lazyValue(handle: handle, len: len, version: version)
+                        entries.append(fullEntry(0, value))
+                        reference.apply(.fullValue, value)
+                    } else {
+                        let value = lazyInvalidation(len: len, version: version)
+                        entries.append(invalidationEntry(0, value))
+                        reference.apply(.lazyListInvalidated, value)
+                    }
+                }
+                transport.deliverChangeSet(Wire.ChangeSet(txnId: 1, entries: entries))
+                if rng.below(4) == 0 {
+                    core.mirror.flush()
+                }
+            }
+            core.mirror.flush()
+            XCTAssertEqual(folded.state, reference.state, "seed \(seed)")
+        }
     }
 
     func testSignalsAreAppliedInTheOrderOfTheirFirstEntry() throws {

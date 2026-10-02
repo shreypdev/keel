@@ -1,0 +1,174 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-infinite",
+  "records": [
+    {
+      "name": "PostId",
+      "type_id": 2003166986,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "u64"
+          },
+          "default": false
+        }
+      ],
+      "transparent": true,
+      "docs": "A post's id."
+    },
+    {
+      "name": "Post",
+      "type_id": 4039610727,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "named",
+            "of": "PostId"
+          },
+          "default": false
+        },
+        {
+          "name": "author",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "body",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ],
+      "docs": "One post of the feed."
+    },
+    {
+      "name": "Hit",
+      "type_id": 1700614218,
+      "fields": [
+        {
+          "name": "slug",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ],
+      "docs": "One search result."
+    }
+  ],
+  "enums": [
+    {
+      "name": "Filter",
+      "type_id": 4104765591,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "All",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Mine",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ]
+    }
+  ],
+  "objects": [],
+  "functions": [],
+  "ports": [],
+  "queries": [
+    {
+      "name": "feed",
+      "query_id": 22701731,
+      "kind": "query",
+      "key": "feed/{filter}",
+      "params": [
+        {
+          "name": "filter",
+          "ty": {
+            "kind": "named",
+            "of": "Filter"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "vec",
+        "of": {
+          "kind": "named",
+          "of": "Post"
+        }
+      },
+      "stale_ms": 60000,
+      "persist": false,
+      "idempotent": false,
+      "infinite": {
+        "cursor": {
+          "kind": "string"
+        },
+        "item_key": "id"
+      }
+    },
+    {
+      "name": "search",
+      "query_id": 277015223,
+      "kind": "query",
+      "key": "search/{term}",
+      "params": [
+        {
+          "name": "term",
+          "ty": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "vec",
+        "of": {
+          "kind": "named",
+          "of": "Hit"
+        }
+      },
+      "stale_ms": null,
+      "persist": true,
+      "idempotent": false,
+      "interval_ms": 30000,
+      "infinite": {
+        "cursor": {
+          "kind": "u32"
+        },
+        "item_key": "slug"
+      }
+    },
+    {
+      "name": "profile",
+      "query_id": 2630111112,
+      "kind": "query",
+      "key": "profile",
+      "params": [],
+      "returns": {
+        "kind": "string"
+      },
+      "stale_ms": null,
+      "persist": false,
+      "idempotent": false
+    }
+  ]
+}

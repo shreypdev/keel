@@ -1,6 +1,6 @@
 # Swift contract runner: notes
 
-`run.sh` runs the scenarios of `../scenarios.md` that Swift runs (S01 to S20 and S23 to S26: `UndraRuntime` over
+`run.sh` runs the scenarios of `../scenarios.md` that Swift runs (S01 to S20, S23 to S33: `UndraRuntime` over
 the C ABI table, the real playground core through `libplayground_core.dylib` and, for S26, `libplayground_a.dylib` and
 `libplayground_b.dylib` in the same process, the bindings `undra bindgen` generated) and pipes the `SCENARIO` lines
 through `../check.sh swift`. The build-B steps of S14 and S15 run in a second process over the second build of the
@@ -51,6 +51,24 @@ when a build-B step fails and an informational `MIGRATION S14 build B ok: <the d
 `MIGRATION S15 build B ok` otherwise; its output is appended to `.build/contract.log`, which `check.sh`
 reads (the last line of an id counts). Build A's library is put back afterwards, also when something
 fails. A filtered `run.sh` (any arguments) skips this phase.
+
+## S31 (newtypes, generic instantiations, leaf types)
+
+`S31_Newtypes.swift` drives the playground's `ledger` module through the generated API (`openAccount`, `deposit`, `balances`,
+`statement`, `loadableStatement`, `echo*`, `sampleReceipt`, the `Ledger` store). Decimals are built from wire bytes (a 128-bit
+mantissa and a scale, `wireDecimal`), never from text: Foundation's parser compacts trailing zeros (`1.10` parses as `1.1`), so the
+scale a test sends is only the one it wrote through the codec, and echoes are compared as re-encoded bytes. The keyed-patch shape of
+`Ledger.accounts` is read through a `RawStore` (one change-set, one operation, the insert under 64 bytes), and the same calls run
+once more through the generated `Ledger` class. The wire `Duration` of the receipt is `Swift.Duration` or, under `--floor`,
+`UndraDuration` (`#if UNDRA_FLOOR`, as in S01). The scenario opens accounts in the shared core, so it expects to be the first to use
+the ledger's free functions in the process (`balances()` has exactly its two keys).
+
+## S29 and S30 (ADR-046)
+
+`Fixture` loads every core with `onPanic` and the default `DiagnosticsAdapter`; `onPanic` records each `UndraPanicReport` with whether it was
+delivered on the main thread (`Fixture.panics`). S29 reads it; its step "a reporter that throws" is Kotlin's and TypeScript's (a Swift
+`onPanic` cannot throw). S30 drives `core.runInBackground(deadline:)` against the harness `Http` and `Kv` and reads
+`stats().background`; its counters are checked as deltas, since the core may have counted runs before.
 
 ## Deviations from scenarios.md
 

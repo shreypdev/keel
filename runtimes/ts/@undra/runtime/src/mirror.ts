@@ -50,6 +50,8 @@ export interface MirrorStats {
   readonly pendingBytes: number;
   /** Entries dropped because no store was registered for their handle. */
   readonly droppedEntries: number;
+  /** Host callback invocations the drain delivered (ADR-041, `main` delivery; see {@link Mirror.enqueueCall}). */
+  readonly callbacksDelivered: number;
 }
 
 /** Options of a {@link Mirror}. */
@@ -163,8 +165,12 @@ type Awaiting = Map<Handle, Map<number, boolean>>;
 
 /** One signal of one store as a drain or a compaction folds it (docs/SPEC.md section 11). */
 class Slot {
-  /** The last full value or lazy invalidation; everything that arrived before it is superseded. */
-  full: ChangeEntry | null = null;
+  /**
+   * What the signal's last full value left to deliver, in order: that value, or the last lazy invalidation, or both (an
+   * invalidation supersedes only earlier invalidations, never the value that carries the page server's handle). A full
+   * value supersedes everything that arrived before it.
+   */
+  full: ChangeEntry[] = [];
   /** The keyed patches that arrived after `full`, whole (count and ops), in arrival order. */
   patches: Uint8Array[] = [];
   /** Sum of the patches' op counts. */
@@ -180,7 +186,8 @@ class Slot {
   ) {}
 
   setFull(entry: ChangeEntry): void {
-    this.full = entry;
+    const [head] = this.full;
+    this.full = entry.op === ChangeOp.LazyInvalidated && head?.op === ChangeOp.FullValue ? [head, entry] : [entry];
     this.patches = [];
     this.ops = 0;
     this.opBytes = 0;
@@ -228,7 +235,16 @@ class Single {
   constructor(readonly entry: ChangeEntry) {}
 }
 
-type Unit = Slot | Single;
+/**
+ * A host callback's invocation queued with the change-sets (ADR-041, `main` delivery): run by the drain in arrival
+ * order; it returns whether it delivered anything (a superseded or cancelled invocation does not).
+ */
+export type MirrorCall = () => boolean;
+
+/** What the queue holds: change-set entries and callback invocations, in arrival order. */
+type Queued = ChangeEntry | MirrorCall;
+
+type Unit = Slot | Single | MirrorCall;
 
 /** A copy of `value` when it is a small view into a larger buffer, so the queue does not keep that buffer alive. */
 function own(value: Uint8Array): Uint8Array {
@@ -247,67 +263,73 @@ function own(value: Uint8Array): Uint8Array {
  *
  * A change-set is validated whole before any of it is queued (a change-set is
  * a transaction). A drain folds the queued entries per signal: a full value
- * supersedes everything before it, consecutive keyed patches become one patch,
- * so each signal is applied at most twice per drain (its last full value, then
- * its merged patch), signals in the order their first entry arrived, and the
+ * supersedes everything before it, a lazy invalidation only the invalidations
+ * before it (the full value before it stays: it carries the page server's
+ * handle), consecutive keyed patches become one patch, so each signal is
+ * applied at most three times per drain (its last full value, the last
+ * invalidation after it, then its merged patch), signals in the order their
+ * first entry arrived, and the
  * signals a drain touched are announced once at its end. Signals a store
  * declared `no_coalesce` are applied entry by entry, each announced on its
  * own. Entries for a handle nobody registered (a store closed while updates
  * were in flight) are dropped and counted. The queue is bounded: past
- * `maxPendingEntries` or `maxPendingBytes` it is folded in place.
+ * `maxPendingEntries` or `maxPendingBytes` it is folded in place. A host
+ * callback's invocation ({@link Mirror.enqueueCall}) runs in its place in the
+ * queue and is never folded with entries.
  */
 export class Mirror {
-  readonly #registry = new Map<Handle, Registration>();
-  readonly #waiters = new Map<Handle, Waiter[]>();
-  readonly #listeners: DrainListener[] = [];
-  readonly #awaiting: Awaiting = new Map();
-  readonly #onError: (error: unknown) => void;
-  readonly #schedule: (fn: () => void) => void;
-  readonly #resync: ((handle: Handle, signalId: number) => void) | undefined;
-  readonly #maxEntries: number;
-  readonly #maxBytes: number;
-  #compactAtEntries: number;
-  #compactAtBytes: number;
-  #queue: ChangeEntry[] = [];
-  #queueBytes = 0;
+  private readonly _registry = new Map<Handle, Registration>();
+  private readonly _waiters = new Map<Handle, Waiter[]>();
+  private readonly _listeners: DrainListener[] = [];
+  private readonly _awaiting: Awaiting = new Map();
+  private readonly _onError: (error: unknown) => void;
+  private readonly _schedule: (fn: () => void) => void;
+  private readonly _resync: ((handle: Handle, signalId: number) => void) | undefined;
+  private readonly _maxEntries: number;
+  private readonly _maxBytes: number;
+  private _compactAtEntries: number;
+  private _compactAtBytes: number;
+  private _queue: Queued[] = [];
+  private _queueBytes = 0;
   /** Change-sets and entries received since the queue was last taken by a drain. */
-  #queuedChangeSets = 0;
-  #queuedEntries = 0;
-  #resyncDue = false;
-  #scheduled = false;
-  #microtaskQueued = false;
-  #flushing = false;
-  #applied = 0;
-  #dropped = 0;
-  #changeSets = 0;
-  #entries = 0;
-  #entriesApplied = 0;
-  #drains = 0;
-  #compactions = 0;
-  #resyncs = 0;
+  private _queuedChangeSets = 0;
+  private _queuedEntries = 0;
+  private _resyncDue = false;
+  private _scheduled = false;
+  private _microtaskQueued = false;
+  private _flushing = false;
+  private _applied = 0;
+  private _dropped = 0;
+  private _changeSets = 0;
+  private _entries = 0;
+  private _entriesApplied = 0;
+  private _drains = 0;
+  private _compactions = 0;
+  private _resyncs = 0;
+  private _calls = 0;
 
   /** @param options See {@link MirrorOptions}. */
   constructor(options: MirrorOptions = {}) {
-    this.#onError =
+    this._onError =
       options.onError ??
       ((error) => {
         queueMicrotask(() => {
           throw error;
         });
       });
-    // Not `queueMicrotask` itself: called as `this.#schedule(...)` it would run with this mirror as
+    // Not `queueMicrotask` itself: called as `this._schedule(...)` it would run with this mirror as
     // its receiver, and browsers throw "Illegal invocation" for a global function called on
     // anything but the window (Node does not, which is how it went unnoticed).
-    this.#schedule =
+    this._schedule =
       options.schedule ??
       ((fn) => {
         scheduleFrame(fn);
       });
-    this.#resync = options.resync;
-    this.#maxEntries = Math.max(1, options.maxPendingEntries ?? DEFAULT_MAX_PENDING_ENTRIES);
-    this.#maxBytes = Math.max(1, options.maxPendingBytes ?? DEFAULT_MAX_PENDING_BYTES);
-    this.#compactAtEntries = this.#maxEntries;
-    this.#compactAtBytes = this.#maxBytes;
+    this._resync = options.resync;
+    this._maxEntries = Math.max(1, options.maxPendingEntries ?? DEFAULT_MAX_PENDING_ENTRIES);
+    this._maxBytes = Math.max(1, options.maxPendingBytes ?? DEFAULT_MAX_PENDING_BYTES);
+    this._compactAtEntries = this._maxEntries;
+    this._compactAtBytes = this._maxBytes;
   }
 
   /**
@@ -316,60 +338,61 @@ export class Mirror {
    * the handle is already registered: two stores cannot mirror one handle.
    */
   register(handle: Handle, apply: ApplyFn, options: RegisterOptions = {}): void {
-    if (this.#registry.has(handle)) {
+    if (this._registry.has(handle)) {
       throw new UndraError("state", `handle ${String(handle)} is already registered with the mirror`);
     }
     const ids = options.noCoalesce === undefined ? null : new Set(options.noCoalesce);
-    this.#registry.set(handle, { apply, noCoalesce: ids !== null && ids.size > 0 ? ids : null });
+    this._registry.set(handle, { apply, noCoalesce: ids !== null && ids.size > 0 ? ids : null });
   }
 
   /** Removes the registration of `handle` and settles the pending {@link Mirror.whenObserved} promises of it. Unknown handles are ignored. */
   unregister(handle: Handle): void {
-    this.#registry.delete(handle);
-    this.#awaiting.delete(handle);
-    const waiters = this.#waiters.get(handle);
+    this._registry.delete(handle);
+    this._awaiting.delete(handle);
+    const waiters = this._waiters.get(handle);
     if (waiters === undefined) return;
-    this.#waiters.delete(handle);
-    for (const w of waiters) this.#settle(w, undefined);
+    this._waiters.delete(handle);
+    for (const w of waiters) this._settle(w, undefined);
   }
 
   /** Whether `handle` is registered. */
   has(handle: Handle): boolean {
-    return this.#registry.has(handle);
+    return this._registry.has(handle);
   }
 
   /** Number of registered handles. */
   get size(): number {
-    return this.#registry.size;
+    return this._registry.size;
   }
 
   /** Number of entries waiting for the next drain. */
   get pending(): number {
-    return this.#queue.length;
+    return this._queue.length;
   }
 
   /** Number of entries dropped because their handle was not registered. */
   get dropped(): number {
-    return this.#dropped;
+    return this._dropped;
   }
 
   /** Number of change-sets accepted so far (`stats().changeSetsReceived`). */
   get changeSets(): number {
-    return this.#changeSets;
+    return this._changeSets;
   }
 
   /** The mirror's counters; see {@link MirrorStats}. */
   stats(): MirrorStats {
     return {
-      changeSetsReceived: this.#changeSets,
-      entriesReceived: this.#entries,
-      entriesApplied: this.#entriesApplied,
-      drains: this.#drains,
-      compactions: this.#compactions,
-      resyncs: this.#resyncs,
-      pendingEntries: this.#queue.length,
-      pendingBytes: this.#queueBytes,
-      droppedEntries: this.#dropped,
+      changeSetsReceived: this._changeSets,
+      entriesReceived: this._entries,
+      entriesApplied: this._entriesApplied,
+      drains: this._drains,
+      compactions: this._compactions,
+      resyncs: this._resyncs,
+      pendingEntries: this._queue.length,
+      pendingBytes: this._queueBytes,
+      droppedEntries: this._dropped,
+      callbacksDelivered: this._calls,
     };
   }
 
@@ -382,10 +405,10 @@ export class Mirror {
     const entry: DrainListener = (stats) => {
       listener(stats);
     };
-    this.#listeners.push(entry);
+    this._listeners.push(entry);
     return () => {
-      const at = this.#listeners.indexOf(entry);
-      if (at >= 0) this.#listeners.splice(at, 1);
+      const at = this._listeners.indexOf(entry);
+      if (at >= 0) this._listeners.splice(at, 1);
     };
   }
 
@@ -400,24 +423,36 @@ export class Mirror {
     try {
       entries = decodeChangeSet(payload).entries;
     } catch (error) {
-      this.#onError(error);
+      this._onError(error);
       return;
     }
-    this.#changeSets++;
-    this.#queuedChangeSets++;
-    this.#entries += entries.length;
-    this.#queuedEntries += entries.length;
+    this._changeSets++;
+    this._queuedChangeSets++;
+    this._entries += entries.length;
+    this._queuedEntries += entries.length;
     if (entries.length === 0) return;
     for (const entry of entries) {
-      this.#queue.push(entry);
-      this.#queueBytes += ENTRY_OVERHEAD + entry.value.length;
+      this._queue.push(entry);
+      this._queueBytes += ENTRY_OVERHEAD + entry.value.length;
     }
-    if (this.#queue.length > this.#compactAtEntries || this.#queueBytes > this.#compactAtBytes) this.#compact();
+    if (this._queue.length > this._compactAtEntries || this._queueBytes > this._compactAtBytes) this._compact();
     // A running flush applies what arrives while it runs (see `flush`), so it needs no second one.
-    if (this.#flushing) return;
+    if (this._flushing) return;
     // Someone waits for an initial change-set (`observe` over a worker or a socket): no frame wait.
-    if (this.#waiters.size > 0) this.queueFlush();
-    else this.#scheduleFlush();
+    if (this._waiters.size > 0) this.queueFlush();
+    else this._scheduleFlush();
+  }
+
+  /**
+   * Queues a host callback's invocation for the drain, in arrival order with the change-sets (ADR-041, `main`
+   * delivery): the drain applies what was queued before it, runs it, then applies what arrived after it, so it sees
+   * the stores as they were when the core made the call. It is never folded with change-set entries, it counts in
+   * the backlog (17 bytes), and what it throws goes to `onError`.
+   */
+  enqueueCall(call: MirrorCall): void {
+    this._queue.push(call);
+    this._queueBytes += ENTRY_OVERHEAD;
+    if (!this._flushing) this._scheduleFlush();
   }
 
   /**
@@ -427,19 +462,19 @@ export class Mirror {
    * before the reply (docs/SPEC.md section 11). Does nothing when nothing waits.
    */
   queueFlush(): void {
-    if (this.#microtaskQueued || (this.#queue.length === 0 && !this.#resyncDue)) return;
-    this.#microtaskQueued = true;
+    if (this._microtaskQueued || (this._queue.length === 0 && !this._resyncDue)) return;
+    this._microtaskQueued = true;
     queueMicrotask(() => {
-      this.#microtaskQueued = false;
+      this._microtaskQueued = false;
       this.flush();
     });
   }
 
-  #scheduleFlush(): void {
-    if (this.#scheduled) return;
-    this.#scheduled = true;
-    this.#schedule(() => {
-      this.#scheduled = false;
+  private _scheduleFlush(): void {
+    if (this._scheduled) return;
+    this._scheduled = true;
+    this._schedule(() => {
+      this._scheduled = false;
       this.flush();
     });
   }
@@ -459,18 +494,18 @@ export class Mirror {
    * queue. After 1000 rounds the rest is left to a later drain.
    */
   flush(): void {
-    if (this.#flushing || (this.#queue.length === 0 && !this.#resyncDue)) return;
-    this.#flushing = true;
-    const timed = this.#listeners.length > 0;
+    if (this._flushing || (this._queue.length === 0 && !this._resyncDue)) return;
+    this._flushing = true;
+    const timed = this._listeners.length > 0;
     const started = timed ? now() : 0;
     const satisfied: Waiter[] = [];
     let changeSets = 0;
     let entries = 0;
-    this.#applied = 0;
+    this._applied = 0;
     try {
-      for (let round = 0; this.#queue.length > 0 || this.#resyncDue; round++) {
+      for (let round = 0; this._queue.length > 0 || this._resyncDue; round++) {
         if (round === MAX_ROUNDS) {
-          this.#onError(
+          this._onError(
             new UndraError(
               "state",
               `the mirror applied ${MAX_ROUNDS} rounds of change-sets in one flush: a signal subscriber keeps causing changes to a store it observes`,
@@ -478,33 +513,33 @@ export class Mirror {
           );
           break;
         }
-        const queued = this.#queue;
-        this.#queue = [];
-        this.#queueBytes = 0;
-        this.#compactAtEntries = this.#maxEntries;
-        this.#compactAtBytes = this.#maxBytes;
-        changeSets += this.#queuedChangeSets;
-        entries += this.#queuedEntries;
-        this.#queuedChangeSets = 0;
-        this.#queuedEntries = 0;
-        if (queued.length > 0) this.#applyUnits(this.#fold(queued, false), satisfied);
-        this.#requestResyncs();
+        const queued = this._queue;
+        this._queue = [];
+        this._queueBytes = 0;
+        this._compactAtEntries = this._maxEntries;
+        this._compactAtBytes = this._maxBytes;
+        changeSets += this._queuedChangeSets;
+        entries += this._queuedEntries;
+        this._queuedChangeSets = 0;
+        this._queuedEntries = 0;
+        if (queued.length > 0) this._applyUnits(this._fold(queued, false), satisfied);
+        this._requestResyncs();
       }
     } finally {
-      this.#flushing = false;
-      this.#entriesApplied += this.#applied;
-      this.#drains++;
+      this._flushing = false;
+      this._entriesApplied += this._applied;
+      this._drains++;
       // Left over by the round cap or by an error that unwound the loop: drained later, never stranded.
-      if (this.#queue.length > 0 || this.#resyncDue) this.#scheduleFlush();
+      if (this._queue.length > 0 || this._resyncDue) this._scheduleFlush();
     }
-    for (const waiter of satisfied) this.#settle(waiter, undefined);
+    for (const waiter of satisfied) this._settle(waiter, undefined);
     if (timed) {
-      const stats: DrainStats = { changeSets, entries, appliedEntries: this.#applied, durationMs: now() - started };
-      for (const listener of [...this.#listeners]) {
+      const stats: DrainStats = { changeSets, entries, appliedEntries: this._applied, durationMs: now() - started };
+      for (const listener of [...this._listeners]) {
         try {
           listener(stats);
         } catch (error) {
-          this.#onError(error);
+          this._onError(error);
         }
       }
     }
@@ -516,15 +551,22 @@ export class Mirror {
    * signal, in place. A compaction folds every signal. Entries of a signal whose merged patch was
    * dropped are discarded until its next full value.
    */
-  #fold(entries: readonly ChangeEntry[], everyKey: boolean): Unit[] {
+  private _fold(entries: readonly Queued[], everyKey: boolean): Unit[] {
     const units: Unit[] = [];
-    const slots = new Map<Handle, Map<number, Slot>>();
-    const awaiting = this.#awaiting;
+    let slots = new Map<Handle, Map<number, Slot>>();
+    const awaiting = this._awaiting;
     let lastHandle: Handle | undefined;
     let lastSlots = new Map<number, Slot>();
     let lastNoCoalesce: ReadonlySet<number> | null = null;
     let lastAwaiting: Map<number, boolean> | undefined;
     for (const entry of entries) {
+      if (typeof entry === "function") {
+        // A callback is a barrier: what arrived after it folds apart from what arrived before it.
+        units.push(entry);
+        slots = new Map();
+        lastHandle = undefined;
+        continue;
+      }
       if (entry.handle !== lastHandle) {
         lastHandle = entry.handle;
         const found = slots.get(entry.handle);
@@ -534,12 +576,13 @@ export class Mirror {
         } else {
           lastSlots = found;
         }
-        lastNoCoalesce = everyKey ? null : (this.#registry.get(entry.handle)?.noCoalesce ?? null);
+        lastNoCoalesce = everyKey ? null : (this._registry.get(entry.handle)?.noCoalesce ?? null);
         lastAwaiting = awaiting.size > 0 ? awaiting.get(entry.handle) : undefined;
       }
       if (lastAwaiting?.has(entry.signalId) === true) {
-        // Its patches are relative to a list this host never saw: wait for a full value.
-        if (entry.op === ChangeOp.KeyedPatch) continue;
+        // Its patches are relative to a list this host never saw, an invalidation to a page server it never saw:
+        // wait for a full value.
+        if (entry.op !== ChangeOp.FullValue) continue;
         lastAwaiting.delete(entry.signalId);
         if (lastAwaiting.size === 0) {
           awaiting.delete(entry.handle);
@@ -560,13 +603,13 @@ export class Mirror {
       if (entry.op !== ChangeOp.KeyedPatch) {
         slot.setFull(entry);
       } else if (!slot.addPatch(entry.value)) {
-        this.#onError(
+        this._onError(
           new UndraError(
             "state",
             `a keyed patch for signal ${entry.signalId} of handle ${String(entry.handle)} has no operation count; the signal is re-observed`,
           ),
         );
-        this.#markDropped(slot);
+        this._markDropped(slot);
         lastAwaiting = awaiting.get(entry.handle);
       }
     }
@@ -574,18 +617,18 @@ export class Mirror {
   }
 
   /** Forgets what `slot` holds and waits for a full value of its signal (re-observed at the next drain). */
-  #markDropped(slot: Slot): void {
-    slot.full = null;
+  private _markDropped(slot: Slot): void {
+    slot.full = [];
     slot.patches = [];
     slot.ops = 0;
     slot.opBytes = 0;
-    let signals = this.#awaiting.get(slot.handle);
+    let signals = this._awaiting.get(slot.handle);
     if (signals === undefined) {
       signals = new Map();
-      this.#awaiting.set(slot.handle, signals);
+      this._awaiting.set(slot.handle, signals);
     }
     signals.set(slot.signalId, true);
-    this.#resyncDue = true;
+    this._resyncDue = true;
   }
 
   /**
@@ -593,19 +636,24 @@ export class Mirror {
    * merged patch past either patch bound is dropped and its signal re-observed at the next drain.
    * The next compaction waits until the backlog doubles, so folding stays O(1) per entry.
    */
-  #compact(): void {
-    const units = this.#fold(this.#queue, true);
-    const queue: ChangeEntry[] = [];
+  private _compact(): void {
+    const units = this._fold(this._queue, true);
+    const queue: Queued[] = [];
     let bytes = 0;
     for (const unit of units) {
-      if (unit instanceof Single) continue; // a compaction folds every signal
-      if (unit.oversized) {
-        this.#markDropped(unit);
+      if (typeof unit === "function") {
+        queue.push(unit);
+        bytes += ENTRY_OVERHEAD;
         continue;
       }
-      if (unit.full !== null) {
-        const value = own(unit.full.value);
-        queue.push({ handle: unit.handle, signalId: unit.signalId, op: unit.full.op, value });
+      if (unit instanceof Single) continue; // a compaction folds every signal
+      if (unit.oversized) {
+        this._markDropped(unit);
+        continue;
+      }
+      for (const entry of unit.full) {
+        const value = own(entry.value);
+        queue.push({ handle: unit.handle, signalId: unit.signalId, op: entry.op, value });
         bytes += ENTRY_OVERHEAD + value.length;
       }
       if (unit.patches.length > 0) {
@@ -614,11 +662,11 @@ export class Mirror {
         bytes += ENTRY_OVERHEAD + value.length;
       }
     }
-    this.#queue = queue;
-    this.#queueBytes = bytes;
-    this.#compactions++;
-    this.#compactAtEntries = Math.max(this.#maxEntries, 2 * queue.length);
-    this.#compactAtBytes = Math.max(this.#maxBytes, 2 * bytes);
+    this._queue = queue;
+    this._queueBytes = bytes;
+    this._compactions++;
+    this._compactAtEntries = Math.max(this._maxEntries, 2 * queue.length);
+    this._compactAtBytes = Math.max(this._maxBytes, 2 * bytes);
   }
 
   /**
@@ -627,111 +675,119 @@ export class Mirror {
    * (a signal error handler that rethrows), the units not applied yet go back to the front of the
    * queue for a later drain.
    */
-  #applyUnits(units: readonly Unit[], satisfied: Waiter[]): void {
+  private _applyUnits(units: readonly Unit[], satisfied: Waiter[]): void {
     let next = 0;
     try {
       while (next < units.length) {
         const first = units[next] as Unit;
-        if (first instanceof Single) {
+        if (!(first instanceof Slot)) {
           next++;
-          batch(() => {
-            this.#applyEntry(first.entry, satisfied);
-          });
+          if (first instanceof Single) {
+            batch(() => {
+              this._applyEntry(first.entry, satisfied);
+            });
+          } else {
+            try {
+              if (first()) this._calls++;
+            } catch (error) {
+              this._onError(error);
+            }
+          }
           continue;
         }
         batch(() => {
           while (next < units.length) {
             const unit = units[next] as Unit;
-            if (unit instanceof Single) break;
+            if (!(unit instanceof Slot)) break;
             next++;
-            this.#applySlot(unit, satisfied);
+            this._applySlot(unit, satisfied);
           }
         });
       }
     } catch (error) {
-      if (next < units.length) this.#requeue(units, next);
+      if (next < units.length) this._requeue(units, next);
       throw error;
     }
   }
 
-  #requeue(units: readonly Unit[], from: number): void {
-    const older: ChangeEntry[] = [];
+  private _requeue(units: readonly Unit[], from: number): void {
+    const older: Queued[] = [];
     for (let i = from; i < units.length; i++) {
       const unit = units[i] as Unit;
-      if (unit instanceof Single) {
-        older.push(unit.entry);
+      if (typeof unit === "function" || unit instanceof Single) {
+        older.push(typeof unit === "function" ? unit : unit.entry);
         continue;
       }
-      if (unit.full !== null) older.push(unit.full);
+      older.push(...unit.full);
       if (unit.patches.length > 0) {
         older.push({ handle: unit.handle, signalId: unit.signalId, op: ChangeOp.KeyedPatch, value: unit.mergedPatch() });
       }
     }
-    for (const entry of older) this.#queueBytes += ENTRY_OVERHEAD + entry.value.length;
-    this.#queue = older.concat(this.#queue);
+    for (const entry of older) this._queueBytes += ENTRY_OVERHEAD + (typeof entry === "function" ? 0 : entry.value.length);
+    this._queue = older.concat(this._queue);
   }
 
-  #applySlot(slot: Slot, satisfied: Waiter[]): void {
-    const registration = this.#registry.get(slot.handle);
+  private _applySlot(slot: Slot, satisfied: Waiter[]): void {
+    const registration = this._registry.get(slot.handle);
     if (registration === undefined) {
-      this.#dropped += slot.entries;
+      this._dropped += slot.entries;
       return;
     }
-    if (slot.full === null && slot.patches.length === 0) return; // dropped for a resync
-    if (slot.full !== null) this.#call(registration, slot.signalId, slot.full.op, slot.full.value);
-    if (slot.patches.length > 0) this.#call(registration, slot.signalId, ChangeOp.KeyedPatch, slot.mergedPatch());
-    this.#satisfy(slot.handle, slot.signalId, satisfied);
+    if (slot.full.length === 0 && slot.patches.length === 0) return; // dropped for a resync
+    for (const entry of slot.full) this._call(registration, slot.signalId, entry.op, entry.value);
+    if (slot.patches.length > 0) this._call(registration, slot.signalId, ChangeOp.KeyedPatch, slot.mergedPatch());
+    this._satisfy(slot.handle, slot.signalId, satisfied);
   }
 
-  #applyEntry(entry: ChangeEntry, satisfied: Waiter[]): void {
-    const registration = this.#registry.get(entry.handle);
+  private _applyEntry(entry: ChangeEntry, satisfied: Waiter[]): void {
+    const registration = this._registry.get(entry.handle);
     if (registration === undefined) {
-      this.#dropped++;
+      this._dropped++;
       return;
     }
-    this.#call(registration, entry.signalId, entry.op, entry.value);
-    this.#satisfy(entry.handle, entry.signalId, satisfied);
+    this._call(registration, entry.signalId, entry.op, entry.value);
+    this._satisfy(entry.handle, entry.signalId, satisfied);
   }
 
-  #call(registration: Registration, signalId: number, op: ChangeOp, value: Uint8Array): void {
-    this.#applied++;
+  private _call(registration: Registration, signalId: number, op: ChangeOp, value: Uint8Array): void {
+    this._applied++;
     try {
       registration.apply(signalId, op, value);
     } catch (error) {
-      this.#onError(error);
+      this._onError(error);
     }
   }
 
-  #satisfy(handle: Handle, signalId: number, satisfied: Waiter[]): void {
-    const waiters = this.#waiters.get(handle);
+  private _satisfy(handle: Handle, signalId: number, satisfied: Waiter[]): void {
+    const waiters = this._waiters.get(handle);
     if (waiters === undefined) return;
     const rest: Waiter[] = [];
     for (const w of waiters) {
       if (w.signalId === ALL_SIGNALS || w.signalId === signalId) satisfied.push(w);
       else rest.push(w);
     }
-    if (rest.length === 0) this.#waiters.delete(handle);
-    else this.#waiters.set(handle, rest);
+    if (rest.length === 0) this._waiters.delete(handle);
+    else this._waiters.set(handle, rest);
   }
 
   /** Re-observes the signals whose merged patch was dropped, once each, from the drain. */
-  #requestResyncs(): void {
-    if (!this.#resyncDue) return;
-    this.#resyncDue = false;
-    for (const [handle, signals] of [...this.#awaiting]) {
-      if (!this.#registry.has(handle)) {
-        this.#awaiting.delete(handle);
+  private _requestResyncs(): void {
+    if (!this._resyncDue) return;
+    this._resyncDue = false;
+    for (const [handle, signals] of [...this._awaiting]) {
+      if (!this._registry.has(handle)) {
+        this._awaiting.delete(handle);
         continue;
       }
       for (const [signalId, due] of [...signals]) {
         if (!due) continue;
         signals.set(signalId, false);
-        if (this.#resync === undefined) continue;
-        this.#resyncs++;
+        if (this._resync === undefined) continue;
+        this._resyncs++;
         try {
-          this.#resync(handle, signalId);
+          this._resync(handle, signalId);
         } catch (error) {
-          this.#onError(error);
+          this._onError(error);
         }
       }
     }
@@ -750,7 +806,7 @@ export class Mirror {
       const waiter: Waiter = { signalId, resolve, reject, timer: undefined };
       if (timeoutMs > 0) {
         waiter.timer = setTimeout(() => {
-          this.#remove(handle, waiter);
+          this._remove(handle, waiter);
           reject(
             new UndraError(
               "observe",
@@ -759,8 +815,8 @@ export class Mirror {
           );
         }, timeoutMs);
       }
-      const list = this.#waiters.get(handle);
-      if (list === undefined) this.#waiters.set(handle, [waiter]);
+      const list = this._waiters.get(handle);
+      if (list === undefined) this._waiters.set(handle, [waiter]);
       else list.push(waiter);
       // Entries that arrived before the promise was made are drained now, not at the next frame.
       this.queueFlush();
@@ -769,20 +825,20 @@ export class Mirror {
 
   /** Rejects every pending {@link Mirror.whenObserved} promise with `error` (the transport went away). */
   failWaiters(error: unknown): void {
-    const all = [...this.#waiters.values()].flat();
-    this.#waiters.clear();
-    for (const w of all) this.#settle(w, { error });
+    const all = [...this._waiters.values()].flat();
+    this._waiters.clear();
+    for (const w of all) this._settle(w, { error });
   }
 
-  #remove(handle: Handle, waiter: Waiter): void {
-    const list = this.#waiters.get(handle);
+  private _remove(handle: Handle, waiter: Waiter): void {
+    const list = this._waiters.get(handle);
     if (list === undefined) return;
     const rest = list.filter((w) => w !== waiter);
-    if (rest.length === 0) this.#waiters.delete(handle);
-    else this.#waiters.set(handle, rest);
+    if (rest.length === 0) this._waiters.delete(handle);
+    else this._waiters.set(handle, rest);
   }
 
-  #settle(waiter: Waiter, failure: { readonly error: unknown } | undefined): void {
+  private _settle(waiter: Waiter, failure: { readonly error: unknown } | undefined): void {
     if (waiter.timer !== undefined) clearTimeout(waiter.timer);
     waiter.timer = undefined;
     if (failure === undefined) waiter.resolve();

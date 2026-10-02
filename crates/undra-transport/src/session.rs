@@ -35,7 +35,7 @@ use undra_wire::payload::{
     Call, CallTarget, Cancel, Event, Hello, Observe, PortReply, PortStatus, Release, StreamCredit,
     TimerFired,
 };
-use undra_wire::{Envelope, Kind, Reader, WireError, Writer};
+use undra_wire::{Envelope, Handle, Kind, Reader, WireError, Writer};
 use tungstenite::Message;
 use tungstenite::error::{Error, ProtocolError};
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
@@ -143,6 +143,9 @@ pub(crate) struct Session {
     release_on_disconnect: bool,
     busy_grace: Duration,
     hooks: Hooks,
+    /// The first teardown decides what becomes of the references this client's calls returned
+    /// (kept for its return, or given back); a second one finds nothing left to decide.
+    origin_settled: std::sync::atomic::AtomicBool,
 }
 
 impl Session {
@@ -160,6 +163,7 @@ impl Session {
             conn,
             resume,
             release_on_disconnect: config.release_on_disconnect,
+            origin_settled: std::sync::atomic::AtomicBool::new(false),
             busy_grace: config.busy_grace,
             hooks,
         }
@@ -259,6 +263,8 @@ impl Session {
                 noted: true,
             });
         }
+        // The slot is ours: the callbacks this client lends are the ones the core delivers.
+        self.rt.set_client_origin(self.origin());
         self.settle_session(&info)
     }
 
@@ -310,7 +316,7 @@ impl Session {
         }
         // A new client: whatever the previous one left behind is not coming back.
         if let Some(gone) = self.resume.supersede() {
-            resume::release_all(&self.rt, &gone.handles);
+            resume::release_retained(&self.rt, &gone);
             self.note(
                 INFO,
                 &format!(
@@ -370,8 +376,19 @@ impl Session {
             }
             Kind::Release => {
                 let release = decode(payload, "Release", Release::decode)?;
-                self.conn.release(release.handle.0);
-                self.rt.release(release.handle.0);
+                let handle = release.handle.0;
+                // One reference of the client's, whichever kind: a constructor's first (counted by
+                // this connection), else one a call returned (counted for the session's origin).
+                // Each ledger gives back exactly what the client gave back, so a store the client
+                // constructed and also had returned is neither released twice nor leaked.
+                if self.conn.release(handle) {
+                    self.rt.release(handle);
+                } else {
+                    self.rt.release_from(self.origin(), handle);
+                }
+                if self.rt.objects().host_refs_of(Handle(handle)).is_none() {
+                    self.conn.forget_observed(handle);
+                }
             }
             Kind::PortReply => {
                 let reply = decode(payload, "PortReply", PortReply::decode)?;
@@ -461,7 +478,7 @@ impl Session {
         };
         let refused = {
             let _route = RouteGuard::set(Route::Commit(Cause::Call(method_id)));
-            self.rt.call(payload) != 0
+            self.rt.call_from(self.origin(), payload) != 0
         };
         if refused {
             // Refused without a reply (call id 0, a runtime shutting down): answer for it, or
@@ -475,6 +492,15 @@ impl Session {
         Ok(())
     }
 
+    /// The runtime origin of this client's calls (ADR-040): stable across the reconnects of one
+    /// session, so the references its calls returned are recorded for it, not for the socket.
+    fn origin(&self) -> u64 {
+        match self.conn.session() {
+            Some(request) => resume::origin_of(&request.token),
+            None => self.conn.id,
+        }
+    }
+
     /// Gives back what the client held: cancels its calls, stops its observations, releases
     /// the objects its constructors made (or keeps them for its return, see
     /// [`resume`](crate::resume)) and fails the port calls it will never answer. Idempotent.
@@ -485,6 +511,12 @@ impl Session {
     pub(crate) fn teardown(&self) {
         let had_client = self.conn.client().is_some();
         let session = self.conn.session().cloned();
+        // This client's callbacks are no longer delivered (they are not the next client's): cleared
+        // before anything below drops a proxy of theirs, and before the slot is vacated, so a client
+        // that attaches next (the same session coming back included) sets its own afterwards.
+        if self.bridge.is_attached(self.conn.id) {
+            self.rt.clear_client_origin(self.origin());
+        }
         let left = self.conn.drain();
         for call_id in &left.calls {
             self.rt.cancel(*call_id);
@@ -512,10 +544,18 @@ impl Session {
             }
         }
         if let Some(request) = keep_for {
-            let replaced = self.resume.retain(&request.token, left.constructed.clone());
-            resume::release_all(&self.rt, &replaced);
+            if let Some(replaced) = self.resume.retain(&request.token, left.constructed.clone()) {
+                resume::release_retained(&self.rt, &replaced);
+            }
         } else if self.release_on_disconnect {
             resume::release_all(&self.rt, &left.constructed);
+        }
+        // What its calls returned (ADR-040) was never in the tracker: the runtime kept it, for
+        // the origin. A session kept for its return keeps it too; the retained session gives it
+        // back (`release_retained`).
+        let settled = self.origin_settled.swap(true, Ordering::AcqRel);
+        if !settled && keep_for.is_none() && self.release_on_disconnect {
+            self.rt.release_origin(self.origin());
         }
         for id in &left.port_calls {
             let mut w = Writer::with_capacity(5);

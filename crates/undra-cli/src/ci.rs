@@ -5,7 +5,10 @@
 //! and iOS (`xcodebuild` on macOS 14). Every job installs `undra` with the install script of
 //! `docs/RELEASING.md`, at the version in the `UNDRA_VERSION` variable at the top of the file, and
 //! the apps' build systems run `undra build` themselves (see `builds::xcode`, the Gradle task and
-//! the Vite plugin), so no job builds the core by hand.
+//! the Vite plugin), so no job builds the core by hand. On a push, each app's job also makes the
+//! release build whose symbol files a crash reporter needs and uploads them as an artifact named
+//! after the core's namespace (`<namespace>-android-symbols`, `-ios-symbols`, `-web-symbols`,
+//! ADR-046).
 //!
 //! The file is assembled from the snippets in `templates/ci/`, so a project without an iOS app
 //! has no iOS job.
@@ -53,6 +56,13 @@ pub fn workflow(config: &ProjectConfig, names: &Names, version: &str) -> String 
         .join(", ");
     let vars = Vars::new()
         .with("NAME", config.name.clone())
+        .with(
+            "NAMESPACE",
+            config
+                .core_namespace
+                .clone()
+                .unwrap_or_else(|| names.core_lib.clone()),
+        )
         .with("APP", names.pascal.clone())
         .with("PLATFORM_LIST", platforms)
         .with("UNDRA_FULL_VERSION", version)
@@ -204,6 +214,53 @@ mod tests {
         );
         assert!(
             text.contains("targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_push_uploads_the_symbol_files_of_each_app_named_after_the_core() {
+        let (config, names) = project(&Platform::ALL);
+        let text = workflow(&config, &names, "0.1.0");
+        for needle in [
+            "name: todo_app_core-android-symbols",
+            "name: todo_app_core-ios-symbols",
+            "name: todo_app_core-web-symbols",
+            "undra build --platform android --release",
+            "-configuration Release",
+            "build/xcode/Build/Products/Release-iphonesimulator/*.dSYM",
+        ] {
+            assert!(text.contains(needle), "no {needle:?}:\n{text}");
+        }
+        // Three uploads, from three jobs, each from `build/symbols/`, and only on a push: a pull request
+        // (a fork's included) builds the debug app and uploads nothing.
+        assert_eq!(
+            text.matches("actions/upload-artifact@v4").count(),
+            3,
+            "{text}"
+        );
+        assert_eq!(text.matches("path: build/symbols/").count(), 2, "{text}");
+        assert_eq!(
+            text.matches("if: github.event_name == 'push'").count(),
+            5,
+            "{text}"
+        );
+        // The crash reporters' side is said once per platform, in a comment.
+        assert!(
+            text.contains("Crashlytics")
+                && text.contains("Sentry")
+                && text.contains("Play Console"),
+            "{text}"
+        );
+        // The namespace is the project's own when it sets one.
+        let (mut config, names) = project(&[Platform::Web]);
+        config.core_namespace = Some("acme_pay".to_owned());
+        assert!(workflow(&config, &names, "0.1.0").contains("name: acme_pay-web-symbols"));
+        // A project without an app has no upload for it.
+        let (config, names) = project(&[Platform::Android]);
+        let text = workflow(&config, &names, "0.1.0");
+        assert!(
+            !text.contains("ios-symbols") && !text.contains("web-symbols"),
             "{text}"
         );
     }

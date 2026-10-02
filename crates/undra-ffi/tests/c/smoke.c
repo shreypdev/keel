@@ -101,10 +101,10 @@ int main(void) {
         api->release(0x7777777700000001ull);
 
         UndraBuf snap = api->snapshot();
-        /* SPEC 5.9 / ADR-022: `count u32, generation_floor u32` then the stores. No stores: 8 bytes.
-         * The library is linked without a core, so nothing in this process ever issued a handle:
-         * the generation floor is 0. */
-        assert(snap.len == 8 && rd32(snap.ptr) == 0 && rd32(snap.ptr + 4) == 0);
+        /* SPEC 5.9, layout 2 (ADR-022, ADR-037, ADR-040): `count u32, generation_floor u64, schema_hash u64,
+         * type count u32, description`. No stores: the count is 0, and the library is linked without a core, so
+         * nothing in this process ever issued a handle: the generation floor is 0. */
+        assert(snap.len > 24 && rd32(snap.ptr) == 0 && rd32(snap.ptr + 4) == 0 && rd32(snap.ptr + 8) == 0);
         assert(api->restore(snap.ptr, snap.len) == 0);
         api->buf_free(snap);
         UndraBuf stats = api->stats_json();
@@ -117,7 +117,7 @@ int main(void) {
 
         /* With no runtime the snapshot keeps the same layout and the process-wide floor (L1). */
         snap = api->snapshot();
-        assert(snap.len == 8 && rd32(snap.ptr) == 0 && rd32(snap.ptr + 4) == 0);
+        assert(snap.len > 24 && rd32(snap.ptr) == 0 && rd32(snap.ptr + 4) == 0 && rd32(snap.ptr + 8) == 0);
         api->buf_free(snap);
     }
     puts("c smoke: ok");

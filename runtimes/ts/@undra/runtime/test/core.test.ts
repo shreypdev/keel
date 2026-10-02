@@ -2,6 +2,7 @@ import { getEventListeners } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { UndraCallError } from "../src/call-error.js";
 import { UndraCore } from "../src/core.js";
+import { reclaim } from "../src/identity.js";
 import { UndraError, UndraModeError, UndraReplyError, UndraSchemaMismatchError, UndraTransportError } from "../src/errors.js";
 import type { Transport } from "../src/transport/transport.js";
 import {
@@ -13,6 +14,7 @@ import {
   type StreamFailure,
   WireError,
   codecs,
+  decodeCancel,
   decodeValue,
   encodeReply,
   encodeValue,
@@ -236,6 +238,95 @@ describe("call cancellation", () => {
     fake.reply(1, ReplyStatus.Ok, u32(1));
     await fake.settle();
     expect(core.closed).toBe(false);
+  });
+
+  it("aborting a call whose reply carries objects keeps its entry until the answer, which gives the references back (objects-followups O7)", async () => {
+    const { fake, core } = await setup();
+    fake.on(M.SLOW, (_c, r) => {
+      r.defer();
+    });
+    const handles = (...hs: bigint[]): Uint8Array => encodeValue(codecs.vec(codecs.u64), hs);
+    // One object: the core answered before it saw the cancel, so the success reply is still on its way.
+    let controller = new AbortController();
+    let call = core.call(FREE, M.SLOW, new Uint8Array(0), controller.signal, reclaim(core, 0));
+    let assertion = expect(call).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await assertion;
+    expect(fake.cancelled).toEqual([1]);
+    expect((await core.stats()).pendingCalls, "the abandoned call waits for its answer").toBe(1);
+    fake.reply(1, ReplyStatus.Ok, encodeValue(codecs.u64, 55n));
+    await fake.settle();
+    expect(fake.released, "the reply's reference was given back").toEqual([55n]);
+    expect((await core.stats()).pendingCalls).toBe(0);
+    // An optional one, present and absent; a list.
+    for (const [shape, body, expected] of [
+      [1, encodeValue(codecs.option(codecs.u64), 56n), [56n]],
+      [1, encodeValue(codecs.option(codecs.u64), null), []],
+      [2, handles(57n, 58n, 57n), [57n, 58n, 57n]],
+    ] as const) {
+      fake.released.length = 0;
+      controller = new AbortController();
+      const id = fake.calls.length + 1;
+      call = core.call(FREE, M.SLOW, new Uint8Array(0), controller.signal, reclaim(core, shape));
+      assertion = expect(call).rejects.toMatchObject({ name: "AbortError" });
+      controller.abort();
+      await assertion;
+      fake.reply(id, ReplyStatus.Ok, body);
+      await fake.settle();
+      expect(fake.released, `shape ${shape}`).toEqual(expected);
+    }
+    // The core's answer to the cancel (status 3), or a failure, carries nothing: nothing is given back.
+    fake.released.length = 0;
+    controller = new AbortController();
+    const id = fake.calls.length + 1;
+    call = core.call(FREE, M.SLOW, new Uint8Array(0), controller.signal, reclaim(core, 0));
+    assertion = expect(call).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await assertion;
+    fake.emitRawReply(encodeReply({ callId: id, status: ReplyStatus.Cancelled }));
+    await fake.settle();
+    expect(fake.released).toEqual([]);
+    expect((await core.stats()).pendingCalls).toBe(0);
+    expect(core.closed).toBe(false);
+  });
+
+  it("without a way to give references back an abandoned call's entry goes at once, as it always did", async () => {
+    const { fake, core } = await setup();
+    fake.on(M.SLOW, (_c, r) => {
+      r.defer();
+    });
+    const controller = new AbortController();
+    const call = core.call(FREE, M.SLOW, new Uint8Array(0), controller.signal);
+    const assertion = expect(call).rejects.toBeDefined();
+    controller.abort();
+    await assertion;
+    expect((await core.stats()).pendingCalls).toBe(0);
+    fake.reply(1, ReplyStatus.Ok, encodeValue(codecs.u64, 55n));
+    await fake.settle();
+    expect(fake.released).toEqual([]);
+  });
+
+  it("a transport that answers the cancel inside the send does not turn the abort into the core's CancelledByCore (objects-followups O7)", async () => {
+    // `wasm-main` runs the core in process: its answer to a Cancel (status 3) arrives before `send` returns.
+    for (const withOrphan of [false, true]) {
+      const { fake, core } = await setup({ synchronous: true });
+      fake.on(M.SLOW, (_c, r) => {
+        r.defer();
+      });
+      const send = fake.send.bind(fake);
+      fake.send = (kind, payload) => {
+        send(kind, payload);
+        if (kind === Kind.Cancel) fake.emitRawReply(encodeReply({ callId: decodeCancel(payload).callId, status: ReplyStatus.Cancelled }));
+      };
+      const controller = new AbortController();
+      const reason = new Error("navigated away");
+      const call = core.call(FREE, M.SLOW, new Uint8Array(0), controller.signal, withOrphan ? reclaim(core, 0) : undefined);
+      const assertion = expect(call, withOrphan ? "with a way to give references back" : "without").rejects.toBe(reason);
+      controller.abort(reason);
+      await assertion;
+      expect((await core.stats()).pendingCalls).toBe(0);
+      expect(core.closed).toBe(false);
+    }
   });
 
   it("the default abort reason is an AbortError", async () => {

@@ -426,7 +426,7 @@ std::shared_ptr<Platform> Binding::platform() {
   if (!platformTried_) {
     platformTried_ = true;
     try {
-      std::unique_ptr<Platform> made = makePlatform(platformError_);
+      std::unique_ptr<Platform> made = makePlatform(api.name_space, platformError_);
       platform_ = std::shared_ptr<Platform>(std::move(made));
     } catch (...) {
       platformError_ = "the platform could not be reached";

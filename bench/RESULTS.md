@@ -500,6 +500,61 @@ the same run (ADR-039's floor: half of it). Over 1.24 million operations the hos
 of the core's rows field for field, 896,219 view patches were applied of 896,219 delivered, and the core rebuilt the
 index once (the observe).
 
+### 6. Objects and callbacks cross at the price of a call (ADR-040, ADR-041)
+
+An object passed to the core is one `u64` in the call and one table lookup in the dispatch; an object handed to the host
+is a table entry (or one more reference on the entry the host already holds) and the same `u64` in the reply. A
+callback method is a port call with the instance first in its arguments. None of it is allowed to cost more than a
+call plus the thing it does, and the gate rows say what that is (the budgets test's own timings, best of three p50s on a
+shared host at load; `with_reset` rows are timed per iteration with the release that gives the reference back outside
+the clock, so their resolution is the 41.7 ns tick of the macOS timer):
+
+| Row | p50 | What it is | Budget (CI) |
+|---|---|---|---|
+| `dispatch/call_sync/add` (the yardstick) | 49.4 ns | a call with two integers | 250 ns |
+| `dispatch/call_sync/object_param` | 48.7 ns | `Calculator.dock_slots(&Dock)`: the handle resolved and downcast | 250 ns; ratio to `add` at most 2.0 (1.03 measured) |
+| `dispatch/call_sync/return_object` | 84.0 ns | a method returns an object the host does not hold: a new entry, one host reference | 420 ns |
+| `dispatch/call_sync/return_interned_object` | 84.0 ns | the object the host already holds: the same handle, one more reference | 420 ns |
+| `boundary/port_call/notify` | 24.3 ns | a fire-and-forget port call (the floor of any callback method that answers nothing) | 250 ns |
+| `boundary/callback/notify` | 43.2 ns | the same through a `CallbackHandle` (the instance first, the weak proxy upgraded) | 250 ns |
+| `boundary/callback/async_roundtrip` | 182.7 ns | an `async` callback method: the call, the host's `port_reply`, the task woken and resumed (one thread, the host drives) | 920 ns |
+
+Returning an object costs about one extra call's worth over the bare call (the table insert and the reference count
+under the table's lock); passing one costs nothing measurable over the integer it replaces. Both gates sit far below
+anything a UI sees. What a platform adds (a wrapper object, the identity map's lookup, the registry's entry) is measured
+on the platform, in the contract scenarios' `adopt` and `lend` timings recorded in the piece's decision record, not
+here.
+
+### 7. A lazy list costs the window the host shows and the 12 bytes that say it changed (ADR-043)
+
+A 100,000-row table is not a value the host should mirror. `Lazy<T>` keeps the items typed in the core; the host is
+told the length and a version (change-set op 0 on observe: handle, length, version, 20 bytes), asks for the 50 rows
+it shows with a page call, and is told that something changed by one 12-byte op-2 entry (`LazyInvalidated`: the new
+length and version), whatever the change was, after which it asks for its window again. `Lazy::over` a derived list
+pages through the derived index (the `k`-th row in O(log n), a page in O(log n + limit)). The gate rows (`lazy/*`,
+through the runtime as the keyed rows are; each checks what it ships before it is timed: the 50 rows decode and equal
+the model, the page header's version is the one `observe` announced, and the invalidation is one change-set of one
+op-2 entry of exactly 12 bytes carrying the new length and version;
+`bench/results/2026-10-01-lazy-lists-layer-a.json`, best of three p50s on a host at load 20-35) and ADR-043's targets:
+
+| Row | p50 | ADR-043 target | Budget (CI) |
+|---|---|---|---|
+| `lazy/page_50_of_100k` (50 rows from the middle: dispatch, the page server, the encoding, the reply) | 290 ns | core half <= 20 us | 1.5 us |
+| `lazy/page_50_of_10k` | 288 ns | (the same row on 10,000) | 1.5 us |
+| `lazy/view_page_50_of_100k` (the rows not done, by title, of a 100,000-row view: found in the derived index) | 3.20 us | (no target; O(log n + limit)) | 16 us |
+| `lazy/invalidate` (one `update_at` of an observed 100,000-row list: the write, the commit, 12 bytes) | 178 ns | <= 1 us, 12 bytes | 900 ns |
+| `lazy/invalidate_10k` | 171 ns | (the same row on 10,000) | 860 ns |
+
+The ratios: `lazy_page_scaling` (100,000 against 10,000 rows) is 1.00-1.01 and `lazy_invalidate_scaling` 0.99-1.16 (max 2
+each: an O(n) step, the list cloned or encoded on the way, would put either near 10). Nothing grows with the list: the
+allocation gate (`crates/undra-ffi/tests/lazy_alloc.rs`) counts the commit of an observed `Lazy` at one buffer more than
+the same write to a plain observed counter (the 12-byte entry), the same number at 10 and at 100,000 items, and zero
+allocations to encode a page of 50 rows into a buffer that is big enough. Against what a `Signal<Vec<T>>` of the same
+rows would send at a change (a keyed patch of about 85 bytes, or the full value, 3.7 MB at 100,000 rows of this shape), the
+invalidation is 12 bytes and the host's cost moves to the page it re-asks for. The view's page is dominated by the
+pipeline running on the 50 rows it serves (the sort-key closure clones a title per row); the index lookup is
+logarithmic.
+
 ## Full tables
 
 ### Wire: encode, decode and round trip per type
@@ -583,6 +638,22 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 | `signals/computed/recompute_1` | 42.1 ns | 41.8 ns .. 42.4 ns |
 | `signals/computed/recompute_chain_10` | 253.1 ns | 251.0 ns .. 256.3 ns |
 
+### Lazy lists (`bench/benches/lazy.rs`, ADR-043)
+
+`Shelf` is a macro-generated store with an owned `Lazy<Item>` of 100,000 rows (24-character titles, every fourth done)
+and a `Lazy::over` view of a derived list of the same rows (the rows not done, by title). `page_*` is one `LazyPage` call
+for 50 rows from the middle through `call_sync_with` (the reply is lent, not copied); `invalidate*` is one method call
+that `update_at`s a row of the observed list and commits the 12-byte entry. The gate harness measured 290 ns, 288 ns,
+3.20 us, 178 ns and 171 ns p50 (the criterion medians below are lower: quieter moments of a shared host).
+
+| Benchmark | Median | 95% CI |
+|---|---|---|
+| `lazy/page_50_of_100k` | 263.8 ns | 261.5 ns .. 266.5 ns |
+| `lazy/page_50_of_10k` | 262.6 ns | 260.5 ns .. 265.0 ns |
+| `lazy/view_page_50_of_100k` | 2.834 µs | 2.817 µs .. 2.851 µs |
+| `lazy/invalidate` | 151.6 ns | 151.2 ns .. 152.0 ns |
+| `lazy/invalidate_10k` | 151.2 ns | 150.5 ns .. 152.1 ns |
+
 ### Snapshot and restore
 
 100 KB is four stores of 250 rows of 100 bytes; 1 MB is forty. `cold_start` builds a runtime and restores; the runtime it made is shut down outside the timed region. `restore_100kb_migrated` restores the same 100 KB as an older build wrote it (`Item.id` a `u32`): every store's fingerprint differs, so each one is decoded by name and migrated structurally, streamed (ADR-037). Measured on 2026-10-01 with snapshot layout 2 (ADR-037), the machine shared with other builds; the restore rows read about 10% slower than the earlier run on the same code paths, which is the load, and the cold start pays one fingerprint computation per new runtime.
@@ -643,6 +714,17 @@ No row of its own in section 14; kept so regressions in the hot paths are visibl
 | `query/refetch_published_to_100_observers` | 6.90 µs | 6.82 µs .. 6.98 µs |
 | `query/platform_construct_and_release` | 1.19 µs | 1.18 µs .. 1.22 µs |
 | `query/platform_refetch_call` | 586.1 ns | 585.0 ns .. 587.4 ns |
+| `query/infinite_append_page_50` | 7.29 µs | 7.07 µs .. 7.59 µs |
+| `query/keyed_push_50` | 5.41 µs | 5.32 µs .. 5.51 µs |
+
+The last two are budgets-test rows (ADR-043, `bench/common/query_rows.rs`; 2026-10-01, the reference host while other pieces
+built, so the ratio is the number to read). `query/infinite_append_page_50` is a platform's `fetch_next_page()` call on an infinite
+query whose list holds 10,000 rows: the call, the fetch task, 50 rows appended with the recorded `push`, and the change-set
+(asserted, when the row is built, to be a keyed patch of exactly those 50 rows) delivered to the host; every run appends a page, so
+the list keeps growing and the cost does not. `query/keyed_push_50` is the same 50 rows appended to a keyed list of 10,000 by a store
+method (`call_sync`, one transaction): the "50-op keyed patch" ADR-043 compares with. Budgets 38 µs and 28 µs (5x the best budgets-test
+p50, 7.4 µs and 5.5 µs); `[ratio."infinite_append_vs_keyed_push_50"]` holds the first at no more than twice the second (1.34 to 1.46
+measured, ADR-043 requires at most 2): the fetch machinery on top of a 50-op keyed patch, however long the list.
 
 ### Opt-in ports (`bench/benches/ports.rs`, ADR-047, ADR-048)
 
@@ -660,6 +742,19 @@ Web: the browser `Db` adapter is an opt-in worker bundle outside the hello world
 80,932 bytes (26,172 gzipped) and wa-sqlite's sync wasm 558,343 bytes (272,993 gzipped), **299,165 bytes gzipped**
 in all (zlib level 9, the playground's Vite production build). The hello world is unchanged: an app pays this
 only when it imports `@undra/runtime/db`.
+
+### Production operations (ADR-046)
+
+Nothing on the hot path moved: reads never cross, a write crosses once, and the panic report is built only when a
+panic is contained, so no budgeted row changed. `sync_alloc`, `commit_alloc` and `derived_alloc` still hold their
+exact counts, and the budgets test passes at its committed numbers (2026-10-01, the merged tree).
+
+| What | Number | How |
+|---|---|---|
+| A contained panic answered with status 2, and the `PanicReport` encoded and handed to `Diagnostics` | p50 34.6 µs with the report, 32.5 µs with the port unbound: the report is about 2 µs of it | `cargo test --release -p undra-ports --test diagnostics -- --ignored --nocapture panic_cost` (p50 of 400; an ignored measurement, not a gated row); a `TestRuntime` has no frame source, so `undra-ffi`'s stack walk is not in it |
+| Hello-world web core, gzipped (the wasm alone) | 119,055 (`main` with objects-callbacks) to 119,654 (+599); budget 120,000 | `scripts/wasm-size.sh`; the standard surface (one port, three records, `run_background`) is in every schema and the FATAL record carries location and operation. Merged as the piece first landed it measured 121,164 (over the gate); the review made `guarded` `Ok(f())` on wasm and `run_background` idle-synchronous (ADR-052, the prod-ops review note) |
+| Hello-world JavaScript runtime up front, gzipped | 21,672 (`main` with objects-callbacks) to 22,005 (+333); budget 22,100 (ADR-052, the prod-ops review note; the review made `runInBackground` and the `Diagnostics` registration lazy) | `scripts/wasm-size.sh`; the report builder (853 bytes), `runInBackground` and the `Diagnostics` port are lazy chunks |
+| Shipped artefacts, built with `--no-symbols` (the profile before ADR-046) and with the symbol work, same core | Android `.so` arm64-v8a 2,355,912 to 2,355,848, x86_64 2,515,840 to 2,515,776; iOS app, linked and stripped, byte-identical (2,190,456); host dylib +16; web wasm 879,095 to 875,686 raw (353,111 to 351,605 gzipped) | `cargo test -p undra-cli --test symbols` (`shipped_artefacts_do_not_grow_and_no_symbols_writes_none`, which fails if any grew); the playground core |
 
 ## The CI gate
 
@@ -734,14 +829,16 @@ file records the thermal state and the mode).
 * **Release builds.** The core is `undra build --release` (LTO fat); the iOS app is the Release configuration, the Android
   app the `benchmark` build type (release, not debuggable, signed with the debug key) with the code compiled ahead of time
   (`cmd package compile -m speed`), the web page the production build. The file records all of it.
-* **The web build target is a large share of every web row.** The bench page is built at Vite's default target, which
-  lowers the runtime's ES2022 `#private` class members to `WeakMap`/`WeakSet` helpers (a `WeakMap` set for every
-  private field of every `UndraWriter`, `UndraReader` and payload object a call allocates). That is what an app built
-  with Vite's defaults ships, the `undra init` web template included: in the review's rerun, the same page built with
-  `build.target: "es2022"` measured the handle call at 1.8 us, the 1 KB round trip at 3.3 us, the keyed insert at
-  22.5 us and the 100-signal change-set at 31 us (host load about 27), against 5.6 to 6.0 us, 8.0 to 8.3 us, 36 to
-  37 us and 173 us for the default build minutes earlier (load about 20): 1.6x (keyed insert) to 5.5x (change-set).
-  The cause analysis is in `.10x/reviews/2026-10-01-device-bench-review.md`. The rows below are the default build.
+* **The web build target decides what a web row costs, and the rows below are the `es2022` build.** The runtime is
+  ES2022. At Vite 6's default target (es2020, which is what the `undra init` template built at before ADR-056) its class
+  fields became `WeakMap`/`WeakSet` helper calls, and the same page measured 3.2 to 3.5 us for the handle call, 3.5 to
+  3.9 us for `callSync` and 88 to 96 us for the 100-signal change-set (the files of 2026-10-01; the review's rerun at
+  `es2022`: 1.8, 1.6, 31 us). The playground page is now built with `build.target: "es2022"` in its `vite.config.ts`, as
+  the Undra Vite plugin builds an app that sets no target of its own, and the call path's classes no longer use
+  `#private` at all (ADR-056): at es2022 the handle call is 0.44 to 0.68 us, and at Vite 6's default target the same tree
+  measured 1.08 us, `callSync` 0.70 us, the 1 KB round trip 2.94 us, the keyed insert 23.0 us, the change-set 47.9 us and
+  the merged frame 2.25 ms (one run at host load 28 to 31, before the last two levers), not 5x worse. The cause
+  analysis is in `.10x/reviews/2026-10-01-device-bench-review.md`.
 * **Clocks.** `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)` (41.67 ns tick), `System.nanoTime` and `performance.now`, which a
   browser rounds to 100 us, or to 5 us when the page is cross-origin isolated (the bench page is). The handle call is
   tens to hundreds of nanoseconds, so it is timed as **batches of calls divided by the batch** (1,000 on a phone) and
@@ -824,20 +921,18 @@ Cold start: fresh launches (10): load p50 1.09 ms, min 1 ms, max 1.2 ms; restore
 
 #### Chromium 153.0.8010.12 headless (Playwright, wasm-main) on Apple M5 Pro
 
-**A desktop browser, not a device.** `2026-10-01-web-chromium-headless-run2.json`, 2026-10-01. model chromium (headless, Playwright), arm64, 18 cores, runtime: wasm-main. Build (release): core release-wasm, wasm-opt -Oz; app vite production build, cross-origin isolated (5 µs clock); commit `e0d9560`. Timer: performance.now, step 5 µs, a pair of reads 74.2 ns. Host: Apple M5 Pro, macOS 26.5 (25F71); load average 2.92 before the run, 3.73 after.
+**A desktop browser, not a device.** `2026-10-02-web-chromium-headless-run3.json`, 2026-10-02. model chromium (headless, Playwright), arm64, 18 cores, runtime: wasm-main. Build (release): core release-wasm, wasm-opt -Oz; app vite production build with build.target es2022 (the playground's vite.config.ts, as the Undra Vite plugin sets it for an app that has none; Vite 6's own default, es2020, lowers the runtime's class fields to helpers), cross-origin isolated (5 µs clock); commit `83a5f85`. Timer: performance.now, step 5 µs, a pair of reads 82 ns. Host: Apple M5 Pro, macOS 26.5 (25F71); load average 24.24 before the run, 22.78 after.
 
 | Row | p50 | p99 | Timed as | Blueprint target | Verdict |
 |---|---|---|---|---|---|
-| Handle method call, primitive args and return | 3.16 µs | 12.3 µs | batches of 1000, 100 samples | n/a | none (no reference machine) |
-| Handle method call, in-thread: the runtime's `callSync` (web only; generated TypeScript calls are asynchronous) | 3.89 µs | 16.3 µs | batches of 5000, 100 samples | ≤ 80 ns (in-thread; at most one frame in Worker mode) | none (no reference machine) |
-| 1 KB record, round trip | 4.57 µs | 73 µs | batches of 500, 100 samples | ≤ 4 µs | none (no reference machine) |
-| Keyed patch on a 10,000-item list, one insert | 20.6 µs | 22 µs | batches of 200, 100 samples | ≤ 30 µs | none (no reference machine) |
-| Change-set with 100 dirty signals, applied on the main thread | 87.7 µs | 148 µs | batches of 100, 100 samples | ≤ 120 µs | none (no reference machine) |
-| Core cold start with 100 KB snapshot restore (**load only: no restore, see the notes**) | 4.5 ms | 4.67 ms | fresh process, 10 launches | ≤ 8 ms (after wasm compile) | none (no reference machine) |
+| Handle method call, primitive args and return | 475 ns | 715 ns | batches of 1000, 100 samples | n/a | none (no reference machine) |
+| Handle method call, in-thread: the runtime's `callSync` (web only; generated TypeScript calls are asynchronous) | 322 ns | 342 ns | batches of 5000, 100 samples | ≤ 80 ns (in-thread; at most one frame in Worker mode) | none (no reference machine) |
+| 1 KB record, round trip | 1.6 µs | 2.27 µs | batches of 500, 100 samples | ≤ 4 µs | none (no reference machine) |
+| Keyed patch on a 10,000-item list, one insert | 16.7 µs | 19.4 µs | batches of 200, 100 samples | ≤ 30 µs | none (no reference machine) |
+| Change-set with 100 dirty signals, applied on the main thread | 19.7 µs | 22.8 µs | batches of 100, 100 samples | ≤ 120 µs | none (no reference machine) |
+| Core cold start with 100 KB snapshot restore (**load only: no restore, see the notes**) | 5.4 ms | 5.72 ms | fresh process, 10 launches | ≤ 8 ms (after wasm compile) | none (no reference machine) |
 
-Cold start: fresh launches (10): load p50 4.5 ms, min 4.29 ms, max 4.67 ms; wasm compile p50 700 µs (not in the row, as the blueprint says); in-page reloads (warm): load p50 710 µs.
-
-* Review annotation (2026-10-01; no number in this file changed): the page was built at Vite's default target, which lowers the runtime's ES2022 `#private` class members to WeakMap/WeakSet helpers, and that lowering is a large share of every row here: the same page built with `build.target: "es2022"` measured 1.8 us, 3.3 us, 22.5 us and 31 us for the handle call, the 1 KB round trip, the keyed insert and the 100-signal change-set at a host load of about 27, against 5.6 to 6.0, 8.0 to 8.3, 36 to 37 and 173 us for the default build at a load of about 20 (this file was at 2 to 4). See `.10x/reviews/2026-10-01-device-bench-review.md`.
+Cold start: fresh launches (10): load p50 5.4 ms, min 5.25 ms, max 5.72 ms; wasm compile p50 875 µs (not in the row, as the blueprint says); in-page reloads (warm): load p50 1.06 ms.
 
 <details><summary>What each row timed</summary>
 
@@ -855,7 +950,7 @@ Cold start: fresh launches (10): load p50 4.5 ms, min 4.29 ms, max 4.67 ms; wasm
 |---|---|---|---|---|---|---|
 | iPhone 17 Pro simulator (iOS 26.5, arm64 on Apple M5 Pro) | 787 µs / 1.41 ms | 1,667 → 1 (1 drain) | 2.04 µs / 2.37 µs | 3.4 ms to 3.94 ms | 4.3x to 5.0x | 4.7% → 20.4% to 23.7% |
 | Android emulator "Google sdk_gphone64_arm64" (Android 15 (API 35), arm64-v8a, hardware-virtualized on Apple M5 Pro) | 167 µs / 285 µs | 1,667 → 1 (1 drain) | 12.5 µs / 13.7 µs | 20.9 ms to 22.9 ms | 124.9x to 136.8x | 1.0% → 125.4% to 137.4% |
-| Chromium 153.0.8010.12 headless (Playwright, wasm-main) on Apple M5 Pro | 4.28 ms / 6.16 ms | 1,667 → 1 (1 drain) | 7.25 µs / 7.04 µs | 11.7 ms to 12.1 ms | 2.7x to 2.8x | 25.7% → 70.4% to 72.5% |
+| Chromium 153.0.8010.12 headless (Playwright, wasm-main) on Apple M5 Pro | 1.46 ms / 1.81 ms | 1,667 → 1 (1 drain) | 2.75 µs / 2.71 µs | 4.52 ms to 4.58 ms | 3.1x | 8.8% → 27.1% to 27.5% |
 
 * **iPhone 17 Pro simulator (iOS 26.5, arm64 on Apple M5 Pro).** A thread of its own commits the burst (the core's side of a socket or a timer): the main thread's cost of a frame is the drain at the next frame, as `DrainStats.duration` times it (`ContinuousClock`). Merged frame = the drain(s) that consumed one burst, summed: decode and apply of the merged patch to the `@Observable` store. Unmerged estimate: the drain of a single entry (a call on the main thread drains before it returns, so the drain listener times a drain of exactly one change-set of one entry applied on its own), 8 after each frame of the experiment so that both are measured in the same minutes (1920 in all); times 1667, by the median entry and by the mean entry. The runtime was not reverted: this is what applying every entry on its own would cost, from the entry cost measured here.
 * **Android emulator "Google sdk_gphone64_arm64" (Android 15 (API 35), arm64-v8a, hardware-virtualized on Apple M5 Pro).** A thread of its own commits the burst (the core's side of a socket or a timer): the main thread's cost of a frame is the drain at the next frame (`ChoreographerFramePacer`), as `DrainStats.duration` times it (`System.nanoTime`). Merged frame = the drain(s) that consumed one burst, summed: decode and apply of the merged patch to the `StateFlow` store (the list is copied once per drain). Unmerged estimate: the drain of a single entry (a call on the main thread drains before it returns, so the drain listener times a drain of exactly one change-set of one entry applied on its own), 8 after each frame of the experiment so that both are measured in the same minutes (1920 in all); times 1667, by the median entry and by the mean entry. The runtime was not reverted: this is what applying every entry on its own would cost, from the entry cost measured here.
@@ -865,7 +960,7 @@ Cold start: fresh launches (10): load p50 4.5 ms, min 4.29 ms, max 4.67 ms; wasm
 
 * **iPhone 17 Pro simulator (iOS 26.5, arm64 on Apple M5 Pro)**, 3 runs (2026-10-01-ios-simulator-iphone-17-pro.json, 2026-10-01-ios-simulator-iphone-17-pro-run2.json, 2026-10-01-ios-simulator-iphone-17-pro-run3.json): median per row, run by run, with the spread: Handle method call: 302 ns / 294 ns / 295 ns (1.03x); 1 KB round trip: 1.13 µs / 458 ns / 1.04 µs (2.46x); Keyed insert, 10k rows: 8.29 µs / 8 µs / 8.79 µs (1.10x); 100-signal change-set: 26.9 µs / 26.2 µs / 27.9 µs (1.07x); merged frame 815 µs / 820 µs / 787 µs (1.04x).
 * **Android emulator "Google sdk_gphone64_arm64" (Android 15 (API 35), arm64-v8a, hardware-virtualized on Apple M5 Pro)**, 2 runs (2026-10-01-android-emulator-arm64-v8a.json, 2026-10-01-android-emulator-arm64-v8a-run2.json): median per row, run by run, with the spread: Handle method call: 266 ns / 251 ns (1.06x); 1 KB round trip: 1.33 µs / 1.38 µs (1.03x); Keyed insert, 10k rows: 23 µs / 23.2 µs (1.01x); 100-signal change-set: 20.3 µs / 19.6 µs (1.04x); merged frame 182 µs / 167 µs (1.09x).
-* **Chromium 153.0.8010.12 headless (Playwright, wasm-main) on Apple M5 Pro**, 2 runs (2026-10-01-web-chromium-headless.json, 2026-10-01-web-chromium-headless-run2.json): median per row, run by run, with the spread: Handle method call: 3.48 µs / 3.16 µs (1.10x); Handle call, `callSync`: 3.55 µs / 3.89 µs (1.10x); 1 KB round trip: 5.3 µs / 4.57 µs (1.16x); Keyed insert, 10k rows: 22.6 µs / 20.6 µs (1.10x); 100-signal change-set: 95.9 µs / 87.7 µs (1.09x); merged frame 4.03 ms / 4.28 ms (1.06x).
+* **Chromium 153.0.8010.12 headless (Playwright, wasm-main) on Apple M5 Pro**, 3 runs (2026-10-02-web-chromium-headless.json, 2026-10-02-web-chromium-headless-run2.json, 2026-10-02-web-chromium-headless-run3.json): median per row, run by run, with the spread: Handle method call: 605 ns / 680 ns / 475 ns (1.43x); Handle call, `callSync`: 428 ns / 442 ns / 322 ns (1.37x); 1 KB round trip: 1.92 µs / 2.02 µs / 1.6 µs (1.26x); Keyed insert, 10k rows: 20.5 µs / 22.4 µs / 16.7 µs (1.34x); 100-signal change-set: 25.4 µs / 27.4 µs / 19.7 µs (1.38x); merged frame 2.08 ms / 2.06 ms / 1.46 ms (1.42x).
 
 #### Pending hardware
 
@@ -887,45 +982,44 @@ shape (the order of the rows, the web drain's merged-to-unmerged ratio). Compare
 file records. The simulator and the emulator run on the M5 Pro's own cores
 (the emulator is arm64, hardware-virtualized, not a translation), which are faster than an A15's and than a 2022
 mid-range phone's: **read a row under its target as encouraging, not as met, and a row over its target as a stronger
-miss on the device.** Ranges are over the runs in the files (three on iOS, two on Android and the web).
+miss on the device.** Ranges are over the runs in the files (three on iOS and the web, two on Android).
 
 1. **The handle call through the generated binding is not the core's 44 ns.** 294 to 302 ns on iOS, 251 to 266 ns on
-   Android, 3.2 to 3.5 us on the web (3.5 to 3.9 us for the runtime's own `callSync`), against the blueprint's 60, 250
+   Android, 0.47 to 0.68 us on the web (0.32 to 0.44 us for the runtime's own `callSync`; 0.44 to 0.48 and 0.29 to 0.32 on
+   the quietest of the runs, load 10, and 3.2 to 3.5 and 3.5 to 3.9 before E4), against the blueprint's 60, 250
    and 80 ns and the host's core-side 44 ns (`dispatch/call_sync/add`): most of a platform call is the generated binding
    (encode the arguments into a writer, the crossing, the reply, decode), not the core. On iOS it is 5x its target on a
    core faster than an A15's, and on Android it sits on its target on one faster than a 2022 mid-range phone's: this
-   is the row to watch on hardware. On the web it is 44 to 49x over for the in-thread row on a desktop browser, and no
-   reference machine closes that. The review measured where it goes (`.10x/reviews/2026-10-01-device-bench-review.md`,
-   E4): the wasm export itself is 130 to 200 ns (the core at `-Oz` plus the crossing); the rest is the TypeScript path,
-   and most of that is the build, not the code: at Vite's default target every `#private` field of the writer, reader
-   and payload objects a call allocates becomes a `WeakMap` entry, which puts the call at 3.7 to 5.7 us in the review's
-   decomposition, against 1.0 to 1.3 us for the same code built at `es2022` (where the per-call allocations, the
-   `BigInt` handle in the call header and the copies in and out are what is left; the promise and the mirror's flush of
-   an empty queue cost tens of nanoseconds). Either the target counts only the call into the wasm export (what the host
-   row measures), or the TypeScript path is what has to get cheaper, starting with the build target and the private
-   members on the hot path. That decision is the integrator's; the rows are the evidence.
-2. **The other rows have room on this hardware**: 1 KB round trip 0.46 to 1.1 us (iOS), 1.3 to 1.4 us (Android), 4.6 to
-   5.3 us (web) against 3, 8 and 4 us; keyed insert 8.0 to 8.8 us, 23 us and 20.6 to 22.6 us against 20, 40 and 30 us; the
-   100-signal change-set 26 to 28 us, 19.6 to 20.3 us and 88 to 96 us against 100, 150 and 120 us. The web's 1 KB row is
-   the one over its target here, at Vite's default target (an `es2022` build of the same page measured 3.3 us at a higher
-   load, under it: see "How the rows are timed"). The iOS 1 KB row was 458 ns in one of three runs and 1.04 to 1.13 us in the other two,
+   is the row to watch on hardware. On the web it is 4 to 6x over for the in-thread row on a desktop browser (it was 44
+   to 49x), and the rest of what is above the wasm export's own 130 to 200 ns is two wasm calls, the writer, the reply
+   copy and the `await`. The review measured where it went (`.10x/reviews/2026-10-01-device-bench-review.md`, E4: the
+   build target, then per-call allocation and the `BigInt` handle) and ADR-056 took it apart lever by lever: the
+   `es2022` target (the plugin and the playground), no `#private` on the call path, a writer and reader with no
+   `DataView` or 256-byte buffer per call, a call payload in one allocation, a direct call that builds no promise, and a
+   transport that copies the header and the arguments apart. The budgets of the rows are tests since then
+   (`[web."id"]` in `bench/budgets.toml`, R9).
+2. **The other rows have room on this hardware**: 1 KB round trip 0.46 to 1.1 us (iOS), 1.3 to 1.4 us (Android), 1.6 to
+   2.0 us (web; 4.6 to 5.3 before E4, the one row that was over its target) against 3, 8 and 4 us; keyed insert 8.0 to 8.8 us, 23 us and
+   16.7 to 22.4 us against 20, 40 and 30 us; the 100-signal change-set 26 to 28 us, 19.6 to 20.3 us and 19.7 to 27.4 us
+   against 100, 150 and 120 us. The iOS 1 KB row was 458 ns in one of three runs and 1.04 to 1.13 us in the other two,
    with nothing different in the harness (the process landing on another kind of core is the likely cause), which is why a
    file records every run.
 3. **Cold start is mostly the platform's load, not the restore**: a fresh iOS process takes 2.2 to 2.7 ms to load the core
    and restore 100 KB (load 2.2 to 2.65 ms, restore 54 to 64 us), Android 1.4 ms (load 1.1 to 1.2 ms, which includes
-   `System.loadLibrary`, restore 250 us), the web 4.2 to 4.5 ms after the module is compiled (0.67 to 0.70 ms to compile;
-   no restore, below), against the host's 70 to 80 us for the core alone (`snapshot/cold_start_restore_100kb`) and the
+   `System.loadLibrary`, restore 250 us), the web 4.2 to 4.5 ms after the module is compiled at the load of 2 to 4 of the first files (0.67 to 0.70 ms to
+   compile; no restore, below), 5.3 to 5.6 ms at the load of 10 to 26 of the files after E4, with the warm reload in the page
+   1.0 to 1.1 ms instead of 0.7 ms and the compile 0.84 to 0.92 ms: the host, not the runtime (a Node loop of
+   `UndraCore.load` on the same module takes 950 us before E4 and after), against the host's 70 to 80 us for the core alone (`snapshot/cold_start_restore_100kb`) and the
    targets of 3, 5 and 8 ms. The iOS median is already 0.74 to 0.90 of its target on a core faster than an A15's.
 4. **ADR-031's drain, measured on Swift and Kotlin for the first time**: 1,667 one-update keyed patches on 10,000 rows a
    frame arrive as one drain that applies one merged patch. On iOS the main thread spends 0.79 to 0.82 ms a frame
    (5% of a 60 Hz frame) where applying every entry alone would cost an estimated 3.4 to 4.1 ms (20 to 25%), 4.2 to 5.0x
    more; on Android 0.17 to 0.18 ms (1%) against an estimated 20.9 to 24.7 ms, **more than a whole frame**, 122 to 137x
-   more, because every Kotlin patch copies the 10,000-row list; on the web the page's own thread pays 4.0 to 4.3 ms, of
-   which the core's own 1,667 transactions are most (wasm-main runs the core on the main thread), against 11.3 to 12.1 ms,
-   2.7 to 2.8x. The ADR's Node probe leaves the core out and saw 3.7 to 4.4 ms a frame before and 0.33 to 0.45 ms after;
-   Chromium's drain alone is 0.76 to 0.81 ms here against that probe's 0.18 to 0.26 ms (the probe ran the runtime's own
-   build in Node, not a Vite production bundle; the page here is the default Vite build, and an `es2022` build of it
-   drained in 0.59 ms at a higher load, with the merged frame at 2.4 ms and the estimated ratio at 3.3x).
+   more, because every Kotlin patch copies the 10,000-row list; on the web the page's own thread pays 1.5 to 2.1 ms (4.0 to 4.3 before E4), of
+   which the core's own 1,667 transactions are most (wasm-main runs the core on the main thread), against 4.5 to 4.6 ms
+   (11.3 to 12.1 before), 3.1x. The ADR's Node probe leaves the core out and saw 3.7 to 4.4 ms a frame before and 0.33 to 0.45 ms after;
+   Chromium's drain alone is 0.16 to 0.23 ms here (0.76 to 0.81 before E4) against that probe's 0.18 to 0.26 ms (the
+   probe ran the runtime's own build in Node, not a Vite production bundle).
 5. **Gaps the harness ran into**: the generated TypeScript has no `snapshot()` or `restore()` (SPEC 17.1; the API gaps in
    `.10x/decisions/sde/playground.md`), so the web cold-start row is the load alone and says so; an in-process Kotlin core
    cannot be loaded twice, so Android has no in-process reload row, only the restore (the iOS core can be shut down and

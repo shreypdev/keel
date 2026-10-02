@@ -1,27 +1,32 @@
-error[E0277]: error[undra::E0060]: `Bytes` is spelled like the built-in Undra type `undra::prelude::Bytes`, but it is a different type
-                = note: the schema records this position as the built-in type, so the platforms would read the bytes of `undra::prelude::Bytes` where the generated code writes `Bytes`
-                = help: rename your type, or import the built-in one (`undra::prelude::Bytes`) where it is used
+error[E0277]: error[undra::E0060]: `Bytes` is spelled like a built-in Undra type, but it is not one
+                = note: the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Bytes`
+                = help: rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra`
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0060
   --> tests/ui/h1_builtin_shadowed.rs:16:18
    |
 16 |     pub payload: Bytes,
-   |                  ^^^^^ this is not `undra::prelude::Bytes`
+   |                  ^^^^^ not a type that crosses as this leaf
    |
-help: the trait `_::__UndraSameAs<undra::prelude::Bytes>` is not implemented for `Bytes`
+help: the trait `undra::undra_wire::leaf::WireLeaf<undra::undra_wire::leaf::kinds::Bytes>` is not implemented for `Bytes`
   --> tests/ui/h1_builtin_shadowed.rs:9:1
    |
  9 | pub struct Bytes {
    | ^^^^^^^^^^^^^^^^
-note: required by a bound in `_::__undra_same`
+help: the trait `undra::undra_wire::leaf::WireLeaf<undra::undra_wire::leaf::kinds::Bytes>` is implemented for `undra::prelude::Bytes`
+  --> $WORKSPACE/crates/undra-wire/src/leaf.rs
+   |
+   | impl WireLeaf<kinds::Bytes> for Bytes {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `_::__undra_leaf`
   --> tests/ui/h1_builtin_shadowed.rs:14:1
    |
 14 | #[k::api]
-   | ^^^^^^^^^ required by this bound in `__undra_same`
+   | ^^^^^^^^^ required by this bound in `__undra_leaf`
    = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: error[undra::E0001]: `Uuid` cannot cross the boundary by value
-                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
-                = help: declare `Uuid` with `#[undra::api]`, or return a record with the data the platform needs
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Uuid` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
   --> tests/ui/h1_builtin_shadowed.rs:24:19
    |
@@ -41,26 +46,31 @@ help: the trait `undra::undra_wire::Decode` is not implemented for `Uuid`
              (A,)
              AppState
              BTreeMap<K, V>
-             Box<T>
+             BackgroundReport
            and $N others
 
-error[E0277]: error[undra::E0060]: `Uuid` is spelled like the built-in Undra type `undra::prelude::Uuid`, but it is a different type
-                = note: the schema records this position as the built-in type, so the platforms would read the bytes of `undra::prelude::Uuid` where the generated code writes `Uuid`
-                = help: rename your type, or import the built-in one (`undra::prelude::Uuid`) where it is used
+error[E0277]: error[undra::E0060]: `Uuid` is spelled like a built-in Undra type, but it is not one
+                = note: the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Uuid`
+                = help: rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra`
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0060
   --> tests/ui/h1_builtin_shadowed.rs:24:19
    |
 24 | pub fn lookup(id: Uuid) -> String {
-   |                   ^^^^ this is not `undra::prelude::Uuid`
+   |                   ^^^^ not a type that crosses as this leaf
    |
-help: the trait `_::__UndraSameAs<undra::prelude::Uuid>` is not implemented for `Uuid`
+help: the trait `undra::undra_wire::leaf::WireLeaf<undra::undra_wire::leaf::kinds::Uuid>` is not implemented for `Uuid`
   --> tests/ui/h1_builtin_shadowed.rs:21:1
    |
 21 | pub struct Uuid(pub u128);
    | ^^^^^^^^^^^^^^^
-note: required by a bound in `_::__undra_same`
+help: the trait `undra::undra_wire::leaf::WireLeaf<undra::undra_wire::leaf::kinds::Uuid>` is implemented for `undra::prelude::Uuid`
+  --> $WORKSPACE/crates/undra-wire/src/leaf.rs
+   |
+   | impl WireLeaf<kinds::Uuid> for Uuid {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `_::__undra_leaf`
   --> tests/ui/h1_builtin_shadowed.rs:23:1
    |
 23 | #[k::api]
-   | ^^^^^^^^^ required by this bound in `__undra_same`
+   | ^^^^^^^^^ required by this bound in `__undra_leaf`
    = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

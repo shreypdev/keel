@@ -15,6 +15,12 @@ class Stats(val raw: String) {
     /** Objects in the core's object table. */
     val liveHandles: Long get() = number(doc, "live_handles")
 
+    /** References to core objects the host owns, summed (`host_refs`, ADR-040). */
+    val hostRefs: Long get() = number(doc, "host_refs")
+
+    /** Host callback instances the core holds proxies of (`live_callbacks`, ADR-041). */
+    val liveCallbacks: Long get() = number(doc, "live_callbacks")
+
     /** Host calls the core is still working on. */
     val activeCalls: Long get() = number(doc, "active_calls")
 

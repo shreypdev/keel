@@ -1,0 +1,66 @@
+error[E0277]: error[undra::E0001]: `uuid::Uuid` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `uuid::Uuid` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui-leaf-off/e0060_uuid_crate_without_its_feature.rs:11:9
+   |
+ 9 | #[k::api]
+   | --------- required by a bound introduced by this call
+10 | pub struct Account {
+11 |     pub id: Uuid,
+   |         ^^^^^^^^ not a type that can cross the boundary
+   |
+   = help: the trait `Encode` is not implemented for `uuid::Uuid`
+   = help: the following other types implement trait `Encode`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             Account
+             AppState
+           and $N others
+
+error[E0277]: error[undra::E0001]: `uuid::Uuid` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `uuid::Uuid` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui-leaf-off/e0060_uuid_crate_without_its_feature.rs:11:13
+   |
+11 |     pub id: Uuid,
+   |             ^^^^ not a type that can cross the boundary
+   |
+   = help: the trait `undra::undra_wire::Decode` is not implemented for `uuid::Uuid`
+   = help: the following other types implement trait `undra::undra_wire::Decode`:
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             Account
+             AppState
+             BTreeMap<K, V>
+           and $N others
+
+error[E0277]: error[undra::E0060]: `uuid::Uuid` is spelled like a built-in Undra type, but it is not one
+                = note: the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `uuid::Uuid`
+                = help: rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0060
+  --> tests/ui-leaf-off/e0060_uuid_crate_without_its_feature.rs:11:13
+   |
+11 |     pub id: Uuid,
+   |             ^^^^ not a type that crosses as this leaf
+   |
+   = help: the trait `undra::undra_wire::leaf::WireLeaf<undra::undra_wire::leaf::kinds::Uuid>` is not implemented for `uuid::Uuid`
+help: the trait `undra::undra_wire::leaf::WireLeaf<undra::undra_wire::leaf::kinds::Uuid>` is implemented for `undra::prelude::Uuid`
+  --> $WORKSPACE/crates/undra-wire/src/leaf.rs
+   |
+   | impl WireLeaf<kinds::Uuid> for Uuid {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `__undra_leaf`
+ --> tests/ui-leaf-off/e0060_uuid_crate_without_its_feature.rs:9:1
+  |
+9 | #[k::api]
+  | ^^^^^^^^^ required by this bound in `__undra_leaf`
+  = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

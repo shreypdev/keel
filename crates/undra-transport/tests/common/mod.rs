@@ -78,6 +78,67 @@ pub trait Beep {
     fn beep(&self, n: u32);
 }
 
+/// A child object a method hands out (ADR-040).
+pub struct Child;
+
+#[undra::api]
+impl Child {
+    pub fn tag(&self) -> u32 {
+        7
+    }
+}
+
+static CHILD: std::sync::OnceLock<std::sync::Arc<Child>> = std::sync::OnceLock::new();
+
+/// What the client platform implements as a callback (ADR-041).
+#[undra::callback]
+pub trait Listener {
+    fn note(&self, line: String);
+}
+
+/// A singleton per runtime, constructed through `Arc<Self>` (ADR-040): every client that constructs
+/// it gets one more reference to the same object, and it keeps the listeners it is given, which
+/// outlive the client that lent them.
+pub struct Hub {
+    listeners: Mutex<Vec<Arc<dyn Listener>>>,
+}
+
+/// The hubs, by runtime (tests run side by side, each with a runtime of its own).
+static HUBS: Mutex<Vec<(usize, Arc<Hub>)>> = Mutex::new(Vec::new());
+
+#[undra::api]
+impl Hub {
+    pub fn shared(ctx: Ctx) -> Arc<Self> {
+        let key = ctx.runtime() as *const Runtime as usize;
+        let mut hubs = HUBS.lock().unwrap();
+        if let Some((_, hub)) = hubs.iter().find(|(k, _)| *k == key) {
+            return Arc::clone(hub);
+        }
+        let hub = Arc::new(Hub {
+            listeners: Mutex::new(Vec::new()),
+        });
+        hubs.push((key, Arc::clone(&hub)));
+        hub
+    }
+
+    pub fn listen(&self, listener: Arc<dyn Listener>) {
+        self.listeners.lock().unwrap().push(listener);
+    }
+
+    pub fn tell(&self, line: String) {
+        let listeners: Vec<_> = self.listeners.lock().unwrap().clone();
+        for listener in &listeners {
+            listener.note(line.clone());
+        }
+    }
+
+    /// Lets every listener go (their proxies drop here, outside the lock).
+    pub fn forget(&self) {
+        let gone = std::mem::take(&mut *self.listeners.lock().unwrap());
+        drop(gone);
+    }
+}
+
 #[undra::store]
 pub struct Counter {
     ctx: Ctx,
@@ -97,6 +158,16 @@ impl Counter {
 
     pub fn get(&self) -> i32 {
         self.count.get()
+    }
+
+    /// The one shared child: the same object (one handle) every time.
+    pub fn child(&self) -> std::sync::Arc<Child> {
+        std::sync::Arc::clone(CHILD.get_or_init(|| std::sync::Arc::new(Child)))
+    }
+
+    /// The runtime's hub, as a call's result (a reference the call returned, not a constructor's).
+    pub fn hub(&self) -> std::sync::Arc<Hub> {
+        Hub::shared(self.ctx.clone())
     }
 
     pub fn add(&self, n: i32) -> i32 {
@@ -215,6 +286,14 @@ pub fn echo_bytes(data: Bytes) -> Bytes {
     data
 }
 
+pub const HUB: u32 = ids::type_id("Hub");
+pub const HUB_SHARED: u32 = ids::method_id("Hub", "shared");
+pub const HUB_LISTEN: u32 = ids::method_id("Hub", "listen");
+pub const HUB_TELL: u32 = ids::method_id("Hub", "tell");
+pub const HUB_FORGET: u32 = ids::method_id("Hub", "forget");
+pub const COUNTER_HUB: u32 = ids::method_id("Counter", "hub");
+pub const LISTENER_PORT: u32 = ids::port_id("Listener");
+pub const LISTENER_NOTE: u32 = ids::port_method_id("Listener", "note");
 pub const NEW: u32 = ids::method_id("Counter", "new");
 pub const GET: u32 = ids::method_id("Counter", "get");
 pub const ADD: u32 = ids::method_id("Counter", "add");
@@ -580,6 +659,19 @@ impl TestClient {
                 method_id: NEW,
             },
             &enc(&initial),
+        );
+        assert_eq!(status, ReplyStatus::Ok);
+        dec::<u64>(&body)
+    }
+
+    /// Constructs the runtime's `Hub` (an `Arc<Self>` singleton) and returns its handle.
+    pub fn new_hub(&mut self) -> u64 {
+        let (status, body) = self.call(
+            CallTarget::Constructor {
+                type_id: HUB,
+                method_id: HUB_SHARED,
+            },
+            &[],
         );
         assert_eq!(status, ReplyStatus::Ok);
         dec::<u64>(&body)

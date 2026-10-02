@@ -220,31 +220,35 @@ Every suite is local; nothing needs the network after install.
 
 | Suite | Command | Expect |
 |---|---|---|
-| Rust workspace | `cargo test --workspace` | 2,100+ pass |
+| Rust workspace | `cargo test --workspace` | 3,100+ pass |
 | Lints (CI-equivalent) | `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings` | clean |
-| TypeScript runtime | `cd runtimes/ts/@undra/runtime && npm ci && npm test` | 890+ pass |
-| Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 630 cases, 0 failed (2 skipped without a native library) |
+| TypeScript runtime | `cd runtimes/ts/@undra/runtime && npm ci && npm test` | 1,646 pass |
+| Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 784 cases, 0 failed (2 skipped without a native library); the Kotlin testkit adds 32 |
 | Kotlin runtime under CI's compiler | `kotlinc` 2.0.21 on PATH (CI downloads it; brew's is newer and infers more) — `PATH=<kotlin-2.0.21>/bin:$PATH runtimes/kotlin/undra-runtime/scripts/test-local.sh` | same count; a passing run under brew's Kotlin alone is not proof |
 | Kotlin over the real JNI core | `cargo build --manifest-path crates/undra-ffi/tests/fixture/Cargo.toml` (the fixture core, namespace `undra_fixture`), then `UNDRA_NATIVE_LIB_DIR=$PWD/crates/undra-ffi/tests/fixture/target/debug runtimes/kotlin/undra-runtime/scripts/test-local.sh`; `bash crates/undra-ffi/tests/jni/run.sh` is the end-to-end leg | the JNI smoke cases run (1 skipped: the one that needs the library absent) |
-| Android adapters, JVM unit tests (needs the Android SDK) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:test` | 130 pass, 1 skipped (the debug and release variants both run) |
-| Android adapters, instrumented tests (needs a booted emulator or device; set `ANDROID_SERIAL` if several are attached) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:connectedAndroidTest` | 112 pass, 1 skipped (the test that switches the device's network off runs only with `-Pandroid.testInstrumentationRunnerArguments.undra.networkToggle=true`) |
+| Android adapters, JVM unit tests (needs the Android SDK) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:test` | 302 results, 2 skipped (151 cases; the debug and release variants both run) |
+| Android adapters, instrumented tests (needs a booted emulator or device; set `ANDROID_SERIAL` if several are attached) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:connectedAndroidTest` | 148 pass, 1 skipped (the test that switches the device's network off runs only with `-Pandroid.testInstrumentationRunnerArguments.undra.networkToggle=true`) |
+| Android WorkManager module (optional, ADR-046): JVM unit tests | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-work:testDebugUnitTest` | 8 pass |
+| Android WorkManager module: instrumented tests (needs a booted emulator or device) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-work:connectedDebugAndroidTest` | 11 pass |
 | Playground Android app on the real adapters (offline queue surviving a killed process) | `bash examples/playground/android/smoke.sh` (needs a booted emulator; it switches airplane mode on and off) | `SMOKE PASSED` |
-| Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` | 527 pass |
+| Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` | 753 pass |
 | Swift runtime over the real C ABI table (the fixture core) | `bash crates/undra-ffi/tests/swift/run.sh` | 6 pass |
-| wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 19 + 24 pass |
+| wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 22 + 36 pass |
 | C host harness (through the fixture core's table, `undra_fixture_undra_api`; `two_cores.c` opens two copies of it side by side) | `bash crates/undra-ffi/tests/c/run.sh` (add `UNDRA_C_SANITIZE=1` for ASan) | `c smoke: ok`, `c lifetime: ok`, `c two cores: ok` |
-| Contract scenarios ×3 platforms | `npm ci` in `runtimes/ts/@undra/runtime` once per checkout (S25 imports wa-sqlite), then `bash contract-tests/run-all.sh` | 74/74 pass (S01–S26 less S21/S22 on native, per platform) |
+| Contract scenarios ×3 platforms | `npm ci` in `runtimes/ts/@undra/runtime` once per checkout (S25 imports wa-sqlite), then `bash contract-tests/run-all.sh` | 86/86 pass (S01–S30 less S21/S22 on native, per platform; S29 "panic report" and S30 "background run" are ADR-046's) |
 | The iOS 15 / 16 floor (ADR-045): the runtime, every golden case in `ObservableObject` mode, `examples/ios15-sample` (xcodebuild at 15.0), the playground's and Fieldbook's bindings at iOS 15, and the Swift contract grid against iOS 15 bindings | `scripts/ios-floor.sh` (steps: `runtime golden sample apps contract simulator`; the last needs an iOS 15 or 16 simulator runtime and says so when there is none) | all build and pass; `simulator` skips here (iOS 26.5 runtime only) |
-| Two cores in one process (ADR-044): the playground core as `playground_a` and `playground_b` | `examples/two-cores/{ios,android,jvm,node}/run.sh` (iOS: the booted simulator, `CONFIGURATION=Release` for the fat-LTO cores; Android: the attached emulator) | `two-cores <platform>: passed` |
+| Two cores in one process (ADR-044): the playground core as `playground_a` and `playground_b` | `examples/two-cores/{ios,android,jvm,node}/run.sh` (iOS: the booted simulator, `CONFIGURATION=Release` for the fat-LTO cores; Android: the attached emulator; Node: `npm ci` for `fake-indexeddb`, the default `Kv` of the web) | `two-cores <platform>: passed`, after the lines that write one default `Kv` key through each core and read two values back (ADR-044 amendment A) |
 | Build systems of a generated project: Gradle, `xcodebuild` and `npm run build` each build the core with no earlier `undra build` (a clean project, then up-to-date, then a change, then the other variant and back; the app links the new core) | `UNDRA_TEST_BUILD_SYSTEMS=1 cargo test -p undra-cli --test build_systems -- --nocapture` (`UNDRA_REQUIRE_TOOLCHAINS=1` makes a missing toolchain a failure; needs `java` on PATH, which `scripts/env.sh` puts there) | 6 pass; skips, saying why, where a toolchain is missing |
 | `undra upgrade` end to end (regenerates the bindings against a local clone standing in for GitHub) | `UNDRA_TEST_UPGRADE_E2E=1 cargo test -p undra-cli --test upgrade` | 15 pass |
+| Symbol files and `undra symbolicate` (R9, ADR-046): the playground core built in release for each platform, made to panic (in a call, and in a task) in a booted iOS simulator, on the emulator, under node and natively, and its frames resolved to the `lab.rs` line; `--no-symbols` and the sizes of the shipped artefacts | `UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test symbols -- --test-threads=1` (needs Xcode with a booted simulator, the Android NDK, `cargo-ndk` and the emulator, node and `wasm-opt`; minutes) | 5 pass; skips, saying why, where a toolchain is missing |
+| The debugger path into Rust (ADR-046): LLDB in batch mode stops at `breakpoint set -f lab.rs -l <line>` in a debug core, on the host and in a simulator process | `UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test debugging -- --test-threads=1` (run it from a login session: LLDB needs Developer Tools access) | 3 pass |
 | Distribution: npm packages (build, pack, `npm install -g`, run) | `bash packaging/npm/test.sh` | all checks pass |
 | Distribution: the curl installer against a served release (checksums, tampering, platforms) | `bash packaging/test-install.sh` | all checks pass |
 | Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` | pass |
 | Benchmarks (numbers for humans) | `cargo bench -p undra-bench` | see `bench/RESULTS.md` |
 | Device bench: the blueprint rows through the generated binding and the mirror, on a simulator, emulator, browser or phone | `scripts/bench-device.sh --device ios`, `--device android` (boots the `undra` AVD if nothing is attached; `--target <serial>` for a phone), `--device web`; add `--quick` to check the plumbing in seconds | writes `bench/results/device/<date>-<target>.json` and the device tables of `bench/RESULTS.md`; needs the iOS simulator + Xcode, the Android SDK + NDK, or Playwright's Chromium (`cd examples/playground/web && npx playwright install chromium`) |
 | React Native runtime: C++ host under ASan + UBSan (both shims) and the JSI layer against React Native's headers | `runtimes/rn/@undra/react-native/cpp/test/run.sh` (needs `npm ci` in `examples/playground/rn` for the headers, and `undra build --platform host` of the playground and of `examples/two-cores/a`, which it runs when missing; `UNDRA_RN_REQUIRE_JSI=1` makes a missing one a failure) | 15 store checks, then 29 + 29 host checks (the linked shim on macOS only); `UndraJsi.cpp`, `UndraTurboModule.cpp` and (macOS) `UndraPlatformApple.mm` compile |
-| React Native runtime: unit tests, typecheck, contract column | in `runtimes/rn/@undra/react-native`: `npm ci`, `npm test`, `npm run typecheck` (build `runtimes/ts/@undra/runtime` first), `npm run test:contract` (needs `undra build -C examples/playground --platform web`, and `contract-tests/derived-vectors.sh` for S19) | 65 pass; clean; 18 pass + S17 skipped |
+| React Native runtime: unit tests, typecheck, contract column | in `runtimes/rn/@undra/react-native`: `npm ci`, `npm test`, `npm run typecheck` (build `runtimes/ts/@undra/runtime` first), `npm run test:contract` (needs `undra build -C examples/playground --platform web`, and `contract-tests/derived-vectors.sh` for S19) | 100 pass; clean; 19 pass + S17 and S29 skipped (app-tested) |
 | React Native playground app on a device | `scripts/rn-device-checks.sh ios` (the iPhone simulator; CocoaPods) or `scripts/rn-device-checks.sh android --target <serial>` (an emulator such as the `undra-rn` AVD, or a phone) | `UNDRA-RN CHECKS 19/19 passed` (iOS) or `20/20` (Android) |
 | Device bench report (CI runs it) | `node --test scripts/bench-device-report.test.mjs` | 14 pass |
 
@@ -276,6 +280,118 @@ its Gradle task, Xcode build phase and Vite plugin run `undra build` themselves 
 The live loop (edit Rust, every app picks up the new core, a dropped connection heals itself) is `undra dev`:
 [`docs/DEV_LOOP.md`](DEV_LOOP.md) has the URL of each platform (the Android emulator is `ws://10.0.2.2:<port>`),
 `undra dev --android`, how reconnecting works and a troubleshooting table.
+
+### Release symbols and crash reports
+
+A release build writes **symbol files** next to what it ships, so a panic report from production resolves to
+`file:line` (ADR-046). `undra build --release` keeps the line tables of the core (`debug = "line-tables-only"` in the
+generated shim's release profile: the same optimisation and LTO, so the same code), strips the copies it ships and keeps
+the unstripped ones below `build/symbols/`. `--no-symbols` skips them (and builds the shim without debug info, as
+before ADR-046); debug builds write none, they are unstripped anyway. A build of one platform replaces its own entries,
+so building each platform in turn (or in separate CI jobs, uploading to one directory) accumulates one manifest.
+
+| Platform | Ships | Symbols |
+|---|---|---|
+| iOS | `build/ios/<Ns>Core.xcframework/<slice>/lib<ns>.a`, nothing stripped | the **app's own dSYM** (Xcode Release, `dwarf-with-dsym`): the prelinked object's debug map names Cargo's objects, which `dsymutil` reads, so the dSYM has the Rust frames; Crashlytics and Sentry take it as they do for Swift. The objects stay in Cargo's target directory: build the app right after `undra build`, as the Xcode build phase does |
+| Android | `build/android/jniLibs/<abi>/lib<ns>.so`, stripped (`llvm-strip --strip-debug --strip-unneeded`) | `build/symbols/android/<abi>/lib<ns>.so` (unstripped, same build id) and `build/symbols/android/native-debug-symbols.zip` (`<abi>/lib<ns>.so`: upload it in the Play Console; Crashlytics takes the directory as `unstrippedNativeLibsDir`, `sentry-cli debug-files upload build/symbols/android` Sentry) |
+| Web | `build/web/<ns>.wasm`: no names, no DWARF (the same `-Oz` optimisation as ever; `--no-symbols` makes the old bytes) | `build/symbols/web/<ns>.debug.wasm` (the same code with its names: one `wasm-opt -Oz -g` run over the module without DWARF makes it and the function map, and the shipped module is it minus the name section, so every `wasm-function[i]:0x…` of a production stack trace names the same function and byte offset in both; `wasm-opt` breaks ties between functions by name, so this module differs from the nameless one by about 0.1%: the hello world +90 bytes gzipped, the playground -421), `build/symbols/web/<ns>.wasm.functions.txt` (`index:name`, `wasm-opt --print-function-map`) and `build/symbols/web/<ns>.dwarf.wasm` (a second run that keeps the DWARF line tables: for Chrome's DevTools and for the definition lines `undra symbolicate` prints; see below) |
+| Host (macOS, Linux) | `build/host/lib<ns>.{dylib,so}`, stripped | next to it: `lib<ns>.dylib.dSYM` (`dsymutil`) / `lib<ns>.so.debug` (`objcopy --only-keep-debug`) |
+
+`build/symbols/manifest.json` lists every shipped image:
+
+```json
+{
+  "version": 1,
+  "undra": "0.1.0",
+  "artifacts": [
+    {
+      "platform": "android",            // ios | android | web | host
+      "namespace": "playground_core",   // the core's namespace (ADR-044)
+      "coreVersion": "0.1.0",           // the core crate's version (what export_core! reports)
+      "schemaHash": "0x53241303b2d08c5e",
+      "arch": "arm64-v8a",              // an ABI, an iOS slice (ios-arm64, ios-arm64-simulator), wasm32, or the host's
+      "format": "elf",                  // elf | macho | wasm
+      "imageId": "16ed68dc3a85066f424f34d3d8020a5f030c614f",
+      "sha256": "…",                    // of the shipped file
+      "shipped": "android/jniLibs/arm64-v8a/libplayground_core.so",   // relative to build/
+      "shippedBytes": 2061680,
+      "symbols": "android/arm64-v8a/libplayground_core.so"           // relative to build/symbols; null for iOS
+      // web entries add "functionMap": "web/playground_core.wasm.functions.txt" and "dwarf": "web/playground_core.dwarf.wasm"
+    }
+  ]
+}
+```
+
+`imageId` is what a `PanicReport` of that image carries as `image_id` (lowercase hex): the ELF GNU build id (the linker is
+asked for `--build-id=sha1`), the Mach-O `LC_UUID` of a host library, the SHA-256 of the wasm module. It is `null` for an
+iOS slice: a static library has no UUID, the image that holds the core is the app, and the app's UUID is the one of its
+dSYM. `schemaHash` is read from a host build of the core the way `undra bindgen` reads it (cached, so it costs a build
+once), or, for the web, asked of the wasm module itself under `node`; a debug build and a failure write `null` (a failure
+warns).
+
+**`undra symbolicate`** resolves a report against them (`undra symbolicate --help` has the whole story):
+
+```bash
+undra symbolicate report.json                       # the JSON of the app's onPanic report; finds the artefact by imageId, then namespace
+undra symbolicate report.json --symbols ./symbols   # a CI build's symbols artifact, unpacked
+undra symbolicate report.json --dsym App.app.dSYM   # iOS: the app's dSYM (Spotlight finds it by UUID when not given)
+undra symbolicate --platform web 'wasm-function[1489]:0x5a692'
+undra symbolicate --platform android --image-id 16ed68dc3a85066f424f34d3d8020a5f030c614f 0x998ef 0x9983f
+```
+
+```text
+0x998ef playground_core::lab::explode (/undra/app/core/src/lab.rs:222)
+0x9983f playground_core::lab::__undra_dispatch_fn_explode (/undra/app/core/src/lab.rs:221)
+```
+
+A report's `address` is the instruction address minus the load address of the image that holds the core, pointing into
+the *call* instruction (nothing is subtracted before the lookup). `llvm-symbolizer` (the NDK's) resolves an Android
+address as it is. On iOS `atos` is given `__TEXT vmaddr + address`, the vmaddr read from the app's dSYM (0x100000000 for
+an arm64 executable). A wasm address is the module offset of the `wasm-function[i]:0x…` line of a V8 stack trace; `i`
+(or, for a bare offset, the function whose body contains it in the debug module) is named by the function map exactly,
+and the line is the line where that function is *defined*, taken from the DWARF module by the function's name. A wasm
+frame carries no line inside its function: `wasm-opt` skips every pass that cannot update DWARF when it keeps DWARF, so a
+module that keeps it is 5 to 7% larger (and has other code), which the shipped module must not be; the panic's own
+`file:line:col` and the operation are in the report (the core logs them before it traps). Paths of a release
+build name the project `/undra/app`, the Undra checkout `/undra/src`, Cargo's registry and git sources `/undra/deps` and the
+builder's home directory `~` (ADR-052: no machine, and the same strings in any checkout); the standard library's are `/rustc/<commit>/…`. Rust symbols are
+demangled with Xcode's or the NDK's `llvm-cxxfilt` when there is one.
+
+`crates/undra-cli/tests/symbols.rs` is the regression test (R9): it builds the playground core in release, makes it panic
+(in a call, and in a task of its own) in a booted iOS simulator, on the emulator, under node and natively, and resolves
+the frames with these files: to the `lab.rs` line of the `panic!` on iOS, Android and the host (the line the core itself
+reports as the panic location), to the function that panicked and where it is defined on the web. It also builds the core with `--no-symbols` and checks
+that no shipped artefact grew. It needs the toolchains of every platform and skips, saying which one is missing, without
+`UNDRA_REQUIRE_TOOLCHAINS=1`:
+
+```bash
+UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test symbols --test debugging -- --test-threads=1
+```
+
+### Debugging into Rust
+
+A debug build (`undra build`, or the Xcode Debug configuration, the Gradle `debug` variant) keeps full DWARF: nothing is
+stripped, and the iOS prelink uses `-all_load`. `undra doctor` checks the pieces below (`rust.lldb-formatters`,
+`android.lldb`, and for the web it prints the extension's link). `crates/undra-cli/tests/debugging.rs` runs LLDB in batch
+mode against the playground core, sets `breakpoint set -f lab.rs -l <the line of explode>`, and asserts the stop, on the
+host dylib and in an iOS simulator process linked with the prelinked core.
+
+* **Xcode.** Step into Rust from a Swift call, or set a breakpoint by file and line in the console
+  (`breakpoint set -f todos.rs -l 42`; in the editor once the `.rs` file is opened). `undra init` writes a `.lldbinit`
+  that loads the toolchain's Rust formatters (`$(rustc --print sysroot)/lib/rustlib/etc/lldb_lookup.py`, and
+  `lldb_commands` where a toolchain has one), so a Rust `String` reads as its text instead of a struct. LLDB reads a
+  project's `.lldbinit` only from its working directory and only when allowed: `echo 'settings set
+  target.load-cwd-lldbinit true' >> ~/.lldbinit`.
+* **Android Studio.** The "Dual (Java + Native)" debugger with the debug APK. The generated Gradle module sets
+  `keepDebugSymbols` for the debug variant's `lib<ns>.so` (an app made by `undra adopt` gets the line from the hint a
+  debug `undra build` prints); the library comes unstripped from a debug build. For a release reproduction add
+  `build/symbols/android` as the symbol directory. `undra doctor` checks that the NDK has its LLDB.
+* **Chrome DevTools.** Install the C/C++ DevTools Support (DWARF) extension
+  (https://chromewebstore.google.com/detail/cc++-devtools-support-dwa/pdcpmagijalfljmkmjngeonclgbbannb): it reads
+  `build/symbols/web/<ns>.dwarf.wasm`, which `vite dev` serves (the generated `vite.config.ts` hands the page the
+  path through `__UNDRA_DEBUG_WASM__`; `vite build` bundles the stripped module and never names it), and opens `.rs`
+  files for breakpoints. `doctor` cannot check a browser extension.
+* **Host tests.** `rust-lldb target/debug/deps/<test binary>` or CodeLLDB on `cargo test`.
 
 ## 4. Read before you write code
 

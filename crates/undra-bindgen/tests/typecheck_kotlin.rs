@@ -104,10 +104,15 @@ fn stdlib() -> Option<PathBuf> {
 /// The `main` classes of `tests/fixtures/kotlin-run`: package and class.
 const MAINS: &[(&str, &str)] = &[
     ("full", "FullTestKt"),
+    ("object_graph", "ObjectGraphTestKt"),
+    ("callbacks", "CallbacksTestKt"),
     ("errors", "ErrorsTestKt"),
     ("enums", "EnumsTestKt"),
     ("records", "RecordsTestKt"),
     ("stdlib", "StdlibTestKt"),
+    ("newtypes", "NewtypesTestKt"),
+    ("infinite", "InfiniteTestKt"),
+    ("lazy", "LazyTestKt"),
 ];
 
 /// Generates every golden case, each in its own package, compiles all of them

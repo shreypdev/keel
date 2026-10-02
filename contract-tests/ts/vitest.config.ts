@@ -29,6 +29,8 @@ export default defineConfig({
     // The scenarios have real timers and quiet windows (50 ms, 200 ms, 1 s): one file at a time, so
     // a busy machine is not made busier by the scenarios themselves.
     fileParallelism: false,
+    // S27 and S28 collect garbage to watch finalizers release references and the registry let go of a reporter.
+    execArgv: ["--expose-gc"],
     reporters: ["default", new ScenarioReporter()],
   },
 });

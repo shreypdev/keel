@@ -135,6 +135,29 @@ class RemoteReconnectTests : Suite() {
             }
         }
 
+        case("a lost connection keeps the callbacks the core holds for the session's return, and closing the core drops them") {
+            WsTestServer().use { server ->
+                serve(server)
+                val hold = CountDownLatch(1)
+                load(server.url, RecordingSleeper().also { it.hold = hold }).use { loaded ->
+                    val listener = Any()
+                    val instance = loaded.core.callbacks.lend(listener)
+                    assertEq(1, loaded.core.callbacks.count(listener))
+                    server.connections.first().drop()
+                    eventually("the connection is lost") { loaded.states.map(::short).lastOrNull() == "reconnecting 1" }
+                    // The server keeps the session's objects, and the proxies of the instances lent, for its return
+                    // (ADR-051): what the core calls over the next connection must find them.
+                    assertEq(1, loaded.core.callbacks.liveCount, "kept while reconnecting")
+                    assertEq(instance, loaded.core.callbacks.instanceOf(listener))
+                    hold.countDown()
+                    eventually("reconnected") { loaded.states.map(::short).lastOrNull() == "connected" && loaded.states.size > 2 }
+                    assertEq(1, loaded.core.callbacks.count(listener), "and still there once reconnected")
+                    loaded.core.close()
+                    assertEq(0, loaded.core.callbacks.liveCount, "dropped with the core")
+                }
+            }
+        }
+
         case("every connection carries the same session token, and asks to resume only when the core holds objects") {
             WsTestServer().use { server ->
                 serve(server) { conn, n ->

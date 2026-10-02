@@ -1,0 +1,14 @@
+error[undra::E0071]: method `token` of the callback interface `Provider` returns a value synchronously: make it `async` and return a `Result<T, E>`
+  = note: the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone: a method either reports (fire-and-forget, returning nothing) or is `async` and returns a `Result`
+  = help: make a reporting method return `()`, or make a method that answers `async` and return `Result<T, E>`; do not start a name with `__`
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0071
+
+error[undra::E0071]: method `ask` of the callback interface `Provider` is `async` and returns nothing: an async method must return a `Result`
+  = note: the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone: a method either reports (fire-and-forget, returning nothing) or is `async` and returns a `Result`
+  = help: make a reporting method return `()`, or make a method that answers `async` and return `Result<T, E>`; do not start a name with `__`
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0071
+
+error[undra::E0071]: method `__release` of the callback interface `Provider` has a name that starts with `__`, which is reserved for `__release` and `__cancel`
+  = note: the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone: a method either reports (fire-and-forget, returning nothing) or is `async` and returns a `Result`
+  = help: make a reporting method return `()`, or make a method that answers `async` and return `Result<T, E>`; do not start a name with `__`
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0071

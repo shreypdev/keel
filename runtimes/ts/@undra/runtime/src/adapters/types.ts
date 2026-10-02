@@ -39,15 +39,93 @@ export interface HttpResponse {
   readonly body: Uint8Array;
 }
 
-/** `NetKind`, a unit enum; the wire index is the position in this list. */
-export const NET_KINDS = ["wifi", "cellular", "wired", "unknown", "none"] as const;
-/** The kind of network the device is on. */
-export type NetKind = (typeof NET_KINDS)[number];
+// `NetKind` and `AppState` are defined with the host events that use them (`./events.ts`): this module is only
+// loaded with the default ports, while a page starts the event sources with its core (ADR-052).
+import type { AppState, NetKind } from "./events.js";
+export { APP_STATES, type AppState, NET_KINDS, type NetKind } from "./events.js";
 
-/** `AppState`, a unit enum; the wire index is the position in this list. */
-export const APP_STATES = ["active", "inactive", "background"] as const;
-/** Whether the app is in the foreground. */
-export type AppState = (typeof APP_STATES)[number];
+/**
+ * One frame of a {@link UndraPanicReport}, innermost first (ADR-046 decision 4.1; the same record on every platform,
+ * `PanicFrame` in the schema).
+ */
+export interface UndraPanicFrame {
+  /**
+   * Where the frame is, as an offset into the core's image: a native core's instruction address minus the image's load
+   * address, a wasm core's byte offset into the module (`wasm-function[i]:0x<offset>`). `0n` when it is not known.
+   * A server-side symbolicator with the symbol files of `undra build --release` resolves it.
+   */
+  readonly address: bigint;
+  /** The function's name when the shipped image still has it (debug builds, a wasm module with a names section), else `null`. */
+  readonly symbol: string | null;
+  /** The source file when the shipped image still has line tables for it, else `null`. */
+  readonly file: string | null;
+  /** The source line, with `file`, else `null`. */
+  readonly line: number | null;
+}
+
+/**
+ * What the core says about a panic it contained, for the app's crash reporter (ADR-046 decision 4): the same record on every
+ * platform (`PanicReport` in the schema), delivered to `LoadOptions.onPanic` once per panic, in the order the panics
+ * happened. A native core hands it to the `Diagnostics` port itself; a wasm core cannot call out of a panic (it traps), so
+ * the runtime builds the same report from the core's FATAL `undra::panic` log record and the stack of the trap.
+ */
+export interface UndraPanicReport {
+  /** The panic message. For a wasm trap that logged none (a stack overflow, out of memory) the trap's own text (`RuntimeError: unreachable`). */
+  readonly message: string;
+  /** `file:line:column` of the panic (remapped in release builds); `""` when the core could not tell (a trap without a panic record). */
+  readonly location: string;
+  /** What was running: `"Todos.add"`, `"explode"`, `"task"`, `"computed Todos.visible"`; `""` when nothing was. */
+  readonly operation: string;
+  /** The thread that panicked: the core's thread name on a native core (`"undra-core"`), `"main"` or `"worker"` for a wasm core (where it ran). */
+  readonly thread: string;
+  /** The frames of the panic, innermost first; empty when there are none to give. */
+  readonly frames: readonly UndraPanicFrame[];
+  /** The core's namespace (`[core] namespace`, ADR-044); `""` when the host does not know it (see `LoadOptions.namespace`). */
+  readonly namespace: string;
+  /** The core's version (its crate's); `""` for a wasm core unless `LoadOptions.coreVersion` says (the module does not carry it). */
+  readonly coreVersion: string;
+  /** The schema hash of the core. */
+  readonly schemaHash: bigint;
+  /**
+   * Which build of the core the addresses belong to: lowercase hex of the Mach-O UUID or the ELF build id of a native core,
+   * the SHA-256 of the `.wasm` for a wasm core; `""` when it could not be read (a wasm module given compiled, or not hashed yet).
+   */
+  readonly imageId: string;
+}
+
+/**
+ * What `UndraCore.runInBackground` reports (ADR-046 decision 3; `BackgroundReport` in the schema): how far the core got
+ * draining its background work inside the window the host had.
+ */
+export interface UndraBackgroundReport {
+  /** Every background task finished before the deadline. */
+  readonly finished: boolean;
+  /** Queued offline mutations that were sent. */
+  readonly replayed: number;
+  /** Stale persisted or observed queries that were fetched again. */
+  readonly refetched: number;
+  /** What a later window still has to drain: queued mutations and stale queries left. */
+  readonly stillPending: number;
+}
+
+/**
+ * The background counters of `UndraStats.background` (`"background"` of `undra_stats_json`): every one is `0` for a core
+ * that does not report them.
+ */
+export interface UndraBackgroundStats {
+  /** Background tasks registered in the core (replay the offline queue, refetch stale queries, flush persistence, the app's own). */
+  readonly tasks: number;
+  /** Work a background window would drain (queued offline mutations, stale persisted queries, unflushed persistence); read it right after `Lifecycle.Background`. */
+  readonly pending: number;
+  /** `run_background` calls the core has served. */
+  readonly runs: number;
+  /** Runs in which every task finished before the deadline. */
+  readonly finished: number;
+  /** Queued mutations sent by background runs, in all. */
+  readonly replayed: number;
+  /** Queries fetched again by background runs, in all. */
+  readonly refetched: number;
+}
 
 // ---------------------------------------------------------------------------
 // The opt-in ports' records and enums (ADR-047 WebSocket and Sse, ADR-048 Db)

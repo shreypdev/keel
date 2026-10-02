@@ -6,12 +6,31 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Undra binary wire codec: value encoding, envelope, typed payloads and keyed list patches. Zero dependencies."
+description = "Undra binary wire codec: value encoding, envelope, typed payloads and keyed list patches. No dependencies unless an opt-in leaf-type feature is enabled."
 readme = "README.md"
 keywords = ["undra", "wire", "codec", "serialization", "binary"]
 categories = ["encoding"]
 
 [dependencies]
+# Opt-in leaf types (ADR-042), each with `default-features = false` and no clock or randomness
+# feature (R12): they map onto the existing wire types and build for wasm32, iOS and Android.
+uuid = { version = "1", default-features = false, optional = true }
+chrono = { version = "0.4", default-features = false, optional = true }
+time = { version = "0.3", default-features = false, optional = true }
+rust_decimal = { version = "1", default-features = false, optional = true }
+bytes = { version = "1", default-features = false, optional = true }
+
+[features]
+# `uuid::Uuid` crosses as `Uuid`.
+uuid = ["dep:uuid"]
+# `chrono::DateTime<Utc>` crosses as `Timestamp`, `chrono::TimeDelta` as `Duration`.
+chrono = ["dep:chrono"]
+# `time::OffsetDateTime` and `time::UtcDateTime` cross as `Timestamp`, `time::Duration` as `Duration`.
+time = ["dep:time"]
+# `rust_decimal::Decimal` crosses as `Decimal`.
+rust_decimal = ["dep:rust_decimal"]
+# `bytes::Bytes` crosses as `Bytes`.
+bytes = ["dep:bytes"]
 
 [dev-dependencies]
 proptest.workspace = true

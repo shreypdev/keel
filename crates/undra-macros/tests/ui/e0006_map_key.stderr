@@ -1,8 +1,17 @@
 error: error[undra::E0006]: `f64` cannot be a map key
-         = note: map keys must be `String`, an integer, `bool` or `Uuid`: those compare and hash identically on every platform (floats and composite keys do not)
-         = help: use one of those key types, or a `Vec` of records with an explicit key field
+         = note: map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not)
+         = help: use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0006
- --> tests/ui/e0006_map_key.rs:9:26
-  |
-9 |     pub buckets: HashMap<f64, u32>,
-  |                          ^^^
+  --> tests/ui/e0006_map_key.rs:10:26
+   |
+10 |     pub buckets: HashMap<f64, u32>,
+   |                          ^^^
+
+error: error[undra::E0006]: `Decimal` cannot be a map key
+         = note: map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not)
+         = help: use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0006
+  --> tests/ui/e0006_map_key.rs:12:26
+   |
+12 |     pub amounts: HashMap<Decimal, u32>,
+   |                          ^^^^^^^

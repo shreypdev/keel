@@ -23,6 +23,8 @@ pub(crate) struct UndraAttr {
     pub(crate) key: Option<LitStr>,
     /// `#[undra(no_coalesce)]`.
     pub(crate) no_coalesce: bool,
+    /// `#[undra(coalesce)]` on a fire-and-forget method of a callback interface (ADR-041).
+    pub(crate) coalesce: bool,
 }
 
 /// Which `#[undra(..)]` options are legal on a node.
@@ -34,6 +36,7 @@ pub(crate) struct Site {
     pub(crate) default: bool,
     pub(crate) key: bool,
     pub(crate) no_coalesce: bool,
+    pub(crate) coalesce: bool,
     /// Whether the node is part of the schema: `#[cfg]` on it would make the schema differ
     /// between builds, so it is rejected (R1, R7).
     pub(crate) schema: bool,
@@ -47,6 +50,7 @@ impl Site {
         default: false,
         key: false,
         no_coalesce: false,
+        coalesce: false,
         schema: false,
     };
     /// A field of a record or of an enum variant.
@@ -56,6 +60,7 @@ impl Site {
         default: true,
         key: false,
         no_coalesce: false,
+        coalesce: false,
         schema: true,
     };
     /// A signal field of a store.
@@ -65,6 +70,7 @@ impl Site {
         default: true,
         key: true,
         no_coalesce: true,
+        coalesce: false,
         schema: true,
     };
     /// A non-signal field of a store.
@@ -74,6 +80,7 @@ impl Site {
         default: false,
         key: false,
         no_coalesce: false,
+        coalesce: false,
         schema: true,
     };
     /// A node that takes no `#[undra(..)]` options at all (variants, methods, parameters).
@@ -83,6 +90,17 @@ impl Site {
         default: false,
         key: false,
         no_coalesce: false,
+        coalesce: false,
+        schema: true,
+    };
+    /// A method of a callback interface (`#[undra::callback]`): `#[undra(coalesce)]` is legal.
+    pub(crate) const CALLBACK_METHOD: Site = Site {
+        name: "a callback interface method",
+        root: false,
+        default: false,
+        key: false,
+        no_coalesce: false,
+        coalesce: true,
         schema: true,
     };
     /// A private method of an API impl block: not part of the schema, so anything goes except
@@ -93,6 +111,7 @@ impl Site {
         default: false,
         key: false,
         no_coalesce: false,
+        coalesce: false,
         schema: false,
     };
 }
@@ -317,11 +336,19 @@ fn parse_one(attr: &Attribute, site: Site, out: &mut UndraAttr) -> syn::Result<(
                 out.no_coalesce = true;
                 Ok(())
             }
+            "coalesce" => {
+                if !site.coalesce {
+                    return Err(misplaced("coalesce"));
+                }
+                flag(&meta, code::E0008, "coalesce")?;
+                out.coalesce = true;
+                Ok(())
+            }
             other => Err(Diag::new(
                 code::E0008,
                 format!("unknown option `{other}` in `#[undra(..)]`"),
-                "the options are `crate = \"path\"` (items), `default` (record fields), `key = \"field\"` and `no_coalesce` (store signal fields)",
-                unknown_help(other, &["crate", "default", "key", "no_coalesce"]),
+                "the options are `crate = \"path\"` (items), `default` (record fields), `key = \"field\"` and `no_coalesce` (store signal fields), and `coalesce` (fire-and-forget methods of a callback interface)",
+                unknown_help(other, &["crate", "default", "key", "no_coalesce", "coalesce"]),
             )
             .on(&meta.path)),
         }
@@ -339,6 +366,9 @@ fn option_home(option: &str) -> &'static str {
         }
         "key" => "move it to a `Signal<Vec<T>>` field of a `#[undra::store]` struct, or remove it",
         "no_coalesce" => "move it to a signal field of a `#[undra::store]` struct, or remove it",
+        "coalesce" => {
+            "move it to a fire-and-forget method of a `#[undra::callback]` trait, or remove it"
+        }
         _ => "remove the option, or move it to where it applies",
     }
 }
@@ -356,6 +386,9 @@ fn option_hint(option: &str) -> &'static str {
         }
         "no_coalesce" => {
             "`no_coalesce` makes a store signal deliver every commit instead of coalescing them"
+        }
+        "coalesce" => {
+            "`coalesce` makes the host deliver only the newest pending call of a fire-and-forget callback method to each instance (progress reporting)"
         }
         _ => "this option is not valid here",
     }

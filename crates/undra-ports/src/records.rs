@@ -15,6 +15,9 @@
 //! | [`StorageError`] | `u16` index: `Unavailable(String)` 0, `Full` 1, `Locked` 2, `Corrupt(String)` 3, `Io(String)` 4 |
 //! | [`NetKind`] | `u16` index: `Wifi` 0, `Cellular` 1, `Wired` 2, `Unknown` 3, `None` 4 |
 //! | [`AppState`] | `u16` index: `Active` 0, `Inactive` 1, `Background` 2 |
+//! | [`PanicFrame`] | `address u64, symbol Option<String>, file Option<String>, line Option<u32>` |
+//! | [`PanicReport`] | `message, location, operation, thread String, frames Vec<PanicFrame>, namespace, core_version String, schema_hash u64, image_id String` |
+//! | [`BackgroundReport`] | `finished bool, replayed u32, refetched u32, still_pending u32` |
 
 use core::fmt;
 
@@ -434,6 +437,64 @@ pub enum AppState {
     Inactive,
     /// Not visible.
     Background,
+}
+
+// ADR-046: the report of a contained panic and of a background run. Short docs on purpose: a core
+// embeds its schema's docs (ADR-050), and every core has these.
+
+/// One frame of a panic's backtrace.
+#[undra_macros::api]
+#[undra(crate = "crate::root")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct PanicFrame {
+    /// Offset of the instruction into its image; 0 if unknown.
+    pub address: u64,
+    /// The function, in builds that name it.
+    pub symbol: Option<String>,
+    /// The source file.
+    pub file: Option<String>,
+    /// The line in `file`.
+    pub line: Option<u32>,
+}
+
+/// A panic the core contained.
+#[undra_macros::api]
+#[undra(crate = "crate::root")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct PanicReport {
+    /// The panic message.
+    pub message: String,
+    /// `file:line:column` of the panic.
+    pub location: String,
+    /// What was running.
+    pub operation: String,
+    /// The panicking thread.
+    pub thread: String,
+    /// The backtrace.
+    pub frames: Vec<PanicFrame>,
+    /// The core's namespace.
+    pub namespace: String,
+    /// The core's version.
+    pub core_version: String,
+    /// The core's schema hash.
+    pub schema_hash: u64,
+    /// The image the addresses belong to, in hex.
+    pub image_id: String,
+}
+
+/// What a background run did.
+#[undra_macros::api]
+#[undra(crate = "crate::root")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub struct BackgroundReport {
+    /// Everything ran to completion.
+    pub finished: bool,
+    /// Mutations sent.
+    pub replayed: u32,
+    /// Queries fetched again.
+    pub refetched: u32,
+    /// Work still waiting.
+    pub still_pending: u32,
 }
 
 #[cfg(test)]

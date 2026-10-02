@@ -27,13 +27,13 @@ pub use closure::{
 };
 pub use closure_json::ClosureJsonError;
 pub use def::{
-    EnumDef, FieldDef, FunctionDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind, QueryDef,
-    QueryKind, RecordDef, Schema, SignalDef, StoreDef, UNDRA_VERSION, VariantDef,
+    EnumDef, FieldDef, FunctionDef, InfiniteDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind,
+    QueryDef, QueryKind, RecordDef, Schema, SignalDef, StoreDef, UNDRA_VERSION, VariantDef,
 };
 pub use dispatch::{DispatchCall, DispatchFn, DispatchOutcome};
 pub use meta::{
-    EnumMeta, FieldMeta, FunctionMeta, MethodMeta, ObjectMeta, ParamMeta, PortMeta, QueryMeta,
-    RecordMeta, SignalMeta, StoreMeta, TypeRefMeta, VariantMeta,
+    EnumMeta, FieldMeta, FunctionMeta, InfiniteMeta, MethodMeta, ObjectMeta, ParamMeta, PortMeta,
+    QueryMeta, RecordMeta, SignalMeta, StoreMeta, TypeRefMeta, VariantMeta,
 };
 pub use registry::{Registration, collect_schema, registrations, schema_from_registrations};
 pub use type_ref::TypeRef;

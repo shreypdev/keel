@@ -142,6 +142,34 @@ final class WireVectorTests: XCTestCase {
             assertCodec(v, hex: hex, name)
             XCTAssertEqual(v.uuidString, text, "\(name) hyphenated lowercase form")
             assertCodec(v.uuid, hex: hex, name)
+        case "decimal":
+            let hexBytes = hexToBytes(hex)
+            if let expectedError = vector["error"] as? String {
+                XCTAssertThrowsError(try Decimal.undraDecoded(from: hexBytes), name) { error in
+                    guard case WireError.invalidTag(_, _, let type) = error else { return XCTFail("\(name): \(error)") }
+                    XCTAssertEqual(type, expectedError, name)
+                }
+                return true
+            }
+            guard let fields = value as? [String: Any], let text = fields["text"] as? String,
+                  let decimal = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")) else { return bad(name, "value") }
+            // Foundation's parser compacts trailing zeros (`1.00` parses as `1`), so the text is
+            // compared as a number, and the bytes through a decode.
+            let decoded = try! Decimal.undraDecoded(from: hexBytes)
+            XCTAssertEqual(decoded, decimal, "\(name) decoding")
+            XCTAssertEqual(decoded.undraEncoded(), hexBytes, "\(name) the scale survives a round trip")
+        case "lazy value":
+            guard let fields = value as? [String: Any], let rawHandle = jsonUInt64(jsonField(fields, "handle")),
+                  let len = jsonInt64(jsonField(fields, "len")).flatMap({ UInt32(exactly: $0) }),
+                  let version = jsonUInt64(jsonField(fields, "version")) else { return bad(name, "value") }
+            assertCodec(UndraLazyValue(handle: UndraHandle(rawValue: rawHandle), len: len, version: version), hex: hex, name)
+        case "lazy invalidated":
+            guard let fields = value as? [String: Any],
+                  let len = jsonInt64(jsonField(fields, "len")).flatMap({ UInt32(exactly: $0) }),
+                  let version = jsonUInt64(jsonField(fields, "version")) else { return bad(name, "value") }
+            assertCodec(UndraLazyInvalidated(len: len, version: version), hex: hex, name)
+        case "lazy page (item i32)":
+            return checkLazyPage(name: name, hex: hex, value: value)
         case "handle":
             guard let raw = jsonUInt64(value) else { return bad(name, "value") }
             let handle = UndraHandle(rawValue: raw)
@@ -165,6 +193,34 @@ final class WireVectorTests: XCTestCase {
             return checkSnapshot(name: name, hex: hex, value: value)
         default:
             return checkStructured(name: name, type: type, hex: hex, value: value)
+        }
+        return true
+    }
+
+    /// The reply to a page call: the header, then the items (here `i32`s).
+    private func checkLazyPage(name: String, hex: String, value: Any) -> Bool {
+        guard let fields = value as? [String: Any], let version = jsonUInt64(jsonField(fields, "version")),
+              let total = jsonInt64(jsonField(fields, "total")).flatMap({ UInt32(exactly: $0) }),
+              let items = jsonInt32Array(jsonField(fields, "items")) else { return bad(name, "value") }
+        let header = UndraLazyPageHeader(version: version, total: total, count: UInt32(items.count))
+        var writer = UndraWriter()
+        header.undraEncode(&writer)
+        for item in items {
+            item.undraEncode(&writer)
+        }
+        XCTAssertEqual(bytesToHex(writer.finish()), hex, "\(name) encode")
+        do {
+            var reader = UndraReader(hexToBytes(hex))
+            let decoded = try UndraLazyPageHeader.undraDecode(&reader)
+            XCTAssertEqual(decoded, header, "\(name) header")
+            var rows: [Int32] = []
+            for _ in 0 ..< Int(decoded.count) {
+                rows.append(try Int32.undraDecode(&reader))
+            }
+            try reader.finish()
+            XCTAssertEqual(rows, items, "\(name) items")
+        } catch {
+            XCTFail("\(name) decode threw \(error)")
         }
         return true
     }
@@ -396,8 +452,7 @@ final class WireVectorTests: XCTestCase {
     /// value}]}]}`, 64-bit values as decimal strings and signal values as raw bytes.
     private func checkSnapshot(name: String, hex: String, value: Any) -> Bool {
         guard let fields = value as? [String: Any],
-              let rawFloor = jsonUInt64(jsonField(fields, "generation_floor")),
-              let generationFloor = UInt32(exactly: rawFloor),
+              let generationFloor = jsonUInt64(jsonField(fields, "generation_floor")),
               let schemaHash = jsonUInt64(jsonField(fields, "schema_hash")),
               let rawTypes = fields["types"] as? [Any],
               let description = fields["description"] as? String,

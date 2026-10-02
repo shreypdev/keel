@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use common::*;
 use undra_bindgen::{BindgenError, Generator, SwiftObservation, validate};
-use undra_meta::{PortKind, Schema, TypeRef};
+use undra_meta::{InfiniteDef, PortKind, QueryKind, RecordDef, Schema, TypeRef};
 
 type Case = (&'static str, fn() -> Schema);
 
@@ -128,12 +128,18 @@ fn unknown_type() -> Schema {
     s
 }
 
-fn lazy_signal() -> Schema {
+/// `Option<Nickname>` where `struct Nickname(Option<String>)`: an option of an option on the wire.
+fn option_of_a_newtype_of_an_option() -> Schema {
     let mut s = Schema::new("t");
-    s.records.push(record("Item", "", vec![]));
-    s.objects.push(store(
-        object("Feed", "", vec![ctor("Feed", "new", vec![], false)], vec![]),
-        vec![("archive", TypeRef::lazy(named("Item")), false, None)],
+    s.records.push(newtype_record(
+        "Nickname",
+        "",
+        TypeRef::option(TypeRef::String),
+    ));
+    s.records.push(record(
+        "Account",
+        "",
+        vec![field("nickname", TypeRef::option(named("Nickname")))],
     ));
     s
 }
@@ -148,6 +154,131 @@ fn object_as_a_value() -> Schema {
     ));
     s.records
         .push(record("Parent", "", vec![field("child", named("Child"))]));
+    s
+}
+
+fn object_in_a_field() -> Schema {
+    let mut s = Schema::new("t");
+    s.objects.push(object(
+        "Child",
+        "",
+        vec![ctor("Child", "new", vec![], false)],
+        vec![],
+    ));
+    s.records.push(record(
+        "Parent",
+        "",
+        vec![field("child", TypeRef::object("Child"))],
+    ));
+    s
+}
+
+fn record_as_an_object() -> Schema {
+    let mut s = Schema::new("t");
+    s.records
+        .push(record("Plain", "", vec![field("id", TypeRef::U32)]));
+    s.objects.push(object(
+        "Holder",
+        "",
+        vec![ctor("Holder", "new", vec![], false)],
+        vec![method(
+            "Holder",
+            "take",
+            "",
+            vec![param("plain", TypeRef::object("Plain"))],
+            TypeRef::Unit,
+            false,
+        )],
+    ));
+    s
+}
+
+fn object_in_a_signal() -> Schema {
+    let mut s = Schema::new("t");
+    s.objects.push(object(
+        "Child",
+        "",
+        vec![ctor("Child", "new", vec![], false)],
+        vec![],
+    ));
+    s.objects.push(store(
+        object("Feed", "", vec![ctor("Feed", "new", vec![], false)], vec![]),
+        vec![(
+            "children",
+            TypeRef::vec(TypeRef::object("Child")),
+            false,
+            None,
+        )],
+    ));
+    s
+}
+
+fn callback_in_a_field() -> Schema {
+    let mut s = Schema::new("t");
+    s.ports.push(port(
+        "Listener",
+        "",
+        PortKind::Callback,
+        vec![port_method(
+            "Listener",
+            "changed",
+            "",
+            vec![],
+            TypeRef::Unit,
+            false,
+        )],
+    ));
+    s.records.push(record(
+        "Holder",
+        "",
+        vec![field("listener", TypeRef::callback("Listener"))],
+    ));
+    s
+}
+
+fn callback_without_a_port() -> Schema {
+    let mut s = Schema::new("t");
+    s.ports.push(port(
+        "Platform",
+        "",
+        PortKind::Async,
+        vec![port_method(
+            "Platform",
+            "ping",
+            "",
+            vec![],
+            TypeRef::Unit,
+            false,
+        )],
+    ));
+    s.objects.push(object(
+        "Service",
+        "",
+        vec![ctor("Service", "new", vec![], false)],
+        vec![method(
+            "Service",
+            "use_it",
+            "",
+            vec![param("p", TypeRef::callback("Platform"))],
+            TypeRef::Unit,
+            false,
+        )],
+    ));
+    s
+}
+
+fn callback_method_shapes() -> Schema {
+    let mut s = Schema::new("t");
+    s.ports.push(port(
+        "Provider",
+        "",
+        PortKind::Callback,
+        vec![
+            port_method("Provider", "token", "", vec![], TypeRef::String, false),
+            port_method("Provider", "ask", "", vec![], TypeRef::Unit, true),
+            port_method("Provider", "__release", "", vec![], TypeRef::Unit, false),
+        ],
+    ));
     s
 }
 
@@ -179,6 +310,82 @@ fn float_map_key() -> Schema {
         "",
         vec![field("by_weight", TypeRef::map(TypeRef::F32, TypeRef::U8))],
     ));
+    s
+}
+
+fn decimal_map_key() -> Schema {
+    let mut s = Schema::new("t");
+    s.records.push(record(
+        "Prices",
+        "",
+        vec![field(
+            "by_amount",
+            TypeRef::map(TypeRef::Decimal, TypeRef::U8),
+        )],
+    ));
+    s
+}
+
+fn newtype_of_a_float_as_a_map_key() -> Schema {
+    let mut s = Schema::new("t");
+    s.records.push(newtype_record("Meters", "", TypeRef::F64));
+    s.records.push(record(
+        "Routes",
+        "",
+        vec![field(
+            "by_length",
+            TypeRef::map(named("Meters"), TypeRef::U8),
+        )],
+    ));
+    s
+}
+
+fn newtype_with_two_fields() -> Schema {
+    let mut s = Schema::new("t");
+    s.records.push(RecordDef {
+        transparent: true,
+        ..record(
+            "UserId",
+            "",
+            vec![field("value", TypeRef::Uuid), field("tenant", TypeRef::U32)],
+        )
+    });
+    s
+}
+
+fn newtype_whose_field_is_not_called_value() -> Schema {
+    let mut s = Schema::new("t");
+    s.records.push(RecordDef {
+        transparent: true,
+        ..record("UserId", "", vec![field("inner", TypeRef::Uuid)])
+    });
+    s
+}
+
+fn infinite_query(returns: TypeRef, item_key: &str) -> Schema {
+    let mut s = Schema::new("t");
+    s.records
+        .push(record("Post", "", vec![field("id", TypeRef::U64)]));
+    let mut feed = query("feed", QueryKind::Query, "feed", vec![], returns, None);
+    feed.infinite = Some(InfiniteDef {
+        cursor: TypeRef::String,
+        item_key: item_key.into(),
+    });
+    s.queries.push(feed);
+    s
+}
+
+fn infinite_query_that_returns_one_record() -> Schema {
+    infinite_query(named("Post"), "id")
+}
+
+fn infinite_query_with_a_key_that_is_not_a_field() -> Schema {
+    infinite_query(TypeRef::vec(named("Post")), "slug")
+}
+
+fn infinite_mutation() -> Schema {
+    let mut s = infinite_query(TypeRef::vec(named("Post")), "id");
+    s.queries[0].kind = QueryKind::Mutation;
     s
 }
 
@@ -237,13 +444,45 @@ const CASES: &[(&str, &[Case])] = &[
         "E0001",
         &[
             ("an unknown type", unknown_type),
-            ("a lazy signal", lazy_signal),
-            ("an object used as a value", object_as_a_value),
+            (
+                "an option of a newtype of an option",
+                option_of_a_newtype_of_an_option,
+            ),
             ("a unit field", unit_as_a_field),
         ],
     ),
+    (
+        "E0004",
+        &[
+            ("a callback in a record field", callback_in_a_field),
+            (
+                "a callback that names no callback port",
+                callback_without_a_port,
+            ),
+        ],
+    ),
     ("E0005", &[("a Result in a field", result_in_a_field)]),
-    ("E0006", &[("a float map key", float_map_key)]),
+    (
+        "E0006",
+        &[
+            ("a float map key", float_map_key),
+            ("a decimal map key", decimal_map_key),
+            (
+                "a newtype of a float as a map key",
+                newtype_of_a_float_as_a_map_key,
+            ),
+        ],
+    ),
+    (
+        "E0007",
+        &[
+            ("a newtype with two fields", newtype_with_two_fields),
+            (
+                "a newtype whose field is not called value",
+                newtype_whose_field_is_not_called_value,
+            ),
+        ],
+    ),
     (
         "E0010",
         &[(
@@ -258,6 +497,36 @@ const CASES: &[(&str, &[Case])] = &[
     (
         "E0031",
         &[("an event method that returns", event_method_that_returns)],
+    ),
+    (
+        "E0064",
+        &[
+            ("an object used as a value", object_as_a_value),
+            ("an object in a record field", object_in_a_field),
+            ("a record named as an object", record_as_an_object),
+            ("an object in a signal", object_in_a_signal),
+        ],
+    ),
+    (
+        "E0071",
+        &[(
+            "callback methods that break the shape",
+            callback_method_shapes,
+        )],
+    ),
+    (
+        "E0073",
+        &[
+            (
+                "an infinite query that returns one record",
+                infinite_query_that_returns_one_record,
+            ),
+            (
+                "an infinite query whose item_key is not a field",
+                infinite_query_with_a_key_that_is_not_a_field,
+            ),
+            ("an infinite mutation", infinite_mutation),
+        ],
     ),
     (
         "E0050",

@@ -17,8 +17,11 @@
 #   generated shim followed by `wasm-opt -Oz --strip-debug --strip-producers`. The wasm module
 #   alone. It refuses to measure without wasm-opt (`brew install binaryen`, or binaryen's release
 #   tarball; CI pins version_133): an unoptimised module is not what ships.
-# * web/hello-runtime-js: what a hello-world app ships of the JavaScript runtime (`@undra/runtime`
-#   tree-shaken and minified by the Vite of its own lockfile, scripts/web-size-runtime.mjs). It
+# * web/hello-runtime-js: what a hello-world app loads up front of the JavaScript runtime
+#   (`@undra/runtime` tree-shaken and minified by the Vite of its own lockfile,
+#   scripts/web-size-runtime.mjs): the one chunk of the runtime modules the app's entry reaches by
+#   static imports. What only a dynamic import() reaches (the wasm-worker and remote transports) is
+#   fetched on demand and reported next to the number as `lazy_gzipped`, not gated with it. It
 #   needs the TypeScript runtime's node_modules (`npm ci` in runtimes/ts/@undra/runtime) and
 #   refuses to pass without them, like the wasm without wasm-opt.
 #
@@ -77,12 +80,16 @@ RAW="$(ls -t "$CARGO_TARGET_DIR"/wasm32-unknown-unknown/release-wasm/undra_core_
 [ -n "$RAW" ] || die "cannot find cargo's wasm output in $CARGO_TARGET_DIR"
 grep -q "before wasm-opt" "$WORK/build.log" \
   || die "undra build did not run wasm-opt (see $WORK/build.log); the gate does not measure an unoptimised module"
-# What ships must not name the machine it was built on: `undra build` remaps the home directory
-# out of release builds (ADR-052; the panic locations of the Undra and registry crates below it).
-if [ -n "${HOME:-}" ] && [ "$HOME" != "/" ] && LC_ALL=C grep -q -a -F -- "$HOME" "$WASM"; then
-  echo "wasm-size.sh: $WASM contains the builder's home directory ($HOME): the release build's --remap-path-prefix is missing" >&2
-  exit 1
-fi
+# What ships must not name the machine it was built on, nor the directory it was built in: `undra build`
+# remaps the home directory, the project, the Undra checkout and Cargo's sources out of release builds
+# (ADR-052; the panic locations of the Undra and registry crates below it), so the size does not move
+# with where this checkout lives.
+for NAMED in "${HOME:-}" "$ROOT" "$PROJECT"; do
+  if [ -n "$NAMED" ] && [ "$NAMED" != "/" ] && LC_ALL=C grep -q -a -F -- "$NAMED" "$WASM"; then
+    echo "wasm-size.sh: $WASM contains $NAMED: the release build's --remap-path-prefix is missing" >&2
+    exit 1
+  fi
+done
 
 # 3. The JavaScript runtime's share (gated like the wasm; a run that cannot measure it fails).
 RUNTIME_DIR="$ROOT/runtimes/ts/@undra/runtime"
@@ -165,7 +172,7 @@ results = [(wasm_line, ok, table)]
 
 js_table = size_table(text, "web/hello-runtime-js")
 js_line = {"artifact": "web/hello-runtime-js", "budget": int(js_table["budget_gzip_bytes"]),
-      "what": "@undra/runtime as the hello app's src/undra.ts imports it, Vite production build of the runtime's lockfile; worker script excluded",
+      "what": "@undra/runtime as the hello app's src/undra.ts imports it, Vite production build of the runtime's lockfile; the chunk loaded up front (static imports only: the on-demand transports and the worker script are lazy_gzipped)",
       "gzip": "zlib deflate level 9", "commit": commit, "date": today}
 if js_json:
     chunks = json.loads(js_json)
@@ -175,6 +182,7 @@ if js_json:
     js_line["tolerance"] = js_table.get("tolerance")
     js_line["bindings_gzipped"] = gz(f"{js_dir}/{chunks['bindings']}")[1]
     js_line["app_gzipped"] = gz(f"{js_dir}/{chunks['app']}")[1]
+    js_line["lazy_gzipped"] = sum(gz(f"{js_dir}/{f}")[1] for f in chunks["lazy"])
     results.append((js_line, js_ok, js_table))
 else:
     js_line["bytes"] = js_line["gzipped"] = None

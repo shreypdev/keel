@@ -227,6 +227,23 @@ export class FakeCoreTransport implements Transport {
     });
   }
 
+  /** The `port_call_id` the next {@link FakeCoreTransport.callPort} uses. */
+  get nextPortCallId(): number {
+    return this.#nextPortCallId;
+  }
+
+  /**
+   * The core calls a port and expects no answer (`port_call_id` 0: a fire-and-forget host callback, ADR-041). Resolves
+   * with what the host's handler said it would do.
+   */
+  notifyPort(portId: number, methodId: number, args: Uint8Array = new Uint8Array(0)): Promise<"sync" | "async" | "unavailable"> {
+    return new Promise((resolve) => {
+      this.#send(() => {
+        resolve((this.#handler as TransportHandler).portCall({ portId, methodId, portCallId: 0, args }).kind);
+      });
+    });
+  }
+
   /** Runs `fn` so that everything it emits is delivered within one macrotask, back to back. */
   burst(fn: () => void): void {
     if (this.synchronous) {

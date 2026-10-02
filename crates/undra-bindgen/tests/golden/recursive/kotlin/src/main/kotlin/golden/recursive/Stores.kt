@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /** A store whose signals are recursive types. */
-class Outline private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class Outline internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _head: MutableStateFlow<ListNode> = signal(ListNode(value = 0, next = null))
     val head: StateFlow<ListNode> = _head.asStateFlow()
     private val _maybeHead: MutableStateFlow<ListNode?> = signal(null)
@@ -34,16 +34,6 @@ class Outline private constructor(core: UndraCore, handle: Long) : UndraStore(co
     val lastError: StateFlow<ParseError?> = _lastError.asStateFlow()
     private val _total: MutableStateFlow<Sum> = signal(Sum.Zero)
     val total: StateFlow<Sum> = _total.asStateFlow()
-
-    init {
-        observeAll()
-    }
-
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraGoldenRecursive.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.Outline.TYPE_ID, UndraIds.Objects.Outline.NEW, ByteArray(0)),
-    )
 
     /**
      * Returns `list` with a new first node.
@@ -172,9 +162,12 @@ class Outline private constructor(core: UndraCore, handle: Long) : UndraStore(co
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(ctx: UndraCore = UndraGoldenRecursive.core): Outline = create(ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraGoldenRecursive.core): Outline {
             val handle = ctx.constructObject(UndraIds.Objects.Outline.TYPE_ID, UndraIds.Objects.Outline.NEW, ByteArray(0))
-            return Outline(ctx, handle)
+            return ctx.adopt(handle, ::Outline)
         }
     }
 }

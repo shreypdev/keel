@@ -8,11 +8,15 @@
 //! |---|---|---|
 //! | `#[undra::api]` | struct | `Encode`, `Decode`, `UNDRA_TYPE_ID`, `RecordMeta` + registration |
 //! | `#[undra::api]` | enum | the same with a `u16` variant index; `EnumMeta` |
+//! | `#[undra::api]` | struct with one unnamed field | a newtype: a transparent record that crosses as its inner type (ADR-042) |
+//! | `#[undra::api(generic)]` | struct or enum with type parameters | a template: the item, generic codecs, a hidden `macro_rules!`; registers nothing |
+//! | `#[undra::api]` | `type TodoPage = Page<Todo>;` | a named instantiation of a template: `RecordMeta` / `EnumMeta` for `TodoPage` |
 //! | `#[undra::error]` | enum | as an enum, plus `Display`, `Error`, `From` for `#[from]` |
 //! | `#[undra::api]` | `impl Type { .. }` | `UndraObject`, the dispatcher, `ObjectMeta` |
 //! | `#[undra::api]` | free `fn` | the dispatcher, `FunctionMeta` |
 //! | `#[undra::store]` | struct | `StoreObject`, signal table, restore, `StoreMeta` |
 //! | `#[undra::port]` | trait | `Port`, the proxy, the accessor, the Rust-side dispatcher, `PortMeta` |
+//! | `#[undra::callback]` | trait | `Port`, `CallbackInterface`, the proxy over a host instance, `PortMeta` (ADR-041) |
 //! | `#[undra::query]` / `#[undra::mutation]` | `async fn` | `<Name>Query` / `<Name>Mutation`, `QueryMeta` |
 //! | `#[undra::migrate]` | free `fn` | a `persist::Migration` registration (ADR-037) |
 //!
@@ -40,7 +44,14 @@
 //!   `__undra_cell` field and struct literals of the type inside that impl block get it added.
 //!   Stores with `Computed` fields name a rebuild function with
 //!   `#[undra::store(restore = "Self::rebuild")]`. See [`store`].
-//! * `Lazy<T>` (a lazily paged list) is rejected with E0001 in v1, like in `undra-bindgen`.
+//! * **Newtypes** (ADR-042): a tuple struct of exactly one field is a transparent record: it crosses as
+//!   its inner type and may be a map key when that is one. A unit struct or a tuple struct of two or
+//!   more fields stays E0007.
+//! * **Generic data types** (ADR-042): `#[undra::api(generic)]` on a struct or enum with type parameters
+//!   is a template that registers nothing; `#[undra::api] pub type TodoPage = Page<Todo>;` registers the
+//!   instantiation `TodoPage`. Signatures spell the alias; `Page<Todo>` is E0002.
+//! * `Lazy<T>` (a list the platforms page through, ADR-043) is a store field and nothing else: anywhere
+//!   else, and inside a `Signal`, `Computed` or `DerivedList`, it is E0001.
 //! * `#[undra::error]` derives `Debug` unless the enum already does.
 //! * `async fn`s of a port trait become methods returning boxed futures (`async fn` in traits
 //!   is not dyn compatible); `#[undra::port]` on `impl Trait for Type` blocks rewrites them back
@@ -96,6 +107,17 @@ pub fn api(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_::expand_api(attr.into(), item.into()).into()
 }
 
+/// What the hidden `macro_rules!` of a `#[undra::api(generic)]` type calls to instantiate it
+/// (ADR-042): not written by hand.
+///
+/// Takes the template's definition with the type arguments substituted, under the name of the
+/// alias (`#[undra::api] pub type TodoPage = Page<Todo>;`), and registers that record or enum.
+#[doc(hidden)]
+#[proc_macro]
+pub fn __instantiate(input: TokenStream) -> TokenStream {
+    impl_::expand_instantiate(input.into()).into()
+}
+
 /// Marks an error enum: everything `#[undra::api]` does for an enum, plus `Display` from
 /// `#[error("..")]`, `std::error::Error` and `From` for `#[from]` fields.
 #[proc_macro_attribute]
@@ -139,6 +161,10 @@ pub fn mutation(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// `from = "0x.."` restricts a hook to old data with that fingerprint. The function is kept as
 /// written; the runtime calls it under the panic guard. A wrong target or shape is E0066.
+///
+/// Many changes need no hook. Fields and variants are matched by name, integers widen, `T` becomes
+/// `Option<T>`, and (ADR-042) wrapping a value in a newtype or unwrapping it is lossless, because a
+/// newtype has the bytes of its inner type: `id: Uuid` becoming `id: UserId` migrates by itself.
 #[proc_macro_attribute]
 pub fn migrate(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_::expand_migrate(attr.into(), item.into()).into()
@@ -159,6 +185,23 @@ pub fn migrate(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn port(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_::expand_port(attr.into(), item.into()).into()
+}
+
+/// Marks a trait as a host callback interface (ADR-041): the host implements it, once per
+/// instance, and passes an instance to a method as `Arc<dyn Trait>`; the core calls it back.
+///
+/// A method either reports (`fn m(&self, ..)`, fire-and-forget; `#[undra(coalesce)]` keeps only
+/// the newest pending call of a method per instance) or is `async` and returns `Result<T, E>`
+/// with an `#[undra::error]` enum that implements `From<PortError>` (anything else is E0071).
+/// `#[undra::callback(background)]` makes the host run implementations on a serial executor per
+/// instance instead of on the main thread through the mirror's drain.
+///
+/// Generated: `impl Port for dyn Trait`, `<Trait>Proxy`, `impl CallbackInterface for dyn Trait`
+/// and `PortMeta` with `kind: Callback`. Rust code and tests implement the trait directly and
+/// pass their own `Arc`.
+#[proc_macro_attribute]
+pub fn callback(attr: TokenStream, item: TokenStream) -> TokenStream {
+    impl_::expand_callback(attr.into(), item.into()).into()
 }
 
 /// Marks a struct as a store: an object whose `Signal<T>` and `Computed<T>` fields the

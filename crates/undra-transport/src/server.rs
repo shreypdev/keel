@@ -561,7 +561,7 @@ impl Server {
         let session = match left {
             Some(left) if suspend.is_some() && left.is_live() => Some(left.into_kept()),
             Some(left) => {
-                resume::release_all(&shared.rt, &left.handles);
+                resume::release_retained(&shared.rt, &left);
                 None
             }
             None => None,

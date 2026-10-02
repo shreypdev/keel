@@ -5,8 +5,11 @@ export * from "./call-error.js";
 export * from "./errors.js";
 export * from "./mirror.js";
 export * from "./object.js";
+export * from "./identity.js";
+export * from "./callbacks.js";
 export * from "./port.js";
 export * from "./signal.js";
+export * from "./lazy.js";
 export * from "./stream.js";
 export * from "./version.js";
 export * from "./transport/transport.js";
@@ -26,6 +29,5 @@ export {
   type RestartResult,
   type SnapshotPolicy,
 } from "./recovery.js";
-export type { UndraPanicReport } from "./panic.js";
 export type { WorkerPortsModule } from "./worker.js";
 export type { UndraClass } from "./lifetime.js";

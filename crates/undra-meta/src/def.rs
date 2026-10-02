@@ -72,6 +72,12 @@ pub struct RecordDef {
     pub type_id: u32,
     /// Fields in declaration order, which is also their wire order.
     pub fields: Vec<FieldDef>,
+    /// A one-field tuple struct (`struct UserId(Uuid)`, ADR-042): it crosses as its inner type,
+    /// byte for byte, and the platforms wrap it in their idiomatic newtype. Such a record has
+    /// exactly one field, named `value`, without `default`. Serialized only when `true`, like
+    /// [`SignalDef::no_coalesce`], so no schema without a newtype hashes differently.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub transparent: bool,
     /// Doc comment; excluded from the schema hash.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub docs: String,
@@ -160,6 +166,12 @@ pub struct MethodDef {
     /// Whether the first Rust parameter is a `Ctx` (constructors and free
     /// functions only).
     pub takes_ctx: bool,
+    /// `#[undra(coalesce)]` on a fire-and-forget method of a callback interface (ADR-041): of the
+    /// invocations still waiting in one drain only the newest, per instance and method, is
+    /// delivered (progress reporting). Serialized only when `true`, like
+    /// [`SignalDef::no_coalesce`], so no schema without one hashes differently.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub coalesce: bool,
     /// Doc comment; excluded from the schema hash.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub docs: String,
@@ -243,6 +255,11 @@ pub enum PortKind {
     Async,
     /// Fire-and-forget host to core events; methods return `()`.
     Event,
+    /// A host-implemented callback interface (`#[undra::callback]`, ADR-041): a port with many
+    /// instances, which the host passes in as parameters. Every method is fire-and-forget
+    /// (returns `()`) or `async` with a `Result<T, E>`. A call on an instance is a port call
+    /// whose arguments begin with the instance handle.
+    Callback,
 }
 
 /// A port: a trait implemented by the platform (foreign) or a Rust fake.
@@ -252,8 +269,14 @@ pub struct PortDef {
     pub name: String,
     /// `fnv1a32("port.<name>")`, see [`crate::ids::port_id`].
     pub port_id: u32,
-    /// Sync, async or event.
+    /// Sync, async, event or callback.
     pub kind: PortKind,
+    /// `#[undra::callback(background)]` (ADR-041): the host runs this callback interface's
+    /// implementations on a serial executor per instance, in call order, without waiting for a
+    /// frame, instead of through the mirror's drain on the main thread. Serialized only when
+    /// `true`, so no schema without one hashes differently.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub background: bool,
     /// Port methods; `method_id` is `fnv1a32("<Trait>.<method>")`. Sorted by
     /// name in the canonical form.
     pub methods: Vec<MethodDef>,
@@ -293,4 +316,27 @@ pub struct QueryDef {
     pub persist: bool,
     /// Whether the call is safe to replay (`idempotent`).
     pub idempotent: bool,
+    /// The polling interval in milliseconds (`interval = "30s"`, ADR-043): while an entry has an
+    /// observer and the app is active, it refetches this long after the previous fetch ended.
+    /// Serialized only when set, so no schema without one hashes differently.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_ms: Option<u64>,
+    /// `poll_in_background` (ADR-043): keep polling while the app is in the background.
+    /// Serialized only when `true`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub poll_in_background: bool,
+    /// `infinite` (ADR-043): a paged query. `params` excludes the cursor and `returns` is
+    /// `Vec<T>` (what the handle's `data` carries). Serialized only when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub infinite: Option<InfiniteDef>,
+}
+
+/// What an `infinite` query adds to its [`QueryDef`] (ADR-043).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InfiniteDef {
+    /// The cursor type `C` of the query's `Page<T, C>` (`String` by default).
+    pub cursor: TypeRef,
+    /// The field of the item record `T` that identifies a row (`item_key = "id"`): the handle's
+    /// `data` is a keyed list on it.
+    pub item_key: String,
 }

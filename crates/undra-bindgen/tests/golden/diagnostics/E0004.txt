@@ -1,0 +1,9 @@
+error[undra::E0004]: `Arc<dyn Listener>` at record Holder, field listener: a callback interface is only allowed as a parameter of a method, constructor or function, alone or as `Option`
+  = note: a callback is an instance the host passes in for the core to call back; it has no value to copy, compare or store, and the core never hands one out
+  = help: take the callback as a parameter, or pass a record or an id where a value is needed
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
+
+error[undra::E0004]: `Platform` at object Service, method use_it, param p is referenced as a callback interface, but it is not one
+  = note: a `callback` reference names a trait declared with `#[undra::callback]`
+  = help: declare `Platform` with `#[undra::callback]`, or fix the name
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004

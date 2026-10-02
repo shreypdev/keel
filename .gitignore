@@ -7,6 +7,8 @@ dist
 /runtimes/kotlin/**/build
 /runtimes/kotlin/.gradle
 /runtimes/swift/.build
+# SwiftPM's build directory, wherever a package is built (a generated bindings package included).
+.build/
 # The Android library of @undra/react-native, as an app's Gradle build (the playground's) writes it.
 /runtimes/rn/@undra/react-native/android/build
 /runtimes/rn/@undra/react-native/android/.cxx

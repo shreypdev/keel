@@ -82,15 +82,75 @@ pub fn record1k() -> Record1k {
 // Dispatch fixtures
 // ---------------------------------------------------------------------------------------------
 
+/// A child object: what the object rows hand out and take back (ADR-040).
+pub struct Dock {
+    slots: u32,
+}
+
+#[undra::api]
+impl Dock {
+    pub fn slots(&self) -> u32 {
+        self.slots
+    }
+}
+
+/// What the callback rows call (ADR-041): one fire-and-forget method and one `async` one.
+#[undra::error]
+#[derive(Clone, Debug, PartialEq)]
+pub enum PingError {
+    #[error("the host is gone")]
+    Gone,
+}
+
+impl From<undra::runtime::PortError> for PingError {
+    fn from(_: undra::runtime::PortError) -> Self {
+        PingError::Gone
+    }
+}
+
+#[undra::callback]
+pub trait Pinger {
+    fn ping(&self, n: u32);
+    async fn echo(&self, n: u32) -> Result<u32, PingError>;
+}
+
 /// An object with the smallest interesting methods: the floor of a handle method call.
 pub struct Calculator {
     base: i64,
+    dock: Arc<Dock>,
 }
 
 #[undra::api]
 impl Calculator {
     pub fn new(base: i64) -> Self {
-        Calculator { base }
+        Calculator {
+            base,
+            dock: Arc::new(Dock { slots: 4 }),
+        }
+    }
+
+    /// A new child every call: the first issue of a handle (ADR-040).
+    pub fn fresh_dock(&self) -> Arc<Dock> {
+        Arc::new(Dock {
+            slots: self.base as u32,
+        })
+    }
+
+    /// The same child every call: the handle the host already holds, one more reference.
+    pub fn held_dock(&self) -> Arc<Dock> {
+        Arc::clone(&self.dock)
+    }
+
+    /// A child taken as a parameter: resolved before the method runs.
+    pub fn dock_slots(&self, dock: &Dock) -> u32 {
+        dock.slots
+    }
+
+    /// Takes a host callback and calls it once: the core half of a callback round trip is
+    /// measured on the proxy directly (`boundary/callback/*`); this keeps the dispatcher path
+    /// (decode, intern, pending proxy) in the schema.
+    pub fn ping_it(&self, pinger: Arc<dyn Pinger>) {
+        pinger.ping(1);
     }
 
     /// Sync, primitive arguments and return: the blueprint's "handle method call" row.
@@ -620,6 +680,56 @@ pub fn views_rows(count: u32) -> Vec<Item> {
             done: n % 4 == 3,
         })
         .collect()
+}
+
+/// A store with lazy lists (ADR-043), for the `lazy/*` rows: `books` is an owned list the host pages
+/// through; `open` is a read-only view of `rows` (the rows not done, by title), paged through the
+/// derived list's index. Seeded rows are `views_rows`: every fourth one done, so `open` holds three
+/// quarters of them.
+#[undra::store(restore = "Self::assemble")]
+pub struct Shelf {
+    #[undra(key = "id")]
+    books: Lazy<Item>,
+    rows: Signal<Vec<Item>>,
+    #[undra(key = "id")]
+    open: Lazy<Item>,
+}
+
+#[undra::api(store)]
+impl Shelf {
+    pub fn new(ctx: Ctx) -> Self {
+        Self::assemble(ctx, Lazy::new(), Signal::new(Vec::new()), Lazy::new())
+    }
+
+    /// The restore hook (and what `new` builds): the view is derived data, rebuilt from `rows`.
+    fn assemble(_ctx: Ctx, books: Lazy<Item>, rows: Signal<Vec<Item>>, _open: Lazy<Item>) -> Self {
+        let open = Lazy::over(
+            &rows
+                .derive()
+                .filter(|row: &Item| !row.done)
+                .sort_by_key(|row: &Item| row.title.clone())
+                .build(),
+        );
+        Shelf { books, rows, open }
+    }
+
+    /// Replaces both lists with `count` rows (`views_rows`).
+    pub fn seed(&self, count: u32) {
+        self.books.replace(views_rows(count));
+        self.rows.replace(views_rows(count));
+    }
+
+    /// Flips `done` of the row at `index` of `books`: one `update_at`, one invalidation.
+    pub fn toggle(&self, index: u32) {
+        self.books
+            .update_at(index as usize, |row| row.done = !row.done);
+    }
+
+    /// Flips `done` of the row at `index` of `rows`: the view's membership changes.
+    pub fn toggle_row(&self, index: u32) {
+        self.rows
+            .update_at(index as usize, |row| row.done = !row.done);
+    }
 }
 
 /// An object whose stream is always ready: its rate is whatever the core polls, far above any

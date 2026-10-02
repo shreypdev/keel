@@ -1,0 +1,35 @@
+error: error[undra::E0040]: `interval = "500ms"` is below one second
+         = note: a poll fetches the whole result again each time, so a query polled more than once a second is really a stream: use a stream for real-time data
+         = help: write `interval = "1s"` or more, or deliver the changes with a `#[undra::port]` event or a stream
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0040
+ --> tests/ui/e0040_interval_below_a_second.rs:8:39
+  |
+8 | #[k::query(key = "ticker", interval = "500ms")]
+  |                                       ^^^^^^^
+
+error: error[undra::E0040]: `interval = "0s"` is below one second
+         = note: a poll fetches the whole result again each time, so a query polled more than once a second is really a stream: use a stream for real-time data
+         = help: write `interval = "1s"` or more, or deliver the changes with a `#[undra::port]` event or a stream
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0040
+  --> tests/ui/e0040_interval_below_a_second.rs:13:36
+   |
+13 | #[k::query(key = "now", interval = "0s")]
+   |                                    ^^^^
+
+error: error[undra::E0040]: invalid `interval` duration: `soon` does not start with a whole number
+         = note: `interval` is how long after a fetch ends the next one starts
+         = help: write a whole number and a unit, for example `interval = "30s"`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0040
+  --> tests/ui/e0040_interval_below_a_second.rs:18:38
+   |
+18 | #[k::query(key = "later", interval = "soon")]
+   |                                      ^^^^^^
+
+error: error[undra::E0040]: mutation `add` has `interval`
+         = note: polling and paging apply to cached reads; a mutation writes and caches nothing
+         = help: remove `interval`; put it on the query the mutation invalidates
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0040
+  --> tests/ui/e0040_interval_below_a_second.rs:23:26
+   |
+23 | #[k::mutation(interval = "5s")]
+   |                          ^^^^

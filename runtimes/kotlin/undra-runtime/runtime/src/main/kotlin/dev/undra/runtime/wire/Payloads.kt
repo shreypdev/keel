@@ -276,7 +276,7 @@ public object Payloads {
         /** The value is a keyed patch (see [KeyedPatch]). */
         PATCH(1u),
 
-        /** A lazy list was invalidated; the value is empty and the host re-pages. */
+        /** A lazy list was invalidated; the value is a [LazyInvalidated] (the new length and version) and the host re-pages its window. */
         INVALIDATED(2u);
 
         public companion object {
@@ -769,6 +769,76 @@ public object Payloads {
         }
     }
 
+    // ---- lazy lists (ADR-043 decision 3.2) -------------------------------------------------------------
+
+    /**
+     * The value of a `Lazy<T>` signal (change-set op 0 [ChangeOp.FULL] of that signal, and a restore's re-send):
+     * `handle u64, len u32, version u64`.
+     *
+     * @property handle the page server: the object a [CallTarget.LazyListPage] call is addressed to. It is
+     *   transient: a restore sends a new one.
+     * @property len the number of items.
+     * @property version the version of the list [len] was read at; it increases with every change.
+     */
+    public data class LazyValue(val handle: Handle, val len: UInt, val version: ULong) : Payload {
+        override fun encode(w: UndraWriter) {
+            w.writeI64(handle.raw)
+            w.writeU32(len)
+            w.writeU64(version)
+        }
+
+        public companion object {
+            /** Reads a lazy value from [r]; it does not require the reader to be exhausted. */
+            public fun decode(r: UndraReader): LazyValue = LazyValue(Handle(r.readI64()), r.readU32(), r.readU64())
+
+            /** Decodes a whole lazy value. */
+            public fun decode(bytes: ByteArray): LazyValue = decodeWhole(bytes) { decode(it) }
+        }
+    }
+
+    /**
+     * The value of a change-set entry with op [ChangeOp.INVALIDATED] (op 2): `len u32, version u64`. A host
+     * knows the new length and version without a round trip and re-pages its window.
+     *
+     * @property len the new number of items.
+     * @property version the new version.
+     */
+    public data class LazyInvalidated(val len: UInt, val version: ULong) : Payload {
+        override fun encode(w: UndraWriter) {
+            w.writeU32(len)
+            w.writeU64(version)
+        }
+
+        public companion object {
+            /** Reads a lazy invalidation from [r]; it does not require the reader to be exhausted. */
+            public fun decode(r: UndraReader): LazyInvalidated = LazyInvalidated(r.readU32(), r.readU64())
+
+            /** Decodes a whole lazy invalidation. */
+            public fun decode(bytes: ByteArray): LazyInvalidated = decodeWhole(bytes) { decode(it) }
+        }
+    }
+
+    /**
+     * The header of the reply to a [CallTarget.LazyListPage] call: `version u64, total u32, count u32`, followed
+     * by [count] items, each encoded as the list's item type.
+     *
+     * @property version the version of the list the page was read at.
+     * @property total the number of items the list had.
+     * @property count how many items follow.
+     */
+    public data class LazyPageHeader(val version: ULong, val total: UInt, val count: UInt) : Payload {
+        override fun encode(w: UndraWriter) {
+            w.writeU64(version)
+            w.writeU32(total)
+            w.writeU32(count)
+        }
+
+        public companion object {
+            /** Reads a page header from [r]; the items are left for the caller to read. */
+            public fun decode(r: UndraReader): LazyPageHeader = LazyPageHeader(r.readU64(), r.readU32(), r.readU32())
+        }
+    }
+
     /**
      * host to core (envelope kind EVENT): `port_id u32, method_id u32, payload`. A fire-and-forget
      * call into an event port (`#[undra::port(event)]`).
@@ -892,7 +962,7 @@ public object Payloads {
      * layout): layout 2 of SPEC 5.9 (ADR-037), all little-endian,
      *
      * ```text
-     * count u32, generation_floor u32,
+     * count u32, generation_floor u64,
      * schema_hash u64,
      * type_count u32, types × { type_id u32, fingerprint u64 },
      * description_len u32, description (UTF-8),
@@ -909,7 +979,7 @@ public object Payloads {
      * instead of decoding as something else. [encode] writes what it is given, valid or not.
      *
      * @property generationFloor the highest handle generation the core had issued when the snapshot
-     *   was taken. A restore resumes the core's generation counter above it, so no handle issued before
+     *   was taken (a `u64` since ADR-040: generations are 40 bits). A restore resumes the core's generation counter above it, so no handle issued before
      *   the snapshot (or between it and the restore) is issued again to another object (ADR-022). Opaque
      *   to the host: pass it back unchanged.
      * @property schemaHash the schema hash of the core that took the snapshot.
@@ -920,7 +990,7 @@ public object Payloads {
      * @property stores every snapshotted store.
      */
     public data class Snapshot(
-        val generationFloor: UInt,
+        val generationFloor: ULong,
         val schemaHash: ULong,
         val types: List<StoreType>,
         val description: String,
@@ -965,7 +1035,7 @@ public object Payloads {
 
         override fun encode(w: UndraWriter) {
             w.writeLen(stores.size)
-            w.writeU32(generationFloor)
+            w.writeU64(generationFloor)
             w.writeU64(schemaHash)
             w.writeLen(types.size)
             for (t in types) {
@@ -1007,7 +1077,7 @@ public object Payloads {
              */
             public fun decode(r: UndraReader): Snapshot {
                 val storeCount = r.readLen(MIN_STORE_BYTES)
-                val generationFloor = r.readU32()
+                val generationFloor = r.readU64()
                 val schemaHash = r.readU64()
                 val typeCount = r.readLen(TYPE_BYTES)
                 val types = ArrayList<StoreType>(typeCount)

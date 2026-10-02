@@ -10,7 +10,9 @@ use std::time::Duration;
 
 use proptest::collection::{btree_map, hash_map, vec};
 use proptest::prelude::*;
-use undra_wire::{Bytes, Decode, Encode, Handle, Reader, Timestamp, Uuid, WireError, Writer};
+use undra_wire::{
+    Bytes, Decimal, Decode, Encode, Handle, Reader, Timestamp, Uuid, WireError, Writer,
+};
 
 /// Checks everything that must hold for one value of a type with a canonical encoding:
 ///
@@ -275,7 +277,7 @@ proptest! {
     }
 
     #[test]
-    fn round_trip_handle(raw in any::<u64>(), index in any::<u32>(), generation in any::<u32>()) {
+    fn round_trip_handle(raw in any::<u64>(), index in 0..=Handle::MAX_INDEX, generation in 0..=Handle::MAX_GENERATION) {
         check(&Handle(raw))?;
         prop_assert_eq!(Handle(raw).encode_to_vec(), raw.to_le_bytes().to_vec());
         let h = Handle::new(index, generation);
@@ -296,5 +298,43 @@ proptest! {
         )
     ) {
         check(&doc)?;
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(512))]
+
+    /// ADR-042: a decimal is 16 bytes of mantissa and one of scale, and round-trips exactly,
+    /// text included.
+    #[test]
+    fn decimal_round_trips(mantissa in any::<i128>(), scale in 0u8..=38) {
+        let d = Decimal::new(mantissa, scale);
+        check(&d)?;
+        prop_assert_eq!(d.encode_to_vec().len(), 17);
+        prop_assert_eq!(d.to_string().parse::<Decimal>().unwrap(), d);
+    }
+
+    /// Numeric comparison is a total order that agrees with itself when the scales change.
+    #[test]
+    fn decimal_numeric_order_is_scale_independent(
+        a in any::<i64>(), b in any::<i64>(), sa in 0u8..=18, sb in 0u8..=18, pad in 0u8..=18,
+    ) {
+        let (da, db) = (Decimal::new(i128::from(a), sa), Decimal::new(i128::from(b), sb));
+        prop_assert_eq!(da.cmp_numeric(&db), db.cmp_numeric(&da).reverse());
+        // Appending zeros to the fraction changes the scale, not the number.
+        let scaled = Decimal::new(i128::from(a) * 10_i128.pow(u32::from(pad)), sa + pad);
+        prop_assert!(da.eq_numeric(&scaled));
+        prop_assert_eq!(da.cmp_numeric(&db), scaled.cmp_numeric(&db));
+    }
+
+    /// Any scale above 38 is rejected, wherever the byte comes from.
+    #[test]
+    fn decimal_scale_above_38_is_rejected(mantissa in any::<i128>(), scale in 39u8..=255) {
+        let mut bytes = mantissa.to_le_bytes().to_vec();
+        bytes.push(scale);
+        prop_assert_eq!(
+            Decimal::decode_exact(&bytes).err(),
+            Some(WireError::InvalidTag { tag: u32::from(scale), at: 16, ty: "decimal scale" })
+        );
     }
 }

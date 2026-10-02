@@ -276,12 +276,13 @@ const _: () = {
         const UNDRA_TYPE_ID: u32 = 0;
         const UNDRA_IS_ERROR: bool = false;
         const __UNDRA_IS_OBJECT: bool = false;
+        const __UNDRA_OBJECT_ID: u32 = 0;
     }
     impl<T: ?::core::marker::Sized> __UndraFallback for T {}
     const _: () = {
         if <Row>::__UNDRA_IS_OBJECT {
             ::core::panic!(
-                "error[undra::E0064]: `Row` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
+                "error[undra::E0064]: `Row` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value\n  = help: return it as `Arc<Row>`, take it as `&Row` or `Arc<Row>` (a method, constructor or function parameter or return), or use a record with the data the platform needs\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
         let __undra_id = <Row>::UNDRA_TYPE_ID;

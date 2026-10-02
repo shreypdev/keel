@@ -20,7 +20,7 @@ public final class TodosQueryHandle: UndraStore, ObservableObject, @unchecked Se
     /// When `data` was last updated.
     @Published public private(set) var updatedAt: Date? = nil
 
-    private init(adopting handle: UndraHandle, core: UndraCore) {
+    init(adopting handle: UndraHandle, core: UndraCore) {
         super.init(core: core, handle: handle)
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
@@ -67,6 +67,24 @@ public final class TodosQueryHandle: UndraStore, ObservableObject, @unchecked Se
             )
         } catch {
             self.core.report(error, operation: "TodosQueryHandle.invalidate")
+        }
+    }
+
+    /// Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+    /// The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+    /// An interval below 1 second or above 7 days is clamped to that range.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func setPollInterval(_ interval: UndraDuration?) {
+        var w = UndraWriter()
+        interval.undraEncode(&w)
+        do {
+            _ = try self.core.callSync(
+                .objectMethod(handle: self.handle, methodId: UndraIds.Objects.TodosQueryHandle.setPollInterval),
+                method: UndraIds.Objects.TodosQueryHandle.setPollInterval,
+                args: w.finish()
+            )
+        } catch {
+            self.core.report(error, operation: "TodosQueryHandle.setPollInterval")
         }
     }
 

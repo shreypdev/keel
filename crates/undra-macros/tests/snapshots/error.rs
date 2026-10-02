@@ -215,8 +215,12 @@ const _: () = {
         A: ?::core::marker::Sized + __UndraSameAs<B>,
         B: ?::core::marker::Sized,
     {}
+    fn __undra_leaf<A, K>()
+    where
+        A: ?::core::marker::Sized + ::undra::wire::leaf::WireLeaf<K>,
+    {}
     fn __undra_identity() {
-        __undra_same::<Uuid, ::undra::wire::Uuid>();
+        __undra_leaf::<Uuid, ::undra::wire::leaf::kinds::Uuid>();
         __undra_same::<u16, ::core::primitive::u16>();
         __undra_same::<String, ::std::string::String>();
     }
@@ -224,12 +228,13 @@ const _: () = {
         const UNDRA_TYPE_ID: u32 = 0;
         const UNDRA_IS_ERROR: bool = false;
         const __UNDRA_IS_OBJECT: bool = false;
+        const __UNDRA_OBJECT_ID: u32 = 0;
     }
     impl<T: ?::core::marker::Sized> __UndraFallback for T {}
     const _: () = {
         if <HttpError>::__UNDRA_IS_OBJECT {
             ::core::panic!(
-                "error[undra::E0064]: `HttpError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
+                "error[undra::E0064]: `HttpError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value\n  = help: return it as `Arc<HttpError>`, take it as `&HttpError` or `Arc<HttpError>` (a method, constructor or function parameter or return), or use a record with the data the platform needs\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
         let __undra_id = <HttpError>::UNDRA_TYPE_ID;
@@ -247,7 +252,7 @@ const _: () = {
     const _: () = {
         if <StorageError>::__UNDRA_IS_OBJECT {
             ::core::panic!(
-                "error[undra::E0064]: `StorageError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
+                "error[undra::E0064]: `StorageError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value\n  = help: return it as `Arc<StorageError>`, take it as `&StorageError` or `Arc<StorageError>` (a method, constructor or function parameter or return), or use a record with the data the platform needs\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
         let __undra_id = <StorageError>::UNDRA_TYPE_ID;

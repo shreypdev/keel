@@ -4,7 +4,7 @@
 # Notes tab survives a killed process (SQLite through the `Db` port), then the Remote tab's offline story is driven through
 # uiautomator:
 #
-#   1. fetch      the `inbox` list is fetched and persisted to Kv (files/undra/kv)
+#   1. fetch      the `inbox` list is fetched and persisted to Kv (files/undra/playground_core/kv: per core namespace)
 #   2. toggle     the Offline switch goes on; an added item is queued by the core (the request fails with a network error)
 #   3. kill       the app process is killed with the queue unsent
 #   4. airplane   REAL airplane mode goes on; the app is relaunched: the persisted query shows the cached list (and the
@@ -119,7 +119,9 @@ item_replayed() { rows_are 4 && ui has-text "Queued while offline"; }
 device_offline() { ! adb_ shell dumpsys connectivity | grep -q "Active default network: [0-9]"; }
 screenshot() { adb_ exec-out screencap -p > "$PROOF/android-adapters-$1.png"; echo "screenshot .proof/android-adapters-$1.png"; }
 launch() { adb_ shell am force-stop "$APP"; adb_ logcat -c; run adb_ shell am start -W -n "$ACTIVITY" --es tab "$1"; }
-kv_files() { adb_ shell run-as "$APP" ls files/undra/kv 2>/dev/null | wc -l | tr -d ' '; }
+# The default Kv is per core namespace (ADR-044 amendment A): the playground's core is `playground_core`.
+KV_DIR="files/undra/playground_core/kv"
+kv_files() { adb_ shell run-as "$APP" ls "$KV_DIR" 2>/dev/null | wc -l | tr -d ' '; }
 # The app's own records: the demo server's request log (tag UndraDemoServer) and the adapters' (tag Undra).
 logcat_app() { adb_ logcat -d -v brief 2>/dev/null | grep -E '^[VDIWEF]/(UndraDemoServer|Undra) *\(' || true; }
 show_log() { logcat_app | grep -E "$1" | head -"${2:-6}" || true; }
@@ -152,7 +154,7 @@ adb_ shell dumpsys package "$APP" | grep -E "android.permission.(INTERNET|ACCESS
 
 # ---- 2. every tab launches ----------------------------------------------------------------------------------------
 failed=0
-for tab in todos counter biglist remote notes; do
+for tab in todos counter biglist remote notes library feed ticker; do
   launch "$tab"
   sleep 4
   screenshot "tab-$tab"
@@ -181,8 +183,64 @@ run adb_ shell am force-stop "$APP"
 launch notes
 wait_for 20 "the note came back from SQLite after the restart" note_kept || failed=1
 echo "database files (run-as $APP ls databases): $(adb_ shell run-as "$APP" ls databases 2>/dev/null | tr '\n' ' ')"
-adb_ shell run-as "$APP" ls databases 2>/dev/null | grep -q "undra-playground.sqlite" || { echo "no undra-playground.sqlite"; failed=1; }
+# Per core namespace (ADR-044 amendment A): undra-<namespace>-<database>.sqlite, the core being playground_core.
+DB_FILE="undra-playground_core-playground.sqlite"
+adb_ shell run-as "$APP" ls databases 2>/dev/null | grep -qF "$DB_FILE" || { echo "no $DB_FILE"; failed=1; }
 screenshot notes-restarted
+
+# ---- 2c. the paging screens (ADR-043): Library (lazy lists), Feed (an infinite query), Ticker (a polled query) ---------------
+echo
+echo "## Library, Feed, Ticker: lazy lists, an infinite query and polling on the real core"
+library_ready() { [ "$(ui text library-count)" = "10,000 books" ] && [ "$(ui count library-book)" -ge 5 ]; }
+evens_ready() { ui has-text "Evens: a view of the even rows of the source list (10)" && [ "$(ui count library-even)" -ge 1 ]; }
+library_grew() { [ "$(ui text library-count)" = "10,100 books" ]; }
+last_book_shown() { ui has-text "Item 10100"; }
+feed_rows() { ui text feed-count | tr -d ',' | cut -d' ' -f1; }
+feed_first_page() { [ "$(feed_rows)" = 50 ]; }
+feed_grew() { [ "$(feed_rows)" -ge 100 ]; }
+feed_refreshed() { [ "$(ui text feed-status)" = "Success" ]; }
+counter_value() { ui text ticker-count; }
+ticker_started() { [ "$(counter_value)" -ge 1 ]; }
+ticker_polled() { [ "$(counter_value)" -gt "$first_tick" ]; }
+ticker_failed() { [ "$(ui count ticker-error)" -ge 1 ]; }
+ticker_recovered() { [ "$(ui count ticker-error)" = 0 ]; }
+ticker_on_screen() { [ "$(ui count ticker-count)" -ge 1 ]; }
+ticker_after_resume() { [ "$(counter_value)" -gt "$resumed" ]; }
+adb_ shell pm clear "$APP" >/dev/null
+launch library
+wait_for 20 "the library has 10,000 books and its first pages (rows, not placeholders)" library_ready || failed=1
+wait_for 10 "the evens view has ten rows" evens_ready || failed=1
+screenshot library-loaded
+tap library-add
+wait_for 10 "the library has 10,100 books" library_grew || failed=1
+tap library-end
+wait_for 10 "the last page was fetched: the last book is on screen" last_book_shown || failed=1
+screenshot library-end
+launch feed
+wait_for 20 "the feed has its first page (50 rows)" feed_first_page || failed=1
+screenshot feed-first-page
+for _ in 1 2 3 4 5 6 7 8; do adb_ shell input swipe 540 1700 540 400 150; done
+wait_for 20 "scrolling to the end fetched the next page (100 rows or more)" feed_grew || failed=1
+screenshot feed-scrolled
+tap feed-refresh
+wait_for 10 "the refresh ended (status Success)" feed_refreshed || failed=1
+launch ticker
+wait_for 20 "the ticker has a first value" ticker_started || failed=1
+first_tick="$(counter_value)"
+wait_for 10 "the counter went up by itself (a poll, a second after each fetch)" ticker_polled || failed=1
+echo "ticker-count: $first_tick -> $(counter_value)"
+tap ticker-failing
+wait_for 10 "a failing fetch shows its error and the polling goes on" ticker_failed || failed=1
+tap ticker-failing
+wait_for 10 "the error clears when a fetch succeeds again" ticker_recovered || failed=1
+screenshot ticker
+step "the app goes to the background (the core stops polling) and comes back (it polls again)"
+adb_ shell input keyevent KEYCODE_HOME
+sleep 4
+run adb_ shell am start -W -n "$ACTIVITY" --es tab ticker
+wait_for 10 "the ticker is on screen again" ticker_on_screen || failed=1
+resumed="$(counter_value)"
+wait_for 10 "the counter goes up again after the app came back" ticker_after_resume || failed=1
 
 # ---- 3. the offline story on the Remote tab -----------------------------------------------------------------------
 echo
@@ -194,7 +252,7 @@ fetched_at="$(ui text remote-updated || true)"
 echo "remote-updated: $fetched_at"
 sleep 1 # the persisted copy is written 250 ms after the fetch
 screenshot remote-fetched
-echo "files in the Kv directory (run-as $APP ls files/undra/kv): $(kv_files)"
+echo "files in the Kv directory (run-as $APP ls $KV_DIR): $(kv_files)"
 
 step "1. the Offline switch simulates losing the network; add an item"
 tap remote-offline
@@ -247,7 +305,7 @@ crashes="$(adb_ logcat -d 2>/dev/null | grep -c -E "FATAL EXCEPTION|Fatal signal
 echo "crash markers: $crashes"
 [ "$crashes" = "0" ] || failed=1
 step "files the app keeps (run-as)"
-adb_ shell run-as "$APP" ls -l files/undra/kv 2>/dev/null || true
+adb_ shell run-as "$APP" ls -l "$KV_DIR" 2>/dev/null || true
 
 echo
 if [ "$failed" = 0 ]; then echo "SMOKE PASSED"; else echo "SMOKE FAILED"; exit 1; fi

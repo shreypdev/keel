@@ -3,6 +3,7 @@
 import {
   CallTarget,
   ChangeOp,
+  type Duration,
   Signal,
   type Timestamp,
   UndraCallError,
@@ -105,6 +106,26 @@ export class TodoByIdQueryHandle extends UndraStore {
       );
     } catch (error) {
       this.core.report(error, "TodoByIdQueryHandle.invalidate");
+    }
+  }
+
+  /**
+   * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+   * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+   * An interval below 1 second or above 7 days is clamped to that range.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  async setPollInterval(ms: Duration | null): Promise<void> {
+    try {
+      const w = new UndraWriter();
+      optionDuration.encode(w, ms);
+      await this.core.call(
+        { target: CallTarget.ObjectMethod, handle: this.handle },
+        UndraIds.Objects.TodoByIdQueryHandle.setPollInterval,
+        w.finish(),
+      );
+    } catch (error) {
+      this.core.report(error, "TodoByIdQueryHandle.setPollInterval");
     }
   }
 
@@ -219,6 +240,26 @@ export class TodoCountQueryHandle extends UndraStore {
       );
     } catch (error) {
       this.core.report(error, "TodoCountQueryHandle.invalidate");
+    }
+  }
+
+  /**
+   * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+   * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+   * An interval below 1 second or above 7 days is clamped to that range.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  async setPollInterval(ms: Duration | null): Promise<void> {
+    try {
+      const w = new UndraWriter();
+      optionDuration.encode(w, ms);
+      await this.core.call(
+        { target: CallTarget.ObjectMethod, handle: this.handle },
+        UndraIds.Objects.TodoCountQueryHandle.setPollInterval,
+        w.finish(),
+      );
+    } catch (error) {
+      this.core.report(error, "TodoCountQueryHandle.setPollInterval");
     }
   }
 
@@ -341,6 +382,26 @@ export class TodosQueryHandle extends UndraStore {
     }
   }
 
+  /**
+   * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+   * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+   * An interval below 1 second or above 7 days is clamped to that range.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  async setPollInterval(ms: Duration | null): Promise<void> {
+    try {
+      const w = new UndraWriter();
+      optionDuration.encode(w, ms);
+      await this.core.call(
+        { target: CallTarget.ObjectMethod, handle: this.handle },
+        UndraIds.Objects.TodosQueryHandle.setPollInterval,
+        w.finish(),
+      );
+    } catch (error) {
+      this.core.report(error, "TodosQueryHandle.setPollInterval");
+    }
+  }
+
   protected override _apply(signalId: number, op: ChangeOp, value: Uint8Array): void {
     try {
       switch (signalId) {
@@ -425,6 +486,7 @@ export async function clearTodos(
   }
 }
 
+const optionDuration = codecs.option(codecs.duration);
 const optionTodo = codecs.option(TodoCodec);
 const optionTodoError = codecs.option(TodoErrorCodec);
 const optionTimestamp = codecs.option(codecs.timestamp);

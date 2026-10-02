@@ -5,7 +5,7 @@ import type { UndraClass } from "../src/lifetime.js";
 import { Signal } from "../src/signal.js";
 import { useUndra, useSignal } from "../src/solid.js";
 import { FakeCoreTransport, SCHEMA } from "./support/fake-core.js";
-import { deferred, microtasks, track } from "./support/harness.js";
+import { deferred, macrotask, microtasks, track } from "./support/harness.js";
 import { CounterStore, str, u32, vecU32 } from "./support/store.js";
 
 /** The Solid adapter against Solid's own reactivity (its browser build, which needs no DOM). */
@@ -152,6 +152,8 @@ describe("useUndra (solid)", () => {
     });
     gate.resolve();
     await microtasks(20);
+    await macrotask(); // the close waits one turn (see `openUndra`)
+    await macrotask();
     expect(created).toHaveLength(1);
     expect(created[0]?.closed).toBe(true);
     expect(store()).toBeUndefined();

@@ -1,0 +1,53 @@
+error: error[undra::E0064]: object `Arc<Child>` cannot be a field of a record or enum
+         = note: a record or enum field holds a value: it is copied, compared, hashed and `Codable`, and none of that can carry a reference to an object
+         = help: keep the data the platform needs in the field (an id, a record), and put the child object behind a method of the parent (the object here is `Child`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064
+  --> tests/ui/e0064_objects_where_values_stand.rs:22:16
+   |
+22 |     pub child: Arc<Child>,
+   |                ^^^^^^^^^^
+
+error: error[undra::E0064]: object `Arc<Child>` cannot be used here
+         = note: an object can only stand alone, or inside `Option` or `Vec`, as a method or function parameter or return
+         = help: use `Arc<T>`, `Option<Arc<T>>` or `Vec<Arc<T>>` (a parameter may also be `&T` or `Option<&T>`) (the object here is `Child`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064
+  --> tests/ui/e0064_objects_where_values_stand.rs:33:46
+   |
+33 |     pub fn by_name(&self) -> HashMap<String, Arc<Child>> {
+   |                                              ^^^^^^^^^^
+
+error: error[undra::E0064]: object `Arc<Child>` cannot be used here
+         = note: an object can only stand alone, or inside `Option` or `Vec`, as a method or function parameter or return
+         = help: use `Arc<T>`, `Option<Arc<T>>` or `Vec<Arc<T>>` (a parameter may also be `&T` or `Option<&T>`) (the object here is `Child`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064
+  --> tests/ui/e0064_objects_where_values_stand.rs:37:40
+   |
+37 |     pub fn nested(&self) -> Vec<Option<Arc<Child>>> {
+   |                                        ^^^^^^^^^^
+
+error: error[undra::E0064]: `&Child` cannot be an element of a list
+         = note: a list owns its elements, and a borrow of an object cannot outlive the call that made it
+         = help: write the list as `Vec<Arc<Child>>`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064
+  --> tests/ui/e0064_objects_where_values_stand.rs:41:47
+   |
+41 |     pub fn borrowed_list(&self, children: Vec<&Child>) {}
+   |                                               ^^^^^^
+
+error: error[undra::E0064]: object `Arc<Child>` cannot be the result of a query or mutation
+         = note: query and mutation values are cached, compared and persisted, so they must be values
+         = help: use a record or an id, and return the object from a method that calls the query (the object here is `Child`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064
+  --> tests/ui/e0064_objects_where_values_stand.rs:58:47
+   |
+58 | pub async fn child_query(ctx: &Ctx) -> Result<Arc<Child>, Oops> {
+   |                                               ^^^^^^^^^^
+
+error: error[undra::E0030]: parameter `child` of port method `open` is not a wire type
+         = note: object `Arc<Child>` cannot be a parameter of a port (a port implementation on the platform would receive a reference it has no wrapper type for)
+         = help: pass a record or an id through the port (the object here is `Child`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0030
+  --> tests/ui/e0064_objects_where_values_stand.rs:64:33
+   |
+64 |     async fn open(&self, child: Arc<Child>) -> Result<(), Oops>;
+   |                                 ^^^^^^^^^^

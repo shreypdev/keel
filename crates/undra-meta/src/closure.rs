@@ -82,6 +82,10 @@ pub struct ClosureRecord {
     pub name: String,
     /// Its fields, in wire order.
     pub fields: Vec<ClosureField>,
+    /// A newtype (ADR-042): it crosses as its one field, byte for byte, so a migration may
+    /// wrap a value of the field's type in it or unwrap one. Written only when `true`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub transparent: bool,
 }
 
 /// An enum (or error) reached by a closure.
@@ -117,13 +121,13 @@ pub struct ClosureVariant {
 ///     name: "Todo".into(),
 ///     type_id: undra_meta::ids::type_id("Todo"),
 ///     fields: vec![FieldDef { name: "title".into(), ty: TypeRef::String, default: false, docs: "".into() }],
-///     docs: "A thing to do.".into(),
+///     transparent: false, docs: "A thing to do.".into(),
 /// });
 /// let before = schema.closure(&TypeRef::vec(TypeRef::named("Todo"))).fingerprint();
 ///
 /// // Docs and unrelated items do not move it ...
 /// schema.records[0].docs.clear();
-/// schema.records.push(RecordDef { name: "Other".into(), type_id: 1, fields: vec![], docs: "".into() });
+/// schema.records.push(RecordDef { name: "Other".into(), type_id: 1, fields: vec![], transparent: false, docs: "".into() });
 /// assert_eq!(schema.closure(&TypeRef::vec(TypeRef::named("Todo"))).fingerprint(), before);
 ///
 /// // ... a structural change does.
@@ -404,6 +408,7 @@ impl Schema {
             return Some(Reached::Record(ClosureRecord {
                 name: record.name.clone(),
                 fields: fields(&record.fields),
+                transparent: record.transparent,
             }));
         }
         let en = self.enums.iter().find(|e| e.name == name)?;
@@ -532,6 +537,7 @@ mod tests {
             name: name.into(),
             type_id: ids::type_id(name),
             fields,
+            transparent: false,
             docs: String::new(),
         }
     }
@@ -642,6 +648,9 @@ mod tests {
             stale_ms: None,
             persist: false,
             idempotent: false,
+            interval_ms: None,
+            poll_in_background: false,
+            infinite: None,
         });
         assert_eq!(profile(&s), base);
     }
@@ -762,6 +771,9 @@ mod tests {
             stale_ms: None,
             persist: true,
             idempotent: false,
+            interval_ms: None,
+            poll_in_background: false,
+            infinite: None,
         };
         s.queries.push(q(
             QueryKind::Query,
@@ -808,5 +820,71 @@ mod tests {
         ));
         let c = s.closure(&TypeRef::named("Node"));
         assert_eq!(c.records.len(), 1);
+    }
+
+    #[test]
+    fn a_newtype_is_described_as_transparent_and_moves_the_fingerprint() {
+        let mut s = Schema::new("t");
+        s.records.push(record(
+            "Todo",
+            vec![field("owner", TypeRef::named("UserId"))],
+        ));
+        s.records
+            .push(record("UserId", vec![field("value", TypeRef::Uuid)]));
+        let flat = s.closure(&TypeRef::named("Todo"));
+        assert!(flat.records.iter().all(|r| !r.transparent));
+        s.records[1].transparent = true;
+        let wrapped = s.closure(&TypeRef::named("Todo"));
+        assert!(wrapped.record("UserId").unwrap().transparent);
+        assert_ne!(flat.fingerprint(), wrapped.fingerprint());
+        let text = wrapped.canonical_json();
+        assert!(text.contains("\"transparent\":true"), "{text}");
+        assert_eq!(TypeClosure::from_json(&text).unwrap(), wrapped);
+        assert!(!flat.canonical_json().contains("transparent"));
+    }
+
+    #[test]
+    fn a_lazy_signal_reaches_its_item_and_its_fingerprint_follows_it() {
+        // `books: Lazy<Todo>` is persisted as the `Vec<Todo>` of its items (ADR-043): the closure of
+        // the store reaches `Todo` and `Tag` through it, a change of the item moves the fingerprint,
+        // and `Lazy<T>` is not the same description as `Vec<T>`.
+        let lazy_store = |item: TypeRef| {
+            let mut s = schema();
+            s.objects[0].store.as_mut().unwrap().signals =
+                vec![signal("books", 0, TypeRef::lazy(item), false)];
+            s
+        };
+        let s = lazy_store(TypeRef::named("Todo"));
+        let c = s.store_closure(ids::type_id("Profile")).unwrap();
+        let names: Vec<&str> = c.records.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["Tag", "Todo"], "through Lazy, transitively");
+        let ClosureRoot::Signals { signals } = &c.root else {
+            panic!("{:?}", c.root)
+        };
+        assert_eq!(signals[0].ty, TypeRef::lazy(TypeRef::named("Todo")));
+        // The canonical description round-trips with the `Lazy` (the snapshot carries it).
+        let text = c.canonical_json();
+        assert_eq!(TypeClosure::from_json(&text).unwrap(), c);
+
+        let base = profile(&s);
+        let mut changed = lazy_store(TypeRef::named("Todo"));
+        changed.records[0].fields.push(field("done", TypeRef::Bool));
+        assert_ne!(profile(&changed), base, "a field of the item");
+        let mut nested = lazy_store(TypeRef::named("Todo"));
+        nested.records[1].fields.push(field("color", TypeRef::U8));
+        assert_ne!(profile(&nested), base, "a field of what the item reaches");
+        let mut vec_store = schema();
+        vec_store.objects[0].store.as_mut().unwrap().signals = vec![signal(
+            "books",
+            0,
+            TypeRef::vec(TypeRef::named("Todo")),
+            false,
+        )];
+        assert_ne!(profile(&vec_store), base, "a list is not a lazy list");
+        assert_eq!(
+            profile(&lazy_store(TypeRef::named("Todo"))),
+            base,
+            "and it is stable"
+        );
     }
 }

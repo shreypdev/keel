@@ -1,5 +1,6 @@
 kotlin/.gitignore
 kotlin/build.gradle.kts
+kotlin/src/main/kotlin/dev/undra/twocores/b/Callbacks.kt
 kotlin/src/main/kotlin/dev/undra/twocores/b/Core.kt
 kotlin/src/main/kotlin/dev/undra/twocores/b/Errors.kt
 kotlin/src/main/kotlin/dev/undra/twocores/b/Ids.kt
@@ -10,6 +11,7 @@ kotlin/src/main/kotlin/dev/undra/twocores/b/Stores.kt
 kotlin/src/main/kotlin/dev/undra/twocores/b/Types.kt
 kotlin/src/main/resources/META-INF/proguard/undra-playground_b.pro
 swift/Package.swift
+swift/Sources/PlaygroundB/Generated/Callbacks.swift
 swift/Sources/PlaygroundB/Generated/Core.swift
 swift/Sources/PlaygroundB/Generated/Errors.swift
 swift/Sources/PlaygroundB/Generated/Ids.swift
@@ -22,6 +24,7 @@ swift/Sources/PlaygroundBCoreFFI/include/module.modulemap
 swift/Sources/PlaygroundBCoreFFI/include/playground_b_undra.h
 swift/Sources/PlaygroundBCoreFFI/playground_b_undra.c
 ts/package.json
+ts/src/callbacks.ts
 ts/src/core.ts
 ts/src/errors.ts
 ts/src/ids.ts

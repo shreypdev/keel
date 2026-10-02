@@ -123,3 +123,25 @@ export function valueOf<T>(entries: readonly SignalUpdate[], signalId: number, c
   }
   throw new Error(`no entry for signal ${signalId} among [${entries.map((e) => e.signalId).join(", ")}]`);
 }
+
+/**
+ * Records every change-set entry a generated store is applied, besides what the store does with it: the entries of the store's own
+ * mirror registration, which a generated class hides behind its signals. It wraps the instance's `_apply` (protected in the type
+ * system only), so it sees what the mirror delivers from now on, not the initial values `create()` already applied.
+ *
+ * ```ts
+ * const entries = tapEntries(library);
+ * await library.addRows(1);
+ * entries.filter((e) => e.signalId === 0); // the books entry of that change-set
+ * ```
+ */
+export function tapEntries(store: object): SignalUpdate[] {
+  const entries: SignalUpdate[] = [];
+  const target = store as { _apply(signalId: number, op: ChangeOp, value: Uint8Array): void };
+  const apply = target._apply.bind(target);
+  target._apply = (signalId, op, value) => {
+    entries.push({ signalId, op, value: value.slice() });
+    apply(signalId, op, value);
+  };
+  return entries;
+}

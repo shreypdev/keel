@@ -46,10 +46,21 @@ fn first_difference(expected: &str, actual: &str) -> String {
     )
 }
 
+/// Whether `tokens` hold a `compile_error!` item of their own (a diagnostic), as opposed to one
+/// inside a `macro_rules!` body (the template macro's arity rule, ADR-042).
+fn reports_an_error(tokens: &TokenStream) -> bool {
+    let file: syn::File = syn::parse2(tokens.clone()).expect("generated code parses");
+    file.items.iter().any(|item| {
+        matches!(item, syn::Item::Macro(m)
+            if m.mac.path.segments.last().is_some_and(|seg| seg.ident == "compile_error"))
+    })
+}
+
 fn check(name: &str, tokens: TokenStream) {
+    let diagnostic = reports_an_error(&tokens);
     let actual = pretty(tokens);
     assert!(
-        !actual.contains("compile_error"),
+        !diagnostic,
         "fixture `{name}` produced a diagnostic:\n{actual}"
     );
     let path = snapshot_path(name);
@@ -128,6 +139,88 @@ fn enum_with_every_variant_shape() {
                 }
             },
         ),
+    );
+}
+
+#[test]
+fn newtype() {
+    check(
+        "newtype",
+        api(
+            quote!(),
+            quote! {
+                /// A user's id.
+                #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+                pub struct UserId(pub Uuid);
+            },
+        ),
+    );
+}
+
+#[test]
+fn generic_struct_template() {
+    check(
+        "generic_struct",
+        api(
+            quote!(generic),
+            quote! {
+                /// One page of a list.
+                pub struct Page<T> {
+                    /// The rows.
+                    pub items: Vec<T>,
+                    #[undra(default)]
+                    pub next: Option<String>,
+                    pub by_name: HashMap<String, Vec<Option<T>>>,
+                }
+            },
+        ),
+    );
+}
+
+#[test]
+fn generic_enum_template() {
+    check(
+        "generic_enum",
+        api(
+            quote!(generic),
+            quote! {
+                pub enum Loadable<T, E> {
+                    Loading,
+                    Loaded(T),
+                    Failed { error: E, retry_after: Option<Duration> },
+                }
+            },
+        ),
+    );
+}
+
+#[test]
+fn alias_of_a_template() {
+    check(
+        "generic_alias",
+        api(
+            quote!(),
+            quote! {
+                /// A page of todos.
+                pub type TodoPage = model::Page<Todo>;
+            },
+        ),
+    );
+}
+
+#[test]
+fn instantiation_of_a_struct_template() {
+    check(
+        "generic_instance",
+        impl_::expand_instantiate(quote! {
+            #[undra_instance(template = "Page", crate_name = "", root = "::undra", docs = "One page of a list.", alias_docs = "")]
+            pub struct TodoPage {
+                pub items: Vec<Todo>,
+                #[undra(default)]
+                pub next: Option<String>,
+                pub by_name: HashMap<String, Vec<Option<Todo>>>,
+            }
+        }),
     );
 }
 
@@ -395,6 +488,11 @@ fn every_snapshot_file_has_a_test() {
         "error",
         "object",
         "function",
+        "newtype",
+        "generic_struct",
+        "generic_enum",
+        "generic_alias",
+        "generic_instance",
         "store",
         "store_default_restore",
         "store_impl",
@@ -403,6 +501,9 @@ fn every_snapshot_file_has_a_test() {
         "port_event",
         "port_impl",
         "query",
+        // The polling and paging expansions, compared by the tests of `impl_/query.rs`.
+        "query_polling",
+        "query_infinite",
         "mutation",
         "migrate",
     ];

@@ -81,11 +81,19 @@ test("S16 schema mismatch rejection", async () => {
     }
 
     // What the bindings carry is what the core exports. (The handle of a query is constructed with the query's own id.)
-    const { RemoteTodosQueryHandle: queryHandle, ...objects } = UndraIds.Objects;
-    for (const [name, ids] of Object.entries(objects)) {
+    // A query handle is not an object of the schema: its type id is the query's own id (`RemoteTodosQueryHandle` is `remoteTodos`).
+    const isHandle = (name: string): boolean => name.endsWith("QueryHandle");
+    for (const [name, ids] of Object.entries(UndraIds.Objects)) {
+      if (isHandle(name)) continue;
       expect(schema.objects.find((o) => o.name === name)?.type_id, `type id of ${name}`).toBe(ids.typeId);
     }
-    expect(queryHandle.typeId).toBe(UndraIds.Queries.remoteTodos);
+    const queryIds = UndraIds.Queries as Readonly<Record<string, number>>;
+    const handles = Object.entries(UndraIds.Objects).filter(([name]) => isHandle(name));
+    expect(handles.map(([name]) => name).sort(), "the query handles of the bindings").toEqual(["FeedQueryHandle", "RemoteTodosQueryHandle", "TickerQueryHandle"]);
+    for (const [name, ids] of handles) {
+      const query = name.slice(0, -"QueryHandle".length);
+      expect(ids.typeId, `type id of ${name}`).toBe(queryIds[`${query.charAt(0).toLowerCase()}${query.slice(1)}`]);
+    }
     for (const [name, id] of Object.entries(UndraIds.Functions)) {
       expect(schema.functions.find((f) => camel(f.name) === name)?.method_id, `method id of ${name}`).toBe(id);
     }

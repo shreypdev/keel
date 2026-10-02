@@ -95,8 +95,9 @@ export interface NativePlatformDefaults {
   /** Where `SecureStore` keeps its values (a Keychain service, a Keystore key and a directory). */
   readonly secureStore?: string;
   /**
-   * Where `Db` keeps its databases (ADR-048): `<Application Support>/<bundle id>/Undra/db/<name>.sqlite` on iOS (the
-   * Swift runtime's), `getDatabasePath("undra-<name>.sqlite")` on Android (`android-adapters`').
+   * Where `Db` keeps its databases (ADR-048): `<Application Support>/<bundle id>/undra/<namespace>/db/<name>.sqlite` on iOS (the
+   * Swift runtime's), `getDatabasePath("undra-<namespace>-<name>.sqlite")` on Android (`android-adapters`'): per core
+   * namespace, as every default store is (ADR-044 amendment A).
    */
   readonly db?: string;
   /** Why the platform has no native defaults (Android: the package's Java library or its context is missing). */
@@ -171,7 +172,7 @@ export function startFailure(code: number): string {
 
 /** The schema's ports as the native host registers them. */
 export interface PortPlan {
-  /** Every port that is not an event port. */
+  /** Every port that is not an event port (callback interfaces included: their calls are queued for JavaScript). */
   readonly ports: number[];
   /** `(portId, methodId)` pairs of the synchronous methods of those ports. */
   readonly syncMethods: number[];
@@ -193,6 +194,9 @@ export function portPlan(schemaJson: string): PortPlan {
   for (const port of schema.ports ?? []) {
     if (typeof port.port_id !== "number" || port.kind === "event") continue;
     ports.push(port.port_id);
+    // A host callback interface (ADR-041) is answered later or not at all: its methods report or are `async`, and
+    // the reserved `__release` and `__cancel` are fire-and-forget. None is answered synchronously.
+    if (port.kind === "callback") continue;
     for (const method of port.methods ?? []) {
       if (typeof method.method_id === "number" && method.is_async !== true) {
         syncMethods.push(port.port_id, method.method_id);

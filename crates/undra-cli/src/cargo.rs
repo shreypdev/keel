@@ -463,6 +463,29 @@ pub struct Build {
     /// Arguments for rustc itself, after `--` (`-Clink-arg=...`): they apply to the shim only,
     /// never to the dependencies, which stay shared with the workspace's own builds.
     pub rustc_args: Vec<String>,
+    /// Extra `--config` arguments (`profile.release.split-debuginfo="unpacked"`): Cargo settings
+    /// that hold for this build only, for what a profile in the shim's manifest cannot say because it
+    /// depends on the target.
+    pub cargo_config: Vec<String>,
+    /// The directories a release build names by a fixed label instead of by where they are on this
+    /// machine (see [`RemapRoots`]).
+    pub remap: RemapRoots,
+}
+
+/// The `--config` argument that sets `split-debuginfo = "unpacked"` for `profile` (ADR-046: on
+/// Apple targets the debug info stays in the objects, which the prelinked iOS object and the host
+/// dylib's dSYM are made from). Not a line of the shim's manifest, because on ELF targets `unpacked`
+/// would leave the DWARF in `.dwo` files next to the objects instead of in the library.
+#[must_use]
+pub fn unpacked_debuginfo(profile: Profile) -> String {
+    format!(
+        "profile.{}.split-debuginfo=\"unpacked\"",
+        match profile {
+            Profile::Dev => "dev",
+            Profile::Release => "release",
+            Profile::ReleaseWasm => "release-wasm",
+        }
+    )
 }
 
 impl Cargo<'_> {
@@ -524,7 +547,10 @@ impl Cargo<'_> {
         }
         let mut cmd = Command::new(&cargo);
         cmd.arg("rustc");
-        match self.path_remap(build.profile) {
+        for config in &build.cargo_config {
+            cmd.arg("--config").arg(config);
+        }
+        match self.path_remap(build.profile, &build.remap) {
             Some(PathRemap::Config(arg)) => {
                 cmd.arg("--config").arg(arg);
             }
@@ -623,29 +649,58 @@ impl Cargo<'_> {
         })
     }
 
-    /// How a build of `profile` keeps the builder's directories out of the binary: `None` for a
-    /// dev build (and without a home directory), see [`PathRemap`] otherwise.
+    /// How a build of `profile` keeps the builder's directories out of the binary and makes it the
+    /// same bytes wherever the project is checked out: `None` for a dev build (and when there is
+    /// nothing to remap), see [`PathRemap`] otherwise.
+    ///
+    /// The prefixes, from the widest to the narrowest (rustc applies the **last** that matches, so
+    /// a directory below another one is listed after it): the home directory (`~`), a `CARGO_HOME`
+    /// outside it (`/cargo`), Cargo's registry and git sources (`/undra/deps`), the Undra
+    /// checkout the core is built against (`/undra/src`) and the project's own workspace
+    /// (`/undra/app`).
     #[must_use]
-    pub fn path_remap(&self, profile: Profile) -> Option<PathRemap> {
+    pub fn path_remap(&self, profile: Profile, roots: &RemapRoots) -> Option<PathRemap> {
         if profile == Profile::Dev {
             return None;
         }
-        let home = self.sys.home()?;
-        let mut flags = Vec::new();
-        // `CARGO_HOME` is a prefix of its own only when it is not below the home directory, so the
-        // two never overlap.
-        let mut prefixes = vec![(home.clone(), "~".to_owned())];
-        if let Some(cargo_home) = self.sys.env("CARGO_HOME").map(PathBuf::from) {
-            if !cargo_home.starts_with(&home) {
-                prefixes.push((cargo_home, "/cargo".to_owned()));
+        // A root or relative directory would remap every path, or none; neither is wanted.
+        let usable = |p: &Path| p.is_absolute() && p.parent().is_some();
+        let home = self.sys.home().filter(|h| usable(h));
+        let env_cargo_home = self.sys.env("CARGO_HOME").map(PathBuf::from);
+        let cargo_home = env_cargo_home
+            .clone()
+            .or_else(|| home.as_ref().map(|h| h.join(".cargo")));
+        // On the same path the first entry wins: the checkout of Undra over the project (an
+        // in-repo example is the repository's workspace, and `/undra/src` says where it is).
+        let mut prefixes: Vec<(PathBuf, &str)> = Vec::new();
+        prefixes.extend(roots.undra.iter().map(|p| (p.clone(), UNDRA_SRC)));
+        prefixes.extend(roots.app.iter().map(|p| (p.clone(), UNDRA_APP)));
+        if let Some(cargo_home) = &cargo_home {
+            prefixes.push((cargo_home.join("registry").join("src"), UNDRA_DEPS));
+            prefixes.push((cargo_home.join("git").join("checkouts"), UNDRA_DEPS));
+        }
+        // `CARGO_HOME` is a prefix of its own only when it is not below the home directory.
+        if let Some(cargo_home) = env_cargo_home {
+            if !home.as_ref().is_some_and(|h| cargo_home.starts_with(h)) {
+                prefixes.push((cargo_home, "/cargo"));
             }
         }
-        for (from, to) in prefixes {
-            // A root or relative "home" would remap every path, or none; neither is wanted.
-            if from.is_absolute() && from.parent().is_some() {
-                flags.push(format!("--remap-path-prefix={}={to}", from.display()));
-            }
+        if let Some(home) = home {
+            prefixes.push((home, "~"));
         }
+        let mut seen: Vec<PathBuf> = Vec::new();
+        prefixes.retain(|(from, _)| {
+            if !usable(from) || seen.contains(from) {
+                return false;
+            }
+            seen.push(from.clone());
+            true
+        });
+        prefixes.sort_by_key(|(from, _)| from.components().count());
+        let mut flags: Vec<String> = prefixes
+            .iter()
+            .map(|(from, to)| format!("--remap-path-prefix={}={to}", from.display()))
+            .collect();
         if flags.is_empty() {
             return None;
         }
@@ -715,18 +770,64 @@ impl Cargo<'_> {
     }
 }
 
-/// How a release build keeps the builder's directories out of the binary it ships.
+/// What a release build calls the checkout of the Undra repository it is built against.
+const UNDRA_SRC: &str = "/undra/src";
+/// What a release build calls the project's workspace (the project itself when it has none).
+const UNDRA_APP: &str = "/undra/app";
+/// What a release build calls Cargo's registry and git sources.
+const UNDRA_DEPS: &str = "/undra/deps";
+
+/// The directories of one build that a release build names by a fixed label instead of by where
+/// they are on this machine, so that the same project builds to the same bytes in any checkout
+/// (ADR-052: the gzipped size of the hello world moved with the length of the checkout's path,
+/// and nothing that ships should name a machine). Each list holds the directory as Cargo
+/// names it and, when it differs, its canonical form (a symlinked `/tmp`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RemapRoots {
+    /// The checkout of the Undra repository a path dependency of the core points at.
+    pub undra: Vec<PathBuf>,
+    /// The root of the project's Cargo workspace, or the project's own root when the core is a
+    /// workspace of its own. Every core of a workspace shares it, so building two of them into
+    /// one target directory does not rebuild the dependencies (Cargo fingerprints the flags).
+    pub app: Vec<PathBuf>,
+}
+
+impl RemapRoots {
+    /// The roots of the directories `undra` and `app`, each with its canonical form.
+    #[must_use]
+    pub fn new(undra: Option<&Path>, app: &Path) -> RemapRoots {
+        fn both(dir: &Path) -> Vec<PathBuf> {
+            let mut dirs = vec![dir.to_path_buf()];
+            if let Ok(real) = dir.canonicalize() {
+                if real != dir {
+                    dirs.push(real);
+                }
+            }
+            dirs
+        }
+        RemapRoots {
+            undra: undra.map(both).unwrap_or_default(),
+            app: both(app),
+        }
+    }
+}
+
+/// How a release build keeps the builder's directories out of the binary it ships, and makes the
+/// binary the same bytes in any checkout.
 ///
 /// Panic locations embed the path of the source file they come from, and the Undra crates, a
-/// path dependency and every registry crate live under the builder's home directory
+/// path dependency and every registry crate live under the builder's directories
 /// (`/Users/<name>/...`, `~/.cargo/registry/...`): without a remapping every shipped wasm module,
-/// XCFramework and `.so` carries the user name and the layout of the machine it was built on
-/// (ADR-052). A release build therefore remaps the home directory to `~` (and `CARGO_HOME`, when
-/// it is elsewhere, to `/cargo`) for every crate of the build, not only the shim, through
-/// `build.rustflags`, which Cargo merges with the project's own. Cargo ignores `build.rustflags`
-/// when `RUSTFLAGS` or `CARGO_ENCODED_RUSTFLAGS` is set, so the flags are then appended to that
-/// variable instead. A project that sets `target.<triple>.rustflags` in its Cargo config
-/// overrides `build.rustflags` as well; it adds `--remap-path-prefix` there itself.
+/// XCFramework and `.so` carries the user name and the layout of the machine it was built on, and
+/// its size moves with the length of the checkout's path (ADR-052). A release build therefore
+/// remaps, for every crate of the build and not only the shim, through `build.rustflags` (which
+/// Cargo merges with the project's own): the home directory to `~`, a `CARGO_HOME` outside it to
+/// `/cargo`, Cargo's registry and git sources to `/undra/deps`, the Undra checkout the core is
+/// built against to `/undra/src` and the project's workspace to `/undra/app` (see
+/// [`RemapRoots`]). Cargo ignores `build.rustflags` when `RUSTFLAGS` or `CARGO_ENCODED_RUSTFLAGS`
+/// is set, so the flags are then appended to that variable instead. A project that sets
+/// `target.<triple>.rustflags` in its Cargo config overrides `build.rustflags` as well; it adds
+/// `--remap-path-prefix` there itself.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PathRemap {
     /// The `--config` argument: `build.rustflags=["--remap-path-prefix=..", ..]`.
@@ -1037,6 +1138,18 @@ mod tests {
     }
 
     #[test]
+    fn apple_builds_leave_the_debug_info_in_the_objects() {
+        assert_eq!(
+            unpacked_debuginfo(Profile::Release),
+            "profile.release.split-debuginfo=\"unpacked\""
+        );
+        assert_eq!(
+            unpacked_debuginfo(Profile::Dev),
+            "profile.dev.split-debuginfo=\"unpacked\""
+        );
+    }
+
+    #[test]
     fn a_missing_rust_target_names_the_fix() {
         use crate::sys::fake::FakeSys;
         let sys = FakeSys::macos()
@@ -1058,13 +1171,35 @@ mod tests {
         assert_eq!(e.fix, "rustup target add aarch64-apple-ios");
     }
 
-    fn remap_of(sys: &crate::sys::fake::FakeSys, profile: Profile) -> Option<PathRemap> {
+    fn remap_with(
+        sys: &crate::sys::fake::FakeSys,
+        profile: Profile,
+        roots: &RemapRoots,
+    ) -> Option<PathRemap> {
         let tc = Toolchain::default();
         Cargo {
             toolchain: &tc,
             sys,
         }
-        .path_remap(profile)
+        .path_remap(profile, roots)
+    }
+
+    fn remap_of(sys: &crate::sys::fake::FakeSys, profile: Profile) -> Option<PathRemap> {
+        remap_with(sys, profile, &RemapRoots::default())
+    }
+
+    /// The flags of a remapping, one string each (the `--config` array or the encoded variable).
+    fn flags_of(remap: Option<PathRemap>) -> Vec<String> {
+        match remap.expect("a remapping") {
+            PathRemap::Config(arg) => arg
+                .strip_prefix("build.rustflags=[")
+                .and_then(|a| a.strip_suffix(']'))
+                .expect("a rustflags array")
+                .split(", ")
+                .map(|f| f.trim_matches('"').to_owned())
+                .collect(),
+            PathRemap::EncodedEnv(flags) => flags.split('\u{1f}').map(str::to_owned).collect(),
+        }
     }
 
     #[test]
@@ -1076,42 +1211,45 @@ mod tests {
             None,
             "dev builds keep real paths"
         );
-        let expected = Some(PathRemap::Config(
-            r#"build.rustflags=["--remap-path-prefix=/Users/dev=~"]"#.to_owned(),
-        ));
-        assert_eq!(remap_of(&sys, Profile::Release), expected);
-        assert_eq!(remap_of(&sys, Profile::ReleaseWasm), expected);
+        let expected = vec![
+            "--remap-path-prefix=/Users/dev=~",
+            "--remap-path-prefix=/Users/dev/.cargo/registry/src=/undra/deps",
+            "--remap-path-prefix=/Users/dev/.cargo/git/checkouts=/undra/deps",
+        ];
+        assert_eq!(flags_of(remap_of(&sys, Profile::Release)), expected);
+        assert_eq!(flags_of(remap_of(&sys, Profile::ReleaseWasm)), expected);
 
         // A rustc that knows the scope flag remaps the binary only, not its messages.
         let sys = FakeSys::macos()
             .with_tool("rustc", "/Users/dev/.cargo/bin/rustc")
             .with_output("rustc", "--remap-path-scope=object --print sysroot", "/x\n");
-        assert_eq!(
-            remap_of(&sys, Profile::ReleaseWasm),
-            Some(PathRemap::Config(
-                r#"build.rustflags=["--remap-path-prefix=/Users/dev=~", "--remap-path-scope=object"]"#
-                    .to_owned()
-            ))
-        );
+        let flags = flags_of(remap_of(&sys, Profile::ReleaseWasm));
+        assert_eq!(flags.last().unwrap(), "--remap-path-scope=object");
+        assert_eq!(flags.len(), 4);
 
-        // A CARGO_HOME elsewhere is a second prefix; one under the home directory is not.
+        // A CARGO_HOME elsewhere is a prefix of its own, listed before what is below it (rustc
+        // applies the last prefix that matches); one under the home directory is not.
         let sys = FakeSys::linux().with_env("CARGO_HOME", "/opt/cargo");
         assert_eq!(
-            remap_of(&sys, Profile::Release),
-            Some(PathRemap::Config(
-                r#"build.rustflags=["--remap-path-prefix=/home/dev=~", "--remap-path-prefix=/opt/cargo=/cargo"]"#
-                    .to_owned()
-            ))
+            flags_of(remap_of(&sys, Profile::Release)),
+            [
+                "--remap-path-prefix=/opt/cargo=/cargo",
+                "--remap-path-prefix=/home/dev=~",
+                "--remap-path-prefix=/opt/cargo/registry/src=/undra/deps",
+                "--remap-path-prefix=/opt/cargo/git/checkouts=/undra/deps",
+            ]
         );
         let sys = FakeSys::linux().with_env("CARGO_HOME", "/home/dev/.cargo");
         assert_eq!(
-            remap_of(&sys, Profile::Release),
-            Some(PathRemap::Config(
-                r#"build.rustflags=["--remap-path-prefix=/home/dev=~"]"#.to_owned()
-            ))
+            flags_of(remap_of(&sys, Profile::Release)),
+            [
+                "--remap-path-prefix=/home/dev=~",
+                "--remap-path-prefix=/home/dev/.cargo/registry/src=/undra/deps",
+                "--remap-path-prefix=/home/dev/.cargo/git/checkouts=/undra/deps",
+            ]
         );
 
-        // No home, or a home that is the root: nothing to remap.
+        // No home and no CARGO_HOME, or a home that is the root: nothing to remap.
         let mut sys = FakeSys::linux();
         sys.home = None;
         assert_eq!(remap_of(&sys, Profile::Release), None);
@@ -1120,23 +1258,116 @@ mod tests {
     }
 
     #[test]
+    fn release_builds_name_the_project_and_the_undra_checkout_by_fixed_labels() {
+        use crate::sys::fake::FakeSys;
+        let sys = FakeSys::macos();
+        // The hello world: a project of its own below the Undra checkout, which is not its workspace.
+        let roots = RemapRoots {
+            undra: vec![PathBuf::from("/Users/dev/src/undra")],
+            app: vec![PathBuf::from("/Users/dev/src/undra/target/wasm-size/hello")],
+        };
+        assert_eq!(
+            flags_of(remap_with(&sys, Profile::ReleaseWasm, &roots)),
+            [
+                "--remap-path-prefix=/Users/dev=~",
+                "--remap-path-prefix=/Users/dev/src/undra=/undra/src",
+                "--remap-path-prefix=/Users/dev/.cargo/registry/src=/undra/deps",
+                "--remap-path-prefix=/Users/dev/.cargo/git/checkouts=/undra/deps",
+                "--remap-path-prefix=/Users/dev/src/undra/target/wasm-size/hello=/undra/app",
+            ],
+            "by depth: a directory below another is listed after it, and rustc applies the last match"
+        );
+        // Whichever order the roots arrive in, the narrower prefix is the later one.
+        let swapped = RemapRoots {
+            undra: vec![PathBuf::from("/Users/dev/src/undra/target/wasm-size/hello")],
+            app: vec![PathBuf::from("/Users/dev/src/undra")],
+        };
+        let flags = flags_of(remap_with(&sys, Profile::Release, &swapped));
+        let at = |needle: &str| flags.iter().position(|f| f.contains(needle)).unwrap();
+        assert!(at("src/undra=/undra/app") < at("hello=/undra/src"));
+        // The same directory is named once, as the Undra checkout (an in-repo example's workspace
+        // is the repository) and with its canonical form too when it is another path.
+        let in_repo = RemapRoots {
+            undra: vec![PathBuf::from("/r/undra"), PathBuf::from("/private/r/undra")],
+            app: vec![PathBuf::from("/r/undra")],
+        };
+        let flags = flags_of(remap_with(&sys, Profile::Release, &in_repo));
+        assert_eq!(
+            flags
+                .iter()
+                .filter(|f| f.ends_with("=/undra/src") || f.ends_with("=/undra/app"))
+                .cloned()
+                .collect::<Vec<_>>(),
+            [
+                "--remap-path-prefix=/r/undra=/undra/src",
+                "--remap-path-prefix=/private/r/undra=/undra/src"
+            ]
+        );
+        // A relative or root directory remaps everything or nothing, and is left out.
+        let bad = RemapRoots {
+            undra: vec![PathBuf::from("/"), PathBuf::from("undra")],
+            app: vec![PathBuf::from("app")],
+        };
+        assert_eq!(
+            flags_of(remap_with(&sys, Profile::Release, &bad)).len(),
+            3,
+            "the home directory and the two Cargo source directories only"
+        );
+        // Dev builds keep real paths whatever the roots.
+        assert_eq!(remap_with(&sys, Profile::Dev, &roots), None);
+    }
+
+    #[test]
+    fn the_roots_of_two_checkouts_of_one_project_give_the_same_flags_but_for_their_paths() {
+        use crate::sys::fake::FakeSys;
+        let sys = FakeSys::linux();
+        let flags = |dir: &str| {
+            flags_of(remap_with(
+                &sys,
+                Profile::ReleaseWasm,
+                &RemapRoots::new(Some(Path::new("/srv/undra")), Path::new(dir)),
+            ))
+        };
+        let (a, b) = (flags("/tmp/a/hello"), flags("/tmp/much/longer/b/hello"));
+        let labels = |flags: &[String]| -> Vec<String> {
+            flags
+                .iter()
+                .map(|f| f.rsplit('=').next().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(
+            labels(&a),
+            labels(&b),
+            "the same labels, so the same strings in the binary"
+        );
+        assert!(a.contains(&"--remap-path-prefix=/tmp/a/hello=/undra/app".to_owned()));
+        assert!(b.contains(&"--remap-path-prefix=/tmp/much/longer/b/hello=/undra/app".to_owned()));
+    }
+
+    #[test]
     fn rustflags_in_the_environment_are_extended_not_replaced() {
         use crate::sys::fake::FakeSys;
         // Cargo ignores build.rustflags when RUSTFLAGS is set: the remapping joins the user's flags.
         let sys = FakeSys::macos().with_env("RUSTFLAGS", "-C  target-cpu=native");
-        assert_eq!(
+        let flags = flags_of(remap_of(&sys, Profile::Release));
+        assert!(matches!(
             remap_of(&sys, Profile::Release),
-            Some(PathRemap::EncodedEnv(
-                "-C\u{1f}target-cpu=native\u{1f}--remap-path-prefix=/Users/dev=~".to_owned()
-            ))
+            Some(PathRemap::EncodedEnv(_))
+        ));
+        assert_eq!(
+            flags[..3],
+            [
+                "-C",
+                "target-cpu=native",
+                "--remap-path-prefix=/Users/dev=~"
+            ]
         );
         // CARGO_ENCODED_RUSTFLAGS wins over RUSTFLAGS in Cargo, and here.
         let sys = sys.with_env("CARGO_ENCODED_RUSTFLAGS", "--cfg\u{1f}a b");
+        let flags = flags_of(remap_of(&sys, Profile::Release));
         assert_eq!(
-            remap_of(&sys, Profile::Release),
-            Some(PathRemap::EncodedEnv(
-                "--cfg\u{1f}a b\u{1f}--remap-path-prefix=/Users/dev=~".to_owned()
-            ))
+            flags[..3],
+            ["--cfg", "a b", "--remap-path-prefix=/Users/dev=~"]
         );
     }
 

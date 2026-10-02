@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 
 use undra::meta::{QueryKind, TypeRef, collect_schema, ids};
-use undra::query::{MutationDef, QueryDef};
+use undra::query::{InfiniteQueryDef, MutationDef, QueryDef};
 use undra::runtime::Ctx;
 use undra::wire::Encode;
 use undra_macros as k;
@@ -46,6 +46,37 @@ pub async fn todos(ctx: &Ctx, page: u32, q: String) -> Result<Vec<Todo>, NetErro
 async fn count(ctx: Ctx) -> Result<u32, NetError> {
     let _ = ctx;
     Ok(3)
+}
+
+/// A polled feed of todos, paged by an opaque cursor.
+#[k::query(
+    key = "feed/{tag}",
+    infinite,
+    item_key = "id",
+    stale = "1m",
+    interval = "1m",
+    poll_in_background,
+    refetch_pages = 2,
+    persist,
+    persist_pages = 3
+)]
+pub async fn feed(
+    ctx: &Ctx,
+    tag: String,
+    #[undra(cursor)] cursor: Option<String>,
+) -> Result<undra::query::Page<Todo, String>, NetError> {
+    let _ = ctx;
+    let from: u32 = cursor.as_deref().map_or(0, |c| c.parse().unwrap());
+    let next = (from < 4).then(|| (from + 2).to_string());
+    Ok(undra::query::Page::new(
+        (from..from + 2)
+            .map(|id| Todo {
+                id,
+                title: tag.clone(),
+            })
+            .collect(),
+        next,
+    ))
 }
 
 #[k::mutation(idempotent, retry = 2, key = "todos")]
@@ -220,4 +251,103 @@ fn the_registered_schema_with_queries_validates() {
     collect_schema("queries-test")
         .validate()
         .unwrap_or_else(|errors| panic!("{errors:#?}"));
+}
+
+#[test]
+fn polling_and_paging_constants_follow_the_arguments() {
+    assert_eq!(FeedQuery::INTERVAL_MS, Some(60_000));
+    assert!(flag(FeedQuery::POLL_IN_BACKGROUND));
+    assert_eq!(FeedQuery::ITEM_KEY, "id");
+    assert_eq!(FeedQuery::REFETCH_PAGES, Some(2));
+    assert_eq!(FeedQuery::PERSIST_PAGES, 3);
+    assert_eq!(<FeedQuery as QueryDef>::INTERVAL_MS, Some(60_000));
+    assert!(flag(<FeedQuery as QueryDef>::POLL_IN_BACKGROUND));
+    // An ordinary query does not poll, and `InfiniteQueryDef` is not implemented for it.
+    assert_eq!(TodosQuery::INTERVAL_MS, None);
+    assert!(!flag(TodosQuery::POLL_IN_BACKGROUND));
+    assert_eq!(<CountQuery as QueryDef>::INTERVAL_MS, None);
+    assert!(<CountQuery as QueryDef>::PAGED.is_none());
+    assert!(<FeedQuery as QueryDef>::PAGED.is_some());
+}
+
+#[test]
+fn an_infinite_query_is_a_query_def_of_its_list_and_an_infinite_def_of_its_pages() {
+    fn list<Q: QueryDef<Params = (String,), Output = Vec<Todo>, Error = NetError>>() {}
+    list::<FeedQuery>();
+    fn pages<Q: InfiniteQueryDef<Item = Todo, Cursor = String>>() {}
+    pages::<FeedQuery>();
+
+    let ctx = Runtime::new().ctx();
+    // One page at a cursor: `None` is the first page, the cursor goes where it was declared.
+    let first = block_on(FeedQuery::fetch_page(ctx.clone(), ("a".to_owned(),), None)).unwrap();
+    assert_eq!(first.items.len(), 2);
+    assert_eq!(first.next.as_deref(), Some("2"));
+    let last = block_on(FeedQuery::fetch_page(
+        ctx.clone(),
+        ("a".to_owned(),),
+        Some("4".to_owned()),
+    ))
+    .unwrap();
+    assert_eq!(last.items[0].id, 4);
+    assert_eq!(last.next, None);
+    // `fetch` is the first page's rows.
+    assert_eq!(
+        block_on(FeedQuery::fetch(ctx, ("a".to_owned(),))).unwrap(),
+        first.items
+    );
+}
+
+#[test]
+fn the_item_key_is_the_hash_of_the_encoded_key_field() {
+    let todo = Todo {
+        id: 7,
+        title: "x".into(),
+    };
+    assert_eq!(
+        FeedQuery::item_key(&todo),
+        ids::fnv1a64(&7_u32.encode_to_vec())
+    );
+    let other = Todo {
+        id: 8,
+        title: "x".into(),
+    };
+    assert_ne!(FeedQuery::item_key(&todo), FeedQuery::item_key(&other));
+    assert_eq!(
+        FeedQuery::item_key(&todo),
+        FeedQuery::item_key(&Todo {
+            id: 7,
+            title: "another title".into()
+        }),
+        "only the key field counts"
+    );
+}
+
+#[test]
+fn query_meta_of_a_polled_and_infinite_query() {
+    let schema = collect_schema("queries-test");
+    let query = |name: &str| schema.queries.iter().find(|q| q.name == name).unwrap();
+    let feed = query("feed");
+    assert_eq!(feed.interval_ms, Some(60_000));
+    assert!(feed.poll_in_background);
+    assert_eq!(
+        feed.params
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>(),
+        ["tag"],
+        "the cursor is not a schema parameter"
+    );
+    assert_eq!(
+        feed.returns,
+        TypeRef::result(
+            TypeRef::vec(TypeRef::named("Todo")),
+            TypeRef::named("NetError")
+        )
+    );
+    let infinite = feed.infinite.as_ref().unwrap();
+    assert_eq!(infinite.cursor, TypeRef::String);
+    assert_eq!(infinite.item_key, "id");
+    let todos = query("todos");
+    assert_eq!((todos.interval_ms, todos.poll_in_background), (None, false));
+    assert_eq!(todos.infinite, None);
 }

@@ -59,4 +59,6 @@ class WireVector(
     val value: JV,
     val hex: String,
     val note: String,
+    /** A vector every decoder must reject: the `type` name the `InvalidTag` carries (ADR-042). */
+    val error: String? = null,
 )

@@ -1,7 +1,13 @@
 //! The Kotlin generator (SPEC section 10.2).
 //!
 //! Output: `src/main/kotlin/<package path>/{Types,Errors,Objects,Stores,Ports,Queries,Ids,Core}.kt`
-//! and the R8 consumer rules of the core, `src/main/resources/META-INF/proguard/undra-<namespace>.pro`.
+//! (plus `Callbacks.kt` when the schema has callback interfaces, ADR-041) and the R8 consumer rules of
+//! the core, `src/main/resources/META-INF/proguard/undra-<namespace>.pro`.
+//!
+//! Objects cross as parameters and returns (ADR-040, `kotlin_objects.rs`): every wrapper is made
+//! through the core's identity map (`UndraCore.adopt`), so one handle is one wrapper, and a
+//! wrapper's constructor is `internal` (the bindings make wrappers; apps call the companion's
+//! factories).
 //! Generated code depends only on `dev.undra.runtime` and `dev.undra.runtime.wire`
 //! (SPEC section 17.2) and kotlinx-coroutines. `Core.kt` declares the core's JNI natives
 //! (`UndraCoreNative`, whose `JNI_OnLoad` registration the core makes, ADR-044) and its entry
@@ -25,6 +31,11 @@ use undra_meta::{
 
 use crate::emit::CodeWriter;
 use crate::model::{self, Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, parse_message};
+
+#[path = "kotlin_callbacks.rs"]
+mod callbacks;
+#[path = "kotlin_objects.rs"]
+mod objects;
 use crate::naming;
 use crate::zero::ZeroState;
 use crate::{GeneratedFile, Generator};
@@ -86,6 +97,10 @@ pub(crate) fn generate(model: &Model, cfg: &Generator) -> Vec<GeneratedFile> {
             path: format!("{dir}/{name}.kt"),
             contents,
         })
+        .chain(kt.callbacks_file().map(|contents| GeneratedFile {
+            path: format!("{dir}/Callbacks.kt"),
+            contents,
+        }))
         .chain(std::iter::once(kt.proguard_file()))
         .collect()
 }
@@ -137,6 +152,7 @@ const QUALIFIED: &[(&str, &str)] = &[
     ("Unit", "kotlin.Unit"),
     ("Duration", "kotlin.time.Duration"),
     ("UUID", "java.util.UUID"),
+    ("BigDecimal", "java.math.BigDecimal"),
     ("Timestamp", "dev.undra.runtime.wire.Timestamp"),
 ];
 
@@ -326,6 +342,7 @@ impl<'a> Ctx<'a> {
             TypeRef::Duration => self.builtin("Duration", sh),
             TypeRef::Timestamp => self.builtin("Timestamp", sh),
             TypeRef::Uuid => self.builtin("UUID", sh),
+            TypeRef::Decimal => self.builtin("BigDecimal", sh),
             TypeRef::Option(inner) => format!("{}?", self.ty(inner, sh)),
             TypeRef::Vec(inner) => {
                 let list = self.builtin("List", sh);
@@ -336,6 +353,8 @@ impl<'a> Ctx<'a> {
                 format!("{map}<{}, {}>", self.ty(k, sh), self.ty(v, sh))
             }
             TypeRef::Named(name) => self.named(name, sh),
+            // The generated wrapper class of an object (ADR-040), the interface of a callback (ADR-041).
+            TypeRef::Object(name) | TypeRef::Callback(name) => self.named(name, sh),
             // Rejected by validation before generation starts.
             TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => "Nothing".to_owned(),
         }
@@ -368,6 +387,10 @@ impl<'a> Ctx<'a> {
             TypeRef::Duration => self.prim("duration"),
             TypeRef::Timestamp => self.prim("timestamp"),
             TypeRef::Uuid => self.prim("uuid"),
+            TypeRef::Decimal => self.prim("decimal"),
+            TypeRef::Object(_) | TypeRef::Callback(_) => {
+                unreachable!("an object or callback has no value codec")
+            }
             TypeRef::Named(name) => self.named(name, sh),
             TypeRef::Option(_) | TypeRef::Vec(_) | TypeRef::Map(..) => {
                 if let Some(name) = self.hoist_names.get(t) {
@@ -531,10 +554,15 @@ impl<'a> Ctx<'a> {
                 self.import("java.util.UUID");
                 "UUID(0L, 0L)".to_owned()
             }
+            TypeRef::Decimal => {
+                self.import("java.math.BigDecimal");
+                "BigDecimal.ZERO".to_owned()
+            }
             TypeRef::Option(_) => "null".to_owned(),
             TypeRef::Vec(_) => "emptyList()".to_owned(),
             TypeRef::Map(..) => "emptyMap()".to_owned(),
             TypeRef::Named(name) => return self.zero_named(name, state),
+            TypeRef::Object(_) | TypeRef::Callback(_) => return None,
             TypeRef::Unit | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
                 "Unit".to_owned()
             }
@@ -553,6 +581,10 @@ impl<'a> Ctx<'a> {
                 let Some(record) = model.record(name) else {
                     return Some(String::new());
                 };
+                // A newtype wraps its one value (`UserId(UUID(0L, 0L))`).
+                if let (true, [only]) = (record.transparent, record.fields.as_slice()) {
+                    return Some(format!("{shown}({})", self.zero_in(&only.ty, state)?));
+                }
                 let mut args = Vec::new();
                 for f in &record.fields {
                     args.push(format!(
@@ -835,7 +867,22 @@ impl KtGen<'_> {
             ));
             w.line(format!("const val NAMESPACE: String = \"{namespace}\""));
             w.blank();
-            w.line("private val entry = CoreEntry(NAMESPACE, UndraIds.SCHEMA_HASH) { UndraCoreNative }");
+            let bridges = self.callback_bridges();
+            if bridges.is_empty() {
+                w.line("private val entry = CoreEntry(NAMESPACE, UndraIds.SCHEMA_HASH) { UndraCoreNative }");
+            } else {
+                // The callback interfaces' bridges are registered with the core before it starts (ADR-041).
+                w.call(
+                    "private val entry = CoreEntry",
+                    &[
+                        "NAMESPACE".to_owned(),
+                        "UndraIds.SCHEMA_HASH".to_owned(),
+                        format!("callbacks = listOf({})", bridges.join(", ")),
+                    ],
+                    " { UndraCoreNative }",
+                    true,
+                );
+            }
             w.blank();
             w.line("/**");
             w.line(" * Loads the core (in this process unless [options] say otherwise) and makes it [core].");
@@ -933,6 +980,7 @@ impl KtGen<'_> {
                     });
                 }
             });
+            self.callback_ids(w);
             w.blank();
             w.block("object Queries", |w| {
                 for q in &m.queries {
@@ -1007,6 +1055,7 @@ impl<'a> Ctx<'a> {
             | TypeRef::Duration
             | TypeRef::Timestamp
             | TypeRef::Uuid
+            | TypeRef::Decimal
             | TypeRef::Option(_)
             | TypeRef::Vec(_)
             | TypeRef::Map(..) => Some(self.zero(t)),
@@ -1061,11 +1110,64 @@ impl<'a> Ctx<'a> {
         });
     }
 
+    /// A newtype (ADR-042): a `value class` around its one value, which crosses as that value
+    /// alone. An inner `ByteArray` compares by identity and a value class cannot say otherwise
+    /// (`equals` and `hashCode` are reserved for it), so a newtype of bytes is an ordinary class.
+    fn newtype(&mut self, w: &mut CodeWriter, r: &RecordDef, inner: &TypeRef) {
+        let none = Shadow::new();
+        let ty = self.ty(inner, &none);
+        let ordered = self.model().is_ordered(inner);
+        kdoc(w, &r.docs, &[]);
+        let names = ["value".to_owned()];
+        if Self::is_bytes_like(inner) {
+            w.block(format!("class {}(val value: {ty}) : UndraRecord", r.name), |w| {
+                // `contentEquals` and friends take a missing array as an array of no identity.
+                w.line(format!(
+                    "override fun equals(other: Any?): Boolean = other is {} && value.contentEquals(other.value)",
+                    r.name
+                ));
+                w.blank();
+                w.line("override fun hashCode(): Int = value.contentHashCode()");
+                w.blank();
+                w.line(format!(
+                    "override fun toString(): String = \"{}(value=${{value.contentToString()}})\"",
+                    r.name
+                ));
+                w.blank();
+                self.record_codec(w, r, &names, &none);
+            });
+            return;
+        }
+        w.line("@JvmInline");
+        let interfaces = if ordered {
+            format!("UndraRecord, Comparable<{}>", r.name)
+        } else {
+            "UndraRecord".to_owned()
+        };
+        w.block(
+            format!("value class {}(val value: {ty}) : {interfaces}", r.name),
+            |w| {
+                if ordered {
+                    w.line(format!(
+                        "override fun compareTo(other: {}): Int = value.compareTo(other.value)",
+                        r.name
+                    ));
+                    w.blank();
+                }
+                self.record_codec(w, r, &names, &none);
+            },
+        );
+    }
+
     fn record(&mut self, w: &mut CodeWriter, r: &RecordDef) {
         self.import("dev.undra.runtime.UndraRecord");
         self.import("dev.undra.runtime.wire.UndraCodec");
         self.import("dev.undra.runtime.wire.UndraReader");
         self.import("dev.undra.runtime.wire.UndraWriter");
+        if let (true, [only]) = (r.transparent, r.fields.as_slice()) {
+            self.newtype(w, r, &only.ty);
+            return;
+        }
         let none = Shadow::new();
         kdoc(w, &r.docs, &[]);
         let names: Vec<String> = r.fields.iter().map(|f| ident(&f.name)).collect();
@@ -1129,7 +1231,15 @@ impl<'a> Ctx<'a> {
                     .fields
                     .iter()
                     .zip(names)
-                    .map(|(f, n)| format!("{n} = {}", self.read_expr(&f.ty, "r", sh)))
+                    .map(|(f, n)| {
+                        let read = self.read_expr(&f.ty, "r", sh);
+                        // A newtype wraps its one value, unnamed.
+                        if r.transparent {
+                            read
+                        } else {
+                            format!("{n} = {read}")
+                        }
+                    })
                     .collect();
                 w.call(
                     format!(
@@ -1408,14 +1518,25 @@ impl<'a> Ctx<'a> {
     /// Writes `val w = UndraWriter(); w.writeX(..)` and returns the expression
     /// holding the encoded arguments.
     fn encode_args(&mut self, w: &mut CodeWriter, params: &[ParamDef], writer: &str) -> String {
+        self.encode_call_args(w, params, writer, &[])
+    }
+
+    /// [`Ctx::encode_args`] for a call whose callback arguments were lent as `lent`; objects are
+    /// written as their handles.
+    fn encode_call_args(
+        &mut self,
+        w: &mut CodeWriter,
+        params: &[ParamDef],
+        writer: &str,
+        lent: &[objects::Lent],
+    ) -> String {
         if params.is_empty() {
             return "ByteArray(0)".to_owned();
         }
         self.import("dev.undra.runtime.wire.UndraWriter");
         w.line(format!("val {writer} = UndraWriter()"));
-        let none = Shadow::new();
         for p in params {
-            let stmt = self.write_stmt(&p.ty, &ident(&p.name), writer, &none);
+            let stmt = self.write_param(p, writer, lent);
             w.line(stmt);
         }
         format!("{writer}.toByteArray()")
@@ -1439,48 +1560,36 @@ impl<'a> Ctx<'a> {
             let ids: Vec<String> = no_coalesce.iter().map(|id| format!("{id}u")).collect();
             format!("core, handle, noCoalesce = setOf({})", ids.join(", "))
         };
+        // The handle of an infinite query is an `InfiniteQuery`, what the Compose helper of the
+        // runtime takes (ADR-043).
+        let infinite = self.model().infinite(&o.name).is_some();
+        let interfaces = if infinite {
+            self.import("dev.undra.runtime.InfiniteQuery");
+            ", InfiniteQuery"
+        } else {
+            ""
+        };
         kdoc(w, &o.docs, &[]);
+        // The constructor is the bindings' own: a wrapper is only made through the core's identity
+        // map (`UndraCore.adopt`, ADR-040), by the companion's factories or a method's return.
         w.block(
             format!(
-                "class {} private constructor(core: UndraCore, handle: Long) : {base}({super_args})",
+                "class {} internal constructor(core: UndraCore, handle: Long) : {base}({super_args}){interfaces}",
                 o.name
             ),
             |w| {
                 for g in &signals {
                     self.signal_property(w, o, g);
                 }
-                let simple_new = o.constructors.iter().find(|c| {
-                    c.name == "new"
-                        && c.params.is_empty()
-                        && !c.is_async
-                        && Ret::classify(&c.returns).is_some_and(|r| r.error().is_none())
-                });
-                if is_store {
-                    w.blank();
-                    w.block("init", |w| {
-                        w.line("observeAll()");
-                    });
-                }
-                if let Some(c) = simple_new {
-                    w.blank();
-                    kdoc(w, &c.docs, &[THROWS_CALL.to_owned()]);
-                    let ids = format!("UndraIds.Objects.{}", o.name);
-                    w.call(
-                        format!("constructor(ctx: UndraCore = {}) : this", self.g.default_core()),
-                        &[
-                            "ctx".to_owned(),
-                            format!("ctx.constructObject({ids}.TYPE_ID, {ids}.NEW, ByteArray(0))"),
-                        ],
-                        "",
-                        true,
-                    );
-                }
+                let new_constructor = o.constructors.iter().find(|c| c.name == "new");
                 for m in &o.methods {
                     w.blank();
                     let ids = format!("UndraIds.Objects.{}", o.name);
+                    let mut callable = Callable::from_method(m);
+                    callable.overrides = infinite && m.method_id == model::QUERY_FETCH_NEXT_PAGE_ID;
                     self.callable(
                         w,
-                        &Callable::from_method(m),
+                        &callable,
                         &Site::Method {
                             id: format!("{ids}.{}", naming::upper_snake(&m.name)),
                             owner: o.name.clone(),
@@ -1491,8 +1600,38 @@ impl<'a> Ctx<'a> {
                     w.blank();
                     self.store_apply(w, &o.name, &signals);
                 }
+                // The lazy lists page through the core: they stop with the store.
+                let lazy: Vec<String> = signals
+                    .iter()
+                    .filter(|g| matches!(g.ty, TypeRef::Lazy(_)))
+                    .map(|g| ident(&g.name))
+                    .collect();
+                if !lazy.is_empty() {
+                    w.blank();
+                    kdoc(
+                        w,
+                        "Stops the lazy lists from paging, then releases the store.",
+                        &[],
+                    );
+                    w.block("override fun close()", |w| {
+                        for name in &lazy {
+                            w.line(format!("{name}.close()"));
+                        }
+                        w.line("super.close()");
+                    });
+                }
+                if o.constructors.is_empty() {
+                    // Only the core makes it: a method returns it (ADR-040).
+                    return;
+                }
                 w.blank();
                 w.block("companion object", |w| {
+                    if let Some(c) = new_constructor {
+                        // `Account(id)` reads like a constructor and still goes through `adopt`, for every
+                        // `new`: with or without parameters, suspending or not, failing or not.
+                        self.constructor_invoke(w, o, c);
+                        w.blank();
+                    }
                     for (i, c) in o.constructors.iter().enumerate() {
                         if i > 0 {
                             w.blank();
@@ -1505,13 +1644,27 @@ impl<'a> Ctx<'a> {
     }
 
     fn signal_property(&mut self, w: &mut CodeWriter, o: &ObjectDef, g: &SignalDef) {
+        let none = Shadow::new();
+        let name = ident(&g.name);
+        if let TypeRef::Lazy(item) = &g.ty {
+            // A lazy list is a runtime class the platform pages through (ADR-043), made with the
+            // store; the constructor's `core` is what it pages with.
+            self.import("dev.undra.runtime.UndraLazyList");
+            let ty = self.ty(item, &none);
+            let codec = self.codec(item, &none);
+            if let Some(doc) = self.model().signal_doc(o, g) {
+                kdoc(w, doc, &[]);
+            }
+            w.line(format!(
+                "val {name}: UndraLazyList<{ty}> = UndraLazyList(core, {codec})"
+            ));
+            return;
+        }
         self.import("kotlinx.coroutines.flow.MutableStateFlow");
         self.import("kotlinx.coroutines.flow.StateFlow");
         self.import("kotlinx.coroutines.flow.asStateFlow");
-        let none = Shadow::new();
         let ty = self.ty(&g.ty, &none);
         let zero = self.zero(&g.ty);
-        let name = ident(&g.name);
         let backing = format!("_{}", naming::camel(&g.name));
         w.line(format!(
             "private val {backing}: MutableStateFlow<{ty}> = signal({zero})"
@@ -1519,9 +1672,46 @@ impl<'a> Ctx<'a> {
         if let Some(doc) = self.model().signal_doc(o, g) {
             kdoc(w, doc, &[]);
         }
+        // The two signals `InfiniteQuery` declares are what the interface asks for.
+        let overrides = if self.model().infinite(&o.name).is_some()
+            && matches!(g.name.as_str(), "has_next_page" | "fetching_next_page")
+        {
+            "override "
+        } else {
+            ""
+        };
         w.line(format!(
-            "val {name}: StateFlow<{ty}> = {backing}.asStateFlow()"
+            "{overrides}val {name}: StateFlow<{ty}> = {backing}.asStateFlow()"
         ));
+    }
+
+    /// `operator fun invoke(..)` of the object's `new`: the call syntax of a constructor over the factory `create`.
+    fn constructor_invoke(&mut self, w: &mut CodeWriter, o: &ObjectDef, c: &MethodDef) {
+        let ret = Ret::classify(&c.returns);
+        let err = ret.as_ref().and_then(Ret::error).map(str::to_owned);
+        let taken: Vec<String> = c.params.iter().map(|p| ident(&p.name)).collect();
+        let taken_refs: Vec<&str> = taken.iter().map(String::as_str).collect();
+        let ctx = naming::avoid("ctx", &taken_refs);
+        let mut params = self.param_list(&c.params);
+        params.push(format!("{ctx}: UndraCore = {}", self.g.default_core()));
+        let mut extra = Vec::new();
+        if let Some(err) = &err {
+            extra.push(format!("@throws {err}"));
+        }
+        extra.push(THROWS_CALL.to_owned());
+        if c.is_async {
+            extra.push(THROWS_CANCELLED.to_owned());
+        }
+        kdoc(w, &c.docs, &extra);
+        let suspend = if c.is_async { "suspend " } else { "" };
+        let mut args = taken.clone();
+        args.push(ctx);
+        w.call(
+            format!("{suspend}operator fun invoke"),
+            &params,
+            format!(": {} = create({})", o.name, args.join(", ")),
+            true,
+        );
     }
 
     fn constructor(&mut self, w: &mut CodeWriter, o: &ObjectDef, c: &MethodDef) {
@@ -1554,14 +1744,29 @@ impl<'a> Ctx<'a> {
         let suffix = format!(": {}", o.name);
         let ids = format!("UndraIds.Objects.{}", o.name);
         let member = naming::upper_snake(&c.name);
+        let lent = objects::lent(&c.params, &taken_refs);
+        let object_args = objects::object_args(&c.params);
         w.call_block(prefix, &params, suffix, true, |w| {
-            let args = self.encode_args(w, &c.params, &writer);
-            if !c.is_async && err.is_none() {
+            objects::require_own(w, &ctx, &object_args);
+            objects::lend(w, &ctx, &lent);
+            if !c.is_async && err.is_none() && lent.is_empty() {
+                let args = self.encode_call_args(w, &c.params, &writer, &lent);
                 // `constructObject` maps what `construct` throws.
                 w.line(format!(
                     "val {handle} = {ctx}.constructObject({ids}.TYPE_ID, {ids}.{member}, {args})"
                 ));
             } else {
+                // Callback arguments are encoded inside the `try`, whose `catch` gives them back.
+                let encoded_before = if lent.is_empty() {
+                    Some(self.encode_call_args(w, &c.params, &writer, &lent))
+                } else {
+                    None
+                };
+                let mut inner = CodeWriter::new("    ");
+                let args = match encoded_before {
+                    Some(args) => args,
+                    None => self.encode_call_args(&mut inner, &c.params, &writer, &lent),
+                };
                 let call = if c.is_async {
                     self.import("dev.undra.runtime.wire.Payloads.CallTarget");
                     self.import("dev.undra.runtime.wire.Codecs");
@@ -1574,9 +1779,18 @@ impl<'a> Ctx<'a> {
                 };
                 let mapped = self.mapped(err.as_deref(), &failure, false);
                 w.line(format!("val {handle} = try {{"));
-                w.indented(|w| w.line(call));
+                w.indented(|w| {
+                    let encoded = inner.finish();
+                    if !encoded.is_empty() {
+                        w.line(encoded.trim_end());
+                    }
+                    w.line(call);
+                });
                 w.line(format!("}} catch ({failure}: Exception) {{"));
-                w.indented(|w| w.line(format!("throw {mapped}")));
+                w.indented(|w| {
+                    objects::give_back(w, &ctx, &failure, &lent);
+                    w.line(format!("throw {mapped}"));
+                });
                 w.line("}");
                 if c.is_async {
                     // `construct` checks this for the synchronous shapes; an async constructor
@@ -1586,7 +1800,9 @@ impl<'a> Ctx<'a> {
                     ));
                 }
             }
-            w.line(format!("return {}({ctx}, {handle})", o.name));
+            objects::fence(self, w, &object_args);
+            // One handle, one wrapper (an `Arc<Self>` constructor can return a live one).
+            w.line(format!("return {ctx}.adopt({handle}, ::{})", o.name));
         });
     }
 
@@ -1661,6 +1877,9 @@ impl<'a> Ctx<'a> {
         kdoc(w, c.docs, &extra);
         let name = ident(c.name);
 
+        let lent = objects::lent(c.params, &taken_refs);
+        let object_args = objects::object_args(c.params);
+
         if let Ret::Stream(item) | Ret::ResultStream { item, .. } = &ret {
             self.import("kotlinx.coroutines.flow.Flow");
             self.import("kotlinx.coroutines.flow.map");
@@ -1669,14 +1888,61 @@ impl<'a> Ctx<'a> {
             let prefix = format!("fun {name}");
             let suffix = format!(": Flow<{item_ty}>");
             w.call_block(prefix, &params, suffix, true, |w| {
-                let args = self.encode_args(w, c.params, &writer);
+                objects::require_own(w, &core, &object_args);
                 let decode = self.decode_all(item, "bytes");
-                w.call(
-                    format!("val {stream_var} = {core}.stream"),
-                    &[target.clone(), id.clone(), args],
-                    "",
-                    true,
-                );
+                if lent.is_empty() {
+                    let args = self.encode_call_args(w, c.params, &writer, &lent);
+                    w.call(
+                        format!("val {stream_var} = {core}.stream"),
+                        &[target.clone(), id.clone(), args],
+                        "",
+                        true,
+                    );
+                } else {
+                    // Every collection sends the call again, and every crossing lends the
+                    // callbacks once more (ADR-041). A reference goes back only for a failure of
+                    // the call itself: what could not be sent (the arguments' encoding) or what the
+                    // core refused, which `Flow.catch` sees because it handles the upstream's
+                    // exceptions alone: not the collector's, and not the decoding of an item the
+                    // core did send (the core owns the references by then).
+                    self.import("kotlinx.coroutines.flow.emitAll");
+                    self.import("kotlinx.coroutines.flow.flow");
+                    let (inner_core, inner_target) = match site {
+                        Site::Method { owner, .. } => (
+                            format!("this@{owner}.core"),
+                            target.replace("this.", &format!("this@{owner}.")),
+                        ),
+                        Site::Function { .. } => (core.clone(), target.clone()),
+                    };
+                    w.line(format!("val {stream_var} = flow {{"));
+                    w.indented(|w| {
+                        objects::lend(w, &inner_core, &lent);
+                        let items = naming::avoid("items", &taken_refs);
+                        w.line(format!("val {items} = try {{"));
+                        w.indented(|w| {
+                            let args = self.encode_call_args(w, c.params, &writer, &lent);
+                            w.call(
+                                format!("{inner_core}.stream"),
+                                &[inner_target.clone(), id.clone(), args],
+                                "",
+                                true,
+                            );
+                        });
+                        w.line(format!("}} catch ({failure}: Exception) {{"));
+                        w.indented(|w| {
+                            objects::give_back(w, &inner_core, &failure, &lent);
+                            w.line(format!("throw {failure}"));
+                        });
+                        w.line("}");
+                        w.line(format!("emitAll({items}.catch {{ {failure} ->"));
+                        w.indented(|w| {
+                            objects::give_back(w, &inner_core, &failure, &lent);
+                            w.line(format!("throw {failure}"));
+                        });
+                        w.line("})");
+                    });
+                    w.line("}");
+                }
                 let mapped = self.mapped(err.as_deref(), "error", true);
                 w.line(format!("return {stream_var}"));
                 w.indented(|w| {
@@ -1684,6 +1950,14 @@ impl<'a> Ctx<'a> {
                     w.block_with(".catch { error ->", "}", |w| {
                         w.line(format!("throw {mapped}"));
                     });
+                    if !object_args.is_empty() {
+                        // The call is sent when the flow is collected: the arguments stay reachable
+                        // until it ends.
+                        self.import("kotlinx.coroutines.flow.onCompletion");
+                        w.block_with(".onCompletion {", "}", |w| {
+                            objects::fence(self, w, &object_args);
+                        });
+                    }
                 });
             });
             return;
@@ -1697,46 +1971,63 @@ impl<'a> Ctx<'a> {
         };
         debug_assert_eq!(is_unit, is_unit_ok);
         let suspend = if c.is_async { "suspend " } else { "" };
-        let prefix = format!("{suspend}fun {name}");
+        let overrides = if c.overrides { "override " } else { "" };
+        let prefix = format!("{overrides}{suspend}fun {name}");
         let suffix = if is_unit {
             String::new()
         } else {
             format!(": {ok_ty}")
         };
         w.call_block(prefix, &params, suffix, true, |w| {
+            // An object of another core is refused before anything else happens (ADR-040); a
+            // command reports that like any failure.
+            if !is_command {
+                objects::require_own(w, &core, &object_args);
+            }
+            objects::lend(w, &core, &lent);
             // A command's arguments are encoded inside the `try` too: it cannot throw, and a click
-            // handler has no way to handle a `WireException` from the writer. Any other call encodes
+            // handler has no way to handle a `WireException` from the writer. So are those of a
+            // call that lends callbacks, whose `catch` gives them back. Any other call encodes
             // them first: a value the wire cannot represent is the caller's bug, not an outcome of
             // the call.
-            let encoded_before = if is_command {
+            let encoded_before = if is_command || !lent.is_empty() {
                 None
             } else {
-                Some(self.encode_args(w, c.params, &writer))
+                Some(self.encode_call_args(w, c.params, &writer, &lent))
             };
             let method = if c.is_async { "call" } else { "callSync" };
             let call = format!("{core}.{method}");
             w.line("try {");
             w.indented(|w| {
+                if is_command {
+                    objects::require_own(w, &core, &object_args);
+                }
                 let args = match encoded_before {
                     Some(args) => args,
-                    None => self.encode_args(w, c.params, &writer),
+                    None => self.encode_call_args(w, c.params, &writer, &lent),
                 };
                 let call_args = [target.clone(), id.clone(), args];
                 if is_unit {
                     w.call(call.clone(), &call_args, "", true);
+                    objects::fence(self, w, &object_args);
                 } else {
                     w.call(format!("val {body_var} = {call}"), &call_args, "", true);
+                    objects::fence(self, w, &object_args);
                     let ok = match &ret {
                         Ret::Plain(t) | Ret::Result { ok: t, .. } => Some(*t),
                         _ => None,
                     };
                     if let Some(ok) = ok {
-                        let expr = self.decode_all(ok, &body_var);
+                        let expr = match self.adopt_expr(ok, &core, &body_var) {
+                            Some(adopted) => adopted,
+                            None => self.decode_all(ok, &body_var),
+                        };
                         w.line(format!("return {expr}"));
                     }
                 }
             });
             w.line(format!("}} catch ({failure}: Exception) {{"));
+            w.indented(|w| objects::give_back(w, &core, &failure, &lent));
             if is_command {
                 w.indented(|w| {
                     w.line(format!(
@@ -1772,6 +2063,22 @@ impl<'a> Ctx<'a> {
                         for g in signals {
                             let backing = format!("_{}", naming::camel(&g.name));
                             w.line(format!("{}u -> {{", g.signal_id));
+                            if matches!(g.ty, TypeRef::Lazy(_)) {
+                                // A lazy list takes the entry's reader itself (a `LazyValue`, a
+                                // `LazyInvalidated`) and checks that it is complete.
+                                let name = ident(&g.name);
+                                w.indented(|w| {
+                                    w.line("if (op == ChangeOp.FULL) {");
+                                    w.indented(|w| w.line(format!("{name}.applyFull(reader)")));
+                                    w.line("} else if (op == ChangeOp.INVALIDATED) {");
+                                    w.indented(|w| {
+                                        w.line(format!("{name}.applyInvalidated(reader)"));
+                                    });
+                                    w.line("}");
+                                });
+                                w.line("}");
+                                continue;
+                            }
                             w.indented(|w| {
                                 let codec = self.codec(&g.ty, &Shadow::new());
                                 w.line("if (op == ChangeOp.FULL) {");
@@ -2013,6 +2320,9 @@ struct Callable<'a> {
     returns: &'a TypeRef,
     is_async: bool,
     docs: &'a str,
+    /// Whether the method implements a member of an interface of the runtime
+    /// (`InfiniteQuery.fetchNextPage`).
+    overrides: bool,
 }
 
 impl<'a> Callable<'a> {
@@ -2023,6 +2333,7 @@ impl<'a> Callable<'a> {
             returns: &m.returns,
             is_async: m.is_async,
             docs: &m.docs,
+            overrides: false,
         }
     }
 
@@ -2033,6 +2344,7 @@ impl<'a> Callable<'a> {
             returns: &f.returns,
             is_async: f.is_async,
             docs: &f.docs,
+            overrides: false,
         }
     }
 }

@@ -1,0 +1,19 @@
+error[undra::E0064]: `Child` at record Parent, field child is an object, named as a value
+  = note: an object crosses the boundary as a handle and is named `object` in the schema; `named` is for records, enums and errors, and the one place it names an object is the return type of the object's own constructors
+  = help: take or return `Arc<Child>` (or `&Child` as a parameter), which the schema records as an `object` reference
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064
+
+error[undra::E0064]: `Arc<Child>` at record Parent, field child: an object is only allowed as a method or function parameter or return, alone or as `Option` or `Vec` of one
+  = note: a record field, a signal, a map, a stream item, a port, a query or a mutation holds values: they are copied, compared, hashed and persisted, and none of that can carry a reference to an object
+  = help: return a record with the data you need, or put the child behind a method of the parent
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064
+
+error[undra::E0064]: `Plain` at object Holder, method take, param plain is referenced as an object, but it is a record
+  = note: an `object` reference names a type with an `#[undra::api] impl` block; records, enums and errors cross by value
+  = help: write `Plain` without `Arc` or `&`, or give it an `#[undra::api] impl` block if it is meant to be an object
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064
+
+error[undra::E0064]: `Arc<Child>` at store Feed, signal children: an object is only allowed as a method or function parameter or return, alone or as `Option` or `Vec` of one
+  = note: a record field, a signal, a map, a stream item, a port, a query or a mutation holds values: they are copied, compared, hashed and persisted, and none of that can carry a reference to an object
+  = help: return a record with the data you need, or put the child behind a method of the parent
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064

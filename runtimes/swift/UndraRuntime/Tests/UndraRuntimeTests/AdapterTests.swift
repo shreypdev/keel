@@ -91,18 +91,18 @@ struct BrokenBackend: KeyValueBackend {
 
 @MainActor
 final class AdapterSetTests: XCTestCase {
-    func testThePlatformDefaultsCoverTheStandardPortsExceptLifecycle() {
+    func testThePlatformDefaultsCoverEveryStandardPort() {
         let ids = Adapters.platformDefault.all.map { $0.portId }
         XCTAssertEqual(Set(ids).count, ids.count, "one adapter per port")
         let expected: Set<UInt32> = [
             StandardPorts.Http.portId, StandardPorts.Kv.portId, StandardPorts.SecureStore.portId,
             StandardPorts.Fs.portId, StandardPorts.Clock.portId, StandardPorts.Rng.portId,
             StandardPorts.Log.portId, StandardPorts.Timer.portId, StandardPorts.Connectivity.portId,
+            StandardPorts.Lifecycle.portId, StandardPorts.Diagnostics.portId,
             // The opt-in ports (ADR-047, ADR-048), for the cores that enable them.
             StandardPorts.WebSocket.portId, StandardPorts.Sse.portId, StandardPorts.Db.portId,
         ]
         XCTAssertEqual(Set(ids), expected)
-        XCTAssertFalse(ids.contains(StandardPorts.Lifecycle.portId))
     }
 
     func testReplacingAndRemovingAdaptersByPort() {
@@ -141,10 +141,10 @@ final class AdapterSetTests: XCTestCase {
         let expected: Set<UInt32> = [
             StandardPorts.Http.portId, StandardPorts.Kv.portId, StandardPorts.SecureStore.portId,
             StandardPorts.Fs.portId, StandardPorts.Clock.portId, StandardPorts.Rng.portId,
-            StandardPorts.Log.portId, StandardPorts.Timer.portId,
+            StandardPorts.Log.portId, StandardPorts.Timer.portId, StandardPorts.Diagnostics.portId,
             StandardPorts.WebSocket.portId, StandardPorts.Sse.portId, StandardPorts.Db.portId,
         ]
-        XCTAssertEqual(registered, expected, "Connectivity has no methods the core calls")
+        XCTAssertEqual(registered, expected, "Connectivity and Lifecycle have no methods the core calls")
         core.shutdown()
     }
 }

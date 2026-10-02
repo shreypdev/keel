@@ -12,10 +12,17 @@ pub const NODE: Check = Check::new("web.node", "node-and-npm");
 pub const NPM: Check = Check::new("web.npm", "node-and-npm").optional();
 /// `wasm-opt` (binaryen): optional, shrinks the wasm core.
 pub const WASM_OPT: Check = Check::new("web.wasm-opt", "wasm-opt").optional();
+/// Chrome's DWARF extension, which reads `<ns>.dwarf.wasm` so DevTools sets breakpoints in `.rs` files. A browser
+/// extension cannot be checked from here: the finding says where to get it (ADR-046).
+pub const DEVTOOLS_DWARF: Check =
+    Check::new("web.devtools-dwarf", "debugging-into-rust").optional();
+
+/// Where Chrome's "C/C++ DevTools Support (DWARF)" extension is.
+pub const DEVTOOLS_DWARF_URL: &str = "https://chromewebstore.google.com/detail/cc++-devtools-support-dwa/pdcpmagijalfljmkmjngeonclgbbannb";
 
 /// Every check of this module (the wasm target is in [`super::rust::ALL`]).
 #[cfg(test)]
-pub const ALL: &[Check] = &[NODE, NPM, WASM_OPT];
+pub const ALL: &[Check] = &[NODE, NPM, WASM_OPT, DEVTOOLS_DWARF];
 
 /// The oldest Node that runs the web app shell and the TypeScript runtime (`engines`).
 pub const MIN_NODE: u32 = 20;
@@ -147,6 +154,9 @@ pub fn check(cx: &Context<'_>) -> Vec<Finding> {
             ));
         }
     }
+    out.push(DEVTOOLS_DWARF.skip(format!(
+        "debugging the core in Chrome: the C/C++ DevTools Support (DWARF) extension reads build/symbols/web/<namespace>.dwarf.wasm and sets breakpoints in .rs files; a browser extension cannot be checked from here: {DEVTOOLS_DWARF_URL}"
+    )));
     out
 }
 
@@ -154,6 +164,21 @@ pub fn check(cx: &Context<'_>) -> Vec<Finding> {
 mod tests {
     use super::super::testing::*;
     use super::*;
+
+    #[test]
+    fn the_devtools_extension_cannot_be_checked_so_the_finding_says_where_it_is() {
+        let report = scan(&good_machine(), &["web"]);
+        let f = by_id(&report, "web.devtools-dwarf").clone();
+        assert_eq!(f.status, crate::commands::doctor::finding::Status::Skip);
+        assert!(
+            f.message.contains(DEVTOOLS_DWARF_URL) && f.message.contains("dwarf.wasm"),
+            "{f:?}"
+        );
+        assert!(DEVTOOLS_DWARF_URL.contains("chromewebstore.google.com"));
+        assert_eq!(f.anchor, "debugging-into-rust");
+        // A skip is not a gap: the report still passes.
+        assert!(report.passed());
+    }
     use crate::commands::doctor::finding::Status;
 
     #[test]

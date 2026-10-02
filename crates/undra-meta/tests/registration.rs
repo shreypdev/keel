@@ -38,6 +38,7 @@ static TODO: RecordMeta = RecordMeta {
             docs: "Tags by name.",
         },
     ],
+    transparent: false,
     docs: "A todo item.",
 };
 
@@ -71,6 +72,7 @@ static CALCULATOR: ObjectMeta = ObjectMeta {
         returns: TypeRefMeta::Named("Calculator"),
         is_async: false,
         takes_ctx: false,
+        coalesce: false,
         docs: "",
     }],
     methods: &[MethodMeta {
@@ -89,6 +91,7 @@ static CALCULATOR: ObjectMeta = ObjectMeta {
         returns: TypeRefMeta::I32,
         is_async: false,
         takes_ctx: false,
+        coalesce: false,
         docs: "",
     }],
     store: None,
@@ -106,6 +109,7 @@ static COUNTER: ObjectMeta = ObjectMeta {
         returns: TypeRefMeta::Named("Counter"),
         is_async: false,
         takes_ctx: true,
+        coalesce: false,
         docs: "",
     }],
     methods: &[],
@@ -142,6 +146,7 @@ static CLOCK: PortMeta = PortMeta {
     name: "Clock",
     port_id: ids::port_id("Clock"),
     kind: PortKind::Sync,
+    background: false,
     methods: &[MethodMeta {
         name: "now_ms",
         method_id: ids::port_method_id("Clock", "now_ms"),
@@ -149,6 +154,7 @@ static CLOCK: PortMeta = PortMeta {
         returns: TypeRefMeta::I64,
         is_async: false,
         takes_ctx: false,
+        coalesce: false,
         docs: "",
     }],
     docs: "",
@@ -167,6 +173,9 @@ static TODOS: QueryMeta = QueryMeta {
     stale_ms: Some(30_000),
     persist: true,
     idempotent: true,
+    interval_ms: None,
+    poll_in_background: false,
+    infinite: None,
 };
 
 static ADD_TODO: QueryMeta = QueryMeta {
@@ -185,6 +194,9 @@ static ADD_TODO: QueryMeta = QueryMeta {
     stale_ms: None,
     persist: false,
     idempotent: false,
+    interval_ms: None,
+    poll_in_background: false,
+    infinite: None,
 };
 
 undra_meta::inventory::submit! { Registration::Record(&TODO) }
@@ -320,6 +332,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
                 docs: "Tags by name.".into(),
             },
         ],
+        transparent: false,
         docs: "A todo item.".into(),
     });
     by_hand.enums.push(EnumDef {
@@ -342,6 +355,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
         docs: String::new(),
     });
     let ctor = |ty: &str, takes_ctx: bool| MethodDef {
+        coalesce: false,
         name: "new".into(),
         method_id: ids::method_id(ty, "new"),
         params: vec![],
@@ -370,6 +384,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
             returns: TypeRef::I32,
             is_async: false,
             takes_ctx: false,
+            coalesce: false,
             docs: String::new(),
         }],
         store: None,
@@ -409,6 +424,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
         name: "Clock".into(),
         port_id: ids::port_id("Clock"),
         kind: PortKind::Sync,
+        background: false,
         methods: vec![MethodDef {
             name: "now_ms".into(),
             method_id: ids::port_method_id("Clock", "now_ms"),
@@ -416,6 +432,7 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
             returns: TypeRef::I64,
             is_async: false,
             takes_ctx: false,
+            coalesce: false,
             docs: String::new(),
         }],
         docs: String::new(),
@@ -433,6 +450,9 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
         stale_ms: None,
         persist: false,
         idempotent: false,
+        interval_ms: None,
+        poll_in_background: false,
+        infinite: None,
     });
     by_hand.queries.push(QueryDef {
         name: "todos".into(),
@@ -447,6 +467,9 @@ fn a_schema_built_from_defs_matches_the_collected_one() {
         stale_ms: Some(30_000),
         persist: true,
         idempotent: true,
+        interval_ms: None,
+        poll_in_background: false,
+        infinite: None,
     });
 
     assert_eq!(collected, by_hand);

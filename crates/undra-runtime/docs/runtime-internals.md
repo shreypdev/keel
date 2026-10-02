@@ -173,8 +173,10 @@ don't block) is documented on `Host`.
 2. Take the core lock (or refuse: section 4).
 3. Route: `Function` looks the `FunctionMeta` up by `method_id`; `Method` resolves the handle
    to an object, takes its `type_id` and looks the `ObjectMeta` up; `Constructor` looks the
-   `ObjectMeta` up by `type_id`; `LazyPage` is answered by the runtime itself from a
-   `LazyList` (no dispatcher). The tables are built once from `undra_meta::registrations()`.
+   `ObjectMeta` up by `type_id`; `LazyPage` is answered by the runtime itself, by a built-in
+   dispatcher under the same panic guard, from the page server (a `LazySource`: a store's
+   `Lazy<T>` signal, or a `LazyList`) its handle names (ADR-043; no generated dispatcher). The
+   tables are built once from `undra_meta::registrations()`.
    A lookup that misses (unknown function id, unknown constructor type, or a method on an
    object whose type has no `ObjectMeta`) falls through to the `DispatchLayer`s, in
    registration order, until one answers something other than `Unknown`; none answering
@@ -412,16 +414,18 @@ the cell knowing its own handle and type id). The runtime decodes that record an
 with the object table's handle and type id, so the snapshot is right even if a cell's handle is
 stale (a store restored from an older snapshot, a handle reissued after release). The result is
 a valid `undra_wire::payload::Snapshot` (tested by decoding it): `count u32`, then
-`generation_floor u32` (the generation counter's high-water mark, read after the stores were
+`generation_floor u64` (ADR-040; the generation counter's high-water mark, read after the stores were
 listed, so it is at least every generation in the snapshot), then the records. A cell that panics
 or writes a malformed record is skipped and logged. Non-store objects are not included.
 
 **Restore** (`Runtime::restore`), all-or-nothing:
 
-1. Decode and validate the snapshot: no null handle, no generation 0 or `u32::MAX`, no duplicate
-   handle, index at most 2^20 (a corrupt snapshot cannot make the table allocate gigabytes), and a
-   `generation_floor` below `u32::MAX` (a floor of `u32::MAX` would leave the counter nothing to
-   issue: `RestoreError::GenerationFloor`).
+1. Decode and validate the snapshot: no null handle, no generation 0 or `Handle::MAX_GENERATION`
+   (2^40 - 1, ADR-040), no duplicate handle, index at most 2^20 (a corrupt snapshot cannot make the
+   table allocate gigabytes), and a `generation_floor` below `Handle::MAX_GENERATION` (a floor at the
+   ceiling would leave the counter nothing to issue: `RestoreError::GenerationFloor`). A snapshot
+   written before ADR-040 (its floor a `u32`, the layout tag unchanged) does not decode and is
+   refused with `RestoreError::Decode`; nothing is released.
 2. Build every store through its `StoreRestorer` (`{ type_id, restore, cell }`, one per store
    type, submitted through `inventory` by `#[undra::store]`): `restore(ctx, handle, reader)`
    gets a `Reader` over the **body** only (`signal_count u32`, then `{ signal_id, len, value }`

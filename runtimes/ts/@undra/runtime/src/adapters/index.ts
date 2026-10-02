@@ -4,6 +4,7 @@ export * from "./fs.js";
 export * from "./http.js";
 export * from "./ids.js";
 export * from "./kv.js";
+export * from "./names.js";
 export * from "./ports.js";
 export * from "./secure.js";
 export * from "./system.js";

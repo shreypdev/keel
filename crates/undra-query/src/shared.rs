@@ -24,18 +24,21 @@
 use core::task::Waker;
 use core::time::Duration;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
 use undra_meta::TypeClosure;
 use undra_meta::ids::fnv1a64;
+use undra_runtime::background::{BackgroundOutcome, Deadline};
 use undra_runtime::executor::TaskId;
 use undra_runtime::log::ERROR;
 use undra_runtime::{Ctx, Runtime, WeakCtx};
 
 use crate::erased::{Erased, Failure, Outcome, QueryVTable};
 use crate::key::{Invalidate, QueryKey};
+use crate::paged::{ListView, PagedState, Restored};
+use crate::poll::{Base, Polling};
 use crate::queue::QueueState;
 use crate::retry::{now_ms, with_retries};
 use crate::status::QueryStatus;
@@ -66,6 +69,21 @@ pub(crate) struct View {
     pub(crate) status: QueryStatus,
     pub(crate) fetching: bool,
     pub(crate) updated_at: Option<i64>,
+    /// The list of an infinite query's entry (`data` is `None` for it).
+    pub(crate) list: Option<ListView>,
+}
+
+impl View {
+    /// The data an ordinary handle shows: the entry's value, or for an infinite query the list
+    /// flattened (made when asked for, so only a plain `observe` of an infinite query pays for it).
+    pub(crate) fn flat_data(&self) -> Option<Erased> {
+        if let Some(data) = &self.data {
+            return Some(data.clone());
+        }
+        let list = self.list.as_ref()?;
+        let first = list.pages.first()?;
+        Some((first.ops.flatten)(&list.pages))
+    }
 }
 
 /// Something that shows an entry: a query handle.
@@ -78,6 +96,8 @@ pub(crate) struct Inflight {
     /// Identifies the fetch, so a result that arrives after the fetch was replaced is dropped.
     pub(crate) serial: u64,
     pub(crate) task: TaskId,
+    /// The fetch loads the next page of an infinite query (not the first, not a refetch).
+    pub(crate) next_page: bool,
 }
 
 /// The compiled key template of query or mutation `id`, made on first use.
@@ -129,6 +149,10 @@ pub(crate) struct Entry {
     pub(crate) stamp: u64,
     /// The optimistic mutations that wrote this entry and have not settled yet, oldest first.
     pub(crate) layers: Vec<Layer>,
+    /// The pages of an infinite query (`data` stays `None` for it).
+    pub(crate) paged: Option<PagedState>,
+    /// The interval polling of the entry (ADR-043).
+    pub(crate) polling: Polling,
 }
 
 impl Entry {
@@ -153,16 +177,23 @@ impl Entry {
             seq: 0,
             stamp: 0,
             layers: Vec::new(),
+            paged: vt.paged.map(|_| PagedState::new()),
+            polling: Polling::default(),
         }
+    }
+
+    /// Whether the entry has something to show: a value, or the first page of an infinite query.
+    pub(crate) fn has_data(&self) -> bool {
+        self.data.is_some() || self.paged.as_ref().is_some_and(PagedState::has_data)
     }
 
     /// The status a handle shows, derived from what the entry holds (see [`QueryStatus`]).
     pub(crate) fn status(&self) -> QueryStatus {
-        if self.inflight.is_some() && self.data.is_none() {
+        if self.inflight.is_some() && !self.has_data() {
             QueryStatus::Fetching
         } else if self.error.is_some() || self.failed {
             QueryStatus::Error
-        } else if self.data.is_some() {
+        } else if self.has_data() {
             QueryStatus::Success
         } else {
             QueryStatus::Idle
@@ -170,21 +201,37 @@ impl Entry {
     }
 
     pub(crate) fn view(&self) -> View {
+        let list = self.paged.as_ref().map(|paged| ListView {
+            ver: paged.list_ver,
+            pages: paged.pages.clone(),
+            appended: paged.appended.clone(),
+            has_next: paged.pages.last().is_some_and(|page| page.next.is_some()),
+            fetching_next: self.inflight.as_ref().is_some_and(|i| i.next_page),
+        });
         View {
             seq: self.seq,
             data: self.data.clone(),
-            data_ver: self.data_ver,
+            data_ver: self.paged.as_ref().map_or(self.data_ver, |p| p.list_ver),
             error: self.error.clone(),
             error_ver: self.error_ver,
             status: self.status(),
             fetching: self.inflight.is_some(),
             updated_at: self.updated_at,
+            list,
+        }
+    }
+
+    /// What a persisted entry stores: the value's encoding, or an infinite query's first pages.
+    pub(crate) fn persist_bytes(&self) -> Option<Vec<u8>> {
+        match &self.paged {
+            Some(paged) => paged.persisted(),
+            None => self.data.as_ref().map(|d| d.bytes.to_vec()),
         }
     }
 
     /// Whether the entry's data is out of date at `now`.
     pub(crate) fn is_stale(&self, now: i64) -> bool {
-        if self.data.is_none() || self.invalidated || self.error.is_some() || self.failed {
+        if !self.has_data() || self.invalidated || self.error.is_some() || self.failed {
             return true;
         }
         match (self.vt.stale_ms, self.updated_at) {
@@ -208,15 +255,28 @@ impl Entry {
     /// Starts showing a persisted entry (in the current form). `false` if its bytes no longer
     /// decode.
     fn seed(&mut self, persisted: &Persisted) -> bool {
-        match (self.vt.decode_data)(&persisted.data) {
-            Ok(data) => {
+        let Ok(data) = (self.vt.decode_data)(&persisted.data) else {
+            return false;
+        };
+        match (&mut self.paged, self.vt.paged) {
+            (Some(paged), Some(ops)) => {
+                // An entry stored with more pages than this build keeps would persist a cursor
+                // it does not know (only the last page's survives a restore): it is not used.
+                let Some(Restored(pages)) = data.value.downcast_ref::<Restored>() else {
+                    return false;
+                };
+                if pages.is_empty() || pages.len() > ops.persist_pages as usize {
+                    return false;
+                }
+                paged.replace(Arc::new(pages.clone()));
+            }
+            _ => {
                 self.data = Some(data);
                 self.data_ver += 1;
-                self.updated_at = Some(persisted.updated_at);
-                true
             }
-            Err(_) => false,
         }
+        self.updated_at = Some(persisted.updated_at);
+        true
     }
 
     /// Registers a publication: bumps `seq` and, if anything shows this entry, returns who
@@ -249,6 +309,8 @@ pub(crate) struct EntrySnapshot {
     failed: bool,
     /// The write stamp the entry had.
     stamp: u64,
+    /// The pages an infinite query's entry had.
+    pages: Option<Arc<Vec<crate::paged::PageRec>>>,
 }
 
 /// Whether two optional values have the same encoding.
@@ -269,6 +331,7 @@ impl EntrySnapshot {
         invalidated: false,
         failed: false,
         stamp: 0,
+        pages: None,
     };
 
     pub(crate) fn of(entry: &Entry) -> EntrySnapshot {
@@ -279,6 +342,7 @@ impl EntrySnapshot {
             invalidated: entry.invalidated,
             failed: entry.failed,
             stamp: entry.stamp,
+            pages: entry.paged.as_ref().map(|p| p.pages.clone()),
         }
     }
 }
@@ -370,6 +434,12 @@ impl Entry {
         self.invalidated = before.invalidated;
         self.failed = before.failed;
         self.stamp = before.stamp;
+        if let Some(paged) = self.paged.as_mut() {
+            let pages = before.pages.unwrap_or_default();
+            if !Arc::ptr_eq(&paged.pages, &pages) {
+                paged.replace(pages);
+            }
+        }
         Unwound::Restored
     }
 }
@@ -445,6 +515,9 @@ pub(crate) struct Shared {
     /// requests are attempted rather than parked. Platforms report the real state right after
     /// start-up (SPEC 11), and only an `online = false` event makes the client queue mutations.
     pub(crate) online: AtomicBool,
+    /// What the client believes about the app's lifecycle, as an `AppState` code (`0` is
+    /// `Active`, which an app that has heard nothing yet is assumed to be: polling needs it).
+    pub(crate) app_state: AtomicU8,
     pub(crate) gc_ms: AtomicU64,
     next_gen: AtomicU64,
     next_sink: AtomicU64,
@@ -452,6 +525,13 @@ pub(crate) struct Shared {
     next_stamp: AtomicU64,
     /// The last time read from the `Clock` port, used if the port fails.
     last_now: AtomicI64,
+    /// What the background tasks wait on: bumped whenever a replay step, a fetch, a write or a
+    /// hydration finishes (ADR-046).
+    pub(crate) idle: crate::background::Notifier,
+    /// Queued mutations answered by a replay, ever (the background run's `replayed`).
+    pub(crate) replayed: AtomicU64,
+    /// Fetches that succeeded, ever (the background run's `refetched`).
+    pub(crate) fetched: AtomicU64,
     /// The persistence counters (`stats_json`'s `query.persist`).
     pub(crate) counters: Counters,
     /// Closures read from the store or written by this build, by fingerprint.
@@ -466,11 +546,15 @@ impl Shared {
             state: Mutex::new(State::default()),
             started: AtomicBool::new(false),
             online: AtomicBool::new(true),
+            app_state: AtomicU8::new(0),
             gc_ms: AtomicU64::new(DEFAULT_GC_MS),
             next_gen: AtomicU64::new(0),
             next_sink: AtomicU64::new(0),
             next_stamp: AtomicU64::new(0),
             last_now: AtomicI64::new(0),
+            idle: crate::background::Notifier::default(),
+            replayed: AtomicU64::new(0),
+            fetched: AtomicU64::new(0),
             counters: Counters::default(),
             closures: Mutex::new(HashMap::new()),
             current: Mutex::new(HashMap::new()),
@@ -491,6 +575,12 @@ impl Shared {
     /// optimistic mutation.
     pub(crate) fn new_stamp(&self) -> u64 {
         self.next_stamp.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    /// An identity for a fetch or a poll timer, never given before (so a result or a tick that
+    /// arrives after what it belongs to was replaced is recognised).
+    pub(crate) fn new_serial(&self) -> u64 {
+        self.next_gen.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     pub(crate) fn is_online(&self) -> bool {
@@ -537,7 +627,7 @@ impl Shared {
                 let rendered = plan_for(plans, schema, vt.id, vt.key).render(schema, &key.params);
                 Entry::new(vt, rendered)
             });
-            if entry.data.is_none() && vt.persist {
+            if !entry.has_data() && vt.persist {
                 if let Some(persisted) = hydrated.remove(&(vt.id, fnv1a64(&key.params))) {
                     entry.seed(&persisted);
                 }
@@ -552,6 +642,7 @@ impl Shared {
             if entry.needs_fetch(now) {
                 self.start_fetch(ctx, &key, entry, &mut fx);
             }
+            self.reschedule_poll(ctx, &key, entry, &mut fx, now, Base::Keep);
             entry.view()
         };
         fx.run(ctx);
@@ -562,6 +653,7 @@ impl Shared {
     /// entry is scheduled for garbage collection.
     pub(crate) fn release(self: &Arc<Self>, ctx: &Ctx, key: &QueryKey, sink_id: u64) {
         let mut fx = Fx::default();
+        let mut reschedule = false;
         {
             let mut state = self.state.lock();
             let Some(entry) = state.entries.get_mut(key) else {
@@ -569,15 +661,24 @@ impl Shared {
             };
             entry.sinks.retain(|(id, _)| *id != sink_id);
             entry.observers = entry.observers.saturating_sub(1);
+            let overridden = entry.polling.clear_override(sink_id);
             if entry.observers == 0 {
                 if let Some(inflight) = entry.inflight.take() {
                     fx.cancel(inflight.task);
                 }
+                // Nobody observes it: no poll.
+                self.cancel_poll(entry, &mut fx);
                 fx.publish(entry);
                 self.schedule_gc(ctx, key, entry);
+            } else {
+                // The interval may have been this observer's.
+                reschedule = overridden;
             }
         }
         fx.run(ctx);
+        if reschedule {
+            self.reschedule_one(ctx, key);
+        }
     }
 
     // ----- fetching ------------------------------------------------------------------------
@@ -593,15 +694,28 @@ impl Shared {
         if entry.inflight.is_some() {
             return;
         }
-        let serial = self.next_gen.fetch_add(1, Ordering::Relaxed) + 1;
-        let task = ctx.spawn(run_fetch(
-            self.clone(),
-            ctx.downgrade(),
-            key.clone(),
-            entry.vt,
+        let serial = self.new_serial();
+        let task = match entry.vt.paged {
+            // An infinite query fetches its loaded pages again, or its first (ADR-043).
+            Some(paged) => {
+                let loaded = entry.paged.as_ref().map_or(0, |p| p.pages.len());
+                (paged.spawn_refresh)(self, ctx, key, entry.vt, serial, loaded)
+            }
+            None => ctx.spawn(run_fetch(
+                self.clone(),
+                ctx.downgrade(),
+                key.clone(),
+                entry.vt,
+                serial,
+            )),
+        };
+        entry.inflight = Some(Inflight {
             serial,
-        ));
-        entry.inflight = Some(Inflight { serial, task });
+            task,
+            next_page: false,
+        });
+        // The next poll is scheduled when this fetch ends.
+        self.cancel_poll(entry, fx);
         fx.publish(entry);
     }
 
@@ -644,15 +758,7 @@ impl Shared {
                         entry.data = Some(value);
                         entry.data_ver += 1;
                     }
-                    if entry.error.take().is_some() {
-                        entry.error_ver += 1;
-                    }
-                    entry.failed = false;
-                    entry.invalidated = false;
-                    entry.updated_at = Some(now);
-                    if entry.vt.persist {
-                        self.schedule_persist(ctx, key, entry);
-                    }
+                    self.settle_success(ctx, key, entry, now);
                 }
                 Err(Failure::Error(error)) => {
                     entry.error = Some(error);
@@ -665,13 +771,49 @@ impl Shared {
                 }
             }
             fx.publish(entry);
+            // The next poll counts from here, whatever the outcome.
+            self.reschedule_poll(ctx, key, entry, &mut fx, now, Base::Now);
         }
         fx.run(ctx);
+        self.idle.bump();
+    }
+
+    /// What a successful fetch does to an entry besides replacing its data: the error is gone,
+    /// the entry is fresh, and it is written to the `Kv` store if its query persists.
+    pub(crate) fn settle_success(
+        self: &Arc<Self>,
+        ctx: &Ctx,
+        key: &QueryKey,
+        entry: &mut Entry,
+        now: i64,
+    ) {
+        if entry.error.take().is_some() {
+            entry.error_ver += 1;
+        }
+        entry.failed = false;
+        entry.invalidated = false;
+        entry.updated_at = Some(now);
+        self.fetched.fetch_add(1, Ordering::SeqCst);
+        if entry.vt.persist {
+            self.schedule_persist(ctx, key, entry);
+        }
     }
 
     /// The fetch task of `serial` was dropped before it finished (it panicked). The entry shows
     /// an error and can be fetched again.
-    fn abort(self: &Arc<Self>, ctx: &Ctx, key: &QueryKey, serial: u64) {
+    pub(crate) fn abort(self: &Arc<Self>, ctx: &Ctx, key: &QueryKey, serial: u64) {
+        // A fetch that was cancelled (its observers went, a write replaced it) arrives here too and
+        // has nothing to do: no clock reading for it.
+        let current = self
+            .state
+            .lock()
+            .entries
+            .get(key)
+            .is_some_and(|entry| entry.inflight.as_ref().map(|i| i.serial) == Some(serial));
+        if !current {
+            return;
+        }
+        let now = self.now(ctx);
         let mut fx = Fx::default();
         {
             let mut state = self.state.lock();
@@ -685,6 +827,7 @@ impl Shared {
             entry.failed = true;
             entry.stamp = self.new_stamp();
             fx.publish(entry);
+            self.reschedule_poll(ctx, key, entry, &mut fx, now, Base::Now);
         }
         Shared::log(
             ctx,
@@ -692,6 +835,7 @@ impl Shared {
             "a query fetch panicked; the entry shows an error",
         );
         fx.run(ctx);
+        self.idle.bump();
     }
 
     // ----- invalidation --------------------------------------------------------------------
@@ -746,6 +890,10 @@ impl Shared {
             self.refetch_observed(ctx, false);
             self.replay_queue(ctx);
         }
+        if online != was {
+            // Offline pauses every poll; back online arms them again (ADR-043).
+            self.reschedule_all(ctx);
+        }
     }
 
     /// The app became active: observed entries that went stale while it was away refetch, and a
@@ -770,6 +918,7 @@ impl Shared {
         if !hydrate_hook_linked() {
             self.spawn_hydration(ctx);
         }
+        crate::background::register(self, ctx);
         // The subscribers use the `Ctx` they are given (ADR-034): the runtime owns them, so one
         // they captured would keep it alive. (`Shared` holds no `Ctx`.)
         // The devtools page of `undra dev` reads the cache through the runtime (ADR-054). The
@@ -790,13 +939,10 @@ impl Shared {
         })
         .detach();
         let shared = self.clone();
-        undra_ports::on_lifecycle_changed(ctx, move |ctx, state| match state {
-            undra_ports::AppState::Active => shared.on_active(ctx),
-            // A background run is another chance to read a queue that was unreadable.
-            undra_ports::AppState::Background => shared.retry_unreadable_queue(ctx),
-            undra_ports::AppState::Inactive => {}
-        })
-        .detach();
+        // The lifecycle input of the client enters here: `on_lifecycle` decides what each state
+        // does (refetching, reading the queue, pausing and resuming polls).
+        undra_ports::on_lifecycle_changed(ctx, move |ctx, state| shared.on_lifecycle(ctx, state))
+            .detach();
     }
 
     /// Starts [`Shared::hydrate`] on the core. The task holds the runtime weakly (ADR-034), so
@@ -805,6 +951,193 @@ impl Shared {
     pub(crate) fn spawn_hydration(self: &Arc<Self>, ctx: &Ctx) {
         let (shared, weak) = (self.clone(), ctx.downgrade());
         ctx.spawn(async move { shared.hydrate(&weak).await });
+    }
+
+    // ----- background runs (ADR-046) ---------------------------------------------------------
+
+    /// Starts writing, on the core, whatever waits out its debounce ([`Shared::flush_entries`]).
+    pub(crate) fn flush_soon(self: &Arc<Self>, ctx: &Ctx) {
+        let (shared, weak) = (self.clone(), ctx.downgrade());
+        ctx.spawn(async move { shared.flush_entries(&weak).await });
+    }
+
+    /// Writes every cache entry that waits out its debounce now, and ends the debounce. The
+    /// queue has no debounce (its writer starts when it changes); see
+    /// [`Shared::background_flush`] for waiting on it.
+    pub(crate) async fn flush_entries(self: &Arc<Self>, weak: &WeakCtx) {
+        let todo: Vec<(QueryKey, Option<TaskId>)> = self
+            .state
+            .lock()
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.persist_dirty)
+            .map(|(key, entry)| (key.clone(), entry.persist_task))
+            .collect();
+        for (key, task) in todo {
+            let Ok(ctx) = weak.upgrade() else {
+                return;
+            };
+            if let Some(task) = task {
+                ctx.cancel_task(task);
+            }
+            {
+                let mut state = self.state.lock();
+                if let Some(entry) = state.entries.get_mut(&key) {
+                    entry.persist_dirty = false;
+                    entry.persist_task = None;
+                }
+            }
+            self.persist_entry(&ctx, &key).await;
+        }
+        self.idle.bump();
+    }
+
+    /// The entries a background run fetches again: observed or persisted, stale, and either
+    /// past a staleness window the query declared or known to need it (invalidated, failed,
+    /// holding an error, or never filled). An entry whose query has no window is "always stale"
+    /// while it is observed, which is no reason to ask the OS for time.
+    fn refetch_candidates(state: &State, now: i64) -> Vec<QueryKey> {
+        state
+            .entries
+            .iter()
+            .filter(|(_, e)| {
+                (e.observers > 0 || e.vt.persist)
+                    && e.is_stale(now)
+                    && (e.vt.stale_ms.is_some()
+                        || e.invalidated
+                        || e.failed
+                        || e.error.is_some()
+                        || e.data.is_none())
+            })
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
+    /// How many entries a background run would fetch again.
+    pub(crate) fn background_refetch_pending(&self, ctx: &Ctx) -> u32 {
+        let any = self
+            .state
+            .lock()
+            .entries
+            .values()
+            .any(|e| e.observers > 0 || e.vt.persist);
+        if !any {
+            return 0;
+        }
+        let now = self.now(ctx);
+        let count = Self::refetch_candidates(&self.state.lock(), now).len();
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
+    /// The refetch task of a background run: starts the fetches of [`Shared::refetch_candidates`]
+    /// and settles (see [`Shared::background_settle`]).
+    pub(crate) async fn background_refetch(
+        self: &Arc<Self>,
+        weak: &WeakCtx,
+        deadline: &Deadline,
+    ) -> BackgroundOutcome {
+        use crate::background::outcome;
+        let baseline = self.fetched.load(Ordering::SeqCst);
+        let keys = {
+            let Ok(ctx) = weak.upgrade() else {
+                return BackgroundOutcome::Incomplete;
+            };
+            let now = self.now(&ctx);
+            let mut fx = Fx::default();
+            let keys = {
+                let mut state = self.state.lock();
+                let keys = Self::refetch_candidates(&state, now);
+                for key in &keys {
+                    if let Some(entry) = state.entries.get_mut(key) {
+                        self.start_fetch(&ctx, key, entry, &mut fx);
+                    }
+                }
+                keys
+            };
+            fx.run(&ctx);
+            keys
+        };
+        let settled = self.background_settle(weak, deadline, baseline).await;
+        let failed = {
+            let state = self.state.lock();
+            keys.iter()
+                .filter_map(|key| state.entries.get(key))
+                .any(|e| e.failed || e.error.is_some())
+        };
+        outcome(settled && !failed)
+    }
+
+    /// What every task of a background run does last: waits for the fetches in flight to end (a
+    /// replay's invalidations refetch the observed lists, whichever task started them), writes what
+    /// they fetched and what waited out its debounce, and waits for the queue's writer, so the run
+    /// is finished when the client is quiet, not while something it started is still going. Counts
+    /// the fetches that succeeded since `baseline` (the run's, whichever task sees them). `false`
+    /// when the window ended first, or the queue was never read (nothing may be written over it).
+    pub(crate) async fn background_settle(
+        self: &Arc<Self>,
+        weak: &WeakCtx,
+        deadline: &Deadline,
+        baseline: u64,
+    ) -> bool {
+        use crate::background::{Woke, wait};
+        let count = || {
+            let fetched = self.fetched.load(Ordering::SeqCst);
+            deadline.reach_refetched(
+                u32::try_from(fetched.saturating_sub(baseline)).unwrap_or(u32::MAX),
+            );
+        };
+        let quiet = loop {
+            let epoch = self.idle.epoch();
+            count();
+            if !self
+                .state
+                .lock()
+                .entries
+                .values()
+                .any(|e| e.inflight.is_some())
+            {
+                break true;
+            }
+            if matches!(wait(self, epoch, weak, deadline).await, Woke::Expired) {
+                break false;
+            }
+        };
+        count();
+        self.flush_entries(weak).await;
+        let written = loop {
+            let epoch = self.idle.epoch();
+            let (busy, readable) = {
+                let state = self.state.lock();
+                (state.queue.writer_busy(), state.queue.is_hydrated())
+            };
+            if !busy {
+                break true;
+            }
+            if !readable || matches!(wait(self, epoch, weak, deadline).await, Woke::Expired) {
+                break false;
+            }
+        };
+        quiet && written
+    }
+
+    /// How much waits to be written: entries out their debounce and a queue its writer has not
+    /// finished with.
+    pub(crate) fn background_flush_pending(&self) -> u32 {
+        let state = self.state.lock();
+        let entries = state.entries.values().filter(|e| e.persist_dirty).count();
+        let queue = usize::from(state.queue.writer_busy());
+        u32::try_from(entries + queue).unwrap_or(u32::MAX)
+    }
+
+    /// The flush task of a background run: writes the cache entries now and settles (it is
+    /// incomplete if the queue was never read: nothing may be written over it, ADR-049).
+    pub(crate) async fn background_flush(
+        self: &Arc<Self>,
+        weak: &WeakCtx,
+        deadline: &Deadline,
+    ) -> BackgroundOutcome {
+        let baseline = self.fetched.load(Ordering::SeqCst);
+        crate::background::outcome(self.background_settle(weak, deadline, baseline).await)
     }
 
     // ----- garbage collection --------------------------------------------------------------
@@ -839,13 +1172,16 @@ impl Shared {
 
     /// Marks `entry` for writing to the `Kv` store 250 ms from now (later writes within the
     /// window are folded into the one pending).
-    fn schedule_persist(self: &Arc<Self>, ctx: &Ctx, key: &QueryKey, entry: &mut Entry) {
+    pub(crate) fn schedule_persist(self: &Arc<Self>, ctx: &Ctx, key: &QueryKey, entry: &mut Entry) {
         entry.persist_dirty = true;
         if entry.persist_task.is_some() {
             return;
         }
-        entry.persist_task =
-            Some(ctx.spawn(run_persist(self.clone(), ctx.downgrade(), key.clone())));
+        let (shared, weak, key) = (self.clone(), ctx.downgrade(), key.clone());
+        entry.persist_task = Some(ctx.spawn(async move {
+            let _bump = crate::background::BumpOnDrop(shared.clone());
+            run_persist(shared, weak, key).await;
+        }));
     }
 
     /// Reads the persisted cache entries, the offline queue and its dead letters from the `Kv`
@@ -879,9 +1215,7 @@ impl Shared {
                 entries, hydrated, ..
             } = &mut *state;
             let waiting = entries.iter_mut().find(|(key, entry)| {
-                key.query_id == query_id
-                    && entry.data.is_none()
-                    && fnv1a64(&key.params) == params_hash
+                key.query_id == query_id && !entry.has_data() && fnv1a64(&key.params) == params_hash
             });
             match waiting {
                 Some((_, entry)) => {
@@ -899,13 +1233,18 @@ impl Shared {
 
     // ----- the cache as data ---------------------------------------------------------------
 
-    /// The data of `key`, if it has any.
+    /// The data of `key`, if it has any. For an infinite query that is the flattened list.
     pub(crate) fn read(&self, key: &QueryKey) -> Option<Erased> {
-        self.state
-            .lock()
-            .entries
-            .get(key)
-            .and_then(|entry| entry.data.clone())
+        let (flatten, pages) = {
+            let state = self.state.lock();
+            let entry = state.entries.get(key)?;
+            let Some(paged) = &entry.paged else {
+                return entry.data.clone();
+            };
+            (paged.pages.first()?.ops.flatten, paged.pages.clone())
+        };
+        // Outside the lock: laying the list out copies every row.
+        Some(flatten(&pages))
     }
 
     /// Writes `value` as the data of the entry (created if missing), as if a fetch had
@@ -938,7 +1277,7 @@ impl Shared {
                 let rendered = plan_for(plans, schema, vt.id, vt.key).render(schema, &key.params);
                 Entry::new(vt, rendered)
             });
-            if fresh && entry.data.is_none() && vt.persist {
+            if fresh && !entry.has_data() && vt.persist {
                 if let Some(persisted) = hydrated.remove(&(vt.id, fnv1a64(&key.params))) {
                     entry.seed(&persisted);
                 }
@@ -953,13 +1292,23 @@ impl Shared {
             if let Some(inflight) = entry.inflight.take() {
                 fx.cancel(inflight.task);
             }
-            let unchanged = entry
-                .data
-                .as_ref()
-                .is_some_and(|old| old.bytes == value.bytes);
-            if !unchanged {
-                entry.data = Some(value);
-                entry.data_ver += 1;
+            match (&mut entry.paged, vt.paged) {
+                // An infinite query's list: the pages are laid out again for the new rows.
+                (Some(paged), Some(ops)) => {
+                    if let Some(pages) = (ops.rebuild)(&paged.pages, &value) {
+                        paged.replace(Arc::new(pages));
+                    }
+                }
+                _ => {
+                    let unchanged = entry
+                        .data
+                        .as_ref()
+                        .is_some_and(|old| old.bytes == value.bytes);
+                    if !unchanged {
+                        entry.data = Some(value);
+                        entry.data_ver += 1;
+                    }
+                }
             }
             if entry.error.take().is_some() {
                 entry.error_ver += 1;
@@ -981,6 +1330,9 @@ impl Shared {
                 self.schedule_gc(ctx, &key, entry);
             }
             fx.publish(entry);
+            // The write cancelled the fetch in flight (and with it the poll that fetch's end
+            // would have scheduled).
+            self.reschedule_poll(ctx, &key, entry, &mut fx, now, Base::Now);
         }
         fx.run(ctx);
     }
@@ -1012,7 +1364,7 @@ impl Shared {
             // (unless another optimistic mutation still has a write on them).
             state.entries.retain(|_, entry| {
                 entry.observers > 0
-                    || entry.data.is_some()
+                    || entry.has_data()
                     || entry.error.is_some()
                     || !entry.layers.is_empty()
             });
@@ -1050,12 +1402,35 @@ impl Shared {
 // -------------------------------------------------------------------------------------------
 
 /// Clears the in-flight marker of a fetch whose task was dropped before it finished.
-struct FetchGuard {
+pub(crate) struct FetchGuard {
     shared: Arc<Shared>,
     ctx: WeakCtx,
     key: QueryKey,
     serial: u64,
     armed: bool,
+}
+
+impl FetchGuard {
+    /// A guard for the fetch `serial` of `key`, armed.
+    pub(crate) fn new(
+        shared: &Arc<Shared>,
+        ctx: &WeakCtx,
+        key: &QueryKey,
+        serial: u64,
+    ) -> FetchGuard {
+        FetchGuard {
+            shared: shared.clone(),
+            ctx: ctx.clone(),
+            key: key.clone(),
+            serial,
+            armed: true,
+        }
+    }
+
+    /// The fetch finished: dropping the guard does nothing.
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
 }
 
 impl Drop for FetchGuard {
@@ -1080,13 +1455,7 @@ async fn run_fetch(
     vt: &'static QueryVTable,
     serial: u64,
 ) {
-    let mut guard = FetchGuard {
-        shared: shared.clone(),
-        ctx: weak.clone(),
-        key: key.clone(),
-        serial,
-        armed: true,
-    };
+    let mut guard = FetchGuard::new(&shared, &weak, &key, serial);
     let outcome = with_retries(&weak, vt.retry, Failure::retryable, || {
         match weak.upgrade() {
             Ok(ctx) => (vt.fetch)(ctx, &key.params),
@@ -1094,7 +1463,7 @@ async fn run_fetch(
         }
     })
     .await;
-    guard.armed = false;
+    guard.disarm();
     if let Ok(ctx) = weak.upgrade() {
         shared.complete(&ctx, &key, serial, outcome);
     }
@@ -1141,7 +1510,7 @@ async fn run_persist(shared: Arc<Shared>, weak: WeakCtx, key: QueryKey) {
                 return;
             };
             entry.persist_dirty = false;
-            entry.data.is_some() && entry.updated_at.is_some()
+            entry.has_data() && entry.updated_at.is_some()
         };
         if write {
             let Ok(ctx) = weak.upgrade() else {
@@ -1260,6 +1629,7 @@ mod tests {
         Some(Inflight {
             serial: 1,
             task: a_task(),
+            next_page: false,
         })
     }
 

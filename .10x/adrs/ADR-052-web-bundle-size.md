@@ -328,6 +328,7 @@ script, not twiggy's shallow bytes (gzip is not additive).
    `report` / `onError`, snapshot and restore, worker sync ports) added 2.3 KB to what the hello app ships, so the
    record is 24,841 bytes; 24 KB would have failed from the day it was set, which is not a test (R9). The
    record is the honest number; `ts-runtime-size` still targets 16 KB.
+
 3. **The 5% tolerance over the record stays**, alongside the budget, for both artefacts.
 4. **No second landing card.** The landing row says plainly that it is the wasm alone ("Web core, hello
    world: the wasm alone, gzipped"); the README states the JavaScript number and its budget in prose.
@@ -358,3 +359,266 @@ and `Runtime::bind_dyn_port_with(port_id, imp, &undra_ports::KV_DISPATCHER)` bin
 with the dispatcher a raw port call on it runs through (`fakes::install` and the dev runner's native `Clock`,
 `Rng`, `Log` do). The typed accessors (`undra_ports::kv(&ctx)`) never needed a dispatcher. App ports are unchanged
 (their dispatchers are submitted as before). Measured: 116,677 bytes gzipped (−3,511).
+
+## Amendment (2026-10-02, `ts-size-e4`): the JavaScript gate counts what the page loads up front, and the cut
+
+Decision 2 above set the JavaScript runtime's budget at 26,000 bytes, with a follow-up (`ts-runtime-size`) aiming at
+16 KB. That piece landed together with E4, the binding call path (ADR-056), as `ts-size-e4`. It reached **21,159
+bytes gzipped, 21.2 KB**, not 16 KB; the gate is restated at 21,500 (below), and this section says what was measured,
+what was cut, what was not, and why the number stops here.
+
+### What the gate measures
+
+`scripts/web-size-runtime.mjs` put every runtime module in one chunk (a `codeSplitting` group matching the runtime's
+directory), including the modules that only a dynamic `import()` reaches. `UndraCore.load` imports the `wasm-worker`
+transport that way, so the transport rode in the measured chunk although a `wasm-main` page never loads it. The group
+now takes Rolldown's `$initial` modules only (reachable from the page's entry by static imports); a runtime module only a
+dynamic import reaches is a chunk of its own, loaded when an app asks for that mode, and the record reports the sum of
+those chunks as `lazy_gzipped` instead of gating it. Both numbers, on the same tree (`1801951`, Vite 8.3.1 / Rolldown
+1.2.11, hello template, zlib level 9):
+
+| | bytes | gzip -9 |
+|---|---|---|
+| the gate as it was: one chunk, the `wasm-worker` transport folded in | 83,958 | **25,996** |
+| the same tree, the chunk the page loads up front | 77,348 | **24,335** |
+| the `wasm-worker` transport on its own, loaded in that mode only | | 2,614 |
+| the Worker script (`worker-*.js`), the other thing that mode loads | | 11,886 |
+
+The difference is the measurement (-1,661), not a saving; every line below starts from the up-front 24,335.
+`UNDRA_SIZE_MODULES=1` makes the script print each module's rendered bytes per chunk (`=exports` adds the exports each
+keeps), `UNDRA_SIZE_TARGET=es2020` builds for another target. The gated build is the pinned Vite's default (native
+`#private` fields); an app on Vite 6's default target (es2020) ships 21,615 of the same code, 462 more, and the Undra
+Vite plugin builds such an app for `es2022` anyway (ADR-056).
+
+### Where the bytes were
+
+esbuild's per-input minified bytes (`--metafile`, es2022) on the same tree, the share of the up-front gzipped size
+estimated in proportion (gzip is not additive; the lever table below is what each change measured), 25,931 gzipped for
+esbuild's chunking, which also loads the remote transport:
+
+| Module | min. bytes | ~gz | |
+|---|---|---|---|
+| `core.ts` (`UndraCore`) | 12,649 | 4,180 | |
+| `mirror.ts` | 7,193 | 2,377 | |
+| `transport/wasm-main.ts` | 6,924 | 2,288 | |
+| `transport/remote.ts` | 5,216 | 1,724 | the mode is a runtime string: bundled by every page |
+| `wire/payloads.ts` | 4,183 | 1,382 | includes `decodeHello`, `decodeLog`, `decodePortCall` only the framed transports read |
+| `wire/writer.ts`, `reader.ts`, `codec.ts` | 3,779 / 2,813 / 3,120 | 1,249 / 930 / 1,031 | |
+| `call-error.ts`, `errors.ts`, `wire/errors.ts` | 2,878 / 1,944 / 1,386 | 951 / 642 / 458 | the public error classes and messages |
+| the four default ports: `adapters/{ports, types, secure, fs, codecs, kv, http, idb}.ts` | 11,894 | ~3,900 | built by `browserAdapters()` for ports a hello core never calls |
+| `adapters/browser.ts`, `system.ts`, `ids.ts` | 1,132 / 903 / 561 | 374 / 298 / 185 | |
+| `wire/types.ts`, `envelope.ts`, `stream.ts`, `port-dispatch.ts`, `object.ts`, `signal.ts` | 1,688 / 1,590 / 1,602 / 883 / 875 / 743 | 558 / 525 / 529 / 292 / 289 / 246 | |
+
+Two things this shows. About a quarter of the first chunk was code a `wasm-main` page with a hello core never runs (the
+remote transport, the four default ports with their codecs, error types and browser adapters, the framed transports'
+wire code). And the rest is the runtime itself: `UndraCore`, the mirror, the in-process transport, the wire and the
+error classes.
+
+### The levers, each its own commit
+
+Up-front gzipped bytes of the hello template, measured at each commit (`scripts/web-size-runtime.mjs`):
+
+| Commit | Lever | gzip -9 | Δ |
+|---|---|---|---|
+| `feaba72` | the gate counts the up-front chunk (baseline) | 24,335 | |
+| `67835f5` | **the remote transport** is a dynamic import (`UndraCore.load` fetches it for mode `remote`) | 22,795 | -1,540 |
+| `14eddde` | **the four default ports load on their first call**: `UndraCore` starts from `lightAdapters()` (timer, console, `Connectivity`, `Lifecycle`) and registers Http, Kv, SecureStore and Fs as lazy ports (`adapters/default-ports.ts`); the first call loads `adapters/standard.js` (the port builders, their codecs and error types, the browser adapters). All four are asynchronous ports: a call that waits for the module is an ordinary asynchronous port call, and a failed load is tried again by the next call | 20,481 | -2,314 |
+| `e69c1a8` | `NetKind` and `AppState` live with the host events: a module two chunks import is emitted whole in the first one, so `types.ts` (every adapter error class) rode along for two unit-enum lists | 19,890 | -591 |
+| `8444262` | the framed transports' wire code (`Kind` apart from the envelope codec, `wire/session.ts` for `Hello`, `Log` and `PortCall`) leaves the first chunk, for the same reason | 19,649 | -241 |
+| | *tried and dropped:* one helper for `UndraReader`'s numeric reads (gzip already folds repeated code) | -19 | |
+| `b1aa0e5`..`9fdaf86` | the E4 call-path levers (ADR-056): byte-wise integers (+150), the call payload in one allocation (+208), the direct call (+127), the small-reply copy (+16), **no `#private` on the call path's classes** (+798: property names are not mangled), a shared scratch `DataView` (+42), `sendCall` / `callSyncParts` (+163) | 21,153 | +1,504 |
+| `dc502f9` | the record after the merge of main and the base object's renamed private flag | **21,159** | +6 |
+
+The up-front chunk went from 24,335 to **21,159** (-3,176, -13%); the call path's speed cost 1,510 bytes of it
+(7.7%). The levers the brief named and what happened to them: tree-shakeable module shape (the lazy modules above are
+what that gained; every top-level registration was already pure or absent, `sideEffects: false` holds), lazy imports
+(remote, default ports, framed wire code; the worker transport already was; recovery is the app's own import), the
+error hierarchy (public classes and messages, kept: R8), `const enum`-free numeric tags (`Kind`, `CallTarget`,
+`ReplyStatus` are public enums; turning them into objects changes their types, so no), class hierarchies (the errors
+are the public API, SPEC 17), dedupe of the wire codecs (the one measured gave -19).
+
+### Why it stops at 21 KB
+
+What a `wasm-main` hello page runs: `UndraCore` (call routing, the error channel, observe and release, snapshot and
+restore, the connection signal), the mirror (ADR-031's coalescing and compaction), the in-process transport (the wasm
+host and its imports), the wire (writer, reader, the codecs, the payloads the host sends and the change-set it reads),
+the error classes, `Signal`, `StreamCall`, the port dispatch and the host events. Each of them is behaviour the
+constitution or the SPEC requires, and none is reached only by a mode or a port. Attributed after the levers (esbuild
+per-input minified bytes, the up-front closure): `core.ts` 16,100, `mirror.ts` 8,618, `wasm-main.ts` 7,973, `writer.ts`
+4,050, `payloads.ts` 3,634, `reader.ts` 3,343, `codec.ts` 3,072, `call-error.ts` 2,876, `errors.ts` 1,942, `stream.ts`
+1,853. Strings are 9 KB of the 61 KB minified, almost all of them the messages R8 wants. Getting to 16 KB would mean
+removing behaviour (a mirror without compaction, no worker or remote mode in the first chunk of an app that picks one,
+no snapshot API) or a different public surface, and that is a decision for a later ADR, not for a size piece. The 8 KB of the
+blueprint is out of reach for the same reason.
+
+### What a page loads over its life (review, same tree)
+
+The gate is the up-front chunk, so it does not say what an app loads in all. gzip -9, measured on the hello app at the
+gated target: the up-front chunk **21,159** (the bindings and the loader, 1,457 and 197 more, are outside the gate as
+before); the first call to Http, Kv, SecureStore or Fs loads `standard` (2,471) and the
+`ports` chunk it imports (1,688), **4,159** in all for the four, one request each, in parallel (Vite's preload of the dynamic
+import's dependencies). A hello app that calls any of those ports therefore loads **25,318** bytes of runtime over its
+life (21,159 + 4,159), against 25,996 before this change: the saving for such an app is 678 bytes and one more round trip at
+its first port call, not the 4,686 the up-front chunk shows; an app that never calls them keeps the whole saving. The remote
+transport (2,276 + 649 for the envelope chunk it shares with the worker transport), the worker transport (2,610 + 649) and the
+Worker script (12,393) load only in the mode that needs them. `lazy_gzipped` (22,159) is the sum of all of them, which no one
+page loads. If a port's chunk cannot be fetched (the network is down, a deploy replaced the file, a Content-Security-Policy
+that allows the entry script but not the chunks beside it, which a policy by origin or by nonce with `strict-dynamic` does not
+do), the call is answered "unavailable" to the
+core, `onError` receives an `UndraUnhandledError` naming the port (`Kv port 0x... method 0x...`) with the failed import as its
+cause, and the next call tries the load again (`default-ports.test.ts`). The four default ports are asynchronous, whatever
+adapter backs them (`sync: false` in the lazy wrapper), so `wasm-worker`'s refusal of a synchronous main-thread port still
+happens at load and never concerns a lazily loaded chunk. Calls made before a port's code arrives run in the order they were
+made, per port; across two ports the calls of the port whose code arrived first run first.
+
+### The gate
+
+Decision 2 is restated: **`[size."web/hello-runtime-js"]` is 21,500 bytes** (the budget; record 21,159, ceiling
+min(21,500, floor(21,159 x 1.05)) = 21,500), the tolerance stays 5%, and the gate is the up-front chunk. The record line
+carries `lazy_gzipped` (22,159: the remote transport, the worker transport, the default ports, the framed wire code, the
+Worker script) so that growth in what loads on demand is visible in review, though ungated. The wasm line of the record was refreshed by the same
+`--record` run (116,575 -> 116,966 bytes gzipped, 117.0 KB: `main` had drifted by 391 bytes since the last record, with no wasm
+change in this piece; still within the 120,000 budget and 5% of itself). The README's number is
+generated from the record as before. A run still fails when the runtime's `node_modules` are missing.
+
+## Amendment (2026-10-01, `prod-ops`): the up-front gate is 22,000
+
+ADR-046 puts a panic report and a background run on every platform, and the web column pays for part of it in the page's
+first chunk. Measured on the merged tree with the gate's own script (`scripts/web-size-runtime.mjs`, the `$initial`
+chunk, zlib level 9): **21,756** bytes gzipped, against 21,336 for `main` alone (+420), so the budget `web/hello-runtime-js`
+becomes **22,000** (the record is 21,756; the 5% tolerance stays). The hello wasm is 119,227 gzipped (+2,146 on `main`'s
+117,081; budget 120,000, unchanged).
+
+What the 420 bytes are (an ablation on the final tree, gzipped, the pieces overlap): loading the trap-report builder
+when the app set `onPanic` or `crashRecovery` (130), `runInBackground` (112), the page's background window and its callback
+(80), the `pagehide` and `freeze` listeners (80), the `panicReports` and `background` stats fields (76), the Diagnostics
+registration (56). What is lazy and costs the hello world nothing: the report builder for the wasm trap path
+(`panic-report.js`, 853 bytes, loaded only for an app with `onPanic` or `crashRecovery`), and the `Diagnostics` port with its
+codecs (in the `ports` chunk, for native cores only). Tried and rejected: decoding the background report from a lazy
+`codecs.js` (+30 bytes: the inline four-field read is cheaper); a lazy `runInBackground` (-45 bytes, but the page window
+must run at `pagehide` or `freeze`, when a chunk fetch is unreliable, so it needs a second code path); all of that plus
+no stats fields reaches about 21,617, still over the old gate, and drops specified behaviour. `up-front.test.ts` fails if
+`core.ts` statically reaches `ports`, `codecs`, `standard`, `panic-report`, `remote`, `wasm-worker` or `recovery`.
+
+One behaviour change on `main`'s lazy design: a page that loads a native core over `remote` (`undra dev`, React Native's
+stand-in) now fetches the `ports` chunk (about 2.3 KB gzipped) at load, because the `Diagnostics` port must be registered
+before the transport starts; `main` fetched it there only for an explicit Timer adapter. A failed fetch rejects `load`, as
+it already did in that case.
+
+## Note (2026-10-02, the objects-callbacks review): the JavaScript gate is restated at 21,800 bytes
+
+ADR-040 and ADR-041 put code in the chunk a page loads up front, because every generated constructor now goes
+through it: `[size."web/hello-runtime-js"]`'s `budget_gzip_bytes` is **21,800** (was 21,500), the tolerance stays 5%,
+and the record is re-measured in the same commit. What the bytes are, measured on the hello app (zlib level 9, the
+gate's own build):
+
+* `main` at `b800994` already measured **21,336**: ns-storage's namespace check had added 163 bytes to the record of
+  21,173 without a re-record (its review states 21,336 of 21,500). That is not this piece's growth.
+* This piece adds **341** (21,336 -> 21,677 before the review's fixes): the identity map (`adopt`, `collected`:
+  one wrapper per handle, a reply's extra reference given back at once, a finalizer that releases a collected
+  wrapper's reference exactly once without touching a newer wrapper of the handle), about **132** of them (the
+  chunk with `adopt` reduced to `new type(core, handle)` and `collected` to `release` measures 21,533); the
+  mirror's callback entries (a main-delivered invocation is a queue entry kind and a fold barrier, ADR-041
+  decision 6), the core's `_giveBack`, `_held` and `hostRefs`, and the wire's handle layout of 24 and 40 bits
+  make the rest.
+* **The alternative, measured and rejected: load the identity map on the first `create()`.** It would take at most
+  the 132 bytes out of the chunk (less the cost of the dynamic import), leaving the chunk above 21,500 anyway, and
+  the first `create()` of a page would wait for a chunk that is not loaded yet: a dynamic import of a 5 to 7 KB
+  chunk the page has not fetched measured **2.6 to 3.8 ms** in headless Chromium against `vite preview` on the
+  loopback (three runs), one round trip more on a real network, against 0.1 ms for a chunk already loaded and
+  0.000 ms for later imports. Prefetching it during `load` would keep the bytes on the startup path while the gate
+  stopped counting them. Later creates would have been unchanged (the module cached), but the first is every
+  app's first screen.
+
+The README's and the site's numbers come from the record as before.
+
+## Review note (2026-10-02, `prod-ops` adversarial review): the JavaScript gate is 22,100; the wasm is back under 120,000
+
+Measured on `prod-ops` merged with `main` at `f9a37a8` (objects-callbacks in), with the gate's own script.
+
+**D1, the JavaScript up front.** The rule (R9): growth of `web/hello-runtime-js` is allowed only for behaviour a hello
+app gets at load. The amendment above, item by item (its ablation's numbers, gzipped, overlapping):
+
+| Item | Bytes | Verdict |
+|---|---|---|
+| The `pagehide` and `freeze` listeners | 80 | **Kept up front.** Registered at load for every page; at `pagehide`/`freeze` a chunk fetch is unreliable. |
+| The page's background window (`_backgroundWindow`, its `stats()` read) | 80 | **Kept up front.** Runs at every hide, for every page. |
+| The `panicReports` and `background` stats fields | 76 | **Kept up front.** Specified surface of `stats()` on every platform; the window reads `background.pending`. |
+| The trap-report loader (`_loadPanics`) | 130 | **Kept up front.** The trigger must run at load: the builder and the module's SHA-256 (`imageId`) have to be there before a trap, and with `recovery` the report is built synchronously before the restart. The builder itself (`panic-report.js`) stays lazy. |
+| `runInBackground` | 112 | **Lazy** (`background.js`, 281 bytes on demand). A hello core has no background task, so `background.pending` is 0 and the window never calls it. The window fetches the chunk at the first hide with work pending; `visibilitychange` to hidden precedes `pagehide` and `freeze` (a page is frozen only when hidden), and the debounced persistence is flushed by the core on `Lifecycle.Background` itself, not by the run. The amendment's objection (a fetch at `pagehide` is unreliable) holds only for a browser that fires `pagehide` without hiding first, where the page is going away and the replay's network calls could not finish either. A failed chunk fetch rejects the call with an `UndraCallError` (to `onError` in the window), like the other lazy chunks. |
+| The `Diagnostics` registration | 56 | **Lazy** (`serveDiagnostics` in the `ports` chunk). Only a native core runs it, and that chunk is already fetched before the transport starts; a wasm page ships none of it. |
+
+On `prod-ops` alone that took the chunk from 21,756 to 21,666 (-90). On the merged tree: **22,005** bytes gzipped, against
+**21,672** for `main` (objects-callbacks' record): this piece is **+333**, the four kept items, and 4 bytes for `load` waiting for the module's hash when the app set `onPanic` (the review's fix of
+S29: a trap right after load had no `imageId`). The budget is **22,100**, the
+record rounded up to the next hundred (the 5% tolerance stays); 22,000 would already fail. Both pieces' bytes, for the
+integrator: `main` before either 21,336; objects-callbacks +336 (21,672, its note above: the identity map, the mirror's
+callback entries, the handle layout); prod-ops +333 (22,005: the trap-report trigger, the page window with
+`pagehide`/`freeze`, the stats fields). `up-front.test.ts` also fails if `core.ts` statically reaches `background.ts`.
+
+**The wasm (a finding of the review, fixed).** Merged with `main`, the hello wasm measured **121,164** gzipped, 1,164 over
+the 120,000 budget: `main` was at 119,055 and this piece added 2,109. Where (named builds, twiggy, then the script's
+gzipped deltas): the standard function `run_background`, generated as an `async fn`, linked its future, its reply encoding
+and its dispatcher into every core (-745 when removed); the wasm hook's `in <operation>` naming (-78); and, the most, the
+report paths of a *caught* panic (`report_from`, the frames, the reporting at every guard), which a wasm core can never
+run: with `panic = "abort"` nothing catches a panic there. Two changes, no behaviour lost:
+
+1. `guarded` is `Ok(f())` on wasm (the hook still logs the FATAL record before the trap), so no reporting path of a caught
+   panic is linked into a wasm core: -1,137 bytes gzipped (part of it `main`'s own dead paths).
+2. `run_background`'s dispatcher is written by hand in `undra-ports` (the same declaration, so the schema and its hash are
+   unchanged): a runtime with no background task answers an idle report synchronously
+   (`Runtime::background_call`), and the asynchronous run is reachable only through `Runtime::add_background_task`: -378.
+
+The hello wasm is **119,654** gzipped (+599 on `main`: the standard surface every schema carries, R1 and ADR-024, the idle
+dispatcher, the FATAL record's `at`/`in` trailer); the budget stays 120,000.
+
+## Review note (2026-10-02, `types-paging` adversarial review): the JavaScript up front is 22,068 of 22,100; the gate stays
+
+Measured on `wt/types-paging` after the review's fixes, with the gate's own script (`scripts/wasm-size.sh`, zlib level 9):
+**web/hello-runtime-js 22,068** gzipped (record 22,005, budget 22,100: 32 bytes of headroom) and **web/hello-wasm 116,480**
+(record 119,654, budget 120,000). The JavaScript number does not depend on the checkout's path (the ~240-byte path effect the
+piece's record mentions is the wasm's panic locations), so `main` will measure the same after the merge.
+
+What the +63 bytes up front are, each something a hello page runs at load (R9's rule): ADR-031's amended fold in the mirror
+(a slot keeps a full value and the last lazy invalidation after it; +36 as the amendment records), the page call's target in
+`UndraCore.call`/`callSync` (`CallTarget.LazyListPage`: the request encoder every transport shares), and the review's fix of
+the mirror's wait-for-a-full-value rule (an invalidation is dropped like a patch). `LazyList`, `useLazyList`, `useLoadMore`
+and `Decimal` are not in the hello chunk (a store without a `Lazy<T>` signal links none of them).
+
+The budget stays **22,100** and the record is re-measured on `main` by the integrator. The next piece that adds to the chunk
+loaded up front either makes room or restates the budget here with its own measured items; 32 bytes is not room for a feature.
+
+## Note 2026-10-02 (objects-followups review): the gate no longer moves with the checkout's path
+
+**Finding.** The hello wasm measured 120,031 gzipped in `.work/objects-followups` and 119,856 in a sibling checkout with a
+shorter name, for the same source: the gate (and the record the README and the site publish) moved with the directory the
+build ran in, by more than the piece under review had changed. Cause: the remapping above covered `$HOME` only, so what
+stayed was the rest of the checkout's path (`~/Desktop/src/.work/objects-followups/crates/undra-runtime/src/…`) in every
+panic location of the Undra crates, and the project's own path in those of the core.
+
+**Decision.** `undra build` (every release profile: wasm, iOS, Android, host) names the directories of the build by fixed
+labels with `--remap-path-prefix`, widest first (rustc applies the last prefix that matches): `$HOME` to `~`, a `CARGO_HOME`
+outside it to `/cargo`, Cargo's registry sources and git checkouts to `/undra/deps`, the Undra checkout the core depends on
+by path to `/undra/src`, and the project's Cargo workspace (the project itself when the core is a workspace of its own) to
+`/undra/app`. The project's *workspace*, not its own directory, so that two cores of one workspace built into one target
+directory carry the same flags (Cargo fingerprints rustflags: a flag per project directory would rebuild every dependency
+each time the project changes). `crates/undra-cli/src/cargo.rs` (`RemapRoots`, `Cargo::path_remap`), `Session::remap_roots`.
+`scripts/wasm-size.sh` fails when the module names `$HOME`, the checkout or the hello project.
+
+**What this does not make identical.** Not every byte: a `TypeId` is a hash of its crate's identity, Cargo derives that
+from the absolute path of a path dependency outside the shim's workspace (the core, the Undra checkout), and no rustc flag
+changes it. The `TypeId` constants (about ten, i64 literals in code and 16-byte statics) differ in value and, as LEB128,
+by a byte or two in width: two copies of the hello project at paths of different length differ by 4 bytes of 278,794 raw,
+and every string of 16 printable bytes or more is the same in both (`build_web.rs`,
+`the_web_module_does_not_depend_on_where_the_project_lives`). The gate's number can still move by a few bytes with the path
+the repository is checked out at (the Undra crates' ids); it no longer moves by hundreds. Debuggers: the DWARF paths are the
+labels too (`--remap-path-scope=object`), and `.lldbinit` does not map them back (it did not map `~` either).
+
+**Measured (review, same source at four checkout paths, before the merge with `types-paging`):** 119,927 (`.work/objects-followups`),
+119,931 (`.work/s1`), 119,818 (a 68-character name), and `main` + this fix 119,842 against this piece 119,931 at one path: the
+piece's own cost is **+89 bytes**; before the fix the same source moved 120,031 / 119,856 between two paths, in order of the
+path's length. What is left (up to 113 bytes, in no order) is the crate identities above. **After the merge** (`main` `94b87ba`,
+recorded 116,628 at its own path without the remap): wasm **116,864** gzipped at `.work/objects-followups` (gate 120,000), and the
+JavaScript up front **22,105**, 5 over its 22,100 (`types-paging`'s 22,068 plus this piece's +39): trimmed to **22,100** by letting an
+aborted call settle its promise before the cancel goes out (no no-op `reject` on the abandoned entry) and by the shorter name of
+the restart counter (`_era`). That is no headroom: the next change to the chunk makes room or restates the budget here.

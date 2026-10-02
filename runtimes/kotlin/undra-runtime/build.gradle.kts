@@ -4,6 +4,7 @@ plugins {
     // Android plugin share one class loader. Only resolved, never applied, when no Android SDK is around.
     alias(libs.plugins.android.library) apply false
     alias(libs.plugins.kotlin.android) apply false
+    alias(libs.plugins.kotlin.compose) apply false
 }
 
 allprojects {

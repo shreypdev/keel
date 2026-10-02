@@ -32,6 +32,7 @@ fn record(name: &str, fields: Vec<FieldDef>) -> RecordDef {
         name: name.into(),
         type_id: ids::type_id(name),
         fields,
+        transparent: false,
         docs: String::new(),
     }
 }
@@ -528,6 +529,82 @@ fn widening_and_wrapping_rules() {
     expected.insert(-1_i64, 1_u32);
     expected.insert(5_i64, 2_u32);
     assert_eq!(out, expected.encode_to_vec());
+}
+
+#[test]
+fn a_lazy_signal_is_persisted_as_the_vec_of_its_items() {
+    let s = base_schema();
+    let lazy = TypeRef::lazy(named("Todo"));
+    let list = TypeRef::vec(named("Todo"));
+    let mut w = Writer::new();
+    w.write_len(2);
+    w.write_raw(&todo_bytes([1; 16], "a", true, &["x"]));
+    w.write_raw(&todo_bytes([2; 16], "b", false, &[]));
+    let bytes = w.into_vec();
+
+    // Decoded and encoded as the list it is stored as.
+    let closure = s.closure(&lazy);
+    assert!(
+        closure.record("Todo").is_some(),
+        "the closure of a Lazy reaches its item"
+    );
+    let value = decode_dyn(&bytes, &lazy, &closure).unwrap();
+    let DynValue::List(items) = &value else {
+        panic!("{value:?}");
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(encode_dyn(&value, &lazy, &closure).unwrap(), bytes);
+    assert_eq!(decode_dyn(&bytes, &list, &closure).unwrap(), value);
+
+    // Lazy <-> Vec <-> Lazy, with and without a change of the items: the bytes follow the items.
+    for (from, to) in [(&lazy, &lazy), (&list, &lazy), (&lazy, &list)] {
+        assert_eq!(
+            structural(&bytes, &s, from, &s, to).unwrap(),
+            bytes,
+            "{from} -> {to}"
+        );
+        let decoded = decode_dyn(&bytes, from, &s.closure(from)).unwrap();
+        let tree = migrate_value(
+            &decoded,
+            from,
+            &s.closure(from),
+            to,
+            &s.closure(to),
+            &NoHooks,
+        );
+        assert_eq!(tree.unwrap(), bytes, "{from} -> {to} (decoded)");
+    }
+    let wide = |t: TypeRef| TypeRef::lazy(t);
+    let ints = vec![1_i16, -2].encode_to_vec();
+    assert_eq!(
+        structural(&ints, &s, &wide(TypeRef::I16), &s, &wide(TypeRef::I64)).unwrap(),
+        vec![1_i64, -2].encode_to_vec()
+    );
+    assert_eq!(
+        structural(
+            &ints,
+            &s,
+            &TypeRef::vec(TypeRef::I16),
+            &s,
+            &wide(TypeRef::I32)
+        )
+        .unwrap(),
+        vec![1_i32, -2].encode_to_vec()
+    );
+    // A list is not a lazy list of something else.
+    assert!(structural(&ints, &s, &wide(TypeRef::I16), &s, &wide(TypeRef::String)).is_err());
+    assert!(structural(&ints, &s, &wide(TypeRef::I16), &s, &TypeRef::I16).is_err());
+
+    // Hostile bytes: an impossible count, a cut item, trailing bytes. Typed errors, no panic.
+    let huge = [0xff, 0xff, 0xff, 0x7f];
+    assert!(decode_dyn(&huge, &lazy, &closure).is_err());
+    assert!(structural(&huge, &s, &lazy, &s, &lazy).is_err());
+    assert!(decode_dyn(&bytes[..bytes.len() - 1], &lazy, &closure).is_err());
+    assert!(structural(&bytes[..bytes.len() - 1], &s, &lazy, &s, &lazy).is_err());
+    let mut extra = bytes.clone();
+    extra.push(0);
+    assert!(decode_dyn(&extra, &lazy, &closure).is_err());
+    assert!(structural(&extra, &s, &lazy, &s, &lazy).is_err());
 }
 
 #[test]
@@ -1213,4 +1290,86 @@ proptest! {
         let wrapped = TypeRef::option(ty.clone());
         let _ = migrate(&bytes, &ty, &old, &wrapped, &new_schema.closure(&wrapped), &NoHooks);
     }
+}
+
+// ----- newtypes and decimals (ADR-042) ------------------------------------------------------
+
+/// `Todo { owner: <owner> }`, with `UserId(Uuid)` declared as a newtype when `wrapped`.
+fn owner_schema(wrapped: bool) -> Schema {
+    let mut s = Schema::new("t");
+    let owner = if wrapped {
+        named("UserId")
+    } else {
+        TypeRef::Uuid
+    };
+    s.records.push(record("Todo", vec![field("owner", owner)]));
+    if wrapped {
+        let mut id = record("UserId", vec![field("value", TypeRef::Uuid)]);
+        id.transparent = true;
+        s.records.push(id);
+    }
+    s
+}
+
+#[test]
+fn wrapping_a_field_in_a_newtype_and_unwrapping_it_migrates_without_a_hook() {
+    let (flat, wrapped) = (owner_schema(false), owner_schema(true));
+    let bytes = Uuid([7; 16]).encode_to_vec();
+    let todo = TypeRef::named("Todo");
+    // The bytes are the same either way: a newtype is its inner value.
+    assert_eq!(
+        structural(&bytes, &flat, &todo, &wrapped, &todo).unwrap(),
+        bytes
+    );
+    assert_eq!(
+        structural(&bytes, &wrapped, &todo, &flat, &todo).unwrap(),
+        bytes
+    );
+    // At the root, inside an option and inside a list too.
+    let owner = TypeRef::named("UserId");
+    assert_eq!(
+        structural(&bytes, &flat, &TypeRef::Uuid, &wrapped, &owner).unwrap(),
+        bytes
+    );
+    let list = Some(Uuid([1; 16])).encode_to_vec();
+    assert_eq!(
+        structural(
+            &list,
+            &flat,
+            &TypeRef::option(TypeRef::Uuid),
+            &wrapped,
+            &TypeRef::option(owner.clone())
+        )
+        .unwrap(),
+        list
+    );
+    // A newtype does not become an unrelated type.
+    assert!(structural(&bytes, &wrapped, &owner, &flat, &TypeRef::String).is_err());
+    // The dynamic path sees the newtype as a record with one field called `value`.
+    let closure = wrapped.closure(&owner);
+    let decoded = decode_dyn(&bytes, &owner, &closure).unwrap();
+    assert_eq!(decoded.field("value"), Some(&DynValue::Uuid([7; 16])));
+    assert_eq!(encode_dyn(&decoded, &owner, &closure).unwrap(), bytes);
+}
+
+proptest! {
+    #[test]
+    fn decimals_round_trip_through_the_dynamic_form(mantissa in any::<i128>(), scale in 0u8..=38) {
+        let d = undra_wire::Decimal::new(mantissa, scale);
+        round_trips(&d, &TypeRef::Decimal)?;
+    }
+}
+
+#[test]
+fn a_decimal_with_a_scale_above_38_is_refused_in_both_directions() {
+    let schema = base_schema();
+    let closure = schema.closure(&TypeRef::Decimal);
+    let mut bytes = 5_i128.to_le_bytes().to_vec();
+    bytes.push(39);
+    assert!(decode_dyn(&bytes, &TypeRef::Decimal, &closure).is_err());
+    let bad = DynValue::Decimal {
+        mantissa: 5,
+        scale: 39,
+    };
+    assert!(encode_dyn(&bad, &TypeRef::Decimal, &closure).is_err());
 }

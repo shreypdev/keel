@@ -201,12 +201,14 @@ fn a_synchronous_port_cannot_be_served_by_a_remote_client() {
 
     // The call still went out (the bridge cannot tell a sync port from an async one), so the
     // client saw it; whatever it answers now is discarded and harmless.
+    // (The contained panic itself is reported to the client's `Diagnostics` port, ADR-046: a
+    // second, fire-and-forget PortCall that is not this one.)
     let call = client
         .frames_of(Kind::PortCall)
-        .last()
-        .map(|frame| port_call(frame))
+        .into_iter()
+        .map(port_call)
+        .find(|call| call.0 == WALL_PORT)
         .expect("a PortCall");
-    assert_eq!(call.0, WALL_PORT);
     client.port_reply(call.2, PortStatus::Ok, &enc(&1_i64));
     let (status, _) = client.method(handle, GET, &[]);
     assert_eq!(status, ReplyStatus::Ok);
@@ -225,11 +227,17 @@ fn even_a_fire_and_forget_sync_port_is_unavailable_over_a_remote_client() {
             .0
             .contains("the `Beep` port has no adapter registered (method `beep`)")
     );
-    let calls: Vec<_> = client
+    let all: Vec<_> = client
         .frames_of(Kind::PortCall)
         .into_iter()
         .map(port_call)
         .collect();
+    // ADR-046: the contained panic is reported to the client's `Diagnostics` port, fire and forget.
+    let (reports, calls): (Vec<_>, Vec<_>) = all
+        .into_iter()
+        .partition(|call| call.0 == undra_runtime::DIAGNOSTICS_PORT);
+    assert_eq!(reports.len(), 1, "one panic, one report");
+    assert_eq!(reports[0].1, undra_runtime::PANICKED_METHOD);
     assert_eq!(calls.len(), 1, "the first beep already failed the call");
     assert_eq!(calls[0].0, BEEP_PORT);
 }

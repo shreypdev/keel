@@ -5,7 +5,7 @@ import type { UndraClass } from "../src/lifetime.js";
 import { Signal } from "../src/signal.js";
 import { useUndra, useSignal } from "../src/vue.js";
 import { FakeCoreTransport, SCHEMA } from "./support/fake-core.js";
-import { deferred, microtasks, track } from "./support/harness.js";
+import { deferred, macrotask, microtasks, track } from "./support/harness.js";
 import { CounterStore, str, u32, vecU32 } from "./support/store.js";
 
 /** The Vue adapter against Vue's own reactivity (it needs no DOM). */
@@ -170,6 +170,8 @@ describe("useUndra (vue)", () => {
     scope.stop();
     gate.resolve();
     await microtasks(20);
+    await macrotask(); // the close waits one turn (see `openUndra`)
+    await macrotask();
     expect(created).toHaveLength(1);
     expect(created[0]?.closed).toBe(true);
     expect(store?.value).toBeUndefined();

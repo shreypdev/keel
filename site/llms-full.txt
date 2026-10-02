@@ -201,7 +201,7 @@ undra build --platform ios,android,web --release
 
 `undra init` also writes `.github/workflows/undra.yml`: a job for the core (format, clippy, tests, `undra bindgen --check`) and one per app, each installing `undra` at the version pinned once at the top of the file. When a newer Undra is out, `undra upgrade` moves every pin of the project (the core's dependency, the runtimes, the workflow) in step, regenerates the bindings and prints the migration notes of every release it crosses; `undra upgrade --dry-run` shows the lines first.
 
-Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 116.6 KB gzipped (budget 120 KB, gated in CI) and an Android `.so` is 831 KB per ABI.
+Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 116.7 KB gzipped (budget 120 KB, gated in CI) and an Android `.so` is 831 KB per ABI.
 
 ## Prefer to explore first?
 
@@ -501,6 +501,8 @@ An observed entry refetches when it is stale and something happens:
 
 **One fetch per key at a time.** If five screens observe the same list, they share one in-flight request.
 
+**Polling and paging.** `interval = "30s"` refetches an observed query on a schedule ([Polling](https://shreypdev.github.io/undra/docs/polling.html)), and `infinite` turns a cursor query into a keyed list that grows by the page ([Paging and lazy lists](https://shreypdev.github.io/undra/docs/paging.html)).
+
 ## Retry with jitter
 
 A failed fetch is retried `retry` times (three by default) with exponential backoff, `min(1000 × 2ⁿ, 30000)` milliseconds, with plus or minus 20% jitter. The jitter comes from the `Rng` port and the delay from the `Timer` port, so a test with fakes sees exactly the schedule it scripts.
@@ -633,6 +635,8 @@ Each runtime ships an adapter for every port, so a new app works without adapter
 | `Timer` | `DispatchQueue` | `ScheduledExecutor` | `setTimeout` |
 | `Connectivity`, `Lifecycle` | `NWPathMonitor`, `scenePhase` | `ConnectivityManager`, activity lifecycle callbacks | `navigator.onLine`, `visibilitychange` |
 
+Every default store is per core namespace (`<namespace>/kv` under the app's `undra` directory in Application Support or `filesDir`, a Keychain service or Keystore alias and an IndexedDB database named after it), so two cores of one app never read each other's keys, secrets or files; an adapter you pass yourself keeps the location you gave it.
+
 On Android one call installs all ten, `AndroidPlatformDefaults.install(core, context)`; the runtime alone installs only `Clock`, `Rng`, `Log` and `Timer`. On the JVM without Android, `Connectivity` and `Lifecycle` are stubs. On the web, `Clock`, `Rng` and `Log` are bound to imports of the wasm module, so a web app needs no adapter code for them.
 
 Under React Native, `loadNative` installs all ten too: `Kv`, `SecureStore`, `Fs` and `Connectivity` are native code in `@undra/react-native` (files in the app's private storage, the Keychain or the Android Keystore, `NWPathMonitor` or `ConnectivityManager`, with the Swift and Android adapters' file layouts), `Http` is React Native's `fetch` and `Lifecycle` its `AppState` ([docs/REACT_NATIVE.md](https://github.com/shreypdev/undra/blob/main/docs/REACT_NATIVE.md)).
@@ -739,6 +743,235 @@ Time works the same way. `FakeClock` is the single source of time for both `Cloc
 The platforms get the same treatment. The [contract scenarios](https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md) run every platform runtime against the real core with a manual clock, an in-memory `Http` server, an in-memory `Kv` and a test that emits connectivity events itself.
 
 The test kit puts these fakes behind the real core in Swift, Kotlin and TypeScript too, with a manual clock, and replays recorded port traffic: [Testing your app](https://shreypdev.github.io/undra/docs/testing.html).
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/objects.html
+
+# Objects and identity
+
+A method can return an object and take one. The platform gets a class, the same wrapper every time it asks for the same object.
+
+## Returns and parameters
+
+A method returns an object the way Rust already shares one, behind an `Arc`, and takes one by reference. Undra generates a class for it in each language, so you never see a handle.
+
+| In Rust | On the platform |
+| --- | --- |
+| `Arc<Shelf>`, `Option<Arc<Shelf>>`, `Vec<Arc<Shelf>>` returned, also inside a `Result` or an `async` method | a `Shelf`, an optional one, a list of them |
+| `&Shelf`, `Arc<Shelf>`, `Option<&Shelf>`, `Vec<Arc<Shelf>>` as a parameter | a `Shelf` you pass, an optional one, a list |
+| a constructor returning `Arc<Self>` | a constructor that gives the same object back while you hold it |
+
+A returned store is a store: observe it and its signals arrive like those of any other.
+
+## One object, one wrapper
+
+Ask for the same object twice and you get the same wrapper while the first is alive. A store returned twice is observed once, a list of shelves is a list you can compare, and in Swift the wrapper is `Hashable` by identity, so `ForEach(shelves, id: \.self)` works.
+
+The reference you hold is given back when the wrapper is closed or collected, once. Hold the wrapper for as long as you use it; `close()` it to let go early.
+
+## What stays out
+
+An object travels as a parameter or a return, and nowhere else.
+
+| Not allowed | Why |
+| --- | --- |
+| An object inside a record, a variant or a store's signal, in a stream item, a query or a mutation | a value is copied, compared, saved and merged; an object is none of those. Put the object behind a method (`E0064` says so) |
+| An object of another core | two cores can issue the same handle numbers, so the generated code refuses it before anything is sent: `UndraCallError.refused` |
+| An object in a port's parameter or return | pass a record or an id instead |
+
+## After a restore
+
+An object a method returned is not part of a saved snapshot: after a restore (a web worker crash, `undra dev` reloading the core) its handle is stale, and calling the method again returns it. Constructed stores restore as before. What a store keeps in a private field is whatever its `restore` hook rebuilds.
+
+## Good to know
+
+- **Passing an object lends it.** The call holds it until it finishes, so closing the wrapper while a call is in flight is safe.
+- **A failed call hands nothing out.** An error, a cancel or a panic gives the references it had issued back.
+- **A shelf stays alive while you hold it,** even if the core drops its own reference.
+
+The playground's [Workshop](https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/workshop.rs) uses every shape on this page, and the contract scenario S27 checks them on Swift, Kotlin and TypeScript.
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/callbacks.html
+
+# Host callbacks
+
+A trait the app implements, so the core can call it: a progress report, a note, a question for the user.
+
+## Declare it
+
+A callback is a trait the app implements. Mark it `#[undra::callback]`, take it as `Arc<dyn Trait>` in a method or function, and call it from the core like any other trait.
+
+| A method on the trait | Means |
+| --- | --- |
+| `fn note(&self, line: String)` | fire and forget: the core does not wait, and nothing is lost on the way |
+| `async fn confirm(&self, q: String) -> Result<bool, E>` | asks the app and awaits its answer, a typed error included |
+| `#[undra(coalesce)]` | a listener that has fallen behind gets only the newest call |
+| `#[undra::callback(background)]` | runs off the main thread, in order, without waiting for a frame |
+
+A method that returns a value without `async` is refused (`E0071`): the core never blocks waiting for app code.
+
+## Where it runs
+
+By default on the main thread, in the order things happened. A callback joins the same queue as state changes, so a listener sees the stores as they were when the core called it. With `background` each listener has its own serial executor instead. Either way the core never runs app code inside its own call.
+
+## Errors and cancelling
+
+An implementation that throws the method's own error answers the core with it, typed. Any other error is reported through `onError` and the core sees the app as unavailable. A throw from a fire-and-forget method is only reported. None of it unwinds into the core.
+
+When the core stops waiting (the call that was awaiting was cancelled), the task running the implementation is cancelled too: a Swift `Task`, a Kotlin `Job`, a TypeScript `AbortSignal` passed as the last argument.
+
+## How long it lives
+
+The core holds the callback until it lets go, so a listener you create inline lives as long as the core uses it. A core that keeps the listener and an app that keeps the core make a cycle across languages. Two ways out:
+
+- **A subscription object.** Return something the app closes (`watch` above): closing it drops the core's hold.
+- **A weak wrapper.** Hand the core a wrapper that forwards while the target lives and does nothing after.
+
+A stream method takes a callback like any other method: the core holds it while the stream runs and lets it go when the stream ends or is dropped. The core never calls a weak wrapper whose target is gone (the question is answered unavailable); if your own code does in Swift, the method throws the error type's `Unavailable`, and an error type without one stops the app with a message.
+
+## Testing
+
+In a Rust test pass an implementation written in Rust: `#[undra::port] impl Reporter for Recorder` records the calls, and an `async` method answers as you set it. See [Testing your app](https://shreypdev.github.io/undra/docs/testing.html).
+
+The playground's [Reporter](https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/workshop.rs) is this page's example, and the contract scenario S28 checks ordering, errors, cancelling and release on Swift, Kotlin and TypeScript.
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/types.html
+
+# Newtypes, generics and decimals
+
+A newtype crosses as the value it wraps and arrives as a distinct type. A generic type gets a name per use. Money is a `Decimal`, never a float.
+
+## Newtypes
+
+A tuple struct with one field is a newtype. It crosses as the value it wraps, with no length and no tag, so it costs nothing on the wire, and each platform gets a distinct type, so an `AccountId` can never be passed where a `UserId` is wanted.
+
+| In Rust | Swift | Kotlin | TypeScript |
+| --- | --- | --- | --- |
+| `struct AccountId(pub Uuid)` | `struct AccountId: RawRepresentable, Hashable, Codable` | `@JvmInline value class AccountId(val value: UUID)` | `type AccountId = string & {{ __brand }}` and a function `AccountId(value)` |
+
+The inner type is any value type: another newtype, a record, a `Vec`, an `Option`, a `Decimal`. A newtype can stand anywhere a record can, and as a map key when the type it wraps is a valid key (`String`, an integer, `bool`, `Uuid`); the compiler checks it, so `HashMap<Price, _>` with `struct Price(Decimal)` is an error at the map, not a surprise on a phone. A keyed list may use a newtype as its key field.
+
+Swift and Kotlin add `Comparable` when the wrapped type has an order that means something (numbers, strings, dates, durations, decimals). A `Uuid` gets none: Foundation's `UUID` is comparable only from iOS 17. No literal conformances are generated, because a literal that becomes an `AccountId` is what the type is there to prevent.
+
+Wrapping a field you already persist in a newtype needs no migration code: the bytes are the same, so an old snapshot or cached query result reads back as it was.
+
+## Generic data types
+
+The schema describes concrete types, so a generic struct or enum is a *template* that registers nothing, and each use is a named instantiation. The name is yours and stays stable, which is what the generated Swift, Kotlin and TypeScript need.
+
+On every platform `EntrySlice` is an ordinary record and `LoadableEntries` an ordinary enum, byte for byte what you would get by writing them out. Signatures spell the alias; writing `Slice<Entry>` in one is [E0002](https://shreypdev.github.io/undra/docs/errors.html#E0002) and the message says which alias to declare. An alias lives in the crate of its template (a second one for the same instantiation is [E0070](https://shreypdev.github.io/undra/docs/errors.html#E0070)), and its arguments are concrete types, other aliases and newtypes included.
+
+Generic objects, stores, functions, methods, ports, callbacks and queries stay out: each would need a dispatcher per instantiation. Type parameters are all a template takes; lifetimes are [E0003](https://shreypdev.github.io/undra/docs/errors.html#E0003), const generics and `where` clauses [E0002](https://shreypdev.github.io/undra/docs/errors.html#E0002).
+
+## Decimal, for money
+
+`Decimal` is an exact decimal number: a 128-bit mantissa and a scale of at most 38, so `19.99` is `1999` with scale `2`. It never goes through a float. The scale is part of the value, so `1.10` and `1.1` are different values to `==` (and to a map) and the same number to a numeric comparison; `Decimal` is therefore not a map key.
+
+| Platform | Type | Notes |
+| --- | --- | --- |
+| Rust | `undra::Decimal { mantissa: i128, scale: u8 }` | exact `FromStr` and `Display`, `cmp_numeric`; no arithmetic. With the `rust_decimal` feature, `rust_decimal::Decimal` crosses too; a value it cannot hold (more than 96 bits of mantissa, or a scale above 28, which a Swift `1 / 3` has) is a decode error, so round on the platform first |
+| Swift | `Foundation.Decimal` | decoding is exact; `==` and hashing are numeric (`1.0 == 1.00`, unlike the other three); a NaN encodes as zero, 2127 or more saturates, digits past the 38th after the point (or past a 127-bit mantissa) are cut off |
+| Kotlin | `java.math.BigDecimal` | `equals` is scale-sensitive, `compareTo` is numeric, as Kotlin engineers expect; digits past the 38th after the point (or past a 127-bit mantissa) round half up, a whole part of 2127 or more saturates |
+| TypeScript | `Decimal` of `@undra/runtime` | `mantissa: bigint`, `scale`, `parse`, `toString`, `equals`, `compare`; no arithmetic, convert through `toString()` to your decimal library |
+
+A scale above 38 is refused by every decoder, in the core as much as on the platforms. `i128` and `u128` stay out; the error points here, or at a `String` newtype for identifiers.
+
+## Types from other crates
+
+The types most Rust teams already use cross as the wire type they stand for, behind features of the `undra` crate. Each dependency is built without a clock or a randomness feature, so a core that uses them still builds for wasm32, iOS and Android, and still reads no clock of its own.
+
+| Feature | Crosses as |
+| --- | --- |
+| `uuid` | `uuid::Uuid` as `Uuid` |
+| `chrono` | `DateTime<Utc>` as `Timestamp` (milliseconds), `TimeDelta` as `Duration` |
+| `time` | `OffsetDateTime` and `UtcDateTime` as `Timestamp` (normalised to UTC), `time::Duration` as `Duration` |
+| `rust_decimal` | `rust_decimal::Decimal` as `Decimal` |
+| `bytes` | `bytes::Bytes` as `Bytes` |
+
+Precision is documented, not hidden. A `Timestamp` is milliseconds, and a finer value rounds toward negative infinity on its way out. A `Duration` is never negative, so a negative `TimeDelta` encodes as zero. `DateTime<Local>` and `DateTime<FixedOffset>` are [E0001](https://shreypdev.github.io/undra/docs/errors.html#E0001): convert to `Utc`, offsets do not cross. Spell a type without its feature and the error names the feature to turn on.
+
+The playground's [ledger](https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/ledger.rs) uses every shape on this page, and the contract scenario S31 checks them on Swift, Kotlin and TypeScript.
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/paging.html
+
+# Paging and lazy lists
+
+A feed from a server grows by the page. A big collection in the core is read a window at a time. Neither ships a whole list across the boundary.
+
+## Two kinds of long list
+
+"Paging" hides two different problems, and they get different tools.
+
+|  | A feed from a server | A big collection in the core |
+| --- | --- | --- |
+| Where the rows are | on a server; the core fetches a page at a time | already in the core (a database, a derived view over 50,000 rows) |
+| What the screen shows | every row loaded so far | a window of it |
+| Use | an `infinite` query: a keyed list that grows by the page | `Lazy<T>`: the platform pages the core's list on demand |
+
+## Infinite queries
+
+An infinite query is a query with a cursor. The function takes the cursor and returns one page; the handle on each platform shows all the pages loaded so far as one list, keyed by the field you name.
+
+The cursor is not part of the cache key and not a parameter on the platform. The handle has the five signals of every query and two more, `hasNextPage` and `fetchingNextPage`, and `data` is the list itself, empty before the first page rather than optional.
+
+Loading the next page appends with the same recorded `push` a store uses, so the change-set is the new rows and nothing else, however long the list already is. A refetch (a stale entry, `invalidate`, the app coming to the front, the network returning, a poll) fetches the loaded pages again in order from the first, each with the cursor the previous response returned, and sends only what changed. `refetch_pages = N` bounds that: a feed scrolled through fifty pages need not cost fifty requests on every refresh.
+
+A mutation edits the whole list with `CacheView::update_items`, inside the optimistic transaction. `persist` keeps the first `persist_pages` pages (one by default) in the same format as any persisted query, so a cold start shows the first page at once. Not in this version: previous pages (paging backwards) and an upper bound on pages kept in memory; for a list that outgrows memory, feed a store's `Lazy<T>` from the query.
+
+## Lazy lists
+
+A store field of type `Lazy<T>` is a list the core owns and the platform reads a window of. The platform is told how many rows there are and which version of the list that is; it asks the core for the pages it needs.
+
+Use a lazy container to show it (`LazyVStack`, `LazyColumn`, a virtualised list), never one that builds every row up front: SwiftUI's `List` over `0..<count` reads all of them at once and the cache cannot hold that. Reading a row that is not loaded gives `nil`, `null` or `undefined` and asks for its page of 50 rows and one page of prefetch on each side, once. Requests made in one frame go out together. At most 24 pages are kept, least recently touched first out. A change to the list, whatever it is, is one 12-byte entry (the new length and the new version): the platform keeps showing the rows it has and asks again for the pages on screen, so a change costs the window, never the list. A reply carries the version it was read at, so a page that arrives after a newer change is thrown away and asked for again.
+
+|  | Cost |
+| --- | --- |
+| Observing a list of 100,000 rows | 20 bytes |
+| A change of any size | 12 bytes, then the window |
+| A page of 50 rows in the core | microseconds (a few hundred nanoseconds on the reference machine) |
+| Rows kept on the platform | at most 24 pages |
+
+`Lazy::over(&derived)` is a read-only lazy view of a derived list ([core concepts](https://shreypdev.github.io/undra/docs/concepts.html)): its pages come from the derived index in O(log n + page), so a filtered and sorted view over 50,000 rows pages as cheaply as the list itself. A store with a view needs a `restore` hook, because the view is rebuilt from its source rather than saved. A `Lazy` is store state: a snapshot carries its rows, and after a restore the platform gets a new page server and reads its window again.
+
+Rows not yet loaded have no identity, so animations across a re-page follow the index; the loaded rows have their keys. A `PagingSource` adapter over `UndraLazyList` for Jetpack Paging can follow if teams ask. On iOS 15 and 16 the Swift class is `UndraLazyListObject`, an `ObservableObject` you hold with `@ObservedObject`.
+
+The playground's [Library and feed](https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/paging.rs) use both, and the contract scenario S32 checks them on Swift, Kotlin and TypeScript. The [pagination recipe](https://shreypdev.github.io/undra/docs/cookbook/pagination.html) shows the older shape, one query per page number.
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/polling.html
+
+# Polling
+
+An `interval` on a query refetches it while it is observed. It runs from the end of the last fetch, pauses when the app is away and resumes when it returns.
+
+## An interval on a query
+
+Add `interval` to a query and the core refetches it while somebody is looking.
+
+The shortest interval is one second; below that the compiler says to use a stream, which is the tool for real-time data ([the opt-in ports](https://shreypdev.github.io/undra/docs/db.html) have WebSocket and Server-Sent Events).
+
+## How it polls
+
+The next fetch is scheduled one interval after the *end* of the previous one, whether it succeeded or failed once its retries ran out. A fetch slower than the interval never overlaps the next, and a struggling server is asked less often rather than hammered.
+
+| Situation | What happens |
+| --- | --- |
+| Nobody observes the entry | no timer; the last observer going away cancels it |
+| The app is in the background or inactive | paused, unless the query says `poll_in_background` |
+| The device is offline | paused |
+| The app comes to the front, the network returns | the usual triggers fire (a stale entry refetches, going online refetches everything observed) and polling continues from the end of that fetch |
+| Several observers | the entry polls at the shortest interval any of them asked for, each new observer starting from the attribute's |
+| A fetch fails | retried with backoff as any query is, then the interval runs from the end; the error shows and the next success clears it |
+
+Time comes from the Clock and delays from the Timer port, so a test under `undra::ports::fakes` advances the clock and sees each poll, background pause included. The contract scenario S33 checks it on every platform with real timers.
 
 ---
 
@@ -907,6 +1140,80 @@ Build the old and the new core, write the data with one and read it with the oth
 
 ---
 
+Source: https://shreypdev.github.io/undra/docs/production.html
+
+# Operating in production
+
+Three things a shipped app needs that nobody should write for themselves: a crash report that names the Rust frame, the symbol files to read it with, and a way to finish the offline queue while the app is not on screen.
+
+## Crash reports
+
+A panic in the core never crashes the app: the call that was running fails with `UndraCallError.panicked` and the core goes on. Your crash reporter still wants to know. Set `onPanic` when you load the core and it receives one structured report for every panic the core contained (a call, a detached task, a computed, a background task, an init or migration hook), once, in order, on the main thread. Nothing is linked for you: forward the report to the reporter you already use. Without `onPanic` the runtime logs one line, so a panic is never silent.
+
+| Field | What it holds |
+| --- | --- |
+| The panic | `message` and `location` (`file:line:column`; release builds remap your home directory to `~`, so no path names your machine). |
+| The context | `operation`, what was running (`Todos.add`, `task`, `computed Todos.visible`), and the Rust `thread`. |
+| The backtrace | `frames`, innermost first, at most 48. Always the `address` of each instruction as an offset into the core's image; a debug build also has `symbol`, `file` and `line`. |
+| The build | `namespace`, `coreVersion` and `schemaHash`: which core. |
+| The image | `imageId`: the Mach-O UUID, ELF build id or wasm SHA-256 of the image the addresses belong to, which is what symbol files are keyed by. |
+
+Crashlytics takes the frames as `StackFrame(address:)` on iOS and as synthetic stack trace elements on Android, Sentry as an event whose frames carry `instruction_addr` and whose debug image is `imageId`. The recipes are three lines each and Undra links no reporter.
+
+On the web a panic traps the module, which cannot call out of its last moments. The runtime builds the same report from what the core logged before it trapped and the trap's stack, and calls `onPanic` before it restarts anything ([crash recovery](https://shreypdev.github.io/undra/docs/web.html#recovering-from-a-crash)). A wasm frame's `address` is the module offset in the stack line (`wasm-function[41]:0x1a2b`), its `symbol` the function name when the build has one. The generated entry passes `namespace`; the module carries no version, so pass `coreVersion` in the load options if you want it in the report. In tests, `CaptureDiagnostics` (the Rust fakes and each testing kit) records the reports.
+
+## Symbol files
+
+A release build keeps line tables and nothing else: the code, the optimisation and the size of what ships are the same. `undra build --release` strips the copies it ships, keeps the unstripped ones below `build/symbols/` and writes `manifest.json` there (per image: namespace, core version, schema hash and the image id a report carries). `--no-symbols` skips all of it.
+
+| Platform | Ships | Symbols to keep (and upload) |
+| --- | --- | --- |
+| iOS | `build/ios/<Ns>Core.xcframework` | The **app's own dSYM**: Xcode's Release configuration already asks for one, and it now contains the Rust frames. Crashlytics and Sentry upload it as for Swift. A static library has no dSYM of its own. |
+| Android | `build/android/jniLibs/<abi>/lib<ns>.so`, stripped | `build/symbols/android/<abi>/lib<ns>.so`, and `native-debug-symbols.zip` in the Play Console layout (Crashlytics: `unstrippedNativeLibsDir`). The libraries carry a GNU build id. |
+| Web | `build/web/<ns>.wasm` | `build/symbols/web/<ns>.debug.wasm` (the same code with its names), `<ns>.wasm.functions.txt` (the function map) and `<ns>.dwarf.wasm` for the browser's debugger. |
+| Host (JVM, macOS) | `build/host/lib<ns>.{dylib,so}` | A `.dSYM` or `.debug` file next to it. |
+
+The generated CI workflows upload `build/symbols/` next to the app build, so every release keeps the files its crashes need. To read a report by hand, give it to `undra symbolicate`:
+
+sh
+
+```sh
+undra symbolicate report.json              # a report as onPanic received it, serialised
+undra symbolicate --platform android --image-id <build id> 0x2f3a1c
+undra symbolicate --dsym App.app.dSYM report.json     # iOS: the app's dSYM
+```
+
+It finds the image by `imageId` in the manifest and prints one line per frame, `address symbol (file:line)`: `atos` with the dSYM on Apple platforms, `llvm-symbolizer` on the Android twin, the function map and the debug module on the web.
+
+## Background runs
+
+The OS gives an app a window to work in while it is not on screen: iOS `BGTaskScheduler`, Android WorkManager, a page about to hide. The core spends it on what is worth finishing: the offline queue replays, stale queries refetch, and what waits to be written is written. The platform calls `runInBackground` with the window it was given; the core runs its background tasks inside it and reports back.
+
+| Report | Meaning |
+| --- | --- |
+| Finished | `finished`: every task was done in time and nothing is pending. Tell the OS it succeeded only then. |
+| Work done | `replayed` queued mutations sent, `refetched` queries fetched again. |
+| Work left | `stillPending`: queued mutations and unfinished fetches. |
+
+A run returns when its tasks are done, or half a second before the deadline so you can still tell the OS. Whatever a task did stays done: the queue persists per item, a request in flight is the client's and goes on, so a run that is cut short, or cancelled when the OS takes the window back, loses nothing and sends nothing twice. Offline, a run ends at once and says what is pending; it does not hold the window for a network that may not return.
+
+On iOS the identifiers are `<id>.processing` and `<id>.refresh`; `undra init` writes them to `Info.plist` with the `processing` and `fetch` background modes. **BackgroundTasks does not run in the simulator**: test the handler with the fakes in the Swift package, and on a device with the debugger command Apple documents. On Android the worker returns `retry()` while work is pending, and the web has no background beyond the page's own life yet: Background Sync in a service worker needs the core inside the worker and is a follow-up.
+
+Your own work joins the run with `undra::background::register(ctx, name, pending, run)` in Rust: `pending` says cheaply how much is waiting, `run` does it and reports progress to the `Deadline` as it goes. The core's statistics carry `background.pending`, which is what the platforms read to decide whether a window is worth asking for.
+
+## Debugging into Rust
+
+| Where | How |
+| --- | --- |
+| Xcode | A debug build keeps full DWARF in the core: step from a Swift call into Rust, and set breakpoints by `breakpoint set -f todos.rs -l 42`. `undra init` writes an `.lldbinit` that loads the toolchain's Rust formatters; `undra doctor` checks it. |
+| Android Studio | The *Dual (Java + Native)* debugger with the unstripped debug `.so` (the generated Gradle module keeps its symbols in debug); `build/symbols/android` is the symbol directory for a release reproduction. `doctor` checks the NDK's LLDB. |
+| Chrome | The C/C++ DevTools Support (DWARF) extension reads the debug module the dev build serves; breakpoints in `.rs` files. A browser extension is not something `doctor` can check, so it prints the link. |
+| Host tests | `rust-lldb` or CodeLLDB on `cargo test`. |
+
+The same panic that reaches your crash reporter is in the console during development: with `undra dev` the report goes to the app attached to the dev server like any port call.
+
+---
+
 Source: https://shreypdev.github.io/undra/docs/several-cores.html
 
 # One core or several
@@ -944,6 +1251,8 @@ namespace = "acme_pay"
 | The bindings' entry, in Swift, Kotlin and TypeScript | `UndraAcmePay` |
 
 `undra build` refuses a namespace that a sibling project already uses, and every runtime refuses to load two cores with one.
+
+The namespace also keeps the default storage apart: each core's `Kv`, `SecureStore`, `Fs` and `Db` live under `undra/<namespace>/` on every platform, so two cores that use the defaults never see each other's data unless you hand them one adapter of your own.
 
 ## Loading two cores
 
@@ -1096,7 +1405,7 @@ The view is a plain array on the platform. Asking for the next page is a call th
 
 ## Limits
 
-- There is no paged query type yet (`Lazy<T>` is rejected in v1): every page you load stays in memory on each platform that observes the list.
+- This recipe is the shape that needs nothing new: one query handle per page, stitched together in the core. For a feed that grows by the page, an `infinite` query keeps the pages, the cursor and the refetch order in the core, and `Lazy<T>` lets a platform read a window of a list that is too big to send; both are in [Paging and lazy lists](https://shreypdev.github.io/undra/docs/paging.html). Here, every page you load stays in memory on each platform that observes the list.
 - Prepending (a chat's older messages) is a `insert` at index 0 of the same list; the recipe appends only.
 
 Source: [`examples/cookbook/core/src/paging.rs`](https://github.com/shreypdev/undra/blob/main/examples/cookbook/core/src/paging.rs).
@@ -1880,9 +2189,9 @@ A diagnostic says what is wrong, why the rule exists and how to fix it. This one
 text
 
 ```
-error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
-  = note: trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript
-  = help: use a concrete `#[undra::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[undra::port]`)
+error[undra::E0004]: callback `Arc<dyn Listener>` cannot be a field of a record or enum (`Listener` is a callback interface)
+  = note: a callback is an instance with a lifetime, not a value: it cannot be copied, compared, stored in a record or mirrored from a signal
+  = help: keep an id or a record here, and take the callback as a parameter of the method that needs it
   = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
 ```
 
@@ -1905,9 +2214,9 @@ error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
 | [`C0013`](https://shreypdev.github.io/undra/docs/errors.html#C0013) | the dev server failed to start or crashed |
 | [`C0014`](https://shreypdev.github.io/undra/docs/errors.html#C0014) | the project's Undra does not match: the core's comes from elsewhere, or it is newer |
 | [`E0001`](https://shreypdev.github.io/undra/docs/errors.html#E0001) | unsupported type in a public position |
-| [`E0002`](https://shreypdev.github.io/undra/docs/errors.html#E0002) | generic parameter |
+| [`E0002`](https://shreypdev.github.io/undra/docs/errors.html#E0002) | generic parameter, or a generic type spelled with its arguments |
 | [`E0003`](https://shreypdev.github.io/undra/docs/errors.html#E0003) | lifetime in a public signature |
-| [`E0004`](https://shreypdev.github.io/undra/docs/errors.html#E0004) | trait object, `dyn`, `impl Trait` |
+| [`E0004`](https://shreypdev.github.io/undra/docs/errors.html#E0004) | a trait object, `dyn` or `impl Trait` that is not a callback parameter, or a callback where one may not stand (ADR-041) |
 | [`E0005`](https://shreypdev.github.io/undra/docs/errors.html#E0005) | `Result` / `Stream` outside return position |
 | [`E0006`](https://shreypdev.github.io/undra/docs/errors.html#E0006) | map key type not allowed |
 | [`E0007`](https://shreypdev.github.io/undra/docs/errors.html#E0007) | unsupported item shape or placement of an Undra attribute |
@@ -1933,9 +2242,12 @@ error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
 | [`E0061`](https://shreypdev.github.io/undra/docs/errors.html#E0061) | the name written is not the declared name of the type, or the type is not declared with `#[undra::api]` |
 | [`E0062`](https://shreypdev.github.io/undra/docs/errors.html#E0062) | a port call could not be answered and its method has no error channel: a runtime message |
 | [`E0063`](https://shreypdev.github.io/undra/docs/errors.html#E0063) | nested `Option<Option<T>>` |
-| [`E0064`](https://shreypdev.github.io/undra/docs/errors.html#E0064) | an object (`#[undra::api] impl`) used where a value is expected |
+| [`E0064`](https://shreypdev.github.io/undra/docs/errors.html#E0064) | an object (`#[undra::api] impl`) used where a value is expected, or a value used as an object, or an object where objects may not stand (ADR-040) |
 | [`E0065`](https://shreypdev.github.io/undra/docs/errors.html#E0065) | a signal of a store written off its owning runtime's core (ADR-035): a runtime message |
 | [`E0066`](https://shreypdev.github.io/undra/docs/errors.html#E0066) | a `#[undra::migrate]` hook with a wrong target or shape (ADR-037; addition) |
+| [`E0070`](https://shreypdev.github.io/undra/docs/errors.html#E0070) | a named instantiation of a generic data type that is declared twice or outside the crate of its template |
+| [`E0071`](https://shreypdev.github.io/undra/docs/errors.html#E0071) | a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041) |
+| [`E0073`](https://shreypdev.github.io/undra/docs/errors.html#E0073) | an `infinite` query that does not meet ADR-043's shape: no `item_key` or one that names no field of the rows, no or more than one `#[undra(cursor)]` parameter, a cursor that is not `Option<C>` or is in the key, a success type that is not `Page<T, C>`, rows that are not a record |
 
 ## Types and shapes
 
@@ -1943,27 +2255,31 @@ error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
 
 Raised by macros, schema validation, the `Encode`/`Decode` bounds.
 
-unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), a `DerivedList` field without its row type (ADR-039), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`)
+unsupported type in a public position (lists the type and the allowed set); includes `i128`/`u128` (the help points at `Decimal`, `Uuid` or a `String` newtype), `DateTime<Local>` and `DateTime<FixedOffset>` ("convert to `Utc`; offsets do not cross"), a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate that only that crate has (`DateTime<Utc>`, `OffsetDateTime`, `TimeDelta`, ..) spelled without the matching feature of `undra` (one error naming the feature), a `Lazy<T>` that is not a store field, or is inside a `Signal`, `Computed` or `DerivedList` (ADR-043), a `DerivedList` field without its row type (ADR-039), `Handle` (no schema type; an object crosses as `Arc<T>` or `&T`, ADR-040), `Arc<T>` of a built-in or an `Rc`, a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `Plain` cannot cross the boundary by value | a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value | declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs |
+| `Plain` cannot cross the boundary by value | a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value | declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra` |
+| `()` cannot be used as a field | `()` occupies zero bytes on the wire, so it is only legal as a return type or as a variant without fields; `Vec<()>`, `Option<()>` and maps of `()` defeat length validation | remove the value, or use `bool` if you need a marker |
+| `DateTime<Local>` cannot cross the boundary | a `Timestamp` is an instant in milliseconds since the Unix epoch, in UTC; a date-time with a local time zone or a fixed offset has no one value every platform reads alike, and the offset itself would be lost | convert to `Utc` (`value.with_timezone(&Utc)`) and spell `DateTime<Utc>`; offsets do not cross |
+| `DateTime<FixedOffset>` cannot cross the boundary | a `Timestamp` is an instant in milliseconds since the Unix epoch, in UTC; a date-time with a local time zone or a fixed offset has no one value every platform reads alike, and the offset itself would be lost | convert to `Utc` (`value.with_timezone(&Utc)`) and spell `DateTime<Utc>`; offsets do not cross |
 | `DerivedList` needs the type of its rows | a derived list is a `Vec` of rows the platforms mirror, so the schema needs the row type, written as the one type argument | write `DerivedList<Row>` for `visible`, with the type the pipeline's `build()` produces |
-| `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet | a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it | expose the items as a `Signal<Vec<T>>` (keyed with `#[undra(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit |
-| `&str` cannot cross the boundary | references have no wire representation; every value crosses by copy | use an owned `String` |
-| `usize` cannot cross the boundary | its width differs between platforms (32-bit wasm, 64-bit iOS and Android), so the wire layout would too | use a fixed-width integer such as `u32` or `u64` |
-| `Ctx` parameter on method `touch` | methods reach the runtime through the object: `Ctx` is only injected into constructors, free functions, queries and mutations | keep a `WeakCtx` (`ctx.downgrade()`) in the object when it is constructed and upgrade it in the method, or use `Ctx::current()` |
+| `Lazy<Row>` can only be the type of a store field, not of a record or enum field | a `Lazy<T>` is a list the core owns and the platforms page through by handle: it is not a value, so it cannot be a parameter, a return type, a record or enum field, or the value of a signal | write it as a field of a `#[undra::store]` struct (`books: Lazy<Book>`); to give a caller a list, return a `Vec<T>`, or take an offset and a limit and return one page |
 
-### `E0002` generic parameter
+### `E0002` generic parameter, or a generic type spelled with its arguments
 
 Raised by macros.
 
-generic parameter on a `#[undra::api]` item
+generic parameter on a `#[undra::api]` item that is not a template, on an error enum, object, store, function, method, port, callback, query or mutation (their text points at `#[undra::api(generic)]` and a named instantiation for data types); a const parameter, a `where` clause or a default type parameter ("only type parameters are supported"); a generic type spelled with its arguments (`Page<Todo>`: declare `#[undra::api] pub type TodoPage = Page<Todo>;` and write `TodoPage`); the wrong number of type arguments for a template (ADR-042)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| generic parameter `T` on `Page` | the schema describes concrete types; every target language would need one instantiation per use | remove the parameter, and declare one concrete `#[undra::api]` type per instantiation |
-| generic parameter `T` on `first` | the schema describes concrete types; every target language would need one instantiation per use | remove the parameter, and declare one concrete `#[undra::api]` type per instantiation |
+| generic parameter `T` on `Page` | the schema describes concrete types; every target language would need one instantiation per use | mark the struct or enum `#[undra::api(generic)]` and declare each instantiation under a name: `#[undra::api] pub type TodoPage = Page<Todo>;`; or remove the parameter and declare one concrete `#[undra::api]` type per instantiation |
+| generic parameter `E` on `Failure` | the schema describes concrete types, and the platforms throw an error by name | remove the parameter and declare one concrete `#[undra::error]` enum per use |
+| generic parameter `T` on `get` | the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed | remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`) |
+| generic parameter `T` on `first` | the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed | remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`) |
+| generic parameter `T` on `Counter` | the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed | remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`) |
+| generic parameter `T` on `Sink` | the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed | remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`) |
 
 ### `E0003` lifetime in a public signature
 
@@ -1973,21 +2289,25 @@ lifetime in a public signature
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| lifetime `'a` on `Label` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | remove the lifetime parameter and use owned types |
-| lifetime `'a` in `&'a str` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | use an owned type such as `String` or `Vec<T>` |
 | lifetime `'static` in `&'static str` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | use an owned type such as `String` or `Vec<T>` |
+| lifetime `'a` on `WithLifetime` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | remove the lifetime parameter and use owned types |
+| lifetime `'a` in `&'a str` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | use an owned type such as `String` or `Vec<T>` |
+| lifetime `'a` on `Label` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | remove the lifetime parameter and use owned types |
 
-### `E0004` trait object, `dyn`, `impl Trait`
+### `E0004` a trait object, `dyn` or `impl Trait` that is not a callback parameter, or a callback where one may not stand (ADR-041)
 
-Raised by macros.
+Raised by macros, schema validation (a bound the compiler checks).
 
-trait object / `dyn` / `Box<dyn Fn>` / closure / function pointer / an `impl Trait` that is not a stream
+trait object / `dyn` / `Box<dyn Fn>` / closure / function pointer / an `impl Trait` that is not a stream (declare a `#[undra::callback]` trait and take `Arc<dyn Trait>`, ADR-041); a callback (`Arc<dyn Trait>`) where one may not stand (anywhere but a parameter of a method, constructor or function, alone or in an `Option`: a return, a field, a signal, a port or query value), with the help of its position; `Arc<dyn Trait>` of a trait that is not a `#[undra::callback]` (the `CallbackInterface` bound, a branded message)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| trait object `dyn Fn(u32)` cannot cross the boundary | trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript | use a concrete `#[undra::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[undra::port]`) |
-| `impl std::fmt::Display` cannot cross the boundary | `impl Trait` has no wire representation; the only one the schema understands is `impl Stream<Item = T>` in a return type | use a concrete type, or `impl Stream<Item = T>` for a sequence of values over time |
-| boxed stream `Pin<Box<dyn undra::runtime::Stream<Item = u32> + Send>>` cannot cross the boundary | a stream is described to the platforms as `impl Stream<Item = T>` in a return type; a boxed or `dyn` stream has no schema representation | return `impl Stream<Item = T> + Send + 'static` (box it inside the function if the branches differ) |
+| callback `Arc<dyn Listener>` cannot be a field of a record or enum (`Listener` is a callback interface) | a callback is an instance with a lifetime, not a value: it cannot be copied, compared, stored in a record or mirrored from a signal | keep an id or a record here, and take the callback as a parameter of the method that needs it |
+| callback `Arc<dyn Listener>` cannot be used here (`Listener` is a callback interface) | a callback is an object the host implements and passes in for the core to call; the core never hands one out | return a plain value, or an object (`Arc<T>`) the host can call methods on |
+| callback `Arc<dyn Listener>` cannot be used here (`Listener` is a callback interface) | a callback may be a parameter of a method, constructor or function, alone or in an `Option`; it cannot be nested in another type | take one `Arc<dyn Trait>` (or `Option<Arc<dyn Trait>>`) per parameter |
+| closure type `Arc<dyn Fn(u32) + Send + Sync>` cannot cross the boundary | callbacks have no wire representation | declare a `#[undra::callback]` trait and take `Arc<dyn Trait>` |
+| `dyn Platform` cannot be taken as a callback | only a trait declared with `#[undra::callback]` has a proxy the core can call and a generated protocol the host implements | add `#[undra::callback]` to the trait, or pass a record or an id |
+| `dyn Plain` cannot be taken as a callback | only a trait declared with `#[undra::callback]` has a proxy the core can call and a generated protocol the host implements | add `#[undra::callback]` to the trait, or pass a record or an id |
 
 ### `E0005` `Result` / `Stream` outside return position
 
@@ -2005,20 +2325,24 @@ Raised by macros, schema validation.
 
 ### `E0006` map key type not allowed
 
-Raised by macros, schema validation.
+Raised by macros, schema validation, a bound the compiler checks.
 
-map key type not allowed
+map key type not allowed: `String`, integers, `bool`, `Uuid` and newtypes of those are keys; a float, a `Decimal`, a record, a collection, and a newtype of one of those are not (the macros assert `K: MapKey` at every `HashMap`/`BTreeMap` key position, ADR-042)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `f64` cannot be a map key | map keys must be `String`, an integer, `bool` or `Uuid`: those compare and hash identically on every platform (floats and composite keys do not) | use one of those key types, or a `Vec` of records with an explicit key field |
-| `f32` at record Scores, field by_weight is not a valid map key | map keys must compare and hash the same on every platform: `String`, an integer type, `bool` and `Uuid` do, floats and composite keys do not | use one of those key types, or a `Vec` of records with an explicit key field |
+| `f64` cannot be a map key | map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not) | use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field |
+| `Decimal` cannot be a map key | map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not) | use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field |
+| `undra::prelude::Decimal` cannot be a map key | map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not) | use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field |
+| `Loose` cannot be a map key | map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not) | use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field |
+| `f32` at record Scores, field by_weight is not a valid map key | map keys must compare and hash the same on every platform: `String`, an integer type, `bool`, `Uuid` and a newtype of one of those do, floats, decimals and composite keys do not | use one of those key types, or a `Vec` of records with an explicit key field |
+| `decimal` at record Prices, field by_amount is not a valid map key | map keys must compare and hash the same on every platform: `String`, an integer type, `bool`, `Uuid` and a newtype of one of those do, floats, decimals and composite keys do not | use one of those key types, or a `Vec` of records with an explicit key field |
 
 ### `E0007` unsupported item shape or placement of an Undra attribute
 
 Raised by macros.
 
-unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__undra_cell`, `#[undra::port]` on an inherent impl, an Undra attribute on the wrong kind of item, `#[undra::api]` on a method, `#[undra::query]` or `#[undra::mutation]` inside an `impl` block or a port trait, a function whose signature uses `Self`, a second `#[undra::api]` impl block for one type). A second impl block is reported by `rustc` as "the name `_undra_error_E0007_<Type>_has_two_undra_api_impl_blocks_merge_them_into_one` is defined multiple times": merge the blocks. A query or mutation inside an impl block that is not `#[undra::api]` cannot be seen by its macro; `rustc` then reports "macro definition is not supported in `trait`s or `impl`s" and "cannot find macro `_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block`", which is this code: move the function out of the block
+unsupported item shape (a unit struct, a tuple struct of two or more fields or none (one field is a newtype), a record without fields, a type alias that does not name an instantiation of a `#[undra::api(generic)]` type, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__undra_cell`, `#[undra::port]` on an inherent impl, an Undra attribute on the wrong kind of item, `#[undra::api]` on a method, `#[undra::query]` or `#[undra::mutation]` inside an `impl` block or a port trait, a function whose signature uses `Self`, a second `#[undra::api]` impl block for one type). A second impl block is reported by `rustc` as "the name `_undra_error_E0007_<Type>_has_two_undra_api_impl_blocks_merge_them_into_one` is defined multiple times": merge the blocks. A query or mutation inside an impl block that is not `#[undra::api]` cannot be seen by its macro; `rustc` then reports "macro definition is not supported in `trait`s or `impl`s" and "cannot find macro `_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block`", which is this code: move the function out of the block
 
 | What you see | Why | Fix |
 | --- | --- | --- |
@@ -2027,7 +2351,7 @@ unsupported item shape (a tuple or unit struct, a record without fields, an empt
 | `#[undra::api]` on the method `now` of a port trait | a port is a list of methods the platform implements; the attribute applies to a whole item (a type or a free function), never to a trait method | remove the attribute from `now`; a function the core exposes that calls the port is a free `#[undra::api] fn(ctx: &Ctx, ..)` outside the trait, calling `weather(ctx).now(..)` |
 | `#[undra::query]` on `admins`, which is inside an `impl` block: its signature uses `Self` | a query is a free function, and the macro generates a struct next to it, which an impl block cannot hold | move `admins` out of the impl block, to module level, and spell out the type instead of `Self` |
 | `#[undra::store]` cannot be applied to an `enum` | `#[undra::store]` applies to a struct | move `#[undra::store]` onto a struct, or remove it |
-| `#[undra::api]` cannot be applied to a type alias | `#[undra::api]` applies to a struct, an enum, an `impl` block or a free `fn` | move `#[undra::api]` onto a struct, an enum, an `impl` block or a free `fn`, or remove it |
+| `#[undra::api]` on the type alias `Alias`, which does not name an instantiation | a type alias is not a schema type of its own; the only alias that is names an instantiation of a generic data type declared with `#[undra::api(generic)]`, so it can be given a name the platforms generate a type for | write `#[undra::api] pub type Alias = Page<Todo>;` for a template `Page`, or remove `#[undra::api]` and write the aliased type where it is used |
 
 ### `E0008` unknown or misplaced `#[undra(..)]` attribute or macro argument
 
@@ -2040,8 +2364,8 @@ unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key,
 | `#[undra(key = "idd")]` on `typo` names no field of `Row` | `key` names the field of the list's items that identifies them, and `Row` has the fields `id`, `title` | write the name of one of those fields as the key |
 | `#[undra(key = "n")]` on `not_a_record` names no field of `u32` | `key` names the field of the list's items that identifies them, and `u32` has no fields (only a record declared with `#[undra::api]` has any) | write the name of one of those fields as the key |
 | `#[undra(key = "not a name")]` on `not_a_name` names no field of `Tagged` | `key` names the field of the list's items that identifies them, and `Tagged` has the fields `type`, `id` | write the name of one of those fields as the key |
-| unknown option `defualt` in `#[undra(..)]` | the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields) | did you mean `default`? Otherwise remove `defualt` |
-| unknown option `frobnicate` in `#[undra(..)]` | the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields) | remove `frobnicate`, or use one of: `crate`, `default`, `key`, `no_coalesce` |
+| unknown option `defualt` in `#[undra(..)]` | the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields), and `coalesce` (fire-and-forget methods of a callback interface) | did you mean `default`? Otherwise remove `defualt` |
+| unknown option `frobnicate` in `#[undra(..)]` | the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields), and `coalesce` (fire-and-forget methods of a callback interface) | remove `frobnicate`, or use one of: `crate`, `default`, `key`, `no_coalesce`, `coalesce` |
 | `#[undra(key)]` is not valid on a record or variant field | `key = "field"` turns a store's `Signal<Vec<T>>` into a keyed list that ships patches | move it to a `Signal<Vec<T>>` field of a `#[undra::store]` struct, or remove it |
 
 ## Errors and stores
@@ -2161,8 +2485,10 @@ port method with a non-wire parameter
 
 | What you see | Why | Fix |
 | --- | --- | --- |
+| parameter `listener` of port method `call` is not a wire type | callback `Arc<dyn Listener>` cannot be a parameter of a port (`Listener` is a callback interface) (a port is implemented once, by the platform, for the whole process; a callback instance in its arguments would need a wrapper type the port implementation does not have) | pass a record or an id through the port |
 | parameter `url` of port method `request` is not a wire type | `&str` cannot cross the boundary (references have no wire representation; every value crosses by copy) | use an owned `String` |
-| parameter `on_progress` of port method `request` is not a wire type | trait object `dyn Fn(u8)` cannot cross the boundary (trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript) | use a concrete `#[undra::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[undra::port]`) |
+| parameter `on_progress` of port method `request` is not a wire type | trait object `dyn Fn(u8)` cannot cross the boundary (trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript) | use a concrete `#[undra::api]` type or an enum listing the cases you need; to call into the platform, declare a `#[undra::callback]` trait and take `Arc<dyn Trait>` as a parameter |
+| parameter `child` of port method `open` is not a wire type | object `Arc<Child>` cannot be a parameter of a port (a port implementation on the platform would receive a reference it has no wrapper type for) | pass a record or an id through the port (the object here is `Child`) |
 
 ### `E0031` event port method that is not a plain `fn(..)` returning `()`
 
@@ -2203,16 +2529,16 @@ the error type of a `Result` port method has no `From<PortError>` (an unavailabl
 
 Raised by macros.
 
-query without `key` / mutation with `stale` / a query argument of the wrong kind
+query without `key` / mutation with `stale` / a query argument of the wrong kind, an `interval` below one second (use a stream for real-time data), `refetch_pages` or `persist_pages` that is not a whole number of at least 1, polling or paging options on a mutation
 
 | What you see | Why | Fix |
 | --- | --- | --- |
+| `interval = "500ms"` is below one second | a poll fetches the whole result again each time, so a query polled more than once a second is really a stream: use a stream for real-time data | write `interval = "1s"` or more, or deliver the changes with a `#[undra::port]` event or a stream |
+| `interval = "0s"` is below one second | a poll fetches the whole result again each time, so a query polled more than once a second is really a stream: use a stream for real-time data | write `interval = "1s"` or more, or deliver the changes with a `#[undra::port]` event or a stream |
+| invalid `interval` duration: `soon` does not start with a whole number | `interval` is how long after a fetch ends the next one starts | write a whole number and a unit, for example `interval = "30s"` |
+| mutation `add` has `interval` | polling and paging apply to cached reads; a mutation writes and caches nothing | remove `interval`; put it on the query the mutation invalidates |
 | query `todos` has no `key` | the cache is addressed by key: two calls share a cached result only if their keys are equal | add `key = "todos"`, with `{param}` placeholders for the parameters that distinguish results |
 | mutation `add_todo` has `stale` | `stale` is how long a cached *read* stays fresh; a mutation writes and caches nothing | remove `stale`; put it on the query the mutation invalidates |
-| `{pgae}` in `key` is not a parameter of the function | each placeholder is replaced by the encoded parameter of that name | the parameters are: page |
-| `key` must be a string literal | `key` takes a string literal; anything else cannot be read at compile time | write `key = "todos:{page}"` |
-| `retry` must be a whole number | `retry` takes a whole number; anything else cannot be read at compile time | write `retry = 3` |
-| `stale` must be a string literal with a unit | `stale` takes a string literal with a unit; anything else cannot be read at compile time | write `stale = "30s"` |
 
 ### `E0041` query or mutation function with an invalid signature
 
@@ -2283,12 +2609,14 @@ a record, enum, error, object or port named like a standard library item (sectio
 
 Raised by macros (a check the compiler runs).
 
-a spelling that looks like a built-in Undra type (`Bytes`, `Uuid`, `String`, `Vec`, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit
+a spelling that looks like a built-in Undra type (`Bytes`, `Uuid`, `String`, `Vec`, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit; for a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes`, `Decimal`) by the membership assertion `Spelled: WireLeaf<kind>`, whose message names the leaves and the features (`uuid`, `chrono`, `time`, `rust_decimal`, `bytes`) that add the types of other crates (ADR-042)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `Bytes` is spelled like the built-in Undra type `undra::prelude::Bytes`, but it is a different type | the schema records this position as the built-in type, so the platforms would read the bytes of `undra::prelude::Bytes` where the generated code writes `Bytes` | rename your type, or import the built-in one (`undra::prelude::Bytes`) where it is used |
-| `Uuid` is spelled like the built-in Undra type `undra::prelude::Uuid`, but it is a different type | the schema records this position as the built-in type, so the platforms would read the bytes of `undra::prelude::Uuid` where the generated code writes `Uuid` | rename your type, or import the built-in one (`undra::prelude::Uuid`) where it is used |
+| `Bytes` is spelled like a built-in Undra type, but it is not one | the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Bytes` | rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra` |
+| `Uuid` is spelled like a built-in Undra type, but it is not one | the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Uuid` | rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra` |
+| `Timestamp` is spelled like a built-in Undra type, but it is not one | the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Timestamp` | rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra` |
+| `Decimal` is spelled like a built-in Undra type, but it is not one | the schema records this position as a wire leaf (`Uuid`, `Timestamp`, `Duration`, `Bytes` or `Decimal`), so the platforms would read the bytes of that leaf where the generated code writes `Decimal` | rename your type, import the built-in one, or, for a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate, enable that feature of `undra` |
 
 ### `E0061` the name written is not the declared name of the type, or the type is not declared with `#[undra::api]`
 
@@ -2300,6 +2628,8 @@ the schema records a name that the type written there does not have: an alias of
 | --- | --- | --- |
 | `Plain` is not a type declared with `#[undra::api]` | Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate | add `#[undra::api]` to `Plain`, or, if it is an alias, write the type it stands for where it is used |
 | `Id` is not a type declared with `#[undra::api]` | Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate | add `#[undra::api]` to `Id`, or, if it is an alias, write the type it stands for where it is used |
+| `Kid` here is an alias or a renamed import of an object that is declared under another name | Undra describes an object to the platforms by the name it is written with, while the handle the core issues is of the type that name resolves to; with `type Kid = Other` or `use path::Other as Kid` the platforms would wrap it as `Kid` | write the object under the name it is declared with (`Other` in the examples above) |
+| `LostPage` here is an alias or a renamed import of an Undra type that is declared under another name | Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type LostPage = Other` or `use path::Other as LostPage` the platforms would be told `LostPage` and receive the layout of `Other` | write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct LostPage` if you mean a distinct type |
 | `Todo` here is an alias or a renamed import of an Undra type that is declared under another name | Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Todo = Other` or `use path::Other as Todo` the platforms would be told `Todo` and receive the layout of `Other` | write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Todo` if you mean a distinct type |
 | `Entry` here is an alias or a renamed import of an Undra type that is declared under another name | Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Entry = Other` or `use path::Other as Entry` the platforms would be told `Entry` and receive the layout of `Other` | write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Entry` if you mean a distinct type |
 
@@ -2321,18 +2651,24 @@ Raised by macros.
 
 | What you see | Why | Fix |
 | --- | --- | --- |
+| nested option `Option<Option<u8>>` cannot cross the boundary | Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null` | wrap the inner option in a record or an enum that names the two cases |
 | nested option `Option<Option<i32>>` cannot cross the boundary | Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null` | wrap the inner option in a record or an enum that names the two cases |
 | nested option `Option<Box<Option<u8>>>` cannot cross the boundary | Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null` | wrap the inner option in a record or an enum that names the two cases |
 
-### `E0064` an object (`#[undra::api] impl`) used where a value is expected
+### `E0064` an object (`#[undra::api] impl`) used where a value is expected, or a value used as an object, or an object where objects may not stand (ADR-040)
 
-Raised by macros (a check the compiler runs).
+Raised by macros (a check the compiler runs), schema validation.
 
-an object (`#[undra::api] impl`) used as a field, parameter or return value: objects cross by handle
+an object (`#[undra::api] impl`) used as a value (a field, a parameter or a return written `Mailbox`): it crosses as `Arc<Mailbox>` or `&Mailbox`; a record, enum or error written as an object (`Arc<Todo>`, `&Todo`: records cross by value); an object where objects may not stand (a record or variant field, a signal, a map key or value, a stream item, a port, callback, query or mutation value, or nested deeper than `Option` or `Vec`), with the reason and the way out of its position (ADR-040)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `Child` is an object and cannot be used as a value | an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value | return a record with the data the platform needs, or construct the object from the platform with one of its constructors |
+| `Calculator` is an object and cannot be used as a value | an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value | return it as `Arc<Calculator>`, take it as `&Calculator` or `Arc<Calculator>` (a method, constructor or function parameter or return), or use a record with the data the platform needs |
+| `NotAnObject` is not an object | an object is a type with an `#[undra::api] impl` block: the macro generates what lets the core hand it to the platforms as a handle, and without one there is nothing to hand out | add `#[undra::api]` to an `impl NotAnObject { .. }` block, or use a record (`#[undra::api] struct`) if it is plain data |
+| object `Arc<Child>` cannot be a field of a record or enum | a record or enum field holds a value: it is copied, compared, hashed and `Codable`, and none of that can carry a reference to an object | keep the data the platform needs in the field (an id, a record), and put the child object behind a method of the parent (the object here is `Child`) |
+| object `Arc<Child>` cannot be used here | an object can only stand alone, or inside `Option` or `Vec`, as a method or function parameter or return | use `Arc<T>`, `Option<Arc<T>>` or `Vec<Arc<T>>` (a parameter may also be `&T` or `Option<&T>`) (the object here is `Child`) |
+| `&Child` cannot be an element of a list | a list owns its elements, and a borrow of an object cannot outlive the call that made it | write the list as `Vec<Arc<Child>>` |
+| object `Arc<Child>` cannot be the result of a query or mutation | query and mutation values are cached, compared and persisted, so they must be values | use a record or an id, and return the object from a method that calls the query (the object here is `Child`) |
 
 ### `E0065` a signal of a store written off its owning runtime's core (ADR-035): a runtime message
 
@@ -2358,6 +2694,46 @@ a `#[undra::migrate]` hook with a wrong target or shape (ADR-037): no target or 
 | the migration hook `wrong_parameter` must take one parameter, `old: Option<&DynValue>` | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | write `fn wrong_parameter(old: Option<&DynValue>) -> Result<T, MigrateError>`, where `T` is the signal's value type (`old` is `None` when the snapshot lacks the signal): a plain, non-generic, non-async function |
 | the migration hook `wrong_return` must return `Result<DynRecord, MigrateError>` | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | write `fn wrong_return(old: &DynRecord) -> Result<DynRecord, MigrateError>`: a plain, non-generic, non-async function |
 | `from = "not-hex"` is not a fingerprint | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | write the 64-bit fingerprint of the old type in hex, as the runtime's log or `undra.types.<fingerprint>` key shows it: `from = "0x0123456789abcdef"`, or leave `from` out to take every old version |
+
+### `E0070` a named instantiation of a generic data type that is declared twice or outside the crate of its template
+
+Raised by macros (a check the compiler runs).
+
+a named instantiation of a generic data type (`type TodoPage = Page<Todo>`) declared twice, or outside the crate of its template (ADR-042): the inherent impl of the instantiation carries a constant named after the rule (`_undra_error_E0070_this_instantiation_of_Page_is_declared_twice_keep_one_alias_per_instantiation`), so a second alias of one instantiation is reported by `rustc` as that constant defined twice; an alias in another crate than its template's is reported by the macro itself, naming both crates
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `TodoPage` instantiates `Page`, which is declared in the crate `model`, not in `app` | an instantiation adds an inherent impl to the template's type, which only the crate that declares the template may do, and a second crate naming the same instantiation would register it twice | declare the alias next to the template, in `model`, and use it from here; or declare a concrete `#[undra::api]` struct or enum in this crate |
+
+### `E0071` a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041)
+
+Raised by macros, schema validation.
+
+a method of a `#[undra::callback]` trait that returns a value synchronously, is `async` without a `Result`, whose name starts with `__` (reserved for `__release` and `__cancel`), or an `async` method marked `#[undra(coalesce)]` (ADR-041): the host runs a callback outside the core's thread and lock, so the core can never wait for it, and a host can always fail or be gone; a method reports (`fn m(&self, ..)`) or is `async` and returns `Result<T, E>`
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| callback method `token` returns a value synchronously | the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone | make it `async` and return `Result<T, E>`, or make it a plain `fn` that returns nothing |
+| callback method `ask` is `async` and returns nothing | the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone | return `Result<T, E>` (an `#[undra::error]` enum that implements `From<PortError>`), or remove `async` to make it a fire-and-forget report |
+| callback method `count` is `async` but does not return a `Result` | the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone | return `Result<T, E>` so the method can report that the host failed or is gone |
+| `#[undra(coalesce)]` on the `async` callback method `confirm` | `coalesce` drops the older of two pending calls, and an `async` method's caller is waiting for each answer | remove `#[undra(coalesce)]`, or make the method a plain `fn` that reports progress |
+| callback method `__release` has a reserved name | names that start with `__` belong to the protocol (`__release` gives an instance back, `__cancel` cancels a call): a method of that name would be mistaken for one | rename the method |
+| method `token` of the callback interface `Provider` returns a value synchronously: make it `async` and return a `Result<T, E>` | the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone: a method either reports (fire-and-forget, returning nothing) or is `async` and returns a `Result` | make a reporting method return `()`, or make a method that answers `async` and return `Result<T, E>`; do not start a name with `__` |
+
+### `E0073` an `infinite` query that does not meet ADR-043's shape: no `item_key` or one that names no field of the rows, no or more than one `#[undra(cursor)]` parameter, a cursor that is not `Option<C>` or is in the key, a success type that is not `Page<T, C>`, rows that are not a record
+
+Raised by macros, schema validation.
+
+an `infinite` query (ADR-043) that is not a list of records with a cursor: no `item_key`, or one that names no field of the rows; no or more than one `#[undra(cursor)]` parameter, a cursor that is not `Option<C>` or is part of the `key`; a success type that is not `Page<T, C>` (with `C` the cursor's type) or rows that are not a record; `item_key`, `refetch_pages` or `persist_pages` without `infinite`, `persist_pages` without `persist`, `#[undra(cursor)]` on a query that is not `infinite`; in the schema an `infinite` mutation or a `returns` that is not `Vec<T>` of a record with the `item_key` field: the handle shows the pages as one list keyed by a field of its rows, and each page is asked for with the cursor the previous one returned
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| the infinite query `no_cursor` has no `#[undra(cursor)]` parameter | the core asks for each page with the cursor the previous one returned: exactly one parameter carries it, `None` for the first page | mark one parameter `#[undra(cursor)] cursor: Option<String>` (or the cursor type your server uses) |
+| the infinite query `two_cursors` has 2 `#[undra(cursor)]` parameters | the core asks for each page with the cursor the previous one returned: exactly one parameter carries it, `None` for the first page | mark one parameter `#[undra(cursor)] cursor: Option<String>` (or the cursor type your server uses) |
+| the cursor `cursor` of `not_an_option` is `String`, not an `Option<C>` | the cursor is `None` for the first page and the previous page's `next` after it | write `#[undra(cursor)] cursor: Option<String>`, or another value type for the cursor your server uses |
+| the cursor `cursor` is in the `key` of the infinite query `in_the_key` | every page of one list shares one cache entry, so the cursor, which differs per page, cannot be part of its key | remove the placeholder from `key`; the key holds the parameters that distinguish lists |
+| `#[undra(cursor)]` on `cursor`, which is not a parameter of an `infinite` query | the cursor is how an infinite query asks for its next page; an ordinary query has no pages | remove the attribute, or add `infinite` and `item_key = ".."` to the query |
+| `item_key = "idd"` of the infinite query `typo` names no field of `Post` | `item_key` names the field of the rows that identifies them, and `Post` has the fields `id`, `title` | write the name of one of those fields as `item_key` |
 
 ## The command line
 
@@ -3105,6 +3481,8 @@ export function add(a: number, b: number): Promise<number>;
 
 Release an object with `close()` (idempotent) or with `using` where `Symbol.dispose` exists (Node 20+ and current browsers); a `FinalizationRegistry` is the backstop.
 
+Objects also cross as parameters and results ([Objects and identity](https://shreypdev.github.io/undra/docs/objects.html)), and host callbacks as parameters ([Host callbacks](https://shreypdev.github.io/undra/docs/callbacks.html)): there is one wrapper per object, so `===` compares the core's objects, and an object of another core is refused with `UndraCallError.Refused` before anything is sent. The generated classes do this through **free functions of `@undra/runtime` that take the core first**, not methods of `UndraCore`, so a page that uses neither feature does not ship them (the size budget of the up-front chunk): `adopt(core, handle, Type)`, `adoptObject`, `adoptOptional`, `adoptList` and `requireOwn(core, object)` for objects; `lend(core, impl, callback)`, `lending(core, send, signal)` and `giveBack(core, instance)` for callbacks. App code does not call them. `callbacks(core)` is the registry of the callbacks the core holds (`liveCount`, `count(impl)`), which a test reads to check that nothing is left behind.
+
 ## Stores and signals
 
 A store extends `UndraStore`. Every signal is a read-only `Signal<T>`: `get()` returns the current value, `peek()` reads without subscribing, and `subscribe(fn)` calls you on change and returns an unsubscribe function. Computed signals are written by the core.
@@ -3369,7 +3747,7 @@ Source: https://shreypdev.github.io/undra/reference/swift.html
 
 # Swift reference
 
-Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb5b7b1dc29182a9d`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xcaec1b9d8ea1f199`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3383,25 +3761,25 @@ The core's entry, named after its namespace: `load` starts the core and checks i
 
 A struct for each record, an enum for each enum, with the wire codec beside it.
 
-`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Account` `AccountId` `Cents` `Composite` `DbCells` `Entry` `EntrySlice` `Item` `Note` `Price` `Primitives` `ProbeCounters` `Receipt` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `LoadableEntries` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
 An enum for each `#[undra::error]`, conforming to `Error`.
 
-`LabError` `ListError` `RemoteError` `StressError` `TodoError`
+`LabError` `LedgerError` `ListError` `RemoteError` `ReportError` `StressError` `TickError` `TodoError` `WorkshopError`
 
 ## Objects
 
 A class for each object, and a function for each free Rust function.
 
-`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
+`Live` `Probe` `Watch` `add` `addLater` `area` `balances` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `deposit` `echoAccount` `echoCents` `echoComposite` `echoDecimal` `echoFigure` `echoPrice` `echoPrimitives` `echoReceipt` `explode` `explodeDetached` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `loadableStatement` `localizedGreeting` `openAccount` `ownerOf` `parseCount` `ping` `sampleReceipt` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `setTickerFailing` `sseFollow` `statement` `storageStatus` `tickerFetches` `touchFeed` `version` `wsEcho`
 
 ## Stores
 
 An `@Observable` class for each `#[undra::store]`: its signals, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Ledger` `Legacy` `Library` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
 
 ## Ports
 
@@ -3409,11 +3787,17 @@ A protocol for each port the core declares, and an adapter that registers your i
 
 `Locale` `localePortImpl`
 
+## Callbacks
+
+A protocol for each `#[undra::callback]` trait, which your app implements so the core can call it, and a weak wrapper to hand over instead of the object itself.
+
+`Reporter` `WeakReporter`
+
 ## Queries
 
 A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
-`RemoteTodosQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
+`FeedQueryHandle` `RemoteTodosQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
 
 ## Wire ids
 
@@ -3429,7 +3813,7 @@ Source: https://shreypdev.github.io/undra/reference/kotlin.html
 
 # Kotlin reference
 
-Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb5b7b1dc29182a9d`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xcaec1b9d8ea1f199`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3443,25 +3827,25 @@ The core's entry, named after its namespace: `load` starts the core and checks i
 
 A data class for each record, an enum or sealed interface for each enum, each with its codec.
 
-`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Account` `AccountId` `Cents` `Composite` `DbCells` `Entry` `EntrySlice` `Item` `Note` `Price` `Primitives` `ProbeCounters` `Receipt` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `LoadableEntries` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
 A sealed class for each `#[undra::error]`, one subclass per variant.
 
-`LabError` `ListError` `RemoteError` `StressError` `TodoError`
+`LabError` `LedgerError` `ListError` `RemoteError` `ReportError` `StressError` `TickError` `TodoError` `WorkshopError`
 
 ## Objects
 
 A class for each object, and a function for each free Rust function.
 
-`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
+`Live` `Probe` `Watch` `add` `addLater` `area` `balances` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `deposit` `echoAccount` `echoCents` `echoComposite` `echoDecimal` `echoFigure` `echoPrice` `echoPrimitives` `echoReceipt` `explode` `explodeDetached` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `loadableStatement` `localizedGreeting` `openAccount` `ownerOf` `parseCount` `ping` `sampleReceipt` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `setTickerFailing` `sseFollow` `statement` `storageStatus` `tickerFetches` `touchFeed` `version` `wsEcho`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `StateFlow`, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Ledger` `Legacy` `Library` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
 
 ## Ports
 
@@ -3469,11 +3853,17 @@ An interface for each port the core declares, and an adapter that registers your
 
 `Locale` `localePortImpl`
 
+## Callbacks
+
+An interface for each `#[undra::callback]` trait, which your app implements so the core can call it, with `weak(target)` to hand over instead of the object itself.
+
+`Reporter`
+
 ## Queries
 
 A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
-`RemoteTodosQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
+`FeedQueryHandle` `RemoteTodosQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
 
 ## Wire ids
 
@@ -3489,7 +3879,7 @@ Source: https://shreypdev.github.io/undra/reference/typescript.html
 
 # TypeScript reference
 
-Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb5b7b1dc29182a9d`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xcaec1b9d8ea1f199`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -3507,25 +3897,25 @@ The core's entry, named after its namespace: `load` starts the core and checks i
 
 An interface for each record, a union for each enum, each with a codec.
 
-`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Account` `AccountId` `Cents` `Composite` `DbCells` `Entry` `EntrySlice` `Item` `Note` `Price` `Primitives` `ProbeCounters` `Receipt` `RemoteConfig` `RemoteTodo` `SseFollow` `StorageStatus` `Todo` `Figure` `Filter` `LoadableEntries` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
 An abstract class for each `#[undra::error]`, one subclass per variant.
 
-`LabErrorKind` `LabError` `ListErrorKind` `ListError` `RemoteErrorKind` `RemoteError` `StressErrorKind` `StressError` `TodoErrorKind` `TodoError`
+`LabErrorKind` `LabError` `LedgerErrorKind` `LedgerError` `ListErrorKind` `ListError` `RemoteErrorKind` `RemoteError` `ReportErrorKind` `ReportError` `StressErrorKind` `StressError` `TickErrorKind` `TickError` `TodoErrorKind` `TodoError` `WorkshopErrorKind` `WorkshopError`
 
 ## Objects
 
 A class for each object, and an async function for each free Rust function.
 
-`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `localizedGreeting` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `storageStatus` `version` `wsEcho`
+`Live` `Probe` `Watch` `add` `addLater` `area` `balances` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `deposit` `echoAccount` `echoCents` `echoComposite` `echoDecimal` `echoFigure` `echoPrice` `echoPrimitives` `echoReceipt` `explode` `explodeDetached` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `loadableStatement` `localizedGreeting` `openAccount` `ownerOf` `parseCount` `ping` `sampleReceipt` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `setTickerFailing` `sseFollow` `statement` `storageStatus` `tickerFetches` `touchFeed` `version` `wsEcho`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `Signal`, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Legacy` `Notes` `Profile` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Ledger` `Legacy` `Library` `Notes` `Profile` `Shelf` `Stress` `Todos` `Workshop`
 
 ## Ports
 
@@ -3533,11 +3923,17 @@ An interface for each port the core declares, and an adapter that registers your
 
 `Locale` `localePortImpl`
 
+## Callbacks
+
+An interface for each `#[undra::callback]` trait, which your app implements so the core can call it, with `weak<Name>(target)` to hand over instead of the object itself.
+
+`Reporter` `weakReporter`
+
 ## Queries
 
 A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
-`RemoteTodosQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
+`FeedQueryHandle` `RemoteTodosQueryHandle` `TickerQueryHandle` `patchRemoteTodo` `postRemoteTodo` `saveNote` `tagNote`
 
 ## Wire ids
 
@@ -3603,6 +3999,9 @@ Landed in the day after v1.0, each behind an ADR and an adversarial review.
 - Persisted-state migrations and typed storage (ADR-037, ADR-049)A changed schema still restores what the last version stored; storage ports fail with typed errors on every platform; a crashed web core restarts from its last snapshot.
 - A testing kit for apps (ADR-055)Previews run the real core in process with scripted ports and a manual clock; a session recorded once with undra dev --record replays deterministically in tests on every platform.
 - WebSocket, SSE and Db ports (ADR-047, ADR-048)Real-time streams with the core's credit as backpressure, and SQL over SQLite on every platform with the same deterministic fake; opt-in, so nothing grows for apps that do not use them.
+- Objects as parameters, host callbacks (ADR-040, ADR-041)Generated classes cross the boundary as themselves, one wrapper per handle; the core calls back into app code through typed callback interfaces that never unwind into it.
+- Production operations (ADR-046)Every contained panic becomes a structured report the app receives with symbolicable frames; background runs drain the queue under a deadline; release builds keep symbols beside the binary and undra symbolicate reads them.
+- Newtypes, generics, Decimal; paged and lazy lists; polling (ADR-042, ADR-043)The boundary types a production app reaches for, each read as native on every platform; a lazy list pages 10,000 rows from the core on demand; polling pauses when the app does.
 
 Now
 
@@ -3625,7 +4024,6 @@ planned
 
 Planned for the releases after v1.0. The order may change with what the benchmarks show.
 
-- Objects as parameters, host callbacks, generics and Decimal (ADR-040 to 042)The boundary types a production app reaches for, each with a schema description and generated code that reads as native.
 - crates.io and Maven CentralPublish the crates under a registry-safe prefix (its own ADR) and the Kotlin runtime without a local build.
 - Windows CLIRelease binaries and docs for the undra command on Windows.
 - Migration guidesFrom Kotlin Multiplatform and from UniFFI; a production-shaped sample beyond the playground.
@@ -4141,7 +4539,7 @@ For scale: 49.8 ns for a synchronous call through the C ABI and 6.31 µs for one
 
 KMP has two web targets. Kotlin/JS compiles Kotlin to JavaScript ([docs](https://kotlinlang.org/docs/js-overview.html)). Kotlin/Wasm targets WebAssembly with garbage collection in the browser, and its documentation still calls it Beta ([docs](https://kotlinlang.org/docs/wasm-overview.html)). If your organisation writes Kotlin on the web, that is coherent. If your web team writes TypeScript and React, the questions are what the seam looks like and what the bundle carries.
 
-Undra's web output is a wasm module built from your Rust core plus `@undra/runtime`, a TypeScript package with no runtime dependencies. Each store field becomes a `Signal<T>` with `get`, `peek` and `subscribe`; `@undra/runtime/react` exports `useUndra` and `useSignal` (built on `useSyncExternalStore`), and Vue, Svelte and Solid adapters exist too. The core can run on the main thread, in a worker, or remotely over a WebSocket. The repository measures 116.6 KB gzipped for the wasm module of Undra's runtime plus a hello-world core, against a budget of 120 KB that CI enforces; it grows with your code.
+Undra's web output is a wasm module built from your Rust core plus `@undra/runtime`, a TypeScript package with no runtime dependencies. Each store field becomes a `Signal<T>` with `get`, `peek` and `subscribe`; `@undra/runtime/react` exports `useUndra` and `useSignal` (built on `useSyncExternalStore`), and Vue, Svelte and Solid adapters exist too. The core can run on the main thread, in a worker, or remotely over a WebSocket. The repository measures 116.7 KB gzipped for the wasm module of Undra's runtime plus a hello-world core, against a budget of 120 KB that CI enforces; it grows with your code.
 
 Playground code, abbreviated: examples/playground/web/src/views/TodosView.tsx
 
@@ -4448,7 +4846,7 @@ Every number here comes from [bench/RESULTS.md](https://github.com/shreypdev/und
 | Decoding that change-set, borrowed | 253.9 ns | [Signals and stores](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#signals-and-stores) |
 | Decoding and replaying a one-operation patch on 10,000 rows (Rust wire crate) | 2.57 µs | [Keyed patch](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#wire-keyed-patch-undra-wire) |
 | Cold start, restoring 100 KB of state | 70.87 µs | [Snapshot](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#snapshot-and-restore) |
-| Wasm runtime plus hello-world core, gzipped | 116.6 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
+| Wasm runtime plus hello-world core, gzipped | 116.7 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
 | Android core, per ABI, release | 831 KB | [README](https://github.com/shreypdev/undra#why-its-fast) |
 
 Read these for what they are. They are core-side, on a host faster than the phones the design targets, so within budget here is necessary and not sufficient. The per-device targets (an iPhone with an A15, a 2022 mid-range Android phone, Chromium) are measured in a later device phase, and the platform half of a crossing, meaning the Swift, JNI or JavaScript side and applying a change-set to a mirror, is not in these numbers. The 46 operations covered by the CI gate have budgets about five times what they measure, so the gate catches an operation that becomes several times slower, not a few percent ([the gate](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#the-ci-gate)). We have not published a stress benchmark for sustained very high write rates, and we have not compared Undra against other tools, so this page makes no such comparison.

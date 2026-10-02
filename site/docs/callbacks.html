@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Host callbacks · Undra docs</title>
+<meta name="description" content="Traits the app implements so the core can call it: progress, notes, a question for the user. Where each call runs, how errors and cancelling cross, and how long the core holds a listener.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/callbacks.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Host callbacks · Undra docs">
+<meta property="og:description" content="Traits the app implements so the core can call it: progress, notes, a question for the user. Where each call runs, how errors and cancelling cross, and how long the core holds a listener.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/callbacks.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Host callbacks · Undra docs">
+<meta name="twitter:description" content="Traits the app implements so the core can call it: progress, notes, a question for the user. Where each call runs, how errors and cancelling cross, and how long the core holds a listener.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/callbacks.html#article","headline":"Host callbacks · Undra docs","description":"Traits the app implements so the core can call it: progress, notes, a question for the user. Where each call runs, how errors and cancelling cross, and how long the core holds a listener.","url":"https://shreypdev.github.io/undra/docs/callbacks.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Host callbacks","item":"https://shreypdev.github.io/undra/docs/callbacks.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html" aria-current="page">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="paging.html">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="production.html">Operating in production</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html" aria-current="page">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="paging.html">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="production.html">Operating in production</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1>Host callbacks</h1>
+    <p class="lede">A trait the app implements, so the core can call it: a progress report, a note, a question for the user.</p>
+<h2 id="declare-it">Declare it<a class="anchor" href="#declare-it" aria-label="Link to this section">#</a></h2>
+<p>A callback is a trait the app implements. Mark it <code>#[undra::callback]</code>, take it as <code>Arc&lt;dyn Trait&gt;</code> in a method or function, and call it from the core like any other trait.</p>
+<div class="table-wrap"><table><thead><tr><th>A method on the trait</th><th>Means</th></tr></thead><tbody><tr><td><code>fn note(&amp;self, line: String)</code></td><td>fire and forget: the core does not wait, and nothing is lost on the way</td></tr><tr><td><code>async fn confirm(&amp;self, q: String) -&gt; Result&lt;bool, E&gt;</code></td><td>asks the app and awaits its answer, a typed error included</td></tr><tr><td><code>#[undra(coalesce)]</code></td><td>a listener that has fallen behind gets only the newest call</td></tr><tr><td><code>#[undra::callback(background)]</code></td><td>runs off the main thread, in order, without waiting for a frame</td></tr></tbody></table></div>
+<p>A method that returns a value without <code>async</code> is refused (<code>E0071</code>): the core never blocks waiting for app code.</p>
+<details class="reveal-code"><summary>Show the code for Rust, Swift, Kotlin and TypeScript</summary>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">/// What the app implements to hear from the core.
+#[undra::callback]
+pub trait Reporter {
+    /// Only the newest report of a burst matters.
+    #[undra(coalesce)]
+    fn progress(&amp;self, done: u32, total: u32);
+    fn note(&amp;self, line: String);
+    /// Asks whether to go on; the app may answer later, or not at all.
+    async fn confirm(&amp;self, question: String) -&gt; Result&lt;bool, ReportError&gt;;
+}
+
+#[undra::api]
+impl Workshop {
+    pub async fn run(&amp;self, steps: u32, reporter: Arc&lt;dyn Reporter&gt;) -&gt; Result&lt;u32, ReportError&gt; { .. }
+    /// Keeps `reporter` until the returned subscription is closed.
+    pub fn watch(&amp;self, reporter: Arc&lt;dyn Reporter&gt;) -&gt; Arc&lt;Watch&gt; { .. }
+}</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">@MainActor
+final class Banner: Reporter {
+    func progress(done: UInt32, total: UInt32) { bar.value = Double(done) / Double(total) }
+    func note(line: String) { log.append(line) }
+    func confirm(question: String) async throws(ReportError) -&gt; Bool { await ask(question) }
+}
+
+let steps = try await workshop.run(steps: 3, reporter: Banner())
+let watch = try workshop.watch(reporter: banner)   // keeps it; watch.close() lets go</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">class Banner : Reporter {
+    override fun progress(done: UInt, total: UInt) { bar.progress = done.toFloat() / total.toFloat() }
+    override fun note(line: String) { log += line }
+    override suspend fun confirm(question: String): Boolean = ask(question)   // throws ReportError
+}
+
+val steps = workshop.run(3u, Banner())
+val watch = workshop.watch(banner)                  // keeps it; watch.close() lets go</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">const banner: Reporter = {
+  progress(done, total) { bar.value = done / total; },
+  note(line) { log.push(line); },
+  confirm(question, signal) { return ask(question, signal); },   // rejects with ReportError
+};
+
+const steps = await workshop.run(3, banner);
+const watch = await workshop.watch(banner);          // keeps it; watch.close() lets go</code></pre></div>
+</details>
+<h2 id="where-it-runs">Where it runs<a class="anchor" href="#where-it-runs" aria-label="Link to this section">#</a></h2>
+<p>By default on the main thread, in the order things happened. A callback joins the same queue as state changes, so a listener sees the stores as they were when the core called it. With <code>background</code> each listener has its own serial executor instead. Either way the core never runs app code inside its own call.</p>
+<h2 id="errors-and-cancelling">Errors and cancelling<a class="anchor" href="#errors-and-cancelling" aria-label="Link to this section">#</a></h2>
+<p>An implementation that throws the method's own error answers the core with it, typed. Any other error is reported through <code>onError</code> and the core sees the app as unavailable. A throw from a fire-and-forget method is only reported. None of it unwinds into the core.</p>
+<p>When the core stops waiting (the call that was awaiting was cancelled), the task running the implementation is cancelled too: a Swift <code>Task</code>, a Kotlin <code>Job</code>, a TypeScript <code>AbortSignal</code> passed as the last argument.</p>
+<h2 id="how-long-it-lives">How long it lives<a class="anchor" href="#how-long-it-lives" aria-label="Link to this section">#</a></h2>
+<p>The core holds the callback until it lets go, so a listener you create inline lives as long as the core uses it. A core that keeps the listener and an app that keeps the core make a cycle across languages. Two ways out:</p>
+<ul><li><strong>A subscription object.</strong> Return something the app closes (<code>watch</code> above): closing it drops the core's hold.</li><li><strong>A weak wrapper.</strong> Hand the core a wrapper that forwards while the target lives and does nothing after.</li></ul>
+<p>A stream method takes a callback like any other method: the core holds it while the stream runs and lets it go when the stream ends or is dropped. The core never calls a weak wrapper whose target is gone (the question is answered unavailable); if your own code does in Swift, the method throws the error type's <code>Unavailable</code>, and an error type without one stops the app with a message.</p>
+<details class="reveal-code"><summary>Show the code for Swift, Kotlin and TypeScript</summary>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">let watch = try workshop.watch(reporter: WeakReporter(banner))   // does nothing once banner is gone</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">val watch = workshop.watch(Reporter.weak(banner))</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">const watch = await workshop.watch(weakReporter(banner));</code></pre></div>
+</details>
+<h2 id="testing">Testing<a class="anchor" href="#testing" aria-label="Link to this section">#</a></h2>
+<p>In a Rust test pass an implementation written in Rust: <code>#[undra::port] impl Reporter for Recorder</code> records the calls, and an <code>async</code> method answers as you set it. See <a href="testing.html">Testing your app</a>.</p>
+<p>The playground's <a href="https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/workshop.rs" rel="noopener">Reporter</a> is this page's example, and the contract scenario S28 checks ordering, errors, cancelling and release on Swift, Kotlin and TypeScript.</p>
+
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/callbacks.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="objects.html"><span>Previous</span><b>Objects and identity</b></a>
+    <a class="next" href="types.html"><span>Next</span><b>Newtypes, generics and decimals</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#declare-it">Declare it</a></li><li><a href="#where-it-runs">Where it runs</a></li><li><a href="#errors-and-cancelling">Errors and cancelling</a></li><li><a href="#how-long-it-lives">How long it lives</a></li><li><a href="#testing">Testing</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

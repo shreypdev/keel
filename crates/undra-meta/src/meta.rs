@@ -20,6 +20,7 @@
 //!             docs: "Free text.",
 //!         },
 //!     ],
+//!     transparent: false,
 //!     docs: "A todo item.",
 //! };
 //!
@@ -35,8 +36,8 @@
 
 use crate::dispatch::DispatchFn;
 use crate::{
-    EnumDef, FieldDef, FunctionDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind, QueryDef,
-    QueryKind, RecordDef, SignalDef, StoreDef, TypeRef, VariantDef,
+    EnumDef, FieldDef, FunctionDef, InfiniteDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind,
+    QueryDef, QueryKind, RecordDef, SignalDef, StoreDef, TypeRef, VariantDef,
 };
 
 /// Converts a slice of `*Meta` into a `Vec` of owned `*Def`.
@@ -85,6 +86,8 @@ pub enum TypeRefMeta {
     Timestamp,
     /// See [`TypeRef::Uuid`].
     Uuid,
+    /// See [`TypeRef::Decimal`].
+    Decimal,
     /// See [`TypeRef::Option`].
     Option(&'static TypeRefMeta),
     /// See [`TypeRef::Vec`].
@@ -99,6 +102,10 @@ pub enum TypeRefMeta {
     Result(&'static TypeRefMeta, &'static TypeRefMeta),
     /// See [`TypeRef::Stream`].
     Stream(&'static TypeRefMeta),
+    /// See [`TypeRef::Object`].
+    Object(&'static str),
+    /// See [`TypeRef::Callback`].
+    Callback(&'static str),
 }
 
 impl From<&TypeRefMeta> for TypeRef {
@@ -121,6 +128,7 @@ impl From<&TypeRefMeta> for TypeRef {
             TypeRefMeta::Duration => TypeRef::Duration,
             TypeRefMeta::Timestamp => TypeRef::Timestamp,
             TypeRefMeta::Uuid => TypeRef::Uuid,
+            TypeRefMeta::Decimal => TypeRef::Decimal,
             TypeRefMeta::Option(t) => TypeRef::option(t.into()),
             TypeRefMeta::Vec(t) => TypeRef::vec(t.into()),
             TypeRefMeta::Map(k, v) => TypeRef::map(k.into(), v.into()),
@@ -128,6 +136,8 @@ impl From<&TypeRefMeta> for TypeRef {
             TypeRefMeta::Named(n) => TypeRef::named(n),
             TypeRefMeta::Result(t, e) => TypeRef::result(t.into(), e.into()),
             TypeRefMeta::Stream(t) => TypeRef::stream(t.into()),
+            TypeRefMeta::Object(n) => TypeRef::object(n),
+            TypeRefMeta::Callback(n) => TypeRef::callback(n),
         }
     }
 }
@@ -141,6 +151,9 @@ pub struct RecordMeta {
     pub type_id: u32,
     /// Fields in declaration order.
     pub fields: &'static [FieldMeta],
+    /// A one-field tuple struct that crosses as its inner type (ADR-042); see
+    /// [`RecordDef::transparent`].
+    pub transparent: bool,
     /// Doc comment (empty if none).
     pub docs: &'static str,
 }
@@ -151,6 +164,7 @@ impl From<&RecordMeta> for RecordDef {
             name: m.name.to_owned(),
             type_id: m.type_id,
             fields: convert_all(m.fields),
+            transparent: m.transparent,
             docs: m.docs.to_owned(),
         }
     }
@@ -289,6 +303,8 @@ pub struct MethodMeta {
     pub is_async: bool,
     /// Whether the first Rust parameter is a `Ctx`.
     pub takes_ctx: bool,
+    /// `#[undra(coalesce)]`, see [`MethodDef::coalesce`].
+    pub coalesce: bool,
     /// Doc comment (empty if none).
     pub docs: &'static str,
 }
@@ -302,6 +318,7 @@ impl From<&MethodMeta> for MethodDef {
             returns: (&m.returns).into(),
             is_async: m.is_async,
             takes_ctx: m.takes_ctx,
+            coalesce: m.coalesce,
             docs: m.docs.to_owned(),
         }
     }
@@ -418,8 +435,10 @@ pub struct PortMeta {
     pub name: &'static str,
     /// `fnv1a32("port.<name>")`.
     pub port_id: u32,
-    /// Sync, async or event.
+    /// Sync, async, event or callback.
     pub kind: PortKind,
+    /// `#[undra::callback(background)]`, see [`PortDef::background`].
+    pub background: bool,
     /// Port methods.
     pub methods: &'static [MethodMeta],
     /// Doc comment (empty if none).
@@ -432,6 +451,7 @@ impl From<&PortMeta> for PortDef {
             name: m.name.to_owned(),
             port_id: m.port_id,
             kind: m.kind,
+            background: m.background,
             methods: convert_all(m.methods),
             docs: m.docs.to_owned(),
         }
@@ -459,6 +479,30 @@ pub struct QueryMeta {
     pub persist: bool,
     /// Whether the call is safe to replay.
     pub idempotent: bool,
+    /// `interval = ".."` (ADR-043): the polling interval in milliseconds.
+    pub interval_ms: Option<u64>,
+    /// `poll_in_background` (ADR-043).
+    pub poll_in_background: bool,
+    /// `infinite` (ADR-043): the cursor type and the item key of a paged query.
+    pub infinite: Option<InfiniteMeta>,
+}
+
+/// Mirror of [`InfiniteDef`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InfiniteMeta {
+    /// The cursor type `C` of `Page<T, C>`.
+    pub cursor: TypeRefMeta,
+    /// The field of the item record that identifies a row.
+    pub item_key: &'static str,
+}
+
+impl From<&InfiniteMeta> for InfiniteDef {
+    fn from(m: &InfiniteMeta) -> InfiniteDef {
+        InfiniteDef {
+            cursor: (&m.cursor).into(),
+            item_key: m.item_key.to_owned(),
+        }
+    }
 }
 
 impl From<&QueryMeta> for QueryDef {
@@ -473,6 +517,9 @@ impl From<&QueryMeta> for QueryDef {
             stale_ms: m.stale_ms,
             persist: m.persist,
             idempotent: m.idempotent,
+            interval_ms: m.interval_ms,
+            poll_in_background: m.poll_in_background,
+            infinite: m.infinite.as_ref().map(InfiniteDef::from),
         }
     }
 }
@@ -512,6 +559,7 @@ mod tests {
             returns: TypeRefMeta::Named("Counter"),
             is_async: false,
             takes_ctx: true,
+            coalesce: false,
             docs: "Creates a counter.",
         }],
         methods: &[MethodMeta {
@@ -524,6 +572,7 @@ mod tests {
             ),
             is_async: true,
             takes_ctx: false,
+            coalesce: false,
             docs: "",
         }],
         store: Some(StoreMeta {
@@ -566,7 +615,7 @@ mod tests {
 
     #[test]
     fn every_type_ref_meta_leaf_maps_to_its_twin() {
-        let pairs: [(TypeRefMeta, TypeRef); 17] = [
+        let pairs: [(TypeRefMeta, TypeRef); 18] = [
             (TypeRefMeta::Bool, TypeRef::Bool),
             (TypeRefMeta::I8, TypeRef::I8),
             (TypeRefMeta::I16, TypeRef::I16),
@@ -584,6 +633,7 @@ mod tests {
             (TypeRefMeta::Duration, TypeRef::Duration),
             (TypeRefMeta::Timestamp, TypeRef::Timestamp),
             (TypeRefMeta::Uuid, TypeRef::Uuid),
+            (TypeRefMeta::Decimal, TypeRef::Decimal),
         ];
         for (meta, def) in pairs {
             assert_eq!(TypeRef::from(&meta), def);
@@ -689,6 +739,7 @@ mod tests {
             name: "Lifecycle",
             port_id: ids::port_id("Lifecycle"),
             kind: PortKind::Event,
+            background: false,
             methods: &[MethodMeta {
                 name: "changed",
                 method_id: ids::port_method_id("Lifecycle", "changed"),
@@ -699,6 +750,7 @@ mod tests {
                 returns: TypeRefMeta::Unit,
                 is_async: false,
                 takes_ctx: false,
+                coalesce: false,
                 docs: "",
             }],
             docs: "",
@@ -716,6 +768,9 @@ mod tests {
             stale_ms: Some(30_000),
             persist: true,
             idempotent: true,
+            interval_ms: None,
+            poll_in_background: false,
+            infinite: None,
         };
         let f = FunctionDef::from(&F);
         assert_eq!(f.method_id, ids::function_id("greet"));

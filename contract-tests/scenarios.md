@@ -1,10 +1,12 @@
 # Contract scenarios
 
-This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): twenty-six
+This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): thirty-three
 scenarios against the **real playground core** (`examples/playground/core`, the same Rust crate the
-apps run), through the real boundary. S01 to S20 and S23 to S26 run on every platform; S21 and S22 are about
+apps run), through the real boundary. S01 to S20 and S23 to S33 run on every platform; S21 and S22 are about
 the web host (worker mode and crash recovery, ADR-049) and run on TypeScript only. S23 to S25 are the opt-in
-ports of ADR-047 and ADR-048; S26 is ADR-044's:
+ports of ADR-047 and ADR-048; S26 is ADR-044's, S27 ADR-040's and S28 ADR-041's; S29 and S30 are ADR-046's
+(panic reports and background runs); S31 is ADR-042's (newtypes, generic instantiations, leaf types) and S32 and
+S33 are ADR-043's (paged queries and lazy lists, polling):
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
@@ -13,9 +15,9 @@ ports of ADR-047 and ADR-048; S26 is ADR-044's:
 | Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI table of the real core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S23 to S26, plus
-S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 74
-cells: 24 on Swift, 24 on Kotlin, 26 on TypeScript.
+`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S20 and S23 to S33, plus
+S21 and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 95
+cells: 31 on Swift, 31 on Kotlin, 33 on TypeScript.
 
 ## The harness (the same on every platform)
 
@@ -700,6 +702,236 @@ harness adapters.
    of kind `state`; native: the runtime's in-process claim), and A, closed, loads again and answers
    `add(2, 3) == 5`. Both are closed at the end.
 
+### S27 objects cross (ADR-040)
+
+`Workshop` is a store that hands out child stores, `Shelf`s (`examples/playground/core/src/workshop.rs`).
+Every step goes through the **generated** classes: `Workshop.create()` / `Workshop()`, `Shelf`, `Watch`.
+`stats().host_refs` is the sum of the references the host owns (the core's view of the live wrappers).
+
+1. **A parent returns a child.** `w.shelf("a")` returns a `Shelf` wrapper (a store: its `label` is `"a"` and
+   `items` is `0` after the first drain, observed when the wrapper was made); `stats().live_handles` and
+   `host_refs` each grew by one for the shelf (and one for `w`).
+2. **One object, one handle, one wrapper.** `w.shelf("a")` again is the same wrapper (`===` / `===` / identity),
+   the same handle, and `host_refs` did not move (the duplicate reference was given back at once); `w.find("a")`
+   is the same wrapper, `w.find("zz")` is `nil`/`null`; `w.shelves()` lists it once; a store returned twice is
+   mirrored once: `shelf.stock(2)` delivers exactly one change-set (`items == 2`), not two.
+3. **A child is passed back as a parameter.** `w.shelf("b").stock(3)`; `w.merge(from: a, onto: b)` moves the two
+   items (`a.items == 0`, `b.items == 5`: `merge` is one `txn` over two stores, so two change-sets, one per store, that
+   one drain applies before `merge` returns); `w.total([a, b])
+   == 5`; `w.describe(a) == "a"` and `w.describe(nil) == "none"`. A parameter is borrowed: `host_refs` is
+   unchanged by these calls.
+4. **Closing releases exactly one reference.** `w.shelf("c")` twice (one wrapper, one reference); `close()` the
+   wrapper: `host_refs` is back to where it was before step 4 and its handle is stale: `stock(1)` on the closed
+   wrapper fails as `refused` (a command: reported through `onError`, not thrown). `w.shelf("c")` again is a
+   **new** wrapper with a new handle (not the closed one) whose `label` is `"c"`.
+5. **A call cancelled before it finishes owes nothing.** `w.open("slow", 60_000)` (async, waits on the Timer) is
+   started and cancelled before its reply: it fails as cancelled, and `host_refs` and `live_handles` are
+   unchanged. `w.open("fast", 10)` returns the shelf (`label == "fast"`); `w.open("", 0)` fails with
+   `WorkshopError.NoName`; neither leaks.
+6. **A restore makes derived handles stale.** A snapshot of the core taken while `a` (a child) is live holds
+   `Workshop` but **not** the shelves (derived handles are transient); after `restore`, the old `Workshop` handle
+   is the same (it is a store) and still answers; the old `a` wrapper is stale (its `stock(1)` is refused); and
+   `w.shelf("a")` returns a **fresh** shelf wrapper with `items == 0` (the restored workshop rebuilt its private
+   state empty, SPEC 5.9).
+7. **Releasing is by handle and finalisers.** Drop (do not `close()`) the last strong reference to a wrapper (and
+   collect it: Swift releases at `deinit`, Kotlin on GC with `System.gc()` and a bounded wait, TypeScript with
+   the `FinalizationRegistry` when `gc` is exposed, else `close()`): `host_refs` goes back down within 5 s.
+8. **A foreign object is refused with a typed error, and the cores' handle numbers are not mixed up.** (Native
+   runners and TypeScript use the two cores of S26: the generated classes of `UndraPlaygroundA` with
+   `ctx: coreA` and `ctx: coreB`.) Both cores issue the same handle numbers for the same history, so a handle
+   alone proves nothing: `wA.merge(from: shelfOfB, onto: shelfOfA)` fails with `UndraCallError.refused` (a
+   message that names the shelf and says it belongs to another core) **before anything is sent**: neither
+   core's `calls` counter moved and both `host_refs` are unchanged.
+9. **Statistics.** `stats()` reports `host_refs` (the sum), and a raw call that gives a handle back twice
+   over-releases nothing the core still counts (the runtimes release at most once per wrapper).
+
+### S28 host callbacks (ADR-041)
+
+`Workshop` calls the app's `Reporter` back (`progress`, `note`, `confirm`). The runner implements `Reporter`
+(generated protocol/interface; on Swift the main-actor protocol) and records what it is called with, in order,
+with the stores' state as seen at each call. `UndraCore.callbacks` (the registry) is read for its live count.
+
+1. **Ordered, and after the change-sets committed before them.** `w.watch(rep)` returns a `Watch`;
+   `w.announce("one")`, `w.announce("two")`: `rep.note` is called with `"one"` then `"two"`, and when it runs
+   the observed `Workshop.notes` is already `1` / `2` (the change-set committed before the call is applied
+   first, ADR-041 decision 6). Nothing ran inside the core's callback: the runner's `note` calls back into the
+   core (`w.announce` from inside `note` is allowed: it is queued, never `E_REENTRANT`).
+2. **An async callback returns a value and throws its typed error.** `await w.run(3, rep)` with `rep.confirm`
+   answering `true` returns `3` (the notes `step 1 of 3` to `step 3 of 3` arrive in order, and the progress
+   reports arrive in order and end at `3/3`: `progress` is `coalesce`, so a drain that ran late delivers fewer
+   than three);
+   with `confirm` answering `false` the call fails with `ReportError.Declined`; with `confirm` throwing
+   `ReportError.Unavailable("x")` the call fails with that error (`status 1`).
+3. **Any other throw is reported, not propagated.** `confirm` throws something that is not a `ReportError`
+   (Swift: another `Error`; Kotlin: `IllegalStateException`; TypeScript: a `TypeError`): the host reports it
+   through `onError` (operation names the callback) and answers unavailable, so `w.run` fails with
+   `ReportError.Unavailable(..)`; a throw from `note` is reported the same way and goes nowhere else.
+4. **Cancellation reaches the host task.** `w.run(1, rep)` with a `confirm` that waits until cancelled (it
+   records that its task / job / signal was cancelled) is started, and the call is cancelled: the host's
+   `confirm` observes cancellation (Swift `Task.isCancelled` / `CancellationError`, Kotlin `Job` cancelled,
+   TypeScript the method's `AbortSignal` aborted) within 1 s; a `confirm` answer that arrives late is
+   discarded; no `ReportError` leaks; the registry still holds the instance until the proxy is gone.
+5. **Interning and the registry.** `w.watch(rep)` twice with the same `rep`: one instance handle
+   (`callbacks.lend` returned equal handles), the registry count for `rep` is 2 after the crossings and **1**
+   once the core gave the duplicate back (`__release`), and `w.watching() == 2` (two subscriptions, one
+   proxy). Closing both `Watch`es: the core dropped the last proxy, the registry is **empty** within 1 s, and
+   `rep` is no longer held (a weak reference to it clears after a GC).
+6. **`coalesce` delivers only the newest per drain.** `w.burst(50, rep)` called while the runner holds the
+   frame (the mirror's drain is not run): when it runs, `rep.progress` is called **once**, with `(50, 50)`,
+   and `rep.note` 50 times in order (`burst 1` to `burst 50`); the invocation of `progress` was not folded with
+   change-set entries (S18 still holds).
+7. **A refused call leaves the registry unchanged.** `w.watch(rep2)` on a closed (stale) `Workshop` wrapper
+   fails as `refused`; `rep2` is not in the registry afterwards (the generated code gave its reference back),
+   and the core sent no `__release` for it.
+8. **Weak by default? No: strong, with the weak wrapper available.** An inline `Reporter` object that nothing
+   else references (`w.watch(Inline())`) is still called by `announce` after a GC (the registry holds it
+   strongly); `WeakReporter(target)` (Swift) / `Reporter.weak(target)` (Kotlin) / `weakReporter(target)`
+   (TypeScript) forwards while the target lives and does nothing (fire-and-forget) or answers unavailable
+   (async) once the target is gone.
+9. **A `background` callback is not delivered through the drain.** (Runners that have a background-delivery
+   interface in the playground only: none yet; the golden case `callbacks` and each runtime's own tests cover
+   `background`.)
+
+### S29 panic report (ADR-046)
+
+The playground core's panics, seen by the app's crash reporter. Every platform sets `LoadOptions.onPanic`
+(Swift `onPanic`, Kotlin `onPanic`, TypeScript `onPanic`) and records each `UndraPanicReport` (message, location,
+operation, thread, frames, namespace, coreVersion, schemaHash, imageId), with a note of the thread it was
+delivered on.
+
+**Native (Kotlin over JNI, Swift over the C ABI)**
+
+1. `explode("kaboom")` fails as in S17.1 (status 2). `onPanic` received **exactly one** report: `message`
+   contains `kaboom`; `location` contains `lab.rs:` and ends in `:<line>:<column>`; `operation == "explode"`;
+   `thread` is not empty; `namespace == "playground_core"`; `coreVersion` is not empty; `schemaHash` is the
+   bindings' hash; `imageId` is empty or lowercase hex; `frames` is not empty (the runners load debug builds, which
+   name their frames: some frame has a `symbol`), and every frame's `address` is a `UInt64`/`Long`/`bigint`.
+2. `explode_later(10, "later")` reports once, `operation == "explode_later"`; a **detached task** that panics
+   (`explode_detached("task")`, which returns at once) reports once, `operation == "task"`.
+3. `onPanic` is called on the platform's main thread (the Swift main actor's thread, the Kotlin runner's `main`
+   executor, the JavaScript thread), once per report and in the order the panics happened; the call that
+   panicked still fails as in S17.
+4. `stats().panics` and `stats().panicReports` both grew by 3 (the stats report `panic_reports`), and the core keeps
+   working: `add(1, 2) == 3`. A reporter that throws changes nothing: the next panic is reported all the same
+   (the runner's `onPanic` throws once, on the first report, in a second `load` of the S17 kind: Swift cannot
+   throw there, so its `onPanic` is `@Sendable (UndraPanicReport) -> Void` and the step is Kotlin and TypeScript).
+
+**wasm (TypeScript)** — the core traps, so the report is built from the core's FATAL record and the trap:
+
+1. `explode("kaboom")` makes the call fail as in S17 (wasm); `onPanic` received **exactly one** report **before**
+   the restart of S22 begins (`onCoreRestarted` fires after it): `message` contains `kaboom`, `location` contains
+   `lab.rs:`, `operation == "explode"` (the call the core was running, from the FATAL record), `thread == "main"`,
+   `namespace == "playground_core"`, `coreVersion` not empty, `schemaHash` the bindings', `frames` not empty (each
+   `address` the module offset of a `wasm-function[i]:0x..` line, a `symbol` when the build has names) and
+   `imageId` is the SHA-256 of the module's bytes as 64 lowercase hex digits.
+2. The same report arrives with recovery on (S22) and with it off, and `onPanic` throwing is reported to `onError`
+   and changes nothing.
+
+### S30 background run (ADR-046)
+
+`runInBackground(deadline)` (Swift `core.runInBackground(deadline:)`, Kotlin `core.runInBackground(deadlineMs)`,
+TypeScript `core.runInBackground(deadlineMs)`) over the standard function `run_background`. List `s30`; the
+server serves `[]`; a handle observes it.
+
+1. **Offline work is pending.** `Connectivity.changed(online=false, kind=None)`; POST `/lists/s30/todos` fails with
+   `HttpError.Network("offline")`; `create_remote_todo("s30", "Queued")` is started and stays pending
+   (`storage_status().pending == 1`). `stats().background.tasks >= 3` and `stats().background.pending >= 1`: the
+   platform can tell that a window is worth asking for. Emitting `Lifecycle.changed(Background)` writes the
+   persisted cache entry of the list at once (the Kv holds a key starting `undra.query.cache2.` within 100 ms, not
+   250 ms later).
+2. **Still offline, the run says so and does not wait.** `runInBackground(5 s)` returns in under 1 s with
+   `finished == false`, `replayed == 0`, `stillPending >= 1`; the item is still queued.
+3. **Online, the run drains the queue.** POST answers `201 {"id":9,"title":"Queued","done":false}` after a delay of
+   400 ms. `Connectivity.changed(online=true, kind=Wifi)` starts the replay; `runInBackground(10 s)` started
+   right after it returns once the replay finished: `finished == true`, `replayed == 1`, `stillPending == 0`; the
+   pending `create_remote_todo` resolved; the server saw 2 POSTs with the same `Idempotency-Key`.
+4. **A run cut at its deadline leaves the work intact.** Offline again; `create_remote_todo("s30", "Slow")` queued
+   (`pending == 1`); POST answers `201 {...}` after 5 s; online. `runInBackground(1 s)` returns in about
+   500 ms (the deadline less the half second kept for the host), **not later than 900 ms**, with
+   `finished == false`, `replayed == 0`, `stillPending == 1`: the replay in flight is the client's, not the run's, so
+   the item is still queued (`pending == 1`, the Kv queue key still holds it) and **nothing is sent twice**; within
+   10 s the POST answers, `pending == 0`, and the server saw exactly one POST for it after the failed one, with the
+   same `Idempotency-Key`.
+5. **A host that cancels the call.** `runInBackground(30 s)` while a replay is held (offline, then online with a
+   POST that answers after 3 s) is cancelled after 100 ms (Swift: the `Task` is cancelled, Kotlin: the coroutine,
+   TypeScript: the `AbortSignal`): the call fails with the platform's cancellation, the core keeps working
+   (`add(1, 2) == 3`) and the queue is intact (`pending == 1` until the POST answers, then 0).
+6. **Counters.** `stats().background.runs == 4`, `.finished == 1`, `.replayed == 1`.
+
+### S31 newtypes, generic instantiations and leaf types (ADR-042)
+
+`ledger` (`examples/playground/core/src/ledger.rs`): free functions (`open_account`, `deposit`, `balances`, `statement`,
+`loadable_statement`, `echo_*`, `sample_receipt`) and the `Ledger` store. Every step goes through the **generated** API.
+
+1. **A newtype is its inner value on the wire.** The codec of `AccountId` writes the same 16 bytes as the `Uuid` codec of the same
+   value, `Cents(-5)` the same 8 bytes as an `i64`, `Price` the same 17 bytes as a `Decimal`; `echo_account(id)` returns an equal
+   `AccountId`, `echo_cents` an equal `Cents`, `echo_price` an equal `Price`. The platform type is a distinct type
+   (Swift `struct AccountId: RawRepresentable` with `rawValue: UUID`, Kotlin `@JvmInline value class`, TypeScript a branded
+   `string`/`number` that is `===` to its inner value at run time); `Cents` is `Comparable` on Swift and Kotlin
+   (`Cents(1) < Cents(2)`).
+2. **A newtype is a map key and the key of a keyed list.** After `open_account` twice, `balances()` is a dictionary/map with
+   exactly those two `AccountId` keys (Swift `[AccountId: Price]`, Kotlin `Map<AccountId, Price>`, TypeScript
+   `Map<AccountId, Price>`). `Ledger` (a store whose `accounts` list is keyed by an `AccountId`): `open("Ada")` delivers one
+   change-set whose `accounts` entry is a keyed patch of one `Insert` (value under 64 bytes), `rename` one `Update`,
+   `close_account` one `Remove`, and the mirrored list equals the model after each.
+3. **Generic instantiations are plain records and enums.** After five `deposit`s of `1.50` into one account: `statement(a, 0, 2)` is an
+   `EntrySlice` of 2 items with `next == 2`, `statement(a, 4, 10)` has 1 item and `next == nil`; `loadable_statement(a, false, 3)` is
+   `.loading`, `(a, true, 3)` is `.loaded(slice)` with 3 items, an unknown account `.failed("no such account")`.
+4. **Decimals are exact.** `deposit(0.1)` then `deposit(0.2)` returns a balance whose text is `0.3`; `echo_decimal` returns the
+   same mantissa and scale for `0`, `1.10`, `-1.50`, a scale of 38, the smallest and the largest 128-bit mantissa (Swift compares
+   the re-encoded bytes with the sent ones, Kotlin `BigDecimal.equals` and TypeScript `Decimal.equals` are scale-sensitive and hold);
+   a wire decimal with a scale of 39, sent through the raw API, is refused by the core as a bad request, never decoded; `deposit` of
+   an amount `rust_decimal` cannot hold fails with `LedgerError.OutOfRange`.
+5. **Leaf types of other crates cross as wire types.** `sample_receipt()` has `id` equal to the UUID `1ed9e400-0000-0000-0000-000000000007`,
+   `issued` the instant `2026-10-01T12:00:00.123Z` (1 790 856 000 123 ms), `valid_for` 90 s, `total` the decimal `19.990` (scale 3), `signature`
+   the bytes `[1, 2, 3, 255]`; `echo_receipt` of a receipt the platform builds returns an equal receipt.
+
+### S32 paged queries and lazy lists (ADR-043)
+
+`Library` (`examples/playground/core/src/paging.rs`) holds two `Lazy<Item>` lists: `books` (10,000 rows it owns) and `evens` (a read-only view of
+the even rows of `source`, a 20-row `Signal<Vec<Item>>`), and `feed` is an `infinite` query (`FeedQueryHandle`: pages of 50 rows of the big list's
+10,000, `even_only` as its parameter, `touch_feed(revision)` makes the even rows show `revision` as their `version` the next time they are fetched).
+Every step goes through the **generated** classes; "page calls" are the target-3 calls the runner counts at its transport (Swift and Kotlin wrap the
+transport the runner loads, TypeScript counts `Kind.Call` payloads whose first byte is 3).
+
+1. **A lazy list is not sent whole.** `Library()`: after the first drain `books.count == 10_000`, and the store's first change-set carries 20 bytes for
+   `books` (a `LazyValue`), not 10,000 rows; `books[0]` is nothing until its page arrives, then `books[0].id == 1`; reading row 9,999 loads the last
+   page (`id == 10_000`); an index outside `0..<count` is nothing and requests nothing (the page-call count does not move).
+2. **A page is requested once, with one page of prefetch each side.** The first read of row 120 (page size 50) makes 3 page calls (pages 2, 1 and 3);
+   reading another row of page 2 makes none (a row of page 1 or 3 asks once for the page beyond it, so scrolling stays one page ahead); the list's
+   `version` equals the version in the page reply.
+3. **A change is one 12-byte entry and the host re-pages only its window.** `add_rows(1)`: one change-set with one `books` entry, op 2, 12 bytes, carrying
+   `len == 10_001` and a higher version; `count == 10_001`; rows already on screen stay readable while the pages the host touched are asked again
+   (the page-call count grows by the window, not by 200); `rename(121, "x")`: row 121 reads `"x"` (`version == 1`) after the re-page;
+   `remove_at(0)`: `count == 10_000` and `books[0].id == 2`.
+4. **A drain folds without losing the page server** (ADR-031, amendment 2026-10-02). With the frame held, `add_rows(1)` three times, then released: one
+   op-2 delivery with the last length and version. A second `Library()` whose `add_rows(1)` runs before its first drain ends with `count == 10_001`
+   and a readable `books[0]` (the drain held the op 0 that names the page server, then the op 2).
+5. **A view pages through the derived index.** `evens.count == 10`, `evens[0].id == 2`, `evens[9].id == 20`; `add_rows(2)` makes `evens.count == 11` and
+   `evens[10].id == 10_002`; `drop_source(20)` leaves `evens.count == 1`.
+6. **An infinite query grows a page at a time.** `FeedQueryHandle(evenOnly: false)`: after the first fetch `data.count == 50` and `hasNextPage`;
+   `fetchNextPage()` makes `fetchingNextPage` true and then false, `data.count == 100`, and the change-set for `data` is a **keyed patch of 50 inserts**
+   (under 5 KB), not a full value; a second handle with the same parameter shares the entry (no fetch of its own); after `touch_feed(7)` and `refetch()` the
+   even rows' `version == 7`, the odd rows' `0`, and the change-set is a keyed patch of at most 50 updates; `FeedQueryHandle(evenOnly: true)` has the 50 rows
+   `2, 4, .., 100`. On Swift `loadMore(ifNeededFor:)` of a row within 5 of the end fetches the next page, of an earlier row it does not.
+
+### S33 polling (ADR-043)
+
+`ticker` (`paging.rs`) is a query with `interval = "1s"` that returns a counter bumped by every fetch (`ticker_fetches()` reads the same counter,
+`set_ticker_failing` makes it fail). The runner uses the real Timer port (real time), the `Lifecycle` and `Connectivity` events of the harness, and
+5-second waits.
+
+1. **A poll after each fetch.** Observing `TickerQueryHandle`: `data == 1` at once; within 2.5 s `data == 2` and `ticker_fetches() >= 2`; two
+   consecutive fetches are at least 0.9 s apart (the interval runs from the end of a fetch).
+2. **Background pauses, Active resumes.** After `Lifecycle` `Background`, `ticker_fetches()` does not move for 1.5 s; after `Active`, `data` advances again
+   within 2.5 s.
+3. **Offline pauses, online resumes.** After `Connectivity` offline nothing is fetched for 1.5 s; after online `data` advances within 2.5 s.
+4. **A failure keeps polling and clears on success.** After `set_ticker_failing(true)`: `error == TickError.Failing` within 2.5 s and `ticker_fetches()`
+   keeps growing; after `set_ticker_failing(false)`: `error` is nothing and `data` advances.
+5. **An observer's override.** `setPollInterval(3 s)` on the only observer: once the next fetch has ended, the following gap is at least 2.9 s; `setPollInterval(nil)`
+   returns to the query's own second.
+6. **The last observer stops it.** After the handle is closed `ticker_fetches()` does not move for 2.5 s.
+
 ## Platform notes
 
 * TypeScript: S03 runs only in `wasm-main` mode (the only one with `callSync`); S17 step 6 is the only
@@ -728,6 +960,19 @@ harness adapters.
 * S20 step 4 differs by platform: a fresh TypeScript core can be loaded with a `Kv` whose queue reads fail, so
   the TypeScript column walks the whole "unreadable, then readable on `Active`" path; Swift and Kotlin load one
   core per process, so their harness fails the first read of the queue at load and S20 checks what that did.
+* S28 step 3 (a throw that is not the method's own error) cannot be written against Swift's generated protocols
+  as the runner is: with typed throws (the default, ADR-032) `confirm` can only throw `ReportError` and `note`
+  cannot throw, so Swift's column prints a `NOTE` line for the step and the runtime's own tests
+  (`ObjectsCallbacksTests`) cover the mapping (status 2, `onError`, operation `Reporter.confirm`).
+* S27 step 7 depends on the garbage collector on Kotlin and TypeScript (`System.gc()` and a bounded wait; the
+  `FinalizationRegistry`, which needs Node's `--expose-gc`, else the runner `close()`s and says so): a GC that
+  does not run in time is a FAIL on Kotlin and a `close()` on TypeScript, never a SKIP.
+* S29 steps 1 to 4 and S30 run on every platform with the playground's debug core; S29's wasm column is the
+  trap path (the core cannot call `Diagnostics` before it traps, so the host builds the report from the FATAL
+  `undra::panic` record, `message`, `at <file>:<line>:<col>` and `in <operation>` on lines of their own, and the
+  trap's stack). S27 and S28 are `objects-callbacks`'; ADR-046's provisional numbers (S27 panic report, S28
+  background run) became S29 and S30.
+* S30 needs a **quiet cache**: a background run refetches the entries that are observed or persisted and stale or in error, and finishes only when they are fetched, so a scenario that leaves an entry in error (S12's 503 and bad body) must leave it healthy before S30 (the Kotlin runner's S12 does, and S30 runs after S20 there; S13 expects the first optimistic placeholder id of the process, `u32::MAX`, so S30 cannot move before it). `refetched` in step 3 is at least 1: coming back online refetches an observed list and the replay's invalidation does again, and the run waits for both.
 * S21 and S22 are TypeScript-only: worker mode and crash recovery are web features (ADR-049; a native core
   contains a panic without trapping, SPEC 5.6). `check.sh` does not expect them from Swift or Kotlin.
 * S23 and S24 start `contract-tests/servers/realtime-server.mjs` with Node (every runner's machine has Node:

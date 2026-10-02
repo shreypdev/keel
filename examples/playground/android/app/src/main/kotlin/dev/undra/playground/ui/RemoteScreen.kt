@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.undra.playground.PanicLog
 import dev.undra.playground.UndraApp
 import dev.undra.playground.core.QueryStatus
 import dev.undra.playground.core.RemoteError
@@ -216,7 +217,31 @@ fun RemoteScreen(vm: RemoteViewModel = viewModel()) {
             items(list.orEmpty(), key = { it.id.toLong() }) { todo ->
                 RemoteRow(todo, offline = vm.offline, onToggle = { vm.toggle(todo) })
             }
+            item { DebugSection() }
         }
+    }
+}
+
+/** The Debug area: the last panic the core reported to `LoadOptions.onPanic` (ADR-046), and a button that makes it panic. */
+@Composable
+private fun DebugSection() {
+    val count by PanicLog.count.collectAsState()
+    val last by PanicLog.last.collectAsState()
+    Column(Modifier.padding(top = 16.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Debug", style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Core panics", modifier = Modifier.weight(1f))
+            Text("$count", modifier = Modifier.testTag("debug-panic-count"))
+        }
+        last?.let {
+            Text(
+                PanicLog.describe(it),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("debug-last-panic"),
+            )
+        }
+        OutlinedButton(onClick = PanicLog::trigger, modifier = Modifier.testTag("debug-panic")) { Text("Make the core panic") }
     }
 }
 

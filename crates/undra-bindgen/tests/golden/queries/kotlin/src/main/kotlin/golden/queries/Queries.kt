@@ -14,6 +14,7 @@ import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.decodeAll
 import java.util.UUID
+import kotlin.time.Duration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,7 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * Observes the `todo_by_id` query (cache key `todo:{id}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
  */
-class TodoByIdQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class TodoByIdQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _data: MutableStateFlow<Todo?> = signal(null)
     /** The latest successful result, if any. */
     val data: StateFlow<Todo?> = _data.asStateFlow()
@@ -38,10 +39,6 @@ class TodoByIdQueryHandle private constructor(core: UndraCore, handle: Long) : U
     private val _updatedAt: MutableStateFlow<Timestamp?> = signal(null)
     /** When `data` was last updated. */
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
-
-    init {
-        observeAll()
-    }
 
     /**
      * Fetches again now, even if the data is fresh.
@@ -72,6 +69,26 @@ class TodoByIdQueryHandle private constructor(core: UndraCore, handle: Long) : U
             )
         } catch (e: Exception) {
             this.core.report(e, "TodoByIdQueryHandle.invalidate")
+        }
+    }
+
+    /**
+     * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+     * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setPollInterval(interval: Duration?) {
+        try {
+            val w = UndraWriter()
+            codecOptionDuration.encode(w, interval)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodoByIdQueryHandle.SET_POLL_INTERVAL),
+                UndraIds.Objects.TodoByIdQueryHandle.SET_POLL_INTERVAL,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "TodoByIdQueryHandle.setPollInterval")
         }
     }
 
@@ -122,6 +139,13 @@ class TodoByIdQueryHandle private constructor(core: UndraCore, handle: Long) : U
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            id: UUID,
+            fresh: Boolean,
+            ctx: UndraCore = UndraGoldenQueries.core,
+        ): TodoByIdQueryHandle = create(id, fresh, ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(
             id: UUID,
             fresh: Boolean,
@@ -131,7 +155,7 @@ class TodoByIdQueryHandle private constructor(core: UndraCore, handle: Long) : U
             Codecs.uuid.encode(w, id)
             w.writeBool(fresh)
             val handle = ctx.constructObject(UndraIds.Objects.TodoByIdQueryHandle.TYPE_ID, UndraIds.Objects.TodoByIdQueryHandle.NEW, w.toByteArray())
-            return TodoByIdQueryHandle(ctx, handle)
+            return ctx.adopt(handle, ::TodoByIdQueryHandle)
         }
     }
 }
@@ -140,7 +164,7 @@ class TodoByIdQueryHandle private constructor(core: UndraCore, handle: Long) : U
  * Observes the `todo_count` query (cache key `todo-count`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
  */
-class TodoCountQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class TodoCountQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _data: MutableStateFlow<UInt?> = signal(null)
     /** The latest successful result, if any. */
     val data: StateFlow<UInt?> = _data.asStateFlow()
@@ -156,16 +180,6 @@ class TodoCountQueryHandle private constructor(core: UndraCore, handle: Long) : 
     private val _updatedAt: MutableStateFlow<Timestamp?> = signal(null)
     /** When `data` was last updated. */
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
-
-    init {
-        observeAll()
-    }
-
-    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraGoldenQueries.core) : this(
-        ctx,
-        ctx.constructObject(UndraIds.Objects.TodoCountQueryHandle.TYPE_ID, UndraIds.Objects.TodoCountQueryHandle.NEW, ByteArray(0)),
-    )
 
     /**
      * Fetches again now, even if the data is fresh.
@@ -196,6 +210,26 @@ class TodoCountQueryHandle private constructor(core: UndraCore, handle: Long) : 
             )
         } catch (e: Exception) {
             this.core.report(e, "TodoCountQueryHandle.invalidate")
+        }
+    }
+
+    /**
+     * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+     * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setPollInterval(interval: Duration?) {
+        try {
+            val w = UndraWriter()
+            codecOptionDuration.encode(w, interval)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodoCountQueryHandle.SET_POLL_INTERVAL),
+                UndraIds.Objects.TodoCountQueryHandle.SET_POLL_INTERVAL,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "TodoCountQueryHandle.setPollInterval")
         }
     }
 
@@ -246,9 +280,14 @@ class TodoCountQueryHandle private constructor(core: UndraCore, handle: Long) : 
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            ctx: UndraCore = UndraGoldenQueries.core,
+        ): TodoCountQueryHandle = create(ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraGoldenQueries.core): TodoCountQueryHandle {
             val handle = ctx.constructObject(UndraIds.Objects.TodoCountQueryHandle.TYPE_ID, UndraIds.Objects.TodoCountQueryHandle.NEW, ByteArray(0))
-            return TodoCountQueryHandle(ctx, handle)
+            return ctx.adopt(handle, ::TodoCountQueryHandle)
         }
     }
 }
@@ -257,7 +296,7 @@ class TodoCountQueryHandle private constructor(core: UndraCore, handle: Long) : 
  * Observes the `todos` query (cache key `todos:{page}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
  */
-class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+class TodosQueryHandle internal constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
     private val _data: MutableStateFlow<Page?> = signal(null)
     /** The latest successful result, if any. */
     val data: StateFlow<Page?> = _data.asStateFlow()
@@ -273,10 +312,6 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
     private val _updatedAt: MutableStateFlow<Timestamp?> = signal(null)
     /** When `data` was last updated. */
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
-
-    init {
-        observeAll()
-    }
 
     /**
      * Fetches again now, even if the data is fresh.
@@ -307,6 +342,26 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
             )
         } catch (e: Exception) {
             this.core.report(e, "TodosQueryHandle.invalidate")
+        }
+    }
+
+    /**
+     * Overrides how often the query polls while this handle observes it, counted from the end of a fetch.
+     * The entry polls at the smallest interval among its observers; no interval clears this handle's override.
+     * An interval below 1 second or above 7 days is clamped to that range.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setPollInterval(interval: Duration?) {
+        try {
+            val w = UndraWriter()
+            codecOptionDuration.encode(w, interval)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodosQueryHandle.SET_POLL_INTERVAL),
+                UndraIds.Objects.TodosQueryHandle.SET_POLL_INTERVAL,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "TodosQueryHandle.setPollInterval")
         }
     }
 
@@ -357,11 +412,17 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        operator fun invoke(
+            page: UInt,
+            ctx: UndraCore = UndraGoldenQueries.core,
+        ): TodosQueryHandle = create(page, ctx)
+
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(page: UInt, ctx: UndraCore = UndraGoldenQueries.core): TodosQueryHandle {
             val w = UndraWriter()
             w.writeU32(page)
             val handle = ctx.constructObject(UndraIds.Objects.TodosQueryHandle.TYPE_ID, UndraIds.Objects.TodosQueryHandle.NEW, w.toByteArray())
-            return TodosQueryHandle(ctx, handle)
+            return ctx.adopt(handle, ::TodosQueryHandle)
         }
     }
 }
@@ -404,6 +465,7 @@ suspend fun clearTodos(ctx: UndraCore = UndraGoldenQueries.core) {
     }
 }
 
+private val codecOptionDuration = Codecs.option(Codecs.duration)
 private val codecOptionTodo = Codecs.option(Todo)
 private val codecOptionTodoError = Codecs.option(TodoError)
 private val codecOptionTimestamp = Codecs.option(Codecs.timestamp)

@@ -8,7 +8,8 @@
 //! * [`add`], [`greet`], [`area`] and [`parse_count`] are synchronous calls, the last two with a
 //!   typed error;
 //! * [`add_later`] and [`fail_later`] are asynchronous (they wait on the `Timer` port);
-//! * [`explode`] and [`explode_later`] panic, to show the panic is contained at the boundary;
+//! * [`explode`], [`explode_later`] and [`explode_detached`] panic, to show the panic is contained at
+//!   the boundary and reaches the app's crash reporter (ADR-046);
 //! * [`Probe`] counts what the core sees of cancelled calls and of streams with backpressure.
 
 use std::collections::BTreeMap;
@@ -226,6 +227,13 @@ pub fn explode(reason: String) -> u32 {
 pub async fn explode_later(ctx: &Ctx, delay_ms: u32, reason: String) -> u32 {
     ctx.sleep(Duration::from_millis(u64::from(delay_ms))).await;
     panic!("{reason}")
+}
+
+/// Returns at once and panics with `reason` in a task of its own (ADR-046: a contained panic that
+/// no call is waiting on still reaches `onPanic`).
+#[undra::api]
+pub fn explode_detached(ctx: &Ctx, reason: String) {
+    ctx.spawn(async move { panic!("{reason}") });
 }
 
 /// What a [`Probe`] has seen.

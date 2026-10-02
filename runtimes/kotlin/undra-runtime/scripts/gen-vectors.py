@@ -85,14 +85,16 @@ def generate() -> str:
     ]
     for vec in dict(doc)["vectors"]:
         f = dict(vec)
+        error = ", error = %s" % kotlin_string(f["error"]) if "error" in f else ""
         lines.append(
-            "        WireVector(%s, %s, %s, %s, %s),"
+            "        WireVector(%s, %s, %s, %s, %s%s),"
             % (
                 kotlin_string(f["name"]),
                 kotlin_string(f["type"]),
                 emit(f["value"]),
                 kotlin_string(f["hex"]),
                 kotlin_string(f.get("note", "")),
+                error,
             )
         )
     lines += ["    )", "}", ""]

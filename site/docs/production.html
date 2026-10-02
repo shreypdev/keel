@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operating in production · Undra docs</title>
+<meta name="description" content="Crash reports that name the Rust frame, the symbol files to read them with, background runs for the offline queue, and debugging into Rust.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/production.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Operating in production · Undra docs">
+<meta property="og:description" content="Crash reports that name the Rust frame, the symbol files to read them with, background runs for the offline queue, and debugging into Rust.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/production.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Operating in production · Undra docs">
+<meta name="twitter:description" content="Crash reports that name the Rust frame, the symbol files to read them with, background runs for the offline queue, and debugging into Rust.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/production.html#article","headline":"Operating in production · Undra docs","description":"Crash reports that name the Rust frame, the symbol files to read them with, background runs for the offline queue, and debugging into Rust.","url":"https://shreypdev.github.io/undra/docs/production.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Operating in production","item":"https://shreypdev.github.io/undra/docs/production.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="paging.html">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="production.html" aria-current="page">Operating in production</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="paging.html">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="production.html" aria-current="page">Operating in production</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+<p class="crumb">Guides</p>
+<h1>Operating in production</h1>
+<p class="lede">Three things a shipped app needs that nobody should write for themselves: a crash report that names the Rust frame, the symbol files to read it with, and a way to finish the offline queue while the app is not on screen.</p>
+<h2 id="crash-reports">Crash reports<a class="anchor" href="#crash-reports" aria-label="Link to this section">#</a></h2>
+<p>A panic in the core never crashes the app: the call that was running fails with <code>UndraCallError.panicked</code> and the core goes on. Your crash reporter still wants to know. Set <code>onPanic</code> when you load the core and it receives one structured report for every panic the core contained (a call, a detached task, a computed, a background task, an init or migration hook), once, in order, on the main thread. Nothing is linked for you: forward the report to the reporter you already use. Without <code>onPanic</code> the runtime logs one line, so a panic is never silent.</p>
+<div class="table-wrap"><table><thead><tr><th>Field</th><th>What it holds</th></tr></thead><tbody><tr><td>The panic</td><td><code>message</code> and <code>location</code> (<code>file:line:column</code>; release builds remap your home directory to <code>~</code>, so no path names your machine).</td></tr><tr><td>The context</td><td><code>operation</code>, what was running (<code>Todos.add</code>, <code>task</code>, <code>computed Todos.visible</code>), and the Rust <code>thread</code>.</td></tr><tr><td>The backtrace</td><td><code>frames</code>, innermost first, at most 48. Always the <code>address</code> of each instruction as an offset into the core's image; a debug build also has <code>symbol</code>, <code>file</code> and <code>line</code>.</td></tr><tr><td>The build</td><td><code>namespace</code>, <code>coreVersion</code> and <code>schemaHash</code>: which core.</td></tr><tr><td>The image</td><td><code>imageId</code>: the Mach-O UUID, ELF build id or wasm SHA-256 of the image the addresses belong to, which is what symbol files are keyed by.</td></tr></tbody></table></div>
+<details class="reveal-code"><summary>Show the three loaders</summary>
+<div data-tabs data-label="Platform">
+<div class="tab-panel" data-label="Swift">
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">var options = LoadOptions.inproc()
+options.onPanic = { report in            // main thread, once per panic
+    MyCrashReporter.recordNonFatal(
+        name: &quot;UndraPanic in \(report.operation)&quot;,
+        reason: report.message,
+        location: report.location,
+        frames: report.frames.map(\.address),   // offsets into the core's image
+        imageId: report.imageId                  // which build's symbol files resolve them
+    )
+}
+let core = try UndraTodos.load(options)</code></pre></div>
+</div>
+<div class="tab-panel" data-label="Kotlin">
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">val core = UndraTodos.load(
+    LoadOptions(onPanic = { report -&gt;        // the main dispatcher, once per panic
+        MyCrashReporter.recordNonFatal(
+            name = &quot;UndraPanic in ${report.operation}&quot;,
+            reason = report.message,
+            location = report.location,
+            frames = report.frames.map { it.address },
+            imageId = report.imageId,
+        )
+    })
+)</code></pre></div>
+</div>
+<div class="tab-panel" data-label="TypeScript">
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">const core = await UndraTodos.load({
+  mode: &quot;wasm-main&quot;, wasm,
+  onPanic: (report) =&gt; {                     // once per trap, before any restart
+    reportError(new Error(`${report.operation}: ${report.message}`, { cause: report }));
+  },
+});</code></pre></div>
+</div>
+</div>
+</details>
+<p>Crashlytics takes the frames as <code>StackFrame(address:)</code> on iOS and as synthetic stack trace elements on Android, Sentry as an event whose frames carry <code>instruction_addr</code> and whose debug image is <code>imageId</code>. The recipes are three lines each and Undra links no reporter.</p>
+<p>On the web a panic traps the module, which cannot call out of its last moments. The runtime builds the same report from what the core logged before it trapped and the trap's stack, and calls <code>onPanic</code> before it restarts anything (<a href="web.html#recovering-from-a-crash">crash recovery</a>). A wasm frame's <code>address</code> is the module offset in the stack line (<code>wasm-function[41]:0x1a2b</code>), its <code>symbol</code> the function name when the build has one. The generated entry passes <code>namespace</code>; the module carries no version, so pass <code>coreVersion</code> in the load options if you want it in the report. In tests, <code>CaptureDiagnostics</code> (the Rust fakes and each testing kit) records the reports.</p>
+<h2 id="symbols">Symbol files<a class="anchor" href="#symbols" aria-label="Link to this section">#</a></h2>
+<p>A release build keeps line tables and nothing else: the code, the optimisation and the size of what ships are the same. <code>undra build --release</code> strips the copies it ships, keeps the unstripped ones below <code>build/symbols/</code> and writes <code>manifest.json</code> there (per image: namespace, core version, schema hash and the image id a report carries). <code>--no-symbols</code> skips all of it.</p>
+<div class="table-wrap"><table><thead><tr><th>Platform</th><th>Ships</th><th>Symbols to keep (and upload)</th></tr></thead><tbody><tr><td>iOS</td><td><code>build/ios/&lt;Ns&gt;Core.xcframework</code></td><td>The <strong>app's own dSYM</strong>: Xcode's Release configuration already asks for one, and it now contains the Rust frames. Crashlytics and Sentry upload it as for Swift. A static library has no dSYM of its own.</td></tr><tr><td>Android</td><td><code>build/android/jniLibs/&lt;abi&gt;/lib&lt;ns&gt;.so</code>, stripped</td><td><code>build/symbols/android/&lt;abi&gt;/lib&lt;ns&gt;.so</code>, and <code>native-debug-symbols.zip</code> in the Play Console layout (Crashlytics: <code>unstrippedNativeLibsDir</code>). The libraries carry a GNU build id.</td></tr><tr><td>Web</td><td><code>build/web/&lt;ns&gt;.wasm</code></td><td><code>build/symbols/web/&lt;ns&gt;.debug.wasm</code> (the same code with its names), <code>&lt;ns&gt;.wasm.functions.txt</code> (the function map) and <code>&lt;ns&gt;.dwarf.wasm</code> for the browser's debugger.</td></tr><tr><td>Host (JVM, macOS)</td><td><code>build/host/lib&lt;ns&gt;.{dylib,so}</code></td><td>A <code>.dSYM</code> or <code>.debug</code> file next to it.</td></tr></tbody></table></div>
+<p>The generated CI workflows upload <code>build/symbols/</code> next to the app build, so every release keeps the files its crashes need. To read a report by hand, give it to <code>undra symbolicate</code>:</p>
+<div class="code"><div class="code-bar"><span><span class="lang">sh</span></span></div><pre><code data-lang="sh">undra symbolicate report.json              # a report as onPanic received it, serialised
+undra symbolicate --platform android --image-id &lt;build id&gt; 0x2f3a1c
+undra symbolicate --dsym App.app.dSYM report.json     # iOS: the app's dSYM</code></pre></div>
+<p>It finds the image by <code>imageId</code> in the manifest and prints one line per frame, <code>address symbol (file:line)</code>: <code>atos</code> with the dSYM on Apple platforms, <code>llvm-symbolizer</code> on the Android twin, the function map and the debug module on the web.</p>
+<h2 id="background">Background runs<a class="anchor" href="#background" aria-label="Link to this section">#</a></h2>
+<p>The OS gives an app a window to work in while it is not on screen: iOS <code>BGTaskScheduler</code>, Android WorkManager, a page about to hide. The core spends it on what is worth finishing: the offline queue replays, stale queries refetch, and what waits to be written is written. The platform calls <code>runInBackground</code> with the window it was given; the core runs its background tasks inside it and reports back.</p>
+<div class="table-wrap"><table><thead><tr><th>Report</th><th>Meaning</th></tr></thead><tbody><tr><td>Finished</td><td><code>finished</code>: every task was done in time and nothing is pending. Tell the OS it succeeded only then.</td></tr><tr><td>Work done</td><td><code>replayed</code> queued mutations sent, <code>refetched</code> queries fetched again.</td></tr><tr><td>Work left</td><td><code>stillPending</code>: queued mutations and unfinished fetches.</td></tr></tbody></table></div>
+<p>A run returns when its tasks are done, or half a second before the deadline so you can still tell the OS. Whatever a task did stays done: the queue persists per item, a request in flight is the client's and goes on, so a run that is cut short, or cancelled when the OS takes the window back, loses nothing and sends nothing twice. Offline, a run ends at once and says what is pending; it does not hold the window for a network that may not return.</p>
+<details class="reveal-code"><summary>Show the three platforms</summary>
+<div data-tabs data-label="Platform">
+<div class="tab-panel" data-label="Swift">
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">// At launch. Registers a processing task (network, minutes) and a refresh task (about 30 s);
+// when the app goes to the background with work pending it asks the OS for both.
+UndraBackground.register(taskIdentifier: &quot;com.example.todo.undra&quot;) {
+    try UndraTodos.load()      // the app may have been launched in the background, without UI
+}
+// Your own run, for example from a push:
+let report = try await core.runInBackground(deadline: 25)</code></pre></div>
+</div>
+<div class="tab-panel" data-label="Kotlin">
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">// Application.onCreate. UndraWorker loads the core with your loader and runs it for at most
+// 9 minutes (WorkManager stops a worker at 10); android-work is an optional module.
+UndraWork.configure(loader = { context -&gt; UndraTodos.load(LoadOptions()) })
+AndroidPlatformDefaults.install(context, core,
+    onBackgroundWorkPending = { UndraWork.schedule(this) })   // unique work, network required
+val report = core.runInBackground(deadlineMs = 25_000)</code></pre></div>
+</div>
+<div class="tab-panel" data-label="TypeScript">
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">// Within the page's life: when the page is hidden the runtime reports Background and, if the
+// core has work pending, runs it for a second. Opt out with backgroundRun: false.
+const report = await core.runInBackground(25_000, { signal });</code></pre></div>
+</div>
+</div>
+</details>
+<p>On iOS the identifiers are <code>&lt;id&gt;.processing</code> and <code>&lt;id&gt;.refresh</code>; <code>undra init</code> writes them to <code>Info.plist</code> with the <code>processing</code> and <code>fetch</code> background modes. <strong>BackgroundTasks does not run in the simulator</strong>: test the handler with the fakes in the Swift package, and on a device with the debugger command Apple documents. On Android the worker returns <code>retry()</code> while work is pending, and the web has no background beyond the page's own life yet: Background Sync in a service worker needs the core inside the worker and is a follow-up.</p>
+<p>Your own work joins the run with <code>undra::background::register(ctx, name, pending, run)</code> in Rust: <code>pending</code> says cheaply how much is waiting, <code>run</code> does it and reports progress to the <code>Deadline</code> as it goes. The core's statistics carry <code>background.pending</code>, which is what the platforms read to decide whether a window is worth asking for.</p>
+<h2 id="debugging">Debugging into Rust<a class="anchor" href="#debugging" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Where</th><th>How</th></tr></thead><tbody><tr><td>Xcode</td><td>A debug build keeps full DWARF in the core: step from a Swift call into Rust, and set breakpoints by <code>breakpoint set -f todos.rs -l 42</code>. <code>undra init</code> writes an <code>.lldbinit</code> that loads the toolchain's Rust formatters; <code>undra doctor</code> checks it.</td></tr><tr><td>Android Studio</td><td>The <em>Dual (Java + Native)</em> debugger with the unstripped debug <code>.so</code> (the generated Gradle module keeps its symbols in debug); <code>build/symbols/android</code> is the symbol directory for a release reproduction. <code>doctor</code> checks the NDK's LLDB.</td></tr><tr><td>Chrome</td><td>The C/C++ DevTools Support (DWARF) extension reads the debug module the dev build serves; breakpoints in <code>.rs</code> files. A browser extension is not something <code>doctor</code> can check, so it prints the link.</td></tr><tr><td>Host tests</td><td><code>rust-lldb</code> or CodeLLDB on <code>cargo test</code>.</td></tr></tbody></table></div>
+<p>The same panic that reaches your crash reporter is in the console during development: with <code>undra dev</code> the report goes to the app attached to the dev server like any port call.</p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="updates.html"><span>Previous</span><b>Shipping an update</b></a>
+    <a class="next" href="several-cores.html"><span>Next</span><b>One core or several</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#crash-reports">Crash reports</a></li><li><a href="#symbols">Symbol files</a></li><li><a href="#background">Background runs</a></li><li><a href="#debugging">Debugging into Rust</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

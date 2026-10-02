@@ -21,6 +21,17 @@
 //! objects) with `-all_load`, so the static constructors of the core's `#[undra::api]`
 //! registrations are kept. Because the entry symbol pulls the one object that holds every
 //! registration, the app no longer links the library with `-force_load`.
+//!
+//! **Symbols.** A release build's profile keeps the DWARF line tables of the core in Cargo's
+//! objects, and `ld -r` does what Apple's linker always does with debug info: it writes no DWARF,
+//! it writes a *debug map* (`N_OSO` stabs) naming the object files the DWARF is in. The app's link
+//! forwards that map, and Xcode's `dsymutil` (Release: `dwarf-with-dsym`) follows it into those
+//! objects, so **the app's own dSYM** gets the Rust frames, as ADR-044's probe showed. The objects
+//! are the ones in Cargo's target directory (`libundra_core_<hash>.a(…rcgu.o)`); they must still be
+//! there, unchanged, when the app is linked, which they are for a build phase that runs `undra
+//! build` and then compiles and links the app. A release build records each slice in
+//! `build/symbols/manifest.json` and warns when the prelinked library names no object that exists
+//! (ADR-046).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -29,6 +40,7 @@ use crate::cargo::{Build, Profile};
 use crate::error::{CliError, Code, Result};
 use crate::fsutil::{create_dir_all, remove_dir_all, size_of, write_if_changed};
 use crate::session::Session;
+use crate::symbols::{Entry, Format, Symbols, sha256, slash_relative};
 use crate::sys::Os;
 use crate::toolchain::Concern;
 
@@ -54,7 +66,11 @@ pub fn simulator_triple(arch: &str) -> &'static str {
 ///
 /// `C0012` off macOS, `C0003` without Xcode's tools, `C0011` without the Rust targets, `C0004`
 /// when a build or `xcodebuild` fails.
-pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
+pub fn build(
+    session: &Session<'_>,
+    release: bool,
+    symbols: &Symbols<'_, '_>,
+) -> Result<Vec<Artifact>> {
     if session.sys.os() != Os::Macos {
         return Err(unsupported(
             "iOS",
@@ -129,6 +145,8 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
             env: env.clone(),
             lib_name: crate::shim::shim_lib_name(&session.project.root),
             rustc_args: Vec::new(),
+            cargo_config: symbols.cargo_config(profile, true),
+            remap: session.remap_roots(),
         })?;
         files
             .into_iter()
@@ -219,6 +237,10 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
         )));
     }
 
+    if release {
+        record_symbols(session, symbols, &xcframework, &library)?;
+    }
+
     let slice_note = |p: &Path| format!("{} in the archive", crate::fsutil::human_size(size_of(p)));
     Ok(vec![Artifact {
         label: "ios xcframework".to_owned(),
@@ -234,6 +256,93 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
             slice_note(&sim)
         )),
     }])
+}
+
+/// The object files a prelinked library's debug map names, from `nm -pa` output: the `N_OSO`
+/// stabs, `OSO <path>` or `OSO <archive>(<member>)`, without the member, once each.
+#[must_use]
+pub fn debug_map_objects(nm_output: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in nm_output.lines() {
+        let Some(at) = line.find(" OSO ") else {
+            continue;
+        };
+        let path = line[at + 5..].trim();
+        let path = path.split_once('(').map_or(path, |(archive, _)| archive);
+        if !path.is_empty() && !out.iter().any(|p| p == path) {
+            out.push(path.to_owned());
+        }
+    }
+    out
+}
+
+/// Records every slice of the XCFramework in the symbol manifest (a release build), or forgets
+/// the iOS symbols an earlier build wrote when they are not wanted (`--no-symbols`).
+///
+/// An iOS slice has no image identity at build time: the image a report names is the app that
+/// links the library, whose UUID is that of the app's dSYM (see [`crate::symbols::manifest`]).
+fn record_symbols(
+    session: &Session<'_>,
+    symbols: &Symbols<'_, '_>,
+    xcframework: &Path,
+    library: &str,
+) -> Result<()> {
+    if !symbols.enabled {
+        return symbols.forget("ios");
+    }
+    let identity = symbols.identity()?.clone();
+    let build_dir = session.project.build_dir();
+    let mut slices: Vec<String> = std::fs::read_dir(xcframework)
+        .map_err(|e| CliError::io("read", xcframework, &e))?
+        .filter_map(std::result::Result::ok)
+        .filter(|e| e.path().join(library).is_file())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    slices.sort();
+    for slice in slices {
+        let path = xcframework.join(&slice).join(library);
+        let bytes = std::fs::read(&path).map_err(|e| CliError::io("read", &path, &e))?;
+        // The prelinked object has no DWARF of its own, but a debug map to the objects that do.
+        let objects = session
+            .toolchain
+            .which(session.sys, "nm")
+            .and_then(|nm| {
+                session.sys.run(
+                    &nm,
+                    &["-pa", &path.display().to_string()],
+                    &session.toolchain.env_pairs(),
+                )
+            })
+            .map(|out| debug_map_objects(&out.stdout));
+        if let Some(objects) = objects {
+            if !objects
+                .iter()
+                .any(|object| session.sys.is_file(Path::new(object)))
+            {
+                session.ui.warn(&format!(
+                    "{} names no object file with the core's DWARF line tables that exists any more ({}), so the app's dSYM will have no Rust frames; build the core again (`undra build --release`) before building the app",
+                    path.display(),
+                    objects.first().map_or("it has no debug map", String::as_str)
+                ));
+            }
+        }
+        symbols.record(Entry {
+            platform: "ios".to_owned(),
+            namespace: identity.namespace.clone(),
+            core_version: identity.core_version.clone(),
+            schema_hash: identity.schema_hash,
+            arch: slice,
+            format: Format::Macho,
+            image_id: None,
+            sha256: sha256::hex(&bytes),
+            shipped: slash_relative(&build_dir, &path),
+            shipped_bytes: bytes.len() as u64,
+            symbols: None,
+            function_map: None,
+            dwarf: None,
+        })?;
+    }
+    Ok(())
 }
 
 /// The architecture `ld -arch` names for a Rust iOS target.
@@ -444,6 +553,23 @@ mod tests {
                 .unwrap()
                 .contains("module UndraFFI")
         );
+    }
+
+    #[test]
+    fn the_debug_map_names_the_objects_with_the_dwarf() {
+        let nm = "0000000000000000 - 01 0000    SO \n\
+                  0000000000000000 - 00 0001   OSO /t/aarch64-apple-ios-sim/release/libcore.a(core-cgu.0.rcgu.o)\n\
+                  0000000000000000 - 00 0001   OSO /t/aarch64-apple-ios-sim/release/libcore.a(builtins.rcgu.o)\n\
+                  0000000000000000 - 00 0001   OSO /t/shim/lib.o\n\
+                  000000000000dad4 t _some_function\n";
+        assert_eq!(
+            debug_map_objects(nm),
+            [
+                "/t/aarch64-apple-ios-sim/release/libcore.a",
+                "/t/shim/lib.o"
+            ]
+        );
+        assert!(debug_map_objects("0000000000000000 T _x\n").is_empty());
     }
 
     #[test]

@@ -86,6 +86,15 @@ export interface Transport {
   send(kind: Kind, payload: Uint8Array): void;
   /** Runs a `Call` and returns the `Reply` payload (SPEC 6 `undra_call_sync`). Present only when `synchronous`. */
   callSync?(payload: Uint8Array): Uint8Array;
+  /**
+   * `send(Kind.Call, head ++ tail)` for a core that runs in this thread, without joining the two: `head` is the 17-byte
+   * `Call` header (SPEC 3.3), which the caller reuses for its next call, and `tail` the encoded arguments. The
+   * transport must have copied both before it returns and keep neither. Optional: `UndraCore` uses it where it is, and
+   * `send` where it is not. Only `wasm-main` has it.
+   */
+  sendCall?(head: Uint8Array, tail: Uint8Array): void;
+  /** `callSync(head ++ tail)`, with the same contract as {@link Transport.sendCall}. */
+  callSyncParts?(head: Uint8Array, tail: Uint8Array): Uint8Array;
   /** The core's statistics as JSON (`undra_stats_json`), or `null` when the transport cannot ask. */
   stats?(): Promise<string | null>;
   /**

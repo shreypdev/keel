@@ -1,0 +1,249 @@
+{
+ "schema": "undra-device-bench/1",
+ "date": "2026-10-02",
+ "finished_at": "2026-10-02T03:48:05.484Z",
+ "target": "web-chromium-headless",
+ "platform": "web",
+ "kind": "browser",
+ "label": "Chromium 153.0.8010.12 headless (Playwright, wasm-main) on Apple M5 Pro",
+ "claim": "Not a device: simulator, emulator or desktop browser on a Mac. Real-device rows are pending hardware, and no claim of meeting a device target is made from this file.",
+ "device": {
+  "model": "chromium (headless, Playwright)",
+  "arch": "arm64",
+  "cores": 18,
+  "browser": "chromium",
+  "browser_version": "153.0.8010.12",
+  "headless": true,
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+  "hardware_concurrency": 18,
+  "cross_origin_isolated": true,
+  "device_pixel_ratio": 1
+ },
+ "host": {
+  "cpu": "Apple M5 Pro",
+  "os": "macOS 26.5 (25F71)",
+  "arch": "arm64",
+  "load_before": 26.4,
+  "load_after": 24.24
+ },
+ "build": {
+  "type": "release",
+  "core": "release-wasm, wasm-opt -Oz",
+  "app": "vite production build with build.target es2022 (the playground's vite.config.ts, as the Undra Vite plugin sets it for an app that has none; Vite 6's own default, es2020, lowers the runtime's class fields to helpers), cross-origin isolated (5 µs clock)",
+  "commit": "83a5f85",
+  "dirty": false
+ },
+ "command": "scripts/bench-device.sh --device web --runs 3",
+ "runtime": "wasm-main",
+ "timer": {
+  "kind": "performance.now",
+  "resolution_ns": 4999.995231628418,
+  "overhead_ns": 120.7500010728836
+ },
+ "config": {
+  "batches": 100,
+  "warmupBatches": 10,
+  "batchSize": {
+   "sync_call": 1000,
+   "sync_call_runtime": 5000,
+   "record_1kb": 500,
+   "keyed_insert_10k": 200,
+   "changeset_100": 100
+  },
+  "resetEveryInserts": 1000,
+  "drainFrames": 240,
+  "drainWarmupFrames": 60,
+  "perEntryBatchSize": 20,
+  "reloads": 20
+ },
+ "ops": [
+  {
+   "id": "sync_call",
+   "mode": "batched",
+   "batch": 1000,
+   "samples": 100,
+   "min": 594.9999988079071,
+   "p50": 680.0000071525574,
+   "p90": 805.0000071525574,
+   "p99": 984.9999845027924,
+   "max": 995.0000047683716,
+   "mean": 699.8000007867813,
+   "note": "`await bench.benchAdd(a, b)`: encode, the call, the reply, decode, through the generated asynchronous binding"
+  },
+  {
+   "id": "sync_call_runtime",
+   "mode": "batched",
+   "batch": 5000,
+   "samples": 100,
+   "min": 424.0000009536743,
+   "p50": 442.00000166893005,
+   "p90": 462.00000047683716,
+   "p99": 500,
+   "max": 506.0000002384186,
+   "mean": 444.8700000047684,
+   "note": "`UndraCore.callSync`: the runtime's synchronous entry (no promise), which the generated TypeScript does not use; the blueprint's in-thread row"
+  },
+  {
+   "id": "record_1kb",
+   "mode": "batched",
+   "batch": 500,
+   "samples": 100,
+   "min": 1720.0000286102295,
+   "p50": 2019.9999809265137,
+   "p90": 2780.0000309944153,
+   "p99": 3189.999997615814,
+   "max": 3209.999978542328,
+   "mean": 2234.1999995708466,
+   "note": "`await bench.benchEchoBytes(1,024 bytes)`: the payload crosses the boundary twice (a byte string, which is cheaper than a record of the same size)"
+  },
+  {
+   "id": "keyed_insert_10k",
+   "mode": "batched",
+   "batch": 200,
+   "samples": 100,
+   "min": 20625,
+   "p50": 22400.00009536743,
+   "p90": 23900.000005960464,
+   "p99": 25199.99995827675,
+   "max": 28400.000035762787,
+   "mean": 22494.749996066093,
+   "note": "`await bench.benchListInsert(5000)` on about 10,000 rows: the call, the core's recorded insert, the one-operation patch, applied to the mirror's list before the call returns"
+  },
+  {
+   "id": "changeset_100",
+   "mode": "batched",
+   "batch": 100,
+   "samples": 100,
+   "min": 24550.00013113022,
+   "p50": 27350.000143051147,
+   "p90": 30749.99988079071,
+   "p99": 31949.999928474426,
+   "max": 32450.000047683716,
+   "mean": 27177.50000655651,
+   "note": "`await bench.benchTouchSignals(100)`: one call, one change-set of 100 entries, applied to 100 signals of the mirror before the call returns"
+  }
+ ],
+ "cold": {
+  "launches": [
+   {
+    "fetch_ns": 4074999.988079071,
+    "compile_ns": 1120000.0047683716,
+    "load_ns": 7844999.998807907
+   },
+   {
+    "fetch_ns": 3259999.990463257,
+    "compile_ns": 1064999.9976158142,
+    "load_ns": 7064999.997615814
+   },
+   {
+    "fetch_ns": 2969999.998807907,
+    "compile_ns": 939999.9976158142,
+    "load_ns": 6685000.002384186
+   },
+   {
+    "fetch_ns": 3425000.011920929,
+    "compile_ns": 979999.9892711639,
+    "load_ns": 6414999.99165535
+   },
+   {
+    "fetch_ns": 2945000.022649765,
+    "compile_ns": 1034999.9964237213,
+    "load_ns": 5974999.9940395355
+   },
+   {
+    "fetch_ns": 3405000.001192093,
+    "compile_ns": 1010000.0202655792,
+    "load_ns": 6234999.984502792
+   },
+   {
+    "fetch_ns": 3100000.023841858,
+    "compile_ns": 1009999.9904632568,
+    "load_ns": 6914999.99165535
+   },
+   {
+    "fetch_ns": 3585000.0083446503,
+    "compile_ns": 1054999.977350235,
+    "load_ns": 6980000.019073486
+   },
+   {
+    "fetch_ns": 3155000.001192093,
+    "compile_ns": 1144999.9809265137,
+    "load_ns": 6680000.007152557
+   },
+   {
+    "fetch_ns": 3280000.001192093,
+    "compile_ns": 914999.9916553497,
+    "load_ns": 6340000.003576279
+   }
+  ],
+  "reload_in_page": {
+   "compile_ns": {
+    "n": 20,
+    "min": 629999.9952316284,
+    "p50": 680000.0071525574,
+    "p90": 735000.0143051147,
+    "p99": 810000.0023841858,
+    "max": 810000.0023841858,
+    "mean": 695249.9970793724
+   },
+   "load_ns": {
+    "n": 20,
+    "min": 1344999.998807907,
+    "p50": 1495000.0047683716,
+    "p90": 1745000.0047683716,
+    "p99": 1845000.0286102295,
+    "max": 1845000.0286102295,
+    "mean": 1541750.0033974648
+   }
+  }
+ },
+ "drain": {
+  "rows": 10000,
+  "updates_per_frame": 1667,
+  "frames": 240,
+  "warmup_frames": 60,
+  "producer": "the page's own thread: one awaited call per frame commits the burst (wasm-main), so the whole burst is main-thread time",
+  "merged": {
+   "frame_ns": {
+    "n": 240,
+    "min": 1280000.001192093,
+    "p50": 2059999.9725818634,
+    "p90": 2335000.0083446503,
+    "p99": 2430000.0071525574,
+    "max": 2444999.9928474426,
+    "mean": 1986520.8341429632
+   },
+   "drain_ns": {
+    "n": 240,
+    "min": 139999.98569488525,
+    "p50": 214999.9737739563,
+    "p90": 245000.00476837158,
+    "p99": 269999.9809265137,
+    "max": 275000.0059604645,
+    "mean": 204854.1652659575
+   },
+   "change_sets_per_frame_p50": 1667,
+   "entries_per_frame_p50": 1667,
+   "applied_per_frame_p50": 1,
+   "drains_per_frame_p50": 1
+  },
+  "unmerged_estimate": {
+   "per_entry_ns": {
+    "n": 240,
+    "min": 2000.001072883606,
+    "p50": 3750.0008940696716,
+    "p90": 4749.998450279236,
+    "p99": 7000.000774860382,
+    "max": 7750.001549720764,
+    "mean": 3798.958230763674
+   },
+   "frame_ns": 6251251.490414143,
+   "frame_ns_mean": 6332863.370683044,
+   "method": "a call that commits one update (one transaction, one drain of one entry, the list copy) minus a call that commits none, as two batches of 20 after each frame of the experiment so that both are measured in the same minutes (240 batches); times 1667, by the median batch and by the mean batch. The runtime was not reverted: this is what applying every entry on its own would cost, from the entry cost measured here"
+  },
+  "ratio_unmerged_over_merged": 3.034588142532473,
+  "ratio_unmerged_over_merged_mean": 3.074205560666035,
+  "note": "merged frame = the awaited burst call of 1,667 transactions plus the drain it ends with, as the page experiences it"
+ },
+ "notes": []
+}

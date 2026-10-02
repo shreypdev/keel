@@ -144,6 +144,8 @@ pub(crate) fn start(config: &[u8], sink: Arc<dyn Sink>, after_init: impl FnOnce(
                 *slot = None;
             }
             let host = Arc::new(NativeHost { sink: sink.clone() });
+            // Before the runtime starts: a panic in an init hook is reported with frames too.
+            crate::frames::install();
             match Runtime::init(config, host) {
                 Ok(runtime) => {
                     *slot = Some(sink);

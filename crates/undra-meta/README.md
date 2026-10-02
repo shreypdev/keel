@@ -4,13 +4,13 @@ The schema data model for [Undra](https://github.com/shreypdev/undra): the one d
 
 `undra-meta` defines:
 
-* `TypeRef`, the type system (`Option`, `Vec`, `Map`, `Named`, `Result`, ...), with the JSON shape `{"kind": "option", "of": {...}}`;
+* `TypeRef`, the type system (`Option`, `Vec`, `Map`, `Named`, `Object`, `Callback`, `Result`, ...), with the JSON shape `{"kind": "option", "of": {...}}`;
 * the owned definitions `Schema`, `RecordDef`, `EnumDef`, `ObjectDef`, `MethodDef`, `StoreDef`, `PortDef`, `QueryDef`, ... (`Serialize`/`Deserialize`);
 * `'static`, const-constructible mirrors (`TypeRefMeta`, `RecordMeta`, `ObjectMeta`, ...) that `undra-macros` emits into `static`s, plus `From<&XMeta> for XDef`;
 * registration through `inventory` (`Registration`, `collect_schema`, `registrations`);
 * the stable identifiers in `ids` (`fnv1a32`, `fnv1a64`, `type_id`, `method_id`, `function_id`, `port_id`, `query_id`, ...), all `const fn`;
 * the canonical JSON and 64-bit schema hash (`Schema::canonical_json`, `Schema::hash`) used for the load-time compatibility check;
-* `Schema::validate`, the whole-schema rules (unique names, resolvable references, `Result`/`Stream`/`Lazy` placement, map keys, stores need a constructor).
+* `Schema::validate`, the whole-schema rules (unique names, resolvable references, `Result`/`Stream`/`Lazy` placement, where objects and callbacks may stand, callback method shapes, map keys, stores need a constructor).
 
 It has no `unsafe` code and depends only on `serde`, `serde_json` and `inventory`.
 
@@ -36,6 +36,7 @@ static TODO: RecordMeta = RecordMeta {
             docs: "When it is due.",
         },
     ],
+    transparent: false,
     docs: "A todo item.",
 };
 
@@ -55,6 +56,7 @@ static TODOS: ObjectMeta = ObjectMeta {
         returns: TypeRefMeta::Named("Todos"),
         is_async: false,
         takes_ctx: false,
+        coalesce: false,
         docs: "",
     }],
     methods: &[MethodMeta {
@@ -64,6 +66,7 @@ static TODOS: ObjectMeta = ObjectMeta {
         returns: TypeRefMeta::Option(&TypeRefMeta::Named("Todo")),
         is_async: false,
         takes_ctx: false,
+        coalesce: false,
         docs: "",
     }],
     store: None,

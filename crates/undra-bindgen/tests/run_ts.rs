@@ -109,3 +109,28 @@ fn stores_mirror_every_signal_type() {
 fn standard_types_come_from_the_runtime() {
     run("stdlib", "stdlib", &[], |_| {});
 }
+
+#[test]
+fn objects_cross_as_parameters_and_returns() {
+    run("object_graph", "object_graph", &[], |_| {});
+}
+
+#[test]
+fn callbacks_are_lent_queued_and_answered() {
+    run("callbacks", "callbacks", &[], |_| {});
+}
+
+#[test]
+fn newtypes_are_their_inner_value_on_the_wire() {
+    run("newtypes", "newtypes", &[], |_| {});
+}
+
+#[test]
+fn infinite_handles_page_and_poll_through_commands() {
+    run("infinite", "paging", &[], |_| {});
+}
+
+#[test]
+fn a_lazy_signal_hands_its_entries_to_the_runtimes_list() {
+    run("lazy", "lazy", &[], |_| {});
+}

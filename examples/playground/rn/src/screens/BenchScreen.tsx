@@ -9,6 +9,8 @@ export interface BenchState {
   readonly bench: readonly BenchRow[] | null;
   readonly running: string | null;
   readonly log: readonly string[];
+  /** The last panic report the core handed to `onPanic` (ADR-046), as lines; `null` before the first. */
+  readonly panic: string | null;
 }
 
 /** Self-checks of the boundary on this device, the measurements of ADR-038, and the log. */
@@ -55,6 +57,10 @@ export function BenchScreen({ state, onRun }: { readonly state: BenchState; read
           </View>
         </View>
       ))}
+      <Text style={styles.section}>Last panic report (onPanic)</Text>
+      <Text style={styles.log} testID="last-panic">
+        {state.panic ?? 'No panic yet.'}
+      </Text>
       <Text style={styles.section}>Log</Text>
       {state.log.map((line, index) => (
         <Text key={index} style={styles.log}>

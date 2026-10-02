@@ -21,3 +21,27 @@
           -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO
           build
+      # A release build, whose dSYM has the core's Rust frames next to the app's own (ADR-046): Crashlytics and Sentry
+      # take the dSYM as they do for Swift. Upload it next to build/symbols/manifest.json; for a signed device archive,
+      # upload the archive's dSYMs folder instead. `undra symbolicate report.json --dsym App.app.dSYM` resolves a report by hand.
+      - name: Release build and its dSYM
+        if: github.event_name == 'push'
+        run: >
+          xcodebuild
+          -project ios/@@APP@@.xcodeproj
+          -scheme @@APP@@
+          -configuration Release
+          -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath build/xcode
+          CODE_SIGNING_ALLOWED=NO
+          build
+      - name: Upload the dSYM and the symbol manifest
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: @@NAMESPACE@@-ios-symbols
+          path: |
+            build/symbols/
+            build/xcode/Build/Products/Release-iphonesimulator/*.dSYM
+          if-no-files-found: error

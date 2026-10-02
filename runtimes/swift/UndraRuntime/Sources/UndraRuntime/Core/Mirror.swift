@@ -6,13 +6,16 @@
 // the stores that own the observable state live.
 //
 // A *drain* applies the queue. It folds the queued entries per signal `(handle, signal)` in
-// arrival order without decoding any value: a full value (op 0) or a lazy invalidation (op 2)
-// supersedes everything queued earlier for the signal, and consecutive keyed patches (op 1)
-// become one patch (the counts add up, the ops follow each other: SPEC 3.8 applies ops one after
-// the other, each index relative to the list the previous op left, so the concatenation is the
-// same change). Each signal is therefore applied at most twice per drain, its last full value and
-// then its merged patch, signals in the order of their first entry. Signals a store declared
-// `no_coalesce` are applied entry by entry instead.
+// arrival order without decoding any value: a full value (op 0) supersedes everything queued
+// earlier for the signal, and consecutive keyed patches (op 1) become one patch (the counts add
+// up, the ops follow each other: SPEC 3.8 applies ops one after the other, each index relative to
+// the list the previous op left, so the concatenation is the same change). A lazy invalidation
+// (op 2) supersedes only the earlier lazy invalidations of its signal, never a full value: the
+// full value of a `Lazy<T>` carries the page server's handle, an invalidation only a length and a
+// version (ADR-043, ADR-031 amendment). Each signal is therefore applied at most three times per
+// drain: its last full value, then its merged patch, then its last lazy invalidation (a signal is
+// a keyed list or a lazy list, never both, so in practice at most twice), signals in the order of
+// their first entry. Signals a store declared `no_coalesce` are applied entry by entry instead.
 //
 // Drains are frame-aligned (`FrameScheduler`): what the core produces on its own waits for the
 // next display frame. Replies, synchronous calls made on the main thread and `observe` drain
@@ -40,10 +43,11 @@ public typealias MirrorApply = @MainActor @Sendable (UInt32, ChangeOp, inout Und
 /// the counters and the drain listeners are safe from any thread; applying (`flush()`) is
 /// main-actor only.
 ///
-/// A drain applies, for each signal, its last full value and then the keyed patches that followed
-/// it merged into one, so a store sees the state after every change-set the drain consumed but not
-/// the states in between (SwiftUI renders once per frame in any case). Signals registered as
-/// `noCoalesce` see every entry.
+/// A drain applies, for each signal, its last full value, then the keyed patches that followed
+/// it merged into one, then its last lazy invalidation (which supersedes earlier invalidations
+/// only, never the full value that carries a lazy list's page server), so a store sees the state
+/// after every change-set the drain consumed but not the states in between (SwiftUI renders once
+/// per frame in any case). Signals registered as `noCoalesce` see every entry.
 public final class Mirror: @unchecked Sendable {
     // MARK: Limits
 
@@ -75,22 +79,42 @@ public final class Mirror: @unchecked Sendable {
     }
 
     /// One parsed change-set entry. `value` shares the storage of the change-set's payload until a
-    /// compaction copies it.
+    /// compaction copies it. An entry with an `invocation` is a host callback call queued with the
+    /// change-sets (ADR-041): it is applied in its place and never folded.
     struct Entry {
         var handle: UInt64
         var signal: UInt32
         var op: ChangeOp
         var value: ArraySlice<UInt8>
+        var invocation: MirrorInvocation? = nil
 
         var key: Key {
             return Key(handle: handle, signal: signal)
         }
     }
 
-    /// A store's registration: its apply function and its `no_coalesce` signals.
+    /// A store's registration: the apply functions of the wrappers that mirror it and its `no_coalesce`
+    /// signals. One handle usually has one wrapper (ADR-040); an `Arc<Self>` constructor that returns an
+    /// object the host already wraps makes a second, and each keeps receiving the changes (keyed by owner, so
+    /// that one wrapper going away takes only its own function with it).
     struct Registration {
-        let apply: MirrorApply
+        /// One wrapper's function; `owner` is `nil` for the public, replacing `register`.
+        struct Applier {
+            let owner: ObjectIdentifier?
+            let apply: MirrorApply
+        }
+
+        var appliers: [Applier]
         let noCoalesce: Set<UInt32>
+
+        /// Applies one entry with every wrapper's function: each reads its own copy of `reader`.
+        @MainActor
+        func apply(_ signal: UInt32, _ op: ChangeOp, _ reader: inout UndraReader) {
+            for applier in appliers {
+                var copy = reader
+                applier.apply(signal, op, &copy)
+            }
+        }
     }
 
     typealias ResyncHandler = @MainActor @Sendable (UndraHandle, UInt32) -> Void
@@ -137,6 +161,7 @@ public final class Mirror: @unchecked Sendable {
         var compactions = 0
         var resyncs = 0
         var droppedEntries = 0
+        var callbacksDelivered = 0
 
         init(maxPendingEntries: Int, maxPendingBytes: Int) {
             compactAtEntries = maxPendingEntries
@@ -176,8 +201,21 @@ public final class Mirror: @unchecked Sendable {
     /// shows each is up to the UI (SwiftUI renders once per frame whatever the model does). A
     /// queue folded because it passed its bound folds these signals too: the bound wins.
     public func register(_ handle: UndraHandle, noCoalesce: Set<UInt32> = [], _ apply: @escaping MirrorApply) {
-        let registration = Registration(apply: apply, noCoalesce: noCoalesce)
+        let registration = Registration(appliers: [Registration.Applier(owner: nil, apply: apply)], noCoalesce: noCoalesce)
         state.withLock { (current: inout State) -> Void in
+            current.registrations[handle.rawValue] = registration
+        }
+    }
+
+    /// Registers `owner`'s `apply` for `handle` next to the functions other owners registered: a second wrapper of
+    /// the same store does not take the first one's place (ADR-040), each receives every change. An owner that
+    /// registers again replaces its own function.
+    func register(_ handle: UndraHandle, owner: AnyObject, noCoalesce: Set<UInt32> = [], _ apply: @escaping MirrorApply) {
+        let id = ObjectIdentifier(owner)
+        state.withLock { (current: inout State) -> Void in
+            var registration = current.registrations[handle.rawValue] ?? Registration(appliers: [], noCoalesce: noCoalesce)
+            registration.appliers.removeAll { $0.owner == id }
+            registration.appliers.append(Registration.Applier(owner: id, apply: apply))
             current.registrations[handle.rawValue] = registration
         }
     }
@@ -187,6 +225,28 @@ public final class Mirror: @unchecked Sendable {
     public func unregister(_ handle: UndraHandle) {
         let raw = handle.rawValue
         state.withLock { (current: inout State) -> Void in
+            current.registrations[raw] = nil
+            if !current.awaiting.isEmpty {
+                current.awaiting = current.awaiting.filter { $0.key.handle != raw }
+            }
+        }
+    }
+
+    /// Removes `owner`'s function from the registration of `handle`; the registration goes with the last one, and so
+    /// does what waits to be observed again. Another owner's function, which a wrapper made after this one's handle
+    /// was released may have registered, is never touched.
+    func unregister(_ handle: UndraHandle, owner: AnyObject) {
+        let raw = handle.rawValue
+        let id = ObjectIdentifier(owner)
+        state.withLock { (current: inout State) -> Void in
+            guard var registration = current.registrations[raw] else {
+                return
+            }
+            registration.appliers.removeAll { $0.owner == id }
+            if !registration.appliers.isEmpty {
+                current.registrations[raw] = registration
+                return
+            }
             current.registrations[raw] = nil
             if !current.awaiting.isEmpty {
                 current.awaiting = current.awaiting.filter { $0.key.handle != raw }
@@ -222,7 +282,8 @@ public final class Mirror: @unchecked Sendable {
                 resyncs: current.resyncs,
                 pendingEntries: current.queue.count,
                 pendingBytes: current.queueBytes,
-                droppedEntries: current.droppedEntries
+                droppedEntries: current.droppedEntries,
+                callbacksDelivered: current.callbacksDelivered
             )
         }
     }
@@ -275,7 +336,7 @@ public final class Mirror: @unchecked Sendable {
     /// callback; it never calls into the core.
     ///
     /// The entry table is parsed here, once; a malformed change-set is logged and dropped whole
-    /// (a change-set is a transaction). Keyed patches of a signal waiting for a full value are
+    /// (a change-set is a transaction). Everything but a full value, for a signal waiting for one, is
     /// discarded. When the queue passes its bound it is folded in place, on this thread.
     func enqueue(_ payload: [UInt8]) {
         var parsed: [Entry] = []
@@ -297,7 +358,7 @@ public final class Mirror: @unchecked Sendable {
             current.queuedEntries += parsed.count
             for entry in parsed {
                 if !current.awaiting.isEmpty, current.awaiting[entry.key] != nil {
-                    if entry.op == .keyedPatch {
+                    if entry.op != .fullValue {
                         continue
                     }
                     current.awaiting[entry.key] = nil
@@ -323,6 +384,36 @@ public final class Mirror: @unchecked Sendable {
                 return (false, unmergeable)
             }
             if current.frameRequested {
+                return (false, unmergeable)
+            }
+            current.frameRequested = true
+            return (true, unmergeable)
+        }
+        Mirror.logUnmergeable(outcome.unmergeable)
+        if outcome.requestFrame {
+            requestFrame()
+        }
+    }
+
+    /// Queues a host callback invocation behind everything queued so far (ADR-041 decision 6): the
+    /// drain runs it in that place, so the implementation sees the stores as they were when the core
+    /// called it. Safe from any thread, including a core callback; it never calls into the core.
+    func enqueue(_ invocation: MirrorInvocation) {
+        let onMainThread = Thread.isMainThread
+        let maxEntries = maxPendingEntries
+        let maxBytes = maxPendingBytes
+        let outcome = state.withLock { (current: inout State) -> (requestFrame: Bool, unmergeable: [Key]) in
+            current.queue.append(Entry(handle: 0, signal: 0, op: .fullValue, value: [], invocation: invocation))
+            current.queueBytes += Mirror.entryOverhead + invocation.bytes
+            var unmergeable: [Key] = []
+            if current.queue.count > current.compactAtEntries || current.queueBytes > current.compactAtBytes {
+                unmergeable = Mirror.compact(&current, maxEntries: maxEntries, maxBytes: maxBytes)
+            }
+            if onMainThread && current.flushing {
+                current.moreRounds = true
+                return (false, unmergeable)
+            }
+            if (onMainThread && current.mainThreadCalls > 0) || current.frameRequested {
                 return (false, unmergeable)
             }
             current.frameRequested = true
@@ -534,6 +625,14 @@ public final class Mirror: @unchecked Sendable {
         }
         var applied = 0
         var dropped = 0
+        var delivered = 0
+        defer {
+            if delivered > 0 {
+                state.withLock { (current: inout State) -> Void in
+                    current.callbacksDelivered += delivered
+                }
+            }
+        }
         for unit in folded.units {
             switch unit {
             case .slot(let at):
@@ -552,7 +651,18 @@ public final class Mirror: @unchecked Sendable {
                     registration.apply(slot.key.signal, .keyedPatch, &reader)
                     applied += 1
                 }
+                if let invalidation = slot.invalidated {
+                    var reader = UndraReader(slice: invalidation.value)
+                    registration.apply(slot.key.signal, invalidation.op, &reader)
+                    applied += 1
+                }
             case .single(let entry):
+                if let invocation = entry.invocation {
+                    if invocation.deliver() {
+                        delivered += 1
+                    }
+                    continue
+                }
                 guard let registration = round.registrations[entry.handle] else {
                     dropped += 1
                     continue
@@ -604,9 +714,12 @@ public final class Mirror: @unchecked Sendable {
     /// One signal as a drain or a compaction folds it.
     private struct Slot {
         let key: Key
-        /// The last full value or lazy invalidation; everything that arrived before it is
-        /// superseded.
+        /// The last full value; everything that arrived before it is superseded (a lazy
+        /// invalidation included).
         var full: Entry?
+        /// The last lazy invalidation since the last full value: it supersedes only earlier
+        /// invalidations, and is applied after `full` (which carries the handle it needs).
+        var invalidated: Entry?
         /// The keyed patches that arrived after `full`, whole (count and ops), in arrival order.
         var patches: [ArraySlice<UInt8>] = []
         /// Sum of the patches' op counts.
@@ -622,11 +735,17 @@ public final class Mirror: @unchecked Sendable {
 
         mutating func setFull(_ entry: Entry) {
             full = entry
+            invalidated = nil
             if !patches.isEmpty {
                 patches.removeAll()
             }
             ops = 0
             opBytes = 0
+        }
+
+        /// Keeps `entry`, a lazy invalidation, in place of the one before it.
+        mutating func setInvalidated(_ entry: Entry) {
+            invalidated = entry
         }
 
         /// Appends a keyed patch; `false` if it cannot be merged (shorter than its 4-byte count,
@@ -649,6 +768,7 @@ public final class Mirror: @unchecked Sendable {
         /// Forgets what the slot holds (its signal waits for a full value).
         mutating func clear() {
             full = nil
+            invalidated = nil
             patches.removeAll()
             ops = 0
             opBytes = 0
@@ -704,11 +824,28 @@ public final class Mirror: @unchecked Sendable {
         var index: [Key: Int] = [:]
         var lastHandle: UInt64?
         var lastNoCoalesce: Set<UInt32> = []
-        for entry in entries {
+        // A coalescing callback method keeps only its newest pending invocation per instance.
+        var newest: [MirrorInvocation.CoalesceKey: Int] = [:]
+        for (position, entry) in entries.enumerated() {
+            if let key = entry.invocation?.coalesce {
+                newest[key] = position
+            }
+        }
+        for (position, entry) in entries.enumerated() {
+            if let invocation = entry.invocation {
+                if let key = invocation.coalesce, newest[key] != position {
+                    continue
+                }
+                folded.units.append(.single(entry))
+                // A barrier: what arrived after the call is not folded into what came before it, so
+                // the implementation sees the stores as they were when the core called it.
+                index.removeAll(keepingCapacity: true)
+                continue
+            }
             let key = entry.key
             if !folded.waiting.isEmpty, folded.waiting.contains(key) {
                 // Relative to a list this host never had: wait for a full value.
-                if entry.op == .keyedPatch {
+                if entry.op != .fullValue {
                     continue
                 }
                 folded.waiting.remove(key)
@@ -733,12 +870,17 @@ public final class Mirror: @unchecked Sendable {
                 folded.units.append(.slot(at))
             }
             folded.slots[at].entries += 1
-            if entry.op != .keyedPatch {
+            switch entry.op {
+            case .fullValue:
                 folded.slots[at].setFull(entry)
-            } else if !folded.slots[at].addPatch(entry.value) {
-                folded.slots[at].clear()
-                folded.waiting.insert(key)
-                folded.unmergeable.append(key)
+            case .lazyListInvalidated:
+                folded.slots[at].setInvalidated(entry)
+            case .keyedPatch:
+                if !folded.slots[at].addPatch(entry.value) {
+                    folded.slots[at].clear()
+                    folded.waiting.insert(key)
+                    folded.unmergeable.append(key)
+                }
             }
         }
         return folded
@@ -754,7 +896,17 @@ public final class Mirror: @unchecked Sendable {
         var queue: [Entry] = []
         queue.reserveCapacity(folded.slots.count)
         var bytes = 0
-        for slot in folded.slots {
+        for unit in folded.units {
+            let slot: Slot
+            switch unit {
+            case .single(let entry):
+                // A callback invocation: kept, in its place.
+                queue.append(entry)
+                bytes += entryOverhead + (entry.invocation?.bytes ?? entry.value.count)
+                continue
+            case .slot(let at):
+                slot = folded.slots[at]
+            }
             if folded.waiting.contains(slot.key) || slot.oversized {
                 current.awaiting[slot.key] = true
                 current.resyncDue = true
@@ -769,6 +921,11 @@ public final class Mirror: @unchecked Sendable {
                 let merged = slot.mergedPatch()
                 let value = slot.patches.count == 1 ? ArraySlice(Array(merged)) : merged
                 queue.append(Entry(handle: slot.key.handle, signal: slot.key.signal, op: .keyedPatch, value: value))
+                bytes += entryOverhead + value.count
+            }
+            if let invalidation = slot.invalidated {
+                let value = ArraySlice(Array(invalidation.value))
+                queue.append(Entry(handle: slot.key.handle, signal: slot.key.signal, op: invalidation.op, value: value))
                 bytes += entryOverhead + value.count
             }
         }
@@ -790,7 +947,7 @@ public final class Mirror: @unchecked Sendable {
         var bytes = 0
         for entry in current.queue {
             if !open.isEmpty, open.contains(entry.key) {
-                if entry.op == .keyedPatch {
+                if entry.op != .fullValue {
                     continue
                 }
                 open.remove(entry.key)

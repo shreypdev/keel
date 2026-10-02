@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use undra_bindgen::naming::CoreNames;
 
-use crate::cargo::{Cargo, CoreInfo, UndraSource};
+use crate::cargo::{Cargo, CoreInfo, RemapRoots, UndraSource};
 use crate::config::{ProjectConfig, check_namespace};
 use crate::error::{CliError, Code, Result};
 use crate::project::Project;
@@ -70,6 +70,23 @@ impl<'a> Session<'a> {
             Some(workspace) => workspace.target_dir.clone(),
             None => self.project.local_target_dir(),
         })
+    }
+
+    /// The directories a release build names by fixed labels (see [`RemapRoots`]): the Undra
+    /// checkout the core is built against, and the project's Cargo workspace (the project itself
+    /// when the core is a workspace of its own). Not read from Cargo's metadata when that fails: a
+    /// build that gets this far has read it already.
+    #[must_use]
+    pub fn remap_roots(&self) -> RemapRoots {
+        let core = self.core().ok();
+        let undra = match core.map(|c| &c.undra) {
+            Some(UndraSource::Path { repo }) => Some(repo.clone()),
+            _ => self.project.undra_repo(),
+        };
+        let app = core
+            .and_then(|c| c.workspace.as_ref())
+            .map_or_else(|| self.project.root.clone(), |w| w.root.clone());
+        RemapRoots::new(undra.as_deref(), &app)
     }
 
     /// What Cargo says about the core crate (read once per session).

@@ -1,5 +1,5 @@
 error: error[undra::E0008]: unknown option `defualt` in `#[undra(..)]`
-         = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields)
+         = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields), and `coalesce` (fire-and-forget methods of a callback interface)
          = help: did you mean `default`? Otherwise remove `defualt`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
   --> tests/ui/d1_unknown_option_suggestions.rs:12:13
@@ -8,8 +8,8 @@ error: error[undra::E0008]: unknown option `defualt` in `#[undra(..)]`
    |             ^^^^^^^
 
 error: error[undra::E0008]: unknown option `frobnicate` in `#[undra(..)]`
-         = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields)
-         = help: remove `frobnicate`, or use one of: `crate`, `default`, `key`, `no_coalesce`
+         = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields), and `coalesce` (fire-and-forget methods of a callback interface)
+         = help: remove `frobnicate`, or use one of: `crate`, `default`, `key`, `no_coalesce`, `coalesce`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
   --> tests/ui/d1_unknown_option_suggestions.rs:14:13
    |
@@ -43,9 +43,9 @@ error: error[undra::E0007]: `#[undra::store]` cannot be applied to an `enum`
 27 | pub enum NotAStruct {
    |          ^^^^^^^^^^
 
-error: error[undra::E0007]: `#[undra::api]` cannot be applied to a type alias
-         = note: `#[undra::api]` applies to a struct, an enum, an `impl` block or a free `fn`
-         = help: move `#[undra::api]` onto a struct, an enum, an `impl` block or a free `fn`, or remove it
+error: error[undra::E0007]: `#[undra::api]` on the type alias `Alias`, which does not name an instantiation
+         = note: a type alias is not a schema type of its own; the only alias that is names an instantiation of a generic data type declared with `#[undra::api(generic)]`, so it can be given a name the platforms generate a type for
+         = help: write `#[undra::api] pub type Alias = Page<Todo>;` for a template `Page`, or remove `#[undra::api]` and write the aliased type where it is used
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
   --> tests/ui/d1_unknown_option_suggestions.rs:32:10
    |

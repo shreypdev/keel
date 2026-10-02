@@ -7,8 +7,9 @@
 
 use proptest::prelude::*;
 use undra_ports::{
-    AppState, FsError, Header, HttpError, HttpMethod, HttpRequest, HttpResponse, NetKind,
-    StorageError, encode_connectivity_changed_event, encode_lifecycle_changed_event,
+    AppState, BackgroundReport, FsError, Header, HttpError, HttpMethod, HttpRequest, HttpResponse,
+    NetKind, PanicFrame, PanicReport, StorageError, encode_connectivity_changed_event,
+    encode_lifecycle_changed_event,
 };
 use undra_wire::{Bytes, Decode, Encode, Writer};
 
@@ -186,6 +187,74 @@ fn http_response_is_status_headers_body() {
         &HttpResponse::new(u16::MAX, Vec::new()),
         "ffff 00000000 00000000",
     );
+}
+
+// ---- ADR-046 -----------------------------------------------------------------------------------
+
+#[test]
+fn panic_frame_is_address_symbol_file_line() {
+    assert_codec(
+        &PanicFrame {
+            address: 0x1122,
+            symbol: None,
+            file: None,
+            line: None,
+        },
+        "2211000000000000 00 00 00",
+    );
+    assert_codec(
+        &PanicFrame {
+            address: 1,
+            symbol: Some("f".into()),
+            file: Some("a.rs".into()),
+            line: Some(7),
+        },
+        "0100000000000000 01 01000000 66 01 04000000 612e7273 01 07000000",
+    );
+}
+
+#[test]
+fn panic_report_is_nine_fields_in_declaration_order() {
+    let report = PanicReport {
+        message: "m".into(),
+        location: "l".into(),
+        operation: "o".into(),
+        thread: "t".into(),
+        frames: vec![PanicFrame {
+            address: 2,
+            symbol: None,
+            file: None,
+            line: Some(1),
+        }],
+        namespace: "n".into(),
+        core_version: "1.0".into(),
+        schema_hash: 0x0102,
+        image_id: "ab".into(),
+    };
+    assert_codec(
+        &report,
+        "01000000 6d 01000000 6c 01000000 6f 01000000 74 \
+         01000000 0200000000000000 00 00 01 01000000 \
+         01000000 6e 03000000 312e30 0201000000000000 02000000 6162",
+    );
+    assert_codec(
+        &PanicReport::default(),
+        "00000000 00000000 00000000 00000000 00000000 00000000 00000000 0000000000000000 00000000",
+    );
+}
+
+#[test]
+fn background_report_is_a_bool_and_three_counts() {
+    assert_codec(
+        &BackgroundReport {
+            finished: true,
+            replayed: 1,
+            refetched: 2,
+            still_pending: 3,
+        },
+        "01 01000000 02000000 03000000",
+    );
+    assert!(BackgroundReport::decode_exact(&hex("02 00000000 00000000 00000000")).is_err());
 }
 
 #[test]
@@ -424,6 +493,8 @@ const KOTLIN_RECORDS: &str =
     "kotlin/undra-runtime/runtime/src/main/kotlin/dev/undra/runtime/adapters/StandardRecords.kt";
 const SWIFT_RECORDS: &str = "swift/UndraRuntime/Sources/UndraRuntime/Core/StandardRecords.swift";
 const TS_TYPES: &str = "ts/@undra/runtime/src/adapters/types.ts";
+/// `NetKind` and `AppState` are defined with the host events (ADR-052's amendment of 2026-10-02): types.ts re-exports them.
+const TS_EVENTS: &str = "ts/@undra/runtime/src/adapters/events.ts";
 const TS_CODECS: &str = "ts/@undra/runtime/src/adapters/codecs.ts";
 
 /// `(variant name, index)` of a type as `undra-meta` registered it.
@@ -701,7 +772,11 @@ fn swift_numbering_matches() {
 
 #[test]
 fn typescript_numbering_matches() {
-    let (Some(types), Some(codecs)) = (runtime_source(TS_TYPES), runtime_source(TS_CODECS)) else {
+    let (Some(types), Some(events), Some(codecs)) = (
+        runtime_source(TS_TYPES),
+        runtime_source(TS_EVENTS),
+        runtime_source(TS_CODECS),
+    ) else {
         eprintln!("runtimes/ not found; skipping the TypeScript numbering check");
         return;
     };
@@ -711,10 +786,15 @@ fn typescript_numbering_matches() {
         "HttpMethod",
         &[],
     );
-    assert_same("TS NET_KINDS", ts_list(&types, "NET_KINDS"), "NetKind", &[]);
+    assert_same(
+        "TS NET_KINDS",
+        ts_list(&events, "NET_KINDS"),
+        "NetKind",
+        &[],
+    );
     assert_same(
         "TS APP_STATES",
-        ts_list(&types, "APP_STATES"),
+        ts_list(&events, "APP_STATES"),
         "AppState",
         &[],
     );

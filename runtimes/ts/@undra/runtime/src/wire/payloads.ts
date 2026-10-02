@@ -4,6 +4,18 @@ import { UndraReader } from "./reader.js";
 import type { Handle } from "./types.js";
 import { UndraWriter } from "./writer.js";
 
+export {
+  type HelloPayload,
+  type LogPayload,
+  type PortCallPayload,
+  decodeHello,
+  decodeLog,
+  decodePortCall,
+  encodeHello,
+  encodeLog,
+  encodePortCall,
+} from "./session.js";
+
 /*
  * Typed encoders and decoders for every envelope payload (docs/SPEC.md
  * sections 3.3 to 3.8 and 5.9). `encodeX` produces exactly the payload bytes
@@ -359,40 +371,131 @@ export function decodeChangeSet(bytes: Uint8Array): ChangeSetPayload {
 }
 
 // ---------------------------------------------------------------------------
-// PortCall (kind 4) and PortReply (kind 5)
+// Lazy lists (ADR-043): the value of a `Lazy<T>` signal, change-set op 2, the page reply
 // ---------------------------------------------------------------------------
 
-/** Payload of a `PortCall`: the core asks the platform to run a port method. */
-export interface PortCallPayload {
-  /** Port being called (`fnv1a32("port.<Trait>")`). */
-  readonly portId: number;
-  /** Method being called (`fnv1a32("<Trait>.<method>")`). */
-  readonly methodId: number;
-  /** Chosen by the core, unique among in-flight port calls. */
-  readonly portCallId: number;
-  /** Encoded parameters in declaration order. */
-  readonly args: Uint8Array;
+/** Size of a {@link LazyValue}: handle 8, len 4, version 8. */
+const LAZY_VALUE_LEN = 20;
+/** Size of a {@link LazyInvalidated}: len 4, version 8. */
+const LAZY_INVALIDATED_LEN = 12;
+/** Size of the header of a lazy page reply: version 8, total 4, count 4. */
+const LAZY_PAGE_HEADER_LEN = 16;
+
+/** The value of a `Lazy<T>` signal (change-set op 0, `FullValue`): `handle u64, len u32, version u64`. */
+export interface LazyValue {
+  /** The page server: the object a page call (`CallTarget.LazyListPage`) is addressed to. */
+  readonly handle: Handle;
+  /** The number of rows. */
+  readonly len: number;
+  /** The version of the list `len` was read at; it increases with every change. */
+  readonly version: bigint;
 }
 
-/** Encodes a `PortCall` payload. */
-export function encodePortCall(call: PortCallPayload): Uint8Array {
-  const w = new UndraWriter(12 + call.args.length);
-  w.writeU32(call.portId);
-  w.writeU32(call.methodId);
-  w.writeU32(call.portCallId);
-  w.writeRaw(call.args);
+/** The value of change-set op 2 (`LazyInvalidated`): `len u32, version u64`. */
+export interface LazyInvalidated {
+  /** The new number of rows. */
+  readonly len: number;
+  /** The new version. */
+  readonly version: bigint;
+}
+
+/** The header of a page reply: `version u64, total u32, count u32`; `count` rows follow, each encoded as the item type. */
+export interface LazyPageHeader {
+  /** The version of the list the page was read at. */
+  readonly version: bigint;
+  /** The number of rows the list had at that version. */
+  readonly total: number;
+  /** How many rows follow the header. */
+  readonly count: number;
+}
+
+/** One page of a lazy list: its header with the decoded rows. */
+export interface LazyPage<T> {
+  /** The version of the list the page was read at. */
+  readonly version: bigint;
+  /** The number of rows the list had at that version. */
+  readonly total: number;
+  /** The rows of the page. */
+  readonly items: readonly T[];
+}
+
+/** Reads a {@link LazyValue} from `r` without requiring the reader to be exhausted. */
+export function readLazyValue(r: UndraReader): LazyValue {
+  const handle = r.readU64();
+  const len = r.readU32();
+  return { handle, len, version: r.readU64() };
+}
+
+/** Reads a {@link LazyInvalidated} from `r` without requiring the reader to be exhausted. */
+export function readLazyInvalidated(r: UndraReader): LazyInvalidated {
+  const len = r.readU32();
+  return { len, version: r.readU64() };
+}
+
+/** Reads the 16-byte header of a page reply from `r`; the rows follow in `r`. */
+export function readLazyPageHeader(r: UndraReader): LazyPageHeader {
+  const version = r.readU64();
+  const total = r.readU32();
+  return { version, total, count: r.readU32() };
+}
+
+/** Encodes a {@link LazyValue}. */
+export function encodeLazyValue(value: LazyValue): Uint8Array {
+  const w = new UndraWriter(LAZY_VALUE_LEN);
+  w.writeU64(value.handle);
+  w.writeU32(value.len);
+  w.writeU64(value.version);
   return w.finish();
 }
 
-/** Decodes a `PortCall` payload. `args` is a borrowed view into `bytes`. */
-export function decodePortCall(bytes: Uint8Array): PortCallPayload {
-  return decodeWithTail(bytes, (r) => {
-    const portId = r.readU32();
-    const methodId = r.readU32();
-    const portCallId = r.readU32();
-    return { portId, methodId, portCallId, args: r.readRest() };
-  });
+/** Decodes a whole {@link LazyValue} payload. */
+export function decodeLazyValue(bytes: Uint8Array): LazyValue {
+  return decodeAll(bytes, readLazyValue);
 }
+
+/** Encodes a {@link LazyInvalidated}. */
+export function encodeLazyInvalidated(value: LazyInvalidated): Uint8Array {
+  const w = new UndraWriter(LAZY_INVALIDATED_LEN);
+  w.writeU32(value.len);
+  w.writeU64(value.version);
+  return w.finish();
+}
+
+/** Decodes a whole {@link LazyInvalidated} payload. */
+export function decodeLazyInvalidated(bytes: Uint8Array): LazyInvalidated {
+  return decodeAll(bytes, readLazyInvalidated);
+}
+
+/** Encodes a page reply: the header (with `count` taken from `page.items`) and the rows, each with `item`. */
+export function encodeLazyPage<T>(item: Codec<T>, page: LazyPage<T>): Uint8Array {
+  const w = new UndraWriter(LAZY_PAGE_HEADER_LEN);
+  w.writeU64(page.version);
+  w.writeU32(page.total);
+  w.writeLen(page.items.length);
+  for (const row of page.items) item.encode(w, row);
+  return w.finish();
+}
+
+/**
+ * Decodes a whole page reply, rows with `item`. `maxCount` (default: whatever the input can hold, at one byte per
+ * row) bounds the row count the header may claim: a hostile count never makes the decoder allocate or loop beyond it.
+ *
+ * @throws {WireError} For a truncated or oversized reply, a count above `maxCount`, trailing bytes, or a row `item` rejects.
+ */
+export function decodeLazyPage<T>(item: Codec<T>, bytes: Uint8Array, maxCount: number = 0xffff_ffff): LazyPage<T> {
+  const r = new UndraReader(bytes);
+  const at = r.position + LAZY_PAGE_HEADER_LEN - 4;
+  const head = readLazyPageHeader(r);
+  if (head.count > maxCount || head.count > r.remaining) throw new WireError({ code: "length_too_large", len: head.count, at });
+  const items = new Array<T>(head.count);
+  for (let i = 0; i < head.count; i++) items[i] = item.decode(r);
+  r.finish();
+  return { version: head.version, total: head.total, items };
+}
+
+// ---------------------------------------------------------------------------
+// PortCall (kind 4) and PortReply (kind 5)
+// ---------------------------------------------------------------------------
 
 /** Outcome code of a port reply (section 3.6). */
 export enum PortStatus {
@@ -689,67 +792,6 @@ export function decodeEvent(bytes: Uint8Array): EventPayload {
 // Hello (12), Log (13), TimerFired (14)
 // ---------------------------------------------------------------------------
 
-/** Payload of a `Hello`, the handshake each side sends first. */
-export interface HelloPayload {
-  /** Version of the Undra crate or runtime that sent it. */
-  readonly undraVersion: string;
-  /** Schema hash of the sender; a mismatch is `UndraSchemaMismatch`. */
-  readonly schemaHash: bigint;
-  /** Platform name, for example `"web"`, `"ios"`, `"android"`, `"node"`. */
-  readonly platform: string;
-  /** Operating mode, for example `"prod"` or `"dev"`. */
-  readonly mode: string;
-}
-
-/** Encodes a `Hello` payload. */
-export function encodeHello(hello: HelloPayload): Uint8Array {
-  const w = new UndraWriter(32);
-  w.writeStr(hello.undraVersion);
-  w.writeU64(hello.schemaHash);
-  w.writeStr(hello.platform);
-  w.writeStr(hello.mode);
-  return w.finish();
-}
-
-/** Decodes a `Hello` payload. */
-export function decodeHello(bytes: Uint8Array): HelloPayload {
-  return decodeAll(bytes, (r) => {
-    const undraVersion = r.readStr();
-    const schemaHash = r.readU64();
-    const platform = r.readStr();
-    const mode = r.readStr();
-    return { undraVersion, schemaHash, platform, mode };
-  });
-}
-
-/** Payload of a `Log`: a record emitted by the core. */
-export interface LogPayload {
-  /** Severity as defined by the `Log` port (`u8`). */
-  readonly level: number;
-  /** Origin of the record. */
-  readonly target: string;
-  /** The message. */
-  readonly message: string;
-}
-
-/** Encodes a `Log` payload. */
-export function encodeLog(log: LogPayload): Uint8Array {
-  const w = new UndraWriter(16 + log.target.length + log.message.length);
-  w.writeU8(log.level);
-  w.writeStr(log.target);
-  w.writeStr(log.message);
-  return w.finish();
-}
-
-/** Decodes a `Log` payload. */
-export function decodeLog(bytes: Uint8Array): LogPayload {
-  return decodeAll(bytes, (r) => {
-    const level = r.readU8();
-    const target = r.readStr();
-    return { level, target, message: r.readStr() };
-  });
-}
-
 /** Payload of a `TimerFired`: the timer set through the Timer port is due. */
 export interface TimerFiredPayload {
   /** The id given to `Timer.set`. */
@@ -803,7 +845,7 @@ export interface SnapshotType {
  * (ADR-037), all little-endian:
  *
  * ```text
- * count u32, generation_floor u32, schema_hash u64,
+ * count u32, generation_floor u64, schema_hash u64,
  * type_count u32, types x { type_id u32, fingerprint u64 },
  * description_len u32, description (UTF-8 JSON, opaque to hosts),
  * count x { handle u64, type_id u32, signal_count u32, signals x { signal_id u32, len u32, value } }
@@ -816,8 +858,9 @@ export interface SnapshotPayload {
   /**
    * The highest handle generation the core had issued when the snapshot was taken. A restore
    * resumes the core's generation counter above it, so no handle issued before the snapshot (or
-   * between it and the restore) is ever issued again to another object (ADR-022). Opaque to the
-   * host: pass it back unchanged.
+   * between it and the restore) is ever issued again to another object (ADR-022). A `u64` on the
+   * wire (ADR-040: generations are 40 bits), read as a `number`, which holds every generation
+   * exactly. Opaque to the host: pass it back unchanged.
    */
   readonly generationFloor: number;
   /** The schema hash of the core that took the snapshot. */
@@ -841,7 +884,7 @@ const SNAPSHOT_TYPE_LEN = 12;
 export function encodeSnapshot(snapshot: SnapshotPayload): Uint8Array {
   const w = new UndraWriter();
   w.writeLen(snapshot.stores.length);
-  w.writeU32(snapshot.generationFloor);
+  w.writeU64Number(snapshot.generationFloor);
   w.writeU64(snapshot.schemaHash);
   w.writeLen(snapshot.types.length);
   for (const type of snapshot.types) {
@@ -870,7 +913,7 @@ export function encodeSnapshot(snapshot: SnapshotPayload): Uint8Array {
 export function decodeSnapshot(bytes: Uint8Array): SnapshotPayload {
   return decodeAll(bytes, (r) => {
     const storeCount = r.readLen(SNAPSHOT_STORE_MIN);
-    const generationFloor = r.readU32();
+    const generationFloor = r.readU64Number();
     const schemaHash = r.readU64();
     const typeCount = r.readLen(SNAPSHOT_TYPE_LEN);
     const types = new Array<SnapshotType>(typeCount);

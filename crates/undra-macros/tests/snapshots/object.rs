@@ -32,11 +32,10 @@ impl Calculator {
     /// Marks the type as an object, so a signature that uses it as a value can say so.
     #[doc(hidden)]
     pub const __UNDRA_IS_OBJECT: bool = true;
-}
-#[automatically_derived]
-impl ::undra::runtime::UndraObject for Calculator {
-    const TYPE_ID: u32 = ::undra::meta::ids::type_id("Calculator");
-    const NAME: &'static str = "Calculator";
+    /// The type id of the declared name: what a signature that takes or returns the
+    /// object as `Arc<T>` or `&T` is checked against (E0061).
+    #[doc(hidden)]
+    pub const __UNDRA_OBJECT_ID: u32 = ::undra::meta::ids::type_id("Calculator");
 }
 #[doc(hidden)]
 #[allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code)]
@@ -75,6 +74,11 @@ const _: () = {
         0
     }] {
         []
+    }
+    #[automatically_derived]
+    impl ::undra::runtime::UndraObject for Calculator {
+        const TYPE_ID: u32 = ::undra::meta::ids::type_id("Calculator");
+        const NAME: &'static str = "Calculator";
     }
     #[allow(unused_variables, unused_mut, deprecated, clippy::all)]
     fn __undra_dispatch_Calculator(
@@ -514,6 +518,7 @@ const _: () = {
                 returns: ::undra::meta::TypeRefMeta::Named("Calculator"),
                 is_async: false,
                 takes_ctx: true,
+                coalesce: false,
                 docs: "Creates one.",
             },
             ::undra::meta::MethodMeta {
@@ -531,6 +536,7 @@ const _: () = {
                 ),
                 is_async: false,
                 takes_ctx: false,
+                coalesce: false,
                 docs: "",
             },
         ],
@@ -551,6 +557,7 @@ const _: () = {
                 returns: ::undra::meta::TypeRefMeta::I64,
                 is_async: false,
                 takes_ctx: false,
+                coalesce: false,
                 docs: "Adds.",
             },
             ::undra::meta::MethodMeta {
@@ -572,6 +579,7 @@ const _: () = {
                 ),
                 is_async: false,
                 takes_ctx: false,
+                coalesce: false,
                 docs: "",
             },
             ::undra::meta::MethodMeta {
@@ -586,6 +594,7 @@ const _: () = {
                 returns: ::undra::meta::TypeRefMeta::I64,
                 is_async: true,
                 takes_ctx: false,
+                coalesce: false,
                 docs: "",
             },
             ::undra::meta::MethodMeta {
@@ -607,6 +616,7 @@ const _: () = {
                 ),
                 is_async: true,
                 takes_ctx: false,
+                coalesce: false,
                 docs: "",
             },
             ::undra::meta::MethodMeta {
@@ -623,6 +633,7 @@ const _: () = {
                 ),
                 is_async: false,
                 takes_ctx: false,
+                coalesce: false,
                 docs: "",
             },
         ],
@@ -658,12 +669,13 @@ const _: () = {
         const UNDRA_TYPE_ID: u32 = 0;
         const UNDRA_IS_ERROR: bool = false;
         const __UNDRA_IS_OBJECT: bool = false;
+        const __UNDRA_OBJECT_ID: u32 = 0;
     }
     impl<T: ?::core::marker::Sized> __UndraFallback for T {}
     const _: () = {
         if <CalcError>::__UNDRA_IS_OBJECT {
             ::core::panic!(
-                "error[undra::E0064]: `CalcError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
+                "error[undra::E0064]: `CalcError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a variant field, a signal value, a map entry or a query value\n  = help: return it as `Arc<CalcError>`, take it as `&CalcError` or `Arc<CalcError>` (a method, constructor or function parameter or return), or use a record with the data the platform needs\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
         let __undra_id = <CalcError>::UNDRA_TYPE_ID;

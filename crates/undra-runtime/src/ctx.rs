@@ -341,7 +341,9 @@ impl Lifeline {
         for waker in waiters {
             // Wakers are arbitrary code: one that panics must not stop the rest, nor the
             // shutdown that is waking them.
-            let _ = crate::guard::guarded(move || waker.wake());
+            if let Err(report) = crate::guard::guarded(move || waker.wake()) {
+                crate::runtime::report_current("a waker panicked", "waker", &report);
+            }
         }
     }
 

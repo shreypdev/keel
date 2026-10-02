@@ -40,7 +40,9 @@
 //!
 //! * [`DispatchResult`] has a fifth variant, `BadRequest(String)`, for undecodable arguments
 //!   and stale receivers (status 5 with a reason); the spec only has `Unknown`, which cannot
-//!   express "the arguments did not decode".
+//!   express "the arguments did not decode". A sixth, `Failed(String)`, is a call that took what it
+//!   was handed and then failed without unwinding (a constructor that took callbacks and could not
+//!   publish what it built): status 2 with the reason, reported like a contained panic.
 //! * [`Runtime::sync_ok`], [`Runtime::sync_err`] and [`Runtime::call_sync_with`] are additions: the
 //!   zero-allocation synchronous path (a per-thread reply slot, ADR-028). [`DispatchResult::Sync`]
 //!   is still what a dispatcher that does not use them returns, and what they return when the slot
@@ -59,14 +61,18 @@ pub use undra_signals;
 pub use undra_wire;
 
 mod atomic_update;
+pub mod background;
 mod blocking;
+mod callbacks;
 mod config;
 mod ctx;
+mod diagnostics;
 mod dispatch;
 pub mod executor;
 mod ext;
 mod guard;
 mod host;
+mod issue;
 mod lazy;
 pub mod log;
 mod object;
@@ -79,14 +85,19 @@ mod sync_out;
 pub mod testing;
 mod timer;
 
+pub use callbacks::{CallbackCall, CallbackHandle, CallbackInterface};
 pub use config::{
     DroppedStore, InitError, MODE_DEV, MODE_INPROC, RestoreError, RestoreReport, RuntimeConfig,
 };
 pub use ctx::{Closed, Ctx, CtxScope, Gone, WeakCtx, WeakSleep};
+pub use diagnostics::{
+    CoreIdentity, DIAGNOSTICS_PORT, FrameSource, PANICKED_METHOD, install_frame_source,
+};
 pub use dispatch::{DispatchBytes, DispatchLayer, DispatchResult};
 pub use ext::{InitHook, InspectFn, StatsSection};
 pub use host::{Host, PortCallOutcome};
-pub use lazy::{LazyList, LazyListInner};
+pub use issue::{IssueError, IssueScope};
+pub use lazy::{LazyList, LazyListInner, MAX_PAGE_ITEMS, serve_lazy_lists};
 pub use object::{
     AnyObject, CellFn, RestoreFn, StoreObject, StoreRestorer, UndraObject, UndraObjectDyn, plain,
     store,

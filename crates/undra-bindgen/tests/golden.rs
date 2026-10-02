@@ -168,7 +168,24 @@ macro_rules! golden_cases {
 }
 
 golden_cases!(
-    records, enums, errors, objects, stores, ports, queries, full, stdlib, recursive
+    object_graph,
+    callbacks,
+    records,
+    enums,
+    errors,
+    objects,
+    stores,
+    ports,
+    queries,
+    full,
+    stdlib,
+    recursive,
+    newtypes,
+    generics,
+    decimal,
+    polling,
+    infinite,
+    lazy
 );
 
 #[test]
@@ -178,6 +195,8 @@ fn every_case_has_a_test() {
     assert_eq!(
         listed,
         [
+            "object_graph",
+            "callbacks",
             "records",
             "enums",
             "errors",
@@ -187,7 +206,13 @@ fn every_case_has_a_test() {
             "queries",
             "full",
             "stdlib",
-            "recursive"
+            "recursive",
+            "newtypes",
+            "generics",
+            "decimal",
+            "polling",
+            "infinite",
+            "lazy"
         ]
     );
 }

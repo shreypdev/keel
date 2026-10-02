@@ -18,6 +18,7 @@ pub(crate) mod check;
 pub(crate) mod common;
 pub(crate) mod diag;
 pub(crate) mod error;
+pub(crate) mod generic;
 pub(crate) mod migrate;
 pub(crate) mod naming;
 pub(crate) mod object;
@@ -164,10 +165,11 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
     run_recovering(item, strip, recover, |item| {
         let mut root: Option<Root> = None;
         let mut store: Option<proc_macro2::Span> = None;
+        let mut generic: Option<proc_macro2::Span> = None;
         parse_args(
             attr,
             "api",
-            "`crate = \"path\"`, and `store` on an impl block of a `#[undra::store]` struct",
+            "`crate = \"path\"`, `store` on an impl block of a `#[undra::store]` struct, and `generic` on a struct or an enum with type parameters",
             |meta| {
                 if meta.path.is_ident("crate") {
                     root = Some(root_arg(meta)?);
@@ -176,11 +178,26 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
                     flag(meta, code::E0008, "store")?;
                     store = Some(syn::spanned::Spanned::span(&meta.path));
                     Ok(true)
+                } else if meta.path.is_ident("generic") {
+                    flag(meta, code::E0008, "generic")?;
+                    generic = Some(syn::spanned::Spanned::span(&meta.path));
+                    Ok(true)
                 } else {
                     Ok(false)
                 }
             },
         )?;
+        if let Some(span) =
+            generic.filter(|_| !matches!(item, syn::Item::Struct(_) | syn::Item::Enum(_)))
+        {
+            return Err(Diag::new(
+                code::E0008,
+                "`generic` is only valid on a struct or an enum",
+                "`#[undra::api(generic)]` marks a data type with type parameters as the template of named instantiations; objects, functions, stores and ports are never generic",
+                "remove `generic`, or apply the attribute to a struct or an enum with a type parameter",
+            )
+            .at(span));
+        }
         if let Some(span) = store.filter(|_| !matches!(item, syn::Item::Impl(_))) {
             return Err(Diag::new(
                 code::E0008,
@@ -191,17 +208,29 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
             .at(span));
         }
         match item {
+            syn::Item::Struct(item) if generic.is_some() => {
+                record::expand_struct_as(root, item, record::Expand::Template)
+            }
+            syn::Item::Enum(item) if generic.is_some() => {
+                record::expand_enum_as(root, item, Mode::Api, record::Expand::Template)
+            }
             syn::Item::Struct(item) => record::expand_struct(root, item),
             syn::Item::Enum(item) => record::expand_enum(root, item, Mode::Api),
             syn::Item::Impl(item) => object::expand_impl(root, store.is_some(), item),
             syn::Item::Fn(item) => object::expand_fn(root, item),
+            syn::Item::Type(item) => generic::expand_alias(root, item),
             other => Err(wrong_item(
                 "api",
-                "a struct, an enum, an `impl` block or a free `fn`",
+                "a struct, an enum, an `impl` block, a free `fn` or a type alias that names an instantiation of a generic",
                 &other,
             )),
         }
     })
+}
+
+/// `undra::__instantiate!`: what the hidden macro of a generic data type calls (ADR-042).
+pub(crate) fn expand_instantiate(input: TokenStream) -> TokenStream {
+    generic::expand_instantiate(input)
 }
 
 /// `#[undra::error]`.
@@ -262,7 +291,7 @@ pub(crate) fn expand_port(attr: TokenStream, item: TokenStream) -> TokenStream {
     run(item, &[], |item| match item {
         syn::Item::Trait(item) => {
             let (root, requested, dispatcher_by_use) = port::parse_port_args(attr)?;
-            port::expand_trait(root, requested, dispatcher_by_use, item)
+            port::expand_trait(root, requested, dispatcher_by_use, false, item)
         }
         syn::Item::Impl(item) => {
             parse_args(
@@ -278,6 +307,17 @@ pub(crate) fn expand_port(attr: TokenStream, item: TokenStream) -> TokenStream {
             "a trait definition or an `impl Trait for Type` block",
             &other,
         )),
+    })
+}
+
+/// `#[undra::callback]` (ADR-041).
+pub(crate) fn expand_callback(attr: TokenStream, item: TokenStream) -> TokenStream {
+    run(item, &[], |item| match item {
+        syn::Item::Trait(item) => {
+            let (root, background) = port::parse_callback_args(attr)?;
+            port::expand_trait(root, port::Requested::Callback, false, background, item)
+        }
+        other => Err(wrong_item("callback", "a trait definition", &other)),
     })
 }
 

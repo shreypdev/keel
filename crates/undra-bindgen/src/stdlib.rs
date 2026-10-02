@@ -1,5 +1,6 @@
-//! The Undra standard library: the ten standard ports of SPEC section 8 and the nine records,
-//! enums and errors they exchange, plus the three opt-in ports (`WebSocket` and `Sse`, ADR-047;
+//! The Undra standard library: the eleven standard ports of SPEC section 8 and the twelve records,
+//! enums and errors they exchange (ADR-046's `Diagnostics` and report types among them), the one
+//! standard function, `run_background`, plus the three opt-in ports (`WebSocket` and `Sse`, ADR-047;
 //! `Db`, ADR-048) and their twelve types, which a core has only when it enables the cargo feature
 //! of `undra-ports` (`websocket`, `sse`, `db`).
 //!
@@ -92,8 +93,8 @@ const fn m(id: u32, decl: &'static str) -> StandardMethod {
     StandardMethod { id, decl }
 }
 
-/// The standard types: the nine of SPEC section 8 (`StorageError` since ADR-049), then the twelve
-/// of the opt-in ports.
+/// The standard types: the twelve of SPEC section 8 (`StorageError` since ADR-049, `PanicFrame`,
+/// `PanicReport` and `BackgroundReport` since ADR-046), then the twelve of the opt-in ports.
 pub const TYPES: &[StandardType] = &[
     StandardType {
         name: "HttpMethod",
@@ -148,6 +149,24 @@ pub const TYPES: &[StandardType] = &[
         type_id: 0xcfb6_6091,
         kind: StandardKind::Enum,
         shape: "Active = 0, Inactive = 1, Background = 2",
+    },
+    StandardType {
+        name: "PanicFrame",
+        type_id: 0x19a4_97d1,
+        kind: StandardKind::Record,
+        shape: "address: u64, symbol: Option<String>, file: Option<String>, line: Option<u32>",
+    },
+    StandardType {
+        name: "PanicReport",
+        type_id: 0xd08d_5436,
+        kind: StandardKind::Record,
+        shape: "message: String, location: String, operation: String, thread: String, frames: Vec<PanicFrame>, namespace: String, core_version: String, schema_hash: u64, image_id: String",
+    },
+    StandardType {
+        name: "BackgroundReport",
+        type_id: 0x5dbe_a5f3,
+        kind: StandardKind::Record,
+        shape: "finished: bool, replayed: u32, refetched: u32, still_pending: u32",
     },
     // ----- opt-in: `WebSocket` (feature `websocket`, ADR-047) -----
     StandardType {
@@ -226,11 +245,30 @@ pub const TYPES: &[StandardType] = &[
     },
 ];
 
-/// How many of [`TYPES`] are the nine of SPEC section 8 (the rest are opt-in).
-pub const CORE_TYPE_COUNT: usize = 9;
+/// How many of [`TYPES`] are the twelve of SPEC section 8 (the rest are opt-in).
+pub const CORE_TYPE_COUNT: usize = 12;
 
-/// How many of [`PORTS`] are the ten of SPEC section 8 (the rest are opt-in).
-pub const CORE_PORT_COUNT: usize = 10;
+/// How many of [`PORTS`] are the eleven of SPEC section 8 (the rest are opt-in).
+pub const CORE_PORT_COUNT: usize = 11;
+
+/// One standard function: in every schema, in no app's generated bindings; the platform runtimes
+/// call it themselves (`runInBackground`, ADR-046).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StandardFunction {
+    /// The function's name.
+    pub name: &'static str,
+    /// `fnv1a32("fn.<name>")`, pinned.
+    pub id: u32,
+    /// The declaration, as for a [`StandardMethod`].
+    pub decl: &'static str,
+}
+
+/// The standard functions (ADR-046).
+pub const FUNCTIONS: &[StandardFunction] = &[StandardFunction {
+    name: "run_background",
+    id: 0x0e5b_14ff,
+    decl: "async run_background(deadline_ms: u64) -> BackgroundReport",
+}];
 
 const WEB_SOCKET_METHODS: &[StandardMethod] = &[
     m(
@@ -345,7 +383,7 @@ const FS_METHODS: &[StandardMethod] = &[
     ),
 ];
 
-/// The standard ports: the ten of SPEC section 8, then the three opt-in ones.
+/// The standard ports: the eleven of SPEC section 8, then the three opt-in ones.
 pub const PORTS: &[StandardPort] = &[
     StandardPort {
         name: "Clock",
@@ -417,6 +455,12 @@ pub const PORTS: &[StandardPort] = &[
         methods: &[m(0x0bc8_2569, "changed(state: AppState)")],
     },
     StandardPort {
+        name: "Diagnostics",
+        port_id: 0xab68_cd7c,
+        kind: PortKind::Sync,
+        methods: &[m(0xbd14_7e2e, "panicked(report: PanicReport)")],
+    },
+    StandardPort {
         name: "WebSocket",
         port_id: 0x7388_b95f,
         kind: PortKind::Async,
@@ -440,6 +484,12 @@ pub const PORTS: &[StandardPort] = &[
 #[must_use]
 pub fn is_standard_type_name(name: &str) -> bool {
     TYPES.iter().any(|t| t.name == name)
+}
+
+/// Whether `name` is the name of a standard function.
+#[must_use]
+pub fn is_standard_function_name(name: &str) -> bool {
+    FUNCTIONS.iter().any(|f| f.name == name)
 }
 
 /// Whether `name` is the name of a standard port.
@@ -470,11 +520,14 @@ fn type_text(ty: &TypeRef) -> String {
         TypeRef::Duration => "Duration".to_owned(),
         TypeRef::Timestamp => "Timestamp".to_owned(),
         TypeRef::Uuid => "Uuid".to_owned(),
+        TypeRef::Decimal => "Decimal".to_owned(),
         TypeRef::Option(t) => format!("Option<{}>", type_text(t)),
         TypeRef::Vec(t) => format!("Vec<{}>", type_text(t)),
         TypeRef::Map(k, v) => format!("Map<{}, {}>", type_text(k), type_text(v)),
         TypeRef::Lazy(t) => format!("Lazy<{}>", type_text(t)),
         TypeRef::Named(n) => n.clone(),
+        TypeRef::Object(n) => format!("Arc<{n}>"),
+        TypeRef::Callback(n) => format!("Arc<dyn {n}>"),
         TypeRef::Result(t, e) => format!("Result<{}, {}>", type_text(t), type_text(e)),
         TypeRef::Stream(t) => format!("Stream<{}>", type_text(t)),
     }
@@ -512,6 +565,24 @@ fn enum_shape(en: &EnumDef) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn method_decl_of(function: &undra_meta::FunctionDef) -> String {
+    let params: Vec<String> = function
+        .params
+        .iter()
+        .map(|p| format!("{}: {}", p.name, type_text(&p.ty)))
+        .collect();
+    let returns = match &function.returns {
+        TypeRef::Unit => String::new(),
+        other => format!(" -> {}", type_text(other)),
+    };
+    format!(
+        "{}{}({}){returns}",
+        if function.is_async { "async " } else { "" },
+        function.name,
+        params.join(", ")
+    )
 }
 
 fn method_decl(method: &MethodDef) -> String {
@@ -605,6 +676,8 @@ pub struct Covered {
     pub types: BTreeSet<&'static str>,
     /// Names of the standard ports the schema declares exactly as the standard library does.
     pub ports: BTreeSet<&'static str>,
+    /// Names of the standard functions the schema declares exactly as the standard library does.
+    pub functions: BTreeSet<&'static str>,
 }
 
 /// Which standard items `schema` contains exactly.
@@ -659,7 +732,29 @@ pub fn covered(schema: &Schema) -> Covered {
         })
         .map(|p| p.name)
         .collect();
-    Covered { types, ports }
+    let functions = FUNCTIONS
+        .iter()
+        .filter(|f| {
+            schema.functions.iter().any(|def| {
+                def.name == f.name && def.method_id == f.id && method_decl_of(def) == f.decl && {
+                    let mut names = BTreeSet::new();
+                    for param in &def.params {
+                        mentioned(&param.ty, &mut names);
+                    }
+                    mentioned(&def.returns, &mut names);
+                    names
+                        .iter()
+                        .all(|n| !is_standard_type_name(n) || types.contains(n.as_str()))
+                }
+            })
+        })
+        .map(|f| f.name)
+        .collect();
+    Covered {
+        types,
+        ports,
+        functions,
+    }
 }
 
 /// How the platform runtime of `lang` spells the standard type `name` (one of [`TYPES`]).
@@ -676,9 +771,14 @@ pub fn covered(schema: &Schema) -> Covered {
 ///   `AppState` is the commonest type name in Swift, and the runtime has exported it under that
 ///   name since v1 (ADR-024, amended).
 pub(crate) fn runtime_spelling(lang: Lang, name: &'static str) -> &'static str {
-    match lang {
-        Lang::Swift if name == "AppState" => "UndraAppState",
-        Lang::Swift | Lang::TypeScript | Lang::Kotlin => name,
+    match (lang, name) {
+        (Lang::Swift, "AppState") => "UndraAppState",
+        // ADR-046: the report types are the runtimes' `Undra...` types in every language, as
+        // `UndraPanicReport` has been in TypeScript since ADR-049.
+        (_, "PanicReport") => "UndraPanicReport",
+        (_, "PanicFrame") => "UndraPanicFrame",
+        (_, "BackgroundReport") => "UndraBackgroundReport",
+        _ => name,
     }
 }
 
@@ -725,6 +825,18 @@ pub(crate) fn id_clashes(schema: &Schema) -> Vec<IdClash> {
     for o in &schema.objects {
         type_item("object", &o.name, o.type_id);
     }
+    for function in &schema.functions {
+        if let Some(f) = FUNCTIONS.iter().find(|f| f.name == function.name) {
+            if f.id != function.method_id {
+                out.push(IdClash {
+                    what: "function",
+                    name: function.name.clone(),
+                    standard: f.id,
+                    found: function.method_id,
+                });
+            }
+        }
+    }
     for port in &schema.ports {
         if let Some(p) = PORTS.iter().find(|p| p.name == port.name) {
             if p.port_id != port.port_id {
@@ -766,12 +878,16 @@ mod tests {
     }
 
     #[test]
-    fn the_table_has_the_ten_ports_and_nine_types_then_the_opt_in_ones() {
+    fn the_table_has_the_eleven_ports_and_twelve_types_then_the_opt_in_ones_and_one_function() {
         assert_eq!(PORTS.len(), CORE_PORT_COUNT + 3);
         assert_eq!(TYPES.len(), CORE_TYPE_COUNT + 12);
-        assert_eq!(CORE_TYPE_COUNT, 9);
-        assert_eq!(PORTS[CORE_PORT_COUNT - 1].name, "Lifecycle");
-        assert_eq!(TYPES[CORE_TYPE_COUNT - 1].name, "AppState");
+        assert_eq!(CORE_TYPE_COUNT, 12);
+        assert_eq!(PORTS[CORE_PORT_COUNT - 1].name, "Diagnostics");
+        assert_eq!(TYPES[CORE_TYPE_COUNT - 1].name, "BackgroundReport");
+        assert_eq!(FUNCTIONS.len(), 1);
+        for f in FUNCTIONS {
+            assert_eq!(f.id, ids::function_id(f.name), "function {}", f.name);
+        }
         let names: BTreeSet<_> = PORTS.iter().map(|p| p.name).collect();
         assert_eq!(names.len(), PORTS.len(), "port names are unique");
         let names: BTreeSet<_> = TYPES.iter().map(|t| t.name).collect();
@@ -790,16 +906,25 @@ mod tests {
 
     #[test]
     fn every_runtime_exports_every_standard_type() {
+        let reports = ["PanicReport", "PanicFrame", "BackgroundReport"];
         for t in TYPES {
-            assert_eq!(runtime_spelling(Lang::TypeScript, t.name), t.name);
-            assert_eq!(runtime_spelling(Lang::Kotlin, t.name), t.name);
-            // Swift spells `AppState` as the runtime's `UndraAppState` and the rest as they are.
-            let expected = if t.name == "AppState" {
-                "UndraAppState"
-            } else {
-                t.name
-            };
-            assert_eq!(runtime_spelling(Lang::Swift, t.name), expected);
+            for lang in [Lang::Swift, Lang::Kotlin, Lang::TypeScript] {
+                // Swift spells `AppState` as the runtime's `UndraAppState`, and every language
+                // spells the ADR-046 report types with the `Undra` prefix; the rest as they are.
+                let expected = if reports.contains(&t.name) {
+                    format!("Undra{}", t.name)
+                } else if lang == Lang::Swift && t.name == "AppState" {
+                    "UndraAppState".to_owned()
+                } else {
+                    t.name.to_owned()
+                };
+                assert_eq!(
+                    runtime_spelling(lang, t.name),
+                    expected,
+                    "{lang:?} {}",
+                    t.name
+                );
+            }
         }
     }
 }

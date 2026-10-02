@@ -106,6 +106,13 @@ DOC COMMENTS
   android   build/android/jniLibs/<abi>/lib<namespace>.so   arm64-v8a and x86_64, 16 KB page aligned\n\
   web       build/web/<namespace>.wasm                  release profile, then wasm-opt -Oz if installed\n\
   host      build/host/lib<namespace>.{dylib,so}        for the JVM tests and undra bindgen\n\n\
+A release build also writes the symbol files that resolve a crash report to file:line, below `build/symbols` with a \
+manifest.json (`--no-symbols` skips them): the unstripped Android libraries (`android/<abi>/lib<namespace>.so`, and \
+`android/native-debug-symbols.zip` for the Play Console), the web module with its names (`web/<namespace>.debug.wasm`, the shipped \
+code) with its function map (`web/<namespace>.wasm.functions.txt`) and a debug module with DWARF for browsers \
+(`web/<namespace>.dwarf.wasm`), and next to a host library its dSYM. iOS needs no file of its own: the prelinked core's debug \
+info lands in your app's dSYM (Xcode Release, `dwarf-with-dsym`). The shipped copies are stripped; they are the same code, and \
+not larger than without symbols. `undra symbolicate` resolves a report with these files.\n\n\
 Every name comes from the core's namespace (`[core] namespace` in undra.toml, default the core's package name in snake \
 case): a core exports one symbol, `<namespace>_undra_api`, so several cores can sit in one app (ADR-044).\n\n\
 The library is the core plus the Undra C ABI, built from a small crate generated below `target/undra/` \
@@ -115,7 +122,8 @@ ABI: package with `undra build --platform android --release`.",
         after_long_help = "\
 EXAMPLES
     undra build                                   every platform in undra.toml, debug
-    undra build --release                         optimized: what you ship
+    undra build --release                         optimized: what you ship, and its symbol files (build/symbols)
+    undra build --release --no-symbols            the same shipped files, without build/symbols
     undra build --platform web --release
     undra build --platform android,host
 
@@ -131,6 +139,46 @@ NOT A MANUAL STEP
     `vite dev`). They find `undra` on PATH; `undra doctor` checks that it is there."
     )]
     Build(BuildArgs),
+    /// Resolve the addresses of a panic report to `symbol (file:line)` with the symbol files of a release build.
+    #[command(
+        long_about = "Takes the frames of a panic report, as the app's `onPanic` receives it (an `UndraPanicReport`, serialised as JSON), \
+or bare addresses, and prints one line per frame: `address symbol (file:line)`. The symbol files are the ones \
+`undra build --release` wrote below `build/symbols` (not with `--no-symbols`); this command finds the right one by the \
+report's image id (then its namespace) in `build/symbols/manifest.json`, and reads it with the platform's tool: `atos` for an \
+iOS app (with the app's dSYM), `llvm-symbolizer` for an Android library (the unstripped twin; the NDK's is used) and for the \
+web module (the function map names the function, the DWARF module the line where it is defined).\n\n\
+THE INPUT\n\
+A report is a JSON object with `frames` (each `{ \"address\": 134567 }`; a number, \"0x20e5f\", or a V8 stack position \
+`wasm-function[41]:0x1a2b`) and, to choose the symbol file, `imageId` (lowercase hex; a UUID with dashes is fine) and `namespace`; \
+`coreVersion` and `schemaHash` are checked against the symbols and a mismatch is warned about. `-` reads the report from \
+standard input. Without a report, give addresses and `--platform` (and `--image-id` when there is more than one build).\n\n\
+WHAT AN ADDRESS IS\n\
+Native (iOS, Android, host): the instruction address minus the load address of the image that holds the core, pointing into the \
+call instruction (so nothing is subtracted before the lookup). On iOS the image is the app executable: `atos` is given the \
+address plus the `__TEXT` start of the app's dSYM. wasm: the module offset of the `wasm-function[i]:0x…` line of a V8 stack \
+trace (`0x…` counts bytes from the start of the module): the function map names the function it is in exactly, and the line is where \
+that function is defined (the shipped module cannot keep line tables inside its functions: `wasm-opt` would skip the passes that make it small), \
+so the panic's own `location` in the report is the line of the panic.\n\n\
+THE MANIFEST\n\
+`build/symbols/manifest.json` lists, per shipped image (an Android ABI, an iOS slice, the web module, a host library): platform, \
+namespace, coreVersion, schemaHash, arch, format (elf, macho, wasm), imageId (ELF build id; the SHA-256 of the wasm module; for iOS \
+null, because the image is the app, whose UUID is that of its dSYM), sha256 and size of the shipped file, and `symbols` (and for \
+the web `functionMap` and `dwarf`), paths relative to the manifest's directory.",
+        after_long_help = "\
+EXAMPLES
+    undra symbolicate report.json                              resolve a report with build/symbols of this project
+    undra symbolicate report.json --symbols ./symbols          the symbols artifact of a CI build, unpacked
+    undra symbolicate report.json --dsym App.app.dSYM          iOS: the app's dSYM (Spotlight finds it by UUID when not given)
+    undra symbolicate --platform web 'wasm-function[1489]:0x5a692'
+    undra symbolicate --platform android --image-id 16ed68dc3a85066f424f34d3d8020a5f030c614f 0x998ef 0x9983f
+    cat report.json | undra symbolicate -
+
+OUTPUT
+    0x998ef playground_core::lab::explode (/undra/app/core/src/lab.rs:222)
+    Release builds name the project /undra/app, the Undra checkout /undra/src, Cargo's sources /undra/deps and the
+    home directory ~ in the paths; the standard library's are /rustc/<commit>/…"
+    )]
+    Symbolicate(SymbolicateArgs),
     /// Serve the core over a WebSocket to running apps, rebuilding when the code changes.
     #[command(
         long_about = "Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a \
@@ -331,12 +379,46 @@ pub struct BuildArgs {
     #[arg(long)]
     pub release: bool,
 
+    /// Do not write the symbol files of a release build (`build/symbols`: the unstripped Android libraries, the web debug
+    /// modules and function map, the manifest). The shipped copies are the same either way, and the shim is built without
+    /// debug info, as before ADR-046.
+    #[arg(long)]
+    pub no_symbols: bool,
+
     /// An Xcode build configuration, as the Run Script phase of the generated Xcode project passes
     /// it (`$CONFIGURATION`): `Release` and names that contain it build release, any other name
     /// debug. After an iOS build it writes the stamp that tells Xcode which configuration the
     /// XCFramework is for.
     #[arg(long, value_name = "NAME", conflicts_with = "release")]
     pub configuration: Option<String>,
+}
+
+/// Arguments of `undra symbolicate`.
+#[derive(Args, Debug)]
+pub struct SymbolicateArgs {
+    /// A panic report as JSON (a file, or `-` for standard input) and/or addresses (`0x20e5f`, `6699`, `wasm-function[41]:0x1a2b`).
+    #[arg(value_name = "REPORT_OR_ADDRESS")]
+    pub inputs: Vec<String>,
+
+    /// Only the artefacts of this platform: ios, android, web, host (needed for bare addresses without `--image-id`).
+    #[arg(long, value_name = "PLATFORM")]
+    pub platform: Option<String>,
+
+    /// The image the addresses are in (the report's `imageId`): an ELF build id, a Mach-O UUID or the SHA-256 of a wasm module.
+    #[arg(long, value_name = "ID")]
+    pub image_id: Option<String>,
+
+    /// The directory with `manifest.json` and the symbol files (default: `build/symbols` of the project).
+    #[arg(long, value_name = "DIR")]
+    pub symbols: Option<PathBuf>,
+
+    /// The dSYM of the iOS (or macOS) app that crashed: the bundle, or the DWARF file inside it. Spotlight looks for it by UUID when not given.
+    #[arg(long, value_name = "PATH")]
+    pub dsym: Option<PathBuf>,
+
+    /// The architecture of a dSYM with several slices, when the report names no image id (`arm64`, `x86_64`).
+    #[arg(long, value_name = "ARCH")]
+    pub arch: Option<String>,
 }
 
 /// Arguments of `undra dev`.
@@ -524,6 +606,47 @@ mod tests {
         assert!(args.json && !args.fix);
         assert_eq!(args.platform.as_deref(), Some("web"));
         assert!(Cli::try_parse_from(["undra", "doctor", "--fix", "--json"]).is_err());
+    }
+
+    #[test]
+    fn build_can_skip_the_symbol_files() {
+        let cli = Cli::try_parse_from(["undra", "build", "--release", "--no-symbols"]).unwrap();
+        let Command::Build(args) = cli.command else {
+            panic!("not build")
+        };
+        assert!(args.release && args.no_symbols);
+        let cli = Cli::try_parse_from(["undra", "build", "--release"]).unwrap();
+        let Command::Build(args) = cli.command else {
+            panic!("not build")
+        };
+        assert!(!args.no_symbols);
+    }
+
+    #[test]
+    fn symbolicate_takes_a_report_or_addresses() {
+        let cli = Cli::try_parse_from([
+            "undra",
+            "symbolicate",
+            "report.json",
+            "0x10",
+            "--platform",
+            "android",
+            "--image-id",
+            "ab12",
+            "--symbols",
+            "/s",
+            "--dsym",
+            "App.dSYM",
+        ])
+        .unwrap();
+        let Command::Symbolicate(args) = cli.command else {
+            panic!("not symbolicate")
+        };
+        assert_eq!(args.inputs, ["report.json", "0x10"]);
+        assert_eq!(args.platform.as_deref(), Some("android"));
+        assert_eq!(args.image_id.as_deref(), Some("ab12"));
+        assert_eq!(args.symbols, Some(PathBuf::from("/s")));
+        assert_eq!(args.dsym, Some(PathBuf::from("App.dSYM")));
     }
 
     #[test]

@@ -198,18 +198,18 @@ class DbOnDeviceTest {
     }
 
     @Test
-    fun the_default_constructor_uses_the_apps_database_path() = run {
+    fun the_default_constructor_uses_the_apps_database_path_and_the_cores_namespace() = run {
         val name = "device-test-${System.nanoTime()}"
-        val defaults = DbPortAdapter(AndroidDbAdapter(context))
+        val defaults = DbPortAdapter(AndroidDbAdapter(context, TEST_NAMESPACE))
         try {
             val db = defaults.open(name, NOTES).db
             defaults.close(db)
-            val file = context.getDatabasePath("undra-$name.sqlite")
+            val file = context.getDatabasePath("undra-$TEST_NAMESPACE-$name.sqlite")
             assertTrue("$file exists", file.isFile)
         } finally {
             defaults.close()
             Thread.sleep(100)
-            context.deleteDatabase("undra-$name.sqlite")
+            context.deleteDatabase("undra-$TEST_NAMESPACE-$name.sqlite")
         }
     }
 

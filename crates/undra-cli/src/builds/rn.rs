@@ -18,6 +18,7 @@
 use crate::error::Result;
 use crate::fsutil::{size_of, write_if_changed};
 use crate::session::Session;
+use crate::symbols::Symbols;
 use crate::sys::Os;
 use undra_bindgen::naming::CoreNames;
 
@@ -29,10 +30,14 @@ use super::{Artifact, android, ios};
 /// # Errors
 ///
 /// What the iOS and Android builds return, and an I/O error writing the pod's files.
-pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
+pub fn build(
+    session: &Session<'_>,
+    release: bool,
+    symbols: &Symbols<'_, '_>,
+) -> Result<Vec<Artifact>> {
     let mut artifacts = Vec::new();
     if session.sys.os() == Os::Macos {
-        artifacts.extend(ios::build(session, release)?);
+        artifacts.extend(ios::build(session, release, symbols)?);
         let names = session.core_names()?;
         let dir = session.project.build_dir().join("ios");
         write_if_changed(
@@ -61,7 +66,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
             "skipping the iOS half of the React Native build: it can only be built on macOS (`undra build --platform ios` says more)",
         );
     }
-    artifacts.extend(android::build(session, release)?);
+    artifacts.extend(android::build(session, release, symbols)?);
     Ok(artifacts)
 }
 

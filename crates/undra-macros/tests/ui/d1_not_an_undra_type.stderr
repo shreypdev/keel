@@ -1,6 +1,6 @@
 error[E0277]: error[undra::E0001]: `Plain` cannot cross the boundary by value
-                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
-                = help: declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
   --> tests/ui/d1_not_an_undra_type.rs:18:9
    |
@@ -27,8 +27,8 @@ help: the trait `Encode` is not implemented for `Plain`
            and $N others
 
 error[E0277]: error[undra::E0001]: `Plain` cannot cross the boundary by value
-                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
-                = help: declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, `Decimal`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs; a type of the `uuid`, `chrono`, `time`, `rust_decimal` or `bytes` crate crosses once you enable that feature of `undra`
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
   --> tests/ui/d1_not_an_undra_type.rs:18:16
    |
@@ -48,7 +48,7 @@ help: the trait `undra::undra_wire::Decode` is not implemented for `Plain`
              (A,)
              AppState
              BTreeMap<K, V>
-             Box<T>
+             BackgroundReport
            and $N others
 
 error[E0080]: evaluation panicked: error[undra::E0061]: `Plain` is not a type declared with `#[undra::api]`

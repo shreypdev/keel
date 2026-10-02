@@ -1,6 +1,6 @@
 import UndraRuntime
 
-/// `(trait, methods)` of the ten standard ports (docs/SPEC.md section 8).
+/// `(trait, methods)` of the eleven standard ports (docs/SPEC.md section 8, ADR-046).
 private let standardPorts: [(String, [String])] = [
     ("Clock", ["now_ms", "monotonic_ns"]),
     ("Rng", ["fill"]),
@@ -12,6 +12,7 @@ private let standardPorts: [(String, [String])] = [
     ("Timer", ["set"]),
     ("Connectivity", ["changed"]),
     ("Lifecycle", ["changed"]),
+    ("Diagnostics", ["panicked"]),
 ]
 
 /// The port id of `Trait`: `fnv1a32("port.<Trait>")`.

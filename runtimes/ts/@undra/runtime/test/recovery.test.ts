@@ -6,10 +6,12 @@ import { DbErrorCodec, DbMigrationCodec, DbOpenedCodec, DbRowsCodec, DbValueCode
 import { OptInPortIds } from "../src/adapters/opt-in-ids.js";
 import type { WsMessage } from "../src/adapters/types.js";
 import { UndraCallError, UndraUnhandledError } from "../src/call-error.js";
+import { type CallbackInterface, callbacks, lend } from "../src/callbacks.js";
 import { dbPort, nodeSqliteDb } from "../src/db.js";
 import { type WebSocketAdapter, webSocketPort } from "../src/realtime.js";
 import { UndraCore } from "../src/core.js";
 import { UndraTransportError } from "../src/errors.js";
+import { adopt, collected } from "../src/identity.js";
 import { UndraStore } from "../src/object.js";
 import type { PortImpl } from "../src/port.js";
 import {
@@ -24,7 +26,7 @@ import {
   withGenerationFloor,
 } from "../src/recovery.js";
 import { Signal } from "../src/signal.js";
-import { type UndraPanicReport, panicReport } from "../src/panic.js";
+import type { UndraPanicReport } from "../src/adapters/types.js";
 import { WasmMainTransport } from "../src/transport/wasm-main.js";
 import { WasmWorkerTransport } from "../src/transport/wasm-worker.js";
 import {
@@ -33,6 +35,7 @@ import {
   ChangeOp,
   Kind,
   PortStatus,
+  UndraWriter,
   codecs,
   decodeSnapshot,
   decodeValue,
@@ -48,8 +51,7 @@ import { STUB, compileStub } from "./support/stub-core.js";
 import { channelWorker } from "./support/worker.js";
 
 /*
- * Recovering a web core that trapped (ADR-049 decision 3): the options, the snapshot keeper, the panic report
- * (ADR-046 decision 4.4, minimal), the restart sequence of UndraCore over a scripted transport (every step and its
+ * Recovering a web core that trapped (ADR-049 decision 3): the options, the snapshot keeper, the restart sequence of UndraCore over a scripted transport (every step and its
  * order, the budget, a restart that traps again), and the two wasm transports over the stub core. The real core in
  * both modes is covered by crates/undra-ffi/tests/wasm/ts-runtime.test.mjs.
  */
@@ -318,29 +320,6 @@ describe("snapshot helpers", () => {
   });
 });
 
-describe("the panic report (ADR-046 decision 4.4, minimal)", () => {
-  it("takes the message of the core's FATAL record and the wasm frames of the trap's stack", () => {
-    const report = panicReport("kaboom", trapError(), 0xabcn, "wasm-main");
-    expect(report.message).toBe("kaboom");
-    expect(report.location).toBe("");
-    expect(report.schemaHash).toBe(0xabcn);
-    expect(report.trap).toBe("RuntimeError: unreachable");
-    expect(report.operation).toBe("wasm-main: RuntimeError: unreachable");
-    expect(report.frames).toEqual([
-      "undra_core.wasm.core::panicking::panic (wasm://wasm/0012abcd:wasm-function[123]:0x4567)",
-      "undra_call (wasm://wasm/0012abcd:wasm-function[9]:0x89)",
-    ]);
-  });
-
-  it("splits the location off a record that carries it, and falls back to the trap's text without a record", () => {
-    expect(panicReport("index out of bounds at src/lib.rs:12", trapError(), 0n, "wasm-worker")).toMatchObject({
-      message: "index out of bounds",
-      location: "src/lib.rs:12",
-    });
-    expect(panicReport(null, trapError("stack overflow"), 0n, "wasm-main").message).toBe("RuntimeError: stack overflow");
-  });
-});
-
 describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
   it("panic report, then in-flight calls and streams fail 'restarted', restart, re-observe, re-create the query handles, then onCoreRestarted and onError", async () => {
     const t = await recovering();
@@ -427,6 +406,69 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     await until("the restart", () => t.restarts.length === 1);
     expect(t.fake.released).toEqual([handle]);
     await expect(t.core.call(FREE, ECHO, u32(1))).resolves.toEqual(u32(1));
+  });
+
+  it("replays the releases sent while the core restarted as the references they were: a give-back of a live wrapper's handle is dropped, not sent as a full release", async () => {
+    const t = await recovering();
+    const gate = deferred<RestartResult>();
+    t.fake.outcomes.push(() => gate.promise);
+    // A live wrapper of a store (one wrapper per handle, observed) ...
+    const live = makeHandle(61, 1);
+    t.fake.store(live, new Map([[0, u32(5)]]));
+    const wrapper = adopt(t.core, live, CounterStore);
+    await t.core.observe(live, ALL_SIGNALS, true);
+    expect(wrapper.count.peek()).toBe(5);
+    // ... a handle two wrappers closed or gave back ...
+    const other = makeHandle(62, 1);
+    t.fake.store(other, new Map([[0, u32(1)]]));
+    t.fake.trap();
+    await macrotask();
+    await expect(t.core.call(FREE, ECHO, u32(1))).rejects.toMatchObject({ reason: "restarted" });
+    // ... and what happens while the core restarts: a reply carried the live handle again (adopt gives the extra
+    // reference back), a superseded wrapper's finalizer did the same, and another handle's wrappers released twice.
+    t.core._giveBack(live);
+    t.core._giveBack(live);
+    t.core._giveBack(other);
+    t.core._giveBack(other);
+    expect(t.fake.released, "held back while the core restarts").toEqual([]);
+    gate.resolve({
+      hello: { undraVersion: "x", schemaHash: SCHEMA, platform: "p", mode: "m" },
+      restoredFromAgeMs: 10,
+      storeHandles: [live, other],
+    });
+    await until("the restart", () => t.restarts.length === 1);
+    // The live wrapper's handle was not released (the restored core counts what the snapshot held, which may not
+    // include those extra references), and its routing and observation survive; the other handle's two went out.
+    expect(t.fake.released).toEqual([other, other]);
+    expect(wrapper.closed).toBe(false);
+    expect(t.core.mirror.has(live)).toBe(true);
+    t.fake.setSignal(live, 0, u32(6));
+    await until("the live wrapper's change", () => wrapper.count.peek() === 6);
+    expect(t.fake.observed.filter((o) => o.handle === live && o.on).length, "observed again after the restart").toBeGreaterThan(1);
+  });
+
+  it("a wrapper from before a restart does not give back a reference a newer wrapper of its handle may own", async () => {
+    const t = await recovering();
+    const handle = makeHandle(63, 1);
+    t.fake.store(handle, new Map([[0, u32(1)]]));
+    const wrapper = adopt(t.core, handle, CounterStore);
+    await t.core.observe(handle, ALL_SIGNALS, true);
+    const born = t.core._era;
+    t.fake.trap();
+    await until("the restart", () => t.restarts.length === 1);
+    expect(t.core._era).toBe(born + 1);
+    // The finalizer of a wrapper made before the restart runs now: a live wrapper holds the handle, whose count the
+    // restored core took from the snapshot.
+    collected(t.core, handle, born);
+    expect(t.fake.released, "the pre-restart finalizer leaks rather than frees the live wrapper").toEqual([]);
+    // A wrapper made after the restart gives back normally.
+    collected(t.core, handle, t.core._era);
+    expect(t.fake.released).toEqual([handle]);
+    // Nothing wraps a handle: a full release whatever the epoch.
+    t.fake.released.length = 0;
+    collected(t.core, 999n, born);
+    expect(t.fake.released).toEqual([999n]);
+    expect(wrapper.closed).toBe(false);
   });
 
   it("past maxRestarts within perMs the core stays dead and onClose reports the trap; the window slides", async () => {
@@ -793,5 +835,75 @@ describe("the wasm transports restart over the stub core", () => {
     await expect(core.call(FREE, STUB.ECHO, u32(5))).resolves.toEqual(u32(5));
     core.close();
     worker.close();
+  });
+});
+
+describe("host callbacks across a restart (ADR-041)", () => {
+  const PORT = 0x7000_0101;
+  const NOTE = 0x21;
+  const ASK = 0x22;
+  interface Listener {
+    note(line: string): void;
+    ask(question: string, signal: AbortSignal): Promise<boolean>;
+  }
+  const spec: CallbackInterface<Listener> = {
+    name: "Listener",
+    portId: PORT,
+    releaseInstance: 0x2e,
+    cancelCall: 0x2f,
+    methods: {
+      [NOTE]: {
+        name: "note",
+        notify: (r) => {
+          const line = r.readStr();
+          return (impl) => impl.note(line);
+        },
+      },
+      [ASK]: {
+        name: "ask",
+        call: (r) => {
+          const question = r.readStr();
+          return async (impl, signal) => encodeValue(codecs.bool, await impl.ask(question, signal));
+        },
+      },
+    },
+  };
+  const into = (instance: bigint, text: string): Uint8Array => {
+    const w = new UndraWriter();
+    w.writeU64(instance);
+    w.writeStr(text);
+    return w.finish();
+  };
+
+  it("a restart drops the callbacks the instance that trapped held: what runs is aborted, what it queued is not delivered", async () => {
+    const t = await recovering();
+    const heard: string[] = [];
+    let aborted = false;
+    const listener: Listener = {
+      note: (line) => heard.push(line),
+      ask: (_question, signal) =>
+        new Promise((_, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(signal.reason);
+          });
+        }),
+    };
+    const instance = lend(t.core, listener, spec);
+    void t.fake.callPort(PORT, ASK, into(instance, "go on?"));
+    await macrotask();
+    expect(callbacks(t.core).liveCount).toBe(1);
+    t.fake.burst(() => {
+      void t.fake.notifyPort(PORT, NOTE, into(instance, "queued by the instance that trapped"));
+      t.fake.trap();
+    });
+    await until("the restart", () => t.restarts.length === 1);
+    await macrotask();
+    expect(callbacks(t.core).liveCount, "the restored instance holds none of them").toBe(0);
+    expect(aborted, "the running implementation's signal aborted").toBe(true);
+    expect(heard, "nothing the trapped instance queued reaches the app").toEqual([]);
+    // Lent again, the listener is a new instance of the new core.
+    expect(lend(t.core, listener, spec)).not.toBe(instance);
+    expect(callbacks(t.core).liveCount).toBe(1);
   });
 });

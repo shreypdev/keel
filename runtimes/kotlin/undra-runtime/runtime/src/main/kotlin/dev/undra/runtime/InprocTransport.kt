@@ -29,6 +29,9 @@ internal class InprocTransport(private val native: NativeApi) : Transport {
     override val mode: Mode get() = Mode.INPROC
     override val isSynchronous: Boolean get() = true
 
+    /** The namespace of the core this transport reaches ([NativeApi.namespace]). */
+    val namespace: String get() = native.namespace
+
     @Volatile
     private var events: TransportEvents? = null
     private val closed = AtomicBoolean(false)

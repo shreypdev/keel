@@ -41,6 +41,7 @@ const RESERVED_TYPE_NAMES: &[&str] = &[
     "Codable",
     "Data",
     "Date",
+    "Decimal",
     "Dictionary",
     "Double",
     "Duration",
@@ -67,10 +68,12 @@ const RESERVED_TYPE_NAMES: &[&str] = &[
     "Void",
     // Kotlin standard library and coroutines.
     "Any",
+    "BigDecimal",
     "Boolean",
     "Byte",
     "ByteArray",
     "Flow",
+    "InfiniteQuery",
     "Int",
     "List",
     "Long",
@@ -102,6 +105,7 @@ const RESERVED_TYPE_NAMES: &[&str] = &[
     "Codec",
     "Codecs",
     "Handle",
+    "LazyList",
     "UndraBytes",
     "UndraCodec",
     "UndraCore",
@@ -110,6 +114,8 @@ const RESERVED_TYPE_NAMES: &[&str] = &[
     "UndraException",
     "UndraHandle",
     "UndraIds",
+    "UndraLazyList",
+    "UndraLazyListObject",
     "UndraObject",
     "UndraPort",
     "UndraPortError",
@@ -677,10 +683,27 @@ impl<'a> Checker<'a> {
             s.ports.iter().map(|p| (p.port_id, p.name.clone())),
         );
         for p in &s.ports {
+            // A callback interface answers two more methods, reserved by the protocol (ADR-041):
+            // a collision of a user method's id with either would route a call wrongly.
+            let reserved = (p.kind == PortKind::Callback).then(|| {
+                [
+                    (
+                        undra_meta::ids::callback_release_id(&p.name),
+                        undra_meta::ids::CALLBACK_RELEASE.to_owned(),
+                    ),
+                    (
+                        undra_meta::ids::callback_cancel_id(&p.name),
+                        undra_meta::ids::CALLBACK_CANCEL.to_owned(),
+                    ),
+                ]
+            });
             self.dup_ids(
                 "method id",
                 &format!("port {}", p.name),
-                p.methods.iter().map(|m| (m.method_id, m.name.clone())),
+                p.methods
+                    .iter()
+                    .map(|m| (m.method_id, m.name.clone()))
+                    .chain(reserved.into_iter().flatten()),
             );
         }
         self.dup_ids(
@@ -868,15 +891,15 @@ impl<'a> Checker<'a> {
         }
 
         if object.constructors.is_empty() {
-            // Plain objects without a constructor can only be reached through
-            // other calls, which are not supported; stores are checked by
-            // `Schema::validate`.
-            if object.store.is_none() {
+            // A plain object without a constructor is created by the core and handed out by a
+            // method or function that returns it (ADR-040); one nothing returns can never be
+            // reached. Stores are checked by `Schema::validate`.
+            if object.store.is_none() && !self.is_returned(&object.name) {
                 self.errors.push(BindgenError::Unsupported {
                     at: at.clone(),
-                    what: "an object without a constructor".to_owned(),
-                    why: "the platforms create an object by calling one of its constructors, and no other call can hand one out, so without a constructor it can never be created".to_owned(),
-                    help: "add `pub fn new(..) -> Self` to its `#[undra::api]` impl block so the platform can create it".to_owned(),
+                    what: "an object without a constructor that nothing returns".to_owned(),
+                    why: "the platforms create an object by calling one of its constructors, or receive it from a method or function that returns it, and without either it can never be created".to_owned(),
+                    help: format!("add `pub fn new(..) -> Self` to its `#[undra::api]` impl block so the platform can create it, or return `Arc<{}>` from a method that hands it out", object.name),
                 });
             }
         }
@@ -903,35 +926,48 @@ impl<'a> Checker<'a> {
             );
             for g in &store.signals {
                 let gat = format!("{at}, signal {}", g.name);
-                if matches!(g.ty, TypeRef::Lazy(_)) {
+                // A `Lazy<T>` signal is a runtime list the platform pages through (ADR-043); what
+                // is checked is its item, like the item of a `Vec<T>`.
+                self.check_value_type(&g.ty, &gat);
+                if matches!(g.ty, TypeRef::Unit) {
                     self.errors.push(BindgenError::Unsupported {
                         at: gat.clone(),
-                        what: "a Lazy<T> signal".to_owned(),
-                        why: "a lazy list needs a runtime API that SPEC section 17 does not define yet, so no platform could observe it".to_owned(),
-                        help: "expose the items as a `Vec<T>` signal, or as a method that takes an offset and a limit".to_owned(),
+                        what: "a signal of type ()".to_owned(),
+                        why: "a signal holds a value the platform shows, and `()` has none"
+                            .to_owned(),
+                        help: "give the signal a value type, or remove it".to_owned(),
                     });
-                } else {
-                    self.check_value_type(&g.ty, &gat);
-                    if matches!(g.ty, TypeRef::Unit) {
-                        self.errors.push(BindgenError::Unsupported {
-                            at: gat.clone(),
-                            what: "a signal of type ()".to_owned(),
-                            why: "a signal holds a value the platform shows, and `()` has none"
-                                .to_owned(),
-                            help: "give the signal a value type, or remove it".to_owned(),
-                        });
-                    }
                 }
-                if g.key.is_some() && !matches!(g.ty, TypeRef::Vec(_)) {
+                if g.key.is_some() && !matches!(g.ty, TypeRef::Vec(_) | TypeRef::Lazy(_)) {
                     self.errors.push(BindgenError::Unsupported {
                         at: gat,
-                        what: "a keyed signal that is not a Vec<T>".to_owned(),
+                        what: "a keyed signal that is not a Vec<T> or a Lazy<T>".to_owned(),
                         why: "a key identifies an item of a list across updates, so only a list can have one".to_owned(),
-                        help: "put `#[undra(key = ..)]` on a `Signal<Vec<T>>` only, or remove it".to_owned(),
+                        help: "put `#[undra(key = ..)]` on a `Signal<Vec<T>>` or a `Lazy<T>` only, or remove it".to_owned(),
                     });
                 }
             }
         }
+    }
+
+    /// Whether some method or function returns the object `name` (alone, optional, in a list, or
+    /// on the `Ok` side of a `Result`): the core can hand an instance to the platform.
+    fn is_returned(&self, name: &str) -> bool {
+        fn mentions(ty: &TypeRef, name: &str) -> bool {
+            match ty {
+                TypeRef::Object(n) => n == name,
+                TypeRef::Option(inner) | TypeRef::Vec(inner) => mentions(inner, name),
+                TypeRef::Result(ok, _) => mentions(ok, name),
+                _ => false,
+            }
+        }
+        self.schema
+            .objects
+            .iter()
+            .flat_map(|o| &o.methods)
+            .map(|m| &m.returns)
+            .chain(self.schema.functions.iter().map(|f| &f.returns))
+            .any(|ty| mentions(ty, name))
     }
 
     fn check_constructor_return(&mut self, object: &ObjectDef, c: &MethodDef, at: &str) {
@@ -984,6 +1020,21 @@ impl<'a> Checker<'a> {
                     why: "the id namespace of a port already has `portId`".to_owned(),
                 });
             }
+            // A callback interface's id namespace also names the two reserved methods of the
+            // protocol (ADR-041): `releaseInstance` and `cancelCall`.
+            if port.kind == PortKind::Callback
+                && matches!(
+                    naming::camel(&m.name).as_str(),
+                    "releaseInstance" | "cancelCall"
+                )
+            {
+                self.errors.push(BindgenError::NameCollision {
+                    at: at.clone(),
+                    names: vec![m.name.clone()],
+                    converted: naming::camel(&m.name),
+                    why: "the id namespace of a callback interface already names the reserved methods `__release` (as `releaseInstance`) and `__cancel` (as `cancelCall`)".to_owned(),
+                });
+            }
             let mat = format!("{at}, method {}", m.name);
             self.check_params(&mat, &m.params);
             self.check_param_types(&m.params, &mat);
@@ -996,7 +1047,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                PortKind::Sync | PortKind::Async => {
+                PortKind::Sync | PortKind::Async | PortKind::Callback => {
                     self.check_return(&m.returns, &mat, false);
                 }
             }
@@ -1021,7 +1072,7 @@ impl<'a> Checker<'a> {
                     help: "use a mutation for a call that only has effects, or return the data the platform needs".to_owned(),
                 });
             }
-            if matches!(ok, TypeRef::Option(_)) {
+            if matches!(ok, TypeRef::Option(_)) || self.is_newtype_of_option(ok) {
                 self.errors.push(BindgenError::Unsupported {
                     at,
                     what: "a query that returns an Option".to_owned(),
@@ -1126,6 +1177,29 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Whether `ty` is a newtype (ADR-042), however deeply nested, whose innermost type is an
+    /// `Option`.
+    fn is_newtype_of_option(&self, ty: &TypeRef) -> bool {
+        let mut ty = ty;
+        for _ in 0..16 {
+            let TypeRef::Named(name) = ty else {
+                return false;
+            };
+            match self
+                .schema
+                .records
+                .iter()
+                .find(|r| r.transparent && &r.name == name)
+                .and_then(|r| r.fields.first())
+            {
+                Some(field) if matches!(field.ty, TypeRef::Option(_)) => return true,
+                Some(field) => ty = &field.ty,
+                None => return false,
+            }
+        }
+        false
+    }
+
     /// A type in a value position (field, parameter, item): no `()` anywhere,
     /// no nested `Option`, no object handles.
     fn check_value_type(&mut self, ty: &TypeRef, at: &str) {
@@ -1141,9 +1215,12 @@ impl<'a> Checker<'a> {
                     at: at.to_owned(),
                     what: format!("the object `{name}` used as a value"),
                     why: "an object lives in the core and crosses the boundary as a handle; its contents have no wire representation".to_owned(),
-                    help: "return a record with the data the platform needs, or construct the object from the platform with one of its constructors".to_owned(),
+                    help: format!("return it as `Arc<{name}>`, take it as `&{name}` or `Arc<{name}>`, or use a record with the data the platform needs"),
                 });
             }
+            // Where an object or a callback may stand was decided by `Schema::validate` (E0064,
+            // E0004); what stands here is one the generators write.
+            TypeRef::Object(_) | TypeRef::Callback(_) => {}
             TypeRef::Option(inner) => {
                 if matches!(**inner, TypeRef::Option(_)) {
                     self.errors.push(BindgenError::Unsupported {
@@ -1151,6 +1228,15 @@ impl<'a> Checker<'a> {
                         what: format!("the nested option `{ty}`"),
                         why: "Kotlin and TypeScript cannot tell `Some(None)` from `None`".to_owned(),
                         help: "wrap the inner option in a record or an enum that names the two cases".to_owned(),
+                    });
+                } else if let (true, TypeRef::Named(newtype)) =
+                    (self.is_newtype_of_option(inner), &**inner)
+                {
+                    self.errors.push(BindgenError::Unsupported {
+                        at: at.to_owned(),
+                        what: format!("`Option<{newtype}>`, an option of a newtype that wraps an option"),
+                        why: "that is an option of an option on the wire, and Kotlin and TypeScript cannot tell `Some(None)` from `None`".to_owned(),
+                        help: format!("make `{newtype}` wrap the value instead of an `Option`, or wrap the option in a record or an enum that names the two cases"),
                     });
                 }
                 self.check_value_type(inner, at);

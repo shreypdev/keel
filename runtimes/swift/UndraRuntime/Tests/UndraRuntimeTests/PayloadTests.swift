@@ -4,7 +4,7 @@ import UndraRuntime
 /// The envelope payloads (docs/SPEC.md sections 3.3 to 3.7 and 5.9). The expected bytes were
 /// derived independently from the spec, not from this code.
 final class PayloadTests: XCTestCase {
-    private let handle = UndraHandle(rawValue: 4_294_967_297) // index 1, generation 1
+    private let handle = UndraHandle(rawValue: 4_294_967_297)
 
     private func slice(_ hex: String) -> ArraySlice<UInt8> {
         return ArraySlice(hexToBytes(hex))
@@ -468,7 +468,7 @@ final class PayloadTests: XCTestCase {
         )
         assertCodec(snapshot, hex:
             "01000000" // store count
-            + "04030201" // generation_floor
+            + "0403020100000000" // generation_floor (u64, ADR-040)
             + "0102030405060708" // schema_hash
             + "01000000" // type_count
             + "07000000" + "0a00000000000000" // type_id, fingerprint
@@ -478,8 +478,8 @@ final class PayloadTests: XCTestCase {
             + "01000000" // signal_count
             + "02000000" // signal_id
             + "01000000" + "09") // len + value
-        // An empty snapshot is 24 zero bytes.
-        assertCodec(Wire.Snapshot(generationFloor: 0, schemaHash: 0, types: [], description: "", stores: []), hex: String(repeating: "00", count: 24))
+        // An empty snapshot is 28 zero bytes.
+        assertCodec(Wire.Snapshot(generationFloor: 0, schemaHash: 0, types: [], description: "", stores: []), hex: String(repeating: "00", count: 28))
     }
 
     func testSnapshotRoundTripsAndFindsFingerprints() throws {
@@ -504,11 +504,11 @@ final class PayloadTests: XCTestCase {
             _ = try Wire.Snapshot.decode(hexToBytes("02000000" + String(repeating: "00", count: 28)))
         }
         // Type count larger than the input could hold (12 bytes a type).
-        expectWireError(.lengthTooLarge(len: UInt32.max, at: 16)) {
-            _ = try Wire.Snapshot.decode(hexToBytes("00000000" + "00000000" + "0000000000000000" + "ffffffff"))
+        expectWireError(.lengthTooLarge(len: UInt32.max, at: 20)) {
+            _ = try Wire.Snapshot.decode(hexToBytes("00000000" + "0000000000000000" + "0000000000000000" + "ffffffff"))
         }
-        expectWireError(.lengthTooLarge(len: 1, at: 16)) {
-            _ = try Wire.Snapshot.decode(hexToBytes("00000000" + "00000000" + "0000000000000000" + "01000000" + "0000000000000000"))
+        expectWireError(.lengthTooLarge(len: 1, at: 20)) {
+            _ = try Wire.Snapshot.decode(hexToBytes("00000000" + "0000000000000000" + "0000000000000000" + "01000000" + "0000000000000000"))
         }
         // Signal count larger than the input could hold (8 bytes a signal).
         var oneStore = sampleSnapshot()
@@ -540,7 +540,7 @@ final class PayloadTests: XCTestCase {
         var twice = sampleSnapshot()
         twice.types[1].typeId = 7
         // The second type entry starts after the counts, the floor, the hash and the first entry.
-        expectWireError(.duplicateKey(at: 4 + 4 + 8 + 4 + 12)) {
+        expectWireError(.duplicateKey(at: 4 + 8 + 8 + 4 + 12)) {
             _ = try Wire.Snapshot.decode(twice.encode())
         }
     }
@@ -555,11 +555,11 @@ final class PayloadTests: XCTestCase {
 
     func testASnapshotInTheLayoutBeforeADR037IsRefused() {
         // The layout before ADR-022 (`count u32, stores`): four bytes end where the floor should be.
-        expectWireError(.unexpectedEOF(needed: 4, at: 4)) {
+        expectWireError(.unexpectedEOF(needed: 8, at: 4)) {
             _ = try Wire.Snapshot.decode(hexToBytes("00000000"))
         }
-        // Layout 1, empty: eight bytes end where the schema hash should be.
-        expectWireError(.unexpectedEOF(needed: 8, at: 8)) {
+        // Layout 1, empty: four bytes are left where the (u64) floor should be.
+        expectWireError(.unexpectedEOF(needed: 8, at: 4)) {
             _ = try Wire.Snapshot.decode(layout1([], floor: 0))
         }
         // Layout 1 with stores: the first handle reads as the hash and the type id as the type

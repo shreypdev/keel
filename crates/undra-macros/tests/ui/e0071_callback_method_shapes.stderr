@@ -1,0 +1,44 @@
+error: error[undra::E0071]: callback method `token` returns a value synchronously
+         = note: the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone
+         = help: make it `async` and return `Result<T, E>`, or make it a plain `fn` that returns nothing
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0071
+  --> tests/ui/e0071_callback_method_shapes.rs:20:21
+   |
+20 |     fn token(&self) -> String;
+   |                     ^^^^^^^^^
+
+error: error[undra::E0071]: callback method `ask` is `async` and returns nothing
+         = note: the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone
+         = help: return `Result<T, E>` (an `#[undra::error]` enum that implements `From<PortError>`), or remove `async` to make it a fire-and-forget report
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0071
+  --> tests/ui/e0071_callback_method_shapes.rs:21:5
+   |
+21 |     async fn ask(&self);
+   |     ^^^^^
+
+error: error[undra::E0071]: callback method `count` is `async` but does not return a `Result`
+         = note: the host runs a callback outside the core's thread and lock, so the core can never wait for it synchronously, and a host implementation can always fail or be gone
+         = help: return `Result<T, E>` so the method can report that the host failed or is gone
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0071
+  --> tests/ui/e0071_callback_method_shapes.rs:22:27
+   |
+22 |     async fn count(&self) -> u32;
+   |                           ^^^^^^
+
+error: error[undra::E0071]: `#[undra(coalesce)]` on the `async` callback method `confirm`
+         = note: `coalesce` drops the older of two pending calls, and an `async` method's caller is waiting for each answer
+         = help: remove `#[undra(coalesce)]`, or make the method a plain `fn` that reports progress
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0071
+  --> tests/ui/e0071_callback_method_shapes.rs:24:14
+   |
+24 |     async fn confirm(&self) -> Result<bool, Oops>;
+   |              ^^^^^^^
+
+error: error[undra::E0071]: callback method `__release` has a reserved name
+         = note: names that start with `__` belong to the protocol (`__release` gives an instance back, `__cancel` cancels a call): a method of that name would be mistaken for one
+         = help: rename the method
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0071
+  --> tests/ui/e0071_callback_method_shapes.rs:25:8
+   |
+25 |     fn __release(&self);
+   |        ^^^^^^^^^

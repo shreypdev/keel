@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
  *
  * Generated subclasses declare one `StateFlow` per signal, created with [signal] and updated by their
  * [apply], which the runtime calls **on the main thread** ([UndraDispatchers.main]) for the changes the
- * core reports, after the subclass has called `core.observe(handle, ...)`. Changes that arrive between two
+ * core reports, once it observes them ([observeAll]). Changes that arrive between two
  * display frames are merged first (see [Mirror]): a signal set many times is applied once with its last
  * value, and its keyed patches are applied as one patch. The constructor registers the store with
  * `core.mirror`; [close] (or the cleaner backstop, see [UndraObject]) unregisters it.
@@ -29,14 +29,16 @@ public abstract class UndraStore(core: UndraCore, handle: Long, noCoalesce: Set<
      * Applies one change to the signal [signalId]. Called on the main thread. [reader] is limited to
      * the change's bytes and valid only during the call; decode it and update the signal's flow. For
      * [ChangeOp.FULL] the reader holds the whole value, for [ChangeOp.PATCH] a keyed patch (SPEC 3.8) and
-     * for [ChangeOp.INVALIDATED] nothing. Signal ids a subclass does not know must be ignored.
+     * for [ChangeOp.INVALIDATED] a [dev.undra.runtime.wire.Payloads.LazyInvalidated] (a `Lazy<T>` signal: hand it
+     * to its [UndraLazyList]). Signal ids a subclass does not know must be ignored.
      */
     protected abstract fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader)
 
     /**
      * Starts observing every signal, so the core reports their current values (applied before this returns when
-     * the core is in process). Generated stores call it from `init`. If the core cannot be reached the store is
-     * closed (no handle leaks) and the failure is thrown as an [UndraCallError].
+     * the core is in process). The runtime calls it when it makes a generated store's wrapper ([UndraCore.adopt]);
+     * a store written by hand calls it from `init`. If the core cannot be reached the store is closed (no handle
+     * leaks) and the failure is thrown as an [UndraCallError].
      *
      * @throws UndraCallError if the core is closed or unreachable.
      */
@@ -47,6 +49,11 @@ public abstract class UndraStore(core: UndraCore, handle: Long, noCoalesce: Set<
             close()
             throw UndraCallError.mapped(e)
         }
+    }
+
+    /** What [UndraCore.adopt] does once the wrapper is registered: observes every signal ([observeAll]). */
+    internal fun start() {
+        observeAll()
     }
 
     /** Creates the [MutableStateFlow] backing one signal, holding [initial] until the core reports the real value. */

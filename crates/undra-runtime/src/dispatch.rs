@@ -55,6 +55,12 @@ pub enum DispatchResult {
     /// The request could not be served: undecodable arguments, stale handle, wrong receiver
     /// type (status 5 with this reason). *Addition to SPEC 16.2, see the crate docs.*
     BadRequest(String),
+    /// The call took what it was handed and then failed inside the core, without unwinding: status
+    /// 2 with this message, contained and reported like a panic (without a backtrace). Unlike [`BadRequest`](DispatchResult::BadRequest) it transfers ownership:
+    /// a refused call owns nothing and the host gives its callback references back, a failed call
+    /// has made its proxies, which the core releases when it drops them (a constructor that took
+    /// callbacks and could not publish what it built).
+    Failed(String),
 }
 
 impl fmt::Debug for DispatchResult {
@@ -67,6 +73,7 @@ impl fmt::Debug for DispatchResult {
             DispatchResult::BadRequest(reason) => {
                 f.debug_tuple("BadRequest").field(reason).finish()
             }
+            DispatchResult::Failed(reason) => f.debug_tuple("Failed").field(reason).finish(),
         }
     }
 }

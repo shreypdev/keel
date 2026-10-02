@@ -25,6 +25,17 @@
  *  - `UndraBuf` memory the core returns is owned by the caller; release it with `undra_buf_free`
  *    of the same table.
  *  - Nothing unwinds out of an entry: a failure is a status, a code or a log record.
+ *  - A handle is an opaque `uint64_t` (24 bits of slot, 40 of generation, ADR-040); never interpret
+ *    it. Every handle in the body of a successful reply is ONE reference the host now owns, and
+ *    it gives each back with `undra_release` exactly once (a method that returns the same object
+ *    again returns the same handle while the host holds it: release one reference per crossing).
+ *    A handle the host passes in a call is borrowed. A handle names an object of the core that
+ *    issued it only: two cores issue the same numbers, so never pass one core's handle to another.
+ *  - A host callback interface (ADR-041) is a port: a call on the trait's `port_id` whose first
+ *    argument is the `uint64_t` instance the host chose when it passed the implementation in. The
+ *    host owns that number; it is never 0 and never reused. The core ends a reference with the
+ *    reserved fire-and-forget method `__release` (and `__cancel` for a call it stopped waiting
+ *    for); a `port_cb` only queues the call and returns (rule 4 below).
  *
  * THE HOST CONTRACT (binding: a host that breaks a rule below has undefined behaviour)
  *

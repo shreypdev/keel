@@ -17,7 +17,8 @@ export interface NativeCoreEntry {
   readonly schemaHash: bigint;
   /**
    * Attaches the core over a transport with the entry's schema hash and makes it the entry's `core`
-   * (the generated entries have it). Without it, `loadNative` calls `UndraCore.attach` itself.
+   * (the generated entries have it, and fill in the namespace the default stores are kept under). Without it,
+   * `loadNative` calls `UndraCore.attach` itself, with the entry's namespace.
    */
   attach?(transport: Transport, options?: Omit<AttachOptions, "expectedSchemaHash">): Promise<UndraCore>;
 }
@@ -194,7 +195,7 @@ function start(entry: NativeCoreEntry, options: NativeLoadOptions): Promise<Undr
   const attached =
     entry.attach !== undefined
       ? entry.attach(transport, attach)
-      : UndraCore.attach(transport, { ...attach, expectedSchemaHash: entry.schemaHash });
+      : UndraCore.attach(transport, { ...attach, expectedSchemaHash: entry.schemaHash, namespace });
   const started = attached.then((ready) => {
     core = ready;
     return ready;

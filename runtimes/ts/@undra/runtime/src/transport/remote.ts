@@ -449,6 +449,8 @@ export class RemoteTransport implements Transport {
   }
 
   #answerPortCall(portCallId: number, outcome: PortOutcome): void {
+    // Port call id 0 is the core's own fire-and-forget call (a panic report to `Diagnostics`, ADR-046): nothing waits for an answer.
+    if (portCallId === 0) return;
     if (outcome.kind === "sync") this.#post(Kind.PortReply, outcome.reply);
     else if (outcome.kind === "unavailable") {
       this.#post(Kind.PortReply, encodePortReply({ portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));

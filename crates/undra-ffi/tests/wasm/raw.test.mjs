@@ -139,12 +139,12 @@ test("without undra_init the entry points fail softly", () => {
   const reply = core.callSync(call.fn(ids.fn("version"), id));
   assert.equal(reply.status, Status.BadRequest);
   core.x.undra_cancel(1);
-  core.observe(0x1_0000_0001n, 0, true);
+  core.observe(0x100_0001n, 0, true);
   const snapshot = core.takeBuf(core.x.undra_snapshot());
-  // An empty snapshot in layout 2 (ADR-037): no stores, floor 0, this core's schema hash, no types, a description.
+  // An empty snapshot in layout 2 (ADR-037, the floor a u64 since ADR-040): no stores, floor 0, this core's schema hash, no types, a description.
   const r = new Reader(snapshot);
   assert.equal(r.u32(), 0, "store count");
-  assert.equal(r.u32(), 0, "generation floor");
+  assert.equal(r.u64(), 0n, "generation floor");
   assert.equal(r.u64(), BigInt.asUintN(64, core.x.undra_schema_hash()), "schema hash");
   assert.equal(r.u32(), 0, "type count");
   assert.deepEqual(Object.keys(JSON.parse(r.str())).sort(), ["enums", "records", "stores"]);
@@ -182,7 +182,7 @@ test("sync calls, constructors and the typed-error path", () => {
   assert.equal(version.status, Status.Ok);
   assert.equal(new Reader(version.body).str(), "undra-ffi test core 1");
   const calc = core.construct(CALC, i64(100));
-  assert.ok(calc > 0xffff_ffffn, "a handle carries a generation in its high half");
+  assert.ok(calc > 0xff_ffffn, "a handle carries a generation above its 24-bit slot index");
   const add = core.callSync(call.method(calc, ids.method(CALC, "add"), core.callId(), [...i64(2), ...i64(3)]));
   assert.equal(new Reader(add.body).i64(), 105n);
   const fail = core.callSync(call.method(calc, ids.method(CALC, "fail"), core.callId()));

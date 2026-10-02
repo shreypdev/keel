@@ -3,7 +3,10 @@ package dev.undra.testkit
 import dev.undra.runtime.UndraPortException
 import dev.undra.runtime.PortImpl
 import dev.undra.runtime.adapters.StandardPorts
+import dev.undra.runtime.adapters.UndraPanicFrame
+import dev.undra.runtime.adapters.UndraPanicReport
 import dev.undra.runtime.wire.UndraWriter
+import dev.undra.runtime.wire.encodeToByteArray
 import dev.undra.testkit.testing.Suite
 import dev.undra.testkit.testing.assertEq
 import dev.undra.testkit.testing.assertThrows
@@ -111,6 +114,48 @@ class PortTests : Suite() {
             assertEq("07", assertThrows<UndraPortException> { methods.call(1u, ByteArray(0)) }.body.toHex())
             assertTrue(assertThrows<dev.undra.runtime.UndraException> { methods.call(2u, ByteArray(0)) }.message!!.contains("unavailable"))
             replayer.finish()
+        }
+        case("CaptureDiagnostics keeps the panic reports the core hands it, in order, and answers inline") {
+            val diagnostics = CaptureDiagnostics()
+            val impl = diagnostics.portImpl()
+            assertTrue(impl.sync, "Diagnostics is a sync port")
+            assertTrue(diagnostics.isEmpty)
+            fun report(operation: String, message: String) = UndraPanicReport(
+                message, "src/lab.rs:12:5", operation, "undra-core", listOf(UndraPanicFrame(0x10, "lab::explode", "src/lab.rs", 12)), "playground_core", "0.1.0", 0x53241303b2d08c5eL, "",
+            )
+            val first = report("explode", "kaboom")
+            val second = report("task", "later")
+            assertEq(0, impl.call(StandardPorts.Diagnostics.PANICKED, UndraPanicReport.encodeToByteArray(first)).size)
+            impl.call(StandardPorts.Diagnostics.PANICKED, UndraPanicReport.encodeToByteArray(second))
+            assertEq(listOf(first, second), diagnostics.reports)
+            assertEq(second, diagnostics.last)
+            assertEq(2, diagnostics.size)
+            assertEq(listOf(first, second), diagnostics.take())
+            assertTrue(diagnostics.isEmpty && diagnostics.last == null)
+            impl.call(StandardPorts.Diagnostics.PANICKED, UndraPanicReport.encodeToByteArray(first))
+            diagnostics.clear()
+            assertEq(0, diagnostics.size)
+            assertThrows<dev.undra.runtime.wire.WireException> { impl.call(StandardPorts.Diagnostics.PANICKED, byteArrayOf(1)) }
+        }
+        case("Fakes installs the Diagnostics recorder with the other ports, and the names and the replayer know the port") {
+            val fakes = Fakes()
+            val impl = fakes.ports().getValue(StandardPorts.Diagnostics.PORT_ID)
+            impl.call(StandardPorts.Diagnostics.PANICKED, UndraPanicReport.encodeToByteArray(UndraPanicReport("m", "l", "o", "t", emptyList(), "n", "1", 1L, "")))
+            assertEq(listOf("o"), fakes.diagnostics.reports.map { it.operation })
+            assertEq("Diagnostics.panicked", standardName(StandardPorts.Diagnostics.PORT_ID, StandardPorts.Diagnostics.PANICKED))
+            assertEq(portId("Diagnostics"), StandardPorts.Diagnostics.PORT_ID)
+            assertEq(methodId("Diagnostics", "panicked"), StandardPorts.Diagnostics.PANICKED)
+            // A recording that holds a report replays it through a sync port: the core's fire-and-forget call is answered inline.
+            val recorder = PortRecorder(1uL, now = { 0L })
+            val wrapped = recorder.wrap(StandardPorts.Diagnostics.PORT_ID, fakes.diagnostics.portImpl())
+            val args = UndraPanicReport.encodeToByteArray(UndraPanicReport("m", "l", "o", "t", emptyList(), "n", "1", 1L, ""))
+            wrapped.call(StandardPorts.Diagnostics.PANICKED, args)
+            val replayer = Replayer(Recording.fromJson(recorder.toJson()))
+            val replayed = replayer.ports().getValue(StandardPorts.Diagnostics.PORT_ID)
+            assertTrue(replayed.sync, "a replayed Diagnostics port is sync")
+            replayed.call(StandardPorts.Diagnostics.PANICKED, args)
+            replayer.finish()
+            assertTrue(recorder.toJson().contains("\"name\":\"Diagnostics.panicked\""), recorder.toJson())
         }
     }
 

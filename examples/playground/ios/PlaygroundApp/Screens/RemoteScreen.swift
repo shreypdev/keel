@@ -64,10 +64,29 @@ struct RemoteScreen: View {
                     Button("Refresh") { inbox.refetch() }
                         .accessibilityIdentifier("remote-refresh")
                 }
+                debugSection
             }
             .refreshable { inbox.refetch() }
             .navigationTitle("Remote")
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    /// The Debug area: the last panic the core reported to `LoadOptions.onPanic` (ADR-046), and a button that makes it panic.
+    private var debugSection: some View {
+        Section("Debug") {
+            let panics = PanicLog.shared
+            LabeledContent("Core panics") {
+                Text("\(panics.count)").accessibilityIdentifier("debug-panic-count")
+            }
+            if let report = panics.last {
+                Text(PanicLog.describe(report))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("debug-last-panic")
+            }
+            Button("Make the core panic") { panics.trigger() }
+                .accessibilityIdentifier("debug-panic")
         }
     }
 

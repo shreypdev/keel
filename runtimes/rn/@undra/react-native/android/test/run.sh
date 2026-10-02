@@ -9,5 +9,5 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 src="$here/../src/main/java/dev/undra/reactnative"
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
-javac -Werror -Xlint:all -d "$out" "$src/SecureSeal.java" "$src/NetworkClassifier.java" "$src/DbWire.java" "$here/dev/undra/reactnative/PureTest.java"
+javac -Werror -Xlint:all -d "$out" "$src/SecureSeal.java" "$src/StoreNames.java" "$src/NetworkClassifier.java" "$src/DbWire.java" "$here/dev/undra/reactnative/PureTest.java"
 java -cp "$out" dev.undra.reactnative.PureTest

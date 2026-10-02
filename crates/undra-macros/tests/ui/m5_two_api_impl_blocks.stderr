@@ -31,3 +31,14 @@ error[E0592]: duplicate definitions with name `__UNDRA_IS_OBJECT`
    | --------- other definition for `__UNDRA_IS_OBJECT`
    |
    = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0592]: duplicate definitions with name `__UNDRA_OBJECT_ID`
+  --> tests/ui/m5_two_api_impl_blocks.rs:9:1
+   |
+ 9 | #[k::api]
+   | ^^^^^^^^^ duplicate definitions for `__UNDRA_OBJECT_ID`
+...
+20 | #[k::api]
+   | --------- other definition for `__UNDRA_OBJECT_ID`
+   |
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

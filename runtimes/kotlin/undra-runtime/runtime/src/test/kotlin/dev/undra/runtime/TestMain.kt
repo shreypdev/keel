@@ -3,6 +3,7 @@ package dev.undra.runtime
 import dev.undra.runtime.testing.Suite
 import dev.undra.runtime.wire.ChangeSetTests
 import dev.undra.runtime.wire.CodecTests
+import dev.undra.runtime.wire.DecimalCodecTests
 import dev.undra.runtime.wire.EnvelopeTests
 import dev.undra.runtime.wire.FnvTests
 import dev.undra.runtime.wire.FuzzTests
@@ -25,6 +26,7 @@ fun main() {
         WriterTests(),
         ReaderTests(),
         CodecTests(),
+        DecimalCodecTests(),
         HandleTests(),
         FnvTests(),
         EnvelopeTests(),
@@ -38,9 +40,12 @@ fun main() {
         CallErrorTests(),
         StreamTests(),
         MirrorTests(),
+        LazyListTests(),
         CoalesceTests(),
         CoalesceModelTests(),
         StoreTests(),
+        ObjectIdentityTests(),
+        CallbackTests(),
         PortTests(),
         InprocTransportTests(),
         CoreEntryTests(),
@@ -50,6 +55,7 @@ fun main() {
         ReconnectCoreTests(),
         RemoteReconnectTests(),
         AdapterTests(),
+        DiagnosticsTests(),
         FileAdapterTests(),
         StorageFailureTests(),
         HttpAdapterTests(),

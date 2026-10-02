@@ -1,8 +1,26 @@
-error: error[undra::E0001]: `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet
-         = note: a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it
-         = help: expose the items as a `Signal<Vec<T>>` (keyed with `#[undra(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit
+error: error[undra::E0001]: `Lazy<Row>` can only be the type of a store field, not of a record or enum field
+         = note: a `Lazy<T>` is a list the core owns and the platforms page through by handle: it is not a value, so it cannot be a parameter, a return type, a record or enum field, or the value of a signal
+         = help: write it as a field of a `#[undra::store]` struct (`books: Lazy<Book>`); to give a caller a list, return a `Vec<T>`, or take an offset and a limit and return one page
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
-  --> tests/ui/e0001_lazy_signal.rs:15:12
+  --> tests/ui/e0001_lazy_signal.rs:15:15
    |
-15 |     older: Lazy<Row>,
-   |            ^^^^^^^^^
+15 |     pub rows: Lazy<Row>,
+   |               ^^^^^^^^^
+
+error: error[undra::E0001]: `Lazy<Row>` can only be the type of a store field, not of a parameter
+         = note: a `Lazy<T>` is a list the core owns and the platforms page through by handle: it is not a value, so it cannot be a parameter, a return type, a record or enum field, or the value of a signal
+         = help: write it as a field of a `#[undra::store]` struct (`books: Lazy<Book>`); to give a caller a list, return a `Vec<T>`, or take an offset and a limit and return one page
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0001_lazy_signal.rs:19:22
+   |
+19 | pub fn page_of(rows: Lazy<Row>) -> u32 {
+   |                      ^^^^^^^^^
+
+error: error[undra::E0001]: `Computed<Lazy<Row>>` cannot hold a `Lazy`: it is a store field, not a value
+         = note: a `Lazy<T>` is a list the core owns and the platforms page through, so it stands as a store field of its own; it is never the value of a `Computed`, which is evaluated, compared and sent as a value
+         = help: write the field as `Lazy<Row>`; to page a computed or filtered list, derive it (`source.derive().filter(..).build()`) and build the field with `Lazy::over(&derived)`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0001_lazy_signal.rs:27:12
+   |
+27 |     older: Computed<Lazy<Row>>,
+   |            ^^^^^^^^^^^^^^^^^^^
