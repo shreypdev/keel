@@ -11,7 +11,7 @@ private fun scenario(id: String, title: String, body: (World) -> Unit): Scenario
     Scenario(id, title) { boot -> body(boot.world ?: fail("the core is not loaded (S16 failed to load it)")) }
 
 /**
- * The nineteen scenarios in the order they run. S16 is first because it is the one that loads the core:
+ * The scenarios in the order they run. S16 is first because it is the one that loads the core:
  * its failing load has to come before the load the others use (`UndraCore.load` leaves nothing behind when
  * it fails), and the others need the core it loads. S17 is last because its last steps shut that core down
  * (S17.6) and load and close a fresh one (S17.7), so S18, S19 and S20 run before it. The build-B steps of S14 and S15
@@ -39,5 +39,8 @@ val SCENARIOS: List<Scenario> = listOf(
     scenario("S20", "storage failures are typed", ::s20Storage),
     // S26 loads two other cores (other namespaces) next to the playground core, and closes them again.
     scenario("S26", "two cores", ::s26TwoCores),
+    // S27 step 8 loads S26's two cores again (S26 closed them) to pass one core's object to the other.
+    scenario("S27", "objects cross", ::s27ObjectsCross),
+    scenario("S28", "host callbacks", ::s28HostCallbacks),
     scenario("S17", "panic containment", ::s17Panic),
 )
