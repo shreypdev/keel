@@ -168,7 +168,7 @@ class MalformedInputTests : Suite() {
             assertWire<WireException.TrailingBytes> {
                 Payloads.StreamFailure.decode(Payloads.StreamFailure(Payloads.ReplyStatus.CANCELLED, "r", "").toByteArray() + 0)
             }
-            assertWire<WireException.TrailingBytes> { Payloads.Snapshot.decode(ByteArray(25).also { it[24] = 1 }) } // the empty snapshot is 24 bytes
+            assertWire<WireException.TrailingBytes> { Payloads.Snapshot.decode(ByteArray(29).also { it[28] = 1 }) } // the empty snapshot is 28 bytes
             assertWire<WireException.TrailingBytes> { Payloads.ChangeSet.decode(Payloads.ChangeSet(1u, emptyList()).toByteArray() + 0) }
             assertWire<WireException.TrailingBytes> { KeyedPatch.decodePatch(bytesOf(0, 0, 0, 0, 1), Codecs.u8) }
         }

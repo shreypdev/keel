@@ -32,12 +32,12 @@ public value class Handle(public val raw: Long) {
         public const val INDEX_BITS: Int = 24
 
         /** The largest slot index a handle can carry (16,777,215). */
-        public const val MAX_INDEX: UInt = (1u shl INDEX_BITS) - 1u
+        public const val MAX_INDEX: UInt = 0xFF_FFFFu
 
         /** The largest generation a handle can carry (2^40 - 1). */
-        public const val MAX_GENERATION: ULong = (1uL shl (64 - INDEX_BITS)) - 1uL
+        public const val MAX_GENERATION: ULong = 0xFF_FFFF_FFFFuL
 
-        private const val INDEX_MASK: Long = (1L shl INDEX_BITS) - 1L
+        private const val INDEX_MASK: Long = 0xFF_FFFFL
 
         /** The null handle. */
         public val NULL: Handle = Handle(0L)
