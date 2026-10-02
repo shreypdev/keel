@@ -177,7 +177,27 @@ pub(crate) fn type_ref(out: &mut String, ty: &TypeRef) {
             out.push_str(",\"of\":");
             string(out, name);
         }
-        _ => {}
+        // The leaves, each by name and no wildcard: a variant added to `TypeRef` must not compile
+        // here until this says what its payload is. This writer decides the schema hash and the
+        // fingerprints, and a variant written without its payload would hash like its sibling.
+        TypeRef::Bool
+        | TypeRef::I8
+        | TypeRef::I16
+        | TypeRef::I32
+        | TypeRef::I64
+        | TypeRef::U8
+        | TypeRef::U16
+        | TypeRef::U32
+        | TypeRef::U64
+        | TypeRef::F32
+        | TypeRef::F64
+        | TypeRef::String
+        | TypeRef::Bytes
+        | TypeRef::Unit
+        | TypeRef::Duration
+        | TypeRef::Timestamp
+        | TypeRef::Uuid
+        | TypeRef::Decimal => {}
     }
     out.push('}');
 }
