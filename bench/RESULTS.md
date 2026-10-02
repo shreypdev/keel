@@ -525,6 +525,36 @@ anything a UI sees. What a platform adds (a wrapper object, the identity map's l
 on the platform, in the contract scenarios' `adopt` and `lend` timings recorded in the piece's decision record, not
 here.
 
+### 7. A lazy list costs the window the host shows and the 12 bytes that say it changed (ADR-043)
+
+A 100,000-row table is not a value the host should mirror. `Lazy<T>` keeps the items typed in the core; the host is
+told the length and a version (change-set op 0 on observe: handle, length, version, 20 bytes), asks for the 50 rows
+it shows with a page call, and is told that something changed by one 12-byte op-2 entry (`LazyInvalidated`: the new
+length and version), whatever the change was, after which it asks for its window again. `Lazy::over` a derived list
+pages through the derived index (the `k`-th row in O(log n), a page in O(log n + limit)). The gate rows (`lazy/*`,
+through the runtime as the keyed rows are; each checks what it ships before it is timed: the 50 rows decode and equal
+the model, the page header's version is the one `observe` announced, and the invalidation is one change-set of one
+op-2 entry of exactly 12 bytes carrying the new length and version;
+`bench/results/2026-10-01-lazy-lists-layer-a.json`, best of three p50s on a host at load 20-35) and ADR-043's targets:
+
+| Row | p50 | ADR-043 target | Budget (CI) |
+|---|---|---|---|
+| `lazy/page_50_of_100k` (50 rows from the middle: dispatch, the page server, the encoding, the reply) | 290 ns | core half <= 20 us | 1.5 us |
+| `lazy/page_50_of_10k` | 288 ns | (the same row on 10,000) | 1.5 us |
+| `lazy/view_page_50_of_100k` (the rows not done, by title, of a 100,000-row view: found in the derived index) | 3.20 us | (no target; O(log n + limit)) | 16 us |
+| `lazy/invalidate` (one `update_at` of an observed 100,000-row list: the write, the commit, 12 bytes) | 178 ns | <= 1 us, 12 bytes | 900 ns |
+| `lazy/invalidate_10k` | 171 ns | (the same row on 10,000) | 860 ns |
+
+The ratios: `lazy_page_scaling` (100,000 against 10,000 rows) is 1.00-1.01 and `lazy_invalidate_scaling` 0.99-1.16 (max 2
+each: an O(n) step, the list cloned or encoded on the way, would put either near 10). Nothing grows with the list: the
+allocation gate (`crates/undra-ffi/tests/lazy_alloc.rs`) counts the commit of an observed `Lazy` at one buffer more than
+the same write to a plain observed counter (the 12-byte entry), the same number at 10 and at 100,000 items, and zero
+allocations to encode a page of 50 rows into a buffer that is big enough. Against what a `Signal<Vec<T>>` of the same
+rows would send at a change (a keyed patch of about 85 bytes, or the full value, 3.5 MB at 100,000 rows of this shape), the
+invalidation is 12 bytes and the host's cost moves to the page it re-asks for. The view's page is dominated by the
+pipeline running on the 50 rows it serves (the sort-key closure clones a title per row); the index lookup is
+logarithmic.
+
 ## Full tables
 
 ### Wire: encode, decode and round trip per type
@@ -607,6 +637,22 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 | `signals/derived_10k/count_toggle` | 387.9 ns | gate harness |
 | `signals/computed/recompute_1` | 42.1 ns | 41.8 ns .. 42.4 ns |
 | `signals/computed/recompute_chain_10` | 253.1 ns | 251.0 ns .. 256.3 ns |
+
+### Lazy lists (`bench/benches/lazy.rs`, ADR-043)
+
+`Shelf` is a macro-generated store with an owned `Lazy<Item>` of 100,000 rows (24-character titles, every fourth done)
+and a `Lazy::over` view of a derived list of the same rows (the rows not done, by title). `page_*` is one `LazyPage` call
+for 50 rows from the middle through `call_sync_with` (the reply is lent, not copied); `invalidate*` is one method call
+that `update_at`s a row of the observed list and commits the 12-byte entry. The gate harness measured 290 ns, 288 ns,
+3.20 us, 178 ns and 171 ns p50 (the criterion medians below are lower: quieter moments of a shared host).
+
+| Benchmark | Median | 95% CI |
+|---|---|---|
+| `lazy/page_50_of_100k` | 263.8 ns | 261.5 ns .. 266.5 ns |
+| `lazy/page_50_of_10k` | 262.6 ns | 260.5 ns .. 265.0 ns |
+| `lazy/view_page_50_of_100k` | 2.834 µs | 2.817 µs .. 2.851 µs |
+| `lazy/invalidate` | 151.6 ns | 151.2 ns .. 152.0 ns |
+| `lazy/invalidate_10k` | 151.2 ns | 150.5 ns .. 152.1 ns |
 
 ### Snapshot and restore
 

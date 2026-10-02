@@ -364,6 +364,35 @@ measured_ns = 174583.2
 budget_ns = 2000
 measured_ns = 387.9
 
+# Lazy lists (ADR-043): a list the host pages through. Through the runtime, as the keyed rows are:
+# dispatch, the page server's lookup under the panic guard, the core's half of a page. Each row
+# checks what it ships before it is timed: `page_*` decodes the 50 rows it serves and compares them
+# with the model (`lazy/view_page_50_of_100k` is the rows not done, by title, of a `Lazy::over`
+# view, found through the derived index: O(log n + limit), the pipeline run on the 50 rows), the
+# header's version is the one `observe` announced; `invalidate*` asserts one change-set of one
+# op-2 entry of exactly 12 bytes carrying the new length and version, however long the list is.
+# ADR-043 targets, all met on this host (best of three, load 20-35): `page_50_of_100k` core half
+# <= 20 us; `invalidate` <= 1 us and 12 bytes. The budgets are the rule of the header, 5x.
+[bench."lazy/page_50_of_100k"]
+budget_ns = 1500
+measured_ns = 290.2
+
+[bench."lazy/page_50_of_10k"]
+budget_ns = 1500
+measured_ns = 288.0
+
+[bench."lazy/view_page_50_of_100k"]
+budget_ns = 16000
+measured_ns = 3196.6
+
+[bench."lazy/invalidate"]
+budget_ns = 900
+measured_ns = 178.0
+
+[bench."lazy/invalidate_10k"]
+budget_ns = 860
+measured_ns = 170.6
+
 [bench."signals/computed/recompute_1"]
 budget_ns = 250
 measured_ns = 40.3
@@ -714,6 +743,22 @@ num = "signals/derived_10k/update_visible"
 den = "signals/keyed_10k/update"
 max = 2.5
 measured = 1.43
+
+# A page of 50 rows and the invalidation of a list of 100,000 against the same on 10,000: O(window)
+# and O(1), so the ratios sit at 1 (healthy 1.0-1.05 for the page, 1.04-1.16 for the invalidation on a
+# host at load 20-35). The bound is what they guard rather than 1.15x of a sample: an O(n) step (the
+# list cloned or encoded on the way) would put either near 10.
+[ratio."lazy_page_scaling"]
+num = "lazy/page_50_of_100k"
+den = "lazy/page_50_of_10k"
+max = 2
+measured = 1.01
+
+[ratio."lazy_invalidate_scaling"]
+num = "lazy/invalidate"
+den = "lazy/invalidate_10k"
+max = 2
+measured = 1.04
 
 # ---------------------------------------------------------------------------------------------
 # Sizes of shipped artefacts (ADR-052): measured by `scripts/wasm-size.sh`, not by the budgets test,

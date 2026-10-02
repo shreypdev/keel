@@ -1,0 +1,21 @@
+{
+  "kind": "layer-a",
+  "date": "2026-10-01",
+  "tag": "lazy-lists",
+  "command": "UNDRA_BENCH_RESULTS_TAG=lazy-lists UNDRA_BENCH_FILTER=lazy/ cargo test -p undra-bench --test budgets --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "3427c1a49ad5-dirty"},
+  "load_average": {"before": 14.74, "after": 14.74},
+  "scale": 1,
+  "baseline": null,
+  "rows": [
+    {"name": "lazy/page_50_of_100k", "p50_ns": 259.5381526104418, "p90_ns": 273.8875502008032, "budget_ns": 1500, "baseline_p50_ns": null, "iterations": 299796, "failed": false},
+    {"name": "lazy/page_50_of_10k", "p50_ns": 261.12751004016064, "p90_ns": 276.355421686747, "budget_ns": 1500, "baseline_p50_ns": null, "iterations": 299796, "failed": false},
+    {"name": "lazy/view_page_50_of_100k", "p50_ns": 2795.3795379537955, "p90_ns": 3062.8448844884488, "budget_ns": 16000, "baseline_p50_ns": null, "iterations": 91203, "failed": false},
+    {"name": "lazy/invalidate", "p50_ns": 155.07831325301206, "p90_ns": 159.7640562248996, "budget_ns": 900, "baseline_p50_ns": null, "iterations": 299796, "failed": false},
+    {"name": "lazy/invalidate_10k", "p50_ns": 150.64457831325302, "p90_ns": 154.9949799196787, "budget_ns": 860, "baseline_p50_ns": null, "iterations": 299796, "failed": false}
+  ],
+  "ratios": [
+    {"name": "lazy_invalidate_scaling", "num": "lazy/invalidate", "den": "lazy/invalidate_10k", "value": 1.02943175910745, "max": 2, "attempts": 1, "holds": true},
+    {"name": "lazy_page_scaling", "num": "lazy/page_50_of_100k", "den": "lazy/page_50_of_10k", "value": 0.9939134814655323, "max": 2, "attempts": 1, "holds": true}
+  ]
+}

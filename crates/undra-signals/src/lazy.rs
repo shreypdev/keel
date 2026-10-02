@@ -756,6 +756,8 @@ impl DerivedSlot for LazyCell {
             return Emitted::Nothing;
         }
         *announced = Some((len, version));
+        // The whole entry in one allocation of the commit's scratch buffer, not two.
+        w.reserve(12);
         LazyInvalidated {
             len: wire_count(len),
             version,
