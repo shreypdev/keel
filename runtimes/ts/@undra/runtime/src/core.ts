@@ -62,7 +62,8 @@ export type LoadMode = "wasm-main" | "wasm-worker" | "remote";
  */
 export type CallTargetRef =
   | { readonly target: CallTarget.FreeFunction }
-  | { readonly target: CallTarget.ObjectMethod; readonly handle: Handle };
+  | { readonly target: CallTarget.ObjectMethod; readonly handle: Handle }
+  | { readonly target: CallTarget.LazyListPage; readonly handle: Handle; readonly offset: number; readonly limit: number };
 
 /** The argument type of `call`, `callSync` and `stream`. */
 export type CallTargetArg = CallTargetRef | CallTarget.FreeFunction;
@@ -339,6 +340,7 @@ function writeHead(out: Uint8Array, target: CallTargetArg, methodId: number, cal
 
 /** A `Call` payload (SPEC 3.3) for a free function or a method, in one allocation: `encodeCall` without its writer. */
 function encodeTarget(target: CallTargetArg, methodId: number, callId: number, args: Uint8Array): Uint8Array {
+  if (typeof target === "object" && target.target === CallTarget.LazyListPage) return encodeCall({ ...target, callId });
   const out = new Uint8Array(HEAD_LEN + args.length);
   writeHead(out, target, methodId, callId);
   if (args.length > 0) out.set(args, HEAD_LEN);
@@ -675,7 +677,7 @@ export class UndraCore {
     if (transport.callSync === undefined) throw new UndraModeError("callSync", transport.mode);
     this._assertOpen();
     let reply: Uint8Array;
-    if (transport.callSyncParts === undefined) {
+    if (transport.callSyncParts === undefined || typeof target === "object" && target.target === CallTarget.LazyListPage) {
       reply = transport.callSync(encodeTarget(target, methodId, this._allocCallId(), args));
     } else {
       writeHead(this._head, target, methodId, this._allocCallId());
