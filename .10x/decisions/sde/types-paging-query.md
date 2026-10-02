@@ -101,4 +101,23 @@ what was settled while building and what the integrator needs at the seams.
 
 ## Numbers and counts
 
-See the end of this file (filled in at the last commit).
+* **Tests** (`cargo test -p <crate> --no-fail-fast`, debug): `undra-query` 278 passed (0 failed, 3 ignored doc examples), of
+  which `tests/polling.rs` 26, `tests/infinite.rs` 31 (the proptest runs 96 cases by default; 4,000 cases were run once, clean),
+  `tests/lifecycle.rs` 4; `undra` 37; `undra-testkit` 33; `undra-meta` 163; `undra-macros` 339 passed, 3 failed: the two `record*`
+  snapshots and `compile_fail` (four `.stderr` goldens), all stale in the foundation commit and `tp-macros`'s (my five new UI
+  cases and the catalogue audit pass). `cargo clippy -p undra-query -p undra-macros -p undra -p undra-meta -p undra-bench
+  --all-targets -- -D warnings` and `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps` for the four library crates: clean.
+* **Bench** (release, budgets test, Apple M5 Pro while other pieces built): `query/infinite_append_page_50` 7.4 µs best p50
+  (criterion median 7.29 µs, 7.07 to 7.59), `query/keyed_push_50` 5.5 µs (5.41 µs); ratio 1.34 to 1.46, gate 2.0; budgets 38 µs
+  and 28 µs. The existing `query/*` rows against the foundation commit, alternating runs of both binaries (24 rounds, the
+  minimum of each, the machine at load 15 to 25): observe 0.77x (noise), construct and release 1.02x, `refetch()` call 1.02x,
+  refetch published to 100 observers 1.01x: no regression.
+* **Size (ADR-052)**, `scripts/wasm-size.sh` hello-world web core (no query): **119,496 B gzipped** in this tree against
+  **119,694 B** at the foundation commit measured the same way; both are over the recorded 116,706 B (+2.4 to 2.6%, the ceiling
+  is 120,000), so the growth over the record is the foundation's (Decimal, the lazy payloads), not this piece's: this piece
+  links nothing of `undra-query` into a core without a query. A core with one ordinary `#[undra::query]` (`stale`, `retry`):
+  192,431 B at the foundation, **195,126 B** with this piece (+2,695 B, +1.4%): about 1.35 KB is the polling code every query
+  carries (any observer may poll any query, so `set_poll_interval` is on every handle), the rest the paging hooks of the
+  generic engine (entry fields, `View`, rollback, seed) and the new dispatch arms; the paged engine itself, the persisted
+  closure and its migration are reached through `PagedVTable` only. Adding an `interval` query: +486 B; adding one `infinite`
+  query (with `persist`): +7,187 B. The JS gate was not measured (no `npm ci` in the worktree).
