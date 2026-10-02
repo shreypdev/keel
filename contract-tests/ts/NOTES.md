@@ -136,6 +136,18 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
   (`setReadBigInts`); S25.3's `-9007199254740993` crosses exactly. Node's SQLite is built without double-quoted string
   literals (`SQLITE_DQS=0`): `"x"` is an identifier, never a string.
 
+* S31 (ADR-042, the ledger): every step goes through the generated API (`openAccount`, `deposit`, `balances`, `statement`, `loadableStatement`,
+  `echo*`, `sampleReceipt`, the `Ledger` store) except where it counts entries or sends what no generated function can. A newtype is a branded
+  `string`, `bigint` or `Decimal`: step 1 compares the bytes of `AccountIdCodec`, `CentsCodec` and `PriceCodec` with those of `codecs.uuid`,
+  `codecs.i64` and `decimalCodec`, and checks `===` against the inner value at run time; that the brand is a distinct *type* is checked at compile
+  time, by four `@ts-expect-error` lines in `distinctTypes()` at the top of the file (`tsc --noEmit -p .` fails if any of them stops being an error;
+  vitest does not type-check). `Cents` compares with `<` as a bigint. Step 2b keeps two ledgers in step, one used raw (`RawStore`: it counts the
+  entries of each change-set and decodes the keyed patch, which a generated store hides) and one generated (`Ledger`, whose `accounts` signal is
+  compared with the model), because two stores of one type in one core are two objects. Step 4's scale-39 decimal goes through `core.call` with the
+  17 raw bytes of the wire vector `decimal_scale_39_rejected`: the core answers status 5 (`UndraReplyError` with `ReplyStatus.BadRequest`). The
+  TypeScript `Duration` is milliseconds (`validFor` of 90 s is `90_000`, compared as 90,000,000,000 ns) and `Timestamp` is a number of milliseconds.
+  React Native's column (`runtimes/rn/@undra/react-native/vitest.contract.config.ts`) runs the same file.
+
 ## Gaps and defects found (for the integrator)
 
 Fixed since (playground finding 5): the Mirror stranded a change-set enqueued from a signal subscriber during the flush; the flush now drains it in a further round (`runtimes/ts/@undra/runtime/test/mirror.test.ts`).
