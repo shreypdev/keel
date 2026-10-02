@@ -1,6 +1,9 @@
 import UndraRuntime
 import PlaygroundCore
 import XCTest
+#if UNDRA_FLOOR
+import Combine
+#endif
 
 extension ContractScenarios {
     // MARK: S18
@@ -39,14 +42,28 @@ extension ContractScenarios {
             // 2. Generated: the final value is there when burst returns (read-your-writes).
             let stress = try Stress(ctx: core)
             defer { stress.close() }
+            #if UNDRA_FLOOR
+            // At the iOS 15 floor the store is an `ObservableObject` whose properties are `@Published`, which fires on every
+            // set (ADR-045): what the mirror merged must reach it merged, one `objectWillChange` per applied entry.
+            var willChange = 0
+            let willChangeSink = stress.objectWillChange.sink { willChange += 1 }
+            defer { willChangeSink.cancel() }
+            #endif
             stress.burst(mode: .firehose, transactions: 1000)
             try checkEqual(stress.value, 1000, "value right after burst(.firehose, 1000)")
+            #if UNDRA_FLOOR
+            try checkEqual(willChange, 1, "objectWillChange events for 1000 merged change-sets")
+            willChange = 0
+            #endif
 
             // 3. Generated, no_coalesce: every progress entry is applied (SwiftUI shows what it renders).
             let applied = core.mirror.stats().entriesApplied
             stress.burst(mode: .progress, transactions: 10)
             try checkEqual(stress.progress, 10, "progress right after burst(.progress, 10)")
             try checkEqual(core.mirror.stats().entriesApplied - applied, 10, "progress entries the mirror applied")
+            #if UNDRA_FLOOR
+            try checkEqual(willChange, 10, "objectWillChange events for 10 no_coalesce entries")
+            #endif
         }
     }
 }

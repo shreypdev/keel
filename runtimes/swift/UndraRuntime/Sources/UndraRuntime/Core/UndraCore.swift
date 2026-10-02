@@ -134,11 +134,15 @@ public final class UndraCore: @unchecked Sendable {
         self.observation = Guarded<(any Sendable)?>(twin)
         self.state = Guarded<State>(initial)
         if isShutDown {
-            // The placeholder `shared` returns: its observable says so too, not `.connecting`.
-            DispatchQueue.main.async { [weak self] in
+            // The placeholder `shared` returns: its observables say so too, not `.connecting`. They are
+            // captured, not the core: a state they were promised reaches them even if the core is gone.
+            let twin = observation.withLock { (slot: inout (any Sendable)?) -> (any Sendable)? in
+                return slot
+            }
+            DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     observable.state = .closed(.requested)
-                    if #available(iOS 17, macOS 14, *), let twin = self?.existingConnection {
+                    if #available(iOS 17, macOS 14, *), let twin = twin as? UndraConnection {
                         twin.state = .closed(.requested)
                     }
                 }
@@ -385,11 +389,16 @@ public final class UndraCore: @unchecked Sendable {
             }
         }
         onConnectionChange?(next)
+        // Both observables are captured, not `self`: a connection a view holds hears `.closed` even when
+        // the core is released right after it closes (`onConnectionChange` runs before this hop).
         let observable = connectionObject
-        DispatchQueue.main.async { [weak self] in
+        let twin = observation.withLock { (slot: inout (any Sendable)?) -> (any Sendable)? in
+            return slot
+        }
+        DispatchQueue.main.async {
             MainActor.assumeIsolated {
                 observable.state = next
-                if #available(iOS 17, macOS 14, *), let twin = self?.existingConnection {
+                if #available(iOS 17, macOS 14, *), let twin = twin as? UndraConnection {
                     twin.state = next
                 }
             }

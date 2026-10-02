@@ -2,7 +2,7 @@
 # The iOS 15 / 16 floor (ADR-045, docs/IOS_15_16.md): everything that proves the compatibility mode builds where it claims to.
 #
 #   scripts/ios-floor.sh             run every step below (macOS with Xcode)
-#   scripts/ios-floor.sh runtime     one step: runtime | golden | sample | apps | contract | simulator
+#   scripts/ios-floor.sh runtime     one step: runtime | golden | sample | apps | contract | probe | simulator
 #
 #   runtime    the Swift runtime package (UndraRuntime and UndraTestKit) for the iOS 15.0 simulator, and for macOS 12
 #              (the same API availability), in Swift 6 language mode
@@ -14,6 +14,10 @@
 #              compile for the iOS 15.0 simulator (their apps stay on iOS 17: they dogfood Observation)
 #   contract   the Swift contract scenarios (the whole grid) against bindings generated for the iOS 15 floor
 #              (contract-tests/swift/run.sh --floor)
+#   probe      the runtime on the booted simulator (the newest iOS runtime installed): a tiny executable built for an iOS 15.0
+#              and for an iOS 17.0 deployment target (scripts/ios-floor-probe) reports that `core.connection` is the one
+#              `@Observable` connection on an OS that has Observation, so a floor build never falls back to the floor path on a
+#              device that can do better
 #   simulator  only when an iOS 15 or 16 simulator runtime is installed (this machine and CI may have iOS 26 only): the
 #              sample is installed and launched on it. Without one it says so and passes; Xcode can still *build*
 #              for those versions, which is what the steps above prove.
@@ -28,7 +32,7 @@ mkdir -p "$SCRATCH"
 SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 UNDRA="${UNDRA:-$REPO/target/debug/undra}"
 steps=("$@")
-[ "${#steps[@]}" = 0 ] && steps=(runtime golden sample apps contract simulator)
+[ "${#steps[@]}" = 0 ] && steps=(runtime golden sample apps contract probe simulator)
 
 need_undra() {
   [ -x "$UNDRA" ] || cargo build -p undra-cli
@@ -79,6 +83,29 @@ step_apps() {
 step_contract() {
   echo "==> the Swift contract scenarios against bindings generated for iOS 15.0"
   bash contract-tests/swift/run.sh --floor
+}
+
+step_probe() {
+  local udid
+  udid="$(xcrun simctl list devices available | grep -E '^ +iPhone' | head -1 | grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}' || true)"
+  if [ -z "$udid" ]; then
+    echo "==> no iPhone simulator is available here; the probe needs one to run"
+    return 0
+  fi
+  xcrun simctl boot "$udid" 2>/dev/null || true
+  if ! xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1; then
+    echo "==> the simulator $udid did not boot; the probe was not run"
+    return 0
+  fi
+  for floor in 15 17; do
+    echo "==> the observation path at run time, binary built for iOS $floor.0, on the simulator $udid"
+    UNDRA_PROBE_IOS="$floor" swift build --package-path scripts/ios-floor-probe --scratch-path "$SCRATCH/probe-$floor" \
+      --sdk "$SDK" --triple "arm64-apple-ios$floor.0-simulator"
+    local binary
+    binary="$(find "$SCRATCH/probe-$floor" -name probe -type f -perm +111 | head -1)"
+    xcrun vtool -show-build "$binary" | grep minos | sed 's/^ */    /'
+    xcrun simctl spawn "$udid" "$binary"
+  done
 }
 
 step_simulator() {

@@ -19,7 +19,7 @@ use std::path::Path;
 
 use undra_bindgen::SwiftObservation;
 
-use crate::error::{CliError, Result};
+use crate::error::{CliError, Code, Result};
 use crate::toml_lite::{self, Document, Entry, Value, quote};
 
 /// A platform an app is built for.
@@ -385,14 +385,13 @@ impl ProjectConfig {
                     "write it in quotes: deployment_target = \"15.0\"",
                 ));
             };
-            check_ios_target(target).map_err(|e| {
-                CliError::bad_config(file, format!("line {}: {}", entry.line, e.what), e.fix)
-            })?;
+            check_ios_target(target)
+                .map_err(|e| in_file(file, format!("line {}: {}", entry.line, e.what), e))?;
             cfg.ios.deployment_target.clone_from(target);
         }
         // `observation` with a floor below iOS 17 would generate code that does not compile (ADR-045).
         cfg.swift_observation(None)
-            .map_err(|e| CliError::bad_config(file, e.what, e.fix))?;
+            .map_err(|e| in_file(file, e.what.clone(), e))?;
         if let Some(entry) = reader.get("ios", "simulator_archs") {
             let archs = reader.as_str_list(entry, "ios", "simulator_archs")?;
             for arch in &archs {
@@ -676,6 +675,17 @@ impl ProjectConfig {
     }
 }
 
+/// `problem` (a diagnostic about a setting, with its own why and fix) as a `C0002` about `file`: the file's name in front
+/// of what is wrong, and the why and the fix kept (`CliError::bad_config` would replace the why with its general one).
+fn in_file(file: &Path, what: String, problem: CliError) -> CliError {
+    CliError::new(
+        Code::BadConfig,
+        format!("{}: {what}", file.display()),
+        problem.why,
+        problem.fix,
+    )
+}
+
 /// The lowest iOS version the Swift runtime supports (ADR-045), as `[ios] deployment_target`.
 pub const MIN_IOS_TARGET: &str = "15.0";
 
@@ -683,12 +693,22 @@ pub const MIN_IOS_TARGET: &str = "15.0";
 /// not `<major>[.<minor>[.<patch>]]`.
 #[must_use]
 pub fn ios_major(target: &str) -> Option<u32> {
-    let mut parts = target.trim().split('.');
-    let major: u32 = parts.next()?.parse().ok()?;
-    for rest in parts {
-        rest.parse::<u32>().ok()?;
+    // Digits only: `u32::from_str` also takes a leading `+`, which Xcode and cargo's IPHONEOS_DEPLOYMENT_TARGET do not.
+    let numbers: Option<Vec<u32>> = target
+        .split('.')
+        .map(|part| {
+            if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+                None
+            } else {
+                part.parse().ok()
+            }
+        })
+        .collect();
+    let numbers = numbers?;
+    if numbers.len() > 3 {
+        return None;
     }
-    Some(major)
+    numbers.first().copied()
 }
 
 /// Checks `[ios] deployment_target`: a version, iOS 15.0 or later (the floor of the Swift runtime, ADR-045).
@@ -983,6 +1003,83 @@ mod tests {
         assert_eq!(ios_major("15"), Some(15));
         assert_eq!(ios_major("16.4.1"), Some(16));
         assert_eq!(ios_major("16."), None);
+        // Only what Xcode itself takes: digits, at most three parts, no sign, no spaces.
+        for bad in [
+            "+15", "-15", " 15", "15 ", "15.+1", "15.0.1.2", "", ".", "1e1", "15.x",
+        ] {
+            assert_eq!(ios_major(bad), None, "{bad:?}");
+        }
+    }
+
+    /// R8 for the iOS floor settings, one row per input the review named: the diagnostic has a code, what is wrong
+    /// (naming the setting and the value), why it matters (specific, not the general sentence of `bad_config`), a fix
+    /// and the docs link, once through `undra.toml` and, for the command line's spelling, through `check_ios_target`.
+    #[test]
+    fn every_ios_floor_mistake_teaches_what_why_fix_and_where_to_read_more() {
+        // (undra.toml text, what it must name, what the why must say, what the fix must offer)
+        let rows: &[(&str, &str, &str, &str)] = &[
+            (
+                "[ios]\ndeployment_target = \"14.0\"\n",
+                "iOS 14.0 is below the lowest iOS Undra supports, 15.0",
+                "Combine",
+                "deployment_target = \"15.0\"",
+            ),
+            (
+                "[ios]\ndeployment_target = \"sixteen\"\n",
+                "`sixteen` is not an iOS version",
+                "IPHONEOS_DEPLOYMENT_TARGET",
+                "\"16.0\"",
+            ),
+            (
+                "[bindings]\nswift_observation = \"observation\"\n[ios]\ndeployment_target = \"16.4\"\n",
+                "`swift_observation = \"observation\"` in [bindings] needs iOS 17, but `deployment_target = \"16.4\"` in [ios] is lower",
+                "Observation, which is iOS 17.0 and later",
+                "swift_observation = \"observable-object\"",
+            ),
+        ];
+        for (toml, what, why, fix) in rows {
+            let e = with_ios(toml).unwrap_err();
+            assert_eq!(e.code, Code::BadConfig, "{toml}");
+            assert!(
+                e.what.contains("undra.toml") && e.what.contains(what),
+                "{toml}: {e}"
+            );
+            assert!(e.why.contains(why), "{toml}: the why is `{}`", e.why);
+            assert!(e.fix.contains(fix), "{toml}: the fix is `{}`", e.fix);
+            let text = e.to_string();
+            assert!(
+                text.starts_with("error[undra::C0002]")
+                    && text.contains("= note: ")
+                    && text.contains("= help: ")
+                    && text.contains("errors.html#C0002"),
+                "{text}"
+            );
+        }
+        // `observation` is not refused as such: on the first iOS that has it, it is the default and may be said outright.
+        assert!(
+            with_ios("[bindings]\nswift_observation = \"observation\"\n[ios]\ndeployment_target = \"17.0\"\n")
+                .is_ok()
+        );
+        // Targets that are fine, whatever their spelling: a major alone, three parts, the first iOS with Observation.
+        for ok in ["15", "15.0", "15.0.1", "16.4", "17.0", "26.0"] {
+            assert!(
+                with_ios(&format!("[ios]\ndeployment_target = \"{ok}\"\n")).is_ok(),
+                "{ok}"
+            );
+        }
+        // The command line says the same thing as a bad argument (C0009), with the same why.
+        for (target, what) in [
+            ("14.0", "below the lowest iOS"),
+            ("x", "not an iOS version"),
+        ] {
+            let e = check_ios_target(target).unwrap_err();
+            assert_eq!(e.code, Code::BadArgument);
+            assert!(e.what.contains(what) && !e.why.is_empty() && !e.fix.is_empty());
+            assert!(e.to_string().contains("errors.html#C0009"));
+        }
+        for ok in ["15", "15.0.1", "17.0"] {
+            assert!(check_ios_target(ok).is_ok(), "{ok}");
+        }
     }
 
     #[test]

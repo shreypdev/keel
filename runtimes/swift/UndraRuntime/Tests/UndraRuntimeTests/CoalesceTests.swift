@@ -353,6 +353,41 @@ public final class ObjectProgressStore: UndraStore, ObservableObject, @unchecked
     }
 }
 
+/// The iOS 15 / 16 shape of a generated store with a keyed list: what `Stores.swift` generates for a `Vec` signal
+/// (a keyed patch goes through `applyPatch` on the `@Published` property).
+@MainActor
+private final class ObjectListStore: UndraStore, ObservableObject, @unchecked Sendable {
+    @Published public private(set) var rows: [UInt32] = []
+    @Published public private(set) var total: UInt32 = 0
+
+    init(adopting handle: UndraHandle, core: UndraCore) {
+        super.init(core: core, handle: handle)
+    }
+
+    public override func apply(signal: UInt32, op: ChangeOp, reader: inout UndraReader) {
+        do {
+            switch (signal, op) {
+            case (0, .fullValue):
+                let value = try [UInt32].undraDecode(&reader)
+                try reader.finish()
+                rows = value
+            case (0, .keyedPatch):
+                let ops: [PatchOp<UInt32>] = try decodePatch(&reader)
+                try reader.finish()
+                try applyPatch(ops, to: &rows)
+            case (1, .fullValue):
+                let value = try UInt32.undraDecode(&reader)
+                try reader.finish()
+                total = value
+            default:
+                break
+            }
+        } catch {
+            XCTFail("undecodable change for signal \(signal): \(error)")
+        }
+    }
+}
+
 // MARK: - Tests
 
 @MainActor
@@ -659,6 +694,43 @@ final class CoalesceTests: XCTestCase {
         XCTAssertEqual(willChange, 5, "one objectWillChange per property set: four progress values and the merged total")
         changes.cancel()
         progress.cancel()
+        store.close()
+    }
+
+    /// ADR-045, S18 at the floor: `@Published` fires on every set, so what the mirror merges must reach it merged. One
+    /// drain of 100 change-sets (100 insert patches of a list, 100 full values of a scalar) is one apply per signal,
+    /// so one `objectWillChange` and one `$property` value per signal, not 100.
+    func testAHundredMergedEntriesPublishOncePerSignalOnAnObservableObjectStore() throws {
+        let frames = ManualFrameScheduler()
+        let transport = FakeTransport()
+        let core = try makeCore(transport, frames: frames)
+        let store = ObjectListStore(adopting: storeHandle, core: core)
+        var willChange = 0
+        var listValues: [[UInt32]] = []
+        var totalValues: [UInt32] = []
+        let changes = store.objectWillChange.sink { willChange += 1 }
+        let rows = store.$rows.dropFirst().sink { listValues.append($0) }
+        let total = store.$total.dropFirst().sink { totalValues.append($0) }
+        for index in UInt32(0) ..< 100 {
+            transport.deliverChangeSet(changeSet(
+                patchEntry(0, patchBytes([PatchOp<UInt32>.insert(index: index, item: 1_000 + index)])),
+                fullEntry(1, u32(index + 1))
+            ))
+        }
+        XCTAssertEqual(willChange, 0, "nothing is applied before the frame")
+        let before = core.mirror.stats()
+        frames.fire()
+        let after = core.mirror.stats()
+        XCTAssertEqual(after.entriesApplied - before.entriesApplied, 2, "one apply per signal after merging 200 entries")
+        XCTAssertEqual(store.rows, (0 ..< 100).map { 1_000 + $0 })
+        XCTAssertEqual(store.total, 100)
+        XCTAssertEqual(willChange, 2, "one objectWillChange per signal, not one per merged entry")
+        XCTAssertEqual(listValues.count, 1, "one value of the list, with every insert in it")
+        XCTAssertEqual(listValues.first?.count, 100)
+        XCTAssertEqual(totalValues, [100])
+        changes.cancel()
+        rows.cancel()
+        total.cancel()
         store.close()
     }
 

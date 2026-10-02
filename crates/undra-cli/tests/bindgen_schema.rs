@@ -216,3 +216,206 @@ fn a_schema_bindgen_rejects_reports_its_diagnostics() {
         "{stderr}"
     );
 }
+
+/// The `--check` command of the generated tree, for the options `extra`.
+fn check_command(schema: &Path, out: &Path, extra: &[&str]) -> std::process::Command {
+    let mut check = undra();
+    check
+        .args(["bindgen", "--check", "--schema"])
+        .arg(schema)
+        .arg("--out")
+        .arg(out)
+        .args(extra);
+    check
+}
+
+/// ADR-045: the Swift observation mode and the iOS floor are part of the generated files, so a project whose mode or floor
+/// changed (`[ios] deployment_target`, `[bindings] swift_observation`, or the flags that say the same) without running
+/// `undra bindgen` again has stale bindings, and `--check` says so and names the files.
+#[test]
+fn a_swift_mode_or_floor_switch_without_regeneration_is_stale_bindings() {
+    let out = TempDir::new("schema-mode");
+    let generate = |extra: &[&str]| {
+        run_ok(
+            undra()
+                .args(["bindgen", "--schema"])
+                .arg(fixture())
+                .arg("--out")
+                .arg(out.path())
+                .args(extra),
+        )
+    };
+    let stale = |extra: &[&str]| {
+        let (code, stderr) = run_err(&mut check_command(&fixture(), out.path(), extra));
+        assert_eq!(code, 1, "{extra:?}");
+        assert!(
+            stderr.contains("out of date")
+                && stderr.contains("swift/Sources/GoldenStores/Generated/Stores.swift differs"),
+            "{extra:?}: {stderr}"
+        );
+        stderr
+    };
+    let current = |extra: &[&str]| {
+        let result = run_ok(&mut check_command(&fixture(), out.path(), extra));
+        assert!(
+            String::from_utf8_lossy(&result.stdout).contains("up to date"),
+            "{extra:?}"
+        );
+    };
+
+    // Generated for iOS 17 (the default): current for itself, stale for every other mode or floor.
+    generate(&[]);
+    current(&[]);
+    current(&["--ios-deployment-target", "17.0"]);
+    stale(&["--swift-observation", "observable-object"]);
+    stale(&["--ios-deployment-target", "15.0"]);
+    stale(&["--ios-deployment-target", "16.0"]);
+
+    // Regenerated for iOS 15: the header says which mode it is, and now the default is the stale one.
+    generate(&["--ios-deployment-target", "15.0"]);
+    let stores = std::fs::read_to_string(
+        out.path()
+            .join("swift/Sources/GoldenStores/Generated/Stores.swift"),
+    )
+    .unwrap();
+    assert!(
+        stores.lines().nth(1).is_some_and(
+            |l| l.starts_with("// Swift mode: observable-object") && l.contains("iOS 15")
+        ),
+        "{stores}"
+    );
+    current(&["--ios-deployment-target", "15.0"]);
+    current(&[
+        "--swift-observation",
+        "observable-object",
+        "--ios-deployment-target",
+        "15.0",
+    ]);
+    stale(&[]);
+    // 16.0 keeps the mode but changes the wire Duration (UndraDuration to Duration) and the package's platforms.
+    let stderr = stale(&["--ios-deployment-target", "16.0"]);
+    assert!(stderr.contains("swift/Package.swift differs"), "{stderr}");
+    // Back to the default: current again.
+    generate(&[]);
+    current(&[]);
+}
+
+/// R8 for the command line's spelling of the floor (`--ios-deployment-target`, `--swift-observation`): each mistake is a
+/// `C0009` with what, why, a fix and the docs link, and nothing is written.
+#[test]
+fn the_floor_flags_explain_their_mistakes() {
+    let out = TempDir::new("schema-flags");
+    let cases: &[(&[&str], &str, &str)] = &[
+        (
+            &["--ios-deployment-target", "14.0"],
+            "iOS 14.0 is below the lowest iOS Undra supports, 15.0",
+            "Combine",
+        ),
+        (
+            &["--ios-deployment-target", "latest"],
+            "`latest` is not an iOS version",
+            "IPHONEOS_DEPLOYMENT_TARGET",
+        ),
+        (
+            &["--swift-observation", "combine"],
+            "`combine` is not a Swift observation mode",
+            "`ObservableObject`s",
+        ),
+        (
+            &[
+                "--swift-observation",
+                "observation",
+                "--ios-deployment-target",
+                "16.4",
+            ],
+            "`--swift-observation observation` needs iOS 17, but `deployment_target = \"16.4\"` in [ios] is lower",
+            "Observation, which is iOS 17.0 and later",
+        ),
+    ];
+    for (extra, what, why) in cases {
+        let (code, stderr) = run_err(
+            undra()
+                .args(["bindgen", "--schema"])
+                .arg(fixture())
+                .arg("--out")
+                .arg(out.path())
+                .args(*extra),
+        );
+        assert_eq!(code, 1, "{extra:?}");
+        assert!(
+            stderr.contains("error[undra::C0009]")
+                && stderr.contains(what)
+                && stderr.contains(why)
+                && stderr.contains("= help: ")
+                && stderr.contains("errors.html#C0009"),
+            "{extra:?}: {stderr}"
+        );
+    }
+    assert!(
+        !out.path().join("swift").exists(),
+        "a refused run writes nothing"
+    );
+    // 15.0.1 and a bare 15 are versions, and `observation` on 17.0 is fine.
+    for extra in [
+        &["--ios-deployment-target", "15.0.1"][..],
+        &["--ios-deployment-target", "15"],
+        &[
+            "--swift-observation",
+            "observation",
+            "--ios-deployment-target",
+            "17.0",
+        ],
+    ] {
+        run_ok(
+            undra()
+                .args(["bindgen", "--schema"])
+                .arg(fixture())
+                .arg("--out")
+                .arg(out.path())
+                .args(extra),
+        );
+    }
+}
+
+/// E0051 at the floor only (ADR-045): a store member named `objectWillChange` is fine for `@Observable` and a collision
+/// with `ObservableObject`'s own publisher below iOS 17, and the CLI reports it as bindgen diagnostics (`C0007`).
+#[test]
+fn a_store_member_named_object_will_change_is_refused_at_the_floor_only() {
+    let out = TempDir::new("schema-e0051");
+    let mut value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(fixture()).unwrap()).unwrap();
+    let todos = value["objects"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|o| o["name"] == "Todos")
+        .unwrap();
+    todos["store"]["signals"][0]["name"] = "object_will_change".into();
+    let schema = out.path().join("will-change.json");
+    std::fs::write(&schema, serde_json::to_string(&value).unwrap()).unwrap();
+    // iOS 17: Observation has no such member.
+    run_ok(
+        undra()
+            .args(["bindgen", "--schema"])
+            .arg(&schema)
+            .arg("--out")
+            .arg(out.path().join("modern")),
+    );
+    let (code, stderr) = run_err(
+        undra()
+            .args(["bindgen", "--schema"])
+            .arg(&schema)
+            .arg("--out")
+            .arg(out.path().join("floor"))
+            .args(["--ios-deployment-target", "15.0"]),
+    );
+    assert_eq!(code, 1);
+    assert!(
+        stderr.contains("error[undra::C0007]")
+            && stderr.contains("E0051")
+            && stderr.contains("objectWillChange")
+            && stderr.contains("ObservableObject"),
+        "{stderr}"
+    );
+    assert!(!out.path().join("floor").join("swift").exists());
+}

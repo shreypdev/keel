@@ -235,10 +235,10 @@ jobs:
         run: scripts/ios-floor.sh apps
       - name: Swift contract scenarios against bindings generated for iOS 15
         run: scripts/ios-floor.sh contract
-      - name: The sample on an iOS 15 or 16 simulator runtime, when the image has one
+      - name: The observation path at run time on the image's simulator, and the sample on an iOS 15 or 16 runtime when it has one
         run: |
           xcrun simctl list runtimes
-          scripts/ios-floor.sh simulator
+          scripts/ios-floor.sh probe simulator
 
   android:
     name: Android cross-build

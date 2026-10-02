@@ -1,0 +1,7 @@
+# undra build output (the XCFramework and the Xcode phase's markers); `undra build` and the Xcode Run Script phase recreate it
+/build
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/

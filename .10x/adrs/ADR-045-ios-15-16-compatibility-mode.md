@@ -191,3 +191,18 @@ the twin.
   (`scripts/ios-floor.sh simulator` does it where such a runtime exists).
 * **ADR-043's `UndraLazyList`** has not landed; when it does it follows decision 4's twin rule (the runtime already has the pattern in
   `UndraConnection` / `UndraConnectionObject`).
+
+## Review addendum (2026-10-02, `wt/ios-floor` review)
+
+* **The cost decision 4 did not state.** `@Published` has no in-place accessor, so `try applyPatch(ops, to: &self.visible)` in the
+  generated `apply` copies the array once per applied patch where `@Observable` mutates it in place. Measured (Apple M5 Pro, release,
+  32-byte rows with a heap string, one patch, `objectWillChange` subscribed): 5 µs at 1,000 rows, 48 µs at 10,000, 0.5 ms at 100,000,
+  against 0.2 µs at every size under Observation; linear (about 5 ns a row) and paid per applied patch, not per op (a 100-op patch is
+  56 µs at 10,000 rows), because the mirror merges a frame's patches into one apply. Accepted as the known cost of `@Published`
+  arrays; stated in SPEC 10.1, `docs/IOS_15_16.md` and the cookbook. (Swapping the array out and back in avoids the copy but publishes
+  an empty list to `$property` subscribers in between, so it is not used.)
+* **A held connection must not depend on the core.** `core.connection` (iOS 17) and `core.connectionObject` are told in one hop to the
+  main queue; the hop captures both observables, not the core (it first captured the core weakly, so an `@Observable` connection missed
+  the final state when the app released the core from `onConnectionChange`).
+* **SQLite.** `sqlite3_changes` (a C `int`) replaces `sqlite3_changes64` below iOS 15.4 / macOS 12.3; a single statement over
+  2,147,483,647 changed rows reports an undefined count. Documented in `docs/IOS_15_16.md`.

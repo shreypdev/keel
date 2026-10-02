@@ -1348,7 +1348,9 @@ Reading a signal is still a plain property read and a command is still a method 
 ## What degrades
 
 - **Granularity.** Observation redraws a view when a property it read changes; an `ObservableObject` redraws every view that observes the store when any of its properties changes. SwiftUI coalesces the events of one drain into one update. Split a big store, or observe a smaller one.
+- **A big list is copied on every patch.** `@Published` has no in-place accessor, so a keyed patch to a list copies the array once, where Observation mutates it in place. Measured on an Apple M5 Pro (release build, 32-byte rows): about 5 µs for 1,000 rows, 48 µs for 10,000 and 0.5 ms for 100,000, against 0.2 µs at any size under Observation. It is linear in the list and paid once per applied patch, not per op (the mirror merges a frame's patches into one apply, so 100 ops cost about what 1 does). It is invisible for lists of thousands; for 100,000 rows that change every frame, [page the list](https://shreypdev.github.io/undra/docs/cookbook/pagination.html) or observe a smaller store.
 - **One name.** A store member called `objectWillChange` is [E0051](https://shreypdev.github.io/undra/docs/errors.html#E0051) in this mode, because `ObservableObject` declares it.
+- **SQLite change counts.** The built-in `SQLiteDbAdapter` counts changes with `sqlite3_changes`, a C `int` (the 64-bit one needs iOS 15.4): a single statement that changes more than 2,147,483,647 rows reports an undefined count.
 - **Nothing else.** The mirror, keyed patches, `no_coalesce` and the error channel are the same code in both modes.
 
 ## Raising the floor later
