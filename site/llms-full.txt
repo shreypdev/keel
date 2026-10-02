@@ -927,7 +927,7 @@ A mutation edits the whole list with `CacheView::update_items`, inside the optim
 
 A store field of type `Lazy<T>` is a list the core owns and the platform reads a window of. The platform is told how many rows there are and which version of the list that is; it asks the core for the pages it needs.
 
-Reading a row that is not loaded gives `nil`, `null` or `undefined` and asks for its page of 50 rows and one page of prefetch on each side, once. Requests made in one frame go out together. At most 24 pages are kept, least recently touched first out. A change to the list, whatever it is, is one 12-byte entry (the new length and the new version): the platform keeps showing the rows it has and asks again for the pages on screen, so a change costs the window, never the list. A reply carries the version it was read at, so a page that arrives after a newer change is thrown away and asked for again.
+Use a lazy container to show it (`LazyVStack`, `LazyColumn`, a virtualised list), never one that builds every row up front: SwiftUI's `List` over `0..<count` reads all of them at once and the cache cannot hold that. Reading a row that is not loaded gives `nil`, `null` or `undefined` and asks for its page of 50 rows and one page of prefetch on each side, once. Requests made in one frame go out together. At most 24 pages are kept, least recently touched first out. A change to the list, whatever it is, is one 12-byte entry (the new length and the new version): the platform keeps showing the rows it has and asks again for the pages on screen, so a change costs the window, never the list. A reply carries the version it was read at, so a page that arrives after a newer change is thrown away and asked for again.
 
 |  | Cost |
 | --- | --- |

@@ -117,8 +117,12 @@ impl Library {
     pub fn add(&amp;self, title: String) { self.books.push(Book { .. }); }   // the recorded API of Signal&lt;Vec&lt;T&gt;&gt;
 }</code></pre></div>
 <div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">let library = try Library()
-List(0..&lt;library.books.count, id: \.self) { i in
-    if let book = library.books[i] { BookRow(book) } else { BookRow.placeholder }   // reading requests the page
+ScrollView {
+    LazyVStack {                                              // a lazy container: a List would build every row up front
+        ForEach(0..&lt;library.books.count, id: \.self) { i in
+            if let book = library.books[i] { BookRow(book) } else { BookRow.placeholder }   // reading requests the page
+        }
+    }
 }</code></pre></div>
 <div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">val library = Library.create()
 LazyColumn { items(library.books) { index, book -&gt; if (book != null) BookRow(book) else Placeholder() } }   // undra-compose</code></pre></div>
@@ -126,7 +130,7 @@ LazyColumn { items(library.books) { index, book -&gt; if (book != null) BookRow(
 const { length, getItem } = useLazyList(library.books);
 // for TanStack Virtual or react-window: useVirtualizer({ count: length, ... }) and getItem(index)</code></pre></div>
 </details>
-<p>Reading a row that is not loaded gives <code>nil</code>, <code>null</code> or <code>undefined</code> and asks for its page of 50 rows and one page of prefetch on each side, once. Requests made in one frame go out together. At most 24 pages are kept, least recently touched first out. A change to the list, whatever it is, is one 12-byte entry (the new length and the new version): the platform keeps showing the rows it has and asks again for the pages on screen, so a change costs the window, never the list. A reply carries the version it was read at, so a page that arrives after a newer change is thrown away and asked for again.</p>
+<p>Use a lazy container to show it (<code>LazyVStack</code>, <code>LazyColumn</code>, a virtualised list), never one that builds every row up front: SwiftUI's <code>List</code> over <code>0..&lt;count</code> reads all of them at once and the cache cannot hold that. Reading a row that is not loaded gives <code>nil</code>, <code>null</code> or <code>undefined</code> and asks for its page of 50 rows and one page of prefetch on each side, once. Requests made in one frame go out together. At most 24 pages are kept, least recently touched first out. A change to the list, whatever it is, is one 12-byte entry (the new length and the new version): the platform keeps showing the rows it has and asks again for the pages on screen, so a change costs the window, never the list. A reply carries the version it was read at, so a page that arrives after a newer change is thrown away and asked for again.</p>
 <div class="table-wrap"><table><thead><tr><th></th><th>Cost</th></tr></thead><tbody><tr><td>Observing a list of 100,000 rows</td><td>20 bytes</td></tr><tr><td>A change of any size</td><td>12 bytes, then the window</td></tr><tr><td>A page of 50 rows in the core</td><td>microseconds (a few hundred nanoseconds on the reference machine)</td></tr><tr><td>Rows kept on the platform</td><td>at most 24 pages</td></tr></tbody></table></div>
 <p><code>Lazy::over(&amp;derived)</code> is a read-only lazy view of a derived list (<a href="concepts.html">core concepts</a>): its pages come from the derived index in O(log n + page), so a filtered and sorted view over 50,000 rows pages as cheaply as the list itself. A store with a view needs a <code>restore</code> hook, because the view is rebuilt from its source rather than saved. A <code>Lazy</code> is store state: a snapshot carries its rows, and after a restore the platform gets a new page server and reads its window again.</p>
 <p>Rows not yet loaded have no identity, so animations across a re-page follow the index; the loaded rows have their keys. A <code>PagingSource</code> adapter over <code>UndraLazyList</code> for Jetpack Paging can follow if teams ask. On iOS 15 and 16 the Swift class is <code>UndraLazyListObject</code>, an <code>ObservableObject</code> you hold with <code>@ObservedObject</code>.</p>
