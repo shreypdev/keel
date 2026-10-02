@@ -81,12 +81,15 @@ fn js_number_output_type_checks() {
         skip("no TypeScript compiler (tsc) found");
         return;
     }
-    let schema = common::case("records");
-    let mut generator = common::generator_for("records", &schema);
-    generator.ts_js_number = true;
-    let files = generator.typescript(&schema).unwrap();
-    if let Err(diagnostics) = typecheck("records-js-number", &files) {
-        panic!("the js_number TypeScript does not type-check:\n{diagnostics}");
+    // `newtypes` has `u64` newtypes, one of them a map key: `number` branded, and a `Map` keyed by it.
+    for case in ["records", "newtypes", "infinite"] {
+        let schema = common::case(case);
+        let mut generator = common::generator_for(case, &schema);
+        generator.ts_js_number = true;
+        let files = generator.typescript(&schema).unwrap();
+        if let Err(diagnostics) = typecheck(&format!("{case}-js-number"), &files) {
+            panic!("the js_number TypeScript of `{case}` does not type-check:\n{diagnostics}");
+        }
     }
 }
 
