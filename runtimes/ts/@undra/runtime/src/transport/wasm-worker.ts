@@ -355,7 +355,7 @@ export class WasmWorkerTransport implements Transport {
    * `UndraTransportError` (`"trap"`, with the engine's stack, when the new instance traps too).
    */
   async restart(generationFloor: number): Promise<RestartResult> {
-    const answer = await this.#request(this.#canRestart, "restart", { t: "restart", id: 0, generationFloor: generationFloor >>> 0 });
+    const answer = await this.#request(this.#canRestart, "restart", { t: "restart", id: 0, generationFloor });
     // The answer carries the result's fields (a failure carries no `hello`).
     if (answer.t !== "restarted" || answer.hello === undefined) throw controlFailure(answer);
     return answer as RestartResult;

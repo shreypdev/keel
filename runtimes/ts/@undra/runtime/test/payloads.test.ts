@@ -701,7 +701,7 @@ describe("Snapshot (layout 2, ADR-037)", () => {
 
   it("lays out the header, the type table, the description, then stores and signals per SPEC 5.9", () => {
     expect(toHex(encodeSnapshot(snapshot))).toBe(
-      "02000000" + "04030201" + "8877665544332211" +
+      "02000000" + "0403020100000000" + "8877665544332211" +
         "02000000" + "efbeadde" + "1032547698badcfe" + "01000000" + "0000000000000000" +
         "0d000000" + toHex(new TextEncoder().encode('{"stores":[]}')) +
         "0100000001000000" + "efbeadde" + "02000000" +
@@ -715,7 +715,9 @@ describe("Snapshot (layout 2, ADR-037)", () => {
     const bytes = encodeSnapshot(snapshot);
     expect(decodeSnapshot(bytes)).toEqual(snapshot);
     expect(decodeSnapshot(embedded(bytes))).toEqual(snapshot);
-    expect(toHex(encodeSnapshot(empty))).toBe("00000000" + "00000000" + "0000000000000000" + "00000000" + "00000000");
+    expect(toHex(encodeSnapshot(empty))).toBe("00000000" + "0000000000000000" + "0000000000000000" + "00000000" + "00000000");
+    const wide = { ...empty, generationFloor: 2 ** 40 - 1 };
+    expect(decodeSnapshot(encodeSnapshot(wide))).toEqual(wide);
     const floor9 = { ...empty, generationFloor: 9, schemaHash: 7n, description: "{}" };
     expect(decodeSnapshot(encodeSnapshot(floor9))).toEqual(floor9);
   });
@@ -727,14 +729,14 @@ describe("Snapshot (layout 2, ADR-037)", () => {
   });
 
   it("rejects counts that cannot fit in the input", () => {
-    expectWireError(() => decodeSnapshot(fromHex("ffffffff 00000000")), "length_too_large");
+    expectWireError(() => decodeSnapshot(fromHex("ffffffff 0000000000000000")), "length_too_large");
     // A type count beyond the input.
-    expectWireError(() => decodeSnapshot(fromHex("00000000 00000000 0000000000000000 ffffffff")), "length_too_large");
+    expectWireError(() => decodeSnapshot(fromHex("00000000 0000000000000000 0000000000000000 ffffffff")), "length_too_large");
     // A signal count beyond the input.
     expectWireError(
       () =>
         decodeSnapshot(
-          fromHex("01000000 00000000 0000000000000000 01000000 02000000 0000000000000000 00000000 0000000000000000 02000000 ffffffff"),
+          fromHex("01000000 0000000000000000 0000000000000000 01000000 02000000 0000000000000000 00000000 0000000000000000 02000000 ffffffff"),
         ),
       "length_too_large",
     );
