@@ -74,7 +74,7 @@
 //! lower. `UNDRA_BENCH_SCALE` never applies to a size.
 //!
 //! A fifth kind of table gates a row of the **web call path**, measured in JavaScript (the
-//! playground's device bench in Chromium, `bench.spec.ts`, and `call-path.test.mjs` against the
+//! playground's device bench in Chromium, `bench.spec.ts`, and `call-path.test.ts` against the
 //! fixture core in Node), not by this crate:
 //!
 //! ```toml

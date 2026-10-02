@@ -450,6 +450,26 @@ removing behaviour (a mirror without compaction, no worker or remote mode in the
 no snapshot API) or a different public surface, and that is a decision for a later ADR, not for a size piece. The 8 KB of the
 blueprint is out of reach for the same reason.
 
+### What a page loads over its life (review, same tree)
+
+The gate is the up-front chunk, so it does not say what an app loads in all. gzip -9, measured on the hello app at the
+gated target: the up-front chunk **21,159** (the bindings and the loader, 1,457 and 197 more, are outside the gate as
+before); the first call to Http, Kv, SecureStore or Fs loads `standard` (2,471) and the
+`ports` chunk it imports (1,688), **4,159** in all for the four, one request each, in parallel (Vite's preload of the dynamic
+import's dependencies). A hello app that calls any of those ports therefore loads **25,318** bytes of runtime over its
+life (21,159 + 4,159), against 25,996 before this change: the saving for such an app is 678 bytes and one more round trip at
+its first port call, not the 4,686 the up-front chunk shows; an app that never calls them keeps the whole saving. The remote
+transport (2,276 + 649 for the envelope chunk it shares with the worker transport), the worker transport (2,610 + 649) and the
+Worker script (12,393) load only in the mode that needs them. `lazy_gzipped` (22,159) is the sum of all of them, which no one
+page loads. If a port's chunk cannot be fetched (the network is down, a deploy replaced the file, a Content-Security-Policy
+that allows the entry script but not the chunks beside it, which a policy by origin or by nonce with `strict-dynamic` does not
+do), the call is answered "unavailable" to the
+core, `onError` receives an `UndraUnhandledError` naming the port (`Kv port 0x... method 0x...`) with the failed import as its
+cause, and the next call tries the load again (`default-ports.test.ts`). The four default ports are asynchronous, whatever
+adapter backs them (`sync: false` in the lazy wrapper), so `wasm-worker`'s refusal of a synchronous main-thread port still
+happens at load and never concerns a lazily loaded chunk. Calls made before a port's code arrives run in the order they were
+made, per port; across two ports the calls of the port whose code arrived first run first.
+
 ### The gate
 
 Decision 2 is restated: **`[size."web/hello-runtime-js"]` is 21,500 bytes** (the budget; record 21,159, ceiling

@@ -1351,6 +1351,8 @@ Generated code calls only these names. Runtimes implement them; bindgen golden f
 
 ### 17.1 TypeScript (`@undra/runtime`)
 
+**A name that starts with an underscore is not API.** The runtime's classes keep their state in TypeScript `private` members whose names start with an underscore (`_pending`, `_head`, `_undraClosed`: not `#private`, which a build that targets less than ES2022 lowers to a `WeakMap` access, ADR-056). TypeScript enforces `private` at compile time only: the members are reachable from JavaScript, and a declaration file lists them by name, without a type. Code that reads or writes one is wrong, and a minor version may rename or remove it. Generated code never uses one (a generated member name is camel-cased and loses a leading underscore, so it cannot collide with one either); the few underscore members it does call (`Signal._set`, the protected `_apply` and `_observeAll` of the store base class) are named in the listing below and are the runtime's contract with generated code, not for apps.
+
 ```ts
 export class UndraCore {
   static load(opts: LoadOptions): Promise<UndraCore>;          // { mode: 'wasm-main' | 'wasm-worker' | 'remote', wasm?: URL | BufferSource, url?: string /* ws:// for remote */, adapters?: Partial<Adapters>, expectedSchemaHash: bigint, mirror?: { schedule?, maxPendingEntries?, maxPendingBytes? } /* §11.1 */, onDevNotice?: (message: string) => void /* dev only, remote cores served by `undra dev`, §5.10 (ADR-053) */, worker?: WorkerLike | (() => WorkerLike) | WorkerModeOptions /* { create?, ports?: URL | string }, ADR-049 */ }

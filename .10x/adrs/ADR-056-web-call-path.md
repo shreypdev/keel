@@ -38,7 +38,7 @@ rounds; Chromium 153 headless, the device bench's own page. Allocation was the c
 
 | # | Commit | Lever | What it removes |
 |---|---|---|---|
-| 1 | `b1aa0e5` | `UndraWriter` and `UndraReader` store and load integers up to 32 bits as bytes, make the `DataView` on first use, default to 64 bytes, copy a result of up to 64 bytes out (`finish`), write short strings ASCII-first and read them by a loop | a `DataView` and an `ArrayBuffer` per writer and per reader; `TextDecoder` for names and keys |
+| 1 | `b1aa0e5` | `UndraWriter` and `UndraReader` store and load integers up to 32 bits as bytes, make the `DataView` on first use (lever 7 removed it: one shared scratch), default to 64 bytes, copy a result of up to 64 bytes out (`finish`), write short strings ASCII-first and read them by a loop | a `DataView` and an `ArrayBuffer` per writer and per reader; `TextDecoder` for names and keys |
 | 2 | `ae53a8d` | `encodeTarget` lays the `Call` header and the arguments out in one array; the handle's two halves come from a four-entry cache of recent handles; a reply's call id is read from its bytes | the `CallPayload` object, a second `UndraWriter`, three `BigInt` operations, a `DataView` per reply |
 | 3 | `8e3ece9` | **the direct call**: on a transport that answers inside `send` (`wasm-main`) and a call without a signal, `UndraCore.call` registers a plain `DirectCall` in the pending map, sends, and returns an already settled promise; a call the core answers later gets its promise after `send` (before anything can reply: `undra_poll` runs from a microtask) | a `Promise`, its executor and three closures built before the send |
 | 4 | `484b67b` | a small reply's body is `slice(5)`, not `subarray(5)` | the materialisation of the reply's buffer |
@@ -174,11 +174,21 @@ this series, against 312 and 159 now: inside the 1,600 and 800 budgets).
 * `UndraWriter`'s default capacity is 64 bytes (was 256) and `finish()` returns an exact copy when the result is at most
   64 bytes (still an exact-length view above): both are inside the documented contract (the view's `ArrayBuffer` may be
   larger, never overwritten).
-* The Vite plugin builds for `es2022` when the app sets no target. Chrome 94, Firefox 93 and Safari 16.4 are the
-  floor of that syntax; an app that needs older browsers sets `build.target` itself, and the call path is then
-  as fast as it now is at es2020 (1.08 µs, not 5.5).
-* Private members of the runtime's classes are no longer enforced at run time, only by the compiler (the declaration
-  files hide them): code that reaches `core._pending` is wrong, and now possible.
+* The Vite plugin builds for `es2022` when the app sets no target. What that asks of a browser, measured in review
+  (the hello app built at `es2022` and at `safari15`, `UNDRA_SIZE_TARGET`): the runtime's own output needs **class fields**
+  (Chrome 72, Firefox 69, Safari 14.1, so iOS 15 Safari is inside it; there is no class static block, no `#x in obj`
+  and no top-level `await` in it, and the up-front chunk has no private field at all; the lazily loaded remote and
+  worker transports keep `#private`, which Safari 14.1 supports). Built at `safari15`, the pinned Vite (Rolldown) turns
+  the same class fields into helper calls and adds one `typeof` helper (up-front chunk 21,594 bytes against 21,147): the
+  helper path, not syntax Safari 15 lacks. The whole of ES2022 syntax, which the *app's own* code may use under this
+  target, goes to Chrome 94, Firefox 93 and Safari 16.4 (class static blocks). An app that needs an older engine, or
+  that targets `safari15` and does not mind the helper path, sets `build.target` itself (the plugin leaves it alone, and
+  a test says so), and its call path is then as fast as it now is at es2020 (1.08 µs, not 5.5).
+* Private members of the runtime's classes are no longer enforced at run time, only by the compiler. A declaration file
+  still lists a `private` member, by name and without a type (`private _pending;`), so the names are visible and cannot
+  be used from TypeScript: code that reaches `core._pending` is wrong, and now possible from JavaScript. SPEC 17.1 says a
+  name that starts with an underscore is not API; generated code never uses one (a generated name is camel-cased and
+  loses a leading underscore, so it cannot collide with a base class's `_undraClosed` either).
 
 ## Risks
 

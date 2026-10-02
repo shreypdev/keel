@@ -927,18 +927,20 @@ export class UndraCore {
     if (given.length > 0 && this._transport.mode === "wasm-worker") {
       this._log(3, "undra::worker", `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`);
     }
+    // An explicit Timer adapter on a native core is served by a port built from a module that loads on demand: fetched before the
+    // transport starts, so that the port is registered before the first message after the Hello can reach it.
+    const timerModule = this._options.adapters?.timer && this._transport.mode === "remote" ? await import("./adapters/ports.js") : undefined;
     const hello = await this._transport.start(this._handler);
     if (hello.schemaHash !== this._options.expectedSchemaHash) {
       throw new UndraSchemaMismatchError(this._options.expectedSchemaHash, hello.schemaHash);
     }
     this.hello = hello;
     this._setConnection({ kind: "connected" });
-    if (this._options.adapters?.timer && this._transport.mode === "remote") {
+    if (timerModule !== undefined && this._options.adapters?.timer) {
       // A native core normally times itself; an explicit Timer adapter is a request to serve its Timer port.
-      const { timerPort } = await import("./adapters/ports.js");
       this._ports.set(
         PortIds.Timer.portId,
-        timerPort(this._options.adapters.timer, (timerId) => {
+        timerModule.timerPort(this._options.adapters.timer, (timerId) => {
           try {
             this.timerFired(timerId);
           } catch (error) {
@@ -1174,8 +1176,13 @@ export class UndraCore {
         transport.sendCall(this._head, args);
       }
     } catch (error) {
-      if (this._pending.get(callId) === entry) this._pending.delete(callId);
-      return Promise.reject(error);
+      // A send that fails before the core answered fails the call. One that fails after (a trap in the same export, the
+      // reply already delivered) leaves the answer standing, as it does for a call that has a promise (`_send`).
+      if (this._pending.get(callId) === entry) {
+        this._pending.delete(callId);
+        return Promise.reject(error);
+      }
+      if (!entry.done) return Promise.reject(error);
     }
     if (entry.done) return entry.failed ? Promise.reject(entry.value) : Promise.resolve(entry.value as Uint8Array);
     return new Promise<Uint8Array>((resolve, reject) => {

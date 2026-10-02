@@ -103,3 +103,77 @@ describe("a core's default ports", () => {
     expect(reply.status).toBe(PortStatus.Unavailable);
   });
 });
+
+describe("calls that arrive while the ports' code is loading, and a load that fails (review of ADR-052's amendment)", () => {
+  const entry = (name: string, value: Uint8Array): Uint8Array => Uint8Array.from([...key(name), ...encodeValue(codecs.bytes, value)]);
+
+  async function freshCore(adapters: Record<string, unknown>, onError: (error: unknown) => void = () => {}) {
+    const fresh = await import("../src/core.js");
+    const fake = new FakeCoreTransport({ mode: "remote" });
+    track(
+      await fresh.UndraCore.attach(fake, {
+        expectedSchemaHash: SCHEMA,
+        shared: false,
+        adapters: { log: captureLog(), http: null, ...adapters } as never,
+        onError,
+      }),
+    );
+    return fake;
+  }
+
+  it("queues the first calls of a port behind the load, drops none, and runs them in the order they were made", async () => {
+    // (Two ports' first calls were checked against a real ES module loader with a delayed chunk, by the reviewer: each port's
+    // calls run in order after the one load; across ports the calls of one port run before the other's. Vitest's module mock
+    // answers a second `import()` of a mocked module while the first is pending with the real module, so this test gates one.)
+    vi.resetModules();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.doMock("../src/adapters/standard.js", async (importOriginal) => {
+      await gate;
+      return importOriginal();
+    });
+    const kv = memoryKv();
+    const fake = await freshCore({ kv, secureStore: null, fs: null });
+    const calls = [
+      fake.callPort(PortIds.Kv.portId, PortIds.Kv.set, entry("a", Uint8Array.of(1))),
+      fake.callPort(PortIds.Kv.portId, PortIds.Kv.set, entry("a", Uint8Array.of(3))),
+      fake.callPort(PortIds.Kv.portId, PortIds.Kv.get, key("a")),
+    ];
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(kv.data.size, "nothing ran before the chunk arrived, and nothing was refused").toBe(0);
+    release();
+    const replies = await Promise.all(calls);
+    expect(replies.map((r) => r.status)).toEqual([PortStatus.Ok, PortStatus.Ok, PortStatus.Ok]);
+    expect(kv.data.get("a"), "the later set won: the port's calls ran in the order they were made").toEqual(Uint8Array.of(3));
+    expect(decodeValue(codecs.option(codecs.bytes), (replies[2] as { body: Uint8Array }).body)).toEqual(Uint8Array.of(3));
+  });
+
+  it("a chunk that cannot load (a CSP, an offline deploy) is answered 'unavailable', reported naming the port, and the next call loads it", async () => {
+    vi.resetModules();
+    let attempts = 0;
+    vi.doMock("../src/adapters/standard.js", async (importOriginal) => {
+      attempts++;
+      if (attempts === 1) throw new TypeError("Failed to fetch dynamically imported module: https://app.test/assets/standard-abc.js");
+      return importOriginal();
+    });
+    const reported: Array<{ message: string }> = [];
+    const kv = memoryKv();
+    kv.data.set("k", Uint8Array.of(7));
+    const fake = await freshCore({ kv, fs: null, secureStore: null }, (error) => reported.push(error as { message: string }));
+    const first = await fake.callPort(PortIds.Kv.portId, PortIds.Kv.get, key("k"));
+    expect(first.status).toBe(PortStatus.Unavailable);
+    expect(reported).toHaveLength(1);
+    expect(reported[0]?.message).toMatch(/Kv port 0x[0-9a-f]+ method 0x/);
+    // (The mock factory's failure is wrapped by vitest; a real failed `import()` carries its own TypeError's text.)
+    const second = await fake.callPort(PortIds.Kv.portId, PortIds.Kv.get, key("k"));
+    expect(second.status).toBe(PortStatus.Ok);
+    expect(decodeValue(codecs.option(codecs.bytes), second.body)).toEqual(Uint8Array.of(7));
+  });
+
+  it("no default port is synchronous, whatever adapter backs it: a lazy chunk cannot implement a synchronous port", async () => {
+    const ports = defaultPorts({ kv: memoryKv(), secureStore: memoryKv() });
+    expect([...ports.values()].every((p) => p.sync === false)).toBe(true);
+  });
+});
