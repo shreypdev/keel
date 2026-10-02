@@ -2214,9 +2214,9 @@ One schema feeds three generators. Three runtimes hold the mirrors. A small bina
 
 Undra is a Rust core, a schema extracted from it, three code generators, and three platform runtimes. Your screens sit on generated bindings; the bindings sit on a runtime package; the runtime talks to the core through a transport that is an ABI, not a framework.
 
-*Figure: Each platform has the same four layers; only the bottom one is platform-specific machinery.*
+*Figure: Each platform has the same four layers; only the bottom one is platform-specific machinery. React Native shares the web's two middle layers.*
 
-The core is one codebase. On each platform it is linked the way that platform expects: a prelinked static library in an XCFramework on iOS, a `.so` over JNI on Android, a wasm module on the web, each named after the core's namespace and reached through one table of entry points, so an app can carry [more than one core](https://shreypdev.github.io/undra/docs/several-cores.html). During development the same core can instead run on your machine behind a WebSocket (`undra dev`).
+The core is one codebase. On each platform it is linked the way that platform expects: a prelinked static library in an XCFramework on iOS, a `.so` over JNI on Android, a wasm module on the web, each named after the core's namespace and reached through one table of entry points, so an app can carry [more than one core](https://shreypdev.github.io/undra/docs/several-cores.html). A React Native app links the iOS and Android builds as they are and reaches them from JavaScript through JSI, under the same generated package and `@undra/runtime` as the web ([React Native](https://github.com/shreypdev/undra/blob/main/docs/REACT_NATIVE.md)). During development the same core can instead run on your machine behind a WebSocket (`undra dev`).
 
 ## From Rust to native code
 
