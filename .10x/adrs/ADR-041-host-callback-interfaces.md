@@ -294,3 +294,27 @@ text left room, and the deviations:
   cannot return (there is no `E` value to throw); the core never calls it in that state, and with `swift_typed_throws =
   false` it throws `.unavailable(.closed)`. A callback over `undra dev` has unit tests but no end-to-end WebSocket test.
 
+## Follow-up notes (2026-10-02, `wt/objects-followups`: the open items O1 to O8 of the review)
+
+* **Streams (decision 4).** A stream that takes callbacks lends them again for every collection (Kotlin, TypeScript) or
+  once (Swift: the stream opens when the method is called), through the same rule as a call: given back when the core
+  refuses the open (status 5) or the call never reached it, kept for everything else. Kotlin's give-back handles only the
+  upstream's failures (`Flow.catch`), so the collector's own exception and the decoding of an item the core sent never
+  give back a reference the core holds; Swift checks object arguments (`requireOwn`) and fails the stream at its first
+  element (`failedStream`); TypeScript lends inside `lendingStream`. Golden cases, typechecks and run tests cover a stream
+  with an object parameter, with a callback, a `Result<Stream, E>` and a free function on all three languages, and S27
+  and S28 each have a stream step on every column over the playground's `Workshop::tally` and `walk`.
+* **Status 5 owns nothing (decision 5).** A constructor that took callbacks and then fails after its body made their
+  proxies (a store whose signals cannot attach, `issue_constructed` refused) answers status 2 (`DispatchResult::Failed`,
+  no unwinding), because the proxies are released with the value it could not publish and the host must not give its
+  references back as well. A constructor without callbacks still refuses with status 5.
+* **A client's instances are its own (decision 5, interning).** Every client numbers its instances from 1, so the core
+  interns proxies per `(origin, port, instance)` and delivers a proxy's calls, `__release` and `__cancel` only while its
+  origin is the client the transport named as attached (`Runtime::set_client_origin`); a left session's proxy, kept by
+  an object that outlived it, is silent towards the next session. The three runtimes keep their registry across a lost
+  connection (a resumed session finds its proxies) and drop it when the core closes.
+* **Weak wrappers (decision 9).** Swift's weak wrapper, called directly after its target is gone, throws the method's own
+  `Unavailable` variant when the error type has one (typed throws can throw nothing else), and
+  `UndraCallbacks.targetGone()` stops the process with a message when it has none, instead of awaiting for ever. The core's
+  path is unchanged (the runtime resolves the target first and answers unavailable). Kotlin's companion `invoke` exists for
+  every `new`, not only a parameterless one.

@@ -307,3 +307,27 @@ deviations:
   drops that reference until the core closes (a hook on `UndraCore.call` would fix it). TypeScript: a query handle's
   constructor still makes its wrapper directly (crash recovery re-creates it; no method returns one).
 
+## Follow-up notes (2026-10-02, `wt/objects-followups`: the open items O1 to O8 of the review)
+
+What the review's open items changed in the rules above (record: `.10x/decisions/sde/objects-followups.md`):
+
+* **Parameters of streams and of a restore (decision 4).** A stream takes object parameters like a call: resolved before
+  it opens, so a refused stream owns nothing, and held (with the proxies of its callback parameters) until it ends or is
+  dropped. A restore cancels a call or stream that holds a store as a *parameter*, not only on one as its receiver
+  (ADR-023's rule, extended: `Runtime::object` records what a dispatch resolved and the call table keeps it); a call
+  whose objects the restore never touched goes on.
+* **One reference, one ledger (decision 6).** What a constructor returns is the session's own reference, counted per
+  handle by the transport's connection (an `Arc<Self>` singleton constructed twice is two); the runtime's origin ledger
+  skips what a constructor issues and records what other calls return. One `Release` gives back one reference of either
+  kind (the constructor's first), and a client's observation of an object ends only when the object does.
+* **Platform limits that moved.** Swift: a second wrapper of a store (an `Arc<Self>` `new` that returns an object the host
+  already wraps) no longer takes the first one's mirror registration over: the mirror keeps one function per owner and every
+  wrapper receives each change; a `close()` racing an `adopt` of the same handle leaves the new wrapper routed and observed
+  (the identity map counts a handle's wrappers and runs the leaving one's cleanup under its lock). TypeScript: an abort that
+  races a successful reply gives the reply's references back (`call`'s `orphan`, passed by generated code as
+  `reclaim(core, shape)` for an `async` method that returns objects; `wasm-main` answers inside the cancel and never had the
+  race); after a crash restart the releases held back are replayed as the bare releases they were and dropped for a handle
+  an open wrapper holds, and a finalizer from before a restart gives nothing back while a newer wrapper holds the handle.
+  Kotlin and Swift keep the documented limit (a caller cancelled at the moment a reply carrying an object arrives).
+* **`undra dev` sessions (decision 6, last consequence).** The session's origin is the key of its callback proxies as well
+  (ADR-041 note), and a session that left no longer speaks for the next one's instances.
