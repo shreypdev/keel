@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import XCTest
 @testable import UndraRuntime
 
@@ -429,6 +430,27 @@ final class ReconnectCoreTests: XCTestCase {
         transport.drop()
         let reconnecting = await waitUntil { core.connection.state == .reconnecting(attempt: 1) }
         XCTAssertTrue(reconnecting)
+    }
+
+    /// ADR-045: the twin for apps below iOS 17, which cannot use the `@Observable` `core.connection`.
+    func testTheConnectionObjectIsTheObservableObjectTwinOfTheObservableConnection() async throws {
+        let transport = FakeTransport(directSync: false)
+        let core = try makeRemoteCore(transport, log: StateLog())
+        var published: [UndraConnectionState] = []
+        let sink = core.connectionObject.$state.sink { published.append($0) }
+        let connected = await waitUntil { core.connectionObject.state == .connected }
+        XCTAssertTrue(connected)
+        transport.drop()
+        let reconnecting = await waitUntil { core.connectionObject.state == .reconnecting(attempt: 1) }
+        XCTAssertTrue(reconnecting)
+        XCTAssertEqual(published.last, .reconnecting(attempt: 1))
+        XCTAssertTrue(published.contains(.connected))
+        // The two follow the same state, one hop behind it.
+        if #available(iOS 17, macOS 14, *) {
+            let same = await waitUntil { core.connection.state == .reconnecting(attempt: 1) }
+            XCTAssertTrue(same)
+        }
+        sink.cancel()
     }
 
     func testAnInProcessCoreIsConnectedUntilShutdown() throws {

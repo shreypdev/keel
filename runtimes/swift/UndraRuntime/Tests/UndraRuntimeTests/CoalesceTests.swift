@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import Observation
 import XCTest
 @testable import UndraRuntime
@@ -326,6 +327,32 @@ public final class ObservableCounterStore: UndraStore, @unchecked Sendable {
     }
 }
 
+/// The iOS 15 / 16 shape of a generated store (ADR-045): `ObservableObject` with `@Published` properties, the
+/// same apply code. What the Swift contract suite runs the whole grid against in `observable-object` mode;
+/// this is the unit-level proof that the mirror drives it as it drives an `@Observable` one.
+@MainActor
+public final class ObjectProgressStore: UndraStore, ObservableObject, @unchecked Sendable {
+    @Published public private(set) var total: UInt32 = 0
+    @Published public private(set) var progress: UInt32 = 0
+    var progressSeen: [UInt32] = []
+
+    init(adopting handle: UndraHandle, core: UndraCore) {
+        super.init(core: core, handle: handle, noCoalesce: [1])
+    }
+
+    public override func apply(signal: UInt32, op: ChangeOp, reader: inout UndraReader) {
+        guard op == .fullValue, let value = try? UInt32.undraDecode(&reader) else {
+            return
+        }
+        if signal == 0 {
+            total = value
+        } else if signal == 1 {
+            progress = value
+            progressSeen.append(value)
+        }
+    }
+}
+
 // MARK: - Tests
 
 @MainActor
@@ -609,6 +636,30 @@ final class CoalesceTests: XCTestCase {
         XCTAssertEqual(core.mirror.stats().entriesApplied, 6)
         progress.close()
         counter.close()
+    }
+
+    func testAnObservableObjectStorePublishesWhatTheMirrorAppliesInOneFrame() throws {
+        let frames = ManualFrameScheduler()
+        let transport = FakeTransport()
+        let core = try makeCore(transport, frames: frames)
+        let store = ObjectProgressStore(adopting: storeHandle, core: core)
+        var willChange = 0
+        var published: [UInt32] = []
+        let changes = store.objectWillChange.sink { willChange += 1 }
+        let progress = store.$progress.dropFirst().sink { published.append($0) }
+        for index in UInt32(1) ... 4 {
+            transport.deliverChangeSet(changeSet(fullEntry(0, u32(100 * index)), fullEntry(1, u32(index))))
+        }
+        XCTAssertEqual(willChange, 0, "nothing is applied before the frame")
+        frames.fire()
+        // The `no_coalesce` signal is applied value by value, the other once, merged.
+        XCTAssertEqual(store.progressSeen, [1, 2, 3, 4])
+        XCTAssertEqual(published, [1, 2, 3, 4], "a Combine subscriber sees every value of the signal")
+        XCTAssertEqual(store.total, 400)
+        XCTAssertEqual(willChange, 5, "one objectWillChange per property set: four progress values and the merged total")
+        changes.cancel()
+        progress.cancel()
+        store.close()
     }
 
     // MARK: Equivalence with sequential application (property test)
@@ -1195,7 +1246,10 @@ final class CoalesceTests: XCTestCase {
         XCTAssertEqual(drains.reports.first?.changeSets, 2)
         XCTAssertEqual(drains.reports.first?.entries, 3)
         XCTAssertEqual(drains.reports.first?.appliedEntries, 2)
-        XCTAssertGreaterThanOrEqual(drains.reports.first?.duration ?? .seconds(-1), .zero)
+        XCTAssertGreaterThanOrEqual(drains.reports.first?.durationNanoseconds ?? -1, 0)
+        if #available(iOS 16, macOS 13, *) {
+            XCTAssertGreaterThanOrEqual(drains.reports.first?.duration ?? .seconds(-1), .zero)
+        }
         registration.remove()
         registration.remove()
         transport.deliverChangeSet(changeSet(fullEntry(0, u32(3))))
