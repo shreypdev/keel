@@ -48,7 +48,9 @@ changed: every class, method, `kind` and typed field of SPEC 17.1 is the same in
   out-of-range write says `T0233: u8, 300 — https://…/errors.html#T0233`, a wire failure `wire: code=unexpected_eof needed=3 at=0 — …#wire-unexpected_eof`,
   a typed error of the core arrives with its own text (`emptyTitle`, "the title cannot be empty"), a malformed command reports `Todos.remove
   malformed` to `onError`, `stats`, `snapshot` (688 bytes) and `restore` run from their lazy chunk, and the same stress at 100,000/s generated
-  99,762/s and applied 73/s. The playground's Playwright smoke: 9 of 9.
+  99,762/s and applied 73/s. The same package in `wasm-worker` mode on a real Worker (the Worker script bundled by Vite from `dist/worker.js`): a store created and a call
+  answered through the worker, a typed `emptyTitle` rejection across it, `callSync` refused with `UndraModeError` saying `T0093: callSync, wasm-worker — …`,
+  `snapshot` (687 bytes) and `restore`. The playground's Playwright smoke: 9 of 9.
 * **Counts**, on the tree before the merge with `main`: the runtime's suite **2,023 pass, 1 skipped** in 75 files (1,646 on `main`'s count in
   `docs/ONBOARDING.md`) and `npm run test:dist` **1,981 pass** in 73 (the two source-only files excluded); its three typechecks; the wasm
   harness 22 + 36 pass on the sources and on the production build; the TypeScript contract column 33/33 on both; the React Native package 111 pass,
