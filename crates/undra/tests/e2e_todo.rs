@@ -270,6 +270,58 @@ pub fn ticks_for(todos: &Todos, n: u32) -> impl Stream<Item = u32> {
     Ticks { next: 0, n }
 }
 
+/// An asynchronous free function that holds four stores and, when it is given one, a fifth: the call
+/// table names four object parameters of a call, and a call that holds more is cancelled by any restore.
+#[undra::api]
+pub async fn count_many(
+    ctx: Ctx,
+    a: &Todos,
+    b: &Todos,
+    c: &Todos,
+    d: &Todos,
+    e: Option<&Todos>,
+    seconds: u64,
+) -> u32 {
+    ctx.sleep(Duration::from_secs(seconds)).await;
+    let len = |todos: &Todos| todos.todos.with(|list| list.len() as u32);
+    len(a) + len(b) + len(c) + len(d) + e.map_or(0, len)
+}
+
+/// Two stores, so the second can be one the core has never heard of (the call is refused after the
+/// first was resolved).
+#[undra::api]
+pub async fn count_pair(ctx: Ctx, a: &Todos, b: &Todos, seconds: u64) -> u32 {
+    ctx.sleep(Duration::from_secs(seconds)).await;
+    a.todos.with(|list| list.len() as u32) + b.todos.with(|list| list.len() as u32)
+}
+
+/// An asynchronous free function that holds no object.
+#[undra::api]
+pub async fn wait_for(ctx: Ctx, seconds: u64) -> u32 {
+    ctx.sleep(Duration::from_secs(seconds)).await;
+    7
+}
+
+thread_local! {
+    /// What `ticks_nested` runs while it is being dispatched: a test's way to call the core from
+    /// inside a dispatch on the same thread.
+    static WHILE_DISPATCHING: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// A stream function whose body runs `WHILE_DISPATCHING`: user code that runs between a call's
+/// object parameters being resolved and the call being registered.
+#[undra::api]
+pub fn ticks_nested(todos: &Todos, n: u32) -> impl Stream<Item = u32> {
+    let _held = todos.todos.with(|list| list.len());
+    WHILE_DISPATCHING.with(|hook| {
+        if let Some(hook) = hook.borrow().as_ref() {
+            hook();
+        }
+    });
+    Ticks { next: 0, n }
+}
+
 /// A Rust implementation of the `Store` port; `fail` scripts an error.
 #[derive(Default)]
 struct FakeStore {
@@ -1123,4 +1175,104 @@ fn a_stream_holding_a_store_parameter_across_a_restore_ends_with_a_failed_item()
     core.t.runtime().stream_credit(id, 100);
     core.t.run_pending();
     assert!(core.t.host().take_stream_items().is_empty());
+}
+
+// ---- review: what the call table names, and what it must not inherit (objects-followups) ----
+
+#[test]
+fn a_call_holding_a_fifth_object_is_cancelled_by_a_restore_that_replaced_only_it() {
+    let core = Core::new();
+    let live = core.todos();
+    let snapshot = core.t.runtime().snapshot();
+    // Four stores made after the snapshot and released before the restore: the restore has nothing
+    // to say about them. The fifth, `live`, is in the snapshot and is replaced.
+    let others: Vec<Handle> = (0..4).map(|_| core.todos()).collect();
+    let args = |fifth: Option<Handle>| {
+        let mut args: Vec<u8> = others.iter().flat_map(enc).collect();
+        args.extend(enc(&fifth.map(|h| h.0)));
+        args.extend(enc(&5_u64));
+        args
+    };
+    let with_fifth = core.start(function_target("count_many"), &args(Some(live)));
+    let with_four = core.start(function_target("count_many"), &args(None));
+    core.t.run_pending();
+    for handle in &others {
+        core.t.runtime().release(handle.0);
+    }
+    core.t.runtime().restore(&snapshot).expect("restores");
+    let replies = core.t.take_replies();
+    assert_eq!(
+        replies
+            .iter()
+            .map(|r| (r.call_id, r.status))
+            .collect::<Vec<_>>(),
+        [(with_fifth, ReplyStatus::Cancelled)],
+        "the call holding five objects cannot tell which one was replaced, so any restore cancels it; \
+         the call holding four names them all and none was touched"
+    );
+    core.t.advance(Duration::from_secs(5));
+    let reply = one(core.t.take_replies());
+    assert_eq!((reply.call_id, reply.status), (with_four, ReplyStatus::Ok));
+}
+
+#[test]
+fn a_call_that_reuses_the_id_of_a_refused_call_does_not_inherit_its_objects() {
+    let core = Core::new();
+    let live = core.todos();
+    let snapshot = core.t.runtime().snapshot();
+    let gone = core.todos();
+    core.t.runtime().release(gone.0);
+    // `count_pair(live, gone)`: the first object resolves (and is noted for call 7), the second is
+    // stale, so the call is refused.
+    let refused = core.t.call(
+        function_target("count_pair"),
+        7,
+        &[enc(&live), enc(&gone), enc(&1_u64)].concat(),
+    );
+    assert_eq!(refused, 0);
+    assert_eq!(one(core.t.take_replies()).status, ReplyStatus::BadRequest);
+    // Call 7 again, a function that holds no object: a restore that replaced `live` has nothing to say.
+    assert_eq!(core.t.call(function_target("wait_for"), 7, &enc(&2_u64)), 0);
+    core.t.run_pending();
+    core.t.runtime().restore(&snapshot).expect("restores");
+    assert!(core.t.take_replies().is_empty(), "not cancelled");
+    core.t.advance(Duration::from_secs(2));
+    let reply = one(core.t.take_replies());
+    assert_eq!((reply.call_id, reply.status), (7, ReplyStatus::Ok));
+    assert_eq!(decode::<u32>(&reply.body), 7);
+}
+
+#[test]
+fn a_call_made_while_another_is_being_dispatched_on_the_same_runtime_is_refused() {
+    // The slot of `Runtime::param` is one per thread, which is enough because a dispatch is not
+    // re-entered: the core lock refuses a nested call, so it cannot take over the outer call's
+    // objects before they are registered. The outer stream is still checked by a restore.
+    let core = Core::new();
+    let store = core.todos();
+    let snapshot = core.t.runtime().snapshot();
+    let nested_status = std::rc::Rc::new(Cell::new(None));
+    let seen = nested_status.clone();
+    let runtime = core.t.runtime().clone();
+    WHILE_DISPATCHING.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            let payload = undra_runtime::testing::call_payload(
+                function_target("count_after"),
+                99,
+                &[enc(&store), enc(&1_u64)].concat(),
+            );
+            seen.set(Some(runtime.call(&payload)));
+        }));
+    });
+    let id = core.start(
+        function_target("ticks_nested"),
+        &[enc(&store), enc(&1000_u32)].concat(),
+    );
+    WHILE_DISPATCHING.with(|hook| *hook.borrow_mut() = None);
+    assert_eq!(nested_status.get(), Some(5), "the nested call was refused");
+    core.t.run_pending();
+    assert_eq!(one(core.t.take_replies()).status, ReplyStatus::StreamOpened);
+    core.t.runtime().restore(&snapshot).expect("restores");
+    let items = core.t.host().take_stream_items();
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!((items[0].call_id, items[0].flag), (id, StreamFlag::Failed));
 }

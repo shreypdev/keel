@@ -389,17 +389,25 @@ struct CallEntry {
     stream: Option<Arc<StreamState>>,
 }
 
-/// The object parameters of one call, inline, unused slots null: a call is checked against its
-/// first four (an object parameter beyond them is not: a restore leaves such a call to finish).
-/// Plain data (`Copy`), so a call table entry has nothing to free.
-type Held = [Handle; 4];
+/// The object parameters of one call, inline, unused slots null: the first four are named, and a
+/// fifth makes the last slot read [`MANY_PARAMS`]. A call that holds more objects than it can name
+/// is cancelled by *any* restore, because the restore cannot tell that none of them was replaced:
+/// cancelled is a status the host handles, a call finished on a replaced store is not. Plain data
+/// (`Copy`), so a call table entry has nothing to free.
+type Held = [Handle; 5];
 
 /// A call with no object parameter.
-const NO_PARAMS: Held = [Handle::NULL; 4];
+const NO_PARAMS: Held = [Handle::NULL; 5];
+
+/// The last slot of a [`Held`] when the call took more object parameters than the four it names.
+const MANY_PARAMS: Handle = Handle(u64::MAX);
 
 /// Remembers that call `call_id` took the object `handle` as a parameter. A call's parameters
 /// are resolved one after the other, straight before its dispatch returns the future or stream
-/// that holds them, so one slot per thread is enough.
+/// that holds them, so one slot per thread is enough: a dispatch is not re-entered on its thread
+/// (the core lock refuses a nested call into the same runtime, which is `Reentrant`; a stream
+/// function's body that calls *another* core would replace the slot, and the outer stream would go
+/// unchecked by a restore: a missed cancel, never a wrong one).
 #[inline(never)]
 fn note_param(call_id: u32, handle: Handle) {
     let mut held = if RESOLVED_FOR.replace(call_id) == call_id {
@@ -407,8 +415,9 @@ fn note_param(call_id: u32, handle: Handle) {
     } else {
         NO_PARAMS
     };
-    if let Some(free) = held.iter_mut().find(|held| held.is_null()) {
-        *free = handle;
+    match held.iter().position(|held| held.is_null()) {
+        Some(free) if free < 4 => held[free] = handle,
+        _ => held[4] = MANY_PARAMS,
     }
     RESOLVED.set(held);
 }
@@ -1578,6 +1587,9 @@ impl Runtime {
             Stats::inc(&self.stats.bad_requests);
             return 5;
         }
+        // The parameters a refused call left in the slot (`Runtime::param` noted them, then another
+        // failed to resolve) are nobody's: a call that reuses its id must not inherit them.
+        RESOLVED_FOR.set(0);
         if self.calls.lock().contains_key(&call_id) {
             Stats::inc(&self.stats.bad_requests);
             self.log(
@@ -2160,6 +2172,9 @@ impl Runtime {
     /// Whether the object `handle` names is not the one it named before the restore (`before`
     /// maps every handle that was live to its object's address).
     fn replaced_by_restore(&self, before: &HashMap<u64, usize>, handle: Handle) -> bool {
+        if handle == MANY_PARAMS {
+            return true;
+        }
         let was = before.get(&handle.0).copied();
         let now = self
             .objects
