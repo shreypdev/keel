@@ -25,6 +25,7 @@ for target in "${want[@]}"; do
       echo "== kotlinc -Werror"
       : "${UNDRA_KOTLINX_COROUTINES:?set UNDRA_KOTLINX_COROUTINES to the kotlinx-coroutines-core jar (source scripts/env.sh)}"
       "$root/scripts/kotlinc.sh" -cp "$UNDRA_KOTLINX_COROUTINES" -d "$scratch/kotlin" -jvm-target 11 -Werror \
+        -opt-in=dev.undra.runtime.UndraEmbeddingApi \
         "$root/runtimes/kotlin/undra-runtime/runtime/src/main/kotlin" \
         "$here/../generated/kotlin/src/main/kotlin" \
         "$here/kotlin"
