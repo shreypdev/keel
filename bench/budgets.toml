@@ -691,7 +691,7 @@ measured = 1.43
 # links the standard ports' Rust dispatchers by use (ADR-052 note): 116,731; 116,800 with devtools' inspector seam.
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 116966
+measured_gzip_bytes = 116706
 tolerance = 0.05
 
 # What a hello-world app loads up front of the JavaScript runtime: `@undra/runtime` as the template's
@@ -708,7 +708,7 @@ tolerance = 0.05
 # what). Gated like the wasm.
 [size."web/hello-runtime-js"]
 budget_gzip_bytes = 21500
-measured_gzip_bytes = 21159
+measured_gzip_bytes = 21173
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------
