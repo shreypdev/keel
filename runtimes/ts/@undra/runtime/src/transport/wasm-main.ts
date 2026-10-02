@@ -1,6 +1,6 @@
 import { cryptoRng, setTimeoutTimer, systemClock } from "../adapters/system.js";
 import type { ClockAdapter, RngAdapter, TimerAdapter } from "../adapters/types.js";
-import { UndraError, UndraReplyError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
+import { UndraError, UndraReplyError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 
 import {
@@ -55,7 +55,7 @@ export interface WasmMainOptions {
 }
 
 /** The exports of an Undra core module (SPEC 7) that this transport uses. */
-interface CoreExports {
+export interface CoreExports {
   readonly memory: WebAssembly.Memory;
   undra_alloc(len: number): number;
   undra_free(ptr: number, len: number): void;
@@ -174,7 +174,8 @@ export class WasmHost implements Channel {
   readonly mode = "wasm-main";
   readonly synchronous = true;
 
-  private readonly _options: WasmMainOptions;
+  /** @internal */
+  readonly _options: WasmMainOptions;
   private readonly _clock: ClockAdapter;
   private _rng: RngAdapter | null;
   private readonly _timer: TimerAdapter;
@@ -191,7 +192,8 @@ export class WasmHost implements Channel {
   private _closed = false;
   private _dead: UndraTransportError | null = null;
   /** The compiled module, kept so that a restart instantiates it again without compiling (ADR-049, `twin`). */
-  private _module: WebAssembly.Module | null = null;
+  /** @internal */
+  _module: WebAssembly.Module | null = null;
 
   /** @param options See {@link WasmMainOptions}. */
   constructor(options: WasmMainOptions) {
@@ -242,14 +244,6 @@ export class WasmHost implements Channel {
     const code = this._invoke(config.finish(), (e, ptr, len) => e.undra_init(ptr, len));
     if (code !== 0) throw new UndraTransportError("handshake", `undra_init failed with code ${code}`);
     return { undraVersion: `wasm-abi-${abi}`, schemaHash, platform: "wasm", mode };
-  }
-
-  /**
-   * A new transport over the same compiled module (no recompile) and options, not started: what a restart after a trap
-   * runs on (ADR-049, `crashRecovery`). This one stays dead.
-   */
-  twin(): this {
-    return new (this.constructor as new (options: WasmMainOptions) => this)({ ...this._options, wasm: this._module ?? this._options.wasm });
   }
 
   observe(handle: bigint, signalId: number, on: boolean): void {
@@ -304,53 +298,10 @@ export class WasmHost implements Channel {
     }
   }
 
-  /** The persisted state of every store (`undra_snapshot`, SPEC 5.9). Rejects `UndraTransportError` when the core is closed or exports no `undra_snapshot`. */
-  snapshot(): Promise<Uint8Array> {
-    try {
-      return Promise.resolve(this.takeSnapshot());
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  }
-
-  /** `undra_snapshot`, copied out of wasm memory, at once; throws `UndraTransportError` when the core cannot be asked. */
-  takeSnapshot(): Uint8Array {
-    return this._run((e) => {
-      if (e.undra_snapshot === undefined) throw new UndraTransportError("unsupported", "the core does not export undra_snapshot");
-      return this._takeBuf(e, e.undra_snapshot());
-    });
-  }
-
-  /**
-   * Rebuilds the stores from `bytes` (`undra_restore`). The change-sets of the observed signals the
-   * core re-delivers during the restore (ADR-023) have reached the handler when this resolves.
-   * Rejects with `UndraRestoreError` when the core refuses the bytes (it is unchanged).
-   */
-  restore(bytes: Uint8Array): Promise<void> {
-    try {
-      this._restore(bytes);
-      return Promise.resolve();
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  }
-
   close(): void {
     this._closed = true;
     this._handler = null;
     this._exports = null;
-  }
-
-  /** `undra_restore`; throws `UndraRestoreError` for a non-zero code. */
-  /** @internal */
-  _restore(bytes: Uint8Array): void {
-    const code = this._invoke(bytes, (e, ptr, len) => {
-      if (e.undra_restore === undefined) {
-        throw new UndraTransportError("unsupported", "the core does not export undra_restore");
-      }
-      return e.undra_restore(ptr, len);
-    });
-    if (code !== 0) throw new UndraRestoreError(code);
   }
 
   // ----- memory ----------------------------------------------------------------------
@@ -378,7 +329,8 @@ export class WasmHost implements Channel {
   }
 
   /** Copies the bytes of an `UndraBuf { ptr, len, cap }` and frees it. */
-  private _takeBuf(e: CoreExports, bufPtr: number): Uint8Array {
+  /** @internal */
+  _takeBuf(e: CoreExports, bufPtr: number): Uint8Array {
     if (bufPtr === 0) throw new UndraTransportError("protocol", "the core returned a null UndraBuf");
     try {
       this._bytes();

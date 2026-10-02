@@ -972,47 +972,9 @@ export class UndraCore {
     }
   }
 
-  /** Live counters of this core; see {@link UndraStats}. */
+  /** Live counters of this core; see {@link UndraStats}. (Built by a module that loads on the first call.) */
   async stats(): Promise<UndraStats> {
-    let core: CoreStatsJson | null = null;
-    const json = this._closed ? null : await this._transport.stats?.().catch(() => null);
-    if (typeof json === "string") {
-      try {
-        const parsed: unknown = JSON.parse(json);
-        if (typeof parsed === "object" && parsed !== null) core = parsed as CoreStatsJson;
-      } catch {
-        core = null;
-      }
-    }
-    let calls = 0;
-    let streams = 0;
-    for (const p of this._pending.values()) {
-      if (p.kind === "call") calls++;
-      else streams++;
-    }
-    const coreHandles = core?.live_handles;
-    const count = (value: unknown): number => (typeof value === "number" ? value : 0);
-    const background = (core?.background ?? {}) as CoreStatsJson;
-    const hostRefs = core?.host_refs;
-    return {
-      liveHandles: typeof coreHandles === "number" ? coreHandles : this._handles.size,
-      hostRefs: typeof hostRefs === "number" ? hostRefs : this._handles.size,
-      pendingCalls: calls,
-      openStreams: streams,
-      mirroredStores: this.mirror.size,
-      droppedEntries: this.mirror.dropped,
-      mirror: this.mirror.stats(),
-      core,
-      panicReports: count(core?.panic_reports),
-      background: {
-        tasks: count(background.tasks),
-        pending: count(background.pending),
-        runs: count(background.runs),
-        finished: count(background.finished),
-        replayed: count(background.replayed),
-        refetched: count(background.refetched),
-      },
-    };
+    return (await import("./extras.js")).stats(this, this._transport, this._pending, this._handles);
   }
 
   /**
@@ -1049,26 +1011,15 @@ export class UndraCore {
    */
   async snapshot(): Promise<Uint8Array> {
     this._assertOpen();
-    const transport = this._transport;
-    if (transport.snapshot === undefined) throw new UndraModeError("snapshot", transport.mode);
-    return transport.snapshot();
+    return (await import("./extras.js")).snapshot(this._transport);
   }
 
   /**
-   * Rebuilds the stores from `bytes` (a `snapshot`); the handles the app holds stay valid. Resolves
-   * after the restored values reached the stores (the core re-delivers the observed signals, and
-   * the mirror is flushed, so code after `await core.restore(..)` reads the restored values). A
-   * call or stream in flight on a store the restore replaced ends as cancelled by the core
-   * (reply status 3; a stream ends with a flag-3 failure of status 3); an object that is not a store becomes a
-   * stale handle. Rejects with `UndraRestoreError` when the core refuses the bytes, in which case
-   * it is unchanged and still usable, with {@link UndraTransportError} when the core is closed, and
-   * with {@link UndraModeError} over a transport that cannot restore (`remote`).
+   * Rebuilds the stores from `bytes` (a `snapshot`); the handles the app holds stay valid. (See the class documentation.)
    */
   async restore(bytes: Uint8Array): Promise<void> {
     this._assertOpen();
-    const transport = this._transport;
-    if (transport.restore === undefined) throw new UndraModeError("restore", transport.mode);
-    await transport.restore(bytes);
+    await (await import("./extras.js")).restore(this._transport, bytes);
     // Read-your-writes (docs/SPEC.md section 11): what the restore delivered is applied before the caller resumes.
     this.mirror.flush();
   }
@@ -1118,8 +1069,9 @@ export class UndraCore {
   private _backgroundWindow(): void {
     if (this._backgroundRunning || this._options.backgroundRun === false || typeof document === "undefined") return;
     this._backgroundRunning = true;
-    this.stats()
-      .then((stats) => (stats.background.pending > 0 ? this.runInBackground(PAGE_BACKGROUND_MS) : undefined))
+    // Only `background.pending` of the core's own statistics: the full `stats()` is a module of its own.
+    Promise.resolve(this._transport.stats?.())
+      .then((json) => ((JSON.parse(json ?? "{}") as { background?: { pending?: number } }).background?.pending ?? 0) > 0 ? this.runInBackground(PAGE_BACKGROUND_MS) : undefined)
       .catch((error: unknown) => {
         if (!this._closed) this._reportError("runInBackground", error);
       })

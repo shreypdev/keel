@@ -4,6 +4,7 @@ import { UndraReplyError, UndraTransportError } from "../errors.js";
 import { Kind, ReplyStatus, codecs, decodeCancel, decodeEvent, decodeObserve, decodeRelease, decodeStreamCredit, decodeTimerFired, encodeValue, splitHandle } from "../wire/index.js";
 import type { Transport } from "./transport.js";
 import { WasmHost } from "./wasm-main.js";
+import { restoreInto, takeSnapshot, twin } from "./wasm-snapshot.js";
 
 export type { WasmMainOptions, WasmSource } from "./wasm-main.js";
 
@@ -54,11 +55,36 @@ export class WasmMainTransport extends WasmHost implements Transport {
         return;
       }
       case Kind.Restore:
-        this._restore(payload);
+        restoreInto(this, payload);
         return;
       default:
         throw new UndraTransportError("protocol", `cannot send a ${Kind[kind] ?? String(kind)} message to a wasm core`);
     }
   }
 
+
+  snapshot(): Promise<Uint8Array> {
+    try {
+      return Promise.resolve(takeSnapshot(this));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  takeSnapshot(): Uint8Array {
+    return takeSnapshot(this);
+  }
+
+  restore(bytes: Uint8Array): Promise<void> {
+    try {
+      restoreInto(this, bytes);
+      return Promise.resolve();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  twin(): this {
+    return twin(this);
+  }
 }
