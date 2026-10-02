@@ -10,7 +10,8 @@
       { "file": "ports.html", "title": "Ports & adapters" },
       { "file": "web.html", "title": "Workers & crash recovery" },
       { "file": "updates.html", "title": "Shipping an update" },
-      { "file": "several-cores.html", "title": "One core or several" }
+      { "file": "several-cores.html", "title": "One core or several" },
+      { "file": "testing.html", "title": "Testing your app" }
     ] },
     { "title": "Cookbook", "pages": [
       { "file": "cookbook/index.html", "title": "All recipes", "pager": "Cookbook, all recipes" },

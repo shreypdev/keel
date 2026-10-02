@@ -125,6 +125,10 @@
         {
           "title": "Persisted-state migrations and typed storage (ADR-037, ADR-049)",
           "text": "A changed schema still restores what the last version stored; storage ports fail with typed errors on every platform; a crashed web core restarts from its last snapshot."
+        },
+        {
+          "title": "A testing kit for apps (ADR-055)",
+          "text": "Previews run the real core in process with scripted ports and a manual clock; a session recorded once with undra dev --record replays deterministically in tests on every platform."
         }
       ]
     },
@@ -167,10 +171,6 @@
         {
           "title": "Objects as parameters, host callbacks, generics and Decimal (ADR-040 to 042)",
           "text": "The boundary types a production app reaches for, each with a schema description and generated code that reads as native."
-        },
-        {
-          "title": "A testing kit for apps",
-          "text": "Previews against an in-memory core; port traffic recorded once and replayed in tests."
         },
         {
           "title": "crates.io and Maven Central",

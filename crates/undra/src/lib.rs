@@ -15,6 +15,7 @@
 //! | [`meta`] | `undra-meta`: the schema every language is generated from |
 //! | [`query`](mod@query) | `undra-query`: the traits `#[undra::query]` and `#[undra::mutation]` implement, and `ctx.query()` / `ctx.mutate(..)` |
 //! | [`ports`] | `undra-ports`: the standard ports (`Http`, `Kv`, `Clock`, ...), their records and the deterministic fakes |
+//! | [`testing`] | `undra-testkit`: the test runtime, the fakes, `Seed`, `Harness`, and port `Recorder` / `Replayer` over the `undra.recording` format |
 //!
 //! The code the macros generate names everything through `::undra::{wire, meta, runtime,
 //! signals, query}` (SPEC 16.3), which is why an application depends on this crate alone.
@@ -27,6 +28,7 @@ pub use undra_runtime as runtime;
 /// receives and returns, and its error.
 pub use undra_runtime::persist;
 pub use undra_signals as signals;
+pub use undra_testkit as testing;
 pub use undra_wire as wire;
 
 pub mod query;

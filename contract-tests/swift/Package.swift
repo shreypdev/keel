@@ -25,6 +25,24 @@ let package = Package(
         .package(path: "Packages/PlaygroundB"),
     ],
     targets: [
+        // The testing kit (docs/TESTING.md) against the same core: PreviewCore with the fakes, RecordedCore under the generated store. Not part of
+        // the grid; run.sh runs it as its own `swift test` (one in-process core per process) after the scenarios.
+        .testTarget(
+            name: "TestKitTests",
+            dependencies: [
+                .product(name: "UndraRuntime", package: "UndraRuntime"),
+                .product(name: "UndraTestKit", package: "UndraRuntime"),
+                .product(name: "PlaygroundCore", package: "PlaygroundCore"),
+            ],
+            path: "Tests/TestKitTests",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L", coreDirectory,
+                    "-lplayground_core",
+                    "-Xlinker", "-rpath", "-Xlinker", coreDirectory,
+                ]),
+            ]
+        ),
         .testTarget(
             name: "ContractTests",
             dependencies: [

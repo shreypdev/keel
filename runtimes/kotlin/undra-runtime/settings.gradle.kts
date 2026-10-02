@@ -26,6 +26,7 @@ dependencyResolutionManagement {
 rootProject.name = "undra-runtime"
 
 include(":runtime")
+include(":testkit")
 
 /** The Android SDK directory, if this machine has one Gradle can be pointed at. */
 fun androidSdk(): File? {

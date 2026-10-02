@@ -212,6 +212,7 @@ pub const RESERVED_ENTRIES: &[&str] = &[
     "UndraCoreRestarted",
     "UndraDispatchers",
     "UndraDuration",
+    "UndraEmbeddingApi",
     "UndraEnum",
     "UndraError",
     "UndraException",

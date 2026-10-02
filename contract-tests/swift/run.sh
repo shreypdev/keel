@@ -75,7 +75,7 @@ cd "$HERE"
 rm -rf "$HANDOVER"
 export UNDRA_CONTRACT_HANDOVER="$HANDOVER"
 status=0
-swift test "$@" 2>&1 | tee "$LOG" || status=$?
+swift test --skip TestKitTests "$@" 2>&1 | tee "$LOG" || status=$?
 
 # 4. Build B's steps, in a second process over build B's library. Build A's goes back afterwards,
 # whatever happens, so the next run (and the Package's link) finds it.
@@ -91,4 +91,10 @@ fi
 
 # 5. The grid. A filtered run reports the scenarios it did not run as MISSING, which is expected.
 "$REPO/contract-tests/check.sh" swift < "$LOG" || status=1
+
+# 5. The testing kit against the same core (its own process: a process holds one in-process core). Skipped when the caller filtered the run.
+if [ "$#" = 0 ]; then
+  echo "==> the testing kit (PreviewCore, RecordedCore) against the real core" >&2
+  swift test --filter TestKitTests 2>&1 | tee "$HERE/.build/testkit.log" || status=1
+fi
 exit "$status"

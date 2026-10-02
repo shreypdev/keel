@@ -738,6 +738,8 @@ Time works the same way. `FakeClock` is the single source of time for both `Cloc
 
 The platforms get the same treatment. The [contract scenarios](https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md) run every platform runtime against the real core with a manual clock, an in-memory `Http` server, an in-memory `Kv` and a test that emits connectivity events itself.
 
+The test kit puts these fakes behind the real core in Swift, Kotlin and TypeScript too, with a manual clock, and replays recorded port traffic: [Testing your app](https://shreypdev.github.io/undra/docs/testing.html).
+
 ---
 
 Source: https://shreypdev.github.io/undra/docs/web.html
@@ -956,6 +958,60 @@ On iOS each slice exports one symbol, so the two libraries link next to each oth
 - **Two local Swift packages need two directory names.** SwiftPM names a local package after its directory.
 
 The [two-core test apps](https://github.com/shreypdev/undra/tree/main/examples/two-cores) load one core under two namespaces on iOS, Android, the JVM and Node, and CI runs them on every change.
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/testing.html
+
+# Testing your app
+
+The kit runs your real core on fakes and a manual clock, plays a recorded session as a screen state, and replays what a session asked of the platform.
+
+## Pick one
+
+| You want | Use |
+| --- | --- |
+| a screen that reacts, or a cache that goes stale | `PreviewCore`: the real core, its ports faked, time in your hands |
+| a state that is slow to reach | `RecordedCore`: a recorded session under the generated stores, no core |
+| a test that fails when the core makes another request | `Replayer`: a recording as the script for the ports |
+
+The same three exist in Swift (`UndraTestKit`, a product of the `UndraRuntime` package), Kotlin (`dev.undra:testkit`), TypeScript (`@undra/testkit`, no runtime dependencies) and, for tests of the core itself, Rust (`undra::testing`). They sit beside the runtimes: no generated file, wire frame or C entry point changes.
+
+## Preview a screen
+
+`PreviewCore.load` starts your app&rsquo;s own core in the process with a deterministic fake behind every standard port. A seed fills them; `advance` moves the clock one deadline at a time and lets the core settle between.
+
+**Sleeps in a native core run in real time.** The manual clock moves what the core reads (`Clock`, staleness, timestamps) and timers armed through the `Timer` port. A native core&rsquo;s `ctx.sleep` is waited for, as the C ABI never hands sleeps to the host: `advance(5_000)` does not finish a 5-second sleep, it returns at once and the task still wakes 5 real seconds later. In a native preview, make that delay a parameter the preview sets to a few milliseconds, wait the real duration and then `settle()`, preview the state after the wait with `RecordedCore`, or run the story on the web, where sleeps follow the clock. `advance` stops after `maxTimers` firings with a typed `TimerStormError` (a timer that re-arms itself without time passing never ends).
+
+## Play a recording
+
+`RecordedCore` loads a recording and releases its change-sets with a playhead you move. Calls are answered by the next recorded reply for the same target; a call the recording has no reply for is a typed refusal that names it.
+
+## Record a session
+
+The dev server sees every call, reply, change-set and port call, on iOS, Android and the web alike, so one flag captures a session. A reload starts a new core, so a new file (`session-2.json`).
+
+bash
+
+```bash
+undra dev --record session.json
+```
+
+A recording holds what the app asked the platform and was answered, so it can hold secrets. `SecureStore` payloads are left out by default (the calls are there, their arguments and replies are empty; `--record-secrets` keeps them). HTTP headers and bodies, `Kv` values and files are recorded as they are: do not share a recording of a real account&rsquo;s session. If the file cannot be written the runner warns once, stops recording and keeps serving.
+
+A recording is one canonical JSON document, `undra.recording` version 1: payloads in hex, handles as strings, times in milliseconds. A recording made on one platform is read by all of them.
+
+## Replay port traffic
+
+A `Replayer` answers a core&rsquo;s port calls from a recording, in order per port. A call that differs is a typed `mismatch`, an extra one is `exhausted`, a recorded call with no reply in the file is `unanswered`, and a recorded call never made is `unconsumed`. A deviation consumes nothing, so one wrong call does not shift every later answer.
+
+## In the playground
+
+- **iOS:** three SwiftUI `#Preview`s, built with the app.
+- **Android:** two Compose `@Preview`s over `RecordedCore` (the preview pane cannot load a native core); the kit is a debug-only dependency.
+- **Web:** four stories in Component Story Format, rendered by Vite alone. Storybook loads them unchanged and is not a dependency.
+
+The kit uses only public APIs, and CI builds all three. [docs/TESTING.md](https://github.com/shreypdev/undra/blob/main/docs/TESTING.md) has the full reference: the seed and recording formats, the fakes&rsquo; conformance file, and the limits.
 
 ---
 
@@ -1412,6 +1468,7 @@ undra dev --android                # also adb reverse the port to every attached
 undra dev --addr 0.0.0.0:7443      # reachable from a phone on your network
 undra dev --no-watch               # build once and serve
 undra dev --no-keep-state          # every rebuilt core starts fresh
+undra dev --record session.json     # also write the session as a recording
 ```
 
 Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport and uses this core instead of a built-in one: edit Rust, save, and the core is rebuilt and restarted. The apps reconnect by themselves, with backoff, whenever the connection drops (a rebuild, a phone that slept, a restarted adb); the core's state is carried across a rebuild (it is snapshotted in this process's memory, never on disk, and restored into the new core), so an app comes back to the screen it was on and its dev bar says "Reloaded, state kept"; a changed schema, or `--no-keep-state`, starts the new core fresh and says so. Logs, including the development records (a line per transaction commit, port call and panic) and a line for each client that connects, reconnects or leaves, print here. Clocks, randomness and logging are answered by this machine, because a remote client cannot answer a synchronous port. The banner also prints the address of the devtools page (behind a per-run token): the stores and their live values, a timeline of every change-set with its diff, a scrubber that restores the core to an earlier step (the app follows, and its dev bar says `time travel: step 3`), the port-call and query-cache logs, and the counters.
@@ -1423,6 +1480,8 @@ Runs the core on this machine and serves it over a WebSocket. A simulator, a pho
 | `--log-level <n>` | log records below this level (0 trace to 5 fatal) are not printed; default 1 |
 | `--android` | run `adb reverse` for the server's port on every attached Android device or emulator (only the one in `ANDROID_SERIAL`, when set) |
 | `--no-keep-state` | start every rebuilt core from fresh state instead of carrying the running core's state over |
+| `--record <file>` | write the session as an `undra.recording` (calls, replies, change-sets, port traffic, with times), rewritten twice a second; a rebuilt core starts `NAME-2.json`. See [Testing your app](https://shreypdev.github.io/undra/docs/testing.html) |
+| `--record-secrets` | keep `SecureStore` values in the recording (by default the calls of that port are recorded with empty arguments and replies) |
 | `--devtools <auto\|on\|off>` | serve the devtools page at `/devtools`: `auto` (default) on a loopback address only, `on` always, `off` never |
 
 How each platform connects (the banner prints these with the real port):
@@ -3307,6 +3366,7 @@ Landed in the day after v1.0, each behind an ADR and an adversarial review.
 - Derived keyed lists (ADR-039)A filtered, sorted view over a 10,000-row list costs what changed: one row edit is 158 bytes on the wire where it was 353 KB.
 - Devtools (ADR-054)A page served by undra dev: live stores, a change-set timeline with time travel, port and query logs, counters; behind a per-run token.
 - Persisted-state migrations and typed storage (ADR-037, ADR-049)A changed schema still restores what the last version stored; storage ports fail with typed errors on every platform; a crashed web core restarts from its last snapshot.
+- A testing kit for apps (ADR-055)Previews run the real core in process with scripted ports and a manual clock; a session recorded once with undra dev --record replays deterministically in tests on every platform.
 
 Now
 
@@ -3331,7 +3391,6 @@ Planned for the releases after v1.0. The order may change with what the benchmar
 
 - Db and WebSocket portsSQL over SQLite on every platform with the same deterministic fake; bidirectional backpressured streams.
 - Objects as parameters, host callbacks, generics and Decimal (ADR-040 to 042)The boundary types a production app reaches for, each with a schema description and generated code that reads as native.
-- A testing kit for appsPreviews against an in-memory core; port traffic recorded once and replayed in tests.
 - crates.io and Maven CentralPublish the crates under a registry-safe prefix (its own ADR) and the Kotlin runtime without a local build.
 - Windows CLIRelease binaries and docs for the undra command on Windows.
 - Migration guidesFrom Kotlin Multiplatform and from UniFFI; a production-shaped sample beyond the playground.

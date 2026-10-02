@@ -60,6 +60,8 @@ android {
     }
 
     sourceSets {
+        // The recordings the Compose previews play (testkit/fixtures at the root of the repository; debug builds only).
+        getByName("debug").assets.srcDir("../../../../testkit/fixtures")
         // `undra build --platform android --release` writes libplayground_core.so for every ABI here.
         // The bindings load it with System.loadLibrary("playground_core"). Like any path in this file
         // it is relative to this module (android/app), not to android/; Gradle ignores a
@@ -89,6 +91,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    // The testing kit (docs/TESTING.md): the Compose previews play a recorded session. Debug builds only.
+    debugImplementation("dev.undra:testkit:0.1.0-SNAPSHOT")
 
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

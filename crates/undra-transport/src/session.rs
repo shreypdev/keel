@@ -119,6 +119,8 @@ pub(crate) struct Hooks {
     pub(crate) dropped: Arc<AtomicUsize>,
     /// The dev notices of this server.
     pub(crate) notices: Arc<Notices>,
+    /// What sees every envelope (`undra dev --record`), if anything.
+    pub(crate) tap: Option<crate::tap::FrameTap>,
 }
 
 impl Default for Hooks {
@@ -127,6 +129,7 @@ impl Default for Hooks {
             frozen: Arc::new(AtomicBool::new(false)),
             dropped: Arc::new(AtomicUsize::new(0)),
             notices: Arc::new(Notices::new(notice::AttachNotices::default())),
+            tap: None,
         }
     }
 }
@@ -345,6 +348,9 @@ impl Session {
             return Err(Violation::schema(ours, env.schema));
         }
         let payload = env.payload;
+        if let Some(tap) = &self.hooks.tap {
+            tap.see(crate::tap::Direction::HostToCore, env.kind, payload);
+        }
         match env.kind {
             Kind::Call => self.on_call(payload)?,
             Kind::Cancel => {
@@ -598,6 +604,9 @@ fn serve(shared: &Arc<Shared>, id: u64, tcp: TcpStream) {
     }
     let (conn, queue) = Conn::new(id, shared.rt.schema_hash(), config.max_queued_bytes, Some(abort));
     let conn = Arc::new(conn);
+    if let Some(tap) = &shared.hooks.tap {
+        conn.set_tap(tap.clone());
+    }
     if !shared.attach(id, &conn) {
         // The server is shutting down.
         conn.abort();
