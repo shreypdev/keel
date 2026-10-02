@@ -106,6 +106,13 @@ impl Deadline {
     pub fn note_refetched(&self, n: u32) {
         self.window.refetched.fetch_add(n, Ordering::Relaxed);
     }
+
+    /// Says that at least `n` queries were fetched again in this run. For tasks that read a counter
+    /// of the whole client (several tasks see the same fetches: they are counted once, not once
+    /// per task).
+    pub fn reach_refetched(&self, n: u32) {
+        self.window.refetched.fetch_max(n, Ordering::Relaxed);
+    }
 }
 
 type PendingFn = Arc<dyn Fn(&Ctx) -> u32 + Send + Sync>;

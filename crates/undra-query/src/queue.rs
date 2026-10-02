@@ -643,6 +643,7 @@ impl Shared {
         if self.state.lock().queue.hydration != Hydration::Hydrated {
             self.hydrate_queue(weak).await;
         }
+        let baseline = self.fetched.load(Ordering::SeqCst);
         let mut counted = self.replayed.load(Ordering::SeqCst);
         let mut starts = 0_u32;
         let done = loop {
@@ -684,18 +685,9 @@ impl Shared {
                 Woke::Expired => break false,
             }
         };
-        // The queue is the replay's: it is done when what it replayed is persisted too, not while
-        // the writer is still storing the emptied queue.
-        let mut done = done;
-        while done {
-            let epoch = self.idle.epoch();
-            if !self.state.lock().queue.writer_busy() {
-                break;
-            }
-            if matches!(wait(self, epoch, weak, deadline).await, Woke::Expired) {
-                done = false;
-            }
-        }
+        // The replay is done when what it did has settled: the lists its invalidations refetched
+        // are fetched and written, and the emptied queue is stored.
+        let done = done && self.background_settle(weak, deadline, baseline).await;
         outcome(done)
     }
 

@@ -903,16 +903,15 @@ impl Shared {
         u32::try_from(count).unwrap_or(u32::MAX)
     }
 
-    /// The refetch task of a background run: starts the fetches of [`Shared::refetch_candidates`],
-    /// waits for them (or the window), writes what they fetched, and counts the fetches that
-    /// succeeded while it ran.
+    /// The refetch task of a background run: starts the fetches of [`Shared::refetch_candidates`]
+    /// and settles (see [`Shared::background_settle`]).
     pub(crate) async fn background_refetch(
         self: &Arc<Self>,
         weak: &WeakCtx,
         deadline: &Deadline,
     ) -> BackgroundOutcome {
-        use crate::background::{Woke, outcome, wait};
-        let mut counted = self.fetched.load(Ordering::SeqCst);
+        use crate::background::outcome;
+        let baseline = self.fetched.load(Ordering::SeqCst);
         let keys = {
             let Ok(ctx) = weak.upgrade() else {
                 return BackgroundOutcome::Incomplete;
@@ -932,37 +931,67 @@ impl Shared {
             fx.run(&ctx);
             keys
         };
-        let done = loop {
-            let epoch = self.idle.epoch();
+        let settled = self.background_settle(weak, deadline, baseline).await;
+        let failed = {
+            let state = self.state.lock();
+            keys.iter()
+                .filter_map(|key| state.entries.get(key))
+                .any(|e| e.failed || e.error.is_some())
+        };
+        outcome(settled && !failed)
+    }
+
+    /// What every task of a background run does last: waits for the fetches in flight to end (a
+    /// replay's invalidations refetch the observed lists, whichever task started them), writes what
+    /// they fetched and what waited out its debounce, and waits for the queue's writer, so the run
+    /// is finished when the client is quiet, not while something it started is still going. Counts
+    /// the fetches that succeeded since `baseline` (the run's, whichever task sees them). `false`
+    /// when the window ended first, or the queue was never read (nothing may be written over it).
+    pub(crate) async fn background_settle(
+        self: &Arc<Self>,
+        weak: &WeakCtx,
+        deadline: &Deadline,
+        baseline: u64,
+    ) -> bool {
+        use crate::background::{Woke, wait};
+        let count = || {
             let fetched = self.fetched.load(Ordering::SeqCst);
-            deadline.note_refetched(u32::try_from(fetched - counted).unwrap_or(u32::MAX));
-            counted = fetched;
-            let (busy, failed) = {
-                let state = self.state.lock();
-                keys.iter().filter_map(|key| state.entries.get(key)).fold(
-                    (false, false),
-                    |(busy, failed), e| {
-                        (
-                            busy || e.inflight.is_some(),
-                            failed || e.failed || e.error.is_some(),
-                        )
-                    },
-                )
-            };
-            if !busy {
-                break !failed;
+            deadline.reach_refetched(
+                u32::try_from(fetched.saturating_sub(baseline)).unwrap_or(u32::MAX),
+            );
+        };
+        let quiet = loop {
+            let epoch = self.idle.epoch();
+            count();
+            if !self
+                .state
+                .lock()
+                .entries
+                .values()
+                .any(|e| e.inflight.is_some())
+            {
+                break true;
             }
-            match wait(self, epoch, weak, deadline).await {
-                Woke::Changed => {}
-                Woke::Expired => break false,
+            if matches!(wait(self, epoch, weak, deadline).await, Woke::Expired) {
+                break false;
             }
         };
-        if !keys.is_empty() {
-            self.flush_entries(weak).await;
-        }
-        let fetched = self.fetched.load(Ordering::SeqCst);
-        deadline.note_refetched(u32::try_from(fetched - counted).unwrap_or(u32::MAX));
-        outcome(done)
+        count();
+        self.flush_entries(weak).await;
+        let written = loop {
+            let epoch = self.idle.epoch();
+            let (busy, readable) = {
+                let state = self.state.lock();
+                (state.queue.writer_busy(), state.queue.is_hydrated())
+            };
+            if !busy {
+                break true;
+            }
+            if !readable || matches!(wait(self, epoch, weak, deadline).await, Woke::Expired) {
+                break false;
+            }
+        };
+        quiet && written
     }
 
     /// How much waits to be written: entries out their debounce and a queue its writer has not
@@ -974,34 +1003,15 @@ impl Shared {
         u32::try_from(entries + queue).unwrap_or(u32::MAX)
     }
 
-    /// The flush task of a background run: writes the cache entries now and waits for the queue's
-    /// writer to finish (it is incomplete if the queue was never read: nothing may be written
-    /// over it, ADR-049).
+    /// The flush task of a background run: writes the cache entries now and settles (it is
+    /// incomplete if the queue was never read: nothing may be written over it, ADR-049).
     pub(crate) async fn background_flush(
         self: &Arc<Self>,
         weak: &WeakCtx,
         deadline: &Deadline,
     ) -> BackgroundOutcome {
-        use crate::background::{Woke, outcome, wait};
-        self.flush_entries(weak).await;
-        let done = loop {
-            let epoch = self.idle.epoch();
-            let (busy, readable) = {
-                let state = self.state.lock();
-                (state.queue.writer_busy(), state.queue.is_hydrated())
-            };
-            if !busy {
-                break true;
-            }
-            if !readable {
-                break false;
-            }
-            match wait(self, epoch, weak, deadline).await {
-                Woke::Changed => {}
-                Woke::Expired => break false,
-            }
-        };
-        outcome(done)
+        let baseline = self.fetched.load(Ordering::SeqCst);
+        crate::background::outcome(self.background_settle(weak, deadline, baseline).await)
     }
 
     // ----- garbage collection --------------------------------------------------------------

@@ -158,6 +158,40 @@ fn online_the_run_drains_the_queue_and_counts_it() {
 }
 
 #[test]
+fn a_run_that_drains_the_queue_waits_for_the_refetch_the_replay_caused() {
+    // An observed, persisted list: the replayed mutation invalidates it, so it is fetched again
+    // and written. The run is finished when all of that is, not when the queue is empty.
+    let (h, slow) = slow_harness(Duration::from_millis(400));
+    h.serve_page(0, vec![todo(1, "milk")]);
+    let _observed = h.query().observe::<TodosQuery>((0,));
+    h.settle();
+    h.advance_ms(1_000);
+    let result = queue_one_offline(&h, "eggs");
+    slow.arm(Duration::from_millis(400));
+    h.fakes.http.reset();
+    h.serve_page(0, vec![todo(1, "milk"), todo(2, "eggs")]);
+    h.fakes.http.respond(post_todos(), ok(&todo(2, "eggs")));
+    h.fakes.connectivity.go_online(NetKind::Wifi);
+    h.t.run_pending();
+    let report = run(&h, Duration::from_secs(10));
+    // (Coming back online refetches the observed list, and the replay's invalidation does again:
+    // both are fetches this run waited for.)
+    assert!(
+        report.finished && report.replayed == 1 && report.still_pending == 0,
+        "{report:?}"
+    );
+    assert!(report.refetched >= 1, "{report:?}");
+    assert_eq!(take(&result).unwrap().unwrap().title, "eggs");
+    assert!(
+        h.fakes
+            .kv
+            .keys()
+            .iter()
+            .any(|k| k.starts_with("undra.query.cache2."))
+    );
+}
+
+#[test]
 fn a_run_cut_at_its_deadline_leaves_the_replay_and_the_queue_alone() {
     let (h, slow) = slow_harness(Duration::from_secs(5));
     let result = queue_one_offline(&h, "slow");
