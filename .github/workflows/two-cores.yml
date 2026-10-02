@@ -2,8 +2,9 @@ name: Two cores
 
 # ADR-044: two Undra cores in one process. examples/two-cores builds the playground core twice, under the
 # namespaces playground_a and playground_b, and a test app per platform loads both side by side through their
-# generated entries: a call and an observed change on each, independent statistics, one shut down while the
-# other keeps working. Each app prints `two-cores <platform>: ok ...` lines and its runner exits non-zero
+# generated entries: a call and an observed change on each, independent statistics, the same default `Kv` key
+# written through each core and read back as that core's own value (the default stores are per namespace, ADR-044
+# amendment A), one shut down while the other keeps working. Each app prints `two-cores <platform>: ok ...` lines and its runner exits non-zero
 # unless the last is `passed`. The same scenario, as S26, runs in the contract columns of ci.yml.
 #
 #   iOS simulator   examples/two-cores/ios/run.sh       two prelinked static cores in one app binary (Debug and Release)

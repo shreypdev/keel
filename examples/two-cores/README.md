@@ -19,7 +19,10 @@ examples/two-cores/
 Each app loads both cores through their generated entries, makes a call on each (`add(2, 3)`, whose
 default core is its package's own), creates a `Counter` in each and changes it (each core's change-set
 reaches only its own mirror), compares their statistics, closes A and checks that B still answers and
-observes while a call on A fails as unavailable. It prints one `two-cores <platform>: ok ...` line per
+observes while a call on A fails as unavailable. Both use the platform's default adapters, whose `Kv` is per core namespace
+(ADR-044 amendment A): each core writes the same key and reads its own value back, a key only A wrote is not B's, and the
+two stores are in two places (`undra/playground_a/kv` and `undra/playground_b/kv` in Application Support, `filesDir` or the
+JVM's data directory, IndexedDB `undra.playground_a.kv` and `undra.playground_b.kv` on Node). It prints one `two-cores <platform>: ok ...` line per
 check, then `passed`; its `run.sh` builds what it needs with the `undra` CLI and exits non-zero otherwise.
 
 ```sh
@@ -39,6 +42,9 @@ Two details a real app with two cores meets too:
   directory, and both generated packages live in a directory called `swift`; the iOS app refers to
   them through `ios/Packages/PlaygroundA` and `PlaygroundB` (symbolic links). A vendor's core usually
   arrives as a remote package, which has an identity of its own.
+* **Default storage is per namespace.** Two cores that both use the defaults keep their `Kv`, `Fs`, `SecureStore` and `Db` data
+  under `undra/<namespace>/` on every platform, so they never read each other's keys; share a store only by passing both
+  cores one adapter of your own.
 * **Handles are per core.** Two cores with the same history issue the same handle numbers; every
   generated object carries the core that made it, and app code passes values, not handles, between
   cores.

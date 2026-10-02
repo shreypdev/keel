@@ -170,21 +170,24 @@ answers the core directly, off the JS thread:
 
 | Port | Default | iOS | Android |
 |---|---|---|---|
-| `Kv` | native (C++, one implementation for both) | files in `<Application Support>/<bundle id>/Undra/kv`, the Swift runtime's layout | files in `<filesDir>/undra/kv`, `android-adapters`' layout |
-| `SecureStore` | native | the Keychain (service `dev.undra.securestore`, `AfterFirstUnlockThisDeviceOnly`), the Swift runtime's items | AES-256-GCM under the Android Keystore key `dev.undra.securestore`, sealed files in `<noBackupFilesDir>/undra/secure`, `android-adapters`' layout |
-| `Fs` | native (C++) | `<Application Support>/<bundle id>/Undra/fs` | `<filesDir>/undra/fs` |
+| `Kv` | native (C++, one implementation for both) | files in `<Application Support>/<bundle id>/undra/<namespace>/kv`, the Swift runtime's layout | files in `<filesDir>/undra/<namespace>/kv`, `android-adapters`' layout |
+| `SecureStore` | native | the Keychain (service `<namespace>.dev.undra.securestore`, `AfterFirstUnlockThisDeviceOnly`), the Swift runtime's items | AES-256-GCM under the Android Keystore key `<namespace>.dev.undra.securestore`, sealed files in `<noBackupFilesDir>/undra/<namespace>/secure`, `android-adapters`' layout |
+| `Fs` | native (C++) | `<Application Support>/<bundle id>/undra/<namespace>/fs` | `<filesDir>/undra/<namespace>/fs` |
 | `Connectivity` | native | `NWPathMonitor` (Network.framework) | `ConnectivityManager` default-network callback |
 | `Http` | `reactNativeHttp()`: React Native's `fetch` | `NSURLSession`, through React Native's networking | OkHttp, through React Native's networking |
 | `Lifecycle` | `AppState` | `active`, `inactive`, `background` | `active`, `background` (React Native reports no `inactive` on Android) |
 | `Clock`, `Rng`, `Log` | native, in the module (`Log` records also reach your `log` adapter, default the console) | | |
 | `Timer` | the core's own timer thread | | |
-| `Db` (opt-in, ADR-048) | native (C++ binding: migrations, one worker per database, transactions, busy timeout) | the system SQLite, `<Application Support>/<bundle id>/Undra/db/<name>.sqlite`, the Swift runtime's file | `android.database.sqlite` through JNI, `getDatabasePath("undra-<name>.sqlite")`, `android-adapters`' file |
+| `Db` (opt-in, ADR-048) | native (C++ binding: migrations, one worker per database, transactions, busy timeout) | the system SQLite, `<Application Support>/<bundle id>/undra/<namespace>/db/<name>.sqlite`, the Swift runtime's file | `android.database.sqlite` through JNI, `getDatabasePath("undra-<namespace>-<name>.sqlite")`, `android-adapters`' file |
 | `WebSocket` (opt-in, ADR-047) | `reactNativeWebSocket()`: React Native's `WebSocket`, headers as its third argument | a dropped connection ends `Network`, or `Closed(1001, "Stream end encountered")` when iOS reports it as the end of its stream (React Native forwards no `wasClean`) | a dropped connection ends `Network` |
 | `Sse` (opt-in, ADR-047) | `reactNativeSse()`: `fetch` body streams where present, else `XMLHttpRequest` progress events | | |
 
-Because the directories, file layouts, Keychain items and Keystore key are the ones the Swift and Kotlin runtimes
-use on the same platform, a value the SwiftUI or Compose shell of an app wrote is read by its React Native shell
-and the reverse. What each default does:
+`<namespace>` is the core's (the table's `name_space`, the generated entry's `namespace`): **every default store is per core
+namespace** (ADR-044 amendment A), so two cores of one app never read or overwrite each other's keys, secrets, files or
+databases, and there is no shared location to migrate from. Because the directories, file layouts, Keychain items and
+Keystore key are the ones the Swift and Kotlin runtimes use on the same platform for the same namespace, a value the
+SwiftUI or Compose shell of an app wrote is read by its React Native shell and the reverse. A value in `adapters` or
+`ports` that replaces a default keeps whatever location you gave it. What each default does:
 
 * `Kv` and `SecureStore`: one file per key, written to a temporary file, flushed and renamed, so a killed app keeps
   the old value or the new one. A failing disk, Keychain or Keystore answers the core a typed `StorageError`
@@ -259,8 +262,8 @@ the C++ module drives.)
   about 6 us through `UndraCore.callSync` (4 us of it building the payload), and 15 to 20 us as an
   awaited generated method on the iOS simulator.
 * One running `UndraCore` per core namespace per process (ADR-044; ADR-038 decision 11 applies per
-  namespace). Several cores, of several namespaces, run side by side, and share the native default
-  ports' storage (one `Kv` directory, one `Fs` root, one Keychain service per app). A Swift or Kotlin
+  namespace). Several cores, of several namespaces, run side by side, and each keeps the native default
+  ports' storage of its own (a `Kv` directory, an `Fs` root, a Keychain service and a Keystore key per namespace). A Swift or Kotlin
   Undra host in the same process can hold other cores, but not the same one: a core image is
   initialised once per process. Two React Native instances in one process (a brownfield app with two
   `ReactHost`s) cannot both load the same core: the module cannot tell a second instance from a
@@ -285,9 +288,9 @@ the C++ module drives.)
 
 | Layer | How | Command | In CI |
 |---|---|---|---|
-| The C++ host (inbox, ports, ownership, shutdown), both shims: finding a core by namespace and refusing its table (unknown core, ABI 1, too short, another namespace, a missing entry), two real cores side by side (`playground_core` and `playground_a`), one host each; the native default ports through the real core (the playground core's `platform` module, a test platform); the JSI layer and the TurboModule compiled against React Native 0.87's headers with `-Werror`; the Apple platform against the iOS SDK (macOS) | against the real cores, ASan + UBSan | `runtimes/rn/@undra/react-native/cpp/test/run.sh` | `ci.yml`, job "React Native (host + model)", every push and pull request (Linux, clang 18: the dlopen shim; the linked shim needs the Objective-C runtime and runs on macOS) |
+| The C++ host (inbox, ports, ownership, shutdown), both shims: finding a core by namespace and refusing its table (unknown core, ABI 1, too short, another namespace, a missing entry), two real cores side by side (`playground_core` and `playground_a`), one host each; the native default ports through the real core (the playground core's `platform` module, a test platform); the JSI layer and the TurboModule compiled against React Native 0.87's headers with `-Werror`; the Apple platform against the iOS SDK, and on this Mac, asked where each core's stores are: per namespace (macOS) | against the real cores, ASan + UBSan | `runtimes/rn/@undra/react-native/cpp/test/run.sh` | `ci.yml`, job "React Native (host + model)", every push and pull request (Linux, clang 18: the dlopen shim; the linked shim needs the Objective-C runtime and runs on macOS) |
 | The portable `Kv` and `Fs` (layouts against the Swift runtime's own vectors and SHA-256's, `..`, symbolic links, a directory swapped for a link while a read or write walks through it, atomic writes and a writer killed mid-write, deep deletes) | this machine's file system, ASan + UBSan | the same `run.sh` (step 0) | the same job |
-| The Android library's pure Java (the seal against an AES-GCM vector from Node, which `android-adapters` opens too; the network classification) | `javac` and the JDK | `runtimes/rn/@undra/react-native/android/test/run.sh` | the same job |
+| The Android library's pure Java (the seal against an AES-GCM vector from Node, which `android-adapters` opens too; the network classification; the per-namespace store names) | `javac` and the JDK | `runtimes/rn/@undra/react-native/android/test/run.sh` | the same job |
 | `NativeTransport`, the frame scheduler, the polyfills, `loadNative`, which ports are native for which options, `reactNativeHttp()` | a fake module and a scripted `fetch`, on Node | `npm test` in `runtimes/rn/@undra/react-native` | the same job |
 | Types of the package and its build config | `tsc`, against `@undra/runtime`'s sources and its emitted declarations (`npm run build` in `runtimes/ts/@undra/runtime` first) | `npm run typecheck` | the same job |
 | The contract scenarios S01..S19 | through `NativeTransport` over a stand-in of the module on the wasm core: 18 pass, S17 (native panic containment) is app-tested | `npm run test:contract` | the same job |

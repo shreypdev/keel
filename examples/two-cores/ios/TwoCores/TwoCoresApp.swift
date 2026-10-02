@@ -8,10 +8,12 @@ import UndraRuntime
 /// namespaces `playground_a` and `playground_b` and linked into this one binary as two prelinked
 /// static libraries, loaded side by side through their generated entries. At launch it gives each a
 /// call and an observed change, compares their statistics, closes one and checks the other keeps
-/// working. Every check is a `two-cores ios:` line in the log and a row on screen.
+/// working. Both cores use the default adapters, whose `Kv` is per core namespace (ADR-044 amendment A): each
+/// writes the same key and reads its own value back, and the files are in two directories. Every check is a
+/// `two-cores ios:` line in the log and a row on screen.
 @main
 struct TwoCoresApp: App {
-    @State private var checks = TwoCoreChecks.run()
+    @State private var checks: [TwoCoreCheck] = []
 
     var body: some Scene {
         WindowGroup {
@@ -21,7 +23,12 @@ struct TwoCoresApp: App {
                         .foregroundStyle(check.passed ? Color.green : Color.red)
                         .accessibilityIdentifier(check.passed ? "pass" : "fail")
                 }
-                .navigationTitle(checks.allSatisfy(\.passed) ? "Two cores: passed" : "Two cores: FAILED")
+                .navigationTitle(checks.isEmpty ? "Two cores: running" : checks.allSatisfy(\.passed) ? "Two cores: passed" : "Two cores: FAILED")
+            }
+            .task {
+                if checks.isEmpty {
+                    checks = await TwoCoreChecks.run()
+                }
             }
         }
     }
@@ -38,15 +45,16 @@ struct TwoCoreCheck: Identifiable {
 enum TwoCoreChecks {
     private static let log = Logger(subsystem: "dev.undra.twocores", category: "two-cores")
 
-    static func run() -> [TwoCoreCheck] {
+    static func run() async -> [TwoCoreCheck] {
         var checks: [TwoCoreCheck] = []
         func check(_ what: String, _ passed: Bool) {
             log.notice("two-cores ios: \(passed ? "ok  " : "FAIL", privacy: .public) \(what, privacy: .public)")
             checks.append(TwoCoreCheck(what: what, passed: passed))
         }
         do {
-            let a = try UndraPlaygroundA.load(.inproc(adapters: .none))
-            let b = try UndraPlaygroundB.load(.inproc(adapters: .none))
+            // The default adapters: `Kv`, `Fs`, `SecureStore` and `Db` are per core namespace.
+            let a = try UndraPlaygroundA.load(.inproc())
+            let b = try UndraPlaygroundB.load(.inproc())
             check(
                 "both loaded: \(UndraPlaygroundA.namespace) and \(UndraPlaygroundB.namespace), two cores",
                 a !== b && UndraPlaygroundA.core === a && UndraPlaygroundB.core === b
@@ -76,6 +84,7 @@ enum TwoCoreChecks {
             let newA = a.stats().coreLiveHandles - handlesA
             let newB = b.stats().coreLiveHandles - handlesB
             check("independent statistics: A has \(newA) new handle, B has \(newB)", newA == 1 && newB == 1)
+            await checkStorage(check)
             a.shutdown()
             counterB.add(amount: 1)
             var unavailable = false
@@ -96,6 +105,49 @@ enum TwoCoreChecks {
         }
         log.notice("two-cores ios: \(checks.allSatisfy(\.passed) ? "passed" : "FAILED", privacy: .public)")
         return checks
+    }
+
+    /// The default stores of two cores are two stores (ADR-044 amendment A): the same `Kv` key written through each core
+    /// reads back that core's own value, a key one core wrote is not the other's, and the files are in
+    /// `<Application Support>/<bundle id>/undra/<namespace>/kv`.
+    private static func checkStorage(_ check: (String, Bool) -> Void) async {
+        let nonce = UUID().uuidString.prefix(8).lowercased()
+        let key = "two-cores.key"
+        let onlyInA = "two-cores.only-a"
+        do {
+            try await PlaygroundA.kvPut(key: key, value: Array("value-of-a-\(nonce)".utf8))
+            try await PlaygroundB.kvPut(key: key, value: Array("value-of-b-\(nonce)".utf8))
+            try await PlaygroundA.kvPut(key: onlyInA, value: [1])
+            let readA = try await PlaygroundA.kvGet(key: key).map { String(decoding: $0, as: UTF8.self) }
+            let readB = try await PlaygroundB.kvGet(key: key).map { String(decoding: $0, as: UTF8.self) }
+            check(
+                "Kv: both wrote \(key) and read their own value back: A has \(readA ?? "nothing"), B has \(readB ?? "nothing")",
+                readA == "value-of-a-\(nonce)" && readB == "value-of-b-\(nonce)"
+            )
+            let keysA = try await PlaygroundA.kvKeys(prefix: "two-cores.")
+            let keysB = try await PlaygroundB.kvKeys(prefix: "two-cores.")
+            check(
+                "Kv: a key only A wrote is not B's: A lists \(keysA), B lists \(keysB)",
+                keysA.contains(onlyInA) && !keysB.contains(onlyInA) && keysB.contains(key)
+            )
+            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent(Bundle.main.bundleIdentifier ?? "app", isDirectory: true)
+                .appendingPathComponent("undra", isDirectory: true)
+            let directories = [UndraPlaygroundA.namespace, UndraPlaygroundB.namespace].map {
+                base.appendingPathComponent($0, isDirectory: true).appendingPathComponent("kv", isDirectory: true)
+            }
+            var isDirectory: ObjCBool = false
+            let present = directories.allSatisfy { FileManager.default.fileExists(atPath: $0.path, isDirectory: &isDirectory) && isDirectory.boolValue }
+            check(
+                "Kv files: \(directories.map { $0.path.replacingOccurrences(of: base.deletingLastPathComponent().path, with: "…") }.joined(separator: " and "))",
+                present
+            )
+            try await PlaygroundA.kvRemove(key: key)
+            try await PlaygroundA.kvRemove(key: onlyInA)
+            try await PlaygroundB.kvRemove(key: key)
+        } catch {
+            check("Kv: the check failed: \(error)", false)
+        }
     }
 
     /// The message of the panic `body` reports as `UndraCallError.panicked`, or `nil`.

@@ -280,3 +280,52 @@ prefix likewise carries the namespace), with **no legacy path and no migration**
 installed app holds data at the old location. An app that passes its own adapters is unaffected. Implemented by
 the follow-up piece `ns-storage` (not by `abi-table`), with a test per platform that two cores' defaults do not
 see each other's data, and SPEC 8's adapter section updated with it.
+
+### Amendment A, as built (2026-10-02, piece `ns-storage`)
+
+**The rule.** Every default store lives under `…/undra/<namespace>/<store>`: `Kv`, `Fs` and `Db` files (`kv`, `fs`, `db`),
+the secure store's items and aliases prefixed `<namespace>.`, the browser's names prefixed `undra.<namespace>.`. There is no
+legacy path and no migration. An adapter the app supplies (a directory, a service, an alias, a root) is untouched and is
+used for every core it serves; sharing a store between two cores is an explicit choice. SPEC 8 carries the table.
+
+| Platform | `Kv` | `Fs` | `SecureStore` | `Db` |
+|---|---|---|---|---|
+| Swift, React Native iOS | `<Application Support>/<bundle id>/undra/<ns>/kv` | `.../undra/<ns>/fs` | Keychain service `<ns>.dev.undra.securestore` | `.../undra/<ns>/db/<name>.sqlite` |
+| `android-adapters`, React Native Android | `<filesDir>/undra/<ns>/kv` | `<filesDir>/undra/<ns>/fs` | Keystore alias `<ns>.dev.undra.securestore`, files `<noBackupFilesDir>/undra/<ns>/secure` | `getDatabasePath("undra-<ns>-<name>.sqlite")` |
+| Kotlin (JVM) | `<dataDir>/<ns>/kv` | `<dataDir>/<ns>/fs` | `<dataDir>/<ns>/secure` | `<dataDir>/<ns>/db/<name>.sqlite` |
+| TypeScript (browser) | IndexedDB `undra.<ns>.kv` | OPFS `undra/<ns>/fs` | IndexedDB `undra.<ns>.secure`, keys in `undra.<ns>.secure-keys` | wa-sqlite pool in OPFS `undra/<ns>/db` |
+
+`<dataDir>` is `undra.data.dir` or `~/.undra/data`. The React Native module is byte compatible with the Swift runtime
+and `android-adapters` (the namespace segment is in the same place on both sides).
+
+**Where the namespace comes from.** The generated entry. Swift `UndraCoreEntry.load` fills `LoadOptions.namespace` in; Kotlin
+`CoreEntry.load` does the same (`LoadOptions.namespace`); an in-process load without an entry takes its table's
+`name_space`; TypeScript's generated `Undra<Ns>.load` and `.attach` now pass `namespace: UndraIds.namespace` (the one change
+to generated output: `core.ts`, its goldens and the committed example trees) and the runtime keeps it as
+`AttachOptions.namespace` / `UndraCore.namespace`; React Native's `makePlatform` takes the table's `name_space`. A core
+loaded with none (a scripted test transport, `UndraCore.load` of a remote core without its entry, a hand-made
+`attach`) has the namespace `_`, which no real namespace is (they start with a lowercase letter), so the fallback
+cannot collide with a core's. Swift and Kotlin publish it as `UndraCore.namespace`.
+
+**Deviations from the ADR's sketch.**
+1. Apple keeps `undra`, lowercase, where the pre-amendment Swift and React Native iOS used `Undra`: nothing is released, and one
+   spelling on every platform is simpler than two.
+2. The Keychain service and the Keystore alias are *prefixed* (`<ns>.dev.undra.securestore`), as the rule says; the Android
+   database file carries the namespace in its name (`getDatabasePath` takes no path separator), unambiguously because a
+   namespace has no `-`.
+3. The JVM keeps `<dataDir>/<ns>/...` (its root is already `~/.undra/data`), not a second `undra` segment.
+4. The browser's `Db` adapter is built before its core, so a port learns its core when the core registers it:
+   `PortImpl.bind({ namespace })` (the one new runtime member), which `dbPort` hands to its adapter as `DbAdapter.open(name, { namespace })`.
+   `waSqliteDb()`'s worker serves the first core to open a database in `undra/<ns>/db` (the pool holds the directory open)
+   and refuses another namespace with a typed `DbError.Unavailable`: one `waSqliteDb()` per core. `nodeSqliteDb({ directory })`
+   has an explicit directory and is untouched.
+5. `Swift` `SQLiteDbAdapter.directory` is `URL?` (`nil` for the default adapter, whose directory is per core), and
+   `SQLiteDbAdapter.defaultDirectory` became `defaultDirectory(namespace:)`. Kotlin's `AndroidKvAdapter(context)`,
+   `AndroidFsAdapter(context)`, `AndroidSecureStoreAdapter(context)` and `AndroidDbAdapter(context)` became `(context, namespace)`
+   (a context alone no longer says where the data is). `LoadOptions` copies in Kotlin now keep `onDevNotice` (the copy that fills the
+   schema hash in used to drop it).
+
+**Proof.** Each adapter's unit tests for the path; `examples/two-cores` writes the same `Kv` key through each core and reads
+two values back on the iOS simulator, an Android emulator, the JVM and Node, and checks the two directories (or IndexedDB
+databases); the React Native Apple platform is asked on a Mac where each core's stores are; the Android Keystore
+test makes two keys. Contract scenarios are unchanged (the wire and the schema are).

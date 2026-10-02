@@ -8,7 +8,7 @@
 //    `android-adapters`' layout;
 //  * `Connectivity`: Java's `NetworkMonitor`, reporting into `nativeConnectivityChanged`;
 //  * `Db` (ADR-048): the binding of `UndraDb.cpp` over Android's own SQLite, through Java's `UndraDatabase`
-//    (`android.database.sqlite`, the file `getDatabasePath("undra-<name>.sqlite")` of `android-adapters`): one
+//    (`android.database.sqlite`, the file `getDatabasePath("undra-<namespace>-<name>.sqlite")` of `android-adapters`): one
 //    byte array of the wire format crosses per statement each way (`DbWire.java`). The NDK has no public
 //    sqlite3, and Android prepares only the first statement of a string and exposes no parameter count, so
 //    this side tells Java both from the SQL lexer of `UndraDb.cpp` (checked against sqlite3 on the host).

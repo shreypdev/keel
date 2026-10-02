@@ -89,7 +89,7 @@ ANDROID_SERIAL=emulator-5554 ./smoke.sh      # SKIP_CORE=1 reuses build/android/
 ```
 
 Builds the core and the app, installs it, launches every tab and screenshots it, then drives the Remote tab's offline story
-with `uiautomator`: fetch (persisted to `files/undra/kv`), Offline switch on, add an item (queued), kill the process, real
+with `uiautomator`: fetch (persisted to `files/undra/playground_core/kv`), Offline switch on, add an item (queued), kill the process, real
 airplane mode on, relaunch (the cached list comes from `Kv` while offline, the core holds the queue because the Connectivity
 adapter says there is no network), airplane mode off (the core replays the queue; the server receives the
 `Idempotency-Key` generated before the kill). Output: `.proof/android-adapters-smoke.log` and `.proof/android-adapters-*.png`.

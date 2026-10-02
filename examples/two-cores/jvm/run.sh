@@ -20,5 +20,9 @@ UNDRA_BUILD_DIR="$OUT/runtime" "$REPO/runtimes/kotlin/undra-runtime/scripts/test
 mkdir -p "$OUT/classes"
 kotlinc -cp "$OUT/runtime/main:$UNDRA_KOTLINX_COROUTINES" -jvm-target 11 -d "$OUT/classes" \
   "$HERE/../a/generated/kotlin/src/main/kotlin" "$HERE/../b/generated/kotlin/src/main/kotlin" "$HERE/Main.kt"
-exec java -Djava.library.path="$HERE/../a/build/host:$HERE/../b/build/host" \
+# The default stores live in a data directory of their own for this run (per core namespace under it), so what the
+# app finds there is what it wrote.
+DATA="$(mktemp -d)"
+trap 'rm -rf "$DATA"' EXIT
+java -Dundra.data.dir="$DATA" -Djava.library.path="$HERE/../a/build/host:$HERE/../b/build/host" \
   -cp "$OUT/runtime/main:$OUT/classes:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES" dev.undra.twocores.jvm.MainKt

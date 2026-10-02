@@ -137,9 +137,12 @@ methods of its implementations), and each core's generated bindings ship `META-I
 
 `UndraCore.load` installs `dev.undra.runtime.adapters.JvmAdapters` for every standard port not in `LoadOptions.adapters`
 (`defaultAdapters = false` turns that off): `Http` over `java.net.http.HttpClient`; `Kv` and `SecureStore` over files under
-`<dataDir>/kv` and `<dataDir>/secure` (SHA-256-named, atomic writes; **not** encrypted); `Fs` over `<dataDir>/fs`, confined to its
-root; `Clock`, `Rng` (`SecureRandom`), `Log` (`java.util.logging`) and `Timer` (a scheduled executor). The data directory is the
-system property `undra.data.dir` or `~/.undra/data`; call `JvmAdapters.standard(dir) { core.timerFired(it) }` to choose another. On Android only
+`<dataDir>/<namespace>/kv` and `<dataDir>/<namespace>/secure` (SHA-256-named, atomic writes; **not** encrypted); `Fs` over
+`<dataDir>/<namespace>/fs`, confined to its root; `Db` over `<dataDir>/<namespace>/db`; `Clock`, `Rng` (`SecureRandom`), `Log`
+(`java.util.logging`) and `Timer` (a scheduled executor). `<dataDir>` is the system property `undra.data.dir` or `~/.undra/data`
+and `<namespace>` is the core's (`UndraCore.namespace`, filled in by the generated entry), so two cores of one app never see each
+other's keys, files or databases (ADR-044 amendment A). `JvmAdapters.standard(dir) { core.timerFired(it) }` uses exactly `dir` (`dir/kv`, ...)
+for every core it serves, as an adapter you pass yourself does; `JvmAdapters.defaultDataDir(core.namespace)` is the directory `load` uses. On Android only
 Clock, Rng, Log and Timer are installed; the rest comes from `android-adapters` (`AndroidPlatformDefaults.install`). Port and method ids are `fnv1a32("port.<Trait>")`
 and `fnv1a32("<Trait>.<method>")` (`StandardPorts`), and the nine standard types of SPEC §8 have hand-written codecs
 (`HttpRequest`, `HttpResponse`, `HttpError`, `Header`, `FsError`, `StorageError`, `NetKind`, `AppState`, `HttpMethod`).
