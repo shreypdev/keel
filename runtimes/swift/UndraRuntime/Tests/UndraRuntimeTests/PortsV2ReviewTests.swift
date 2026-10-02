@@ -189,6 +189,9 @@ final class RealtimeReviewTests: XCTestCase {
         let socket = try XCTUnwrap(adapter.sockets.first)
         var waited: [Double] = []
         var late: [Double] = []
+        // And not before the burst gap, in every round: the binding cannot know a message is alone until the gap passed without another, and a
+        // slow machine only makes that later (the TypeScript runtime's clock-driven test asserts the same: nothing at 1 ms, the answer at 2).
+        var soonest = UInt64.max
         for round in 0 ..< 40 {
             // The pull waits; the message arrives.
             let pull = Task { () async -> (Result<[WsMessage], WsError>, UInt64) in
@@ -197,19 +200,24 @@ final class RealtimeReviewTests: XCTestCase {
             }
             try await Task.sleep(nanoseconds: 5_000_000)
             var reference = referenceTimer()
+            let pushed = DispatchTime.now().uptimeNanoseconds
             socket.push(.text("w\(round)"))
             let (result, at) = await pull.value
             XCTAssertEqual(try result.get(), [.text("w\(round)")])
             waited.append((Double(at) - Double(await reference.value)) / 1e6)
+            soonest = min(soonest, at - pushed)
             // The message is there before the pull.
             socket.push(.text("l\(round)"))
             await eventually("the read-ahead") { socket.pulled == 2 * (round + 1) }
             reference = referenceTimer()
+            let pulled = DispatchTime.now().uptimeNanoseconds
             let early = try await binding.receive(conn: conn, max: 16)
             let answered = DispatchTime.now().uptimeNanoseconds
             XCTAssertEqual(early, [.text("l\(round)")])
             late.append((Double(answered) - Double(await reference.value)) / 1e6)
+            soonest = min(soonest, answered - pulled)
         }
+        XCTAssertGreaterThanOrEqual(soonest, 2_000_000, "a lone message was answered \(Double(soonest) / 1e6) ms after it arrived or was asked for: before the 2 ms burst gap")
         waited.sort()
         late.sort()
         XCTAssertLessThan(waited[20], 5, "a lone message was answered \(waited[20]) ms (the median of 40) after a burst-gap timer armed at its arrival")
@@ -295,8 +303,7 @@ final class RealtimeReviewTests: XCTestCase {
         let binding = WebSocketBinding(adapter: URLSessionWebSocketAdapter())
         defer { binding.detach() }
         let conn = try await binding.connect(url: "\(server.ws)/ws/echo", protocols: [], headers: []).conn
-        let first = Task { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 16) } }
-        try await Task.sleep(nanoseconds: 50_000_000)
+        let first = await running { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 16) } }
         await expectThrows(WsError.protocol("a receive is already pending on connection \(conn)")) { () async throws(WsError) -> [WsMessage] in
             try await binding.receive(conn: conn, max: 16)
         }
@@ -338,8 +345,7 @@ final class RealtimeReviewTests: XCTestCase {
         let server = try sharedServer()
         let binding = WebSocketBinding(adapter: URLSessionWebSocketAdapter())
         let conn = try await binding.connect(url: "\(server.ws)/ws/stall", protocols: [], headers: []).conn
-        let pull = Task { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 16) } }
-        try await Task.sleep(nanoseconds: 50_000_000)
+        let pull = await running { await capture { () async throws(WsError) -> [WsMessage] in try await binding.receive(conn: conn, max: 16) } }
         binding.detach()
         let answered = try await pull.value.get()
         XCTAssertEqual(answered, [])

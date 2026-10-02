@@ -239,9 +239,10 @@ final class DbBindingTests: XCTestCase {
         let db = try await binding.open(name: "app", migrations: notesMigrations).db
         let tx = try await binding.begin(db)
         _ = try await binding.execute(tx, "INSERT INTO notes (title) VALUES (?)", [.text("in tx")])
-        let outside = Task { () async throws(DbError) -> DbExecuted in
+        let outside = await runningThrowing { () async throws -> DbExecuted in
             try await binding.execute(db, "INSERT INTO notes (title) VALUES (?)", [.text("outside")])
         }
+        // A negative wait: a binding that let the outer statement run would have it recorded by now (a slow machine only passes this).
         try await Task.sleep(nanoseconds: 100_000_000)
         let inserts = recorder.ran(1).filter { $0 == "INSERT INTO notes (title) VALUES (?)" }
         XCTAssertEqual(inserts.count, 1, "the outer statement waits for the transaction")
@@ -279,8 +280,7 @@ final class DbBindingTests: XCTestCase {
         let (binding, _) = try makeBinding()
         let db = try await binding.open(name: "app", migrations: notesMigrations).db
         let first = try await binding.begin(db)
-        let second = Task { () async throws(DbError) -> UInt32 in try await binding.begin(db) }
-        try await Task.sleep(nanoseconds: 50_000_000)
+        let second = await runningThrowing { () async throws -> UInt32 in try await binding.begin(db) }
         _ = try await binding.execute(first, "INSERT INTO notes (title) VALUES ('a')", [])
         try await binding.finish(first, commit: true)
         let next = try await second.value
@@ -337,8 +337,7 @@ final class DbBindingTests: XCTestCase {
         let db = try await binding.open(name: "app", migrations: notesMigrations).db
         let tx = try await binding.begin(db)
         _ = try await binding.execute(tx, "INSERT INTO notes (title) VALUES ('a')", [])
-        let waiting = Task { await capture { () async throws(DbError) -> DbRows in try await binding.query(db, "SELECT * FROM notes", []) } }
-        try await Task.sleep(nanoseconds: 50_000_000)
+        let waiting = await running { await capture { () async throws(DbError) -> DbRows in try await binding.query(db, "SELECT * FROM notes", []) } }
         try await binding.close(db)
         await expectThrows(DbError.unavailable("database \(db) was closed")) { () async throws(DbError) -> DbRows in try await waiting.value.get() }
         XCTAssertEqual(Array(recorder.ran(1).suffix(3)), ["ROLLBACK", "done ROLLBACK", "close"])
