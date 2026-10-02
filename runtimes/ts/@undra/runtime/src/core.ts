@@ -24,7 +24,7 @@ import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
 import { dispatchPortCall, portOperation } from "./port-dispatch.js";
 import { Signal } from "./signal.js";
-import { StreamCall } from "./stream.js";
+import type { StreamSupport } from "./stream-support.js";
 import type { ReconnectOptions, WebSocketFactory } from "./transport/remote.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport/transport.js";
 import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
@@ -36,20 +36,15 @@ import {
   type HelloPayload,
   Kind,
   ReplyStatus,
-  StreamFlag,
   type PortCallPayload,
-  type StreamFailure,
   codecs,
-  decodeStreamFailure,
   decodeValue,
   encodeCall,
   encodeCancel,
   encodeEvent,
   encodeObserve,
   encodeRelease,
-  encodeStreamCredit,
   encodeTimerFired,
-  streamFailureReplyBody,
 } from "./wire/index.js";
 
 /** How the core is reached (SPEC 17.1). */
@@ -297,9 +292,13 @@ class DirectCall implements PendingCall {
   }
 }
 
-interface PendingStream {
+/** A stream's entry in the pending map: the stream support (`stream-support.ts`) owns what happens to it. */
+export interface PendingStream {
   readonly kind: "stream";
-  readonly stream: StreamCall;
+  /** The reply to the stream's call (`StreamOpened`, or its failure). */
+  reply(status: number, body: Uint8Array): void;
+  reject(error: unknown): void;
+  cleanup?: undefined;
 }
 
 const UNLOADED_MESSAGE =
@@ -760,7 +759,22 @@ export class UndraCore {
    * that it panicked, cancelled the stream or refused it (ADR-036).
    */
   stream(target: CallTargetArg, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array> {
-    return { [Symbol.asyncIterator]: () => this._openStream(target, methodId, args) };
+    const core = this;
+    return {
+      [Symbol.asyncIterator]: () =>
+        core._streams?.open(core, target, methodId, args) ??
+        // No `features: [streams]` (a core loaded without its generated entry): the support loads on the first stream.
+        (async function* () {
+          yield* (core._streams = (await import("./stream-support.js")).streams).open(core, target, methodId, args);
+        })(),
+    };
+  }
+
+  /** @internal The stream support, once a feature or the first stream installed it. */
+  _streams: StreamSupport | undefined;
+  /** @internal For the stream support: the pending map, the transport, a fresh call id, the request encoder. */
+  get _internals() {
+    return { pending: this._pending, transport: this._transport, callId: () => this._allocCallId(), encode: encodeTarget, closedMessage: this._closedMessage };
   }
 
   /**
@@ -1155,12 +1169,8 @@ export class UndraCore {
     const pending = [...this._pending.values()];
     this._pending.clear();
     for (const p of pending) {
-      if (p.kind === "call") {
-        p.cleanup?.();
-        p.reject(failure);
-      } else {
-        p.stream.fail(failure);
-      }
+      p.cleanup?.();
+      p.reject(failure);
     }
     this.mirror.failWaiters(failure);
     return pending.length;
@@ -1369,33 +1379,6 @@ export class UndraCore {
     });
   }
 
-  private _openStream(target: CallTargetArg, methodId: number, args: Uint8Array): StreamCall {
-    const callId = this._closed ? 0 : this._allocCallId();
-    const stream = new StreamCall(callId, {
-      sendCredit: (id, credit) => {
-        this._assertOpen();
-        this._transport.send(Kind.StreamCredit, encodeStreamCredit({ callId: id, credit }));
-      },
-      cancel: (id) => {
-        this._pending.delete(id);
-        if (this._closed) return;
-        this._transport.send(Kind.Cancel, encodeCancel({ callId: id }));
-      },
-    });
-    if (this._closed) {
-      stream.fail(new UndraTransportError("closed", this._closedMessage));
-      return stream;
-    }
-    this._pending.set(callId, { kind: "stream", stream });
-    try {
-      this._transport.send(Kind.Call, encodeTarget(target, methodId, callId, args));
-    } catch (error) {
-      this._pending.delete(callId);
-      stream.fail(error);
-    }
-    return stream;
-  }
-
   // ----- what the transport tells us --------------------------------------------------
 
   private readonly _handler: TransportHandler = {
@@ -1406,7 +1389,7 @@ export class UndraCore {
       this.mirror.enqueue(payload);
     },
     streamItem: (payload) => {
-      this._onStreamItem(payload);
+      this._streams?.item(this, payload);
     },
     portCall: (call) => this._onPortCall(call),
     log: (level, target, message) => {
@@ -1439,29 +1422,14 @@ export class UndraCore {
     const entry = this._pending.get(callId);
     if (entry === undefined) return; // aborted or cancelled meanwhile, or never ours
 
-    if (status > ReplyStatus.BadRequest) {
-      this._pending.delete(callId);
-      const error = new UndraTransportError("protocol", `the core sent reply status ${status}`);
-      if (entry.kind === "call") {
-        entry.cleanup?.();
-        entry.reject(error);
-      } else {
-        entry.stream.fail(error);
-      }
+    if (entry.kind === "stream") {
+      entry.reply(status, body);
       return;
     }
-
-    if (entry.kind === "stream") {
-      if (status === ReplyStatus.StreamOpened) {
-        entry.stream.opened();
-        return;
-      }
+    if (status > ReplyStatus.BadRequest) {
       this._pending.delete(callId);
-      entry.stream.fail(
-        status === ReplyStatus.Ok
-          ? new UndraTransportError("protocol", "the core answered a stream call with a plain result")
-          : new UndraReplyError(status as ReplyStatus, body),
-      );
+      entry.cleanup?.();
+      entry.reject(new UndraTransportError("protocol", `the core sent reply status ${status}`));
       return;
     }
 
@@ -1484,52 +1452,6 @@ export class UndraCore {
     this.mirror.queueFlush();
     if (status === ReplyStatus.Ok) entry.resolve(body);
     else entry.reject(new UndraReplyError(status as ReplyStatus, body));
-  }
-
-  private _onStreamItem(payload: Uint8Array): void {
-    if (payload.length < 5) {
-      this._reportError("stream", new UndraTransportError("protocol", "the core sent a truncated stream item"));
-      return;
-    }
-    const callId = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint32(0, true);
-    const flag = payload[4] as number;
-    const entry = this._pending.get(callId);
-    if (entry?.kind !== "stream") return;
-    const body = payload.subarray(5);
-    switch (flag) {
-      case StreamFlag.Item:
-        entry.stream.push(body);
-        return;
-      case StreamFlag.End:
-        this._pending.delete(callId);
-        entry.stream.end();
-        return;
-      case StreamFlag.Error:
-        // The stream's own `E`; generated code decodes it.
-        this._pending.delete(callId);
-        entry.stream.fail(new UndraReplyError(ReplyStatus.Error, body));
-        return;
-      case StreamFlag.Failed: {
-        // Panicked, cancelled by the core or refused: exactly the failed reply with that status (ADR-036).
-        this._pending.delete(callId);
-        let failure: StreamFailure;
-        try {
-          failure = decodeStreamFailure(body);
-        } catch (error) {
-          entry.stream.fail(
-            new UndraTransportError("protocol", `the core sent a malformed stream failure: ${errorMessage(error)}`, {
-              cause: error,
-            }),
-          );
-          return;
-        }
-        entry.stream.fail(new UndraReplyError(failure.status, streamFailureReplyBody(failure)));
-        return;
-      }
-      default:
-        this._pending.delete(callId);
-        entry.stream.fail(new UndraTransportError("protocol", `the core sent stream flag ${flag}`));
-    }
   }
 
   private _onPortCall(call: PortCallPayload): PortOutcome {
