@@ -53,7 +53,7 @@ export const HeaderCodec: Codec<Header> = {
 const headers = codecs.vec(HeaderCodec);
 const optionBytes = codecs.option(codecs.bytes);
 const optionU32 = codecs.option(codecs.u32);
-const optionString = codecs.option(codecs.string);
+const optionName = codecs.option(codecs.string);
 
 /** Writes `v` as its `u16` index in `variants` (the encoding half of a unit enum's codec). */
 function writeIndex<T extends string>(w: UndraWriter, name: string, variants: readonly T[], v: T): void {
@@ -241,16 +241,16 @@ export const StorageErrorCodec: Codec<StorageError> = {
 /** Reads a panic frame (`PanicFrameCodec.decode`). */
 export function readPanicFrame(r: UndraReader): UndraPanicFrame {
   const address = r.readU64();
-  const symbol = optionString.decode(r);
-  const file = optionString.decode(r);
+  const symbol = optionName.decode(r);
+  const file = optionName.decode(r);
   return { address, symbol, file, line: optionU32.decode(r) };
 }
 
 /** Writes a panic frame (`PanicFrameCodec.encode`). */
 export function writePanicFrame(w: UndraWriter, v: UndraPanicFrame): void {
   w.writeU64(v.address);
-  optionString.encode(w, v.symbol);
-  optionString.encode(w, v.file);
+  optionName.encode(w, v.symbol);
+  optionName.encode(w, v.file);
   optionU32.encode(w, v.line);
 }
 
