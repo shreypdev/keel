@@ -16,7 +16,6 @@ import {
 import { nextCallId } from "./callid.js";
 import { UndraCallError, UndraUnhandledError } from "./call-error.js";
 import { Mirror, type MirrorOptions, type MirrorStats } from "./mirror.js";
-import type { RecreateCall, UndraStore } from "./object.js";
 import { isTrap } from "./panic.js";
 import type { PanicReporter, PanicSupport } from "./panic-report.js";
 import type { CrashRecovery, UndraCoreRestarted } from "./recovery.js";
@@ -172,10 +171,10 @@ export interface AttachOptions {
    * snapshot at most once a second while stores change (4 MiB at most, outside wasm memory, in the worker in
    * `wasm-worker` mode). On a trap: `onPanic` hears the panic; every call and stream in flight fails with
    * `UndraTransportError("restarted")` (it may or may not have run; it is not retried); the same compiled module is
-   * instantiated again and the snapshot restored (stores keep their handles); every observed store is observed again;
-   * query handles are re-created (their wrappers move to the new handles); then `onCoreRestarted` and `onError` hear an
-   * `UndraCoreRestarted`. Store writes after the last snapshot, objects that are not stores (query handles excepted),
-   * the core's running tasks and timers, and what the core held outside its stores are lost. One trap more than
+   * instantiated again and the snapshot restored (stores and query handles keep their handles, ADR-059); every observed
+   * store and query handle is observed again; then `onCoreRestarted` and `onError` hear an `UndraCoreRestarted`. Store
+   * writes after the last snapshot, stores and query handles created after it, objects that are neither, the core's
+   * running tasks and timers, and what the core held outside its stores are lost. One trap more than
    * `maxRestarts` within `perMs` (default 3 a minute) and the core stays dead: `onClose` reports the trap, as without
    * recovery. Wasm modes only (a native core contains its panics). The recovery code ships only with an app that
    * passes it.
@@ -1187,16 +1186,6 @@ export class UndraCore {
   }
 
   // ----- recovery (ADR-049 decision 3; the restart sequence is `crashRecovery`'s) ---------------
-
-  /**
-   * Registers a store the runtime re-creates after a restart instead of restoring it (a query handle): its constructor
-   * call is recorded, and after a restart it runs again and the store moves to the new handle.
-   *
-   * @internal Called by `UndraStore` for the `recreate` option that generated query handles pass.
-   */
-  _recreatable(store: UndraStore, call: RecreateCall): void {
-    this._options.recovery?.track(store, call);
-  }
 
   /** The panic report of `trap` (ADR-046 decision 4.4), handed to `onPanic`. The builder is loaded: see {@link UndraCore._loadPanics}. */
   private _panicReport(trap: Error): UndraPanicReport {

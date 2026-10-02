@@ -17,16 +17,19 @@ import type { PortImpl } from "../src/port.js";
 import {
   DEFAULT_RECOVERY,
   type RestartResult,
+  type Reinstantiable,
   SnapshotKeeper,
   UndraCoreRestarted,
   emptySnapshot,
   crashRecovery,
   resolveRecovery,
+  restartHere,
   snapshotStoreHandles,
   withGenerationFloor,
 } from "../src/recovery.js";
 import { Signal } from "../src/signal.js";
 import type { UndraPanicReport } from "../src/adapters/types.js";
+import type { TransportHandler } from "../src/transport/transport.js";
 import { WasmMainTransport } from "../src/transport/wasm-main.js";
 import { WasmWorkerTransport } from "../src/transport/wasm-worker.js";
 import {
@@ -70,19 +73,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** A query handle as `undra-bindgen` writes one (ADR-049): it records its constructor call. */
+/** A query handle as `undra-bindgen` writes one (ADR-059): a store the core's snapshot names, which it re-issues on its handle. */
 class QueryStore extends UndraStore {
   readonly data = new Signal<number>(0);
 
-  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
-    super(core, handle, { recreate: { typeId: QUERY_TYPE, methodId: QUERY_NEW, args } });
+  private constructor(core: UndraCore, handle: bigint) {
+    super(core, handle);
     this._signals = [this.data];
   }
 
   static async create(core: UndraCore, key: number): Promise<QueryStore> {
-    const args = u32(key);
-    const handle = await core.construct(QUERY_TYPE, QUERY_NEW, args);
-    const store = new QueryStore(core, handle, args);
+    const handle = await core.construct(QUERY_TYPE, QUERY_NEW, u32(key));
+    const store = new QueryStore(core, handle);
     await store._observeAll();
     return store;
   }
@@ -100,7 +102,10 @@ function trapError(text = "unreachable"): UndraTransportError {
   return new UndraTransportError("trap", `the wasm core trapped: ${text}`, { cause });
 }
 
-/** A scripted transport that can restart: each restart takes the next scripted outcome, else succeeds with the stores in `restoredStores`. */
+/**
+ * A scripted transport that can restart: each restart takes the next scripted outcome, else succeeds with the handles in
+ * `restoredStores` (the snapshot's records: its stores and its query handles' recreation records, ADR-059).
+ */
 class RestartableFake extends FakeCoreTransport {
   readonly floors: number[] = [];
   readonly outcomes: Array<() => Promise<RestartResult>> = [];
@@ -318,13 +323,56 @@ describe("snapshot helpers", () => {
     expect(snapshotStoreHandles(Uint8Array.of(1, 2, 3))).toBeNull();
     expect(decodeSnapshot(emptySnapshot(7n, 12))).toEqual({ generationFloor: 12, schemaHash: 7n, types: [], description: "", stores: [] });
   });
+
+  // ADR-059: a query handle is in the snapshot as a recreation record, a record with one field whose id is reserved and whose
+  // bytes are the core's own. The core re-issues such a handle on restore as it restores a store, so the runtime has to
+  // count it among the handles that came back: one that is not in the list is stale, and its wrapper is not observed again.
+  const RECREATION_FIELD = 0xffff_fffe;
+  const query = makeHandle(5, 3);
+  const withQuery = encodeSnapshot({
+    generationFloor: 3,
+    schemaHash: 9n,
+    types: [
+      { typeId: 1, fingerprint: 2n },
+      { typeId: QUERY_TYPE, fingerprint: 0n },
+    ],
+    description: "{}",
+    stores: [
+      { handle: makeHandle(4, 2), typeId: 1, signals: [{ signalId: 0, value: u32(5) }] },
+      { handle: query, typeId: QUERY_TYPE, signals: [{ signalId: RECREATION_FIELD, value: Uint8Array.of(1, 0, 0, 0, 0, 0, 0) }] },
+    ],
+  });
+
+  it("list the recreation record of a query handle with the stores", () => {
+    expect(snapshotStoreHandles(withQuery)).toEqual([makeHandle(4, 2), query]);
+  });
+
+  it("restartHere reports the handles of the snapshot it restored, the query handle's among them", async () => {
+    const keeper = new SnapshotKeeper({ snapshotEveryMs: 0, maxSnapshotBytes: 1024 }, { take: () => withQuery, tooLarge: () => {}, failed: () => {} });
+    expect(keeper.takeNow()).toBe(withQuery.byteLength);
+    const hello = { undraVersion: "x", schemaHash: 9n, platform: "p", mode: "m" };
+    const restored: Uint8Array[] = [];
+    const twin = {
+      start: () => Promise.resolve(hello),
+      restore: (bytes: Uint8Array) => {
+        restored.push(bytes);
+        return Promise.resolve();
+      },
+    } as unknown as Reinstantiable;
+    const result = await restartHere(twin, {} as TransportHandler, keeper, 8, () => {});
+    expect(result.storeHandles).toEqual([makeHandle(4, 2), query]);
+    expect(result.restoredFromAgeMs).not.toBeNull();
+    expect(restored).toHaveLength(1);
+    expect(decodeSnapshot(restored[0] as Uint8Array).generationFloor, "the floor was raised over the handles the host holds").toBe(8);
+    expect(decodeSnapshot(restored[0] as Uint8Array).stores.map((record) => record.handle)).toEqual([makeHandle(4, 2), query]);
+  });
 });
 
 describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
-  it("panic report, then in-flight calls and streams fail 'restarted', restart, re-observe, re-create the query handles, then onCoreRestarted and onError", async () => {
+  it("panic report, then in-flight calls and streams fail 'restarted', restart, re-observe the stores and the query handles, then onCoreRestarted and onError", async () => {
     const t = await recovering();
     const { fake, core } = t;
-    // A store the snapshot will bring back, a query handle, and an object that is not a store.
+    // A store and a query handle the snapshot will bring back, and an object that is neither.
     const counterHandle = makeHandle(50, 3);
     fake.store(counterHandle, new Map([[0, u32(1)]]));
     const counter = await CounterStore.create(core, counterHandle);
@@ -332,7 +380,7 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     expect(query.data.peek()).toBe(40);
     const queryHandle = query.handle;
     const object = await core.construct(OBJECT_TYPE, OBJECT_NEW, new Uint8Array(0));
-    fake.restoredStores = [counterHandle];
+    fake.restoredStores = [counterHandle, queryHandle];
 
     const pending = core.call(FREE, PENDING, new Uint8Array(0));
     // A stream the core has not answered yet: its first item waits.
@@ -343,6 +391,7 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     fake.setSignal(counterHandle, 0, u32(9)); // a change the restored snapshot does not have
     await until("the change", () => counter.count.peek() === 9);
     fake.store(counterHandle, new Map([[0, u32(7)]])); // what the restored core answers an observe with
+    fake.store(queryHandle, new Map([[0, u32(41)]])); // and for the query handle it builds again when it is observed
 
     fake.trap("kaboom");
     await until("the restart", () => t.restarts.length === 1);
@@ -362,21 +411,22 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     // 4. The restored store was observed again and shows the restored value, on the same handle.
     expect(counter.handle).toBe(counterHandle);
     expect(counter.count.peek()).toBe(7);
-    // 5. The query handle was re-created with its recorded call and the wrapper moved to the new handle.
-    expect(query.handle).not.toBe(queryHandle);
-    expect(core.mirror.has(queryHandle)).toBe(false);
-    expect(core.mirror.has(query.handle)).toBe(true);
+    // 5. The query handle is in the snapshot as a recreation record (ADR-059): the core re-issued it on its own handle, and
+    // the runtime observes it again like a store. The wrapper is untouched, no constructor ran again, and the observe was
+    // answered with what the core has now.
+    expect(query.handle).toBe(queryHandle);
+    expect(core.mirror.has(queryHandle)).toBe(true);
     const ctors = fake.calls.filter((c) => "methodId" in c && c.methodId === QUERY_NEW);
-    expect(ctors).toHaveLength(2);
-    expect(fake.observed.filter((o) => o.handle === query.handle && o.on)).toHaveLength(1);
-    expect(query.data.peek()).toBe(40);
-    fake.setSignal(query.handle, 0, u32(41));
-    await until("the query's change", () => query.data.peek() === 41);
+    expect(ctors).toHaveLength(1);
+    expect(fake.observed.filter((o) => o.handle === queryHandle && o.on), "observed once when it was made and once more after the restart").toHaveLength(2);
+    expect(query.data.peek()).toBe(41);
+    fake.setSignal(queryHandle, 0, u32(42));
+    await until("the query's change", () => query.data.peek() === 42);
     // 6. One event, to both hooks: the panic, the snapshot's age, the failed calls and the stale object.
     const event = t.restarts[0] as UndraCoreRestarted;
     expect(event).toBeInstanceOf(UndraCoreRestarted);
     expect(event).toBeInstanceOf(UndraUnhandledError);
-    expect(event).toMatchObject({ restoredFromAgeMs: 250, rejectedCalls: 2, staleObjects: 1, operation: "wasm core" });
+    expect(event, "the query handle is in the snapshot, so it is not stale").toMatchObject({ restoredFromAgeMs: 250, rejectedCalls: 2, staleObjects: 1, operation: "wasm core" });
     expect(event.message).toBe("the wasm core trapped (kaboom) and was restarted from a snapshot 250 ms old");
     expect(event.report).toBe(t.panics[0]);
     expect(event.error).toBeInstanceOf(UndraCallError.Panicked);
@@ -384,7 +434,7 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     expect(t.closed).toEqual([]);
     expect(core.closed).toBe(false);
     expect(core.hello.undraVersion).toBe("fake-2");
-    // The core works; the object that is not a store went stale: it is not observed or re-created.
+    // The core works; the object that is neither a store nor a query handle went stale: it is not observed again.
     await expect(core.call(FREE, ECHO, u32(3))).resolves.toEqual(u32(3));
     expect(fake.observed.filter((o) => o.handle === object)).toEqual([]);
   });
@@ -586,17 +636,25 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     expect(t.fake.sent.filter((m) => m.kind === Kind.PortReply)).toEqual([]);
   });
 
-  it("a query handle closed before the restart is not re-created; one whose constructor fails stays stale", async () => {
+  it("a query handle the snapshot has is observed again on its handle; one closed before the restart is not, and one made after the snapshot is stale like a store made then", async () => {
     const t = await recovering();
-    const closed = await QueryStore.create(t.core, 1);
-    const failing = await QueryStore.create(t.core, 2);
+    const kept = await QueryStore.create(t.core, 1);
+    const closed = await QueryStore.create(t.core, 2);
     closed.close();
-    t.fake.on(QUERY_NEW, (_call, r) => r.badRequest("no longer"));
+    const late = await QueryStore.create(t.core, 3);
+    const observes = (store: QueryStore): number => t.fake.observed.filter((o) => o.handle === store.handle && o.on).length;
+    const [keptHandle, lateHandle] = [kept.handle, late.handle];
+    // The last snapshot kept was taken before `late` was made, so it has a record for `kept` and none for `late` or `closed`.
+    t.fake.restoredStores = [keptHandle];
     t.fake.trap();
     await until("the restart", () => t.restarts.length === 1);
-    expect(t.restarts[0]?.staleObjects).toBe(1);
-    expect(failing.handle).toBe(failing.handle);
-    expect(t.errors.some((e) => e.operation.startsWith("re-creating a query handle"))).toBe(true);
+    expect(kept.handle, "the wrapper is untouched (ADR-059)").toBe(keptHandle);
+    expect(observes(kept), "observed again").toBe(2);
+    expect(observes(closed), "released, so not observed again").toBe(1);
+    expect(observes(late), "not in the snapshot, so not observed again").toBe(1);
+    expect(late.handle).toBe(lateHandle);
+    expect(t.restarts[0]?.staleObjects, "only the one the snapshot did not have").toBe(1);
+    expect(t.fake.calls.filter((c) => "methodId" in c && c.methodId === QUERY_NEW), "none was constructed again").toHaveLength(3);
   });
 });
 

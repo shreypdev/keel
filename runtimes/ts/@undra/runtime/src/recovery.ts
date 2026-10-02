@@ -2,7 +2,6 @@ import { UndraCallError, UndraUnhandledError } from "./call-error.js";
 import type { UndraCore } from "./core.js";
 import { UndraRestoreError, UndraTransportError } from "./errors.js";
 import { wrapperOf } from "./identity.js";
-import { type RecreateCall, type UndraStore, _rebindObject } from "./object.js";
 import type { UndraPanicFrame, UndraPanicReport } from "./adapters/types.js";
 import { isTrap } from "./panic.js";
 import { type PanicSupport, panicSupport } from "./panic-report.js";
@@ -208,7 +207,10 @@ export function emptySnapshot(schemaHash: bigint, floor: number): Uint8Array {
   return encodeSnapshot({ generationFloor: Math.max(0, Math.floor(floor)), schemaHash, types: [], description: "", stores: [] });
 }
 
-/** The handles of the stores in a snapshot, or `null` when it does not decode (a layout this runtime does not read). */
+/**
+ * The handles of the records in a snapshot, or `null` when it does not decode (a layout this runtime does not read): its
+ * stores, and the recreation records of its query handles (ADR-059), which the core re-issues on restore as it restores a store.
+ */
 export function snapshotStoreHandles(snapshot: Uint8Array): Handle[] | null {
   try {
     return decodeSnapshot(snapshot).stores.map((store) => store.handle);
@@ -223,7 +225,7 @@ export interface RestartResult {
   readonly hello: HelloPayload;
   /** How old the restored snapshot was, in ms; `null` when there was none (or it was refused), and the stores were not restored. */
   readonly restoredFromAgeMs: number | null;
-  /** The handles of the stores the restore brought back (ADR-022: the same handles); `null` when they cannot be read off the snapshot. */
+  /** The handles of the stores and query handles the restore brought back (ADR-022, ADR-059: the same handles); `null` when they cannot be read off the snapshot. */
   readonly storeHandles: readonly Handle[] | null;
 }
 
@@ -251,7 +253,7 @@ export interface CoreRestartInfo {
   readonly restoredFromAgeMs: number | null;
   /** How many calls and streams in flight were rejected with `UndraTransportError("restarted")`. */
   readonly rejectedCalls: number;
-  /** How many objects the app holds went stale: objects that are not stores (query handles excepted: they are re-created), and stores the snapshot did not have. Calls on them are refused. */
+  /** How many objects the app holds went stale: objects that are neither stores nor query handles, and stores and query handles the snapshot did not have (created after it was taken). Calls on them are refused. */
   readonly staleObjects: number;
 }
 
@@ -417,12 +419,6 @@ export interface CrashRecovery {
    * @internal Called by `UndraCore`; throws when this recovery already belongs to a core.
    */
   attach(transport: Transport, host: RecoveryHost, onCoreRestarted?: (event: UndraCoreRestarted) => void): Transport;
-  /**
-   * A store to re-create after a restart instead of restoring it (a query handle), with its recorded constructor call.
-   *
-   * @internal Called by `UndraCore` for the `recreate` option that generated query handles pass.
-   */
-  track(store: UndraStore, call: RecreateCall): void;
 }
 
 /**
@@ -438,9 +434,9 @@ export interface CrashRecovery {
  * may not have run, and it is not retried); the registered ports release what the instance held through them
  * (`PortImpl.dispose`: WebSocket connections and event streams close, open transactions roll back, databases close);
  * the same compiled module is instantiated again and the snapshot restored
- * (stores keep their handles); every observed store is observed again; query handles are re-created behind the same
- * objects; then `onCoreRestarted` and `onError` hear an {@link UndraCoreRestarted}. Lost: store writes after the last
- * snapshot, objects that are not stores (query handles excepted), the core's running tasks and timers, and whatever the
+ * (stores and query handles keep their handles, ADR-059); every observed store and query handle is observed again; then
+ * `onCoreRestarted` and `onError` hear an {@link UndraCoreRestarted}. Lost: store writes after the last snapshot, stores
+ * and query handles created after it, objects that are neither, the core's running tasks and timers, and whatever the
  * core held outside its stores (re-apply it in `onCoreRestarted`). Past `maxRestarts` within `perMs` the core stays dead
  * and `onClose` reports the trap. Wasm modes only (a native core contains its panics). A core loaded without it ships none
  * of this code.
@@ -459,9 +455,6 @@ export function crashRecovery(options: RecoveryOptions = {}): CrashRecovery {
       if (attached !== null) throw new UndraTransportError("unsupported", "this crashRecovery() already belongs to a core: make one per core");
       attached = new Recovering(transport, settings, host, onCoreRestarted);
       return attached;
-    },
-    track(store, call) {
-      attached?.track(store, call);
     },
   };
 }
@@ -496,8 +489,6 @@ class Recovering implements Transport {
   #times: number[] = [];
   /** Counts recoveries: a re-attach that a newer trap overtook stops. */
   #run = 0;
-  /** The stores re-created after a restart (query handles), by handle. */
-  readonly #recreatable = new Map<Handle, { readonly ref: WeakRef<UndraStore>; readonly call: RecreateCall }>();
   /** While the trapped core is being instantiated again: calls fail with "restarted". */
   #restarting = false;
   /** The highest floor a restart used: handles that went stale are forgotten, but the app's wrappers keep them (ADR-022). */
@@ -619,14 +610,6 @@ class Recovering implements Transport {
     this.#inner.close();
   }
 
-  track(store: UndraStore, call: RecreateCall): void {
-    // The stores closed or collected since are forgotten here (a released store's wrapper is closed).
-    for (const [handle, entry] of this.#recreatable) {
-      if (entry.ref.deref()?.closed !== false) this.#recreatable.delete(handle);
-    }
-    this.#recreatable.set(store.handle, { ref: new WeakRef(store), call });
-  }
-
   /** Runs `run`; a trap it throws is "restarted" when the core will recover from it, which the caller then sees. */
   #guard<T>(run: () => T): T {
     try {
@@ -651,7 +634,7 @@ class Recovering implements Transport {
   #floor(): number {
     const host = this.#host;
     let floor = this.#floorUsed;
-    for (const set of [host.handles, host.observed.keys(), this.#recreatable.keys(), this.#releasedWhileDown.keys()]) {
+    for (const set of [host.handles, host.observed.keys(), this.#releasedWhileDown.keys()]) {
       for (const handle of set) floor = Math.max(floor, handleGeneration(handle));
     }
     this.#floorUsed = floor;
@@ -689,8 +672,9 @@ class Recovering implements Transport {
 
   /**
    * The restart sequence of ADR-049 decision 3.4: the panic report went to `onPanic` already; every call and stream in
-   * flight fails with "restarted"; the core comes back from the last snapshot; the stores are observed again and the query
-   * handles re-created; then `onCoreRestarted` and `onError`. A trap during it counts against the budget like any other.
+   * flight fails with "restarted"; the core comes back from the last snapshot; the stores and the query handles (which the
+   * core re-issues on their own handles, ADR-059) are observed again; then `onCoreRestarted` and `onError`. A trap during
+   * it counts against the budget like any other.
    */
   async #recover(firstTrap: UndraTransportError, firstReport: UndraPanicReport): Promise<void> {
     const host = this.#host;
@@ -753,19 +737,18 @@ class Recovering implements Transport {
   }
 
   /**
-   * After a restart: what was released meanwhile is released, the stores the snapshot brought back are observed again
-   * (their values reach the mirror), and the query handles are re-created and their wrappers moved to the new handles.
-   * Returns how many objects went stale, or `null` when a newer trap overtook this round.
+   * After a restart: what was released meanwhile is released, and the stores and query handles the snapshot brought back
+   * are observed again (their values reach the mirror; the core builds a query handle again when it is first observed,
+   * ADR-059, so the wrapper keeps its handle). Returns how many objects went stale (not in the snapshot: objects that are
+   * neither, and stores and query handles created after it), or `null` when a newer trap overtook this round.
    */
   async #reattach(result: RestartResult, run: number): Promise<number | null> {
     const host = this.#host;
     const core = host.core;
     const restored = result.storeHandles === null ? null : new Set(result.storeHandles);
-    const recreate = [...this.#recreatable.entries()];
-    const recreated = new Set(recreate.map(([handle]) => handle));
     let stale = 0;
     for (const handle of new Set([...host.handles, ...host.observed.keys()])) {
-      if (recreated.has(handle) || restored === null || restored.has(handle)) continue;
+      if (restored === null || restored.has(handle)) continue;
       stale++;
       host.handles.delete(handle);
       host.observed.delete(handle);
@@ -785,51 +768,12 @@ class Recovering implements Transport {
     core._era++;
     const observing: Array<Promise<void>> = [];
     for (const [handle, signals] of [...host.observed]) {
-      if (recreated.has(handle)) continue;
       for (const signalId of signals) observing.push(core.observe(handle, signalId, true));
     }
     const settled = await Promise.allSettled(observing);
     if (run !== this.#run || core.closed) return null;
     const trapped = settled.find((s): s is PromiseRejectedResult => s.status === "rejected" && overtaken(s.reason));
     if (trapped !== undefined) throw trapped.reason;
-    for (const [old, entry] of recreate) {
-      const store = entry.ref.deref();
-      this.#recreatable.delete(old);
-      if (store === undefined || store.closed || !core.mirror.has(old)) continue;
-      let handle: Handle;
-      try {
-        handle = await core.construct(entry.call.typeId, entry.call.methodId, entry.call.args);
-      } catch (error) {
-        if (run !== this.#run || core.closed) return null;
-        if (overtaken(error)) throw error;
-        stale++;
-        core.report(error, `re-creating a query handle after a restart (type 0x${entry.call.typeId.toString(16)})`);
-        continue;
-      }
-      if (run !== this.#run || core.closed || store.closed) {
-        core.release(handle);
-        if (run !== this.#run || core.closed) return null;
-        continue;
-      }
-      const signals = host.observed.get(old) ?? new Set<number>();
-      host.observed.delete(old);
-      host.handles.delete(old);
-      // The wrapper moves to the new handle, and its mirror registration with it.
-      const ref = entry.ref;
-      core.mirror.unregister(old);
-      core.mirror.register(handle, (signalId, op, value) => {
-        (ref.deref() as unknown as { _apply?: (s: number, o: typeof op, v: Uint8Array) => void } | undefined)?._apply?.(signalId, op, value);
-      });
-      _rebindObject(store, handle);
-      this.#recreatable.set(handle, entry);
-      const outcomes = await Promise.allSettled([...signals].map((signalId) => core.observe(handle, signalId, true)));
-      if (run !== this.#run || core.closed) return null;
-      const failed = outcomes.find((o): o is PromiseRejectedResult => o.status === "rejected");
-      if (failed !== undefined) {
-        if (overtaken(failed.reason)) throw failed.reason;
-        core.report(failed.reason, "observing a re-created query handle after a restart");
-      }
-    }
     return stale;
   }
 }
