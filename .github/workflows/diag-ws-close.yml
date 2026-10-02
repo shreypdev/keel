@@ -101,3 +101,36 @@ jobs:
           mv "$RUNNER_TEMP/diag.swift" "$RUNNER_TEMP/main.swift"
           swiftc -swift-version 5 -o "$RUNNER_TEMP/diag" "$RUNNER_TEMP/main.swift"
           "$RUNNER_TEMP/diag" "$PORT"
+      - name: A poll that waits for a change, cache allowed (what the XCTest harness does), against a server that says nothing about caching and one that says no-store
+        continue-on-error: true
+        run: |
+          cat > "$RUNNER_TEMP/flip.mjs" <<'JS'
+          import { createServer } from "node:http";
+          const make = (headers) => { let t0 = 0; const s = createServer((req, res) => { if (!t0) t0 = Date.now(); res.writeHead(200, headers); res.end(JSON.stringify({ closed: Date.now() - t0 > 200 })); }); return new Promise((r) => s.listen(0, "127.0.0.1", () => r(s.address().port))); };
+          const plain = await make({ "content-type": "application/json" });
+          const nostore = await make({ "content-type": "application/json", "cache-control": "no-store" });
+          console.log(`PORTS ${plain} ${nostore}`);
+          setTimeout(() => process.exit(0), 20000);
+          JS
+          node "$RUNNER_TEMP/flip.mjs" > "$RUNNER_TEMP/flip.out" 2>&1 &
+          sleep 1
+          read -r _ PLAIN NOSTORE < "$RUNNER_TEMP/flip.out"
+          cat > "$RUNNER_TEMP/poll.swift" <<'SWIFT'
+          import Foundation
+          func poll(_ label: String, _ port: String) async {
+              let url = URL(string: "http://127.0.0.1:\(port)/stats")!
+              var first: Int? = nil
+              for i in 0..<150 {
+                  guard let (d, _) = try? await URLSession.shared.data(from: url),
+                        let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+                  if (j["closed"] as? Bool) == true { first = i; break }
+                  try? await Task.sleep(nanoseconds: 20_000_000)
+              }
+              print("\(label): the poll that first saw the change: \(first.map(String.init) ?? "NEVER in 150 polls (3 s)")")
+          }
+          await poll("server with no cache headers", CommandLine.arguments[1])
+          await poll("server with cache-control: no-store", CommandLine.arguments[2])
+          SWIFT
+          mv "$RUNNER_TEMP/poll.swift" "$RUNNER_TEMP/main.swift"
+          swiftc -swift-version 5 -o "$RUNNER_TEMP/poll" "$RUNNER_TEMP/main.swift"
+          "$RUNNER_TEMP/poll" "$PLAIN" "$NOSTORE"
