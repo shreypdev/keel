@@ -315,7 +315,12 @@ What the review's open items changed in the rules above (record: `.10x/decisions
   it opens, so a refused stream owns nothing, and held (with the proxies of its callback parameters) until it ends or is
   dropped. A restore cancels a call or stream that holds a store as a *parameter*, not only on one as its receiver
   (ADR-023's rule, extended: `Runtime::object` records what a dispatch resolved and the call table keeps it); a call
-  whose objects the restore never touched goes on.
+  whose objects the restore never touched goes on. A call that holds more than four objects (a fifth parameter, or the
+  fifth element of a `Vec<Arc<T>>`) cannot be checked against each, so any restore cancels it: cancelled is a status the
+  host handles, finishing on a replaced store is not (the review of the follow-ups; the first version left such a call to
+  finish). The slot that carries the parameters from `Runtime::param` to the call table is one per thread, which is enough
+  because the core lock refuses a nested call into the same runtime; a stream function's body that calls *another* core
+  while it is dispatched would replace it, and the outer stream would go unchecked by a restore (a missed cancel).
 * **One reference, one ledger (decision 6).** What a constructor returns is the session's own reference, counted per
   handle by the transport's connection (an `Arc<Self>` singleton constructed twice is two); the runtime's origin ledger
   skips what a constructor issues and records what other calls return. One `Release` gives back one reference of either
@@ -329,5 +334,13 @@ What the review's open items changed in the rules above (record: `.10x/decisions
   race); after a crash restart the releases held back are replayed as the bare releases they were and dropped for a handle
   an open wrapper holds, and a finalizer from before a restart gives nothing back while a newer wrapper holds the handle.
   Kotlin and Swift keep the documented limit (a caller cancelled at the moment a reply carrying an object arrives).
+* **Framework lifetimes (TypeScript).** The wrapper is one per handle, so two creations the core answers with one handle
+  (an `Arc<Self>` constructor: StrictMode's second effect, or two components) reach two `useUndra` lives as the *same*
+  wrapper. `openUndra` counts its lives per object and closes it when the last ends; an object that arrives after its life
+  ended is closed one turn later, unless another life took it meanwhile (the review: the second effect used to be handed an
+  object the first one's cleanup had closed).
+* **Swift's identity map.** The map never loads a weak reference under its lock (a load makes a strong temporary; if it is
+  the wrapper's last reference the wrapper deallocates inside the lock and its `deinit`, which closes it, takes the lock
+  again): a slot names its wrapper by `ObjectIdentifier`. The review's eight-thread adopt/close stress found it.
 * **`undra dev` sessions (decision 6, last consequence).** The session's origin is the key of its callback proxies as well
   (ADR-041 note), and a session that left no longer speaks for the next one's instances.

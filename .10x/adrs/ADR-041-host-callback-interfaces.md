@@ -318,3 +318,10 @@ text left room, and the deviations:
   `UndraCallbacks.targetGone()` stops the process with a message when it has none, instead of awaiting for ever. The core's
   path is unchanged (the runtime resolves the target first and answers unavailable). Kotlin's companion `invoke` exists for
   every `new`, not only a parameterless one.
+* **Swift's weak wrapper with typed throws (review).** A weak wrapper's asynchronous method can only throw its own error
+  type under `throws(E)` (a `UndraCallError` does not convert: `thrown expression type 'CallError' cannot be converted to
+  error type 'AuthError'`), so an error type with no `Unavailable` variant has nothing to throw and the method stops the
+  process with a message (`UndraCallbacks.targetGone()`). It is app code calling a wrapper of its own whose target died
+  (the core never gets there: the runtime resolves the target first and answers unavailable), the Swift convention for such a
+  contract breach, and not one of the boundary entries R6 guards. With `swift_typed_throws = false` the method throws
+  `UndraCallError.unavailable`.
