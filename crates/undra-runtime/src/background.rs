@@ -144,8 +144,8 @@ impl Registry {
                 let (pending, run) = (task.pending, task.run);
                 out.push(Registered {
                     name: task.name,
-                    pending: Arc::new(move |ctx| pending(ctx)),
-                    run: Arc::new(move |ctx, deadline| run(ctx, deadline)),
+                    pending: Arc::new(pending),
+                    run: Arc::new(run),
                 });
             }
         }

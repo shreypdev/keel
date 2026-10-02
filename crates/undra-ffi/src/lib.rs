@@ -31,8 +31,17 @@ compile_error!(
 
 mod api;
 mod buf;
+#[cfg(not(target_family = "wasm"))]
+mod frames;
 mod guard;
 mod table;
+
+/// What the macros of this crate expand to; not API.
+#[doc(hidden)]
+pub mod __private {
+    pub use undra_runtime::CoreIdentity;
+    pub use undra_runtime::inventory;
+}
 
 pub use api::{ABI_VERSION, WASM_ABI_VERSION, init_code, restore_code};
 pub use buf::UndraBuf;

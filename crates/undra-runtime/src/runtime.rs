@@ -1202,6 +1202,23 @@ impl Runtime {
         self.emit_report(operation, report);
     }
 
+    /// Reports a panic an embedder contained at its own boundary (`undra-ffi`'s entries): the
+    /// report names `entry` as the operation and carries no frames.
+    pub fn report_boundary_panic(&self, entry: &str, message: &str) {
+        Stats::inc(&self.stats.panics);
+        let report = PanicReport {
+            message: message.to_owned(),
+            backtrace: String::new(),
+            location: String::new(),
+            thread: std::thread::current()
+                .name()
+                .unwrap_or("unnamed")
+                .to_owned(),
+            frames: Vec::new(),
+        };
+        self.emit_report(entry, &report);
+    }
+
     /// Hands the report of a contained panic to the `Diagnostics` port, fire and forget: to a
     /// Rust binding (a fake) if there is one, else to the platform with `port_call_id` 0, like a
     /// log record. A report that itself panics, or one made while a report is being delivered,
