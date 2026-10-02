@@ -48,16 +48,19 @@ import UIKit
 /// once per core, each with its own `taskIdentifier` and a loader that returns the core of its namespace
 /// (`{ Undra<Ns>.core.isShutDown ? try Undra<Ns>.load() : Undra<Ns>.core }`).
 ///
-/// ## Trying it in the simulator
+/// ## Trying it
 ///
-/// The simulator does not run background tasks by itself. Run the app from Xcode, pause it in the debugger
-/// and evaluate (Apple's documented way, one line each):
+/// BackgroundTasks does not run in the simulator: `BGTaskScheduler.submit` throws `.unavailable` there (the
+/// runtime logs it and carries on), so no request is ever scheduled. On a device, run the app from Xcode, put it in
+/// the background with work waiting (an offline mutation queued) so that the requests are submitted, pause it in
+/// the debugger and evaluate Apple's documented commands, one line each:
 ///
 ///     e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"com.example.app.undra.refresh"]
 ///     e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateExpirationForTaskWithIdentifier:@"com.example.app.undra.refresh"]
 ///
 /// The first runs the handler (the core runs in the window and the task completes), the second calls the
-/// expiration handler while it runs. Use the `.processing` identifier for the processing window.
+/// expiration handler while it runs. Use the `.processing` identifier for the processing window. The commands
+/// answer "No task request with identifier ... has been scheduled" until a request was submitted.
 @available(iOSApplicationExtension, unavailable)
 public enum UndraBackground {
     /// How long the windows are used and when the next one is asked for.
