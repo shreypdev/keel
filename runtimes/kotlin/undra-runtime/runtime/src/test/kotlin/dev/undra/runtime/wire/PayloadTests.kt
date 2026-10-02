@@ -386,17 +386,17 @@ class PayloadTests : Suite() {
         case("Snapshot is layout 2: count, floor, schema hash, the type table, the description, then each store (ADR-037)") {
             // The bytes of the Rust codec's `layout_matches_the_spec` (crates/undra-wire/src/payload/snapshot.rs).
             val snapshot = Payloads.Snapshot(
-                generationFloor = 0x01020304u,
+                generationFloor = 0x01020304uL,
                 schemaHash = 0x0807060504030201uL,
                 types = listOf(Payloads.Snapshot.StoreType(7u, 0x0auL)),
                 description = "{}",
                 stores = listOf(Payloads.Snapshot.Store(Handle.make(1u, 1u), 7u, listOf(Payloads.Snapshot.Signal(2u, bytesOf(9))))),
             )
             check(
-                "01000000" + "04030201" + "0102030405060708" + // count, generation_floor, schema_hash
+                "01000000" + "0403020100000000" + "0102030405060708" + // count, generation_floor (u64), schema_hash
                     "01000000" + "07000000" + "0a00000000000000" + // type_count, type_id, fingerprint
                     "02000000" + "7b7d" + // description
-                    "0100000001000000" + "07000000" + "01000000" + // handle, type_id, signal_count
+                    "0100000100000000" + "07000000" + "01000000" + // handle, type_id, signal_count
                     "02000000" + "01000000" + "09", // signal_id, len, value
                 snapshot, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) },
             )
@@ -406,7 +406,7 @@ class PayloadTests : Suite() {
 
         case("Snapshot round-trips several types and stores, signals of any length and a non-ASCII description") {
             val snapshot = Payloads.Snapshot(
-                generationFloor = 5u,
+                generationFloor = 5uL,
                 schemaHash = 0xfeedbeef00000001uL,
                 types = listOf(Payloads.Snapshot.StoreType(7u, 0x11uL), Payloads.Snapshot.StoreType(8u, ULong.MAX_VALUE)),
                 description = "{\"stores\":[],\"note\":\"h${cp(0xe9)}llo ${cp(0x1F30A)}\"}",
