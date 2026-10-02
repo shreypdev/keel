@@ -35,9 +35,9 @@
 //! assert_eq!(rows.as_slice(), [10, 0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 0]);
 //! ```
 
+use std::any::Any;
 use std::fmt;
 use std::ops::{Bound, Range, RangeBounds};
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
@@ -47,9 +47,11 @@ use undra_wire::{Encode, Handle, Writer};
 
 use crate::derived::DerivedList;
 use crate::derived::node::{DerivedNode, check_cycle};
+use crate::derived::slot::{DerivedSlot, Emitted};
 use crate::graph::{Binding, Reactive, record};
 use crate::oplog::move_within;
 use crate::signal::Signal;
+use crate::store::StoreCell;
 use crate::value::SignalValue;
 
 /// A list a host pages through: what the runtime's object table serves `LazyPage` calls from
@@ -674,38 +676,33 @@ impl<T: SignalValue> fmt::Debug for Lazy<T> {
 // The store slot
 // ---------------------------------------------------------------------------------------------
 
-/// What a commit sends for a lazy slot.
-pub(crate) enum LazyEmit {
-    /// Change-set op 2 (`LazyInvalidated`): the host re-pages its window.
-    Invalidated,
-    /// Change-set op 0 (`LazyValue`): the host has no list yet (an unobserved `no_coalesce` slot).
-    Full,
-    /// Nothing the host does not already know.
-    Nothing,
+/// How the runtime registers the page servers of a store's lazy lists (ADR-043), set on the store's
+/// cell by [`StoreCell::set_lazy_hooks`](crate::StoreCell::set_lazy_hooks).
+///
+/// The runtime's object table calls them with itself as `table` (an `&dyn Any` so that this crate
+/// knows nothing of the table): `register` when the store enters the table (a new store, or one a
+/// restore places), `unregister` when the store leaves it. A core whose stores have no `Lazy` field
+/// never sets them, which is what keeps the page-server code out of its binary.
+#[derive(Clone, Copy)]
+pub struct LazyHooks {
+    /// The store entered `table` with `handle`: register a page server for each of
+    /// [`cell.lazy_sources()`](crate::StoreCell::lazy_sources) and tell the cell the handles.
+    pub register: fn(table: &dyn Any, cell: &Arc<StoreCell>, handle: u64),
+    /// The store left `table`: remove its page servers.
+    pub unregister: fn(table: &dyn Any, cell: &StoreCell),
 }
 
-/// A lazy list as a store slot sees it.
-pub(crate) trait LazySlot: Send + Sync {
-    /// The page server the runtime registers for the host.
-    fn source(&self) -> Arc<dyn LazySource>;
-    /// The page server's handle in the runtime's object table (`0` until it is registered).
-    fn handle(&self) -> u64;
-    /// Records the page server's handle: the runtime registers one per lazy slot when the store
-    /// enters its object table.
-    fn set_handle(&self, handle: u64);
-    /// Writes the signal's value (`LazyValue`) and remembers the host was told it: `observe`.
-    fn write_full(&self, w: &mut Writer);
-    /// Writes what a commit sends and says which op it is. `retain == false`: the slot is only
-    /// delivered because it is `no_coalesce` and the host does not observe it.
-    fn commit(&self, retain: bool, w: &mut Writer) -> LazyEmit;
-    /// The host may not have what was last announced (unobserved, or a delivery was abandoned): the
-    /// next commit announces again.
-    fn forget(&self);
+impl fmt::Debug for LazyHooks {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("LazyHooks")
+    }
 }
 
-/// The state a store keeps for one `Lazy` slot.
+/// The state a store keeps for one `Lazy` slot: a [derived slot](DerivedSlot) that announces the
+/// list's length and version instead of sending patches.
 pub(crate) struct LazyCell {
     source: Arc<dyn LazySource>,
+    /// The page server's handle in the runtime's object table (`0` until it is registered).
     handle: AtomicU64,
     /// The `(len, version)` the host was last told, by op 0 or op 2: a commit whose list is at the
     /// same stamp (a view whose source changed without changing the view) sends nothing.
@@ -721,9 +718,23 @@ impl LazyCell {
         }
     }
 
-    fn value(&self, len: usize, version: u64, w: &mut Writer) {
+    /// The page server the runtime registers for the host.
+    pub(crate) fn source(&self) -> Arc<dyn LazySource> {
+        Arc::clone(&self.source)
+    }
+
+    pub(crate) fn handle(&self) -> u64 {
+        self.handle.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn set_handle(&self, handle: u64) {
+        self.handle.store(handle, Ordering::SeqCst);
+    }
+
+    /// Writes the signal's value (`LazyValue`): the page server, the length and the version.
+    fn write_value(&self, len: usize, version: u64, w: &mut Writer) {
         LazyValue {
-            handle: Handle(self.handle.load(Ordering::SeqCst)),
+            handle: Handle(self.handle()),
             len: wire_count(len),
             version,
         }
@@ -731,34 +742,18 @@ impl LazyCell {
     }
 }
 
-impl LazySlot for LazyCell {
-    fn source(&self) -> Arc<dyn LazySource> {
-        Arc::clone(&self.source)
-    }
-
-    fn handle(&self) -> u64 {
-        self.handle.load(Ordering::SeqCst)
-    }
-
-    fn set_handle(&self, handle: u64) {
-        self.handle.store(handle, Ordering::SeqCst);
-    }
-
-    fn write_full(&self, w: &mut Writer) {
-        let (len, version) = self.source.stamp();
-        *self.announced.lock() = Some((len, version));
-        self.value(len, version, w);
-    }
-
-    fn commit(&self, retain: bool, w: &mut Writer) -> LazyEmit {
+impl DerivedSlot for LazyCell {
+    /// What a commit sends: 12 bytes of length and version, or nothing when the host already knows
+    /// them. `retain == false` (delivered only because it is `no_coalesce`, unobserved): the value.
+    fn commit(&self, w: &mut Writer, retain: bool) -> Emitted {
         let (len, version) = self.source.stamp();
         if !retain {
-            self.value(len, version, w);
-            return LazyEmit::Full;
+            self.write_value(len, version, w);
+            return Emitted::Full;
         }
         let mut announced = self.announced.lock();
         if *announced == Some((len, version)) {
-            return LazyEmit::Nothing;
+            return Emitted::Nothing;
         }
         *announced = Some((len, version));
         LazyInvalidated {
@@ -766,22 +761,35 @@ impl LazySlot for LazyCell {
             version,
         }
         .encode(w);
-        LazyEmit::Invalidated
+        Emitted::Invalidated
     }
 
+    /// `observe(on)`: the value, remembering that the host was told it.
+    fn resync(&self, w: &mut Writer) {
+        let (len, version) = self.source.stamp();
+        *self.announced.lock() = Some((len, version));
+        self.write_value(len, version, w);
+    }
+
+    /// The host may not have what was last announced (unobserved, or a delivery was abandoned): the
+    /// next commit announces again.
     fn forget(&self) {
         *self.announced.lock() = None;
     }
-}
 
-/// Runs `f` with a panic of the list's own code (a pipeline closure behind a view, an item's
-/// `Encode`) caught: what a lazy slot's evaluation does at a commit or an observe, as a computed's.
-pub(crate) fn isolated<R>(f: impl FnOnce() -> R) -> Result<R, String> {
-    catch_unwind(AssertUnwindSafe(f)).map_err(|payload| crate::store::panic_message(&*payload))
+    fn persisted(&self) -> bool {
+        true
+    }
+
+    fn lazy(&self) -> Option<&LazyCell> {
+        Some(self)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
     use super::*;
 
     fn list(n: u32) -> Lazy<u32> {

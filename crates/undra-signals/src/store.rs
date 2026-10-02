@@ -16,7 +16,7 @@ use crate::derived::DerivedList;
 use crate::derived::slot::{Attached, DerivedSlot, Emitted};
 use crate::error::SignalsError;
 use crate::graph::{Binding, SlotFlags};
-use crate::lazy::{Lazy, LazyCell, LazyEmit, LazySlot, LazySource, isolated};
+use crate::lazy::{Lazy, LazyCell, LazyHooks, LazySource};
 use crate::oplog::{KeyedLog, ListLog, Taken, apply_ops};
 use crate::signal::Signal;
 use crate::sink::ChangeSink;
@@ -62,17 +62,21 @@ enum SlotKind {
     Computed,
     /// A derived list (ADR-039): a computed that ships keyed patches. Isolated like a computed
     /// when its closures panic (ADR-019 amendment).
+    ///
+    /// A `Lazy<T>` (ADR-043) is a slot of this kind too: the host pages it and is told its length
+    /// and version, never its items, and unlike a derived list a snapshot carries it.
     Derived(Box<dyn DerivedSlot>),
-    /// A `Lazy<T>` (ADR-043): the host pages it, and is told by length and version, never by value.
-    /// Persisted like a plain signal (a snapshot carries the items).
-    Lazy(Box<dyn LazySlot>),
 }
 
 impl SlotKind {
     /// A slot evaluated by the core rather than written: left out of snapshots, held back on its
     /// own when its evaluation panics.
     fn is_computed(&self) -> bool {
-        matches!(self, SlotKind::Computed | SlotKind::Derived(_))
+        match self {
+            SlotKind::Computed => true,
+            SlotKind::Derived(slot) => !slot.persisted(),
+            SlotKind::Plain | SlotKind::Keyed(_) => false,
+        }
     }
 
     /// Drops whatever the slot keeps about the host's copy (a keyed baseline, a derived list's
@@ -81,7 +85,6 @@ impl SlotKind {
         match self {
             SlotKind::Keyed(state) => state.forget(),
             SlotKind::Derived(state) => state.forget(),
-            SlotKind::Lazy(state) => state.forget(),
             SlotKind::Plain | SlotKind::Computed => {}
         }
     }
@@ -188,6 +191,8 @@ pub struct StoreCell {
     /// The computed slots whose evaluation panicked, with the panic message: held back until
     /// they evaluate again (ADR-019 amendment). The slot's `failed` flag is the fast check.
     failed: Mutex<BTreeMap<u32, String>>,
+    /// How the runtime registers this store's lazy lists (see [`StoreCell::set_lazy_hooks`]).
+    lazy_hooks: OnceLock<LazyHooks>,
 }
 
 /// What evaluating the computeds of one delivery did to their failed state: reported to the sink
@@ -238,6 +243,7 @@ impl StoreCell {
             delivery: Mutex::new(()),
             last_txn: AtomicU64::new(0),
             failed: Mutex::new(BTreeMap::new()),
+            lazy_hooks: OnceLock::new(),
         })
     }
 
@@ -421,7 +427,7 @@ impl StoreCell {
             signal_id,
             lazy.binding(),
             encode,
-            SlotKind::Lazy(Box::new(LazyCell::new(source))),
+            SlotKind::Derived(Box::new(LazyCell::new(source))),
         )
     }
 
@@ -548,8 +554,9 @@ impl StoreCell {
 
     /// The lazy lists of this store: each `Lazy` signal's id and its page server, in id order.
     ///
-    /// The runtime calls this when the store enters its object table, registers each page server
-    /// there (a transient entry that lives and dies with the store) and tells the cell the handle
+    /// The runtime calls this when the store enters its object table (see
+    /// [`set_lazy_hooks`](StoreCell::set_lazy_hooks)), registers each page server there (a
+    /// transient entry that lives and dies with the store) and tells the cell the handle
     /// ([`set_lazy_handle`](StoreCell::set_lazy_handle)). Empty for a store without a `Lazy`.
     pub fn lazy_sources(&self) -> Vec<(u32, Arc<dyn LazySource>)> {
         let slots = self.slots.read();
@@ -557,9 +564,10 @@ impl StoreCell {
             .iter()
             .enumerate()
             .filter_map(|(index, slot)| match &slot.kind {
-                SlotKind::Lazy(lazy) => {
-                    Some((u32::try_from(index).unwrap_or(ALL_SIGNALS), lazy.source()))
-                }
+                SlotKind::Derived(slot) => Some((
+                    u32::try_from(index).unwrap_or(ALL_SIGNALS),
+                    slot.lazy()?.source(),
+                )),
                 _ => None,
             })
             .collect()
@@ -568,23 +576,36 @@ impl StoreCell {
     /// Records the object-table handle of the page server of lazy signal `signal_id`: what its
     /// `LazyValue` entries carry. Ignored for a signal that is not a `Lazy`.
     pub fn set_lazy_handle(&self, signal_id: u32, handle: u64) {
-        if let Some(slot) = self.slot(signal_id) {
-            if let SlotKind::Lazy(lazy) = &slot.kind {
-                lazy.set_handle(handle);
-            }
-        }
+        self.with_lazy(signal_id, |lazy| lazy.set_handle(handle));
     }
 
     /// The handle recorded by [`set_lazy_handle`](StoreCell::set_lazy_handle) (`0` before, and for a
     /// signal that is not a `Lazy`).
     pub fn lazy_handle(&self, signal_id: u32) -> u64 {
-        match self.slot(signal_id) {
-            Some(slot) => match &slot.kind {
-                SlotKind::Lazy(lazy) => lazy.handle(),
-                _ => 0,
-            },
-            None => 0,
+        self.with_lazy(signal_id, LazyCell::handle).unwrap_or(0)
+    }
+
+    /// Runs `f` on the lazy list of slot `signal_id`, if the slot is one.
+    fn with_lazy<R>(&self, signal_id: u32, f: impl FnOnce(&LazyCell) -> R) -> Option<R> {
+        let slot = self.slot(signal_id)?;
+        match &slot.kind {
+            SlotKind::Derived(derived) => derived.lazy().map(f),
+            _ => None,
         }
+    }
+
+    /// Tells the cell how its lazy lists get their page servers: the runtime's object table calls
+    /// `hooks.register` when the store enters it and `hooks.unregister` when the store leaves it.
+    /// `#[undra::store]` makes the call for a store with a `Lazy` field (so a core without one links
+    /// none of the page-server code); a hand-written store calls
+    /// `undra_runtime::serve_lazy_lists(&cell)`. The first call wins.
+    pub fn set_lazy_hooks(&self, hooks: LazyHooks) {
+        let _ = self.lazy_hooks.set(hooks);
+    }
+
+    /// The hooks set by [`set_lazy_hooks`](StoreCell::set_lazy_hooks), if any.
+    pub fn lazy_hooks(&self) -> Option<LazyHooks> {
+        self.lazy_hooks.get().copied()
     }
 
     /// Records what a delivery's computed evaluations did and tells the sink: once per transition
@@ -863,19 +884,6 @@ impl StoreCell {
                             continue;
                         }
                     },
-                    // A lazy list announces its length and version, never its items; a view's
-                    // pipeline is isolated as a derived list's is.
-                    SlotKind::Lazy(state) => match isolated(|| state.write_full(&mut value)) {
-                        Ok(()) => {
-                            if slot.flags.failed.load(Ordering::SeqCst) {
-                                health.recovered.push(*id);
-                            }
-                        }
-                        Err(message) => {
-                            health.failed.push((*id, message));
-                            continue;
-                        }
-                    },
                     // A derived list is isolated as a computed is.
                     SlotKind::Derived(state) => {
                         let resynced = catch_unwind(AssertUnwindSafe(|| {
@@ -1107,26 +1115,6 @@ impl StoreCell {
                         continue;
                     }
                 },
-                // A lazy list sends 12 bytes of length and version, or nothing at all when the
-                // host already knows them (ADR-043).
-                SlotKind::Lazy(state) => {
-                    let retain = slot.flags.observed.load(Ordering::SeqCst);
-                    scratch.clear();
-                    let emitted = isolated(|| state.commit(retain, &mut scratch));
-                    let op = match emitted {
-                        Ok(LazyEmit::Invalidated) => ChangeOp::LazyInvalidated,
-                        Ok(LazyEmit::Full) => ChangeOp::Full,
-                        Ok(LazyEmit::Nothing) => continue,
-                        Err(message) => {
-                            health.failed.push((*id, message));
-                            continue;
-                        }
-                    };
-                    builder.push(handle, *id, op, scratch.as_slice());
-                    if slot.flags.failed.load(Ordering::SeqCst) {
-                        health.recovered.push(*id);
-                    }
-                }
                 // A derived list sends its pending derived ops, the full value, or nothing at
                 // all (ADR-039); its closures' panics are isolated as a computed's are.
                 SlotKind::Derived(state) => {
@@ -1138,6 +1126,7 @@ impl StoreCell {
                     let op = match emitted {
                         Ok(Emitted::Patch) => ChangeOp::KeyedPatch,
                         Ok(Emitted::Full) => ChangeOp::Full,
+                        Ok(Emitted::Invalidated) => ChangeOp::LazyInvalidated,
                         Ok(Emitted::Nothing) => continue,
                         Err(payload) => {
                             health.failed.push((*id, panic_message(&*payload)));

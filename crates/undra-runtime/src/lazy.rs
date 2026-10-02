@@ -32,15 +32,46 @@
 //! assert_eq!(&reply[16..], &[20, 0, 0, 0, 30, 0, 0, 0]);
 //! ```
 
+use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::RwLock;
-use undra_signals::{LazySource, page_window};
+use undra_signals::{LazyHooks, LazySource, StoreCell, page_window};
 use undra_wire::payload::LazyPage;
 use undra_wire::{Encode, Writer};
 
+use undra_meta::{DispatchCall, DispatchOutcome};
+
+use crate::dispatch::DispatchResult;
 use crate::object::{AnyObject, UndraObject, erased};
+use crate::object_table::ObjectTable;
+use crate::runtime::Runtime;
+
+/// The shared state of a [`LazyList`].
+#[derive(Debug, Default)]
+pub struct LazyListInner {
+    items: RwLock<Vec<Vec<u8>>>,
+    version: AtomicU64,
+}
+
+/// A list of pre-encoded items that platforms page through by handle: the simplest
+/// [`LazySource`], for a core that builds a list by hand (a typed, reactive list is a store's
+/// `Lazy<T>`).
+///
+/// Cloning gives another view of the same list: a core keeps one clone to mutate and hands another
+/// to [`Runtime::insert_lazy_list`](crate::Runtime::insert_lazy_list). Mutations bump
+/// [`version`](LazyList::version); the owning store is responsible for telling the host (a
+/// `LazyInvalidated` change-set entry) so it re-pages.
+#[derive(Clone, Debug, Default)]
+pub struct LazyList {
+    inner: Arc<LazyListInner>,
+}
+
+impl UndraObject for LazyList {
+    const TYPE_ID: u32 = undra_meta::ids::type_id("LazyList");
+    const NAME: &'static str = PAGE_SERVER_NAME;
+}
 
 /// The most items one page call returns: a `limit` above it is cut to it. A host asks for a window
 /// of what it shows (tens of rows); the cap only keeps a hostile or buggy call from making the core
@@ -54,6 +85,40 @@ pub(crate) const PAGE_SERVER_NAME: &str = "LazyList";
 /// A page server in the object table: the type-erased list a `LazyPage` call is answered from.
 pub(crate) struct PageServer {
     pub(crate) source: Arc<dyn LazySource>,
+}
+
+/// Makes the runtime serve the `Lazy` signals of the store behind `cell` (ADR-043): when the store
+/// enters an object table (a new store, or one a restore places) a page server is registered there
+/// for each lazy signal, and the cell is told its handle, so that `observe` can hand it to the host;
+/// when the store leaves the table the servers go with it. They are transient entries: never in a
+/// snapshot, and the host cannot release them.
+///
+/// `#[undra::store]` makes this call for a store that has a `Lazy` field, so a core without one
+/// links none of the page-server registration. Call it yourself for a hand-written store (after
+/// attaching its signals):
+///
+/// ```
+/// use undra_runtime::serve_lazy_lists;
+/// use undra_signals::{Lazy, StoreCell};
+///
+/// let cell = StoreCell::new(7);
+/// cell.attach_lazy(&Lazy::from_vec(vec![1_u32]), 0).unwrap();
+/// serve_lazy_lists(&cell);
+/// assert!(cell.lazy_hooks().is_some());
+/// ```
+pub fn serve_lazy_lists(cell: &StoreCell) {
+    cell.set_lazy_hooks(LazyHooks {
+        register: |table, cell, _store| {
+            if let Some(table) = table.downcast_ref::<ObjectTable>() {
+                table.register_lazy(cell);
+            }
+        },
+        unregister: |table, cell| {
+            if let Some(table) = table.downcast_ref::<ObjectTable>() {
+                table.unregister_lazy(cell);
+            }
+        },
+    });
 }
 
 /// The object-table entry of a page server for `source`.
@@ -82,29 +147,25 @@ pub(crate) fn page_reply(source: &dyn LazySource, offset: u32, limit: u32) -> Ve
     reply
 }
 
-/// The shared state of a [`LazyList`].
-#[derive(Debug, Default)]
-pub struct LazyListInner {
-    items: RwLock<Vec<Vec<u8>>>,
-    version: AtomicU64,
-}
-
-/// A list of pre-encoded items that platforms page through by handle: the simplest
-/// [`LazySource`], for a core that builds a list by hand (a typed, reactive list is a store's
-/// `Lazy<T>`).
-///
-/// Cloning gives another view of the same list: a core keeps one clone to mutate and hands another
-/// to [`Runtime::insert_lazy_list`](crate::Runtime::insert_lazy_list). Mutations bump
-/// [`version`](LazyList::version); the owning store is responsible for telling the host (a
-/// `LazyInvalidated` change-set entry) so it re-pages.
-#[derive(Clone, Debug, Default)]
-pub struct LazyList {
-    inner: Arc<LazyListInner>,
-}
-
-impl UndraObject for LazyList {
-    const TYPE_ID: u32 = undra_meta::ids::type_id("LazyList");
-    const NAME: &'static str = PAGE_SERVER_NAME;
+/// The built-in dispatcher of page calls (a [`DispatchFn`](undra_meta::DispatchFn)): `call.handle` is
+/// the page server, `call.args` the call's `offset u32, limit u32`. A stale, foreign or non-lazy
+/// handle is a bad request that says so.
+pub(crate) fn lazy_page_dispatch(rt: &dyn Any, call: DispatchCall<'_>) -> DispatchOutcome {
+    DispatchOutcome::new(match rt.downcast_ref::<Runtime>() {
+        Some(rt) => match rt.object::<PageServer>(call.handle) {
+            Ok(server) => {
+                let word = |at: usize| {
+                    call.args
+                        .get(at..at + 4)
+                        .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+                        .map_or(0, u32::from_le_bytes)
+                };
+                DispatchResult::Sync(Ok(page_reply(&*server.source, word(0), word(4))))
+            }
+            Err(e) => DispatchResult::BadRequest(e.to_string()),
+        },
+        None => DispatchResult::Unknown,
+    })
 }
 
 impl LazyList {

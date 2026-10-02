@@ -40,10 +40,10 @@ use crate::ext::{Extensions, InitHook, InspectFn, Inspectors};
 use crate::guard::{self, PanicReport, drop_guarded, encode_panic_body};
 use crate::host::{Host, PortCallOutcome};
 use crate::issue::{IssueScope, OriginScope, Origins, WithOrigin};
-use crate::lazy::{LazyList, PageServer, page_reply, page_server};
+use crate::lazy::{LazyList, lazy_page_dispatch, page_server};
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
 use crate::object::{AnyObject, StoreObject, StoreRestorer, UndraObject, erased, store};
-use crate::object_table::{BadHandle, BadHandleReason, GENERATION_CEILING, ObjectTable, Released};
+use crate::object_table::{BadHandle, GENERATION_CEILING, ObjectTable, Released};
 use crate::persist::{self, RegisteredHooks};
 use crate::ports::{
     Completion, Events, PortBinding, PortDispatch, PortDispatcher, PortError, PortFuture,
@@ -1646,26 +1646,21 @@ impl Runtime {
         }
     }
 
-    /// Answers a `LazyPage` call (SPEC 3.3, ADR-043) from the page server `handle` names: a stale,
-    /// foreign or non-lazy handle is a typed bad request; the source is asked under the panic guard
-    /// (an item's `Encode` or a view's pipeline closure is user code).
+    /// Answers a `LazyPage` call (SPEC 3.3, ADR-043) through the built-in dispatcher of the page
+    /// servers, so it runs under the same panic guard and is classified like any other call: the
+    /// source's encoders and a view's pipeline closures are user code.
     fn serve_page(&self, handle: Handle, offset: u32, limit: u32) -> Dispatched {
-        let server = match self.objects.get::<PageServer>(handle) {
-            Ok(server) => server,
-            Err(BadHandle {
-                reason: BadHandleReason::WrongType { found, .. },
-                ..
-            }) => {
-                return Dispatched::Bad(format!(
-                    "handle {handle:?} refers to a {found}, not a lazy list"
-                ));
-            }
-            Err(e) => return Dispatched::Bad(e.to_string()),
+        let mut args = [0_u8; 8];
+        args[..4].copy_from_slice(&offset.to_le_bytes());
+        args[4..].copy_from_slice(&limit.to_le_bytes());
+        let call = DispatchCall {
+            method_id: 0,
+            call_id: 0,
+            handle: handle.0,
+            args: &args,
         };
-        match guard::guarded(|| page_reply(&*server.source, offset, limit)) {
-            Ok(body) => Dispatched::Done(DispatchResult::Sync(Ok(body)), handle),
-            Err(report) => Dispatched::Panicked(report, handle),
-        }
+        self.run_dispatcher("lazy list", lazy_page_dispatch, call, handle, false)
+            .unwrap_or_else(|| Dispatched::Bad("internal: unrouted page call".to_owned()))
     }
 
     /// Runs one dispatcher under the panic guard and classifies what it answered. A layer

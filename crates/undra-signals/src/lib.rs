@@ -77,7 +77,7 @@ pub use deps::{Dep, Deps};
 pub use derived::{Derive, DerivedList, DerivedStats, Order, Sorted, Unsorted};
 pub use effect::Effect;
 pub use error::{SignalsError, WriteError};
-pub use lazy::{Lazy, LazySource, page_window};
+pub use lazy::{Lazy, LazyHooks, LazySource, page_window};
 pub use signal::Signal;
 pub use sink::{ChangeSink, clear_sink, set_sink, with_sink};
 pub use store::{ALL_SIGNALS, CellSlot, StoreCell};

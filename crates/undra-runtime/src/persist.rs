@@ -757,14 +757,6 @@ fn put_value(
     Ok(())
 }
 
-/// The type a signal's persisted bytes are: a `Lazy<T>` is stored as the `Vec<T>` of its items.
-pub(crate) fn stored_as(ty: &TypeRef) -> std::borrow::Cow<'_, TypeRef> {
-    match ty {
-        TypeRef::Lazy(item) => std::borrow::Cow::Owned(TypeRef::Vec(item.clone())),
-        other => std::borrow::Cow::Borrowed(other),
-    }
-}
-
 fn list_bytes(items: &[DynValue]) -> Option<Vec<u8>> {
     items
         .iter()
@@ -1013,18 +1005,6 @@ impl Converter<'_> {
         if depth > MAX_DEPTH {
             return Err(not_structural("the value nests too deeply"));
         }
-        // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4), so
-        // `Lazy<T>`, `Vec<T>` and their items convert as lists do.
-        if matches!(old_ty, TypeRef::Lazy(_)) || matches!(new_ty, TypeRef::Lazy(_)) {
-            return self.convert(
-                w,
-                value,
-                &stored_as(old_ty),
-                &stored_as(new_ty),
-                depth,
-                hook_here,
-            );
-        }
         let refuse = || not_structural(format!("{old_ty} cannot become {new_ty}"));
         match (old_ty, new_ty) {
             (TypeRef::Option(old_inner), TypeRef::Option(new_inner)) => match value {
@@ -1039,7 +1019,12 @@ impl Converter<'_> {
                 w.write_u8(1);
                 self.convert(w, value, old_ty, new_inner, depth + 1, hook_here)?;
             }
-            (TypeRef::Vec(old_item), TypeRef::Vec(new_item)) => {
+            // A `Lazy<T>` signal is persisted as the `Vec<T>` of its items (ADR-043 decision 3.4), so
+            // `Lazy<T>` and `Vec<T>` convert as lists do.
+            (
+                TypeRef::Vec(old_item) | TypeRef::Lazy(old_item),
+                TypeRef::Vec(new_item) | TypeRef::Lazy(new_item),
+            ) => {
                 let DynValue::List(items) = value else {
                     return Err(refuse());
                 };

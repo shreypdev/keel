@@ -842,4 +842,49 @@ mod tests {
         assert_eq!(TypeClosure::from_json(&text).unwrap(), wrapped);
         assert!(!flat.canonical_json().contains("transparent"));
     }
+
+    #[test]
+    fn a_lazy_signal_reaches_its_item_and_its_fingerprint_follows_it() {
+        // `books: Lazy<Todo>` is persisted as the `Vec<Todo>` of its items (ADR-043): the closure of
+        // the store reaches `Todo` and `Tag` through it, a change of the item moves the fingerprint,
+        // and `Lazy<T>` is not the same description as `Vec<T>`.
+        let lazy_store = |item: TypeRef| {
+            let mut s = schema();
+            s.objects[0].store.as_mut().unwrap().signals =
+                vec![signal("books", 0, TypeRef::lazy(item), false)];
+            s
+        };
+        let s = lazy_store(TypeRef::named("Todo"));
+        let c = s.store_closure(ids::type_id("Profile")).unwrap();
+        let names: Vec<&str> = c.records.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["Tag", "Todo"], "through Lazy, transitively");
+        let ClosureRoot::Signals { signals } = &c.root else {
+            panic!("{:?}", c.root)
+        };
+        assert_eq!(signals[0].ty, TypeRef::lazy(TypeRef::named("Todo")));
+        // The canonical description round-trips with the `Lazy` (the snapshot carries it).
+        let text = c.canonical_json();
+        assert_eq!(TypeClosure::from_json(&text).unwrap(), c);
+
+        let base = profile(&s);
+        let mut changed = lazy_store(TypeRef::named("Todo"));
+        changed.records[0].fields.push(field("done", TypeRef::Bool));
+        assert_ne!(profile(&changed), base, "a field of the item");
+        let mut nested = lazy_store(TypeRef::named("Todo"));
+        nested.records[1].fields.push(field("color", TypeRef::U8));
+        assert_ne!(profile(&nested), base, "a field of what the item reaches");
+        let mut vec_store = schema();
+        vec_store.objects[0].store.as_mut().unwrap().signals = vec![signal(
+            "books",
+            0,
+            TypeRef::vec(TypeRef::named("Todo")),
+            false,
+        )];
+        assert_ne!(profile(&vec_store), base, "a list is not a lazy list");
+        assert_eq!(
+            profile(&lazy_store(TypeRef::named("Todo"))),
+            base,
+            "and it is stable"
+        );
+    }
 }

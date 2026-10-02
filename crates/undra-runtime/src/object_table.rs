@@ -233,11 +233,8 @@ struct Entry {
     /// First issued by a return, not by a host-called constructor: a snapshot leaves it out and
     /// a restore makes its handle stale.
     transient: bool,
-    /// The page servers the runtime registered for this store's `Lazy` signals (ADR-043), by
-    /// signal id: entries of the table's own, removed with this one.
-    lazy: Vec<(u32, Handle)>,
-    /// A page server registered for a store: the host holds no reference to it, so it cannot
-    /// release it; it goes with its store.
+    /// A page server registered for a store (ADR-043): the host holds no reference to it, so it
+    /// cannot release it; it goes with its store.
     table_owned: bool,
 }
 
@@ -471,7 +468,6 @@ impl ObjectTable {
                 observed: Observed::default(),
                 host_refs,
                 transient,
-                lazy: Vec::new(),
                 table_owned,
             });
             let handle = Handle::new(index, generation);
@@ -487,34 +483,31 @@ impl ObjectTable {
             // The owner first: a commit that sees the handle must route to the right runtime.
             cell.set_owner(self.owner.load(Ordering::Relaxed));
             cell.set_handle(handle.0);
-            self.register_lazy(&cell, handle);
+            if let Some(hooks) = cell.lazy_hooks() {
+                (hooks.register)(self, &cell, handle.0);
+            }
         }
         handle
     }
 
-    /// Registers a page server for each `Lazy` signal of the store at `store` and tells its cell
-    /// the handle (ADR-043): transient entries the table owns, so they are never in a snapshot and
-    /// the host cannot release them; they are removed with the store. A store without a `Lazy`
-    /// costs one empty call.
-    fn register_lazy(&self, cell: &undra_signals::StoreCell, store: Handle) {
-        let sources = cell.lazy_sources();
-        if sources.is_empty() {
-            return;
-        }
-        let mut registered = Vec::with_capacity(sources.len());
-        for (signal_id, source) in sources {
+    /// Registers a page server for each `Lazy` signal of `cell` and tells the cell the handle
+    /// (ADR-043): transient entries the table owns, so they are never in a snapshot and the host
+    /// cannot release them; [`unregister_lazy`](ObjectTable::unregister_lazy) removes them with the
+    /// store. Reached through the cell's [`LazyHooks`](undra_signals::LazyHooks), which only a core
+    /// with a `Lazy` field sets.
+    pub(crate) fn register_lazy(&self, cell: &undra_signals::StoreCell) {
+        for (signal_id, source) in cell.lazy_sources() {
             let server = self.place_with(crate::lazy::page_server(source), true, true);
             cell.set_lazy_handle(signal_id, server.0);
-            registered.push((signal_id, server));
         }
-        let mut inner = self.inner.write();
-        if let Some(entry) = inner
-            .slots
-            .get_mut(store.index() as usize)
-            .filter(|slot| slot.generation == store.generation())
-            .and_then(|slot| slot.entry.as_mut())
-        {
-            entry.lazy = registered;
+    }
+
+    /// Removes the page servers [`register_lazy`](ObjectTable::register_lazy) registered for `cell`.
+    pub(crate) fn unregister_lazy(&self, cell: &undra_signals::StoreCell) {
+        for (signal_id, _) in cell.lazy_sources() {
+            let server = Handle(cell.lazy_handle(signal_id));
+            cell.set_lazy_handle(signal_id, 0);
+            Self::remove_table_owned(&mut self.inner.write(), server);
         }
     }
 
@@ -614,7 +607,6 @@ impl ObjectTable {
                 observed: Observed::default(),
                 host_refs: 1,
                 transient: false,
-                lazy: Vec::new(),
                 table_owned: false,
             });
             inner.live += 1;
@@ -627,7 +619,9 @@ impl ObjectTable {
         if let Some(cell) = cell {
             cell.set_owner(self.owner.load(Ordering::Relaxed));
             cell.set_handle(handle.0);
-            self.register_lazy(&cell, handle);
+            if let Some(hooks) = cell.lazy_hooks() {
+                (hooks.register)(self, &cell, handle.0);
+            }
         }
         Ok(())
     }
@@ -685,6 +679,19 @@ impl ObjectTable {
     /// reusable; the next object placed in it gets a fresh generation, so `handle` stays stale
     /// for good.
     pub fn release(&self, handle: Handle) -> Result<Released, BadHandle> {
+        let released = self.release_entry(handle)?;
+        // The page servers of a store's `Lazy` signals go with it (ADR-043), outside the table's lock.
+        if let Released::Removed(object) = &released {
+            if let Some(cell) = object.as_store() {
+                if let Some(hooks) = cell.lazy_hooks() {
+                    (hooks.unregister)(self, cell);
+                }
+            }
+        }
+        Ok(released)
+    }
+
+    fn release_entry(&self, handle: Handle) -> Result<Released, BadHandle> {
         let mut inner = self.inner.write();
         Self::check(&inner, handle)?;
         let index = handle.index();
@@ -721,15 +728,6 @@ impl ObjectTable {
                 let address = entry.object.address();
                 if inner.by_address.get(&address) == Some(&index) {
                     inner.by_address.remove(&address);
-                }
-                // The page servers of the store's `Lazy` signals go with it. They only hold the
-                // lists the store itself holds, so dropping them here runs no destructor of an item.
-                let cell = entry.object.as_store();
-                for (signal_id, server) in &entry.lazy {
-                    Self::remove_table_owned(&mut inner, *server);
-                    if let Some(cell) = cell {
-                        cell.set_lazy_handle(*signal_id, 0);
-                    }
                 }
                 Ok(Released::Removed(entry.object))
             }
@@ -1165,5 +1163,144 @@ mod tests {
         t.release(h).unwrap();
         assert!(t.with_observed(h, |_| ()).is_none());
         assert!(!t.mark_poisoned(h));
+    }
+
+    // ----- the page servers of a store's `Lazy` signals (ADR-043) -----------------------------
+
+    use crate::ctx::Ctx;
+    use crate::lazy::PageServer;
+    use crate::object::{StoreObject, store};
+    use undra_signals::{Lazy, StoreCell};
+    use undra_wire::{Reader, WireError};
+
+    /// A store with two lazy lists and a plain signal; `serving` decides whether its cell asks the
+    /// runtime to serve them (what `#[undra::store]` does for a store with a `Lazy` field).
+    struct Shelf {
+        cell: Arc<StoreCell>,
+        books: Lazy<u32>,
+    }
+
+    impl UndraObject for Shelf {
+        const TYPE_ID: u32 = 31;
+        const NAME: &'static str = "Shelf";
+    }
+
+    impl StoreObject for Shelf {
+        fn cell(&self) -> &Arc<StoreCell> {
+            &self.cell
+        }
+
+        fn restore(_: Ctx, _: &mut Reader<'_>) -> Result<Self, WireError> {
+            Err(WireError::UnexpectedEof { at: 0, needed: 1 })
+        }
+    }
+
+    fn shelf(serving: bool) -> Arc<Shelf> {
+        let cell = StoreCell::new(31);
+        let books = Lazy::from_vec(vec![10_u32, 20, 30]);
+        let tags = Lazy::from_vec(vec![String::from("x")]);
+        cell.attach_lazy(&books, 0).unwrap();
+        cell.attach(&undra_signals::Signal::new(0_u8), 1).unwrap();
+        cell.attach_lazy(&tags, 2).unwrap();
+        if serving {
+            crate::lazy::serve_lazy_lists(&cell);
+        }
+        Arc::new(Shelf { cell, books })
+    }
+
+    fn page_len(t: &ObjectTable, handle: Handle) -> Option<usize> {
+        t.get::<PageServer>(handle)
+            .ok()
+            .map(|server| server.source.len())
+    }
+
+    #[test]
+    fn a_store_enters_with_a_transient_page_server_per_lazy_signal() {
+        let t = ObjectTable::isolated();
+        let shelf = shelf(true);
+        let h = t.insert(store(shelf.clone()));
+        // The store and its two page servers; the host owns the store's reference only.
+        assert_eq!((t.live(), t.host_refs(), t.store_count()), (3, 1, 1));
+        let (books, tags) = (shelf.cell.lazy_handle(0), shelf.cell.lazy_handle(2));
+        assert!(books != 0 && tags != 0 && books != tags);
+        assert_eq!(shelf.cell.lazy_handle(1), 0, "a plain signal has none");
+        assert_eq!(page_len(&t, Handle(books)), Some(3));
+        assert_eq!(page_len(&t, Handle(tags)), Some(1));
+        // The servers are objects of the table's own: no host reference, a name, no store.
+        assert_eq!(t.host_refs_of(Handle(books)), Some(0));
+        assert_eq!(t.type_of(Handle(books)).unwrap().1, "LazyList");
+        assert!(t.get_dyn(Handle(books)).unwrap().as_store().is_none());
+        // The server shares the store's list.
+        shelf.books.push(40);
+        assert_eq!(page_len(&t, Handle(books)), Some(4));
+        // Only the store is listed for a snapshot.
+        let listed = t.stores();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].0, h);
+    }
+
+    #[test]
+    fn the_host_cannot_release_a_page_server_and_the_store_takes_them_with_it() {
+        let t = ObjectTable::isolated();
+        let shelf = shelf(true);
+        let h = t.insert(store(shelf.clone()));
+        let books = Handle(shelf.cell.lazy_handle(0));
+        // A host release of a page server is nothing: the list stays served.
+        assert!(matches!(
+            t.release(books),
+            Ok(Released::Kept { remaining: 0 })
+        ));
+        assert_eq!(page_len(&t, books), Some(3));
+        assert_eq!(t.live(), 3);
+
+        // Releasing the store removes its servers and the cell forgets their handles.
+        let tags = Handle(shelf.cell.lazy_handle(2));
+        assert!(t.release(h).unwrap().into_removed().is_some());
+        assert_eq!(t.live(), 0);
+        assert_eq!(page_len(&t, books), None);
+        assert_eq!(
+            t.get::<PageServer>(tags).err().map(|e| e.reason),
+            Some(BadHandleReason::Stale)
+        );
+        assert_eq!(
+            (shelf.cell.lazy_handle(0), shelf.cell.lazy_handle(2)),
+            (0, 0)
+        );
+
+        // The same store entering again (issued once more) is served by new servers.
+        let again = t.insert(store(shelf.clone()));
+        assert_ne!(again, h);
+        assert_eq!(t.live(), 3);
+        let fresh = Handle(shelf.cell.lazy_handle(0));
+        assert!(fresh != books && page_len(&t, fresh) == Some(3));
+        assert_eq!(
+            page_len(&t, books),
+            None,
+            "the old handle stays stale for good"
+        );
+    }
+
+    #[test]
+    fn a_restore_places_the_servers_too_and_a_clear_takes_everything() {
+        let t = ObjectTable::isolated();
+        let shelf = shelf(true);
+        t.insert_at(Handle::new(4, 9), store(shelf.clone()))
+            .unwrap();
+        assert_eq!(t.live(), 3);
+        assert_eq!(page_len(&t, Handle(shelf.cell.lazy_handle(0))), Some(3));
+        let old = Handle(shelf.cell.lazy_handle(0));
+        let cleared = t.clear();
+        assert_eq!(cleared.len(), 3, "the store and its page servers");
+        assert_eq!(t.live(), 0);
+        assert_eq!(page_len(&t, old), None);
+    }
+
+    #[test]
+    fn a_store_whose_cell_does_not_serve_registers_nothing() {
+        let t = ObjectTable::isolated();
+        let shelf = shelf(false);
+        t.insert(store(shelf.clone()));
+        assert_eq!(t.live(), 1);
+        assert_eq!(shelf.cell.lazy_handle(0), 0);
     }
 }

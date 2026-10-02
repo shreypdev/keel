@@ -700,6 +700,14 @@ pub(crate) fn expand_store(
         quote! { #attach #coalesce }
     });
 
+    // A store with a `Lazy` field asks the runtime to register a page server for each (ADR-043).
+    // Only such a store names the registration code, so a core without one does not link it.
+    let serve_lazy = if signals.iter().any(|s| s.kind == SigKind::Lazy) {
+        quote!(#runtime::serve_lazy_lists(&__cell);)
+    } else {
+        TokenStream::new()
+    };
+
     // --- restore ----------------------------------------------------------------------------
     let plain: Vec<&SignalField> = signals.iter().filter(|s| s.kind.is_plain()).collect();
     let slots: Vec<syn::Ident> = plain
@@ -870,6 +878,7 @@ pub(crate) fn expand_store(
                 #(#key_fns)*
                 let __cell = #signals_path::StoreCell::new(#meta::ids::type_id(#name_str));
                 #(#attach_stmts)*
+                #serve_lazy
                 ::core::result::Result::Ok(__cell)
             }
 
@@ -1180,6 +1189,13 @@ mod tests {
             "{out}"
         );
         assert!(has(&out, "__cell.attach_lazy(&self.tail, 2u32)?;"), "{out}");
+        // Only a store with a `Lazy` asks the runtime to serve it: a core without one links nothing.
+        assert!(
+            has(&out, "::undra::runtime::serve_lazy_lists(&__cell);"),
+            "{out}"
+        );
+        let plain = expand("struct S { a: Signal<i32> }").unwrap();
+        assert!(!has(&plain, "serve_lazy_lists"), "{plain}");
         // Restored from the `Vec` of its items; a missing `#[undra(default)]` one is empty.
         assert!(
             has(
