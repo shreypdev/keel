@@ -157,11 +157,22 @@ impl Registry {
         self.tasks.lock().len()
     }
 
-    /// The work waiting across every task (a panicking probe counts as none).
+    /// The work waiting across every task (a panicking probe counts as none, and is reported like
+    /// any contained panic: operation `background pending <name>`).
     pub(crate) fn pending(&self, ctx: &Ctx) -> u32 {
         self.all()
             .iter()
-            .map(|t| crate::guard::guarded(|| (t.pending)(ctx)).unwrap_or(0))
+            .map(|t| match crate::guard::guarded(|| (t.pending)(ctx)) {
+                Ok(n) => n,
+                Err(report) => {
+                    ctx.runtime().log_panic(
+                        &format!("the pending probe of background task `{}` panicked", t.name),
+                        &format!("background pending {}", t.name),
+                        &report,
+                    );
+                    0
+                }
+            })
             .fold(0_u32, u32::saturating_add)
     }
 }
@@ -242,7 +253,19 @@ pub async fn run(ctx: &Ctx, deadline: Duration) -> BackgroundTotals {
     } else {
         registered
             .iter()
-            .map(|task| crate::guard::guarded(|| (task.run)(ctx, window.clone())).ok())
+            .map(
+                |task| match crate::guard::guarded(|| (task.run)(ctx, window.clone())) {
+                    Ok(future) => Some(future),
+                    Err(report) => {
+                        runtime.log_panic(
+                            &format!("background task `{}` panicked", task.name),
+                            "task",
+                            &report,
+                        );
+                        None
+                    }
+                },
+            )
             .collect()
     };
     let mut tasks = Tasks {

@@ -1192,7 +1192,7 @@ impl Runtime {
     /// A panic the runtime contained: the FATAL record, the counter, and the structured report
     /// for the app's crash reporter (ADR-046 decision 4). `what` is the sentence of the record,
     /// `operation` what was running (`Todos.add`, `task`).
-    fn log_panic(&self, what: &str, operation: &str, report: &PanicReport) {
+    pub(crate) fn log_panic(&self, what: &str, operation: &str, report: &PanicReport) {
         Stats::inc(&self.stats.panics);
         self.log(
             FATAL,
