@@ -211,10 +211,26 @@ class ChangeSetTests : Suite() {
             fun build(n: Int) = changeSet(1u, List(n) { entry(it) })
             val small = build(10)
             val large = build(20_000)
-            sumEntries(small) // load classes and settle lazy initialization before measuring
-            sumEntries(large)
-            val smallBytes = allocatedBytes { sumEntries(small) }
-            val largeBytes = allocatedBytes { sumEntries(large) }
+            // Load classes, settle lazy initialization and let the JIT compile the loop before measuring: a compilation, an OSR
+            // transition or a deoptimization during a measured pass allocates on this thread once (a hosted runner saw 2,120 bytes
+            // over 19,990 entries one day and none the next), which is not an allocation per entry.
+            repeat(5) {
+                sumEntries(small)
+                sumEntries(large)
+            }
+            // The least of five paired measurements: a one-off allocation of the JVM's is in one of them at most, an allocation per
+            // entry (16 bytes or more, 320 KB over the extra entries) is in every one.
+            var smallBytes = -1L
+            var largeBytes = -1L
+            for (attempt in 0 until 5) {
+                val s = allocatedBytes { sumEntries(small) }
+                val l = allocatedBytes { sumEntries(large) }
+                if (s < 0 || l < 0) break
+                if (smallBytes < 0 || l - s < largeBytes - smallBytes) {
+                    smallBytes = s
+                    largeBytes = l
+                }
+            }
             if (smallBytes < 0 || largeBytes < 0) {
                 println("  note: per-thread allocation counter unavailable on this JVM; allocation assertion skipped")
             } else {
