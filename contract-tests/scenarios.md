@@ -730,5 +730,6 @@ server serves `[]`; a handle observes it.
   `undra::panic` record, `message`, `at <file>:<line>:<col>` and `in <operation>` on lines of their own, and the
   trap's stack). S27 and S28 are `objects-callbacks`'; ADR-046's provisional numbers (S27 panic report, S28
   background run) became S29 and S30.
+* S30 needs a **quiet cache**: a background run refetches the entries that are observed or persisted and stale or in error, and finishes only when they are fetched, so a scenario that leaves an entry in error (S12's 503 and bad body) must leave it healthy before S30 (the Kotlin runner's S12 does, and S30 runs after S20 there; S13 expects the first optimistic placeholder id of the process, `u32::MAX`, so S30 cannot move before it). `refetched` in step 3 is at least 1: coming back online refetches an observed list and the replay's invalidation does again, and the run waits for both.
 * S21 and S22 are TypeScript-only: worker mode and crash recovery are web features (ADR-049; a native core
   contains a panic without trapping, SPEC 5.6). `check.sh` does not expect them from Swift or Kotlin.
