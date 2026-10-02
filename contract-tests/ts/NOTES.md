@@ -148,6 +148,26 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
   TypeScript `Duration` is milliseconds (`validFor` of 90 s is `90_000`, compared as 90,000,000,000 ns) and `Timestamp` is a number of milliseconds.
   React Native's column (`runtimes/rn/@undra/react-native/vitest.contract.config.ts`) runs the same file.
 
+* S32 (ADR-043, `Library`, `FeedQueryHandle`) and S33 (`TickerQueryHandle`): the steps of S32 are `src/paging-steps.ts`, run by
+  `test/s32-*.test.ts` on `wasm-main` and, as a non-scenario test, by `test/paging-worker.test.ts` on `wasm-worker` (replies are asynchronous
+  there; the steps that need the core to answer in the caller's turn, the reply versions and 4a, do not run). **Page calls** are counted at the
+  core's transport (`src/page-calls.ts`: `Kind.Call` payloads whose first byte is 3, in `callSync` for `wasm-main` and native, in `send` for
+  a worker; the transport is the core's private field, which a harness may reach). **Entries** of a generated store are recorded by wrapping
+  its `_apply` (`tapEntries` in `src/raw-store.ts`: it sees what the mirror delivers after `create()`; a second `RawStore` of the same type
+  gives the first change-set). The list's `version` is `LazyList.version`. **The frame held** (S32.4): a reply drains the mirror before its
+  caller resumes, so there is no frame to hold across an `await`; the three `add_rows` calls are made in one turn without awaiting, and
+  the mirror holds their three change-sets until it drains (a drain then delivers one op 2). The first-drain half of step 4 (a store whose
+  op 0 and op 2 are folded) is made inside a drain: a subscriber of the first library's `length` observes the second store and calls its
+  `add_rows`, so the drain's next round finds [op 0, op 2] together; with the ADR-031 amendment reversed (op 2 supersedes op 0) that step
+  fails (it waits for a length the list never learns). **Prefetch** (S32.2): a read of a row of an already loaded page asks for the page
+  beyond it if that is not loaded, so "reading any row of those pages afterwards makes none" holds for the pages whose neighbours are loaded
+  (page 2 of pages 1 to 3), and a row of page 1 or 3 asks for page 0 or 4, once; the step reads rows of page 2 for "none" and counts the
+  two edge pages. **The window** (S32.3): the pages read since the last change, here pages 0 and 199 (step 1) and 1 to 3, so five calls
+  re-page it. S33 takes real time (about 25 s): the harness's Clock is manual but `ctx.sleep` is the runtime's `setTimeout`; times are
+  `performance.now()` at the arrival of each value of `data`, and `emitLifecycle` / `emitConnectivity` are the events. After
+  `setPollInterval(3 s)` the fetch that was already scheduled is rescheduled to three seconds after the last one ended, so step 5 waits up to
+  four seconds for it before measuring the gap that follows.
+
 ## Gaps and defects found (for the integrator)
 
 Fixed since (playground finding 5): the Mirror stranded a change-set enqueued from a signal subscriber during the flush; the flush now drains it in a further round (`runtimes/ts/@undra/runtime/test/mirror.test.ts`).

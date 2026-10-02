@@ -294,7 +294,26 @@ describe.each([
       expect(server.calls).toEqual([]);
     });
 
-    it("ignores a change that is not newer than the list's version", async () => {
+    it("version is that of the last value, invalidation or page reply that raised it", async () => {
+    const { list, server } = await numbersList(200, { synchronous });
+    expect(list.version).toBe(1n);
+    server.change((rows) => {
+      rows.push(1);
+    });
+    list.applyInvalidated(reader(server.invalidated()));
+    expect(list.version).toBe(2n);
+    list.applyInvalidated(reader(encodeLazyInvalidated({ len: 5, version: 1n }))); // older: ignored
+    expect(list.version).toBe(2n);
+    server.change((rows) => {
+      rows.push(2);
+    });
+    list.get(0); // the page reply carries version 3, ahead of any notice
+    await answered();
+    expect(list.version).toBe(3n);
+    expect(list.length.peek()).toBe(202);
+  });
+
+  it("ignores a change that is not newer than the list's version", async () => {
       const { list, server } = await numbersList(200, { synchronous });
       list.get(0);
       await answered();
@@ -447,20 +466,41 @@ describe.each([
   describe("failures", () => {
     const reported = (errors: unknown[]): unknown[] => errors.map((e) => (e as { cause?: unknown }).cause);
 
-    it("a core that refuses the page call (a stale handle) is reported, get still answers, and the page is not asked again", async () => {
+    it("a core that refuses the page call (a stale handle: the store was closed) is not reported; the list stops asking until a value revives it", async () => {
       const { list, server, errors, fake } = await numbersList(200, { synchronous });
       list.applyFull(reader(encodeLazyValue({ handle: 0x0003_0000_0003n, len: 200, version: 1n }))); // a handle the fake does not know
       expect(list.get(0)).toBeUndefined();
       await answered();
+      expect(errors, "a refusal is a page server that is gone, which closing a store does").toEqual([]);
+      const asked = fake.calls.length;
+      expect(asked).toBeGreaterThanOrEqual(1);
+      expect(list.get(0)).toBeUndefined();
+      list.prefetch(0, 200);
+      await answered();
+      expect(fake.calls.length, "no more calls while the page server is gone").toBe(asked);
+      // A value that names a page server again revives it.
+      list.applyFull(reader(server.value()));
+      list.get(0);
+      await answered();
+      expect(list.get(0)).toBe(row(0));
+      expect(errors).toEqual([]);
+    });
+
+    it("a core that panics on a page call is reported, and the page is not asked again until the list changes", async () => {
+      const { list, server, errors, fake } = await numbersList(200, { synchronous });
+      fake.on(-1, (_call, respond) => respond.panic("boom"));
+      list.get(0);
+      await answered();
       expect(errors.length).toBeGreaterThanOrEqual(1);
       expect(errors[0]?.operation).toBe("LazyList.page");
-      expect(errors[0]?.error).toBeInstanceOf(UndraCallError.Refused);
+      expect(errors[0]?.error).toBeInstanceOf(UndraCallError.Panicked);
       const asked = fake.calls.length;
       expect(list.get(0)).toBeUndefined();
       await answered();
       expect(fake.calls.length).toBe(asked);
-      // A change of the list lets it try again.
-      list.applyFull(reader(server.value()));
+      server.install(fake);
+      server.version = 5n;
+      list.applyInvalidated(reader(server.invalidated()));
       list.get(0);
       await answered();
       expect(list.get(0)).toBe(row(0));

@@ -22,7 +22,7 @@ describe("parseParams", () => {
     });
   });
 
-  test("screen names the eight views; list is the 10k list (tab id biglist)", () => {
+  test("screen names the eleven views; list is the 10k list (tab id biglist)", () => {
     expect(parseParams("?screen=live").screen).toBe("live");
     expect(parseParams("?screen=notes").screen).toBe("notes");
     expect(parseParams("?screen=workshop").screen).toBe("workshop");
@@ -32,6 +32,9 @@ describe("parseParams", () => {
     expect(parseParams("?screen=remote").screen).toBe("remote");
     expect(parseParams("?screen=stress").screen).toBe("stress");
     expect(parseParams("?screen=workshop").screen).toBe("workshop");
+    expect(parseParams("?screen=library").screen).toBe("library");
+    expect(parseParams("?screen=feed").screen).toBe("feed");
+    expect(parseParams("?screen=ticker").screen).toBe("ticker");
   });
 
   test("the tab id biglist is not a screen name; unknown screens are ignored", () => {
@@ -115,6 +118,7 @@ describe("tabFromHash", () => {
     expect(tabFromHash("#biglist")).toBe("biglist");
     expect(tabFromHash("remote")).toBe("remote");
     expect(tabFromHash("#stress")).toBe("stress");
+    for (const tab of ["library", "feed", "ticker"]) expect(tabFromHash(`#${tab}`)).toBe(tab);
   });
 
   test("anything else is no tab", () => {

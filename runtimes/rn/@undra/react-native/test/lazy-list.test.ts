@@ -122,9 +122,15 @@ describe("a LazyList over the native transport", () => {
     expect(list.get(76)).toBe(760);
   });
 
-  test("a page call the module refuses is reported, never thrown into get", async () => {
+  test("a page call the module refuses (its page server is gone) is quiet; one that panics is reported; neither is thrown into get", async () => {
     const { list, native, errors } = await attach();
     native.onCallSync = (payload) => encodeReply({ callId: decodeCall(payload).callId, status: ReplyStatus.BadRequest, reason: "stale handle" });
+    expect(() => list.get(0)).not.toThrow();
+    await tick();
+    expect(errors).toEqual([]);
+    expect(list.get(0)).toBeUndefined();
+    native.onCallSync = (payload) => encodeReply({ callId: decodeCall(payload).callId, status: ReplyStatus.Panic, message: "boom", backtrace: "" });
+    list.applyFull(new UndraReader(encodeLazyValue({ handle: HANDLE, len: 1000, version: 9n }))); // a value revives the list
     expect(() => list.get(0)).not.toThrow();
     await tick();
     expect(errors.length).toBeGreaterThan(0);

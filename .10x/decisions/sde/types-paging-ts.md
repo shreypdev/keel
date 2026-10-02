@@ -157,3 +157,27 @@ the React hooks are the web ones, so `docs/REACT_NATIVE.md` needs no change beyo
   comes back as a `Decimal` instance, keyed patches are one op each. Style notes only: the brand is the string-literal property
   `__brand` (`types.ts:37`, `:47`, `:238`), which autocomplete shows on the value; a `unique symbol` brand would hide it.
 * `examples/playground/web`: `npm run build` (tsc + vite) passes and `npm test` is 124 passed (11 files) against the new bindings.
+
+## S32, S33, the playground screens (after the merge of tp-lazy, tp-query and the playground's `paging.rs`)
+
+* **S32 and S33 in `contract-tests/ts`** (`test/s32-paged-queries-lazy-lists.test.ts`, `test/s33-polling.test.ts`; `src/paging-steps.ts`,
+  `src/page-calls.ts`, `tapEntries` in `src/raw-store.ts`; how each step is read is in NOTES.md). The S32 steps also run on `wasm-worker`
+  (`test/paging-worker.test.ts`, not a scenario); the React Native contract column runs both scenarios (`vitest.contract.config.ts`).
+* **`LazyList.version`** (a public read-only getter, for the scenario and tools): the version of the list the host has seen.
+* **A refused page call is quiet** (`lazy.ts`, `_failedPage`). Closing a store while a page was asked for (a view unmounting, the scenario
+  closing its library) made the next flush fail with "stale handle", reported through `onError`; a refusal (reply status 5) now means the page
+  server is gone: the list stops asking, quietly, until a value names a page server again (`applyFull` revives it). Any other failure is still
+  reported. Found by S32 (the harness fails a scenario on an unreported runtime error), and React's StrictMode double mount would have shown it
+  to every app.
+* **S32.2 as written does not hold for edge pages**: "reading any row of those pages afterwards makes none". A read of a loaded page asks for the
+  page beyond it when that is not loaded (the prefetch that keeps scrolling ahead; the Swift engine does the same, `UndraLazyListEngine.item(at:)`),
+  so a row of page 1 or 3 asks for page 0 or 4, once. TypeScript reads page 2 for "none" and counts the two edge pages; the scenario text should say so.
+* **The playground web app** (`examples/playground/web`): three tabs, `?screen=library|feed|ticker` (or `#library`, `#feed`, `#ticker`):
+  `LibraryView` (`useLazyList(library.books)` drawn as a window by index with placeholders, the `evens` view and the buttons that change them),
+  `FeedView` (`FeedQueryHandle`, `useLoadMore` on a sentinel, footer, refresh, "touch even rows", "even rows only"), `TickerView`
+  (`TickerQueryHandle`, `setPollInterval` as an override switch, "fail on purpose"). `src/paging.ts` holds the logic that is tested in Node
+  (`paging.test.ts`); `smoke/smoke.spec.ts` has one test per screen. No dependency was added.
+* Observations (not bugs): a `refetch()` asked for while one is in flight is the one in flight, so a change made in between is not fetched
+  (the Feed disables its buttons while `fetching`); `setPollInterval(3 s)` reschedules the pending poll to three seconds after the last fetch
+  ended (S33.5 waits for it); `Library._signals` in the generated store lists only `source` (`stores.ts`, `this._signals = [this.source]`), not
+  in signal-id order, which nothing reads.
