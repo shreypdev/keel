@@ -550,7 +550,7 @@ each: an O(n) step, the list cloned or encoded on the way, would put either near
 allocation gate (`crates/undra-ffi/tests/lazy_alloc.rs`) counts the commit of an observed `Lazy` at one buffer more than
 the same write to a plain observed counter (the 12-byte entry), the same number at 10 and at 100,000 items, and zero
 allocations to encode a page of 50 rows into a buffer that is big enough. Against what a `Signal<Vec<T>>` of the same
-rows would send at a change (a keyed patch of about 85 bytes, or the full value, 3.5 MB at 100,000 rows of this shape), the
+rows would send at a change (a keyed patch of about 85 bytes, or the full value, 3.7 MB at 100,000 rows of this shape), the
 invalidation is 12 bytes and the host's cost moves to the page it re-asks for. The view's page is dominated by the
 pipeline running on the 50 rows it serves (the sort-key closure clones a title per row); the index lookup is
 logarithmic.
