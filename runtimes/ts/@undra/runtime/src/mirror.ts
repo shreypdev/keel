@@ -795,7 +795,7 @@ export class Mirror {
    * loads it here.
    */
   async whenObserved(handle: Handle, signalId: number, timeoutMs = 0): Promise<void> {
-    this._w ??= (await import("./mirror-waiters.js")).mirrorWaiters(this);
+    this._w ??= (await import("./transport/framed.js")).mirrorWaiters(this);
     return this._w.when(handle, signalId, timeoutMs);
   }
 

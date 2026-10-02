@@ -69,19 +69,11 @@ export function portFailureReply(call: PortCallPayload, error: unknown, hooks: P
 }
 
 /** How the runtime names a port in what it says: `Kv port 0x...` when its implementation has a name (the standard ports, generated adapters), else `port 0x...`. */
-function portName(portId: number, impl?: Pick<PortImpl, "name">): string {
+export function portName(portId: number, impl?: Pick<PortImpl, "name">): string {
   return `${impl?.name === undefined ? "" : `${impl.name} `}port 0x${portId.toString(16)}`;
 }
 
 /** The operation a failed port method is reported under: `Kv port 0x... method 0x...` (see `portName`). */
 export function portOperation(call: Pick<PortCallPayload, "portId" | "methodId">, impl?: Pick<PortImpl, "name">): string {
   return `${portName(call.portId, impl)} method 0x${call.methodId.toString(16)}`;
-}
-
-/**
- * The text of the error that refuses a synchronous port on a thread the core cannot wait for (`wasm-worker`, ADR-049):
- * the port and the fix (the other fix, mode `"wasm-main"`, is in the docs of `registerPort`).
- */
-export function syncPortRefusal(portId: number, impl?: Pick<PortImpl, "name">): string {
-  return `${portName(portId, impl)} is synchronous: in wasm-worker mode, register it in LoadOptions.worker.ports`;
 }

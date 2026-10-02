@@ -61,3 +61,5 @@ export async function restore(transport: Transport, bytes: Uint8Array): Promise<
   if (transport.restore === undefined) throw new UndraModeError("restore", transport.mode);
   await transport.restore(bytes);
 }
+
+export { runInBackground } from "./background.js";

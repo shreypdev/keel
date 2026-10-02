@@ -14,7 +14,7 @@ import {
   encodePortReply,
 } from "../wire/index.js";
 import type { PortImpl } from "../port.js";
-import { syncPortRefusal } from "../port-dispatch.js";
+import { portName } from "../port-dispatch.js";
 import type { RestartResult, SnapshotPolicy } from "../recovery.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
 import type { WasmSource } from "./wasm-main.js";
@@ -532,4 +532,12 @@ export function workerTransport(options: import("../core.js").LoadOptions, recov
     ...(options.logLevel !== undefined && { logLevel: options.logLevel }),
     ...(options.handshakeTimeoutMs !== undefined && { startTimeoutMs: options.handshakeTimeoutMs }),
   });
+}
+
+/**
+ * The text of the error that refuses a synchronous port on a thread the core cannot wait for (`wasm-worker`, ADR-049):
+ * the port and the fix (the other fix, mode `"wasm-main"`, is in the docs of `registerPort`).
+ */
+function syncPortRefusal(portId: number, impl?: Pick<PortImpl, "name">): string {
+  return `${portName(portId, impl)} is synchronous: in wasm-worker mode, register it in LoadOptions.worker.ports`;
 }

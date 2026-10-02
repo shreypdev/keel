@@ -393,6 +393,9 @@ function replyBody(reply: Uint8Array): Uint8Array {
   return reply.length <= 64 ? reply.slice(5) : reply.subarray(5);
 }
 
+/** What loads on its first use: `stats`, `snapshot`, `restore`, `runInBackground`. */
+const extras = () => import("./extras.js");
+
 /** Overlays `overrides` on `base`: a value replaces, `null` removes. */
 function mergeAdapters(base: Partial<Adapters>, overrides: AdapterOverrides | undefined): Partial<Adapters> {
   const merged: Record<string, unknown> = { ...base };
@@ -932,7 +935,7 @@ export class UndraCore {
 
   /** Live counters of this core; see {@link UndraStats}. (Built by a module that loads on the first call.) */
   async stats(): Promise<UndraStats> {
-    return (await import("./extras.js")).stats(this, this._transport, this._pending, this._handles);
+    return (await extras()).stats(this, this._transport, this._pending, this._handles);
   }
 
   /**
@@ -954,7 +957,7 @@ export class UndraCore {
   async runInBackground(deadlineMs: number, options: { readonly signal?: AbortSignal } = {}): Promise<UndraBackgroundReport> {
     try {
       // Loaded on demand (`background.ts`): a hello page, whose core has no background task, never runs it (ADR-052).
-      return await (await import("./background.js")).runInBackground(this, deadlineMs, options.signal);
+      return await (await extras()).runInBackground(this, deadlineMs, options.signal);
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
@@ -969,7 +972,7 @@ export class UndraCore {
    */
   async snapshot(): Promise<Uint8Array> {
     this._assertOpen();
-    return (await import("./extras.js")).snapshot(this._transport);
+    return (await extras()).snapshot(this._transport);
   }
 
   /**
@@ -977,7 +980,7 @@ export class UndraCore {
    */
   async restore(bytes: Uint8Array): Promise<void> {
     this._assertOpen();
-    await (await import("./extras.js")).restore(this._transport, bytes);
+    await (await extras()).restore(this._transport, bytes);
     // Read-your-writes (docs/SPEC.md section 11): what the restore delivered is applied before the caller resumes.
     this.mirror.flush();
   }

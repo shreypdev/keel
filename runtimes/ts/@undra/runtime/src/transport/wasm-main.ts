@@ -79,25 +79,7 @@ export interface CoreExports {
   _initialize?(): void;
 }
 
-const REQUIRED_FUNCTIONS = [
-  "undra_alloc",
-  "undra_free",
-  "undra_abi_version",
-  "undra_schema_hash",
-  "undra_init",
-  "undra_call",
-  "undra_call_sync",
-  "undra_cancel",
-  "undra_stream_credit",
-  "undra_observe",
-  "undra_release",
-  "undra_port_reply",
-  "undra_event",
-  "undra_timer_fired",
-  "undra_poll",
-  "undra_buf_free",
-  "undra_stats_json",
-] as const;
+
 
 /**
  * `undra_alloc` (SPEC 7) traps when it cannot satisfy a request, so it never returns 0. A 0 is a
@@ -221,13 +203,9 @@ export class WasmHost implements Channel {
     this._module = module;
     this._instance = instance;
     const exported = instance.exports as unknown as Record<string, unknown>;
-    const missing = [
-      ...(exported.memory instanceof WebAssembly.Memory ? [] : ["memory"]),
-      ...REQUIRED_FUNCTIONS.filter((name) => typeof exported[name] !== "function"),
-    ];
-    if (missing.length > 0) {
-      throw new UndraTransportError("handshake", `the module is not an Undra core: it does not export ${missing.join(", ")}`);
-    }
+    // PROTOTYPE (ADR-057 lever c): the per-export check (which export is missing) is the development build's; the
+    // production build asks only whether this is an Undra core at all, and its ABI version below says the rest.
+    if (typeof exported.undra_abi_version !== "function") throw new UndraTransportError("handshake", "the module is not an Undra core");
     this._exports = exported as unknown as CoreExports;
     const { abi, schemaHash } = this._run((e) => {
       e._initialize?.();
