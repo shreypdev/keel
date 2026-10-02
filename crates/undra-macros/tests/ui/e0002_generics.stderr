@@ -1,6 +1,6 @@
 error: error[undra::E0002]: generic parameter `T` on `Page`
          = note: the schema describes concrete types; every target language would need one instantiation per use
-         = help: remove the parameter, and declare one concrete `#[undra::api]` type per instantiation
+         = help: mark the struct or enum `#[undra::api(generic)]` and declare each instantiation under a name: `#[undra::api] pub type TodoPage = Page<Todo>;`; or remove the parameter and declare one concrete `#[undra::api]` type per instantiation
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
  --> tests/ui/e0002_generics.rs:6:17
   |
@@ -8,8 +8,8 @@ error: error[undra::E0002]: generic parameter `T` on `Page`
   |                 ^
 
 error: error[undra::E0002]: generic parameter `T` on `first`
-         = note: the schema describes concrete types; every target language would need one instantiation per use
-         = help: remove the parameter, and declare one concrete `#[undra::api]` type per instantiation
+         = note: the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed
+         = help: remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`)
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
   --> tests/ui/e0002_generics.rs:11:14
    |

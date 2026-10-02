@@ -1,0 +1,53 @@
+error: error[undra::E0002]: generic parameter `T` on `Page`
+         = note: the schema describes concrete types; every target language would need one instantiation per use
+         = help: mark the struct or enum `#[undra::api(generic)]` and declare each instantiation under a name: `#[undra::api] pub type TodoPage = Page<Todo>;`; or remove the parameter and declare one concrete `#[undra::api]` type per instantiation
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_only_for_data_types.rs:10:17
+   |
+10 | pub struct Page<T> {
+   |                 ^
+
+error: error[undra::E0002]: generic parameter `E` on `Failure`
+         = note: the schema describes concrete types, and the platforms throw an error by name
+         = help: remove the parameter and declare one concrete `#[undra::error]` enum per use
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_only_for_data_types.rs:16:18
+   |
+16 | pub enum Failure<E> {
+   |                  ^
+
+error: error[undra::E0002]: generic parameter `T` on `get`
+         = note: the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed
+         = help: remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_only_for_data_types.rs:30:16
+   |
+30 |     pub fn get<T>(&self, value: T) -> u8 {
+   |                ^
+
+error: error[undra::E0002]: generic parameter `T` on `first`
+         = note: the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed
+         = help: remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_only_for_data_types.rs:36:14
+   |
+36 | pub fn first<T>(items: Vec<T>) -> u8 {
+   |              ^
+
+error: error[undra::E0002]: generic parameter `T` on `Counter`
+         = note: the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed
+         = help: remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_only_for_data_types.rs:41:20
+   |
+41 | pub struct Counter<T> {
+   |                    ^
+
+error: error[undra::E0002]: generic parameter `T` on `Sink`
+         = note: the schema describes concrete types, and objects, stores, functions, methods, ports, callbacks, queries and mutations are dispatched by id: one dispatcher per instantiation, and a schema that can name a type parameter, would be needed
+         = help: remove the parameter and write the concrete types; only data types can be generic: mark a struct or enum `#[undra::api(generic)]` and declare each instantiation under a name (`#[undra::api] pub type TodoPage = Page<Todo>;`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0002
+  --> tests/ui/e0002_generic_only_for_data_types.rs:48:16
+   |
+48 | pub trait Sink<T> {
+   |                ^

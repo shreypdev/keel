@@ -1,0 +1,63 @@
+error[E0277]: error[undra::E0006]: `undra::prelude::Decimal` cannot be a map key
+                = note: map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not)
+                = help: use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0006
+  --> tests/ui/e0006_newtype_keys.rs:32:27
+   |
+32 |     pub by_price: HashMap<Price, u32>,
+   |                           ^^^^^ not a type that can be a map key
+   |
+   = help: the trait `undra::undra_wire::leaf::Newtype` is not implemented for `undra::prelude::Decimal`
+help: the following other types implement trait `undra::undra_wire::leaf::Newtype`
+  --> tests/ui/e0006_newtype_keys.rs:10:1
+   |
+10 | #[k::api]
+   | ^^^^^^^^^ `UserId`
+...
+14 | #[k::api]
+   | ^^^^^^^^^ `Price`
+...
+18 | #[k::api]
+   | ^^^^^^^^^ `Owner`
+   = note: required for `undra::prelude::Decimal` to implement `undra::undra_wire::leaf::MapKey`
+   = note: 1 redundant requirement hidden
+   = note: required for `Price` to implement `undra::undra_wire::leaf::MapKey`
+note: required by a bound in `__undra_map_key`
+  --> tests/ui/e0006_newtype_keys.rs:28:1
+   |
+28 | #[k::api]
+   | ^^^^^^^^^ required by this bound in `__undra_map_key`
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: error[undra::E0006]: `Loose` cannot be a map key
+                = note: map keys must be `String`, an integer, `bool`, `Uuid` or a newtype of one of those: they compare and hash identically on every platform (floats, decimals, records and collections do not)
+                = help: use one of those key types, a newtype of one (`struct UserId(pub Uuid);`), or a `Vec` of records with an explicit key field
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0006
+  --> tests/ui/e0006_newtype_keys.rs:33:28
+   |
+33 |     pub by_record: HashMap<Loose, u32>,
+   |                            ^^^^^ not a type that can be a map key
+   |
+help: the trait `undra::undra_wire::leaf::Newtype` is not implemented for `Loose`
+  --> tests/ui/e0006_newtype_keys.rs:24:1
+   |
+24 | pub struct Loose {
+   | ^^^^^^^^^^^^^^^^
+help: the following other types implement trait `undra::undra_wire::leaf::Newtype`
+  --> tests/ui/e0006_newtype_keys.rs:10:1
+   |
+10 | #[k::api]
+   | ^^^^^^^^^ `UserId`
+...
+14 | #[k::api]
+   | ^^^^^^^^^ `Price`
+...
+18 | #[k::api]
+   | ^^^^^^^^^ `Owner`
+   = note: required for `Loose` to implement `undra::undra_wire::leaf::MapKey`
+note: required by a bound in `__undra_map_key`
+  --> tests/ui/e0006_newtype_keys.rs:28:1
+   |
+28 | #[k::api]
+   | ^^^^^^^^^ required by this bound in `__undra_map_key`
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

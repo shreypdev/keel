@@ -50,6 +50,7 @@ static __UNDRA_META_Point: ::undra_runtime::meta::RecordMeta = ::undra_runtime::
             docs: "",
         },
     ],
+    transparent: false,
     docs: "",
 };
 ::undra_runtime::meta::inventory::submit! {

@@ -39,7 +39,7 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | Code | Meaning |
 /// |---|---|
 /// | E0001 | unsupported type in a public position |
-/// | E0002 | generic parameter |
+/// | E0002 | generic parameter, or a generic type spelled with its arguments |
 /// | E0003 | lifetime in a public signature |
 /// | E0004 | a trait object, `dyn` or `impl Trait` that is not a callback parameter, or a callback where one may not stand (ADR-041) |
 /// | E0005 | `Result` / `Stream` outside return position |
@@ -70,6 +70,7 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0064 | an object (`#[undra::api] impl`) used where a value is expected, or a value used as an object, or an object where objects may not stand (ADR-040) |
 /// | E0065 | a signal of a store written off its owning runtime's core (ADR-035): a runtime message |
 /// | E0066 | a `#[undra::migrate]` hook with a wrong target or shape (ADR-037; addition) |
+/// | E0070 | a named instantiation of a generic data type that is declared twice or outside the crate of its template (addition) |
 /// | E0071 | a method of a `#[undra::callback]` trait that is neither fire-and-forget nor `async` with a `Result`, or whose name starts with `__` (ADR-041) |
 pub(crate) mod code {
     pub(crate) const E0001: &str = "E0001";
@@ -100,6 +101,7 @@ pub(crate) mod code {
     pub(crate) const E0063: &str = "E0063";
     pub(crate) const E0064: &str = "E0064";
     pub(crate) const E0066: &str = "E0066";
+    pub(crate) const E0070: &str = "E0070";
     pub(crate) const E0071: &str = "E0071";
 }
 

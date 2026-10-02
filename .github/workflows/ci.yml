@@ -85,6 +85,39 @@ jobs:
             cargo build -p $p --target wasm32-unknown-unknown
           done
 
+  # ADR-042: the types of other crates that cross as a wire leaf are opt-in features of `undra`. Each must
+  # build for every platform the core ships to, and none may bring a clock or randomness along (R12): a
+  # `chrono` with `clock` or a `uuid` with `v4` would pull `wasm-bindgen` and `getrandom` into the wasm core.
+  leaf-features:
+    name: Leaf-type features (uuid, chrono, time, rust_decimal, bytes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown, aarch64-apple-ios, aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests with every feature on (the codecs, the facade, the macros that name a missing feature)
+        run: |
+          features=uuid,chrono,time,rust_decimal,bytes
+          cargo test -p undra-wire --features $features
+          cargo test -p undra --features $features
+          cargo test -p undra-macros --lib --features $features
+      - name: Each feature builds for wasm32, iOS and Android
+        run: |
+          for target in wasm32-unknown-unknown aarch64-apple-ios aarch64-linux-android; do
+            for feature in uuid chrono time rust_decimal bytes; do
+              cargo build -p undra-wire --features $feature --target $target
+              cargo build -p undra --features $feature --target $target
+            done
+          done
+      - name: No clock and no randomness comes with them
+        run: |
+          if cargo tree -p undra --features uuid,chrono,time,rust_decimal,bytes -e features,normal --target wasm32-unknown-unknown | grep -E 'getrandom|wasm-bindgen|js-sys|iana-time-zone'; then
+            echo "a leaf-type feature pulled a clock or randomness source into the core (R12)"
+            exit 1
+          fi
+
   ts:
     name: TypeScript runtime
     runs-on: ubuntu-latest

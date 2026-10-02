@@ -1,0 +1,35 @@
+error: error[undra::E0001]: `DateTime<Utc>` needs the `chrono` feature of `undra`
+         = note: `chrono`'s types cross as the wire type they stand for (`DateTime<Utc>` as `Timestamp`), but the dependency is opt-in, so a core that does not use it does not build it; no clock or randomness feature of `chrono` is enabled either way
+         = help: enable it: `undra = { version = "..", features = ["chrono"] }` in Cargo.toml (if you name the Undra crates directly with `crate = ".."`, enable `chrono` on `undra-wire` and `undra-macros`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui-leaf-off/e0001_leaf_without_its_feature.rs:17:13
+   |
+17 |     pub at: DateTime<Utc>,
+   |             ^^^^^^^^^^^^^
+
+error: error[undra::E0001]: `OffsetDateTime` needs the `time` feature of `undra`
+         = note: `time`'s types cross as the wire type they stand for (`OffsetDateTime` as `Timestamp`), but the dependency is opt-in, so a core that does not use it does not build it; no clock or randomness feature of `time` is enabled either way
+         = help: enable it: `undra = { version = "..", features = ["time"] }` in Cargo.toml (if you name the Undra crates directly with `crate = ".."`, enable `time` on `undra-wire` and `undra-macros`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui-leaf-off/e0001_leaf_without_its_feature.rs:18:17
+   |
+18 |     pub opened: OffsetDateTime,
+   |                 ^^^^^^^^^^^^^^
+
+error: error[undra::E0001]: `UtcDateTime` needs the `time` feature of `undra`
+         = note: `time`'s types cross as the wire type they stand for (`UtcDateTime` as `Timestamp`), but the dependency is opt-in, so a core that does not use it does not build it; no clock or randomness feature of `time` is enabled either way
+         = help: enable it: `undra = { version = "..", features = ["time"] }` in Cargo.toml (if you name the Undra crates directly with `crate = ".."`, enable `time` on `undra-wire` and `undra-macros`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui-leaf-off/e0001_leaf_without_its_feature.rs:19:17
+   |
+19 |     pub closed: UtcDateTime,
+   |                 ^^^^^^^^^^^
+
+error: error[undra::E0001]: `TimeDelta` needs the `chrono` feature of `undra`
+         = note: `chrono`'s types cross as the wire type they stand for (`TimeDelta` as `Duration`), but the dependency is opt-in, so a core that does not use it does not build it; no clock or randomness feature of `chrono` is enabled either way
+         = help: enable it: `undra = { version = "..", features = ["chrono"] }` in Cargo.toml (if you name the Undra crates directly with `crate = ".."`, enable `chrono` on `undra-wire` and `undra-macros`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui-leaf-off/e0001_leaf_without_its_feature.rs:20:15
+   |
+20 |     pub took: TimeDelta,
+   |               ^^^^^^^^^

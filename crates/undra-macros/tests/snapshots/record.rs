@@ -105,6 +105,7 @@ static __UNDRA_META_Todo: ::undra::meta::RecordMeta = ::undra::meta::RecordMeta 
             docs: "",
         },
     ],
+    transparent: false,
     docs: "A todo item.",
 };
 ::undra::meta::inventory::submit! {
@@ -124,14 +125,23 @@ const _: () = {
         A: ?::core::marker::Sized + __UndraSameAs<B>,
         B: ?::core::marker::Sized,
     {}
+    fn __undra_leaf<A, K>()
+    where
+        A: ?::core::marker::Sized + ::undra::wire::leaf::WireLeaf<K>,
+    {}
+    fn __undra_map_key<K>()
+    where
+        K: ?::core::marker::Sized + ::undra::wire::leaf::MapKey,
+    {}
     fn __undra_identity() {
-        __undra_same::<Uuid, ::undra::wire::Uuid>();
+        __undra_leaf::<Uuid, ::undra::wire::leaf::kinds::Uuid>();
         __undra_same::<String, ::std::string::String>();
         __undra_same::<bool, ::core::primitive::bool>();
         __undra_same::<Vec<String>, ::std::vec::Vec<String>>();
         __undra_same::<Option<Timestamp>, ::core::option::Option<Timestamp>>();
-        __undra_same::<Timestamp, ::undra::wire::Timestamp>();
+        __undra_leaf::<Timestamp, ::undra::wire::leaf::kinds::Timestamp>();
         __undra_same::<HashMap<String, i32>, ::std::collections::HashMap<String, i32>>();
         __undra_same::<i32, ::core::primitive::i32>();
+        __undra_map_key::<String>();
     }
 };

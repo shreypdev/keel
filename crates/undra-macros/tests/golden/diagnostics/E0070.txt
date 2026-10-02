@@ -1,0 +1,4 @@
+error[undra::E0070]: `TodoPage` instantiates `Page`, which is declared in the crate `model`, not in `app`
+  = note: an instantiation adds an inherent impl to the template's type, which only the crate that declares the template may do, and a second crate naming the same instantiation would register it twice
+  = help: declare the alias next to the template, in `model`, and use it from here; or declare a concrete `#[undra::api]` struct or enum in this crate
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0070
