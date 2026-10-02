@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sample app: Fieldbook · Undra docs</title>
+<meta name="description" content="Fieldbook, field notes with photos on one Rust core: auth, an offline queue, a derived notebook, an update with a hook, and live presence.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/sample.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Sample app: Fieldbook · Undra docs">
+<meta property="og:description" content="Fieldbook, field notes with photos on one Rust core: auth, an offline queue, a derived notebook, an update with a hook, and live presence.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/sample.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Sample app: Fieldbook · Undra docs">
+<meta name="twitter:description" content="Fieldbook, field notes with photos on one Rust core: auth, an offline queue, a derived notebook, an update with a hook, and live presence.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/sample.html#article","headline":"Sample app: Fieldbook · Undra docs","description":"Fieldbook, field notes with photos on one Rust core: auth, an offline queue, a derived notebook, an update with a hook, and live presence.","url":"https://shreypdev.github.io/undra/docs/sample.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Sample app: Fieldbook","item":"https://shreypdev.github.io/undra/docs/sample.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="sample.html" aria-current="page">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="several-cores.html">One core or several</a></li><li><a href="testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="sample.html" aria-current="page">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Cookbook</p>
+    <h1>Sample app: Fieldbook</h1>
+    <p class="lede">A small but real app on one Rust core: field notes with photos, on the web, iOS and Android.</p>
+<h2 id="what-it-is">What it is<a class="anchor" href="#what-it-is" aria-label="Link to this section">#</a></h2>
+<p>Fieldbook is a small but real app: field notes with photos, for a team that works where there is no signal. One Rust core, three apps (web, iOS, Android) that use only the public API, and a test suite that runs the core with no device. The cookbook's recipes, in one product.</p>
+<h2 id="what-it-demonstrates">What it demonstrates<a class="anchor" href="#what-it-demonstrates" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Feature</th><th>In the core</th></tr></thead><tbody><tr><td>Sign-in with a team code, tokens in the secure store, one re-auth on a 401</td><td><code>auth.rs</code></td></tr><tr><td>A note is on the device before the screen shows it, and is sent when there is a network, even after a kill</td><td><code>notes.rs</code>: <code>Kv</code>, an idempotent <code>push_note</code></td></tr><tr><td>Search, tag chips, pinned first, newest first</td><td>a keyed list, a <code>DerivedList</code> and a <code>Computed</code></td></tr><tr><td>Photos kept in the app's files and uploaded in the background</td><td><code>Fs</code> and the queue</td></tr><tr><td>An update that renames a field and adds three, without losing data</td><td><code>#[undra(default)]</code>, <code>#[undra::migrate]</code></td></tr><tr><td>Who else is in the notebook</td><td><code>presence.rs</code>: a reconnecting WebSocket (feature <code>presence</code>)</td></tr><tr><td>State kept across a rebuild under <code>undra dev</code></td><td>every store has a <code>restore</code> function, tested</td></tr></tbody></table></div>
+<h2 id="run-it">Run it<a class="anchor" href="#run-it" aria-label="Link to this section">#</a></h2>
+<details class="reveal-code"><summary>Show the commands</summary>
+<div class="code"><div class="code-bar"><span>shell</span></div><pre><code data-lang="bash">cd examples/fieldbook/web &amp;&amp; npm install &amp;&amp; npm run dev   # the web app, with an in-page demo server (team code: fieldbook)
+node examples/fieldbook/server/server.mjs                    # a backend for the iOS and Android apps
+cargo test -p fieldbook-core                                  # the core, against the fakes
+cd examples/fieldbook/web &amp;&amp; npm test                          # the bindings over the real wasm core</code></pre></div>
+</details>
+<p>Tick <strong>offline</strong> in the web app, write two notes, reload, untick it: the notes were on the device the whole time, and the core sends them when the network returns.</p>
+<h2 id="how-far-it-goes">How far it goes<a class="anchor" href="#how-far-it-goes" aria-label="Link to this section">#</a></h2>
+<ul><li>The web, iOS and Android apps build in CI (<code>vite build</code>, <code>xcodebuild</code>, <code>assembleDebug</code>); the screens are small on purpose.</li><li>Notes are stored in <code>Kv</code>. The <code>Db</code> port (SQLite) is the next step for a notebook that grows; it is an opt-in port.</li><li>SwiftUI previews and the web stories run the real core on the <a href="testing.html">testing kit</a>'s fakes, and so do the web tests, with a manual clock. Android's Compose previews are not in the sample: they play a recording, and none was made.</li></ul>
+<p>Source: <a href="https://github.com/shreypdev/undra/tree/main/examples/fieldbook" rel="noopener"><code class="cw">examples/fieldbook</code></a>, with a README that says how to run each platform. <a href="cookbook/">The cookbook</a> has the recipes it is made of.</p>
+  
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/sample.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="cookbook/from-uniffi.html"><span>Previous</span><b>Cookbook, from UniFFI</b></a>
+    <a class="next" href="cli.html"><span>Next</span><b>The CLI</b></a>
+  </nav>
+  </main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#what-it-is">What it is</a></li><li><a href="#what-it-demonstrates">What it demonstrates</a></li><li><a href="#run-it">Run it</a></li><li><a href="#how-far-it-goes">How far it goes</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

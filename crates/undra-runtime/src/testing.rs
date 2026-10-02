@@ -268,6 +268,7 @@ struct HostState {
     port_calls: Vec<PortCallRecord>,
     timer_sets: Vec<(u32, u64)>,
     scripts: HashMap<(u32, u32), PortScript>,
+    default_script: Option<PortScript>,
     timeline: Vec<HostEvent>,
 }
 
@@ -377,6 +378,16 @@ impl RecordingHost {
             .insert((port_id, method_id), Arc::new(script));
     }
 
+    /// Scripts the answer to every port call no [`script_port`](RecordingHost::script_port) entry
+    /// covers (a replayer answers a whole recording through it). Without one, an unscripted call is
+    /// unavailable.
+    pub fn script_port_default(
+        &self,
+        script: impl Fn(&PortCallRecord) -> PortCallOutcome + Send + Sync + 'static,
+    ) {
+        self.state.lock().default_script = Some(Arc::new(script));
+    }
+
     /// Scripts a synchronous success with a fixed `body`.
     pub fn script_port_ok(&self, port_id: u32, method_id: u32, body: Vec<u8>) {
         self.script_port(port_id, method_id, move |call| sync_ok(call, &body));
@@ -474,7 +485,11 @@ impl Host for RecordingHost {
             let mut state = self.state.lock();
             state.timeline.push(HostEvent::PortCall(port_call_id));
             state.port_calls.push(record.clone());
-            state.scripts.get(&(port_id, method_id)).cloned()
+            state
+                .scripts
+                .get(&(port_id, method_id))
+                .or(state.default_script.as_ref())
+                .cloned()
         };
         match script {
             Some(script) => script(&record),
@@ -546,12 +561,27 @@ impl TestRuntime {
     ///
     /// Panics if `config.mode` is invalid.
     pub fn with_config(config: RuntimeConfig) -> TestRuntime {
+        TestRuntime::with_host(config, |host| host)
+    }
+
+    /// Like [`with_config`](TestRuntime::with_config), but the runtime's host is `wrap(host)`: a
+    /// decorator around the recording host, such as the testkit's recorder, which sees everything
+    /// the runtime tells its host and forwards it. [`host`](TestRuntime::host) is still the
+    /// recording host inside.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `config.mode` is invalid.
+    pub fn with_host(
+        config: RuntimeConfig,
+        wrap: impl FnOnce(Arc<RecordingHost>) -> Arc<dyn Host>,
+    ) -> TestRuntime {
         // The creating thread is this test's driver: its direct signal writes are allowed.
         drive_from_this_thread();
         let host = Arc::new(RecordingHost::new());
         let rt = match Runtime::build(
             config,
-            host.clone(),
+            wrap(host.clone()),
             BuildOptions {
                 manual: true,
                 run_hooks: false,
@@ -754,6 +784,16 @@ mod tests {
             Err(crate::PortError::Unavailable)
         );
         assert_eq!(t.host().port_calls().len(), 2);
+    }
+
+    #[test]
+    fn the_default_script_answers_what_no_method_script_covers() {
+        let t = TestRuntime::new();
+        t.host().script_port_ok(1, 2, vec![9]);
+        t.host().script_port_default(|call| sync_ok(call, &[7]));
+        assert_eq!(t.runtime().port_call_sync(1, 2, &[]), Ok(vec![9]));
+        assert_eq!(t.runtime().port_call_sync(1, 3, &[]), Ok(vec![7]));
+        assert_eq!(t.runtime().port_call_sync(8, 8, &[]), Ok(vec![7]));
     }
 
     #[test]

@@ -152,6 +152,8 @@ EXAMPLES
     undra dev --addr 0.0.0.0:7443           reachable from a phone on your network (no authentication!)
     undra dev --no-watch                    build once and serve
     undra dev --no-keep-state               every rebuilt core starts fresh, as before the state was carried over
+    undra dev --record session.json         also write the session as an undra.recording, to preview or test with (docs/TESTING.md)
+    undra dev --record s.json --record-secrets   keep SecureStore values in it (by default they are left out)
     undra dev --devtools off                do not serve the devtools page (auto: loopback addresses only)
 
 CONNECTING
@@ -342,6 +344,15 @@ pub struct DevArgs {
     /// Start every rebuilt core from fresh state instead of carrying the running core's state over (the escape hatch for "my logic changed under the restored state").
     #[arg(long)]
     pub no_keep_state: bool,
+
+    /// Record the session (every call, reply, change-set, port call and the core's clock and random readings) into FILE as an
+    /// `undra.recording` (docs/TESTING.md). A reload starts a new core and so a new file: FILE, then `NAME-2.json`, `NAME-3.json`.
+    #[arg(long, value_name = "FILE")]
+    pub record: Option<PathBuf>,
+
+    /// Keep `SecureStore` values (tokens, passwords) in the recording. By default the calls of the `SecureStore` port are recorded with empty arguments and replies, so the file can be shared; HTTP headers and bodies, `Kv` values and files are recorded as they are either way.
+    #[arg(long, requires = "record")]
+    pub record_secrets: bool,
 
     /// Serve the devtools page (store viewer, change-set timeline with time travel, port and query logs, counters) at /devtools: `auto` on a loopback address only, `on` always, `off` never. Every request needs the token in the printed address.
     #[arg(long, value_enum, value_name = "MODE", default_value = "auto")]

@@ -10,6 +10,7 @@
 		A0A0A0A0A0A0A0A000000001 /* PlaygroundCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000010 /* PlaygroundCore */; };
 		A0A0A0A0A0A0A0A000000002 /* UndraRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000011 /* UndraRuntime */; };
 		A0A0A0A0A0A0A0A000000003 /* PlaygroundCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A0A0A0A0A0A0A0A000000020 /* PlaygroundCore.xcframework */; };
+		A0A0A0A0A0A0A0A000000004 /* UndraTestKit in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000012 /* UndraTestKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +57,7 @@
 			files = (
 				A0A0A0A0A0A0A0A000000001 /* PlaygroundCore in Frameworks */,
 				A0A0A0A0A0A0A0A000000002 /* UndraRuntime in Frameworks */,
+				A0A0A0A0A0A0A0A000000004 /* UndraTestKit in Frameworks */,
 				A0A0A0A0A0A0A0A000000003 /* PlaygroundCore.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -141,6 +143,7 @@
 			packageProductDependencies = (
 				A0A0A0A0A0A0A0A000000010 /* PlaygroundCore */,
 				A0A0A0A0A0A0A0A000000011 /* UndraRuntime */,
+				A0A0A0A0A0A0A0A000000012 /* UndraTestKit */,
 			);
 			productName = "PlaygroundApp";
 			productReference = A0A0A0A0A0A0A0A000000030 /* PlaygroundApp.app */;
@@ -406,6 +409,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A0A0A0A0A0A0A0A000000121 /* UndraRuntime package */;
 			productName = UndraRuntime;
+		};
+		A0A0A0A0A0A0A0A000000012 /* UndraTestKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A0A0A0A0A0A0A0A000000121 /* UndraRuntime package */;
+			productName = UndraTestKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

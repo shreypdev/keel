@@ -152,6 +152,7 @@ const UNDRA_CRATES: &[&str] = &[
     "undra-query",
     "undra-ffi",
     "undra-transport",
+    "undra-testkit",
     "undra-bindgen",
     "undra-cli",
 ];

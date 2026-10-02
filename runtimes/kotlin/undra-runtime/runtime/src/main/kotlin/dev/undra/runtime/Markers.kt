@@ -1,5 +1,18 @@
 package dev.undra.runtime
 
+/**
+ * Marks the embedding API: [Transport], [TransportEvents], [PortOutcome] and [UndraCore.attachTransport], the seam a tool uses to put a
+ * core of its own under [UndraCore] (the testing kit's recorded core is one). It is not what an app uses: the contract may change
+ * between releases (SPEC section 17.2). Using it needs `@OptIn(UndraEmbeddingApi::class)`.
+ */
+@RequiresOptIn(
+    level = RequiresOptIn.Level.ERROR,
+    message = "This is the embedding API of the Undra runtime, for testing tools and embedders; it may change between releases.",
+)
+@Retention(AnnotationRetention.BINARY)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
+public annotation class UndraEmbeddingApi
+
 /** Marker of generated records (`#[undra::api]` structs); their companion is an `UndraCodec`. */
 public interface UndraRecord
 

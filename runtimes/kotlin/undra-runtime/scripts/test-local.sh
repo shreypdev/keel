@@ -14,6 +14,7 @@
 #   scripts/test-local.sh                 # everything
 #   scripts/test-local.sh check|main|test|run   # one phase (each phase is incremental, so a slow machine
 #                                               # or a per-command time limit can run them one by one)
+#   scripts/test-local.sh kit                   # only the testing kit (dev.undra.testkit): compile it and run its suites
 #   UNDRA_FUZZ_ITERATIONS=50000 scripts/test-local.sh
 #   UNDRA_FUZZ_SEED=1234 scripts/test-local.sh
 #   UNDRA_WERROR=0 scripts/test-local.sh   # do not treat compiler warnings as errors
@@ -62,7 +63,7 @@ if [ -z "$STDLIB" ]; then
   exit 2
 fi
 
-FLAGS=(-jvm-target 11)
+FLAGS=(-jvm-target 11 -opt-in=dev.undra.runtime.UndraEmbeddingApi)
 if [ "${UNDRA_WERROR:-1}" = "1" ]; then FLAGS+=(-Werror); fi
 
 # Colon-join the non-empty arguments (bash 3.2 on macOS rejects empty arrays under `set -u`, so no arrays of paths).
@@ -76,6 +77,8 @@ join_cp() {
 
 MAIN_SRC="$HERE/runtime/src/main/kotlin"
 TEST_SRC="$HERE/runtime/src/test/kotlin"
+KIT_SRC="$HERE/testkit/src/main/kotlin"
+KIT_TEST_SRC="$HERE/testkit/src/test/kotlin"
 # Test support shared with android-adapters' tests (FaultyFileSystem), compiled into the test build.
 SUPPORT_SRC="$HERE/test-support/kotlin"
 GOLDEN_SRC="$REPO/crates/undra-bindgen/tests/golden/full/kotlin/src/main/kotlin"
@@ -113,6 +116,14 @@ phase_check() {
       missing=1
     fi
   done < <(grep -rhoE 'class [A-Za-z0-9_]+ : Suite\(\)' "$TEST_SRC" | awk '{print $2}')
+  [ "$missing" = "0" ] || exit 1
+  local kit_main="$KIT_TEST_SRC/dev/undra/testkit/TestMain.kt"
+  while read -r name; do
+    if ! grep -q "$name()" "$kit_main"; then
+      echo "error: $name extends Suite but testkit's TestMain.kt does not run it" >&2
+      missing=1
+    fi
+  done < <(grep -rhoE 'class [A-Za-z0-9_]+ : Suite\(\)' "$KIT_TEST_SRC" | awk '{print $2}')
   [ "$missing" = "0" ] || exit 1
 }
 
@@ -181,11 +192,32 @@ phase_run() {
     dev.undra.runtime.TestMainKt
 }
 
+# --- 4. the testing kit (dev.undra.testkit): its own module in Gradle, compiled here against the runtime classes ------
+phase_kit() {
+  phase_main
+  if ! up_to_date "$OUT/kit.stamp" "$KIT_SRC" "$KIT_TEST_SRC" "$MAIN_SRC" "$HERE/scripts/local"; then
+    rm -rf "$OUT/kit-main" "$OUT/kit-test" "$OUT/kit.stamp"
+    mkdir -p "$OUT/kit-main" "$OUT/kit-test"
+    echo "==> compiling testkit/src/main (explicit API strict)"
+    kotlinc -cp "$(join_cp "$OUT/main" "$COROUTINES")" -d "$OUT/kit-main" "${FLAGS[@]}" -Xexplicit-api=strict "$KIT_SRC"
+    echo "==> compiling testkit/src/test"
+    kotlinc -cp "$(join_cp "$OUT/main" "$OUT/kit-main" "$COROUTINES")" -d "$OUT/kit-test" "${FLAGS[@]}" \
+      -Xfriend-paths="$OUT/kit-main" "$KIT_TEST_SRC" "$HERE/scripts/local/junit-stub"
+    touch "$OUT/kit.stamp"
+  else
+    echo "==> testkit is up to date"
+  fi
+  echo "==> running the testkit suites"
+  java -Xmx512m "-Dundra.testkit.dir=$REPO/testkit" \
+    -cp "$(join_cp "$OUT/main" "$OUT/kit-main" "$OUT/kit-test" "$STDLIB" "$COROUTINES")" dev.undra.testkit.TestMainKt
+}
+
 case "$PHASE" in
+  kit)   phase_kit ;;
   check) phase_check ;;
   main)  phase_main ;;
   test)  phase_test ;;
   run)   phase_run ;;
-  all)   phase_check; phase_run ;;
-  *) echo "usage: test-local.sh [all|check|main|test|run]" >&2; exit 2 ;;
+  all)   phase_check; phase_run; phase_kit ;;
+  *) echo "usage: test-local.sh [all|check|main|test|run|kit]" >&2; exit 2 ;;
 esac

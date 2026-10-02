@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auth · Undra cookbook</title>
+<meta name="description" content="A session store, tokens in the secure store, one re-auth on a 401, and a logout that clears what the user left behind. Written once for three UIs.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/cookbook/auth.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Auth · Undra cookbook">
+<meta property="og:description" content="A session store, tokens in the secure store, one re-auth on a 401, and a logout that clears what the user left behind. Written once for three UIs.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/cookbook/auth.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Auth · Undra cookbook">
+<meta name="twitter:description" content="A session store, tokens in the secure store, one re-auth on a 401, and a logout that clears what the user left behind. Written once for three UIs.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/cookbook/auth.html#article","headline":"Auth · Undra cookbook","description":"A session store, tokens in the secure store, one re-auth on a 401, and a logout that clears what the user left behind. Written once for three UIs.","url":"https://shreypdev.github.io/undra/docs/cookbook/auth.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Auth","item":"https://shreypdev.github.io/undra/docs/cookbook/auth.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../../assets/base.css">
+<link rel="stylesheet" href="../../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../../docs/" aria-current="page">Docs</a>
+      <a href="../../blog/">Blog</a>
+      <a href="../../roadmap/">Roadmap</a>
+      <a href="../../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../concepts.html">Core concepts</a></li><li><a href="../queries.html">Queries &amp; mutations</a></li><li><a href="../ports.html">Ports &amp; adapters</a></li><li><a href="../web.html">Workers &amp; crash recovery</a></li><li><a href="../updates.html">Shipping an update</a></li><li><a href="../several-cores.html">One core or several</a></li><li><a href="../testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="index.html">All recipes</a></li><li><a href="auth.html" aria-current="page">Auth</a></li><li><a href="pagination.html">Pagination</a></li><li><a href="forms.html">Forms</a></li><li><a href="upload.html">File upload</a></li><li><a href="realtime.html">Real-time</a></li><li><a href="offline.html">Offline-first</a></li><li><a href="from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="from-uniffi.html">From UniFFI</a></li><li><a href="../sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../cli.html">The CLI</a></li><li><a href="../architecture.html">Architecture</a></li><li><a href="../errors.html">Error codes</a></li><li><a href="../../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../api-swift.html">Swift</a></li><li><a href="../api-kotlin.html">Kotlin</a></li><li><a href="../api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../concepts.html">Core concepts</a></li><li><a href="../queries.html">Queries &amp; mutations</a></li><li><a href="../ports.html">Ports &amp; adapters</a></li><li><a href="../web.html">Workers &amp; crash recovery</a></li><li><a href="../updates.html">Shipping an update</a></li><li><a href="../several-cores.html">One core or several</a></li><li><a href="../testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="index.html">All recipes</a></li><li><a href="auth.html" aria-current="page">Auth</a></li><li><a href="pagination.html">Pagination</a></li><li><a href="forms.html">Forms</a></li><li><a href="upload.html">File upload</a></li><li><a href="realtime.html">Real-time</a></li><li><a href="offline.html">Offline-first</a></li><li><a href="from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="from-uniffi.html">From UniFFI</a></li><li><a href="../sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../cli.html">The CLI</a></li><li><a href="../architecture.html">Architecture</a></li><li><a href="../errors.html">Error codes</a></li><li><a href="../../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../api-swift.html">Swift</a></li><li><a href="../api-kotlin.html">Kotlin</a></li><li><a href="../api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Cookbook</p>
+    <h1>Auth</h1>
+    <p class="lede">Where a token lives, when it is refreshed and what logging out forgets are rules of the app, not of three UIs. Written once in the core, they hold on iOS, Android and the web.</p>
+<h2 id="the-recipe">The recipe<a class="anchor" href="#the-recipe" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>The session is a signal.</strong> <code>Auth.session</code> is <code>SignedOut</code> or <code>SignedIn</code>. The root view switches on it; nothing else decides which screen shows.</li><li><strong>Tokens are secrets, not state.</strong> They go to the <code>SecureStore</code> port (Keychain, Android Keystore, WebCrypto) and never into a signal, because every signal is mirrored into each platform's memory.</li><li><strong>A 401 is not an error.</strong> <code>authed</code> adds the token and, on a <code>401</code>, refreshes once and retries. A second request that meets the same <code>401</code> waits for the refresh in flight. A refresh the server refuses signs the user out, wherever the request came from.</li><li><strong>Queued writes use today's token.</strong> An offline write replayed an hour later goes through <code>authed</code> too, so it carries the token that is current then.</li><li><strong>Logout forgets.</strong> Both tokens, the persisted cache, the session. It is refused with a typed <code>PendingWrites</code> while writes wait in the offline queue: they would go out as whoever signs in next.</li></ul>
+<details class="reveal-code"><summary>Show the Rust</summary>
+<!-- snippet:examples/cookbook/core/src/auth.rs#auth-session rust -->
+<div class="code"><div class="code-bar"><span>core/src/auth.rs</span></div><pre><code data-lang="rust">/// Who is signed in.
+#[undra::api]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Session {
+    /// Nobody: show the login screen.
+    SignedOut,
+    /// A user with a session the server accepted.
+    SignedIn {
+        /// The display name the server returned at sign-in.
+        user: String,
+    },
+}
+
+/// The login screen's store: the session and whether a call is running.
+#[undra::store(restore = &quot;Self::assemble&quot;)]
+pub struct Auth {
+    ctx: WeakCtx,
+    session: Signal&lt;Session&gt;,
+    busy: Signal&lt;bool&gt;,
+}
+
+/// Signs in with an email and a password: the tokens go to the secure store, the session to
+/// the UI. A wrong password is `BadCredentials`, not a network error.
+pub async fn sign_in(&amp;self, email: String, password: String) -&gt; Result&lt;(), AuthError&gt; {
+    let ctx = self.ctx.upgrade().map_err(|_| AuthError::Closed)?;
+    let _busy = Busy::start(&amp;self.busy);
+    let url = net::url(&amp;ctx, &quot;/auth/login&quot;)?;
+    let body = serde_json::json!({ &quot;email&quot;: email, &quot;password&quot;: password });
+    let response = net::send(&amp;ctx, net::post_json(url, &amp;body)).await?;
+    let tokens: Tokens = match response.status {
+        401 | 403 =&gt; return Err(AuthError::BadCredentials),
+        _ =&gt; net::json(&amp;net::ok(response)?)?,
+    };
+    save_tokens(&amp;ctx, &amp;tokens).await?;
+    self.session.set(Session::SignedIn { user: tokens.user });
+    Ok(())
+}</code></pre></div>
+<!-- /snippet -->
+<!-- snippet:examples/cookbook/core/src/auth.rs#auth-401 rust -->
+<div class="code"><div class="code-bar"><span>core/src/auth.rs</span></div><pre><code data-lang="rust">/// Sends `request` as the signed-in user: with the access token, and with one refresh and one retry
+/// if the server answers `401`. A refresh the server refuses signs the user out and fails with
+/// [`AuthError::SessionExpired`].
+pub async fn authed(ctx: &amp;Ctx, request: HttpRequest) -&gt; Result&lt;HttpResponse, AuthError&gt; {
+    for attempt in 0..2 {
+        let seen = state(ctx).epoch.load(Ordering::SeqCst);
+        let Some(token) = secret(ctx, ACCESS).await? else {
+            return Err(AuthError::SessionExpired);
+        };
+        let signed = request
+            .clone()
+            .with_header(&quot;Authorization&quot;, format!(&quot;Bearer {token}&quot;));
+        let response = net::send(ctx, signed).await?;
+        if response.status != 401 {
+            return Ok(response);
+        }
+        if attempt == 0 {
+            refresh(ctx, seen).await?;
+        }
+    }
+    forget(ctx).await;
+    Err(AuthError::SessionExpired)
+}
+
+/// Refreshes the tokens, unless somebody already did since `seen`; waits if somebody is doing it.
+async fn refresh(ctx: &amp;Ctx, seen: u64) -&gt; Result&lt;(), AuthError&gt; {
+    let st = state(ctx);
+    if st.epoch.load(Ordering::SeqCst) != seen {
+        return Ok(());
+    }
+    if st.refreshing.swap(true, Ordering::SeqCst) {
+        // The core runs on one thread, so this flag is race free. Waiting on the Timer port keeps
+        // it deterministic in a test: the fake clock decides when the poll runs.
+        while st.refreshing.load(Ordering::SeqCst) {
+            ctx.sleep(Duration::from_millis(20)).await;
+        }
+        return Ok(()); // the retry shows how the refresh went
+    }
+    let _running = Flag(&amp;st.refreshing);
+    let Some(refresh_token) = secret(ctx, REFRESH).await? else {
+        forget(ctx).await;
+        return Err(AuthError::SessionExpired);
+    };
+    let url = net::url(ctx, &quot;/auth/refresh&quot;)?;
+    let response = net::send(
+        ctx,
+        net::post_json(url, &amp;serde_json::json!({ &quot;refresh&quot;: refresh_token })),
+    )
+    .await?;
+    match response.status {
+        200..=299 =&gt; {
+            let tokens: Tokens = net::json(&amp;response.body.0)?;
+            save_tokens(ctx, &amp;tokens).await?;
+            Ok(())
+        }
+        // The refresh token was refused: this session is over.
+        401 | 403 =&gt; {
+            forget(ctx).await;
+            Err(AuthError::SessionExpired)
+        }
+        code =&gt; Err(NetError::Status { code }.into()),
+    }
+}</code></pre></div>
+<!-- /snippet -->
+<!-- snippet:examples/cookbook/core/src/auth.rs#auth-logout rust -->
+<div class="code"><div class="code-bar"><span>core/src/auth.rs</span></div><pre><code data-lang="rust">/// Forgets the user: both tokens, the persisted cache, and the session the UI shows.
+async fn forget(ctx: &amp;Ctx) {
+    let store = ctx.secure_store();
+    // Best effort: a store that cannot delete is already unusable, and the session must still end.
+    let _ = store.delete(ACCESS.to_owned()).await;
+    let _ = store.delete(REFRESH.to_owned()).await;
+    let kv = ctx.kv();
+    if let Ok(keys) = kv.list(CACHE_PREFIX.to_owned()).await {
+        for key in keys {
+            let _ = kv.delete(key).await;
+        }
+    }
+    let st = state(ctx);
+    st.epoch.fetch_add(1, Ordering::SeqCst);
+    let session = st
+        .session
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    if let Some(session) = session {
+        session.set(Session::SignedOut);
+    }
+}
+
+/// Signs out: tells the server (best effort), forgets both tokens and the persisted cache and
+/// shows the login screen. Refused with `PendingWrites` while writes wait in the
+/// offline queue.
+pub async fn sign_out(&amp;self) -&gt; Result&lt;(), AuthError&gt; {
+    let ctx = self.ctx.upgrade().map_err(|_| AuthError::Closed)?;
+    let pending = ctx.query().pending_mutations();
+    if pending &gt; 0 {
+        return Err(AuthError::PendingWrites {
+            count: u32::try_from(pending).unwrap_or(u32::MAX),
+        });
+    }
+    let _busy = Busy::start(&amp;self.busy);
+    if let Ok(url) = net::url(&amp;ctx, &quot;/auth/logout&quot;) {
+        // The server may be unreachable: signing out must not depend on it.
+        let _ = authed(&amp;ctx, HttpRequest::post(url, Vec::new())).await;
+    }
+    forget(&amp;ctx).await;
+    Ok(())
+}</code></pre></div>
+<!-- /snippet -->
+</details>
+<h2 id="on-the-platform">On the platform<a class="anchor" href="#on-the-platform" aria-label="Link to this section">#</a></h2>
+<p>The root view switches on the session, and a failed sign-in is a case, not a string to parse.</p>
+<details class="reveal-code"><summary>Show the Swift, Kotlin and TypeScript</summary>
+<div data-tabs data-label="Platform">
+<div class="tab-panel" data-label="Swift">
+<!-- snippet:examples/cookbook/snippets/swiftui/Sources/Snippets/Snippets.swift#auth-swift swift -->
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">struct Root: View {
+    let auth: Auth
+
+    var body: some View {
+        switch auth.session {
+        case .signedOut: LoginView(auth: auth)
+        case .signedIn(let user): HomeView(user: user)
+        }
+    }
+}
+
+@MainActor func logIn(_ auth: Auth, email: String, password: String) async -&gt; String? {
+    do {
+        try await auth.signIn(email: email, password: password)
+        return nil
+    } catch AuthError.badCredentials {
+        return &quot;Wrong email or password&quot;
+    } catch {
+        return error.localizedDescription
+    }
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+<div class="tab-panel" data-label="Kotlin">
+<!-- snippet:examples/cookbook/snippets/kotlin/Snippets.kt#auth-kotlin kotlin -->
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">fun label(session: Session): String = when (session) {
+    Session.SignedOut -&gt; &quot;Sign in&quot;
+    is Session.SignedIn -&gt; session.user
+}
+
+suspend fun logIn(auth: Auth, email: String, password: String): String? =
+    try {
+        auth.signIn(email, password)
+        null
+    } catch (e: AuthError.BadCredentials) {
+        &quot;Wrong email or password&quot;
+    } catch (e: UndraException) {
+        e.message
+    }</code></pre></div>
+<!-- /snippet -->
+</div>
+<div class="tab-panel" data-label="TypeScript">
+<!-- snippet:examples/cookbook/snippets/ts/snippets.tsx#auth-ts tsx -->
+<div class="code"><div class="code-bar"><span><span class="lang">tsx</span></span></div><pre><code data-lang="tsx">export function Root({ auth }: { auth: Auth }) {
+  const session = useSignal(auth.session);
+  return session.kind === &quot;signedOut&quot; ? &lt;Login auth={auth} /&gt; : &lt;Home user={session.user} /&gt;;
+}
+
+export async function logIn(auth: Auth, email: string, password: string): Promise&lt;string | null&gt; {
+  try {
+    await auth.signIn(email, password);
+    return null;
+  } catch (error) {
+    return error instanceof AuthError.BadCredentials ? &quot;Wrong email or password&quot; : String(error);
+  }
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+</div>
+</details>
+<h2 id="what-the-tests-prove">What the tests prove<a class="anchor" href="#what-the-tests-prove" aria-label="Link to this section">#</a></h2>
+<ul><li>Sign-in puts the tokens in <code>SecureStore</code> and nothing in plain storage.</li><li>A <code>401</code> costs exactly one refresh and the caller never sees it; a refused refresh clears both tokens, the persisted cache and the screen.</li><li>A request that meets a refresh in progress waits instead of refreshing again.</li><li>A session left by the last run resumes (refreshing on the way); sign-out is refused while a write is queued.</li></ul>
+<h2 id="limits">Limits<a class="anchor" href="#limits" aria-label="Link to this section">#</a></h2>
+<ul><li>The query client has no <code>clear()</code> yet. Sign-out deletes the persisted entries and the recipe keys cached data by user (<code>profile:{user}</code>), so the next person never reads the last one's entry; in-memory entries leave with their observers.</li><li>The core cannot show a login web view or an OAuth sheet: that is the platform's. It hands the code to <code>sign_in</code> like any other value.</li></ul>
+<p>Source: <a href="https://github.com/shreypdev/undra/blob/main/examples/cookbook/core/src/auth.rs" rel="noopener"><code class="cw">examples/cookbook/core/src/auth.rs</code></a>. The sample app, <a href="../sample.html">Fieldbook</a>, uses it.</p>
+  
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/cookbook/auth.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="index.html"><span>Previous</span><b>Cookbook, all recipes</b></a>
+    <a class="next" href="pagination.html"><span>Next</span><b>Pagination</b></a>
+  </nav>
+  </main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#the-recipe">The recipe</a></li><li><a href="#on-the-platform">On the platform</a></li><li><a href="#what-the-tests-prove">What the tests prove</a></li><li><a href="#limits">Limits</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../../docs/cli.html">The CLI</a></li>
+          <li><a href="../../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../../blog/">Blog</a></li>
+          <li><a href="../../roadmap/">Roadmap</a></li>
+          <li><a href="../../playground/">Playground</a></li>
+          <li><a href="../../feed.xml">RSS feed</a></li>
+          <li><a href="../../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../../assets/site.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "now_ms": 1700000000000,
+  "rng_seed": 42,
+  "kv": { "greeting": "hello", "blob": { "hex": "00ff" } },
+  "secure_store": { "token": "t-123" },
+  "fs": { "notes/a.txt": "hello" },
+  "http": [
+    {
+      "url": "https://api.test/lists/inbox/todos",
+      "method": "get",
+      "status": 200,
+      "headers": [["content-type", "application/json"]],
+      "body": "[{\"id\":1,\"title\":\"Buy milk\",\"done\":false},{\"id\":2,\"title\":\"Walk the dog\",\"done\":true}]"
+    },
+    { "url_prefix": "https://api.test/slow", "error": "timeout" }
+  ],
+  "connectivity": { "online": true, "kind": "wifi" },
+  "lifecycle": "active"
+}

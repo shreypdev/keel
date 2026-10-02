@@ -17,7 +17,13 @@ export default defineConfig({
       "@undra/runtime/realtime": here("../../../runtimes/ts/@undra/runtime/src/realtime.ts"),
       "@undra/runtime/db": here("../../../runtimes/ts/@undra/runtime/src/db.ts"),
       "@undra/runtime": here("../../../runtimes/ts/@undra/runtime/src/index.ts"),
+      // The testing kit (docs/TESTING.md), for the stories.
+      "@undra/testkit": here("../../../runtimes/ts/@undra/testkit/src/index.ts"),
     },
+  },
+  build: {
+    // Two pages: the app, and the stories (`stories.html`, a plain renderer of src/stories/*.stories.tsx).
+    rollupOptions: { input: { main: here("index.html"), stories: here("stories.html") } },
   },
   server: {
     // The wasm core (`undra build --platform web`) and the runtime live outside this directory.

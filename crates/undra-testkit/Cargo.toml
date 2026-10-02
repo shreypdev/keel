@@ -1,0 +1,25 @@
+[package]
+name = "undra-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Undra testkit: the recording format, port record/replay, seeds for the deterministic fakes, and the harness the platform testing kits are checked against"
+readme = "README.md"
+keywords = ["undra", "testing", "recording", "fakes", "cross-platform"]
+categories = ["development-tools::testing"]
+
+[dependencies]
+undra-meta = { workspace = true }
+undra-wire = { workspace = true }
+undra-runtime = { workspace = true }
+undra-ports = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+undra = { workspace = true }
+undra-macros = { workspace = true }
+proptest = { workspace = true }

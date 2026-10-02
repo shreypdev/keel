@@ -15,7 +15,9 @@ const clip = (t) => (t.length <= CAP ? t : t.slice(0, CAP).replace(/\s+\S*$/, ""
 
 function pages() {
   const docs = readdirSync(join(SITE, "docs")).filter((f) => f.endsWith(".html")).map((f) => f.slice(0, -5));
-  docs.sort((a, b) => ((DOCS_ORDER.indexOf(a) + 1 || 99) - (DOCS_ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
+  // the pages in subdirectories of docs/ (the cookbook), in the order docs.json lists them
+docs.push(...navData.groups.flatMap((g) => g.pages).filter((p) => !p.external && p.file.includes("/") && !p.file.startsWith("..")).map((p) => p.file.replace(/\.html$/, "")));
+docs.sort((a, b) => ((DOCS_ORDER.indexOf(a) + 1 || 99) - (DOCS_ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
   const out = docs.map((d) => `docs/${d}.html`);
   // the generated API reference (build-reference.mjs); rustdoc's own pages have their own search
   for (const f of navData.also ?? []) if (existsSync(join(SITE, "docs", f))) out.push(posix.normalize(posix.join("docs", f)));

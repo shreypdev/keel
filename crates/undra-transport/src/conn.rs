@@ -98,6 +98,8 @@ pub(crate) struct Conn {
     /// A handle on the socket used only to abort it.
     tcp: Option<TcpStream>,
     client: OnceLock<ClientInfo>,
+    /// Sees every envelope this connection queues (`undra dev --record`).
+    tap: OnceLock<crate::tap::FrameTap>,
     /// What the upgrade request said about the client's session (ADR-051).
     session: OnceLock<SessionRequest>,
     /// The server turned this client away after it attached (a session it cannot resume): its
@@ -159,12 +161,18 @@ impl Conn {
             }),
             tcp,
             client: OnceLock::new(),
+            tap: OnceLock::new(),
             session: OnceLock::new(),
             refused: AtomicBool::new(false),
             last_rx: AtomicU64::new(clock().as_millis().try_into().unwrap_or(u64::MAX)),
             clock,
         };
         (conn, rx)
+    }
+
+    /// Lets `tap` see every envelope queued from now on. Set once, before the connection is used.
+    pub(crate) fn set_tap(&self, tap: crate::tap::FrameTap) {
+        let _ = self.tap.set(tap);
     }
 
     /// A second sender into the outbound queue, for the read side's raw frames.
@@ -265,7 +273,13 @@ impl Conn {
         state.next_seq = state.next_seq.wrapping_add(1);
         let mut w = Writer::with_capacity(Envelope::HEADER_LEN + hint);
         Envelope::write_with(&mut w, kind, seq, self.schema, payload);
-        self.enqueue_locked(state, w.into_vec())
+        let frame = w.into_vec();
+        if let Some(tap) = self.tap.get() {
+            if let Ok(env) = Envelope::parse(&frame) {
+                tap.see(crate::tap::Direction::CoreToHost, kind, env.payload);
+            }
+        }
+        self.enqueue_locked(state, frame)
     }
 
     /// Queues one complete WebSocket message and applies the backlog bound.

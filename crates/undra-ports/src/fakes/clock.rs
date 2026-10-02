@@ -11,6 +11,11 @@ use crate::{Clock, Timer};
 /// Nanoseconds per millisecond.
 const NS_PER_MS: u64 = 1_000_000;
 
+/// The most timers one [`FakeClock::advance`] (or [`Fakes::advance`](crate::fakes::Fakes::advance))
+/// fires before it stops with a panic: a timer that re-arms itself without time passing never
+/// ends, and a test that hangs says nothing.
+pub const MAX_TIMERS_PER_ADVANCE: usize = 100_000;
+
 type TimerHook = Arc<dyn Fn(u32) + Send + Sync>;
 
 struct State {
@@ -104,6 +109,12 @@ impl FakeClock {
 
     /// Moves time forward by `duration` and fires the timers that come due. Returns the ids of
     /// the timers that fired, in the order they fired.
+    ///
+    /// # Panics
+    ///
+    /// After [`MAX_TIMERS_PER_ADVANCE`] timers with another still due: a timer that re-arms itself
+    /// at the same instant (from the hook) would otherwise never let time move on. The clock
+    /// stays at the last deadline that fired.
     pub fn advance(&self, duration: Duration) -> Vec<u32> {
         let step = u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX);
         let target = self.state.lock().mono_ns.saturating_add(step);
@@ -122,6 +133,13 @@ impl FakeClock {
                     state.wall_ns += i128::from(moved);
                     return fired;
                 };
+                assert!(
+                    fired.len() < MAX_TIMERS_PER_ADVANCE,
+                    "FakeClock::advance fired {} timers and timer {} is due again at {} ms: a timer that re-arms itself without time passing never ends",
+                    fired.len(),
+                    state.timers.get(&key).copied().unwrap_or_default(),
+                    state.mono_ns / NS_PER_MS,
+                );
                 let id = state.timers.remove(&key).unwrap_or_default();
                 // The clock reads the deadline while the timer fires.
                 let moved = key.0.saturating_sub(state.mono_ns);
@@ -231,6 +249,25 @@ mod tests {
         clock.advance(Duration::from_nanos(1_500_000));
         assert_eq!(clock.now_ms(), 9_001, "sub-millisecond time accumulates");
         assert_eq!(clock.monotonic_ns(), 251_500_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "a timer that re-arms itself without time passing never ends")]
+    fn a_timer_that_re_arms_itself_at_the_same_instant_stops_at_the_cap() {
+        let clock = Arc::new(FakeClock::new());
+        let again = clock.clone();
+        clock.on_timer_fired(move |id| Timer::set(&*again, id, 0));
+        clock.set(7, 0);
+        clock.advance(Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_periodic_timer_inside_the_cap_is_fine() {
+        let clock = Arc::new(FakeClock::new());
+        let again = clock.clone();
+        clock.on_timer_fired(move |id| Timer::set(&*again, id, 1));
+        clock.set(1, 1);
+        assert_eq!(clock.advance(Duration::from_millis(100)).len(), 100);
     }
 
     #[test]

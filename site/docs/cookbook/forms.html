@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forms · Undra cookbook</title>
+<meta name="description" content="A signal per field, the errors derived in the core, and a submit that refuses typed: validation written once for three UIs.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/cookbook/forms.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Forms · Undra cookbook">
+<meta property="og:description" content="A signal per field, the errors derived in the core, and a submit that refuses typed: validation written once for three UIs.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/cookbook/forms.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Forms · Undra cookbook">
+<meta name="twitter:description" content="A signal per field, the errors derived in the core, and a submit that refuses typed: validation written once for three UIs.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/cookbook/forms.html#article","headline":"Forms · Undra cookbook","description":"A signal per field, the errors derived in the core, and a submit that refuses typed: validation written once for three UIs.","url":"https://shreypdev.github.io/undra/docs/cookbook/forms.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Forms","item":"https://shreypdev.github.io/undra/docs/cookbook/forms.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../../assets/base.css">
+<link rel="stylesheet" href="../../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../../docs/" aria-current="page">Docs</a>
+      <a href="../../blog/">Blog</a>
+      <a href="../../roadmap/">Roadmap</a>
+      <a href="../../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../concepts.html">Core concepts</a></li><li><a href="../queries.html">Queries &amp; mutations</a></li><li><a href="../ports.html">Ports &amp; adapters</a></li><li><a href="../web.html">Workers &amp; crash recovery</a></li><li><a href="../updates.html">Shipping an update</a></li><li><a href="../several-cores.html">One core or several</a></li><li><a href="../testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="index.html">All recipes</a></li><li><a href="auth.html">Auth</a></li><li><a href="pagination.html">Pagination</a></li><li><a href="forms.html" aria-current="page">Forms</a></li><li><a href="upload.html">File upload</a></li><li><a href="realtime.html">Real-time</a></li><li><a href="offline.html">Offline-first</a></li><li><a href="from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="from-uniffi.html">From UniFFI</a></li><li><a href="../sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../cli.html">The CLI</a></li><li><a href="../architecture.html">Architecture</a></li><li><a href="../errors.html">Error codes</a></li><li><a href="../../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../api-swift.html">Swift</a></li><li><a href="../api-kotlin.html">Kotlin</a></li><li><a href="../api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../concepts.html">Core concepts</a></li><li><a href="../queries.html">Queries &amp; mutations</a></li><li><a href="../ports.html">Ports &amp; adapters</a></li><li><a href="../web.html">Workers &amp; crash recovery</a></li><li><a href="../updates.html">Shipping an update</a></li><li><a href="../several-cores.html">One core or several</a></li><li><a href="../testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="index.html">All recipes</a></li><li><a href="auth.html">Auth</a></li><li><a href="pagination.html">Pagination</a></li><li><a href="forms.html" aria-current="page">Forms</a></li><li><a href="upload.html">File upload</a></li><li><a href="realtime.html">Real-time</a></li><li><a href="offline.html">Offline-first</a></li><li><a href="from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="from-uniffi.html">From UniFFI</a></li><li><a href="../sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../cli.html">The CLI</a></li><li><a href="../architecture.html">Architecture</a></li><li><a href="../errors.html">Error codes</a></li><li><a href="../../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../api-swift.html">Swift</a></li><li><a href="../api-kotlin.html">Kotlin</a></li><li><a href="../api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Cookbook</p>
+    <h1>Forms and validation</h1>
+    <p class="lede">Validation rules written three times drift. Written once in the core, a form is a few signals and one command, and every platform draws the same errors.</p>
+<h2 id="the-recipe">The recipe<a class="anchor" href="#the-recipe" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>A signal per field.</strong> Each text field binds to a setter (<code>set_email</code>); the core holds the value, so a rotation or a restore loses nothing.</li><li><strong>Errors are derived.</strong> <code>errors</code> is a <code>Computed</code> of the fields: recomputed when one changes, never by the UI, and sent to the platforms only when it changed. It shows the problems of the fields the user has left, so an empty form is not an angry form.</li><li><strong>The rules are plain functions.</strong> <code>problems</code> takes values and returns problems: testable without a runtime, and the one place a rule is written.</li><li><strong>The command refuses typed.</strong> <code>submit</code> on an invalid form returns <code>Invalid</code> before any request, shows every problem from then on, and the server's "taken" is a case (<code>EmailTaken</code>), not a message to parse.</li></ul>
+<details class="reveal-code"><summary>Show the Rust</summary>
+<!-- snippet:examples/cookbook/core/src/forms.rs#forms-errors rust -->
+<div class="code"><div class="code-bar"><span>core/src/forms.rs</span></div><pre><code data-lang="rust">/// Every problem of the form as it stands, in field order. A pure function: the one place the
+/// rules are written, easy to test without a runtime.
+fn problems(email: &amp;str, password: &amp;str, terms: bool) -&gt; Vec&lt;FieldError&gt; {
+    let mut out = Vec::new();
+    let mut add = |field, message: &amp;str| {
+        out.push(FieldError {
+            field,
+            message: message.to_owned(),
+        })
+    };
+    let email = email.trim();
+    match email.split_once('@') {
+        Some((name, host)) if !name.is_empty() &amp;&amp; host.contains('.') &amp;&amp; !host.ends_with('.') =&gt; {}
+        _ =&gt; add(Field::Email, &quot;Enter an email address like name@example.com&quot;),
+    }
+    if password.chars().count() &lt; 8 || !password.chars().any(|c| c.is_ascii_digit()) {
+        add(Field::Password, &quot;Use at least 8 characters, with a number&quot;);
+    }
+    if !terms {
+        add(Field::Terms, &quot;Accept the terms to continue&quot;);
+    }
+    out
+}</code></pre></div>
+<!-- /snippet -->
+<!-- snippet:examples/cookbook/core/src/forms.rs#forms-store rust -->
+<div class="code"><div class="code-bar"><span>core/src/forms.rs</span></div><pre><code data-lang="rust">/// The sign-up form's store.
+#[undra::store(restore = &quot;Self::assemble&quot;)]
+pub struct SignUp {
+    ctx: WeakCtx,
+    email: Signal&lt;String&gt;,
+    password: Signal&lt;String&gt;,
+    terms: Signal&lt;bool&gt;,
+    /// The fields the user has left, whose problems are shown.
+    touched: Signal&lt;Vec&lt;Field&gt;&gt;,
+    submitting: Signal&lt;bool&gt;,
+    /// The problems of the touched fields.
+    errors: Computed&lt;Vec&lt;FieldError&gt;&gt;,
+    /// Whether the form can be submitted.
+    valid: Computed&lt;bool&gt;,
+}</code></pre></div>
+<!-- /snippet -->
+<!-- snippet:examples/cookbook/core/src/forms.rs#forms-submit rust -->
+<div class="code"><div class="code-bar"><span>core/src/forms.rs</span></div><pre><code data-lang="rust">/// Creates the account and returns its id. An invalid form is refused with
+/// `Invalid` (and every problem is shown from then on); nothing is sent.
+pub async fn submit(&amp;self) -&gt; Result&lt;u32, SubmitError&gt; {
+    if self.submitting.get() {
+        return Err(SubmitError::Busy);
+    }
+    let found = problems(&amp;self.email.get(), &amp;self.password.get(), self.terms.get());
+    if !found.is_empty() {
+        self.touched
+            .set(vec![Field::Email, Field::Password, Field::Terms]);
+        return Err(SubmitError::Invalid {
+            count: u32::try_from(found.len()).unwrap_or(u32::MAX),
+        });
+    }
+    let ctx = self.ctx.upgrade().map_err(|_| NetError::Closed)?;
+    self.submitting.set(true);
+    let result = self.send(&amp;ctx).await;
+    self.submitting.set(false);
+    result
+}</code></pre></div>
+<!-- /snippet -->
+</details>
+<h2 id="on-the-platform">On the platform<a class="anchor" href="#on-the-platform" aria-label="Link to this section">#</a></h2>
+<p>A field is a binding to a setter; the errors and the button state are signals.</p>
+<details class="reveal-code"><summary>Show the Swift, Kotlin and TypeScript</summary>
+<div data-tabs data-label="Platform">
+<div class="tab-panel" data-label="Swift">
+<!-- snippet:examples/cookbook/snippets/swiftui/Sources/Snippets/Snippets.swift#forms-swift swift -->
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">struct SignUpView: View {
+    let form: SignUp
+
+    var body: some View {
+        Form {
+            TextField(&quot;Email&quot;, text: Binding(get: { form.email }, set: { form.setEmail(email: $0) }))
+                .onSubmit { form.blur(.email) }
+            ForEach(form.errors, id: \.message) { error in
+                Text(error.message).foregroundStyle(.red)
+            }
+            Button(&quot;Create account&quot;) {
+                Task {
+                    do { _ = try await form.submit() }
+                    catch SubmitError.emailTaken { /* point at the email field */ }
+                    catch { /* Invalid: the errors above already say why */ }
+                }
+            }
+            .disabled(!form.valid)
+        }
+    }
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+<div class="tab-panel" data-label="Kotlin">
+<!-- snippet:examples/cookbook/snippets/kotlin/Snippets.kt#forms-kotlin kotlin -->
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">class SignUpScreen(private val form: SignUp) {
+    val errors: StateFlow&lt;List&lt;FieldError&gt;&gt; = form.errors
+    val canSubmit: StateFlow&lt;Boolean&gt; = form.valid
+
+    fun onEmail(text: String) = form.setEmail(text)
+    fun onEmailLeft() = form.blur(Field.EMAIL)
+
+    suspend fun create(): String? =
+        try {
+            form.submit()
+            null
+        } catch (e: SubmitError.EmailTaken) {
+            &quot;That email is already registered&quot;
+        } catch (e: SubmitError.Invalid) {
+            null // `errors` already says why
+        }
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+<div class="tab-panel" data-label="TypeScript">
+<!-- snippet:examples/cookbook/snippets/ts/snippets.tsx#forms-ts tsx -->
+<div class="code"><div class="code-bar"><span><span class="lang">tsx</span></span></div><pre><code data-lang="tsx">export function SignUpView({ form }: { form: SignUp }) {
+  const errors = useSignal(form.errors);
+  const valid = useSignal(form.valid);
+  return (
+    &lt;form
+      onSubmit={async (e) =&gt; {
+        e.preventDefault();
+        try {
+          await form.submit();
+        } catch (error) {
+          if (error instanceof SubmitError.EmailTaken) alert(&quot;That email is already registered&quot;);
+        }
+      }}
+    &gt;
+      &lt;input type=&quot;email&quot; onChange={(e) =&gt; void form.setEmail(e.target.value)} onBlur={() =&gt; void form.blur(&quot;email&quot;)} /&gt;
+      {errors.map((error) =&gt; &lt;p key={error.message}&gt;{error.message}&lt;/p&gt;)}
+      &lt;button disabled={!valid}&gt;Create account&lt;/button&gt;
+    &lt;/form&gt;
+  );
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+</div>
+</details>
+<h2 id="what-the-tests-prove">What the tests prove<a class="anchor" href="#what-the-tests-prove" aria-label="Link to this section">#</a></h2>
+<ul><li>Nothing is shown until a field is left; the error goes as soon as the field is right.</li><li>An invalid submit makes no request and shows all three problems; a second submit while one runs is refused.</li><li>A valid submit sends the trimmed email; a <code>409</code> is <code>EmailTaken</code>, a <code>500</code> is a network case, and the form can be submitted again.</li></ul>
+<h2 id="limits">Limits<a class="anchor" href="#limits" aria-label="Link to this section">#</a></h2>
+<ul><li>Messages are plain English strings from the core. For several languages return a code (an enum) and let each platform localise it, or ask a synchronous port the way the playground's <code>Locale</code> does.</li><li>The server must still validate: this is the client's half, written once instead of three times.</li></ul>
+<p>Source: <a href="https://github.com/shreypdev/undra/blob/main/examples/cookbook/core/src/forms.rs" rel="noopener"><code class="cw">examples/cookbook/core/src/forms.rs</code></a>.</p>
+  
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/cookbook/forms.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="pagination.html"><span>Previous</span><b>Pagination</b></a>
+    <a class="next" href="upload.html"><span>Next</span><b>File upload</b></a>
+  </nav>
+  </main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#the-recipe">The recipe</a></li><li><a href="#on-the-platform">On the platform</a></li><li><a href="#what-the-tests-prove">What the tests prove</a></li><li><a href="#limits">Limits</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../../docs/cli.html">The CLI</a></li>
+          <li><a href="../../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../../blog/">Blog</a></li>
+          <li><a href="../../roadmap/">Roadmap</a></li>
+          <li><a href="../../playground/">Playground</a></li>
+          <li><a href="../../feed.xml">RSS feed</a></li>
+          <li><a href="../../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../../assets/site.js" defer></script>
+</body>
+</html>

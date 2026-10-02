@@ -18,6 +18,8 @@ kotlin {
     explicitApi()
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_11)
+        // The transports are the runtime's own implementations of the embedding API.
+        freeCompilerArgs.add("-opt-in=dev.undra.runtime.UndraEmbeddingApi")
     }
 }
 

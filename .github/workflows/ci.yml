@@ -42,6 +42,26 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # The cookbook (examples/cookbook) and Fieldbook (examples/fieldbook): their bindings are what the
+      # core generates, the TypeScript lines the cookbook pages show compile, and Fieldbook's web app runs
+      # its generated bindings against the real wasm core (npm test) and bundles (npm run build).
+      - name: Cookbook and Fieldbook bindings are current (undra bindgen --check)
+        run: |
+          cargo build -p undra-cli
+          target/debug/undra bindgen -C examples/cookbook --check --docs
+          target/debug/undra bindgen -C examples/fieldbook --check --docs
+      - name: The real-time recipe and Fieldbook's presence over the opt-in ports (ADR-047)
+        run: |
+          cargo test -p cookbook --features realtime
+          cargo test -p fieldbook-core --features presence
+      - name: Cookbook TypeScript lines compile (tsc --strict)
+        run: bash examples/cookbook/snippets/check.sh ts
+      - name: Fieldbook web (bindings over the real wasm core, then the bundle)
+        working-directory: examples/fieldbook/web
+        run: |
+          npm ci --no-audit --no-fund
+          PATH="$GITHUB_WORKSPACE/target/debug:$PATH" npm test
+          PATH="$GITHUB_WORKSPACE/target/debug:$PATH" npm run build
       # `cargo test --workspace` above skips the heavy halves of these (they run real builds); here they
       # must run. The web app's build through the Vite plugin needs the npm registry; `undra upgrade`
       # end to end builds the core from a local clone. Gradle runs in the android job, Xcode in macos.
@@ -61,7 +81,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: wasm32 build (core crates)
         run: |
-          for p in undra-meta undra-wire undra-signals undra-runtime undra-ports undra-query undra-ffi undra playground-core; do
+          for p in undra-meta undra-wire undra-signals undra-runtime undra-ports undra-query undra-testkit undra-ffi undra playground-core cookbook fieldbook-core; do
             cargo build -p $p --target wasm32-unknown-unknown
           done
 
@@ -78,6 +98,14 @@ jobs:
         run: |
           npm ci
           npm test
+      # The testing kit (docs/TESTING.md): its tests, and its build config, which compiles against the runtime's emitted declarations.
+      - name: Testing kit (@undra/testkit)
+        run: |
+          (cd runtimes/ts/@undra/runtime && npm run build)
+          cd runtimes/ts/@undra/testkit
+          npm ci
+          npm test
+          npm run typecheck
       # The devtools page of `undra dev` (ADR-054): its tests, and the committed assets must be what its
       # sources build to (the CLI embeds them, so `cargo build` needs no Node).
       - name: Devtools page (typecheck, tests, committed assets equal a rebuild, size budget)
@@ -168,6 +196,21 @@ jobs:
           cargo check -p undra-ffi --target aarch64-apple-ios-sim
       - name: Xcode builds the core in its Run Script phase (undra init's project; Debug, Release, Debug)
         run: UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test build_systems -- xcode --nocapture
+      - name: Cookbook Swift lines compile (Swift 6, over the generated bindings)
+        run: bash examples/cookbook/snippets/check.sh swift
+      - name: Fieldbook's iOS app builds (the Run Script phase builds the core)
+        run: |
+          rustup target add aarch64-apple-ios-sim
+          cargo build -p undra-cli
+          PATH="$GITHUB_WORKSPACE/target/debug:$PATH" xcodebuild -project examples/fieldbook/ios/Fieldbook.xcodeproj \
+            -scheme Fieldbook -destination 'generic/platform=iOS Simulator' build
+      # The playground's SwiftUI previews (#Preview over UndraTestKit) are compiled with the app: a Debug build of it.
+      - name: The playground's iOS app builds, SwiftUI previews and the testing kit included
+        run: |
+          cargo build -p undra-cli
+          target/debug/undra build -C examples/playground --platform ios
+          xcodebuild -quiet -project examples/playground/ios/PlaygroundApp.xcodeproj -scheme PlaygroundApp \
+            -configuration Debug -destination 'generic/platform=iOS Simulator' build
 
   android:
     name: Android cross-build
@@ -196,6 +239,16 @@ jobs:
           "$sdkmanager" "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0" > /dev/null
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
           UNDRA_TEST_BUILD_SYSTEMS=1 cargo test -p undra-cli --test build_systems -- gradle --nocapture
+      - name: Fieldbook's Android app assembles (Gradle's undraBuild task builds the core)
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          cargo build -p undra-cli
+          cd examples/fieldbook/android
+          PATH="$GITHUB_WORKSPACE/target/debug:$PATH" ./gradlew :app:assembleDebug --console=plain
+      # The playground's Compose previews (@Preview over dev.undra:testkit, a debug dependency) are compiled with the app.
+      - name: The playground's Android app builds, Compose previews and the testing kit included
+        working-directory: examples/playground/android
+        run: ./gradlew --no-daemon :app:assembleDebug
 
   ffi-miri:
     # macOS, not Linux: Miri's strict c-variadic check currently flags parking_lot_core's
@@ -276,6 +329,10 @@ jobs:
           # it from the kotlinc location the way test-local.sh does).
           UNDRA_KOTLIN_STDLIB: /home/runner/kotlin/kotlinc/lib/kotlin-stdlib.jar
         run: bash contract-tests/run-all.sh ts kotlin
+      - name: Cookbook Kotlin lines compile (kotlinc -Werror, over the generated bindings)
+        env:
+          UNDRA_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
+        run: bash examples/cookbook/snippets/check.sh kotlin
 
   contracts-swift:
     name: Contract scenarios (Swift)
@@ -286,6 +343,30 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run the Swift scenario runner
         run: bash contract-tests/run-all.sh swift
+
+  playground-web:
+    # The playground's web app and its stories page (src/stories, rendered by stories.html with Vite alone; the modules are Component Story Format
+    # over @undra/testkit): type-checked and built against the wasm core `undra build` makes.
+    name: Playground web (app and stories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The undra CLI, then the playground core for the web
+        run: |
+          cargo build -p undra-cli
+          target/debug/undra build -C examples/playground --platform web
+      - name: Type-check and build the app and the stories page
+        working-directory: examples/playground/web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
 
   react-native:
     # The React Native runtime without a device (docs/REACT_NATIVE.md, "What is tested where"): the C++ host

@@ -15,6 +15,7 @@ export default defineConfig({
       "@undra/runtime/db-worker": at("../../runtimes/ts/@undra/runtime/src/db-worker.ts"),
       "@undra/runtime/db": at("../../runtimes/ts/@undra/runtime/src/db.ts"),
       "@undra/runtime": at("../../runtimes/ts/@undra/runtime/src/index.ts"),
+      "@undra/testkit": at("../../runtimes/ts/@undra/testkit/src/index.ts"),
       "@playground/core": at("../../examples/playground/generated/ts/src/index.ts"),
       // S26: the playground core under two more namespaces (ADR-044), each with its own bindings.
       "@two-cores/a": at("../../examples/two-cores/a/generated/ts/src/index.ts"),

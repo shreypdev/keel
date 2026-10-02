@@ -15,7 +15,7 @@
 //! child, never a file.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -396,6 +396,54 @@ pub struct Running {
     stdin: Option<ChildStdin>,
 }
 
+/// Where and how a run records its session (`undra dev --record`).
+#[derive(Clone, Copy, Debug)]
+pub struct RecordTo<'a> {
+    /// The first run's file; later runs write `NAME-<id>.EXT` ([`record_path`]).
+    pub base: &'a Path,
+    /// Keep `SecureStore` values in the file (`--record-secrets`). Off by default: they are left out.
+    pub secrets: bool,
+}
+
+/// Where run `id` writes its recording: `base` for the first run, `NAME-<id>.EXT` for the cores
+/// that replace it (a recording belongs to one core, and a reload starts a new one).
+#[must_use]
+pub fn record_path(base: &Path, id: u64) -> PathBuf {
+    if id <= 1 {
+        return base.to_path_buf();
+    }
+    let stem = base
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = match base.extension() {
+        Some(ext) => format!("{stem}-{id}.{}", ext.to_string_lossy()),
+        None => format!("{stem}-{id}"),
+    };
+    base.with_file_name(name)
+}
+
+/// What a run is asked to do besides serve the core: record the session, serve the devtools page.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RunOptions<'a> {
+    /// `undra dev --record`.
+    pub record: Option<RecordTo<'a>>,
+    /// This run's devtools token, when the page is served (ADR-054).
+    pub devtools: Option<&'a str>,
+}
+
+/// The runner arguments that make run `id` record: `--record FILE`, and `--record-secrets` when the file keeps `SecureStore` values.
+fn record_args(record: RecordTo<'_>, id: u64) -> Vec<std::ffi::OsString> {
+    let mut args = vec![
+        "--record".into(),
+        record_path(record.base, id).into_os_string(),
+    ];
+    if record.secrets {
+        args.push("--record-secrets".into());
+    }
+    args
+}
+
 /// Starts the runner on `addr` and forwards what it prints as [`RunnerEvent`]s. A `standby` runner
 /// builds its core and waits for `listen` (see the module documentation). With `devtools` (this
 /// run's token) it also serves the devtools page (ADR-054).
@@ -409,7 +457,7 @@ pub fn spawn(
     log_level: u8,
     id: u64,
     standby: bool,
-    devtools: Option<&str>,
+    options: RunOptions<'_>,
     events: Sender<RunnerEvent>,
 ) -> Result<Running> {
     let mut command = Command::new(exe);
@@ -417,10 +465,13 @@ pub fn spawn(
         .arg(addr)
         .arg("--log-level")
         .arg(log_level.to_string());
+    if let Some(record) = options.record {
+        command.args(record_args(record, id));
+    }
     if standby {
         command.arg("--standby");
     }
-    if let Some(token) = devtools {
+    if let Some(token) = options.devtools {
         // The token travels in the environment: arguments are listed by `ps` for every user.
         command.arg("--devtools").env("UNDRA_DEVTOOLS_TOKEN", token);
     }
@@ -741,8 +792,16 @@ mod tests {
         std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
-        let mut running =
-            spawn(&script, "127.0.0.1:0", 1, 9, false, None, tx).expect("the fake runner starts");
+        let mut running = spawn(
+            &script,
+            "127.0.0.1:0",
+            1,
+            9,
+            false,
+            RunOptions::default(),
+            tx,
+        )
+        .expect("the fake runner starts");
         let wait = |rx: &std::sync::mpsc::Receiver<RunnerEvent>| {
             rx.recv_timeout(Duration::from_secs(60))
                 .expect("an answer in time")
@@ -800,5 +859,16 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn a_recording_run_gets_its_own_file_and_secrets_only_when_asked() {
+        let base = Path::new("/tmp/session.json");
+        let args = |secrets, id| record_args(RecordTo { base, secrets }, id);
+        assert_eq!(args(false, 1), ["--record", "/tmp/session.json"]);
+        assert_eq!(
+            args(true, 2),
+            ["--record", "/tmp/session-2.json", "--record-secrets"]
+        );
     }
 }

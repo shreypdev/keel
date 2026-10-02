@@ -1,0 +1,26 @@
+{
+  "format": "undra.recording",
+  "version": 1,
+  "schema_hash": "0x00000000deadbeef",
+  "source": "test",
+  "platform": "ios",
+  "events": [
+    {"t":0,"kind":"call","target":"constructor","type":7,"method":8,"call":1,"args":""},
+    {"t":3,"kind":"reply","call":1,"status":"ok","body":"0100000001000000"},
+    {"t":6,"kind":"call","target":"method","handle":"0x0000000100000001","method":9,"call":2,"args":"010203"},
+    {"t":9,"kind":"call","target":"function","method":10,"call":3,"args":""},
+    {"t":12,"kind":"call","target":"page","handle":"0x0000000200000003","offset":0,"limit":50,"call":4,"args":""},
+    {"t":15,"kind":"observe","handle":"0x0000000100000001","signal":4294967295,"on":true},
+    {"t":18,"kind":"change_set","txn":5,"entries":[{"handle":"0x0000000100000001","signal":0,"op":"full","value":"ab"},{"handle":"0x0000000100000001","signal":1,"op":"patch","value":""},{"handle":"0x0000000200000003","signal":2,"op":"lazy_invalidated","value":""}]},
+    {"t":21,"kind":"stream_item","call":3,"flag":"item","body":"09"},
+    {"t":24,"kind":"stream_item","call":3,"flag":"end","body":""},
+    {"t":27,"kind":"port_call","port":515815688,"method":1796529958,"call":1,"args":"0405","name":"Http.request"},
+    {"t":30,"kind":"port_reply","call":1,"status":"unavailable","body":""},
+    {"t":33,"kind":"port_call","port":99,"method":100,"call":2,"args":""},
+    {"t":36,"kind":"event","port":535820031,"method":3035799568,"payload":"010000","name":"Connectivity.changed"},
+    {"t":39,"kind":"timer_fired","timer":6},
+    {"t":42,"kind":"release","handle":"0x0000000100000001"},
+    {"t":45,"kind":"cancel","call":2},
+    {"t":48,"kind":"reply","call":2,"status":"cancelled","body":""}
+  ]
+}

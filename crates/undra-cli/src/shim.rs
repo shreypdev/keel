@@ -231,6 +231,7 @@ pub fn write_runner(target_dir: &Path, project_root: &Path, core: &CoreInfo) -> 
             "UNDRA_TRANSPORT",
             core.undra.dependency("undra-transport", &[]),
         )
+        .with("UNDRA_TESTKIT", core.undra.dependency("undra-testkit", &[]))
         .with("PORTS_DEP", ports_dep)
         .with(
             "STATE_LIMIT_BYTES",
@@ -473,7 +474,8 @@ mod tests {
             std::fs::read_to_string(runner_dir(&dir, Path::new("/nonexistent")).join("Cargo.toml"))
                 .unwrap();
         assert!(
-            with.contains("bind_native_ports(&runtime)") && with.contains("NativeClock"),
+            with.contains("bind_native_ports(&runtime, recorder.as_ref())")
+                && with.contains("NativeClock"),
             "{with}"
         );
         assert!(

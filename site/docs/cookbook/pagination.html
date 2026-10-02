@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pagination · Undra cookbook</title>
+<meta name="description" content="A keyed list fed page by page, a view derived from it, the cursor in a signal, and a load-more that is safe to call on every frame.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/cookbook/pagination.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Pagination · Undra cookbook">
+<meta property="og:description" content="A keyed list fed page by page, a view derived from it, the cursor in a signal, and a load-more that is safe to call on every frame.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/cookbook/pagination.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Pagination · Undra cookbook">
+<meta name="twitter:description" content="A keyed list fed page by page, a view derived from it, the cursor in a signal, and a load-more that is safe to call on every frame.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/cookbook/pagination.html#article","headline":"Pagination · Undra cookbook","description":"A keyed list fed page by page, a view derived from it, the cursor in a signal, and a load-more that is safe to call on every frame.","url":"https://shreypdev.github.io/undra/docs/cookbook/pagination.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Pagination","item":"https://shreypdev.github.io/undra/docs/cookbook/pagination.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../../assets/base.css">
+<link rel="stylesheet" href="../../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../../docs/" aria-current="page">Docs</a>
+      <a href="../../blog/">Blog</a>
+      <a href="../../roadmap/">Roadmap</a>
+      <a href="../../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../concepts.html">Core concepts</a></li><li><a href="../queries.html">Queries &amp; mutations</a></li><li><a href="../ports.html">Ports &amp; adapters</a></li><li><a href="../web.html">Workers &amp; crash recovery</a></li><li><a href="../updates.html">Shipping an update</a></li><li><a href="../several-cores.html">One core or several</a></li><li><a href="../testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="index.html">All recipes</a></li><li><a href="auth.html">Auth</a></li><li><a href="pagination.html" aria-current="page">Pagination</a></li><li><a href="forms.html">Forms</a></li><li><a href="upload.html">File upload</a></li><li><a href="realtime.html">Real-time</a></li><li><a href="offline.html">Offline-first</a></li><li><a href="from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="from-uniffi.html">From UniFFI</a></li><li><a href="../sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../cli.html">The CLI</a></li><li><a href="../architecture.html">Architecture</a></li><li><a href="../errors.html">Error codes</a></li><li><a href="../../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../api-swift.html">Swift</a></li><li><a href="../api-kotlin.html">Kotlin</a></li><li><a href="../api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../concepts.html">Core concepts</a></li><li><a href="../queries.html">Queries &amp; mutations</a></li><li><a href="../ports.html">Ports &amp; adapters</a></li><li><a href="../web.html">Workers &amp; crash recovery</a></li><li><a href="../updates.html">Shipping an update</a></li><li><a href="../several-cores.html">One core or several</a></li><li><a href="../testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="index.html">All recipes</a></li><li><a href="auth.html">Auth</a></li><li><a href="pagination.html" aria-current="page">Pagination</a></li><li><a href="forms.html">Forms</a></li><li><a href="upload.html">File upload</a></li><li><a href="realtime.html">Real-time</a></li><li><a href="offline.html">Offline-first</a></li><li><a href="from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="from-uniffi.html">From UniFFI</a></li><li><a href="../sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../cli.html">The CLI</a></li><li><a href="../architecture.html">Architecture</a></li><li><a href="../errors.html">Error codes</a></li><li><a href="../../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../api-swift.html">Swift</a></li><li><a href="../api-kotlin.html">Kotlin</a></li><li><a href="../api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Cookbook</p>
+    <h1>Pagination and infinite lists</h1>
+    <p class="lede">An infinite list is a keyed list that grows. The core owns the pages, the cursor and the filter, so a page crosses as one-row inserts however long the list already is.</p>
+<h2 id="the-recipe">The recipe<a class="anchor" href="#the-recipe" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>One keyed list.</strong> <code>posts</code> is appended with the recorded list operations, so a page of twenty rows is twenty one-row inserts in a single change-set (SPEC 3.8), not the whole list.</li><li><strong>A derived view.</strong> <code>visible</code> is a <code>DerivedList</code> of it, filtered by <code>topic</code>. Typing in a search box sends the rows that entered or left the view.</li><li><strong>The cursor is a signal.</strong> It is the server's opaque next-page token, so it survives a restore (a crash recovery, an <code>undra dev</code> rebuild) and a screen can show "end of list" from <code>exhausted</code>.</li><li><strong><code>load_more</code> is safe to call from a scroll view on every frame.</strong> It does nothing while a page is in flight or after the last page, and a call cancelled mid-flight (the screen went away) does not leave the store stuck loading.</li><li><strong>Refresh starts a generation.</strong> A page still on its way from before the refresh is dropped when it arrives. A row the server repeats between two pages is added once.</li></ul>
+<details class="reveal-code"><summary>Show the Rust</summary>
+<!-- snippet:examples/cookbook/core/src/paging.rs#paging-load rust -->
+<div class="code"><div class="code-bar"><span>core/src/paging.rs</span></div><pre><code data-lang="rust">/// The feed screen's store.
+#[undra::store(restore = &quot;Self::assemble&quot;)]
+pub struct Feed {
+    ctx: WeakCtx,
+    /// Bumped by `refresh`: a page that comes back for an older generation is dropped.
+    generation: Arc&lt;AtomicU64&gt;,
+    #[undra(key = &quot;id&quot;)]
+    posts: Signal&lt;Vec&lt;Post&gt;&gt;,
+    cursor: Signal&lt;Option&lt;String&gt;&gt;,
+    exhausted: Signal&lt;bool&gt;,
+    loading: Signal&lt;bool&gt;,
+    topic: Signal&lt;String&gt;,
+    #[undra(key = &quot;id&quot;)]
+    visible: DerivedList&lt;Post&gt;,
+}
+
+/// Fetches the next page and appends it. Returns how many rows were new. Does nothing (and
+/// returns 0) while a page is in flight or after the last page.
+pub async fn load_more(&amp;self) -&gt; Result&lt;u32, NetError&gt; {
+    if self.loading.get() || self.exhausted.get() {
+        return Ok(0);
+    }
+    let ctx = self.ctx.upgrade().map_err(|_| NetError::Closed)?;
+    let mine = self.generation.load(Ordering::SeqCst);
+    self.loading.set(true);
+    let _loading = Loading {
+        flag: self.loading.clone(),
+        generation: self.generation.clone(),
+        mine,
+    };
+
+    let path = match self.cursor.get() {
+        Some(cursor) =&gt; format!(&quot;/feed?cursor={}&quot;, percent_encode(&amp;cursor)),
+        None =&gt; &quot;/feed&quot;.to_owned(),
+    };
+    let url = net::url(&amp;ctx, &amp;path)?;
+    let page: PageBody = net::json(&amp;net::ok(net::send(&amp;ctx, HttpRequest::get(url)).await?)?)?;
+    if self.generation.load(Ordering::SeqCst) != mine {
+        return Ok(0); // a refresh started while this page was on its way
+    }
+
+    // The server can repeat a row when the list changes between two pages: keep one.
+    let fresh: Vec&lt;Post&gt; = self.posts.with(|have| {
+        page.items
+            .into_iter()
+            .filter(|post| !have.iter().any(|h| h.id == post.id))
+            .collect()
+    });
+    let added = u32::try_from(fresh.len()).unwrap_or(u32::MAX);
+    // One transaction: the rows, the cursor and the flags reach the platforms together.
+    txn(|| {
+        for post in fresh {
+            self.posts.push(post);
+        }
+        self.exhausted.set(page.next.is_none());
+        self.cursor.set(page.next);
+        self.loading.set(false);
+    });
+    Ok(added)
+}</code></pre></div>
+<!-- /snippet -->
+</details>
+<h2 id="on-the-platform">On the platform<a class="anchor" href="#on-the-platform" aria-label="Link to this section">#</a></h2>
+<p>The view is a plain array on the platform. Asking for the next page is a call the list makes when its last row appears.</p>
+<details class="reveal-code"><summary>Show the Swift, Kotlin and TypeScript</summary>
+<div data-tabs data-label="Platform">
+<div class="tab-panel" data-label="Swift">
+<!-- snippet:examples/cookbook/snippets/swiftui/Sources/Snippets/Snippets.swift#paging-swift swift -->
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">struct FeedView: View {
+    let feed: Feed
+
+    var body: some View {
+        List(feed.visible, id: \.id) { post in
+            Text(post.title)
+                .task {
+                    // The core ignores a call while a page is in flight or after the last page.
+                    if post.id == feed.visible.last?.id { _ = try? await feed.loadMore() }
+                }
+        }
+        .searchable(text: Binding(get: { feed.topic }, set: { feed.setTopic(topic: $0) }))
+        .refreshable { _ = try? await feed.refresh() }
+    }
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+<div class="tab-panel" data-label="Kotlin">
+<!-- snippet:examples/cookbook/snippets/kotlin/Snippets.kt#paging-kotlin kotlin -->
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">class FeedScreen(private val feed: Feed) {
+    val rows: StateFlow&lt;List&lt;Post&gt;&gt; = feed.visible
+
+    // Call it when the last row scrolls into view: the core ignores a call while a page is in
+    // flight and after the last page.
+    suspend fun onEndReached() { feed.loadMore() }
+
+    fun onSearch(text: String) = feed.setTopic(text)
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+<div class="tab-panel" data-label="TypeScript">
+<!-- snippet:examples/cookbook/snippets/ts/snippets.tsx#paging-ts tsx -->
+<div class="code"><div class="code-bar"><span><span class="lang">tsx</span></span></div><pre><code data-lang="tsx">export function FeedView({ feed }: { feed: Feed }) {
+  const posts = useSignal(feed.visible);
+  return (
+    &lt;&gt;
+      &lt;input onChange={(e) =&gt; void feed.setTopic(e.target.value)} placeholder=&quot;Search&quot; /&gt;
+      {posts.map((post) =&gt; &lt;p key={post.id}&gt;{post.title}&lt;/p&gt;)}
+      {/* The core ignores a call while a page is in flight and after the last page. */}
+      &lt;button onClick={() =&gt; void feed.loadMore()}&gt;More&lt;/button&gt;
+    &lt;/&gt;
+  );
+}</code></pre></div>
+<!-- /snippet -->
+</div>
+</div>
+</details>
+<h2 id="what-the-tests-prove">What the tests prove<a class="anchor" href="#what-the-tests-prove" aria-label="Link to this section">#</a></h2>
+<ul><li>Pages append until the server says there are no more, and then a scroll view's calls send nothing.</li><li>A failed page keeps the cursor, so the retry continues from the same place.</li><li>A page reaches the platforms as one change-set of inserts, for the list and for the view (decoded from the wire, as a platform sees it).</li><li>The topic filters the view, and pages loaded later join it.</li></ul>
+<h2 id="limits">Limits<a class="anchor" href="#limits" aria-label="Link to this section">#</a></h2>
+<ul><li>There is no paged query type yet (<code>Lazy&lt;T&gt;</code> is rejected in v1): every page you load stays in memory on each platform that observes the list.</li><li>Prepending (a chat's older messages) is a <code>insert</code> at index 0 of the same list; the recipe appends only.</li></ul>
+<p>Source: <a href="https://github.com/shreypdev/undra/blob/main/examples/cookbook/core/src/paging.rs" rel="noopener"><code class="cw">examples/cookbook/core/src/paging.rs</code></a>.</p>
+  
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/cookbook/pagination.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="auth.html"><span>Previous</span><b>Auth</b></a>
+    <a class="next" href="forms.html"><span>Next</span><b>Forms</b></a>
+  </nav>
+  </main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#the-recipe">The recipe</a></li><li><a href="#on-the-platform">On the platform</a></li><li><a href="#what-the-tests-prove">What the tests prove</a></li><li><a href="#limits">Limits</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../../docs/cli.html">The CLI</a></li>
+          <li><a href="../../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../../blog/">Blog</a></li>
+          <li><a href="../../roadmap/">Roadmap</a></li>
+          <li><a href="../../playground/">Playground</a></li>
+          <li><a href="../../feed.xml">RSS feed</a></li>
+          <li><a href="../../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../../assets/site.js" defer></script>
+</body>
+</html>

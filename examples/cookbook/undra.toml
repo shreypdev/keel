@@ -1,0 +1,40 @@
+# undra.toml: makes examples/cookbook an Undra project (`undra --help` for the commands).
+#
+# The cookbook is one core with one module per recipe (core/src/*.rs). Every Rust sample on the
+# docs site's cookbook pages is code from this crate, and every recipe has a test that runs it
+# against the test runtime and the deterministic fakes: `cargo test -p cookbook`. The Swift,
+# Kotlin and TypeScript snippets on those pages are lines of the bindings `undra bindgen`
+# generates from it (generated/, checked in CI with `undra bindgen --check`).
+
+[project]
+name = "cookbook"
+id = "dev.undra.cookbook"
+platforms = ["ios", "android", "web"]
+
+[core]
+path = "core"
+
+[paths]
+generated = "generated"
+build = "build"
+
+[undra]
+version = "0.1"
+path = "../.."
+
+[bindings]
+swift_module = "CookbookCore"
+kotlin_package = "dev.undra.cookbook.core"
+ts_scope = "cookbook"
+ts_package = "core"
+
+[ios]
+deployment_target = "17.0"
+simulator_archs = ["arm64"]
+
+[android]
+abis = ["arm64-v8a", "x86_64"]
+min_sdk = 26
+
+[web]
+opt_level = "z"

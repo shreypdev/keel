@@ -19,6 +19,7 @@ undra-signals = { workspace = true }
 undra-runtime = { workspace = true }
 undra-query = { workspace = true }
 undra-ports = { workspace = true }
+undra-testkit = { workspace = true }
 
 # The opt-in standard ports (ADR-047, ADR-048), off by default: `undra = { features = ["websocket"] }`.
 [features]

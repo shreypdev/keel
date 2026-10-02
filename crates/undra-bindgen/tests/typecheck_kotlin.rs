@@ -75,6 +75,8 @@ fn base_classes(tc: &Toolchain) -> &'static Path {
             .arg("-d")
             .arg(&out)
             .args(["-jvm-target", "11"])
+            // The runtime's own transports implement the embedding API (ADR-055).
+            .arg("-opt-in=dev.undra.runtime.UndraEmbeddingApi")
             .arg(&wire)
             .output()
             .expect("kotlinc.sh runs");

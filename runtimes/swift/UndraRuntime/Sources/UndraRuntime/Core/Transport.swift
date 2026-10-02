@@ -5,7 +5,7 @@
 // continuations, streams, the mirror, ports.
 
 /// What the host answers to a port call (docs/SPEC.md sections 3.6 and 6.3).
-enum PortCallOutcome: Sendable, Equatable {
+package enum PortCallOutcome: Sendable, Equatable {
     /// The host answered inline; `reply` is a complete `Wire.PortReply` payload.
     case sync(reply: [UInt8])
     /// The host will answer later through `UndraTransport.portReply(_:)`.
@@ -20,7 +20,7 @@ enum PortCallOutcome: Sendable, Equatable {
 /// implementation must therefore copy what it needs, hand the work to another thread, and never
 /// call back into the transport synchronously (the one exception is `onPortCall`, which returns
 /// the answer for a sync port and has no other way to give it).
-protocol UndraInbound: AnyObject, Sendable {
+package protocol UndraInbound: AnyObject, Sendable {
     /// A `Wire.Reply` payload for call `callId`.
     func onReply(callId: UInt32, payload: [UInt8])
     /// A `Wire.ChangeSet` payload.
@@ -47,39 +47,44 @@ protocol UndraInbound: AnyObject, Sendable {
 }
 
 extension UndraInbound {
-    func onReconnecting(attempt: Int, error: any Error) {}
+    package func onReconnecting(attempt: Int, error: any Error) {}
 
-    func onReconnected() {}
+    package func onReconnected() {}
 
-    func holdsObjects() -> Bool {
+    package func holdsObjects() -> Bool {
         return false
     }
 }
 
 /// What a transport learns while starting.
-struct TransportInfo: Sendable, Equatable {
+package struct TransportInfo: Sendable, Equatable {
     /// The schema hash of the core.
-    var schemaHash: UInt64
+    package var schemaHash: UInt64
+
+    /// Reports a core with this schema hash.
+    package init(schemaHash: UInt64) {
+        self.schemaHash = schemaHash
+    }
 }
 
 /// What a transport needs to start.
-struct TransportStartOptions: Sendable, Equatable {
+package struct TransportStartOptions: Sendable, Equatable {
     /// The host platform, sent to the core (`"ios"`, `"macos"`).
-    var platform: String
+    package var platform: String
     /// Records below this level are not forwarded by the core (Log port numbering).
-    var logLevel: UInt8
+    package var logLevel: UInt8
     /// Seconds to wait for a remote handshake.
-    var connectTimeout: Double
+    package var connectTimeout: Double
     /// The schema hash the bindings were generated for; a remote transport announces it in its
     /// `Hello`.
-    var expectedSchemaHash: UInt64
+    package var expectedSchemaHash: UInt64
 }
 
 /// Moves encoded payloads between `UndraCore` and a core.
 ///
 /// All methods are thread-safe. None of them may be called from inside an `UndraInbound` callback
 /// (the core's re-entrancy rule, docs/SPEC.md section 5.1).
-protocol UndraTransport: AnyObject, Sendable {
+package protocol UndraTransport: AnyObject, Sendable {
     /// How this transport reaches the core.
     var mode: UndraMode { get }
 

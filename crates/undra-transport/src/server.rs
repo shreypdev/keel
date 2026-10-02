@@ -22,6 +22,7 @@ use crate::notice::{AttachNotices, Notices};
 use crate::origin::OriginPolicy;
 use crate::resume::{self, KeptSession, Resume, short_token};
 use crate::session::{self, Hooks};
+use crate::tap::FrameTap;
 use crate::ws::close;
 
 const TARGET: &str = "undra::transport";
@@ -83,6 +84,9 @@ pub struct ServerConfig {
     /// What to tell the clients that attach soon after the server starts (a dev notice, ADR-053).
     /// Default: nothing.
     pub attach_notices: AttachNotices,
+    /// Sees every envelope in both directions, read-only: `undra dev --record` writes a recording
+    /// from it (ADR-055). Default: none.
+    pub tap: Option<FrameTap>,
     /// Serve the devtools page at `/devtools` and its socket at `/devtools/ws` (ADR-054). Only the
     /// dev runner `undra dev` generates sets this; with `None` (the default) every `/devtools`
     /// request is a `404`. A token that is not valid disables devtools and the server says so.
@@ -105,6 +109,7 @@ impl Default for ServerConfig {
             origin_policy: OriginPolicy::default(),
             inherited_session: None,
             attach_notices: AttachNotices::default(),
+            tap: None,
             devtools: None,
         }
     }
@@ -386,6 +391,7 @@ impl Server {
             frozen: Arc::new(AtomicBool::new(false)),
             dropped: Arc::new(AtomicUsize::new(0)),
             notices: Arc::new(Notices::new(config.attach_notices.clone())),
+            tap: config.tap.clone(),
         };
         let hub = match &config.devtools {
             Some(devtools) if devtools.token_is_valid() => {

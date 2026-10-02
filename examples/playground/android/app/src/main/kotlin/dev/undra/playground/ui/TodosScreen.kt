@@ -51,10 +51,10 @@ import kotlinx.coroutines.launch
  * its state: it lives as long as this ViewModel (across tab switches and rotation) and closing it releases
  * its handle in the core.
  */
-class TodosViewModel : ViewModel() {
-    /** The to-do list in the core. */
-    val store = Todos.create()
-
+class TodosViewModel(
+    /** The to-do list in the core. A preview passes a store over a recorded core (`ScreenPreviews.kt`). */
+    val store: Todos = Todos.create(),
+) : ViewModel() {
     /** The text field. */
     var draft by mutableStateOf("")
 
