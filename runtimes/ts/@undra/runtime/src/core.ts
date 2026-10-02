@@ -377,25 +377,9 @@ export class UndraCore {
       const gone = (): never => {
         throw new UndraTransportError("closed", UNLOADED_MESSAGE);
       };
-      const core = new UndraCore(
-        {
-          mode: "wasm-main",
-          synchronous: true,
-          start: () => Promise.reject(new UndraTransportError("closed", UNLOADED_MESSAGE)),
-          sendCall: gone,
-          callSync: gone,
-          observe: gone,
-          release: gone,
-          cancel: gone,
-          streamCredit: gone,
-          event: gone,
-          timerFired: gone,
-          portReply: gone,
-          close: () => {},
-        },
-        { expectedSchemaHash: 0n, shared: false },
-        {},
-      );
+      // A core that was closed from the start touches nothing of its transport but `mode`, `synchronous` and `callSync` (which says
+      // closed before it says it is the wrong mode): every other entry point checks `closed` first (ADR-057).
+      const core = new UndraCore({ mode: "wasm-main", synchronous: true, callSync: gone } as unknown as CoreTransport, { expectedSchemaHash: 0n, shared: false }, {});
       core._closed = true;
       core._closedMessage = UNLOADED_MESSAGE;
       UndraCore._unloaded = core;

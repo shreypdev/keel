@@ -225,6 +225,33 @@ describe("Uuid", () => {
     }
   });
 
+  it("says the same thing for every way a UUID can be wrong: it names the input and the shape (ADR-057: one message)", () => {
+    const messages = new Set<string>();
+    for (const bad of ["", "123e4567", `${text}0`, "123e4567-e89b-12d3-a456-42661417400g", "123e4567_e89b-12d3-a456-426614174000"]) {
+      try {
+        encodeUuid(bad);
+        expect.unreachable(bad);
+      } catch (error) {
+        expect(error).toBeInstanceOf(RangeError);
+        expect((error as RangeError).message).toContain(`"${bad}"`);
+        messages.add((error as RangeError).message.replace(`"${bad}"`, "<input>"));
+      }
+    }
+    expect([...messages], "one sentence, whatever was wrong").toHaveLength(1);
+    expect(() => encodeUuid(text, new Uint8Array(20), 5)).toThrow(/room for 16 bytes at offset 5 of 20/);
+  });
+
+  it("decodes every byte value at every position as two lowercase hex digits", () => {
+    for (let position = 0; position < 16; position++) {
+      for (let value = 0; value < 256; value++) {
+        const bytes = new Uint8Array(16);
+        bytes[position] = value;
+        const hex = toHex(bytes);
+        expect(decodeUuid(bytes)).toBe(`${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`);
+      }
+    }
+  });
+
   it("rejects a destination that is too small", () => {
     expect(() => encodeUuid(text, new Uint8Array(15))).toThrow(RangeError);
     expect(() => encodeUuid(text, new Uint8Array(20), 5)).toThrow(RangeError);
