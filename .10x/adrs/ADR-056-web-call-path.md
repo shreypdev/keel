@@ -47,18 +47,30 @@ rounds; Chromium 153 headless, the device bench's own page. Allocation was the c
 | 7 | `92b8b7c` | 64-bit and floating-point values go through one module-level scratch `DataView` | a `DataView` (and an `ArrayBuffer`) per reader or writer that met a `u64`: every change-set entry has a handle |
 | 8 | `9fdaf86` | **`sendCall` and `callSyncParts`** (optional on `Transport`): the core writes the 17-byte header into one array it reuses and the transport copies header and arguments into wasm memory one after the other | the joined payload's allocation and copy (for a 1 KB argument, 1 KB of each) |
 
-Node microbench, `await bench.benchAdd` through the generated binding, ns per call (min), on the loaded host (load 15
-to 60) with the variants run alternately, so each row is comparable with the one beside it and not with another
-column's host:
+Node 24 microbench of the playground's `Bench` through the generated binding (min of 5 to 7 rounds, ns per call; the
+variants are bundled from each commit and run alternately, three rounds, so the columns of one table share a host). The
+first table is from the first alternating run, on a host at load 20 to 60; the second, from the later run at load 15,
+which has its own `before`:
 
-| | before | 1 | 1+2 | 1-3 | 1-4 | 1-7 | 1-8 |
-|---|---|---|---|---|---|---|---|
-| `await bench.benchAdd` (generated) | 1,693 | 1,395 | 997 | 808 | 659 | 507 | 462 |
-| `UndraCore.callSync`, pre-encoded arguments | 854 | 877 | 630 | 524 | 393 | 326 | 291 |
-| `await core.call`, pre-encoded arguments | 1,089 | 1,448 | 973 | 576 | 616 | 435 | 392 |
+| (load 20 to 60) | before | levers 1 | 1 and 2 | 1 to 3 | 1 to 4 |
+|---|---|---|---|---|---|
+| `await bench.benchAdd` (generated) | 1,693 | 1,395 | 997 | 808 | **659** |
+| `UndraCore.callSync`, pre-encoded arguments | 854 | 877 | 630 | 524 | 393 |
+| `await core.call`, pre-encoded arguments | 1,089 | 1,448 | 973 | 576 | 616 |
+| writer alone (two `u32`) | 291 | 54 | 59 | 48 | 45 |
+| `decodeValue(u32)` | 42 | 6 | 6 | 3 | 5 |
 
-(Rows 5 and 6 do not move V8 with native fields, which is why this table has no column for them; the Chromium table
-below does.)
+| (load 15) | before | levers 1 to 7 | 1 to 8 |
+|---|---|---|---|
+| `await bench.benchAdd` (generated) | 1,010 | 507 | **462** |
+| `UndraCore.callSync`, pre-encoded arguments | 561 | 326 | 291 |
+| `await core.call`, pre-encoded arguments | 698 | 435 | 392 |
+| the 1 KB echo through the generated binding | 2,348 | 1,634 | 1,114 |
+| `encodeCall` alone | 244 | 67 | 63 |
+| `benchTouchSignals(100)` (the mirror applies 100 signals) | 24,016 | 19,369 | 18,896 |
+
+(Levers 5 and 6 do not move V8 with native fields, which is why they have no column of their own in Node: the Chromium
+table below is where they show. The `+` columns are cumulative.)
 
 ### 3. Chromium, the device bench
 
