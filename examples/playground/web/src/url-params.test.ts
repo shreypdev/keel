@@ -22,12 +22,13 @@ describe("parseParams", () => {
     });
   });
 
-  test("screen names the five views; list is the 10k list (tab id biglist)", () => {
+  test("screen names the six views; list is the 10k list (tab id biglist)", () => {
     expect(parseParams("?screen=todos").screen).toBe("todos");
     expect(parseParams("?screen=counter").screen).toBe("counter");
     expect(parseParams("?screen=list").screen).toBe("biglist");
     expect(parseParams("?screen=remote").screen).toBe("remote");
     expect(parseParams("?screen=stress").screen).toBe("stress");
+    expect(parseParams("?screen=workshop").screen).toBe("workshop");
   });
 
   test("the tab id biglist is not a screen name; unknown screens are ignored", () => {

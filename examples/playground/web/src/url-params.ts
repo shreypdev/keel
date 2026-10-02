@@ -8,10 +8,10 @@
  * parameter were absent.
  */
 
-/** The ids of the five views; `biglist` is the "10k list" tab. */
-export const TAB_IDS = ["todos", "counter", "biglist", "remote", "stress"] as const;
+/** The ids of the six views; `biglist` is the "10k list" tab. */
+export const TAB_IDS = ["todos", "counter", "biglist", "remote", "stress", "workshop"] as const;
 
-/** One of the five views. */
+/** One of the six views. */
 export type TabId = (typeof TAB_IDS)[number];
 
 /** The names `screen=` accepts, and the view each one shows. `list` is the 10k list, whose tab id is `biglist`. */
@@ -21,6 +21,7 @@ const SCREENS: Readonly<Record<string, TabId>> = {
   list: "biglist",
   remote: "remote",
   stress: "stress",
+  workshop: "workshop",
 };
 
 /** What the stress generator writes: the merged `value` signal or the `no_coalesce` `progress` one. */

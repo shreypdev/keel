@@ -309,3 +309,26 @@ test("a core that cannot be loaded is reported on the page", async ({ page }) =>
   await expect(alert).toContainText("wasm core");
   await expect(page.getByTestId("tab-todos")).toHaveCount(0);
 });
+
+test("the workshop: shelves the core hands out, merged by one call; a job that calls the page back", async ({ page }) => {
+  const problems: string[] = [];
+  page.on("pageerror", (error) => problems.push(error.message));
+  await page.goto("/?screen=workshop");
+  const left = page.getByTestId("shelf-left");
+  const right = page.getByTestId("shelf-right");
+  await expect(left).toHaveText("left: 0");
+  await page.getByTestId("shelf-stock").click();
+  await page.getByTestId("shelf-stock").click();
+  await expect(left).toHaveText("left: 2");
+  await page.getByTestId("shelf-merge").click();
+  await expect(right).toHaveText("right: 2");
+  await expect(left).toHaveText("left: 0");
+  await page.getByTestId("job-run").click();
+  await expect(page.getByTestId("job-question")).toContainText("ran 3 steps; go on?");
+  await expect(page.getByTestId("job-step")).toHaveText("step 3 of 3");
+  await expect(page.getByTestId("job-notes").getByRole("listitem")).toHaveCount(3);
+  await page.getByTestId("job-yes").click();
+  await expect(page.getByTestId("job-outcome")).toHaveText("done: 3 steps");
+  await expect(page.getByTestId("job-count")).toHaveText("1 job run");
+  expect(problems).toEqual([]);
+});

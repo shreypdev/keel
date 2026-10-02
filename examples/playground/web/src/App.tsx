@@ -8,6 +8,7 @@ import { DebugPanel } from "./views/DebugPanel";
 import { RemoteView } from "./views/RemoteView";
 import { StressView } from "./views/StressView";
 import { TodosView } from "./views/TodosView";
+import { WorkshopView } from "./views/WorkshopView";
 
 const TABS = [
   { id: "todos", label: "Todos" },
@@ -15,12 +16,13 @@ const TABS = [
   { id: "biglist", label: "10k list" },
   { id: "remote", label: "Remote" },
   { id: "stress", label: "Stress" },
+  { id: "workshop", label: "Workshop" },
 ] as const satisfies readonly { readonly id: TabId; readonly label: string }[];
 
 /**
- * Five views over one core. Each reads the signals of its store with `useSignal` (`@undra/runtime/react`) and calls its methods.
+ * Six views over one core. Each reads the signals of its store with `useSignal` (`@undra/runtime/react`) and calls its methods.
  *
- * The first view comes from the URL: `?screen=` (`todos`, `counter`, `list`, `remote`, `stress`), else the
+ * The first view comes from the URL: `?screen=` (`todos`, `counter`, `list`, `remote`, `stress`, `workshop`), else the
  * `#fragment` (`#counter`, so a view can be linked to and reloaded). With `?embed=1` the page is
  * only that view, with no tab bar or heading, for the landing page's iframe; `channel` is then the
  * line to that page, which the stress screen posts its numbers through.
@@ -51,6 +53,7 @@ export function App({
       {tab === "biglist" && <BigListView bigList={playground.bigList} autoStream={params.stream} />}
       {tab === "remote" && <RemoteView playground={playground} />}
       {tab === "stress" && <StressView channel={channel} initialRate={params.rate} initialMode={params.mode} autostart={autostart} />}
+      {tab === "workshop" && <WorkshopView />}
     </>
   );
 
