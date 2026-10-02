@@ -12,6 +12,7 @@ import {
   UndraTransportError,
   type UndraUnhandledError,
 } from "../src/index.js";
+import { reclaim } from "../src/identity.js";
 import { RemoteTransport, reconnectDelayMs } from "../src/transport/remote.js";
 import type { Transport, TransportHandler } from "../src/transport/transport.js";
 import {
@@ -32,6 +33,7 @@ import {
   encodeValue,
   encodeStreamItem,
   encodeReply,
+  codecs,
 } from "../src/wire/index.js";
 import { SCHEMA } from "./support/fake-core.js";
 import { FakeServer } from "./support/fake-websocket.js";
@@ -513,6 +515,27 @@ describe("UndraCore over a reconnecting remote transport", () => {
     expect(() => {
       core.event(1, 2, new Uint8Array(0));
     }).toThrowError(UndraTransportError);
+  });
+
+  it("an abort that races the answer sends the cancel, and the success that still arrives gives its object back (O7, over the socket)", async () => {
+    const server = new FakeServer();
+    const { core } = await loaded(server);
+    const controller = new AbortController();
+    const reason = new Error("navigated away");
+    const call = core.call(FREE, 1, new Uint8Array(0), controller.signal, reclaim(core, 0));
+    const assertion = expect(call).rejects.toBe(reason);
+    await settle();
+    const { callId } = decodeCall((server.current.sent(Kind.Call)[0] as { payload: Uint8Array }).payload);
+    controller.abort(reason);
+    await assertion;
+    expect(server.current.sent(Kind.Cancel), "the core is told").toHaveLength(1);
+    expect((await core.stats()).pendingCalls, "the abandoned call waits for its answer").toBe(1);
+    // The server answered before it saw the cancel: the reply carries an object the host now owns.
+    server.reply(callId, encodeValue(codecs.u64, 0x1_0000_0007n));
+    await settle();
+    expect(server.current.sent(Kind.Release).map((e) => decodeRelease(e.payload).handle)).toEqual([0x1_0000_0007n]);
+    expect((await core.stats()).pendingCalls).toBe(0);
+    expect(core.closed).toBe(false);
   });
 
   it("works again after the reconnect: a call is answered", async () => {

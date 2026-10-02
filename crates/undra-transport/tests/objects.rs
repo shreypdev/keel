@@ -7,7 +7,7 @@ mod common;
 use std::time::Duration;
 
 use common::*;
-use undra::wire::payload::{PortCall, ReplyStatus};
+use undra::wire::payload::{CallTarget, PortCall, ReplyStatus};
 use undra::wire::{Kind, Reader};
 use undra_transport::ServerConfig;
 
@@ -238,5 +238,62 @@ fn a_session_that_left_has_no_say_over_the_next_sessions_instances() {
         port_calls_of(&second),
         [(LISTENER_NOTE, 1), (release, 1)],
         "exactly one release: its own"
+    );
+}
+
+/// Review of O5: the origin that gates a proxy's calls follows the slot. A client lends its instance 1 to
+/// an object that outlives it and leaves (its session is kept): the proxy is silent while the slot is
+/// empty; the same session comes back and its proxy speaks to it again, once, and gives its one
+/// reference back when the listeners go. (A *different* client attaching ends the kept session by
+/// design, `a_resumed_session_keeps_its_returned_objects_until_it_releases_or_expires`, so two clients
+/// cannot come back out of order: the one that left first is gone when the second attaches.)
+#[test]
+fn a_resumed_session_hears_its_own_listener_again_after_the_slot_stood_empty() {
+    let _serial = serial();
+    let f = start_with(
+        ServerConfig {
+            resume_grace: Duration::from_secs(600),
+            ..quick()
+        },
+        "dev",
+    );
+    let release = undra::meta::ids::callback_release_id("Listener");
+    let settle = |client: &mut TestClient| {
+        std::thread::sleep(Duration::from_millis(300));
+        while let Received::Frame(_) = client.recv_within(Duration::from_millis(200)) {}
+    };
+
+    let mut first = f.session_client("tok-listener", false);
+    let hub = first.new_hub();
+    let (status, _) = first.method(hub, HUB_LISTEN, &enc(&1_u64));
+    assert_eq!(status, ReplyStatus::Ok);
+    drop(first);
+    f.eventually("the slot is empty", |f| !f.bridge.is_connected());
+    // Nobody is attached: the core's call to the listener goes nowhere, and the proxy stays.
+    f.rt.call_sync(&undra_runtime::testing::call_payload(
+        CallTarget::Method {
+            handle: undra::wire::Handle(hub),
+            method_id: HUB_TELL,
+        },
+        1,
+        &enc(&"to nobody".to_owned()),
+    ));
+
+    let mut back = f.session_client("tok-listener", true);
+    let (status, _) = back.method(hub, HUB_TELL, &enc(&"to the session".to_owned()));
+    assert_eq!(status, ReplyStatus::Ok, "its hub came back with it");
+    settle(&mut back);
+    assert_eq!(
+        port_calls_of(&back),
+        [(LISTENER_NOTE, 1)],
+        "one note, to its own instance 1; the one told while nobody was attached is not replayed"
+    );
+    let (status, _) = back.method(hub, HUB_FORGET, &[]);
+    assert_eq!(status, ReplyStatus::Ok);
+    settle(&mut back);
+    assert_eq!(
+        port_calls_of(&back),
+        [(LISTENER_NOTE, 1), (release, 1)],
+        "exactly one release: its own reference"
     );
 }

@@ -487,6 +487,69 @@ final class ObjectIdentityTests: XCTestCase {
         XCTAssertFalse(core.isObserved(handle(9)))
     }
 
+    /// Review of O2: eight threads adopt and close wrappers of one handle at the same time, and wrappers are shared
+    /// between them (an adopt of a live wrapper returns it, so several threads close the same object). Whatever the
+    /// interleaving, every reference the core issued goes back exactly once (the interned adopt's extra at once, the
+    /// wrapper's own with its close), the identity map holds nothing afterwards, and it is not wedged: the next adopt
+    /// makes a fresh wrapper of the handle.
+    func testEightThreadsAdoptingAndClosingOneHandleLoseNoReference() throws {
+        let transport = FakeTransport()
+        let core = try makeCore(transport, frames: ManualFrameScheduler())
+        let threads = 8
+        let rounds = 500
+        DispatchQueue.concurrentPerform(iterations: threads) { _ in
+            for _ in 0 ..< rounds {
+                let wrapper = core.adopt(handle(21)) { Box(adopting: $0, core: $1) }
+                _ = core.adopt(handle(21)) { Box(adopting: $0, core: $1) }
+                wrapper.close()
+            }
+        }
+        XCTAssertEqual(transport.releases.count, threads * rounds * 2, "one release per reference the core issued")
+        XCTAssertEqual(Set(transport.releases), [handle(21).rawValue])
+        XCTAssertEqual(core.identities.count, 0, "no entry outlives its wrappers")
+        let fresh = core.adopt(handle(21)) { Box(adopting: $0, core: $1) }
+        XCTAssertEqual(core.identities.count, 1)
+        fresh.close()
+        XCTAssertEqual(core.identities.count, 0)
+        XCTAssertEqual(transport.releases.count, threads * rounds * 2 + 1)
+    }
+
+    /// The same race with stores, which also own a routing in the mirror and an observed set: wrappers are made on
+    /// the main actor (as stores are), closed on seven other threads, and afterwards the last one is routed and
+    /// observed and its close clears both.
+    func testAStoreAdoptedOnTheMainThreadWhileSevenThreadsCloseItsOlderWrappersEndsRoutedAndObserved() throws {
+        let transport = FakeTransport()
+        let frames = ManualFrameScheduler()
+        let core = try makeCore(transport, frames: frames)
+        let closers = DispatchQueue(label: "closers", attributes: .concurrent)
+        let closing = DispatchGroup()
+        var kept: [CountStore] = []
+        for round in 0 ..< 2_000 {
+            let wrapper = core.adopt(handle(22)) { CountStore(adopting: $0, core: $1) }
+            core.observe(handle(22), signal: Observe.allSignals, on: true)
+            if round % 7 == 6 {
+                kept.append(wrapper)
+            }
+            for _ in 0 ..< 3 {
+                closers.async(group: closing) {
+                    wrapper.close()
+                }
+            }
+        }
+        XCTAssertEqual(closing.wait(timeout: .now() + 30), .success)
+        kept.removeAll()
+        let last = core.adopt(handle(22)) { CountStore(adopting: $0, core: $1) }
+        core.observe(handle(22), signal: Observe.allSignals, on: true)
+        XCTAssertEqual(core.mirror.registeredCount, 1)
+        transport.deliverChangeSet(makeChangeSet([(handle(22), 0, UInt32(5).undraEncoded())]))
+        frames.fire()
+        XCTAssertEqual(last.count, 5)
+        last.close()
+        XCTAssertEqual(core.mirror.registeredCount, 0)
+        XCTAssertEqual(core.identities.count, 0)
+        XCTAssertFalse(core.isObserved(handle(22)))
+    }
+
     func testStatisticsReadHostReferencesTolerantly() {
         XCTAssertEqual(UndraStats(json: "{\"live_handles\":2,\"host_refs\":3}").hostRefs, 3)
         XCTAssertEqual(UndraStats(json: "{\"live_handles\":2}").hostRefs, 0)
