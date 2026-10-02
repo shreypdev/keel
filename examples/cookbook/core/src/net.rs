@@ -23,7 +23,7 @@ pub struct ServerConfig {
 #[undra::error]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NetError {
-    /// [`configure_server`] was not called.
+    /// `configure_server` was not called.
     #[error("the server is not configured")]
     NotConfigured,
     /// The `Http` port failed: no network, a timeout, a bad URL or a cancelled request.

@@ -21,6 +21,7 @@ use undra::prelude::*;
 
 use crate::net::{self, NetError};
 
+// docs:begin offline-update
 /// A note. Build 1 had `{ id, body }`; build 2 renamed the text and added `pinned`.
 #[undra::api]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -35,7 +36,9 @@ pub struct Note {
     #[serde(default)]
     pub pinned: bool,
 }
+// docs:end
 
+// docs:begin offline-queue
 /// The notes of `list`: `GET /lists/{list}/notes`. Persisted, so the next launch shows them before
 /// the network answers.
 #[undra::query(key = "notes:{list}", stale = "30s", persist, retry = 1)]
@@ -43,7 +46,9 @@ pub async fn notes(ctx: &Ctx, list: String) -> Result<Vec<Note>, NetError> {
     let url = net::url(ctx, &format!("/lists/{list}/notes"))?;
     net::json(&net::ok(net::send(ctx, HttpRequest::get(url)).await?)?)
 }
+// docs:end
 
+// docs:begin offline-queue
 /// Adds a note to `list`: `POST /lists/{list}/notes`. Idempotent: the key stays the same across
 /// retries and offline replays. `pinned` is build 2's; a queued build-1 call has none (`None`).
 #[undra::mutation(key = "notes:{list}", idempotent)]
@@ -61,7 +66,9 @@ pub async fn add_note(
     }
     net::json(&net::ok(net::send(ctx, request).await?)?)
 }
+// docs:end
 
+// docs:begin offline-queue
 /// Adds a note the way a UI wants it: it shows at once, the server is asked, and the placeholder is
 /// taken back if the server refuses. Offline, the call keeps waiting and the placeholder stays
 /// until the queue replays the write.
@@ -84,6 +91,7 @@ pub async fn create_note(
         })
         .await
 }
+// docs:end
 
 /// A write that could not be sent, and why.
 #[undra::api]
@@ -138,6 +146,7 @@ pub fn discard_stuck(ctx: &Ctx, id: Uuid) -> bool {
     ctx.query().discard_dead_letter(id)
 }
 
+// docs:begin offline-update
 /// Build 1's notes (`{ id, body }`) become build 2's. Structural migration cannot do this one, a
 /// rename is a removal and an addition to it, so the hook reads the old name.
 #[undra::migrate(ty = "Note")]
@@ -159,7 +168,9 @@ fn note_from_build_1(old: &DynValue) -> Result<Note, MigrateError> {
         pinned: pinned.unwrap_or(false),
     })
 }
+// docs:end
 
+// docs:begin offline-update
 /// A queued build-1 `add_note(list, body)` becomes build 2's `add_note(list, text, pinned)`:
 /// `pinned` is an `Option` and fills itself with `None`; the renamed parameter is the hook's job.
 #[undra::migrate(mutation = "add_note")]
@@ -168,6 +179,7 @@ fn add_note_from_build_1(old: &DynRecord) -> Result<DynRecord, MigrateError> {
     new.rename("body", "text");
     Ok(new)
 }
+// docs:end
 
 #[cfg(test)]
 mod tests {

@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.AsyncIterable", "ESNext.Disposable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@cookbook/core": ["../../generated/ts/src/index.ts"],
+      "@undra/runtime": ["../../../../runtimes/ts/@undra/runtime/src/index.ts"],
+      "@undra/runtime/react": ["../../../../runtimes/ts/@undra/runtime/src/react.ts"],
+      "react": ["../../../../runtimes/ts/@undra/runtime/node_modules/@types/react"],
+      "react/jsx-runtime": ["../../../../runtimes/ts/@undra/runtime/node_modules/@types/react/jsx-runtime"]
+    },
+    "types": []
+  },
+  "include": ["snippets.tsx"]
+}

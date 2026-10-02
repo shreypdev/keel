@@ -44,13 +44,13 @@ pub enum UploadState {
     },
 }
 
-/// One upload, a row of the `uploads` signal of [`Uploads`].
+/// One upload, a row of the `uploads` signal of the `Uploads` store.
 #[undra::api]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Upload {
     /// Identity of the row; the list is updated by key.
     pub id: u32,
-    /// The file's path in the app's storage, as given to [`Uploads::start`].
+    /// The file's path in the app's storage, as given to `start`.
     pub path: String,
     /// The server's name for this upload, made once and kept for retries.
     pub remote: String,
@@ -83,6 +83,7 @@ pub enum UploadError {
     Closed,
 }
 
+// docs:begin upload-part
 /// Sends part `index` of `total`: `PUT /uploads/{upload}/parts/{index}`. Idempotent, so while the
 /// device is offline it waits in the persisted queue and is replayed when the network returns.
 #[undra::mutation(key = "upload:{upload}", idempotent)]
@@ -100,6 +101,7 @@ pub async fn put_part(
     net::ok(net::send(ctx, request).await?)?;
     Ok(u32::try_from(data.0.len()).unwrap_or(u32::MAX))
 }
+// docs:end
 
 /// Tells the server every part is there: `POST /uploads/{upload}/complete`.
 #[undra::mutation(key = "upload:{upload}", idempotent)]
@@ -190,6 +192,7 @@ impl Uploads {
         result
     }
 
+    // docs:begin upload-loop
     async fn send_parts(&self, ctx: &Ctx, id: u32, data: &[u8]) -> Result<(), UploadError> {
         let row = self.row(id).ok_or(UploadError::Unknown)?;
         let first = row.sent as usize / PART;
@@ -210,6 +213,7 @@ impl Uploads {
             .await?;
         Ok(())
     }
+    // docs:end
 
     fn row(&self, id: u32) -> Option<Upload> {
         self.uploads

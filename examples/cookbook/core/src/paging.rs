@@ -58,6 +58,7 @@ impl Drop for Loading {
     }
 }
 
+// docs:begin paging-load
 /// The feed screen's store.
 #[undra::store(restore = "Self::assemble")]
 pub struct Feed {
@@ -73,6 +74,7 @@ pub struct Feed {
     #[undra(key = "id")]
     visible: DerivedList<Post>,
 }
+// docs:end
 
 #[undra::api(store)]
 impl Feed {
@@ -117,6 +119,7 @@ impl Feed {
         }
     }
 
+    // docs:begin paging-load
     /// Fetches the next page and appends it. Returns how many rows were new. Does nothing (and
     /// returns 0) while a page is in flight or after the last page.
     pub async fn load_more(&self) -> Result<u32, NetError> {
@@ -161,6 +164,7 @@ impl Feed {
         });
         Ok(added)
     }
+    // docs:end
 
     /// Starts again from the first page: the list and the cursor are reset and page one is
     /// fetched. A page still on its way from before is dropped when it arrives.

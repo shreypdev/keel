@@ -81,8 +81,10 @@ const toMarkdown = (html, page) => block(parse(html), page).replace(/\n{3,}/g, "
 // ---- collect pages
 const pages = [];
 const docs = readdirSync(join(SITE, "docs")).filter((f) => f.endsWith(".html")).map((f) => f.slice(0, -5));
+// the pages in subdirectories of docs/ (the cookbook), in the order docs.json lists them
+docs.push(...navData.groups.flatMap((g) => g.pages).filter((p) => !p.external && p.file.includes("/") && !p.file.startsWith("..")).map((p) => p.file.replace(/\.html$/, "")));
 docs.sort((a, b) => ((DOCS_ORDER.indexOf(a) + 1 || 99) - (DOCS_ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
-for (const d of docs) pages.push({ group: "Docs", path: d === "index" ? "docs/" : `docs/${d}.html`, file: `docs/${d}.html` });
+for (const d of docs) pages.push({ group: "Docs", path: d === "index" ? "docs/" : d.endsWith("/index") ? `docs/${d.slice(0, -5)}` : `docs/${d}.html`, file: `docs/${d}.html` });
 for (const f of navData.also ?? []) { // the generated API reference pages, in the order docs.json lists them
   const file = posix.normalize(posix.join("docs", f));
   if (existsSync(join(SITE, file))) pages.push({ group: "Reference", path: file, file });

@@ -201,6 +201,7 @@ impl Follower {
         });
     }
 
+    // docs:begin realtime-loop
     async fn run(self) {
         let backoff = Backoff::default();
         let mut attempt: u32 = 0;
@@ -269,6 +270,7 @@ impl Follower {
             }
         }
     }
+    // docs:end
 
     /// Reads the event stream until it ends or fails, resuming from the last event id.
     async fn fall_back(&self) {

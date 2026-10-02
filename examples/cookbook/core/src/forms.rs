@@ -66,6 +66,7 @@ struct Created {
     id: u32,
 }
 
+// docs:begin forms-errors
 /// Every problem of the form as it stands, in field order. A pure function: the one place the
 /// rules are written, easy to test without a runtime.
 fn problems(email: &str, password: &str, terms: bool) -> Vec<FieldError> {
@@ -89,7 +90,9 @@ fn problems(email: &str, password: &str, terms: bool) -> Vec<FieldError> {
     }
     out
 }
+// docs:end
 
+// docs:begin forms-store
 /// The sign-up form's store.
 #[undra::store(restore = "Self::assemble")]
 pub struct SignUp {
@@ -105,6 +108,7 @@ pub struct SignUp {
     /// Whether the form can be submitted.
     valid: Computed<bool>,
 }
+// docs:end
 
 #[undra::api(store)]
 impl SignUp {
@@ -178,8 +182,9 @@ impl SignUp {
         }
     }
 
+    // docs:begin forms-submit
     /// Creates the account and returns its id. An invalid form is refused with
-    /// [`SubmitError::Invalid`] (and every problem is shown from then on); nothing is sent.
+    /// `Invalid` (and every problem is shown from then on); nothing is sent.
     pub async fn submit(&self) -> Result<u32, SubmitError> {
         if self.submitting.get() {
             return Err(SubmitError::Busy);
@@ -198,6 +203,7 @@ impl SignUp {
         self.submitting.set(false);
         result
     }
+    // docs:end
 
     /// The request of `submit`, so that `submitting` is cleared on every way out of it.
     async fn send(&self, ctx: &Ctx) -> Result<u32, SubmitError> {

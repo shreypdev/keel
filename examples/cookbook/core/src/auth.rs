@@ -26,6 +26,7 @@ const REFRESH: &str = "auth.refresh";
 /// The prefix of the query client's persisted cache entries (`undra.query.cache2.<id>.<hash>`).
 const CACHE_PREFIX: &str = "undra.query.cache2.";
 
+// docs:begin auth-session
 /// Who is signed in.
 #[undra::api]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,6 +39,7 @@ pub enum Session {
         user: String,
     },
 }
+// docs:end
 
 /// Why an auth call failed.
 #[undra::error]
@@ -135,6 +137,7 @@ async fn save_tokens(ctx: &Ctx, tokens: &Tokens) -> Result<(), StorageError> {
     Ok(())
 }
 
+// docs:begin auth-logout
 /// Forgets the user: both tokens, the persisted cache, and the session the UI shows.
 async fn forget(ctx: &Ctx) {
     let store = ctx.secure_store();
@@ -158,7 +161,9 @@ async fn forget(ctx: &Ctx) {
         session.set(Session::SignedOut);
     }
 }
+// docs:end
 
+// docs:begin auth-401
 /// Sends `request` as the signed-in user: with the access token, and with one refresh and one retry
 /// if the server answers `401`. A refresh the server refuses signs the user out and fails with
 /// [`AuthError::SessionExpired`].
@@ -182,7 +187,9 @@ pub async fn authed(ctx: &Ctx, request: HttpRequest) -> Result<HttpResponse, Aut
     forget(ctx).await;
     Err(AuthError::SessionExpired)
 }
+// docs:end
 
+// docs:begin auth-401
 /// Refreshes the tokens, unless somebody already did since `seen`; waits if somebody is doing it.
 async fn refresh(ctx: &Ctx, seen: u64) -> Result<(), AuthError> {
     let st = state(ctx);
@@ -222,6 +229,7 @@ async fn refresh(ctx: &Ctx, seen: u64) -> Result<(), AuthError> {
         code => Err(NetError::Status { code }.into()),
     }
 }
+// docs:end
 
 /// The signed-in user's profile. The key carries the user, so the next person to sign in on this
 /// device never reads this one's cached entry.
@@ -234,7 +242,7 @@ pub struct Profile {
     pub email: String,
 }
 
-/// `GET /me`, as `user`: a persisted query that goes through [`authed`], so it survives an expired
+/// `GET /me`, as `user`: a persisted query that goes through `authed`, so it survives an expired
 /// token without its caller knowing.
 #[undra::query(key = "profile:{user}", stale = "60s", persist, retry = 0)]
 pub async fn profile(ctx: &Ctx, user: String) -> Result<Profile, AuthError> {
@@ -244,6 +252,7 @@ pub async fn profile(ctx: &Ctx, user: String) -> Result<Profile, AuthError> {
     Ok(net::json(&body)?)
 }
 
+// docs:begin auth-session
 /// The login screen's store: the session and whether a call is running.
 #[undra::store(restore = "Self::assemble")]
 pub struct Auth {
@@ -251,10 +260,11 @@ pub struct Auth {
     session: Signal<Session>,
     busy: Signal<bool>,
 }
+// docs:end
 
 #[undra::api(store)]
 impl Auth {
-    /// A store with nobody signed in. Call [`resume`](Auth::resume) at launch.
+    /// A store with nobody signed in. Call `resume` at launch.
     pub fn new(ctx: Ctx) -> Self {
         Self::assemble(ctx, Signal::new(Session::SignedOut), Signal::new(false))
     }
@@ -292,8 +302,9 @@ impl Auth {
         Ok(())
     }
 
+    // docs:begin auth-session
     /// Signs in with an email and a password: the tokens go to the secure store, the session to
-    /// the UI. A wrong password is [`AuthError::BadCredentials`], not a network error.
+    /// the UI. A wrong password is `BadCredentials`, not a network error.
     pub async fn sign_in(&self, email: String, password: String) -> Result<(), AuthError> {
         let ctx = self.ctx.upgrade().map_err(|_| AuthError::Closed)?;
         let _busy = Busy::start(&self.busy);
@@ -308,9 +319,11 @@ impl Auth {
         self.session.set(Session::SignedIn { user: tokens.user });
         Ok(())
     }
+    // docs:end
 
+    // docs:begin auth-logout
     /// Signs out: tells the server (best effort), forgets both tokens and the persisted cache and
-    /// shows the login screen. Refused with [`AuthError::PendingWrites`] while writes wait in the
+    /// shows the login screen. Refused with `PendingWrites` while writes wait in the
     /// offline queue.
     pub async fn sign_out(&self) -> Result<(), AuthError> {
         let ctx = self.ctx.upgrade().map_err(|_| AuthError::Closed)?;
@@ -328,6 +341,7 @@ impl Auth {
         forget(&ctx).await;
         Ok(())
     }
+    // docs:end
 }
 
 #[cfg(test)]
