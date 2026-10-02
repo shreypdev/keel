@@ -6,6 +6,9 @@
 //                      android-adapters/README.md). Included only when an
 //                      Android SDK is found (ANDROID_HOME, ANDROID_SDK_ROOT, or sdk.dir in local.properties of
 //                      this build or of the build that includes it), so a JVM-only checkout builds :runtime.
+//   :undra-compose     The optional Compose helpers (ADR-043: `LazyListScope.items(list)` for a lazily paged list and
+//                      `LazyListState.LoadMoreWhenNearEnd` for an infinite query). The only module that depends on Compose;
+//                      included under the same condition as :android-adapters (see undra-compose/README.md).
 
 pluginManagement {
     repositories {
@@ -42,4 +45,5 @@ fun androidSdk(): File? {
 
 if (androidSdk() != null) {
     include(":android-adapters")
+    include(":undra-compose")
 }
