@@ -400,8 +400,10 @@ fun balances(ctx: UndraCore = UndraPlaygroundB.core): Map<AccountId, Price> {
 }
 
 /**
- * Tells the core where the server is. Call it once at start-up, before anything observes
- * [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
+ * Tells the core where the server is. Call it at start-up, before anything observes
+ * [`remote_todos`], and again whenever the core is a new one that kept its stores (after a dev
+ * reload or a web crash restart): the address lives in the core outside any store, so a snapshot
+ * does not carry it. Calling it again points the core elsewhere (cached data stays until it goes
  * stale).
  * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
  */
