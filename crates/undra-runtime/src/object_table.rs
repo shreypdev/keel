@@ -201,7 +201,12 @@ impl Observed {
         } else {
             if self.all {
                 self.all = false;
-                self.signals = (0..signal_count).collect();
+                // Inserted one by one: `collect` into a set sorts first, which instantiates a stable
+                // sort of `u32` for this one place (ADR-052).
+                self.signals.clear();
+                for id in 0..signal_count {
+                    self.signals.insert(id);
+                }
             }
             self.signals.remove(&signal_id);
         }
@@ -253,6 +258,9 @@ struct Inner {
     by_address: HashMap<usize, u32>,
     /// The sum of every entry's `host_refs`.
     host_refs: u64,
+    /// The dispatcher of `LazyPage` calls, set when the first store with a `Lazy` field enters the
+    /// table: a core without one never links it (ADR-052).
+    lazy_dispatch: Option<undra_meta::DispatchFn>,
 }
 
 /// The source of handle generations: a counter of the highest generation issued so far
@@ -349,6 +357,7 @@ impl ObjectTable {
                 stores: BTreeSet::new(),
                 by_address: HashMap::new(),
                 host_refs: 0,
+                lazy_dispatch: None,
             }),
             owner: AtomicU64::new(0),
             own_generations: None,
@@ -485,11 +494,26 @@ impl ObjectTable {
             // The owner first: a commit that sees the handle must route to the right runtime.
             cell.set_owner(self.owner.load(Ordering::Relaxed));
             cell.set_handle(handle.0);
-            if let Some(hooks) = cell.lazy_hooks() {
-                (hooks.register)(self, &cell, handle.0);
-            }
+            self.lazy_enter(&cell, handle);
         }
         handle
+    }
+
+    /// A store entered the table: its `Lazy` signals get their page servers, if its core serves any.
+    /// One copy for every way a store enters (a constructor, a returned store, a restore).
+    #[inline(never)]
+    fn lazy_enter(&self, cell: &Arc<undra_signals::StoreCell>, handle: Handle) {
+        if let Some(hooks) = cell.lazy_hooks() {
+            (hooks.register)(self, cell, handle.0);
+        }
+    }
+
+    /// A store left the table: its page servers go with it.
+    #[inline(never)]
+    fn lazy_leave(&self, cell: &undra_signals::StoreCell) {
+        if let Some(hooks) = cell.lazy_hooks() {
+            (hooks.unregister)(self, cell);
+        }
     }
 
     /// Registers a page server for each `Lazy` signal of `cell` and tells the cell the handle
@@ -498,10 +522,22 @@ impl ObjectTable {
     /// store. Reached through the cell's [`LazyHooks`](undra_signals::LazyHooks), which only a core
     /// with a `Lazy` field sets.
     pub(crate) fn register_lazy(&self, cell: &undra_signals::StoreCell) {
+        self.serve_page_calls();
         for (signal_id, source) in cell.lazy_sources() {
             let server = self.place_with(crate::lazy::page_server(source), true, true);
             cell.set_lazy_handle(signal_id, server.0);
         }
+    }
+
+    /// Starts answering `LazyPage` calls: the first store with a `Lazy` field, or the first list
+    /// a core inserts itself, does it, so a core with none never links the dispatcher (ADR-052).
+    pub(crate) fn serve_page_calls(&self) {
+        self.inner.write().lazy_dispatch = Some(crate::lazy::lazy_page_dispatch);
+    }
+
+    /// The dispatcher of `LazyPage` calls, once a store with a `Lazy` field has entered the table.
+    pub(crate) fn lazy_dispatch(&self) -> Option<undra_meta::DispatchFn> {
+        self.inner.read().lazy_dispatch
     }
 
     /// Removes the page servers [`register_lazy`](ObjectTable::register_lazy) registered for `cell`.
@@ -634,9 +670,7 @@ impl ObjectTable {
         if let Some(cell) = cell {
             cell.set_owner(self.owner.load(Ordering::Relaxed));
             cell.set_handle(handle.0);
-            if let Some(hooks) = cell.lazy_hooks() {
-                (hooks.register)(self, &cell, handle.0);
-            }
+            self.lazy_enter(&cell, handle);
         }
         Ok(())
     }
@@ -698,9 +732,7 @@ impl ObjectTable {
         // The page servers of a store's `Lazy` signals go with it (ADR-043), outside the table's lock.
         if let Released::Removed(object) = &released {
             if let Some(cell) = object.as_store() {
-                if let Some(hooks) = cell.lazy_hooks() {
-                    (hooks.unregister)(self, cell);
-                }
+                self.lazy_leave(cell);
             }
         }
         Ok(released)

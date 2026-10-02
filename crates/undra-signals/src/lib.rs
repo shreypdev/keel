@@ -98,3 +98,33 @@ pub use sink::{ChangeSink, clear_sink, set_sink, with_sink};
 pub use store::{ALL_SIGNALS, CellSlot, StoreCell};
 pub use txn::{next_txn_id, txn};
 pub use value::{KeyFn, ListLike, SignalValue};
+
+/// Sorts a list of signal ids in place: Shell's sort, a few instructions, instead of the
+/// instantiation of `slice::sort_unstable` for `u32` (about 4 KB of wasm in every core, ADR-052).
+/// A store has a few dozen signals and a commit's list is nearly in order, so this is faster than
+/// a general sort at that size and fine for thousands.
+///
+/// ```
+/// let mut ids = [5, 1, 4, 1, 3];
+/// undra_signals::sort_ids(&mut ids);
+/// assert_eq!(ids, [1, 1, 3, 4, 5]);
+/// ```
+pub fn sort_ids(ids: &mut [u32]) {
+    let n = ids.len();
+    let mut gap = 1;
+    while gap < n / 3 {
+        gap = gap * 3 + 1;
+    }
+    while gap > 0 {
+        for i in gap..n {
+            let value = ids[i];
+            let mut j = i;
+            while j >= gap && ids[j - gap] > value {
+                ids[j] = ids[j - gap];
+                j -= gap;
+            }
+            ids[j] = value;
+        }
+        gap /= 3;
+    }
+}

@@ -982,7 +982,7 @@ impl StoreCell {
                 .collect();
         }
         let mut ids = signal_ids.to_vec();
-        ids.sort_unstable();
+        crate::sort_ids(&mut ids);
         ids.dedup();
         ids.into_iter()
             .filter_map(|id| slots.get(id as usize).map(|slot| (id, Arc::clone(slot))))
@@ -1026,7 +1026,7 @@ impl StoreCell {
         if !unsent.is_empty() {
             ids.extend_from_slice(&unsent);
         }
-        ids.sort_unstable();
+        crate::sort_ids(&mut ids);
         ids.dedup();
 
         // Claim the slots that will be delivered *before* encoding anything (see

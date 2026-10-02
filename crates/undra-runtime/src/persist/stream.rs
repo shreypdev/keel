@@ -55,6 +55,11 @@ impl<'a> Streamer<'a> {
         if depth > MAX_DEPTH {
             return Err(WireError::NestingTooDeep { at: r.position() }.into());
         }
+        // A newtype is its inner value on the wire (ADR-042): wrapping a value in one, or unwrapping
+        // it, copies the bytes through the inner type's conversion.
+        if let Some((old_inner, new_inner)) = self.through_newtype(old_ty, new_ty) {
+            return self.convert(r, w, old_inner, new_inner, depth + 1, hook_here);
+        }
         let refuse = || not_structural(format!("{old_ty} cannot become {new_ty}"));
         match (old_ty, new_ty) {
             (TypeRef::Option(old_inner), TypeRef::Option(new_inner)) => {
@@ -145,20 +150,6 @@ impl<'a> Streamer<'a> {
                     }
                 }
             }
-            // A newtype is its inner value on the wire (ADR-042): wrapping a value in one, or
-            // unwrapping it, copies the bytes through the inner type's conversion.
-            (TypeRef::Named(old_name), new) if !matches!(new, TypeRef::Named(_)) => {
-                match transparent_inner(self.old, old_name) {
-                    Some(inner) => self.convert(r, w, inner, new, depth + 1, hook_here)?,
-                    None => return Err(refuse()),
-                }
-            }
-            (old, TypeRef::Named(new_name)) if !matches!(old, TypeRef::Named(_)) => {
-                match transparent_inner(self.new, new_name) {
-                    Some(inner) => self.convert(r, w, old, inner, depth + 1, hook_here)?,
-                    None => return Err(refuse()),
-                }
-            }
             (a, b) if a == b => {
                 let start = r.position();
                 skip(r, a, self.old, depth)?;
@@ -168,6 +159,25 @@ impl<'a> Streamer<'a> {
             _ => return Err(refuse()),
         }
         Ok(())
+    }
+
+    /// The pair of types to convert instead when exactly one of `old` and `new` is a newtype: the
+    /// inner type stands for it.
+    fn through_newtype<'t>(
+        &'t self,
+        old: &'t TypeRef,
+        new: &'t TypeRef,
+    ) -> Option<(&'t TypeRef, &'t TypeRef)> {
+        match (old, new) {
+            (TypeRef::Named(_), TypeRef::Named(_)) => None,
+            (TypeRef::Named(name), _) => {
+                transparent_inner(self.old, name).map(|inner| (inner, new))
+            }
+            (_, TypeRef::Named(name)) => {
+                transparent_inner(self.new, name).map(|inner| (old, inner))
+            }
+            _ => None,
+        }
     }
 
     /// Whether the named types `old` and `new` are described identically (so their bytes mean the

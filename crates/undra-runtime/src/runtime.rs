@@ -40,7 +40,7 @@ use crate::ext::{Extensions, InitHook, InspectFn, Inspectors};
 use crate::guard::{self, PanicReport, drop_guarded, encode_panic_body};
 use crate::host::{Host, PortCallOutcome};
 use crate::issue::{IssueScope, OriginScope, Origins, WithOrigin};
-use crate::lazy::{LazyList, lazy_page_dispatch, page_server};
+use crate::lazy::{LazyList, page_server};
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
 
 /// The `port_call_id` of a fire-and-forget port call: no answer is expected (SPEC 6, host contract 6).
@@ -1834,8 +1834,14 @@ impl Runtime {
             handle: handle.0,
             args: &args,
         };
-        self.run_dispatcher("lazy list", lazy_page_dispatch, call, handle, false)
-            .unwrap_or_else(|| Dispatched::Bad("internal: unrouted page call".to_owned()))
+        // Set by the first store with a `Lazy` field; without one nothing is served (and the core does
+        // not link the dispatcher, ADR-052).
+        let unserved = || Dispatched::Bad("not a lazy list".to_owned());
+        let Some(dispatch) = self.objects.lazy_dispatch() else {
+            return unserved();
+        };
+        self.run_dispatcher("lazy list", dispatch, call, handle, false)
+            .unwrap_or_else(unserved)
     }
 
     /// Runs one dispatcher under the panic guard and classifies what it answered. A layer
@@ -2338,6 +2344,7 @@ impl Runtime {
     /// constructs). A store's `Lazy<T>` signals are registered by the runtime when the store is
     /// inserted; this is for a core that serves a list of its own.
     pub fn insert_lazy_source(&self, source: Arc<dyn undra_signals::LazySource>) -> Handle {
+        self.objects.serve_page_calls();
         self.objects.insert(page_server(source))
     }
 
@@ -2860,7 +2867,7 @@ impl Runtime {
     /// does not change.
     fn snapshot_description(&self, type_ids: &[u32]) -> Arc<str> {
         let mut key = type_ids.to_vec();
-        key.sort_unstable();
+        undra_signals::sort_ids(&mut key);
         let mut cache = self.description.lock();
         if let Some((cached, text)) = cache.as_ref() {
             if *cached == key {
