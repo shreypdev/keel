@@ -12,6 +12,9 @@ export const OP_IDS = ["sync_call", "record_1kb", "keyed_insert_10k", "changeset
 /** An id of {@link OP_IDS}. */
 export type OpId = (typeof OP_IDS)[number];
 
+/** The rows that have a `[web."id"]` budget in bench/budgets.toml (R9): the operations, the runtime's own call, and the merged frame of the drain experiment. */
+export const WEB_BUDGET_IDS = [...OP_IDS, "sync_call_runtime", "drain_frame"] as const;
+
 /** Extra rows only the web measures: the runtime's own synchronous call, which generated TypeScript does not use. */
 export const WEB_EXTRA_OP_IDS = ["sync_call_runtime"] as const;
 

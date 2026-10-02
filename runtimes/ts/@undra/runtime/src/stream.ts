@@ -38,93 +38,93 @@ const DONE: IteratorResult<Uint8Array, undefined> = { value: undefined, done: tr
 export class StreamCall implements AsyncIterableIterator<Uint8Array> {
   /** The call id of the stream. */
   readonly callId: number;
-  readonly #host: StreamHost;
-  readonly #items: Uint8Array[] = [];
-  readonly #waiters: Waiter[] = [];
-  #state: State = "opening";
-  #error: unknown = undefined;
-  #credit = 0;
+  private readonly _host: StreamHost;
+  private readonly _items: Uint8Array[] = [];
+  private readonly _waiters: Waiter[] = [];
+  private _state: State = "opening";
+  private _error: unknown = undefined;
+  private _credit = 0;
 
   /** @param callId The call id the stream was opened with. @param host The core. */
   constructor(callId: number, host: StreamHost) {
     this.callId = callId;
-    this.#host = host;
+    this._host = host;
   }
 
   /** Items received and not yet consumed. */
   get buffered(): number {
-    return this.#items.length;
+    return this._items.length;
   }
 
   /** The core accepted the stream (`Reply` status 4): grant the initial credit. */
   opened(): void {
-    if (this.#state !== "opening") return;
-    this.#state = "open";
-    this.#credit = STREAM_WINDOW;
-    this.#grant(STREAM_WINDOW);
+    if (this._state !== "opening") return;
+    this._state = "open";
+    this._credit = STREAM_WINDOW;
+    this._grant(STREAM_WINDOW);
   }
 
   /** An item arrived. */
   push(body: Uint8Array): void {
-    if (this.#state !== "open" && this.#state !== "opening") return;
-    const waiter = this.#waiters.shift();
+    if (this._state !== "open" && this._state !== "opening") return;
+    const waiter = this._waiters.shift();
     if (waiter === undefined) {
-      this.#items.push(body);
+      this._items.push(body);
       return;
     }
     waiter.resolve({ value: body, done: false });
-    this.#consumed();
+    this._consumed();
   }
 
   /** The stream ended normally; buffered items are still delivered first. */
   end(): void {
-    if (this.#state !== "open" && this.#state !== "opening") return;
-    this.#state = "ended";
-    this.#settle();
+    if (this._state !== "open" && this._state !== "opening") return;
+    this._state = "ended";
+    this._settle();
   }
 
   /** The stream failed (an error or failure item, a rejected open, a lost channel); buffered items are still delivered first. */
   fail(error: unknown): void {
-    if (this.#state === "failed" || this.#state === "closed" || this.#state === "ended") return;
-    this.#state = "failed";
-    this.#error = error;
-    this.#settle();
+    if (this._state === "failed" || this._state === "closed" || this._state === "ended") return;
+    this._state = "failed";
+    this._error = error;
+    this._settle();
   }
 
   next(): Promise<IteratorResult<Uint8Array, undefined>> {
-    const item = this.#items.shift();
+    const item = this._items.shift();
     if (item !== undefined) {
-      this.#consumed();
+      this._consumed();
       return Promise.resolve({ value: item, done: false });
     }
-    switch (this.#state) {
+    switch (this._state) {
       case "ended":
       case "closed":
-        this.#state = "closed";
+        this._state = "closed";
         return Promise.resolve(DONE);
       case "failed": {
-        this.#state = "closed";
-        const error = this.#error;
-        this.#error = undefined;
+        this._state = "closed";
+        const error = this._error;
+        this._error = undefined;
         return Promise.reject(error);
       }
       default:
         return new Promise((resolve, reject) => {
-          this.#waiters.push({ resolve, reject });
+          this._waiters.push({ resolve, reject });
         });
     }
   }
 
   /** The consumer is done (`break`, `return`, an exception in the loop body): cancel the stream if it is still running. */
   return(): Promise<IteratorResult<Uint8Array, undefined>> {
-    const running = this.#state === "opening" || this.#state === "open";
-    this.#state = "closed";
-    this.#items.length = 0;
-    this.#error = undefined;
-    for (const waiter of this.#waiters.splice(0)) waiter.resolve(DONE);
+    const running = this._state === "opening" || this._state === "open";
+    this._state = "closed";
+    this._items.length = 0;
+    this._error = undefined;
+    for (const waiter of this._waiters.splice(0)) waiter.resolve(DONE);
     if (running) {
       try {
-        this.#host.cancel(this.callId);
+        this._host.cancel(this.callId);
       } catch {
         // The channel is gone; the core has nothing left to cancel.
       }
@@ -137,31 +137,31 @@ export class StreamCall implements AsyncIterableIterator<Uint8Array> {
   }
 
   /** Answers the waiting `next()` calls once the stream is terminal. Nothing to do while items are buffered or nobody waits (the next `next()` sees the outcome). */
-  #settle(): void {
-    if (this.#items.length > 0 || this.#waiters.length === 0) return;
-    const failing = this.#state === "failed";
-    const error = this.#error;
-    this.#state = "closed";
-    this.#error = undefined;
-    this.#waiters.splice(0).forEach((waiter, index) => {
+  private _settle(): void {
+    if (this._items.length > 0 || this._waiters.length === 0) return;
+    const failing = this._state === "failed";
+    const error = this._error;
+    this._state = "closed";
+    this._error = undefined;
+    this._waiters.splice(0).forEach((waiter, index) => {
       if (failing && index === 0) waiter.reject(error);
       else waiter.resolve(DONE);
     });
   }
 
   /** One item was consumed: return credit when the window runs low. */
-  #consumed(): void {
-    if (this.#state !== "open") return;
-    this.#credit--;
-    if (this.#credit >= STREAM_LOW_WATER) return;
-    const grant = STREAM_WINDOW - this.#credit;
-    this.#credit = STREAM_WINDOW;
-    this.#grant(grant);
+  private _consumed(): void {
+    if (this._state !== "open") return;
+    this._credit--;
+    if (this._credit >= STREAM_LOW_WATER) return;
+    const grant = STREAM_WINDOW - this._credit;
+    this._credit = STREAM_WINDOW;
+    this._grant(grant);
   }
 
-  #grant(credit: number): void {
+  private _grant(credit: number): void {
     try {
-      this.#host.sendCredit(this.callId, credit);
+      this._host.sendCredit(this.callId, credit);
     } catch (error) {
       this.fail(error instanceof UndraError ? error : new UndraError("state", "could not grant stream credit", { cause: error }));
     }

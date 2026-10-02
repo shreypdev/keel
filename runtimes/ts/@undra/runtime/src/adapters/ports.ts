@@ -1,10 +1,9 @@
 import { UndraPortError } from "../errors.js";
 import type { PortImpl } from "../port.js";
 import { UndraReader, UndraWriter, codecs, encodeValue } from "../wire/index.js";
-import { readHttpRequest, writeAppState, writeFsError, writeHttpError, writeHttpResponse, writeNetKind, writeStorageError } from "./codecs.js";
+import { readHttpRequest, writeFsError, writeHttpError, writeHttpResponse, writeStorageError } from "./codecs.js";
 import { PortIds } from "./ids.js";
 import {
-  type AppState,
   type Adapters,
   type ClockAdapter,
   type FsAdapter,
@@ -13,7 +12,6 @@ import {
   HttpError,
   type KvAdapter,
   type LogAdapter,
-  type NetKind,
   type RngAdapter,
   StorageError,
   type TimerAdapter,
@@ -241,51 +239,4 @@ export function standardPorts(adapters: Partial<Adapters>): Map<number, PortImpl
   return ports;
 }
 
-/** Where host events go: `UndraCore.event`. */
-export interface EventSink {
-  event(portId: number, methodId: number, payload: Uint8Array): void;
-}
-
-/** Sends `Connectivity.changed(online, kind)` to the core. */
-export function emitConnectivity(core: EventSink, online: boolean, kind: NetKind): void {
-  const w = new UndraWriter(4);
-  w.writeBool(online);
-  writeNetKind(w, kind);
-  core.event(PortIds.Connectivity.portId, PortIds.Connectivity.changed, w.finish());
-}
-
-/** Sends `Lifecycle.changed(state)` to the core. */
-export function emitLifecycle(core: EventSink, state: AppState): void {
-  core.event(PortIds.Lifecycle.portId, PortIds.Lifecycle.changed, encodeWith(writeAppState, state));
-}
-
-/**
- * Connects the Connectivity and Lifecycle adapters to the core: every change
- * they report is sent as an event. Returns the function that disconnects
- * them. `onError` receives failures to send (the core closed meanwhile).
- */
-export function startEventSources(
-  core: EventSink,
-  adapters: Partial<Adapters>,
-  onError: (error: unknown) => void,
-): () => void {
-  const stops: Array<() => void> = [];
-  const guarded =
-    <A extends unknown[]>(send: (...args: A) => void) =>
-    (...args: A): void => {
-      try {
-        send(...args);
-      } catch (error) {
-        onError(error);
-      }
-    };
-  if (adapters.connectivity) {
-    stops.push(adapters.connectivity.subscribe(guarded((online, kind) => emitConnectivity(core, online, kind))));
-  }
-  if (adapters.lifecycle) {
-    stops.push(adapters.lifecycle.subscribe(guarded((state) => emitLifecycle(core, state))));
-  }
-  return () => {
-    for (const stop of stops.splice(0)) stop();
-  };
-}
+export { type EventSink, emitConnectivity, emitLifecycle, startEventSources } from "./events.js";

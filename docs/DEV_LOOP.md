@@ -315,6 +315,14 @@ The dev loop above is `undra dev`. The other half, the build of what you ship, n
 | iOS | the **Build the Undra core** Run Script phase, before Compile Sources, with `undra build --platform ios --configuration $CONFIGURATION` | every Xcode build | Xcode's input/output analysis over `ios/Config/undra-core-inputs.xcfilelist` (every file of the core and of its path dependencies, the Cargo manifests and `Cargo.lock`, kept in step by `undra build`) and `undra-core-outputs.xcfilelist` (the XCFramework and a stamp per configuration) |
 | Web | the `undra()` plugin of `web/vite.config.ts` (`@undra/runtime/vite`) | `vite build` and `vite dev`; under `vite dev` also on every change of the core's `src/**`, its manifests or `Cargo.lock` (one build at a time, the first included), followed by a full reload; never under Vitest (mode `test`) unless `inTests: true` | `UNDRA_SKIP_BUILD=1`, the `skip` option |
 
+The Vite plugin also builds the page for `es2022` unless the app's `vite.config.ts` sets `build.target` itself: Vite 6 and older
+default to `es2020`, which turns the runtime's class fields and private members into helper calls and makes the call
+path several times slower (`bench/RESULTS.md`, ADR-056). What `es2022` excludes: the runtime's own code needs class fields
+(Chrome 72, Firefox 69, Safari 14.1, so iOS 15 Safari runs it), and your own code may use any ES2022 syntax, up to class
+static blocks (Chrome 94, Firefox 93, Safari 16.4). A browser older than that needs a `build.target` of your own, which the
+plugin keeps; a target below `es2022` (the pinned Vite also lowers class fields for `safari15`) makes the bundler lower the
+runtime's class fields again, and the call path costs what it did before ADR-056.
+
 All three find `undra` on `PATH` and in `~/.undra/bin`, `~/.cargo/bin` and Homebrew's directories, because an app launched
 from the Dock or an IDE has a short `PATH`; the Gradle task and the Vite plugin take `UNDRA_BIN` first (the Xcode phase
 does not: Xcode's environment is the project's build settings, not your shell's). When it is
