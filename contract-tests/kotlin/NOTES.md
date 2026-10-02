@@ -1,12 +1,12 @@
 # Kotlin column of the contract tests
 
 `run.sh` runs the scenarios of `../scenarios.md` that Kotlin runs (S01 to S20, S23 to S25 for the opt-in ports, S26,
-S27, S28 and S31 to S33) on the JVM, through `dev.undra.runtime.UndraCore` over the real JNI shim and the real `libplayground_core` of
+S27, S28, S31 to S33 and S35) on the JVM, through `dev.undra.runtime.UndraCore` over the real JNI shim and the real `libplayground_core` of
 `examples/playground/core`, and pipes the verdicts through `../check.sh kotlin`. Sources are in `src/dev/undra/contract/`:
-one file per scenario (`S01Primitives.kt` ... `S19DerivedKeyedList.kt`, `S20Storage.kt`, `S23`..`S25`, `S26TwoCores.kt`),
-the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`, `Handover.kt`), the fakes of scenarios.md's harness
-section (`ManualClock`, `FakeServer`, `MemoryKv`, `CapturingLog`) and the build-B process of S14 and S15
-(`MigrationBuildB.kt`).
+one file per scenario (`S01Primitives.kt` ... `S19DerivedKeyedList.kt`, `S20Storage.kt`, `S23`..`S25`, `S26TwoCores.kt`,
+`S35QueryHandles.kt`), the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`, `Handover.kt`), the fakes of
+scenarios.md's harness section (`ManualClock`, `FakeServer`, `MemoryKv`, `CapturingLog`) and the build-B process of S14, S15
+and S35 (`MigrationBuildB.kt`).
 
 ## How it is arranged
 
@@ -42,16 +42,17 @@ section (`ManualClock`, `FakeServer`, `MemoryKv`, `CapturingLog`) and the build-
   Kotlin-only last check that does not drain: a burst made off the main thread must reach its store at a frame of
   the runtime's own pacer, so the frame path stays covered although every wait drains.
 
-## Two builds (S14 steps 7 to 9, S15 steps 11 to 14)
+## Two builds (S14 steps 7 to 9, S15 steps 11 to 14, S35 step 10)
 
 `run.sh` builds the core twice with the undra CLI: build B first (`UNDRA_PLAYGROUND_V2=1 undra build --platform host`,
 which the core's `build.rs` turns into `cfg(playground_v2)`; the CLI rebuilds when only that variable changes), copied
 to `build/core-b`, then build A, copied to `build/core-a`. Each JVM loads its own copy (`-Djava.library.path`), so a
 later `undra build` by another runner cannot swap a library under a run. The script stops if the two are identical.
 
-The main JVM runs S01 to S20 against build A. S14 step 7 writes `build/migration/s14.json` (every key and value of the
+The main JVM runs the scenarios against build A. S14 step 7 writes `build/migration/s14.json` (every key and value of the
 harness `Kv` once both notes wait in the queue, in hex, and the `Idempotency-Key` of the failed `save_note` POST); S15
-step 11 writes `s15.json` (snapshots `P` and `L` and the `Profile` handle). Each scenario deletes its file first, and
+step 11 writes `s15.json` (snapshots `P` and `L` and the `Profile` handle); S35 step 2 writes `s35.json` (the snapshot, as hex, and
+the values of the remote, ticker, feed, library and roster handles, as decimal strings). Each scenario deletes its file first, and
 `run.sh` deletes the directory before the run (`UNDRA_CONTRACT_HANDOVER` names it), so a failed scenario never hands
 over an older run's data.
 
@@ -60,10 +61,11 @@ run against build A (it compares `undra_schema_hash` with the generated hash: bo
 B with the hash the library reports and with a fresh `ManualClock`, `FakeServer`, `CapturingLog` and a `MemoryKv`
 holding exactly the handed-over contents (and no injected failure), emits `Connectivity.changed(false, None)` right
 after the load, and drives the core through `UndraCore`'s raw API (`configure_remote`, `storage_status`, `add` and
-`Profile.describe` by `fnv1a32` id; the generated `StorageStatus` and `RemoteConfig` only as codecs). It prints
-`SCENARIO S14 FAIL` / `SCENARIO S15 FAIL` lines when a build-B step fails and an informational
-`MIGRATION S14 build B ok: <the dead letter>` / `MIGRATION S15 build B ok` otherwise; its output is appended to
-`build/run.log`, which `check.sh` reads (the last line of an id counts).
+`Profile.describe` by `fnv1a32` id; the generated `StorageStatus`, `RemoteConfig`, `QueryStatus` and `RemoteTodo` only as
+codecs). It prints `SCENARIO S14 FAIL` / `SCENARIO S15 FAIL` / `SCENARIO S35 FAIL` lines when a build-B step fails and an
+informational `MIGRATION S14 build B ok: <the dead letter>` / `MIGRATION S15 build B ok` / `MIGRATION S35 build B ok`
+otherwise; its output is appended to `build/run.log`, which `check.sh` reads (the last line of an id counts). S14 and S15 share
+the first core; S35 step 10 gets a new one (see the S35 notes below).
 
 ## Reading the scenarios on the JVM
 
@@ -132,6 +134,26 @@ after the load, and drives the core through `UndraCore`'s raw API (`configure_re
   when S16 loaded the core) and 5; step 3 prints nothing. Step 1 also checks that a write of the `s20` entry was
   attempted and failed `Full`. The entry's key is computed (`undra.query.cache2.<query id>.<fnv1a64 of the encoded
   arguments>`). S20 runs after S18 and before S17, which shuts the core down.
+* S35 (ADR-059) steps 1 to 9 use the generated wrappers and restore into this core. Step 2 hands the snapshot and the five
+  handle values over to the build-B process (`Handover.QueryHandles`). Steps 3 and 8 need "the entries the mirror applied to
+  the remote and feed wrappers during the restore" and a wrapper's `apply` is protected, so `Tap` replaces the wrapper's mirror
+  registration with one that records each entry and then calls the wrapper's own `apply` (the generated override, found by
+  reflection: its name is mangled because it takes a `UInt`); the wrapper behaves as it would without the tap (steps 4 and 6
+  read what it shows). A `StateFlow` does not repeat an equal value, so a `Recorder` on `remote.data`, `remote.status` and
+  `feed.data` only shows blinks; the tap is what proves nothing was sent. The reads wait for a 200 ms quiet window
+  (`quietFor`, `holdsFor` with nothing to check) because a fetch a restore started would only show at the server a moment later.
+  `live_handles` after the first restore is the reading before it less one (the `Probe`, a plain object the restore makes stale);
+  the second restore is compared with that reading. The counter is moved to 6 before the second restore so that it has
+  something to put back. Step 1's feed: S32 leaves the `feed/false` entry with its pages in the query cache, so the handle may
+  show them at once; step 1 asks for pages only until the feed has 100 rows.
+* S35 step 10 (build-B process) needs a fresh runtime: it counts what a restore adds (7: `Counter`, `Library` and its two page
+  servers, and the three query handles build B honours), and the core S14's and S15's steps used still holds the stores S15's
+  restore of `P` made. So the process closes that core and loads another with an empty `Kv`, a new `FakeServer` and a new
+  `CapturingLog` (one core per process, loaded one after the other, as S17.7 does), then reads `live_handles` and restores.
+  Observing the remote handle is the first use of it, and it must see `fetching` with `data` absent: the server answers the list
+  after 300 ms so that the mirror cannot fold the fetch's result into the first drain. The roster handle is refused through
+  `callSync` of its `refetch`: `UndraReplyException`, status `BAD_REQUEST`, and the `CapturingLog` holds the WARN `restore:
+  Handle(index=<i>, gen=<g>) (0x..) is not re-issued: the types it was made from changed`.
 
 ## The opt-in ports (S23, S24, S25; ADR-047, ADR-048)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The Kotlin column of the contract tests: runs S01..S20 and S23..S33 of contract-tests/scenarios.md on the JVM
+# The Kotlin column of the contract tests: runs S01..S20, S23..S33 and S35 of contract-tests/scenarios.md on the JVM
 # over JNI against the real libplayground_core of the playground core (and, for S26, libplayground_a and
 # libplayground_b: the same core under two more namespaces, examples/two-cores, which S27 uses again), then checks they passed.
 #
@@ -14,10 +14,10 @@
 #   2. compiles the Kotlin runtime's main sources (runtimes/kotlin/undra-runtime/scripts/test-local.sh main)
 #   3. compiles the generated bindings (examples/playground/generated/kotlin and examples/two-cores/{a,b}/generated/kotlin)
 #      together with the runner (src/)
-#   4. runs the runner on the JVM with -Djava.library.path pointing at build A; S14 and S15 hand what build A
-#      persisted over in $OUT/migration
-#   5. runs it again in a second JVM over build B (UNDRA_CONTRACT_PHASE=B), which checks S14 steps 8-9 and
-#      S15 steps 12-14 and prints only `SCENARIO S14|S15 FAIL` lines (plus `MIGRATION ... ok`)
+#   4. runs the runner on the JVM with -Djava.library.path pointing at build A; S14, S15 and S35 hand what build A
+#      persisted (or snapshotted) over in $OUT/migration
+#   5. runs it again in a second JVM over build B (UNDRA_CONTRACT_PHASE=B), which checks S14 steps 8-9, S15 steps
+#      12-14 and S35 step 10 and prints only `SCENARIO S14|S15|S35 FAIL` lines (plus `MIGRATION ... ok`)
 #   6. pipes the output of both through contract-tests/check.sh kotlin (the last line of an id counts)
 #
 # Output goes under contract-tests/kotlin/build (git-ignored); UNDRA_BUILD_DIR moves it. Needs the toolchain
@@ -139,11 +139,11 @@ if [ -n "${UNDRA_SQLITE_JDBC:-}" ]; then
   DRIVER=":$UNDRA_SQLITE_JDBC"
 fi
 CP="$OUT/runtime/main:$CLASSES:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES$DRIVER"
-echo "==> running S01..S20 and S23..S33 against build A (${CORE_A#"$REPO"/}, and playground_a, playground_b)"
+echo "==> running S01..S20, S23..S33 and S35 against build A (${CORE_A#"$REPO"/}, and playground_a, playground_b)"
 mkdir -p "$OUT"
 status=0
 java -Xmx1g -Djava.library.path="$CORE_A:$LIB_DIR_A:$LIB_DIR_B" -cp "$CP" dev.undra.contract.MainKt 2>&1 | tee "$OUT/run.log" || status=$?
-echo "==> running the build-B steps of S14 and S15 against build B (${CORE_B#"$REPO"/})"
+echo "==> running the build-B steps of S14, S15 and S35 against build B (${CORE_B#"$REPO"/})"
 UNDRA_CONTRACT_PHASE=B java -Xmx1g -Djava.library.path="$CORE_B" -cp "$CP" dev.undra.contract.MainKt 2>&1 | tee -a "$OUT/run.log" || status=$?
 "$REPO/contract-tests/check.sh" kotlin "$OUT/run.log" || status=1
 
