@@ -64,7 +64,7 @@ const chunkPath = join(out, built.runtime);
 const require = createRequire(join(runtimeDir, "package.json"));
 const ts = require("typescript");
 const acorn = require("acorn");
-const { TraceMap, decodedMappings } = require("@jridgewell/trace-mapping");
+const { TraceMap, decodedMappings, originalPositionFor } = require("@jridgewell/trace-mapping");
 
 const code = readFileSync(chunkPath);
 const text = code.toString("latin1"); // one character per byte: offsets below are byte offsets
@@ -217,6 +217,45 @@ decodedMappings(map).forEach((segments, line) => {
     }
   });
 });
+// The runtime is built from the package's `dist` (ADR-057), whose own maps point at `src/*.ts`: a byte printed from `dist/core.js` is charged to the
+// TypeScript line it came from (the rename pass moved the columns of those maps, so a renamed property still lands on its declaration), which is
+// what the concern rules and the declaration names speak of.
+{
+  const fromDist = new Map(); // source index -> { map, dir } of its own `.map`, when it has one
+  const resolved = new Map(); // "source:line:column" -> [new source index, line, column]
+  const known = new Map(sources.map((x, i) => [x.abs, i]));
+  const originalOf = (s, line, column) => {
+    const key = `${s}:${line}:${column}`;
+    if (resolved.has(key)) return resolved.get(key);
+    if (!fromDist.has(s)) {
+      const own = `${sources[s].abs}.map`;
+      fromDist.set(s, /[\\/]dist[\\/]/.test(sources[s].abs) && existsSync(own) ? { map: new TraceMap(JSON.parse(readFileSync(own, "utf8"))), dir: dirname(own) } : null);
+    }
+    const own = fromDist.get(s);
+    let result = [s, line, column];
+    if (own) {
+      const at = originalPositionFor(own.map, { line: line + 1, column });
+      if (at.source) {
+        const abs = resolve(own.dir, at.source);
+        if (!known.has(abs)) {
+          known.set(abs, sources.length);
+          const inRuntime = /runtimes[\\/]ts[\\/]@undra[\\/]runtime[\\/](.*)$/.exec(abs);
+          sources.push({ abs, short: inRuntime ? inRuntime[1] : abs });
+        }
+        result = [known.get(abs), at.line - 1, at.column];
+      }
+    }
+    resolved.set(key, result);
+    return result;
+  };
+  for (let k = 0; k < code.length; k++) {
+    if (ownerSource[k] < 0) continue;
+    const [s, line, column] = originalOf(ownerSource[k], ownerLine[k], ownerColumn[k]);
+    ownerSource[k] = s;
+    ownerLine[k] = line;
+    ownerColumn[k] = column;
+  }
+}
 // Vite's preload helper has no mapping, so its text would be charged to the mapped token before it: find it by the
 // string it starts with and give it a name of its own.
 const VITE_HELPER = -2;

@@ -30,6 +30,14 @@ const BUNDLER = "bundler: Vite's preload helper for dynamic imports, and the chu
 const rules = [
   [/^\(vite preload helper\)|^\(bundler/, /.*/, BUNDLER],
 
+  // ADR-057: the production messages, the call header, the on-demand loader and the lazy stream path of a core without the feature.
+  [/^src\/messages(\.prod)?\.ts$/, /.*/, ERRORS],
+  [/^src\/call-head\.ts$/, /.*/, CALLS],
+  [/^src\/on-demand\.ts$/, /.*/, LIFECYCLE],
+  [/^src\/core\.ts$/, /^UndraCore\._streamAfterLoad$/, STREAMS],
+  [/^src\/core\.ts$/, /^backgroundPending$/, BACKGROUND],
+  [/^dist\/object\.js$/, /^UndraStore\./, STORE],
+
   [/^src\/wire\/errors\.ts$/, /^PatchError/, PATCHES],
   [/^src\/(errors|errors-[a-z-]+|base-error|call-error)\.ts$|^src\/wire\/errors\.ts$/, /.*/, ERRORS],
   [/^src\/platform\.ts$/, /errorMessage/, ERRORS],
