@@ -689,9 +689,12 @@ measured = 1.43
 # Hooks, the value decoder and the E0066 check are linked only by a core that has a `#[undra::migrate]`.
 # After main's ABI table (ADR-044) the merged core measured 120,188, over the budget; the persistence-v2 review
 # links the standard ports' Rust dispatchers by use (ADR-052 note): 116,731; 116,800 with devtools' inspector seam.
+# prod-ops (ADR-046: the Diagnostics port and the panic report, `run_background`, the stats section, the
+# trap path's trailer lines) added 2,146 bytes to the merged tree's 117,081: 119,227, 773 under the budget. The
+# background run's task table and poll loop are linked only when a task is registered (by use, ADR-052).
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 116575
+measured_gzip_bytes = 119227
 tolerance = 0.05
 
 # What a hello-world app ships of the JavaScript runtime: `@undra/runtime` as the template's
@@ -704,7 +707,12 @@ tolerance = 0.05
 # errors, worker protocol 3, the snapshot layout-2 codec; crash recovery is `crashRecovery()`, which only an app
 # that imports it ships): 24,841 -> 25,906; after main's ABI table and the review's worker refusal, 25,984
 # (16 bytes under the budget: the next change to the hello runtime pays for itself, or `ts-runtime-size` lands).
+# prod-ops (ADR-046) raises the budget to 27,500 (measured 27,385): every runtime now has the `Diagnostics`
+# adapter and `onPanic` (the report codecs, the wasm trap path that builds the report from the FATAL record and
+# the stack, an image id), about 700 bytes up front, and `runInBackground` with the page's background window, about
+# 850 bytes in a lazily loaded chunk that the measuring script folds in. `ts-size-e4` (ADR-056) takes the budget
+# back down: measured with its script this change is about 25,000.
 [size."web/hello-runtime-js"]
-budget_gzip_bytes = 26000
-measured_gzip_bytes = 25996
+budget_gzip_bytes = 27500
+measured_gzip_bytes = 27385
 tolerance = 0.05
