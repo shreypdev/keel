@@ -114,7 +114,9 @@ export function info(file: string): ModuleInfo {
         edges.push({ target, names: "all" });
         stars.push(target);
       } else if (ts.isNamespaceExport(clause)) {
-        edges.push({ target, names: "all" });
+        // `export * as ns from "m"`: a bundler resolves a member access (`ns.vec`) to the module that defines it and keeps no
+        // other member of `m`, so no member is followed here (`namespaceMembersUsed` finds the ones the first chunk names).
+        edges.push({ target, names: [] });
         named.set(clause.name.text, { target, name: "all" });
       } else {
         const values = clause.elements.filter((e) => !e.isTypeOnly);
@@ -170,7 +172,10 @@ export function reachable(entries: readonly string[]): Set<string> {
     } else {
       for (const name of edge.names) {
         const home = definedIn(edge.target, name);
-        if (home !== undefined) include(home);
+        if (home === undefined) continue;
+        // A name that is a namespace of a barrel (`codecs`): the barrel is reached, none of what it re-exports.
+        if (info(home).pureBarrel) seen.add(home);
+        else include(home);
       }
     }
   };
@@ -189,4 +194,21 @@ export function codeImporters(module: string): string[] {
     const i = info(file);
     return !i.pureBarrel && i.edges.some((edge) => edge.target === module);
   });
+}
+
+/** The members of the namespace `ns` that `files` name by `ns.member` (`codecs.vec` gives `vec`). */
+export function namespaceMembersUsed(files: Iterable<string>, ns: string): Set<string> {
+  const used = new Set<string>();
+  for (const file of files) {
+    for (const match of readFileSync(join(SRC, file), "utf8").matchAll(new RegExp(`\\b${ns}\\.(?!(?:js|ts)\\b)([A-Za-z0-9_]+)`, "g"))) used.add(match[1] as string);
+  }
+  return used;
+}
+
+/** The names `file` exports as values. */
+export function exportedValues(file: string): Set<string> {
+  const module = info(file);
+  const names = new Set([...module.own, ...module.named.keys()]);
+  for (const star of module.stars) for (const name of exportedValues(star)) names.add(name);
+  return names;
 }

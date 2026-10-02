@@ -477,35 +477,65 @@ describe("records and enums built from codecs", () => {
   });
 });
 
+/** The type of every member of `codecs` as the table in `wire/codec.ts` documents it: assigning the namespace to it is the compile-time pin. */
+interface CodecsShape {
+  readonly bool: Codec<boolean>;
+  readonly u8: Codec<number>;
+  readonly i8: Codec<number>;
+  readonly u16: Codec<number>;
+  readonly i16: Codec<number>;
+  readonly u32: Codec<number>;
+  readonly i32: Codec<number>;
+  readonly u64: Codec<bigint>;
+  readonly i64: Codec<bigint>;
+  readonly u64Number: Codec<number>;
+  readonly i64Number: Codec<number>;
+  readonly f32: Codec<number>;
+  readonly f64: Codec<number>;
+  readonly unit: Codec<void>;
+  readonly string: Codec<string>;
+  readonly bytes: Codec<Uint8Array>;
+  readonly duration: Codec<number>;
+  readonly timestamp: Codec<number>;
+  readonly uuid: Codec<string>;
+  readonly handle: Codec<bigint>;
+  option<T>(inner: Codec<T>): Codec<T | null>;
+  vec<T>(item: Codec<T>): Codec<T[]>;
+  map<K, V>(key: Codec<K>, value: Codec<V>): Codec<Map<K, V>>;
+  result<T, E>(ok: Codec<T>, err: Codec<E>): Codec<WireResult<T, E>>;
+}
+
 describe("codecs namespace and helpers", () => {
-  it("is frozen and exposes every documented codec", () => {
-    expect(Object.isFrozen(codecs)).toBe(true);
-    for (const name of [
-      "bool",
-      "u8",
-      "i8",
-      "u16",
-      "i16",
-      "u32",
-      "i32",
-      "u64",
-      "i64",
-      "f32",
-      "f64",
-      "unit",
-      "string",
-      "bytes",
-      "duration",
-      "timestamp",
-      "uuid",
-      "handle",
-      "option",
-      "vec",
-      "map",
-      "result",
-    ] as const) {
-      expect(codecs[name], name).toBeDefined();
+  // The 24 names of SPEC 10.4 / `codecs`' table: generated code and hand-written code name them as `codecs.<name>` (ADR-057, D9).
+  const NAMES = [
+    "bool", "u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64", "u64Number", "i64Number", "f32", "f64",
+    "unit", "string", "bytes", "duration", "timestamp", "uuid", "handle", "option", "vec", "map", "result",
+  ] as const;
+
+  it("exposes exactly the 24 documented codecs, each a codec or a combinator, with the documented types", () => {
+    const typed: CodecsShape = codecs;
+    expect(typed).toBe(codecs);
+    expect(Object.keys(codecs).sort()).toEqual([...NAMES].sort());
+    for (const name of NAMES) expect(codecs[name], name).toBeDefined();
+    for (const name of ["option", "vec", "map", "result"] as const) expect(typeof codecs[name], name).toBe("function");
+    for (const name of NAMES.filter((n) => !["option", "vec", "map", "result"].includes(n))) {
+      const codec = codecs[name as "bool"] as Codec<unknown>;
+      expect([typeof codec.encode, typeof codec.decode], name).toEqual(["function", "function"]);
     }
+  });
+
+  it("cannot be reassigned (a module namespace, not a plain object: ADR-057 D9; its other module-namespace properties are checked on the built package, test/dist-flavour.test.ts)", () => {
+    const view = codecs as unknown as Record<string, unknown>;
+    expect(() => {
+      view["u8"] = codecs.u16;
+    }).toThrow(TypeError);
+    expect(codecs.u8.encode).toBeTypeOf("function");
+  });
+
+  it("is what `export *` hands out: the wire barrel and the package root name the same codecs", async () => {
+    const [wire, root] = await Promise.all([import("../src/wire/index.js"), import("../src/index.js")]);
+    expect(wire.codecs).toBe(codecs);
+    expect(root.codecs).toBe(codecs);
   });
 
   it("decodeValue requires the input to be consumed exactly", () => {

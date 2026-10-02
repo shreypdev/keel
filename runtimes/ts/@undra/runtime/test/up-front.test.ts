@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codeImporters, reachable, sourceFiles } from "./support/module-graph.js";
+import { codeImporters, exportedValues, namespaceMembersUsed, reachable, sourceFiles } from "./support/module-graph.js";
 
 /*
  * What a page loads up front is what an app's entry reaches of the runtime by static imports (ADR-052, ADR-057: the hello page's
@@ -29,6 +29,7 @@ const STAYS_OUT: Readonly<Record<string, string>> = {
   "wire/session.ts": "the framed transports' session payloads (`Hello`, `Log`, `PortCall`)",
   "adapters/ids.ts": "`PortIds`, the names and hashes of every standard port: the first chunk spells the nine ids it needs as literals (`adapters/port-literals.ts`)",
   "fnv.ts": "the hash that `PortIds` is computed with",
+  "wire/codecs-more.ts": "the fourteen codecs a hello page does not name (`codecs` is a namespace, ADR-057): a first-chunk module that names one puts it up front",
 };
 
 describe("what UndraCore loads up front", () => {
@@ -52,6 +53,12 @@ describe("what UndraCore loads up front", () => {
         expect(upFront.has(importer), `${importer} imports or re-exports ${name}, and is itself up front`).toBe(false);
       }
     }
+  });
+
+  it("names only the core codecs up front: a `codecs.<name>` of the first chunk's modules that is not in codecs-core.ts puts codecs-more.ts there", () => {
+    const named = namespaceMembersUsed(upFront, "codecs");
+    expect([...named].filter((name) => !exportedValues("wire/codecs-core.ts").has(name))).toEqual([]);
+    expect(named.size, "the first chunk names some codecs (the scan finds them)").toBeGreaterThan(0);
   });
 
   it("knows its own modules (a renamed or deleted module is dropped from the list here)", () => {
