@@ -1,7 +1,7 @@
 import { UndraPortError } from "../errors.js";
 import type { PortImpl } from "../port.js";
 import { UndraReader, UndraWriter, codecs, encodeValue } from "../wire/index.js";
-import { readHttpRequest, writeAppState, writeFsError, writeHttpError, writeHttpResponse, writeNetKind, writeStorageError } from "./codecs.js";
+import { readHttpRequest, readPanicReport, writeAppState, writeFsError, writeHttpError, writeHttpResponse, writeNetKind, writeStorageError } from "./codecs.js";
 import { PortIds } from "./ids.js";
 import {
   type AppState,
@@ -17,6 +17,7 @@ import {
   type RngAdapter,
   StorageError,
   type TimerAdapter,
+  type UndraPanicReport,
 } from "./types.js";
 
 /*
@@ -226,6 +227,26 @@ export function logPort(log: LogAdapter): PortImpl {
 }
 
 /**
+ * The `Diagnostics` port (ADR-046 decision 4.2): a native core calls `panicked` once per panic it contained, fire and forget,
+ * after its FATAL log record. Decodes the `PanicReport` and passes it to `onPanic`; the call is answered either way (the
+ * core ignores the answer), and a failure of `onPanic` is the caller's to contain, so that it never reaches the core. A wasm
+ * core never calls it (it traps: see `LoadOptions.onPanic`). `UndraCore` registers it for the native cores it reaches
+ * (`remote`, React Native) and forwards to `LoadOptions.onPanic`; an embedder with its own transport can register it too.
+ */
+export function diagnosticsPort(onPanic: (report: UndraPanicReport) => void): PortImpl {
+  return {
+    name: "Diagnostics",
+    sync: true,
+    methods: {
+      [PortIds.Diagnostics.panicked]: (args) => {
+        onPanic(readArgs(args, readPanicReport));
+        return EMPTY;
+      },
+    },
+  };
+}
+
+/**
  * The ports the runtime registers for `adapters` without being asked: Http,
  * Kv, SecureStore and Fs. Clock, Rng and Log stay with the core's built-in
  * bindings (SPEC 7) and Timer with the wasm `timer_set` import; register
@@ -263,11 +284,14 @@ export function emitLifecycle(core: EventSink, state: AppState): void {
  * Connects the Connectivity and Lifecycle adapters to the core: every change
  * they report is sent as an event. Returns the function that disconnects
  * them. `onError` receives failures to send (the core closed meanwhile).
+ * `onBackground` is called after the core was told the app went to the
+ * background (`Lifecycle.changed(background)`).
  */
 export function startEventSources(
   core: EventSink,
   adapters: Partial<Adapters>,
   onError: (error: unknown) => void,
+  onBackground?: () => void,
 ): () => void {
   const stops: Array<() => void> = [];
   const guarded =
@@ -283,7 +307,14 @@ export function startEventSources(
     stops.push(adapters.connectivity.subscribe(guarded((online, kind) => emitConnectivity(core, online, kind))));
   }
   if (adapters.lifecycle) {
-    stops.push(adapters.lifecycle.subscribe(guarded((state) => emitLifecycle(core, state))));
+    stops.push(
+      adapters.lifecycle.subscribe(
+        guarded((state) => {
+          emitLifecycle(core, state);
+          if (state === "background") onBackground?.();
+        }),
+      ),
+    );
   }
   return () => {
     for (const stop of stops.splice(0)) stop();

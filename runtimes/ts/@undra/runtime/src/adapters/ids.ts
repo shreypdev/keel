@@ -17,7 +17,7 @@ function port<const M extends readonly string[]>(name: string, methods: M) {
   return Object.freeze(ids);
 }
 
-/** Port and method ids of the ten standard ports. */
+/** Port and method ids of the eleven standard ports. */
 export const PortIds = Object.freeze({
   Clock: port("Clock", ["nowMs", "monotonicNs"] as const),
   Rng: port("Rng", ["fill"] as const),
@@ -29,4 +29,5 @@ export const PortIds = Object.freeze({
   Timer: port("Timer", ["set"] as const),
   Connectivity: port("Connectivity", ["changed"] as const),
   Lifecycle: port("Lifecycle", ["changed"] as const),
+  Diagnostics: port("Diagnostics", ["panicked"] as const),
 });

@@ -2,7 +2,9 @@ import { UndraCallError, UndraUnhandledError } from "./call-error.js";
 import type { UndraCore } from "./core.js";
 import { UndraRestoreError, UndraTransportError } from "./errors.js";
 import { type RecreateCall, type UndraStore, _rebindObject } from "./object.js";
-import { type UndraPanicReport, isTrap } from "./panic.js";
+import type { UndraPanicFrame, UndraPanicReport } from "./adapters/types.js";
+import { isTrap } from "./panic.js";
+import { type PanicSupport, panicSupport } from "./panic-report.js";
 import type { PortImpl } from "./port.js";
 import { errorMessage } from "./platform.js";
 import type { Transport, TransportHandler } from "./transport/transport.js";
@@ -234,6 +236,11 @@ export function restartedError(trap: Error): UndraTransportError {
 
 // ----- the event ------------------------------------------------------------------------------------
 
+/** A frame of a trap's stack as a line: `symbol (0xoffset)`. */
+function formatFrame(frame: UndraPanicFrame): string {
+  return `${frame.symbol ?? "<unknown>"} (0x${frame.address.toString(16)})`;
+}
+
 /** What `LoadOptions.onCoreRestarted` receives (ADR-049 decision 3.4.6). */
 export interface CoreRestartInfo {
   /** The panic that trapped the core. */
@@ -264,7 +271,7 @@ export class UndraCoreRestarted extends UndraUnhandledError implements CoreResta
 
   /** @param info What happened. @param trap The trap. */
   constructor(info: CoreRestartInfo, trap: Error) {
-    super("wasm core", new UndraCallError.Panicked(info.report.message, info.report.frames.join("\n"), { cause: trap }), trap);
+    super("wasm core", new UndraCallError.Panicked(info.report.message, info.report.frames.map(formatFrame).join("\n"), { cause: trap }), trap);
     this.message = `the wasm core trapped (${info.report.message}) and was restarted from ${
       info.restoredFromAgeMs === null ? "no snapshot" : `a snapshot ${info.restoredFromAgeMs} ms old`
     }`;
@@ -373,7 +380,7 @@ export interface RecoveryHost {
   lose(error: Error): void;
   /** Hands `error` to `onError`, guarded as the core's own reports are. */
   deliver(error: UndraUnhandledError): void;
-  /** Builds the panic report of `trap` and hands it to `onPanic`. */
+  /** Builds the panic report of `trap` and hands it to `onPanic`; the host has what builds it (`CrashRecovery.panics`) by now. */
   panicked(trap: Error): UndraPanicReport;
 }
 
@@ -386,6 +393,13 @@ export interface CrashRecovery {
   readonly options: ResolvedRecovery;
   /** The last snapshot kept on this thread (`wasm-main`; in `wasm-worker` mode the worker keeps it), or `null`. For devtools, tests and benchmarks. */
   readonly lastSnapshot: KeptSnapshot | null;
+  /**
+   * What builds the panic report of a trap (`UndraCoreRestarted.report` carries one): a core with recovery has it from the
+   * start, where a core that only has `onPanic` loads it when it starts.
+   *
+   * @internal Read by `UndraCore`.
+   */
+  readonly panics: PanicSupport;
   /** Takes and keeps a snapshot now (`wasm-main`), whatever the schedule says: returns its size, or `null` when none could be taken. For tests and benchmarks. */
   keepSnapshotNow(): number | null;
   /**
@@ -426,6 +440,7 @@ export function crashRecovery(options: RecoveryOptions = {}): CrashRecovery {
   let attached: Recovering | null = null;
   return {
     options: settings,
+    panics: panicSupport,
     get lastSnapshot() {
       return attached?.keeper?.last ?? null;
     },

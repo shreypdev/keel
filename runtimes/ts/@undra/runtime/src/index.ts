@@ -26,6 +26,5 @@ export {
   type RestartResult,
   type SnapshotPolicy,
 } from "./recovery.js";
-export type { UndraPanicReport } from "./panic.js";
 export type { WorkerPortsModule } from "./worker.js";
 export type { UndraClass } from "./lifetime.js";
