@@ -1530,7 +1530,7 @@ export interface MirrorStats { changeSetsReceived; entriesReceived; entriesAppli
 export interface DrainStats { changeSets: number; entries: number; appliedEntries: number; durationMs: number }
 export function scheduleFrame(fn: () => void): void;          // the default schedule (§11.1)
 export class Signal<T> { get(): T; peek(): T; subscribe(fn: (v: T) => void): () => void; /* internal */ _set(v: T): void }
-export interface UndraFeature {}                              // opaque: what AttachOptions.features takes (ADR-057)
+export interface UndraFeature { readonly name: string }   // what AttachOptions.features takes (ADR-057): opaque but for its name (`streams.name` is "streams"); the rest of it is not API
 export const streams: UndraFeature;                           // the stream support (`UndraCore.stream`, §3.7): imported by the generated entry of a schema that has a stream, so it is up front with the entry; a hello page, whose schema has none, does not carry it
 export class UndraError extends Error { readonly kind: string }   // the root of everything the runtime throws on purpose; WireError (kind 'wire') is one
 export class UndraReplyError extends UndraError { status: ReplyStatus; body: Uint8Array }   // the raw reply failure of call/callSync; generated code maps it
