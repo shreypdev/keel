@@ -179,7 +179,7 @@ answers the core directly, off the JS thread:
 | `Clock`, `Rng`, `Log` | native, in the module (`Log` records also reach your `log` adapter, default the console) | | |
 | `Timer` | the core's own timer thread | | |
 | `Db` (opt-in, ADR-048) | native (C++ binding: migrations, one worker per database, transactions, busy timeout) | the system SQLite, `<Application Support>/<bundle id>/Undra/db/<name>.sqlite`, the Swift runtime's file | `android.database.sqlite` through JNI, `getDatabasePath("undra-<name>.sqlite")`, `android-adapters`' file |
-| `WebSocket` (opt-in, ADR-047) | `reactNativeWebSocket()`: React Native's `WebSocket`, headers as its third argument | | |
+| `WebSocket` (opt-in, ADR-047) | `reactNativeWebSocket()`: React Native's `WebSocket`, headers as its third argument | a dropped connection ends `Closed(1001, "Stream end encountered")` (React Native forwards no `wasClean`) | a dropped connection ends `Network` |
 | `Sse` (opt-in, ADR-047) | `reactNativeSse()`: `fetch` body streams where present, else `XMLHttpRequest` progress events | | |
 
 Because the directories, file layouts, Keychain items and Keystore key are the ones the Swift and Kotlin runtimes
@@ -187,8 +187,13 @@ use on the same platform, a value the SwiftUI or Compose shell of an app wrote i
 and the reverse. What each default does:
 
 * `Kv` and `SecureStore`: one file per key, written to a temporary file, flushed and renamed, so a killed app keeps
-  the old value or the new one. They have no error channel: a failing disk, Keychain or Keystore answers the core
-  "unavailable" (its call fails and the reason is logged), never "missing" for a value that exists.
+  the old value or the new one. A failing disk, Keychain or Keystore answers the core a typed `StorageError`
+  (ADR-049), never "missing" for a value that exists.
+* `WebSocket` and `Sse`: React Native's timers fire on frame boundaries, so the 2 ms quiet period of a pull
+  (ADR-047 §3) is one frame here: a lone message reaches the core about 16.7 ms after it arrived (the platform's own
+  `WebSocket` delivers it in under 1 ms). React Native reports every failure before a socket opens as an error event
+  without a status, so a refused upgrade, a DNS failure and a refused port are all `Refused { status: null }` (SSE's
+  DNS failure is `Network`, as elsewhere).
 * `Fs`: paths are relative to the root; any `..` and any symbolic link on a path is `FsError.Denied`, so the core
   cannot leave the root; `write` creates directories and is atomic; `delete` removes a directory with everything in
   it, never the root.

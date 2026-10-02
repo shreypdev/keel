@@ -21,6 +21,7 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -608,6 +609,10 @@ void testTransactions() {
   const auto waited = std::chrono::steady_clock::now() - started;
   check(busy.status == 1 && readFailure(busy.body).kind == DbErrorKind::Busy, "an outer statement during a transaction is Busy: " + describe(busy));
   check(waited >= std::chrono::milliseconds(250), "after the busy timeout");
+  // ... and not much later: the deadline wakes the worker, nothing else has to happen on the database.
+  check(waited < std::chrono::milliseconds(300 + 700),
+      "Busy within the busy timeout (300 ms) plus slack, after " +
+          std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(waited).count()) + " ms");
   // One that the commit releases in time runs, after the transaction's statements.
   const uint32_t waiting = h.post(ports::kDbQuery, statementArgs(db, "SELECT COUNT(*) FROM t"));
   const uint32_t secondBegin = h.post(ports::kDbBegin, idArgs(db));
@@ -717,7 +722,13 @@ void testStop() {
   h.port->stop();
   // The transaction was rolled back by its thread before it closed.
   Harness again(g_base + "/stop");
-  check(again.query(again.open("stop"), "SELECT COUNT(*) FROM t").rows[0][0] == DbValue(int64_t{0}), "stop rolled back the open transaction");
+  const uint32_t reopened = again.open("stop");
+  check(again.query(reopened, "SELECT COUNT(*) FROM t").rows[0][0] == DbValue(int64_t{0}), "stop rolled back the open transaction");
+  // No transaction (and no lock) dangles in the file: a new one starts at once and commits.
+  const uint32_t fresh = again.begin(reopened);
+  again.execute(fresh, "INSERT INTO t VALUES (7)");
+  again.ok(ports::kDbCommit, fresh);
+  check(again.query(reopened, "SELECT COUNT(*) FROM t").rows[0][0] == DbValue(int64_t{1}), "BEGIN IMMEDIATE after the stop succeeds");
   // Malformed arguments are unavailable, never a crash.
   const Bytes junk{1, 2, 3};
   check(again.port->post(ports::kDbExecute, 1000, junk.data(), 3, &out) == 2, "malformed arguments");
@@ -725,7 +736,143 @@ void testStop() {
   ok("stop joins every database thread, drops what waits, rolls back; malformed calls are unavailable");
 }
 
+void testInjectionAndLargeValues() {
+  Harness h(freshDir("values"));
+  const uint32_t db = h.open(":memory:");
+  h.execute(db, "CREATE TABLE t (v TEXT, b BLOB)");
+  // Values travel only as bound parameters: SQL in a value is a value.
+  for (const std::string &evil : {std::string("'; DROP TABLE t; --"), std::string("x'); DROP TABLE t; --"), std::string("\"; DELETE FROM t; --")}) {
+    h.execute(db, "INSERT INTO t (v) VALUES (?)", {evil});
+    const DbRows back = h.query(db, "SELECT v FROM t WHERE v = ?", {evil});
+    check(back.rows.size() == 1 && textOf(back.rows[0][0]) == evil, "an injection attempt is stored as text: " + evil);
+  }
+  check(h.query(db, "SELECT COUNT(*) FROM sqlite_master WHERE name = 't'").rows[0][0] == DbValue(int64_t{1}), "and the table is still there");
+  check(h.query(db, "SELECT COUNT(*) FROM t").rows[0][0] == DbValue(int64_t{3}), "with its three rows");
+  // Two megabytes of text (U+0000 and a supplementary character included) and of blob, there and back.
+  std::string text(2 * 1024 * 1024, 'a');
+  text[17] = '\0';
+  text.replace(1000, 4, "\xf0\x9f\x8c\x8d");
+  Bytes blob(2 * 1024 * 1024 + 3, 0);
+  for (std::size_t i = 0; i < blob.size(); ++i) blob[i] = static_cast<uint8_t>(i * 31);
+  h.execute(db, "INSERT INTO t VALUES (?, ?)", {text, blob});
+  const DbRows big = h.query(db, "SELECT v, b, length(v), length(b) FROM t WHERE b IS NOT NULL");
+  check(big.rows.size() == 1 && textOf(big.rows[0][0]) == text, "2 MiB of text with U+0000 comes back byte for byte");
+  check(big.rows[0][1] == DbValue(blob), "2 MiB of blob comes back byte for byte");
+  check(big.rows[0][3] == DbValue(static_cast<int64_t>(blob.size())), "the blob's length in SQL");
+  ok("values only as parameters (injection text stays text); 2 MiB text with U+0000 and 2 MiB blobs round-trip");
+}
+
+void testMigrationKeepsVersion() {
+  Harness h(freshDir("keep"));
+  const std::vector<DbMigration> v1 = {{1, "CREATE TABLE a (x INTEGER)"}};
+  uint32_t version = 0;
+  const uint32_t first = h.open("keep", v1, &version);
+  check(version == 1, "at version 1");
+  h.execute(first, "INSERT INTO a VALUES (41)");
+  h.ok(ports::kDbClose, first);
+  const std::vector<DbMigration> broken = {v1[0], {2, "CREATE TABLE b (y INTEGER); INSERT INTO a VALUES (42); INSERT INTO nowhere VALUES (1)"}};
+  const DbFailure failed = h.failure(ports::kDbOpen, openArgs("keep", broken));
+  check(failed.kind == DbErrorKind::Migration && failed.version == 2, "the broken migration 2 of a database at 1: " + failed.message);
+  const uint32_t again = h.open("keep", v1, &version);
+  check(version == 1, "user_version is still 1 after the failed migration, got " + std::to_string(version));
+  check(h.query(again, "PRAGMA user_version").rows[0][0] == DbValue(int64_t{1}), "PRAGMA user_version 1");
+  check(h.query(again, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'b'").rows[0][0] == DbValue(int64_t{0}), "no table b");
+  check(h.query(again, "SELECT x FROM a").rows.size() == 1, "the row of version 1 kept, migration 2's insert gone");
+  ok("a failing migration leaves user_version and the data of the versions before it unchanged");
+}
+
+void testFailedCommit() {
+  Harness h(freshDir("commit"));
+  const uint32_t db = h.open("commit", {{1, "CREATE TABLE parent (id INTEGER PRIMARY KEY); "
+                                            "CREATE TABLE child (pid INTEGER REFERENCES parent (id) DEFERRABLE INITIALLY DEFERRED)"}});
+  const uint32_t tx = h.begin(db);
+  h.execute(tx, "INSERT INTO child VALUES (999)"); // deferred: only the COMMIT checks it
+  const DbFailure refused = h.failure(ports::kDbCommit, idArgs(tx));
+  check(refused.kind == DbErrorKind::Constraint && refused.constraint == DbConstraintKind::ForeignKey,
+      std::string("a commit a deferred foreign key refuses is Constraint { ForeignKey }: ") + kindName(refused.kind) + " " + refused.message);
+  check(h.failure(ports::kDbExecute, statementArgs(tx, "SELECT 1")).message == "transaction " + std::to_string(tx) + " is over",
+      "the refused transaction is over");
+  check(h.query(db, "SELECT COUNT(*) FROM child").rows[0][0] == DbValue(int64_t{0}), "and rolled back");
+  // Nothing dangles on the connection: the next transaction begins and commits, a plain statement autocommits.
+  const uint32_t next = h.begin(db);
+  h.execute(next, "INSERT INTO parent VALUES (1)");
+  h.ok(ports::kDbCommit, next);
+  h.execute(db, "INSERT INTO parent VALUES (2)");
+  h.ok(ports::kDbClose, db);
+  const uint32_t reopened = h.open("commit");
+  check(h.query(reopened, "SELECT COUNT(*) FROM parent").rows[0][0] == DbValue(int64_t{2}), "both later writes are in the file");
+  ok("a failed commit (deferred foreign key) rolls back and ends the transaction; the next one runs");
+}
+
+void testStopWhileRunning() {
+  const std::string dir = freshDir("running");
+  const std::string slow = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 2000000) SELECT COUNT(*) FROM c";
+  {
+    Harness h(dir);
+    const uint32_t db = h.open("running");
+    const uint32_t running = h.post(ports::kDbQuery, statementArgs(db, slow));
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    h.port->stop();
+    // The statement that was running finished on its thread, which `stop` joined: answered before `stop`
+    // returned, never after it.
+    check(h.answered(running), "the running statement was answered before stop returned");
+    std::size_t replies = 0;
+    {
+      std::lock_guard<std::mutex> lock(h.mutex);
+      replies = h.replies.size();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::lock_guard<std::mutex> lock(h.mutex);
+    check(h.replies.size() == replies, "no reply arrives after stop returned");
+  }
+  {
+    // The host goes away while a statement runs: its destructor stops and joins, so the reply cannot reach a
+    // destroyed host (AddressSanitizer would see it).
+    // A transaction is open too: the thread rolls it back after the statement, before it is joined.
+    Harness h(dir);
+    const uint32_t db = h.open("running", {{1, "CREATE TABLE t (v INTEGER)"}});
+    const uint32_t tx = h.begin(db);
+    h.execute(tx, "INSERT INTO t VALUES (1)");
+    h.post(ports::kDbQuery, statementArgs(tx, slow));
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  }
+  Harness after(dir);
+  const uint32_t db = after.open("running");
+  check(after.query(db, "SELECT COUNT(*) FROM t").rows[0][0] == DbValue(int64_t{0}), "the destroyed host's transaction was rolled back");
+  const uint32_t tx = after.begin(db);
+  after.ok(ports::kDbRollback, tx);
+  ok("stop while a statement runs: answered before stop returns, nothing after; a host destroyed mid-statement");
+}
+
 } // namespace
+
+/// Opens of one new database from several bindings at once (two cores, two stores opening "app" at launch) all
+/// succeed and migrate it once: the version is read again under BEGIN IMMEDIATE's write lock, and the switch to WAL
+/// (which SQLite answers BUSY at once while another connection makes it) waits like any other lock. A migration version
+/// above SQLite's user_version range (a signed 32-bit integer) is refused before anything runs.
+void testConcurrentOpens() {
+  const std::string dir = freshDir("concurrent");
+  const std::vector<DbMigration> v1v2 = {{1, "CREATE TABLE a (x INTEGER)"}, {2, "INSERT INTO a VALUES (1)"}};
+  for (int round = 0; round < 8; ++round) {
+    std::vector<std::unique_ptr<Harness>> bindings;
+    for (int i = 0; i < 4; ++i) bindings.push_back(std::make_unique<Harness>(dir));
+    const std::string name = "together" + std::to_string(round);
+    std::vector<uint32_t> calls;
+    for (auto &binding : bindings) calls.push_back(binding->post(ports::kDbOpen, openArgs(name, v1v2)));
+    for (std::size_t i = 0; i < bindings.size(); ++i) {
+      const Reply r = bindings[i]->wait(calls[i]);
+      check(r.status == 0, "concurrent open " + std::to_string(i) + " of " + name + ": " + describe(r));
+      check(getU32(r.body.data() + 4) == 2, "every concurrent open answers version 2");
+    }
+    const uint32_t db = bindings[0]->open(name, v1v2);
+    check(bindings[0]->query(db, "SELECT COUNT(*) FROM a").rows[0][0] == DbValue(int64_t{1}), "migration 2 ran once");
+  }
+  Harness h(dir);
+  const DbFailure wide = h.failure(ports::kDbOpen, openArgs("wide", {{1, "SELECT 1"}, {3000000000u, "SELECT 1"}}));
+  check(wide.kind == DbErrorKind::Migration && wide.version == 3000000000u, "a version above user_version's range: " + wide.message);
+  h.open("fits", {{2147483647u, "SELECT 1"}});
+  ok("concurrent opens of one new database migrate it once; versions fit user_version");
+}
 
 int main() {
   char pattern[] = "/tmp/undra-rn-db.XXXXXX";
@@ -743,6 +890,11 @@ int main() {
   testCloseAndBusyFile();
   testFailures();
   testStop();
+  testInjectionAndLargeValues();
+  testMigrationKeepsVersion();
+  testFailedCommit();
+  testStopWhileRunning();
+  testConcurrentOpens();
   std::string cmd = "rm -rf '" + g_base + "'";
   if (std::system(cmd.c_str()) != 0) std::fprintf(stderr, "# could not remove %s\n", g_base.c_str());
   std::printf("# %d Db checks passed\n", g_checks);

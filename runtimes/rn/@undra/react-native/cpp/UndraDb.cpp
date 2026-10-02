@@ -3,10 +3,13 @@
 #include <pthread.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <new>
+#include <optional>
+#include <thread>
 #include <utility>
 
 namespace undra::rn {
@@ -651,6 +654,11 @@ uint8_t DbPort::post(uint32_t methodId, uint32_t portCallId, const uint8_t *args
         if (m.version <= last) {
           return answerNow(out, failureReply(portCallId, DbFailure::migration(m.version, "migration versions must strictly increase, starting at 1")));
         }
+        // PRAGMA user_version is a signed 32-bit integer: a larger version would be stored as 0 and migrated again.
+        if (m.version > 2147483647u) {
+          return answerNow(out, failureReply(portCallId, DbFailure::migration(m.version,
+              "migration versions must be at most 2147483647: SQLite keeps the version in a signed 32-bit integer (PRAGMA user_version)")));
+        }
         last = m.version;
       }
       auto db = std::make_shared<Database>();
@@ -903,40 +911,66 @@ std::vector<uint8_t> DbPort::runOpen(const std::shared_ptr<Database> &shared, Jo
 
   DbRows rows;
   for (const std::string &pragma : {std::string("PRAGMA foreign_keys = ON"),
-                                    "PRAGMA busy_timeout = " + std::to_string(options_.busyTimeout.count()),
-                                    std::string(options_.wal ? "PRAGMA journal_mode = WAL" : "")}) {
-    if (pragma.empty()) continue;
+                                    "PRAGMA busy_timeout = " + std::to_string(options_.busyTimeout.count())}) {
     if (auto f = db.conn->query(pragma, {}, rows)) return fail(*f);
   }
-  if (auto f = db.conn->query("PRAGMA user_version", {}, rows)) return fail(*f);
-  uint32_t version = 0;
-  if (!rows.rows.empty() && !rows.rows.front().empty()) {
-    if (const auto *v = std::get_if<int64_t>(&rows.rows.front().front())) version = static_cast<uint32_t>(*v);
-  }
-  if (!job.migrations.empty()) {
-    const uint32_t newest = job.migrations.back().version;
-    if (version > newest) {
-      return fail(DbFailure::migration(version, "the database is at version " + std::to_string(version) +
-                                                   ", newer than the newest migration (" + std::to_string(newest) + ")"));
+  if (options_.wal) {
+    // While another connection switches the same new file to WAL, SQLite answers BUSY at once instead of calling its
+    // busy handler: the switch is retried until the busy timeout, as any other lock is waited for.
+    const auto deadline = std::chrono::steady_clock::now() + options_.busyTimeout;
+    for (;;) {
+      auto f = db.conn->query("PRAGMA journal_mode = WAL", {}, rows);
+      if (!f) break;
+      if (f->kind != DbErrorKind::Busy || std::chrono::steady_clock::now() >= deadline) return fail(*f);
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
   }
-  std::vector<const DbMigration *> pending;
-  for (const DbMigration &m : job.migrations) {
-    if (m.version > version) pending.push_back(&m);
-  }
-  if (!pending.empty()) {
+  const auto userVersion = [&](uint32_t &version) -> std::optional<DbFailure> {
+    if (auto f = db.conn->query("PRAGMA user_version", {}, rows)) return f;
+    version = 0;
+    if (!rows.rows.empty() && !rows.rows.front().empty()) {
+      if (const auto *v = std::get_if<int64_t>(&rows.rows.front().front())) version = static_cast<uint32_t>(*v);
+    }
+    return std::nullopt;
+  };
+  const uint32_t newest = job.migrations.empty() ? 0 : job.migrations.back().version;
+  const auto newer = [&](uint32_t version) -> std::optional<DbFailure> {
+    if (job.migrations.empty() || version <= newest) return std::nullopt;
+    return DbFailure::migration(version, "the database is at version " + std::to_string(version) +
+                                             ", newer than the newest migration (" + std::to_string(newest) + ")");
+  };
+  uint32_t version = 0;
+  if (auto f = userVersion(version)) return fail(*f);
+  if (auto f = newer(version)) return fail(*f);
+  if (version < newest) {
     DbExecuted ignored;
     if (auto f = db.conn->execute("BEGIN IMMEDIATE", {}, ignored)) return fail(*f);
     const auto rollBack = [&] {
       DbExecuted none;
       (void)db.conn->execute("ROLLBACK", {}, none);
     };
+    // Another connection to the file (a second open of it, another core) may have migrated it while this one waited
+    // for the write lock: what is pending is decided again under it, so two opens at once migrate the file once.
+    if (auto f = userVersion(version)) {
+      rollBack();
+      return fail(*f);
+    }
+    if (auto f = newer(version)) {
+      rollBack();
+      return fail(*f);
+    }
+    std::vector<const DbMigration *> pending;
+    for (const DbMigration &m : job.migrations) {
+      if (m.version > version) pending.push_back(&m);
+    }
+    if (pending.empty()) rollBack();
     for (const DbMigration *m : pending) {
       if (auto f = db.conn->executeScript(m->sql)) {
         rollBack();
         return fail(DbFailure::migration(m->version, dbErrorText(*f)));
       }
     }
+    if (!pending.empty()) {
     const uint32_t last = pending.back()->version;
     if (auto f = db.conn->execute("PRAGMA user_version = " + std::to_string(last), {}, ignored)) {
       rollBack();
@@ -947,6 +981,7 @@ std::vector<uint8_t> DbPort::runOpen(const std::shared_ptr<Database> &shared, Jo
       return fail(DbFailure::migration(last, dbErrorText(*f)));
     }
     version = last;
+    }
   }
   {
     std::lock_guard<std::mutex> lock(mutex_);

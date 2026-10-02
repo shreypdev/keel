@@ -3,6 +3,7 @@ package dev.undra.reactnative;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.DatabaseErrorHandler;
+import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteCursor;
 import android.database.sqlite.SQLiteDatabase;
 import java.io.File;
@@ -179,6 +180,24 @@ final class UndraDatabase {
             }
             return new SQLiteCursor(driver, editTable, query);
         };
-        return db.rawQueryWithFactory(factory, sql, null, null);
+        return db.rawQueryWithFactory(factory, sqliteOwned(sql), null, null);
+    }
+
+    /**
+     * {@code sql}, with a leading {@code ;} when it is a BEGIN, COMMIT or ROLLBACK: Android would otherwise run it
+     * through its per-thread transaction stack, which pops a transaction before SQLite refuses its COMMIT (a deferred
+     * foreign key) and then refuses the binding's ROLLBACK ("no current transaction"), leaving SQLite's transaction open
+     * and every later BEGIN failing. With the {@code ;} {@link DatabaseUtils} reads it as OTHER and SQLite runs it; the
+     * database has one connection, so the transaction spans the statements that follow.
+     */
+    static String sqliteOwned(String sql) {
+        switch (DatabaseUtils.getSqlStatementType(sql)) {
+            case DatabaseUtils.STATEMENT_BEGIN:
+            case DatabaseUtils.STATEMENT_COMMIT:
+            case DatabaseUtils.STATEMENT_ABORT:
+                return ";" + sql;
+            default:
+                return sql;
+        }
     }
 }

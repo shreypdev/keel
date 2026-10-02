@@ -7,6 +7,7 @@ import {
   SseError,
   type SseEvent,
   SseEventCodec,
+  UndraPortError,
   UndraWriter,
   WsError,
   WsErrorCodec,
@@ -17,7 +18,7 @@ import {
   decodePortReply,
   decodeValue,
 } from "@undra/runtime";
-import type { PlatformWebSocket } from "@undra/runtime/realtime";
+import { OptInPortIds, type PlatformWebSocket } from "@undra/runtime/realtime";
 import {
   type NativeCoreEntry,
   type ReactNativeWebSocketConstructor,
@@ -187,10 +188,90 @@ describe.skipIf(!hasWebSocket)("reactNativeWebSocket against the realtime server
     expect(flooded.end).toMatchObject({ code: 1008, reason: "the core did not keep up" });
   });
 
+  test("a stalled reader past the byte limit (16 MiB by default) also ends with Closed(1008)", async () => {
+    const small = reactNativeWebSocket({ WebSocket: RnWebSocket, maxBufferedBytes: 64 * 1024 });
+    const conn = await small.connect(`${server.wsUrl}/ws/flood?n=200&size=4096`, [], []);
+    await tick(200);
+    const flooded = await drain(conn.messages());
+    // 16 messages of 4 KiB fit in 64 KiB; the 17th is past it.
+    expect(flooded.items.length).toBe(16);
+    expect(flooded.end).toBeInstanceOf(WsError.Closed);
+    expect(flooded.end).toMatchObject({ code: 1008, reason: "the core did not keep up" });
+    // The connection was given up: closed from this side (with 1008 on React Native; Node's `WebSocket`, which plays
+    // it here, refuses 1008 from a script and sends a close frame without a code).
+    await eventually(() => lastConnection("/ws/flood").closeCode !== null);
+  });
+
+  test("the binding: one receive at a time (a second is Protocol), a lone message answered within milliseconds, close during a receive answers []", async () => {
+    const ports = realtimePorts({ webSocket: adapter, sse: reactNativeSse({ transport: "xhr", XMLHttpRequest: NodeXhr }) });
+    const port = ports[OptInPortIds.WebSocket.portId]!;
+    const ids = OptInPortIds.WebSocket;
+    const w = new UndraWriter(64);
+    w.writeStr(`${server.wsUrl}/ws/echo`);
+    codecs.vec(codecs.string).encode(w, []);
+    codecs.vec(HeaderCodec).encode(w, []);
+    const { conn } = decodeValue(WsOpenedCodec, await port.methods[ids.connect]!(w.finish()));
+    const receiveArgs = (max: number): Uint8Array => {
+      const r = new UndraWriter(8);
+      r.writeU32(conn);
+      r.writeU32(max);
+      return r.finish();
+    };
+    const sendText = async (value: string): Promise<void> => {
+      const s = new UndraWriter(16);
+      s.writeU32(conn);
+      WsMessageCodec.encode(s, text(value));
+      await port.methods[ids.send]!(s.finish());
+    };
+    const portError = async (pending: Promise<Uint8Array> | Uint8Array): Promise<WsError> => {
+      const error = await rejection(Promise.resolve(pending));
+      expect(error).toBeInstanceOf(UndraPortError);
+      return decodeValue(WsErrorCodec, (error as UndraPortError).body);
+    };
+    const receive = (max: number) => Promise.resolve(port.methods[ids.receive]!(receiveArgs(max)));
+
+    // A lone message: the pull answers it once it has been quiet for 2 ms, not after waiting for 16.
+    const lone: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const pending = receive(16);
+      const sent = performance.now();
+      await sendText(`lone ${i}`);
+      expect(decodeValue(codecs.vec(WsMessageCodec), await pending)).toEqual([text(`lone ${i}`)]);
+      lone.push(performance.now() - sent);
+    }
+    lone.sort((a, b) => a - b);
+    expect(lone[2]).toBeLessThan(25); // the median, a loopback echo included
+
+    // A second receive while one waits is the typed Protocol error; the first still answers.
+    const first = receive(16);
+    const second = await portError(port.methods[ids.receive]!(receiveArgs(16)));
+    expect(second).toBeInstanceOf(WsError.Protocol);
+    expect(second.message).toContain(`a receive is already pending on connection ${conn}`);
+
+    // The core's close answers the waiting receive with [] (once), and every later one with [] too.
+    const close = new UndraWriter(16);
+    close.writeU32(conn);
+    close.writeU16(1000);
+    close.writeStr("bye");
+    await port.methods[ids.close]!(close.finish());
+    expect(decodeValue(codecs.vec(WsMessageCodec), await first)).toEqual([]);
+    expect(decodeValue(codecs.vec(WsMessageCodec), await receive(16))).toEqual([]);
+    // A send after the core's close is Closed with that close's code and reason.
+    const late = new UndraWriter(16);
+    late.writeU32(conn);
+    WsMessageCodec.encode(late, text("late"));
+    const closed = await portError(port.methods[ids.send]!(late.finish()));
+    expect(closed).toBeInstanceOf(WsError.Closed);
+    expect(closed).toMatchObject({ code: 1000, reason: "bye" });
+    await eventually(() => lastConnection("/ws/echo").closeCode === 1000);
+    port.dispose?.();
+    ports[OptInPortIds.Sse.portId]!.dispose?.();
+  });
+
   test("through the binding loadNative registers: connect, send, receive, close", async () => {
     const ports = realtimePorts({ webSocket: adapter, sse: reactNativeSse({ transport: "xhr", XMLHttpRequest: NodeXhr }) });
-    const port = ports[PortIds.WebSocket.portId]!;
-    const ids = PortIds.WebSocket;
+    const port = ports[OptInPortIds.WebSocket.portId]!;
+    const ids = OptInPortIds.WebSocket;
     const w = new UndraWriter(64);
     w.writeStr(`${server.wsUrl}/ws/echo`);
     codecs.vec(codecs.string).encode(w, ["p"]);
@@ -212,7 +293,7 @@ describe.skipIf(!hasWebSocket)("reactNativeWebSocket against the realtime server
     await port.methods[ids.close]!(close.finish());
     await eventually(() => lastConnection("/ws/echo").closeCode === 1000);
     port.dispose?.();
-    ports[PortIds.Sse.portId]!.dispose?.();
+    ports[OptInPortIds.Sse.portId]!.dispose?.();
   });
 });
 
@@ -281,9 +362,20 @@ describe("reactNativeSse over XMLHttpRequest progress events", () => {
     expect((read.end as Error).message).toContain("did not keep up");
   });
 
+  test("a flood under a stalled reader stays bounded at the default limit (4,096 events), then Network", async () => {
+    const stream = await sse.open(`${server.url}/sse/flood?n=6000&size=8`, [], null);
+    await eventually(() => lastConnection("/sse/flood").written === 6000);
+    await tick(100);
+    const read = await drain(stream.events());
+    expect(read.items.length).toBe(4096);
+    expect(read.items[4095]?.id).toBe("4095");
+    expect(read.end).toBeInstanceOf(SseError.Network);
+    expect((read.end as Error).message).toContain("did not keep up");
+  });
+
   test("through the binding loadNative registers: open, next, close", async () => {
-    const port = realtimePorts({ webSocket: reactNativeWebSocket({ WebSocket: RnWebSocket }), sse })[PortIds.Sse.portId]!;
-    const ids = PortIds.Sse;
+    const port = realtimePorts({ webSocket: reactNativeWebSocket({ WebSocket: RnWebSocket }), sse })[OptInPortIds.Sse.portId]!;
+    const ids = OptInPortIds.Sse;
     const open = new UndraWriter(64);
     open.writeStr(`${server.url}/sse/feed`);
     codecs.vec(HeaderCodec).encode(open, []);
@@ -339,22 +431,22 @@ describe("loadNative and the opt-in ports", () => {
     const native = new FakeNative();
     native.schema = {
       ports: [
-        { port_id: PortIds.WebSocket.portId, kind: "async", methods: [{ method_id: PortIds.WebSocket.connect, is_async: true }] },
-        { port_id: PortIds.Sse.portId, kind: "async", methods: [{ method_id: PortIds.Sse.next, is_async: true }] },
+        { port_id: OptInPortIds.WebSocket.portId, kind: "async", methods: [{ method_id: OptInPortIds.WebSocket.connect, is_async: true }] },
+        { port_id: OptInPortIds.Sse.portId, kind: "async", methods: [{ method_id: OptInPortIds.Sse.next, is_async: true }] },
       ],
     };
     installFake(native);
     const core = await loadNative(entryOf(native));
-    expect(native.started?.ports).toEqual([PortIds.WebSocket.portId, PortIds.Sse.portId]);
+    expect(native.started?.ports).toEqual([OptInPortIds.WebSocket.portId, OptInPortIds.Sse.portId]);
     const connect = new UndraWriter(32);
     connect.writeStr("http://not-a-websocket");
     codecs.vec(codecs.string).encode(connect, []);
     codecs.vec(HeaderCodec).encode(connect, []);
-    native.queue(RecordKind.PortCall, new Uint8Array([...le([PortIds.WebSocket.portId, "u32"], [PortIds.WebSocket.connect, "u32"], [7, "u32"]), ...connect.finish()]), "core");
+    native.queue(RecordKind.PortCall, new Uint8Array([...le([OptInPortIds.WebSocket.portId, "u32"], [OptInPortIds.WebSocket.connect, "u32"], [7, "u32"]), ...connect.finish()]), "core");
     const next = new UndraWriter(8);
     next.writeU32(42);
     next.writeU32(16);
-    native.queue(RecordKind.PortCall, new Uint8Array([...le([PortIds.Sse.portId, "u32"], [PortIds.Sse.next, "u32"], [8, "u32"]), ...next.finish()]), "core");
+    native.queue(RecordKind.PortCall, new Uint8Array([...le([OptInPortIds.Sse.portId, "u32"], [OptInPortIds.Sse.next, "u32"], [8, "u32"]), ...next.finish()]), "core");
     await eventually(() => native.portReplies.length === 2);
     const replies = native.portReplies.map((bytes) => decodePortReply(bytes));
     const ws = replies.find((r) => r.portCallId === 7)!;
@@ -369,15 +461,15 @@ describe("loadNative and the opt-in ports", () => {
 
   test("an app's own WebSocket port in `ports` replaces the default", async () => {
     const native = new FakeNative();
-    native.schema = { ports: [{ port_id: PortIds.WebSocket.portId, kind: "async", methods: [{ method_id: PortIds.WebSocket.connect, is_async: true }] }] };
+    native.schema = { ports: [{ port_id: OptInPortIds.WebSocket.portId, kind: "async", methods: [{ method_id: OptInPortIds.WebSocket.connect, is_async: true }] }] };
     installFake(native);
     const seen: number[] = [];
     const core = await loadNative(entryOf(native), {
       ports: {
-        [PortIds.WebSocket.portId]: {
+        [OptInPortIds.WebSocket.portId]: {
           sync: false,
           methods: {
-            [PortIds.WebSocket.connect]: () => {
+            [OptInPortIds.WebSocket.connect]: () => {
               seen.push(1);
               return new Uint8Array([1, 0, 0, 0, 0, 0, 0, 0]);
             },
@@ -385,7 +477,7 @@ describe("loadNative and the opt-in ports", () => {
         },
       },
     });
-    native.queue(RecordKind.PortCall, new Uint8Array([...le([PortIds.WebSocket.portId, "u32"], [PortIds.WebSocket.connect, "u32"], [9, "u32"])]), "core");
+    native.queue(RecordKind.PortCall, new Uint8Array([...le([OptInPortIds.WebSocket.portId, "u32"], [OptInPortIds.WebSocket.connect, "u32"], [9, "u32"])]), "core");
     await eventually(() => native.portReplies.length === 1);
     expect(seen).toEqual([1]);
     expect(decodePortReply(native.portReplies[0]!).status).toBe(PortStatus.Ok);
@@ -393,19 +485,19 @@ describe("loadNative and the opt-in ports", () => {
   });
 
   test("Db is a native default (port 0x559eda82) unless `ports` replaces it", async () => {
-    expect(PortIds.Db.portId).toBe(0x559eda82);
-    const offered = { ports: [PortIds.Kv.portId, PortIds.Db.portId] };
-    expect(nativeDefaultPorts(offered, {})).toEqual([PortIds.Kv.portId, PortIds.Db.portId]);
-    expect(nativeDefaultPorts(offered, { ports: { [PortIds.Db.portId]: { sync: false, methods: {} } } })).toEqual([PortIds.Kv.portId]);
-    expect(nativeDefaultPorts(offered, { adapters: { kv: null } })).toEqual([PortIds.Db.portId]);
+    expect(OptInPortIds.Db.portId).toBe(0x559eda82);
+    const offered = { ports: [PortIds.Kv.portId, OptInPortIds.Db.portId] };
+    expect(nativeDefaultPorts(offered, {})).toEqual([PortIds.Kv.portId, OptInPortIds.Db.portId]);
+    expect(nativeDefaultPorts(offered, { ports: { [OptInPortIds.Db.portId]: { sync: false, methods: {} } } })).toEqual([PortIds.Kv.portId]);
+    expect(nativeDefaultPorts(offered, { adapters: { kv: null } })).toEqual([OptInPortIds.Db.portId]);
 
     const native = new FakeNative();
-    native.defaults = { ports: [PortIds.Db.portId], db: "/data/user/0/app/databases/undra-<name>.sqlite" };
-    native.schema = { ports: [{ port_id: PortIds.Db.portId, kind: "async", methods: [{ method_id: PortIds.Db.open, is_async: true }] }] };
+    native.defaults = { ports: [OptInPortIds.Db.portId], db: "/data/user/0/app/databases/undra-<name>.sqlite" };
+    native.schema = { ports: [{ port_id: OptInPortIds.Db.portId, kind: "async", methods: [{ method_id: OptInPortIds.Db.open, is_async: true }] }] };
     installFake(native);
     expect(nativePlatformDefaults(native.namespace).db).toBe("/data/user/0/app/databases/undra-<name>.sqlite");
     const core = await loadNative(entryOf(native));
-    expect(native.started?.nativePorts).toEqual([PortIds.Db.portId]);
+    expect(native.started?.nativePorts).toEqual([OptInPortIds.Db.portId]);
     core.close();
   });
 });

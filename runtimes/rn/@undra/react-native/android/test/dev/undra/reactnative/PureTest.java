@@ -128,6 +128,22 @@ public final class PureTest {
         check(Arrays.equals(new DbWire.Rows(new String[0]).finish(), hex("00" + "00000000" + "00000000")), "no columns, no rows");
         ok("DbWire writes DbExecuted, DbRows and a failure as the C++ side reads them");
 
+        // JNI's classic traps: modified UTF-8 writes U+0000 as C0 80 and a supplementary character as two 3-byte
+        // surrogates (CESU-8). DbWire carries standard UTF-8 both ways, so the wire's String is the core's.
+        String tricky = "a\u0000b🌍é";
+        byte[] standard = hex("61" + "00" + "62" + "f09f8c8d" + "c3a9");
+        Object[] text = DbWire.readParams(hex("01000000" + "0300" + "09000000" + "610062f09f8c8dc3a9"));
+        check(tricky.equals(text[0]), "U+0000 and an emoji arrive from C++ as one String");
+        DbWire.Rows cell = new DbWire.Rows(new String[] {"t\u0000🌍"});
+        cell.beginRow();
+        cell.text(tricky);
+        byte[] out = cell.finish();
+        byte[] expectedCell = hex("00" + "01000000" + "06000000" + "7400f09f8c8d" + "01000000" + "01000000" + "0300" + "09000000");
+        check(Arrays.equals(Arrays.copyOfRange(out, 0, expectedCell.length), expectedCell)
+                && Arrays.equals(Arrays.copyOfRange(out, expectedCell.length, out.length), standard),
+                "U+0000 and an emoji leave as standard UTF-8 (no C0 80, no CESU-8 surrogates): " + Arrays.toString(out));
+        ok("DbWire carries U+0000 and supplementary characters as standard UTF-8 in both directions");
+
         System.out.println("# " + checks + " checks passed");
     }
 }

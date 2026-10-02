@@ -6,7 +6,7 @@ import {
   type PortImpl,
   type AppState as UndraAppState,
 } from "@undra/runtime";
-import { type SseAdapter, type WebSocketAdapter, ssePort, webSocketPort } from "@undra/runtime/realtime";
+import { OptInPortIds, type SseAdapter, type WebSocketAdapter, ssePort, webSocketPort } from "@undra/runtime/realtime";
 import { AppState } from "react-native";
 import { reactNativeHttp } from "./http.js";
 import type { NativePlatformDefaults } from "./native.js";
@@ -85,8 +85,8 @@ export function reactNativeAdapters(): ReactNativeAdapters {
  */
 export function realtimePorts(adapters: Pick<ReactNativeAdapters, "webSocket" | "sse">): Record<number, PortImpl> {
   return {
-    [PortIds.WebSocket.portId]: webSocketPort(adapters.webSocket),
-    [PortIds.Sse.portId]: ssePort(adapters.sse),
+    [OptInPortIds.WebSocket.portId]: webSocketPort(adapters.webSocket),
+    [OptInPortIds.Sse.portId]: ssePort(adapters.sse),
   };
 }
 
@@ -99,7 +99,7 @@ const NATIVE_DEFAULTS: ReadonlyArray<readonly [number, keyof AdapterOverrides | 
   [PortIds.SecureStore.portId, "secureStore"],
   [PortIds.Fs.portId, "fs"],
   [PortIds.Connectivity.portId, "connectivity"],
-  [PortIds.Db.portId, null],
+  [OptInPortIds.Db.portId, null],
 ];
 
 /**
