@@ -154,10 +154,12 @@ extension UndraLazyList: @preconcurrency RandomAccessCollection {
         return count
     }
 
+    /// The index after `i`.
     public func index(after i: Int) -> Int {
         return i + 1
     }
 
+    /// The index before `i`.
     public func index(before i: Int) -> Int {
         return i - 1
     }
@@ -295,10 +297,12 @@ extension UndraLazyListObject: @preconcurrency RandomAccessCollection {
         return count
     }
 
+    /// The index after `i`.
     public func index(after i: Int) -> Int {
         return i + 1
     }
 
+    /// The index before `i`.
     public func index(before i: Int) -> Int {
         return i - 1
     }

@@ -162,6 +162,44 @@ final class LazyListObservationTests: XCTestCase {
         XCTAssertEqual(list.count, 501)
     }
 
+    func testTheTwinAndTheObservableListMakeTheSameCallsAndShowTheSameRows() throws {
+        func script(_ read: (Int) -> Int32?, _ prefetch: (Range<Int>) -> Void, _ invalidate: (LazyServer) throws -> Void,
+                    _ server: LazyServer, _ turns: LazyTurns) throws -> [Int32?] {
+            _ = read(260)
+            prefetch(0 ..< 120)
+            turns.runUntilQuiet()
+            server.mutate { $0[260] = -260; $0.removeLast(40) }
+            try invalidate(server)
+            _ = read(300)
+            turns.runUntilQuiet()
+            return [read(260), read(130), read(300), read(459), read(460)]
+        }
+        let first = try LazyRig(rows: 500)
+        let observed = try script({ first.list[$0] }, { first.list.prefetch($0) }, { server in
+            var reader = UndraReader(server.invalidated())
+            try first.list.applyInvalidated(&reader)
+        }, first.server, first.turns)
+
+        let transport = FakeTransport()
+        let server = LazyServer(rows: 500)
+        server.install(on: transport)
+        let core = try makeCore(transport)
+        let turns = LazyTurns()
+        let twin = UndraLazyListObject<Int32>(core: core, schedule: { turns.schedule($0) })
+        var value = UndraReader(server.value())
+        try twin.applyFull(&value)
+        let viaTwin = try script({ twin[$0] }, { twin.prefetch($0) }, { server in
+            var reader = UndraReader(server.invalidated())
+            try twin.applyInvalidated(&reader)
+        }, server, turns)
+
+        XCTAssertEqual(viaTwin, observed)
+        XCTAssertEqual(server.offsets, first.server.offsets)
+        XCTAssertEqual(twin.count, first.list.count)
+        XCTAssertEqual(twin.count, 460)
+        XCTAssertEqual(observed.first ?? nil, -260)
+    }
+
     func testTheTwinPublishesItsCount() throws {
         let transport = FakeTransport()
         let core = try makeCore(transport)

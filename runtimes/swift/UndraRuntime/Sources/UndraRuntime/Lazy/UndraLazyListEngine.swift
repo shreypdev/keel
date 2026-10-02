@@ -28,6 +28,7 @@ public enum UndraLazyListError: Error, Sendable, Equatable {
 }
 
 extension UndraLazyListError: CustomStringConvertible {
+    /// A one-line description that names the page and what is wrong with it.
     public var description: String {
         switch self {
         case .nullHandle:
@@ -275,6 +276,9 @@ final class UndraLazyListEngine<Item: UndraCodec & Sendable> {
             pending.insert(.pages)
         }
         queued = queued.filter { $0 < live }
+        for page in Array(touched.keys) where page >= live {
+            touched[page] = nil
+        }
         // The window: what was touched since the previous invalidation. A page already on its way is not asked for again: its
         // reply is older than `version` and will be asked for again when it comes.
         for (page, at) in touched where at > windowFloor && page < live && inFlight[page] == nil {

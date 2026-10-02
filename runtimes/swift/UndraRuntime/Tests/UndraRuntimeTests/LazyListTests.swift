@@ -546,6 +546,27 @@ final class LazyListTests: XCTestCase {
         XCTAssertEqual(Array(rig.server.targets.suffix(2)), [replacement, replacement])
     }
 
+    func testChangingThePageSizeDropsWhatWasAskedAtTheOldSize() async throws {
+        let rig = try LazyRig(rows: 100, direct: false, hold: true)
+        XCTAssertNil(rig.list[0])
+        rig.turns.run()
+        let sent = await waitUntil { rig.server.heldCount == 2 }
+        XCTAssertTrue(sent)
+        rig.list.pageSize = 10
+        rig.server.release(on: rig.transport)           // two pages of 50 rows, for boundaries that no longer exist
+        try await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(rig.list.testEngine.cachedPages, [])
+        XCTAssertEqual(rig.errors.count, 0)
+        XCTAssertNil(rig.list[0])
+        rig.turns.run()
+        let asked = await waitUntil { rig.server.heldCount == 2 }
+        XCTAssertTrue(asked)
+        rig.server.release(on: rig.transport)
+        let arrived = await waitUntil { rig.list[0] == 0 }
+        XCTAssertTrue(arrived)
+        XCTAssertEqual(rig.server.limits.suffix(2).map { Int($0) }, [10, 10])
+    }
+
     func testStaleRepliesAreAskedForAgainAFewTimesThenReported() throws {
         let rig = try LazyRig(rows: 100)
         rig.server.mutate { _ in }
@@ -599,6 +620,29 @@ final class LazyListTests: XCTestCase {
         var trailing = UndraReader(good + [1, 2])
         XCTAssertThrowsError(try rig.list.applyInvalidated(&trailing))
         XCTAssertEqual(rig.list.count, 100)
+    }
+
+    // MARK: Cost
+
+    func testReadingCachedRowsIsCheap() throws {
+        // The hot path of a view: rows of cached pages, read over and over. Generous (debug build, a busy machine), but it fails
+        // if a read starts to cost anything like a call.
+        let rig = try LazyRig(rows: 5000)
+        rig.list.prefetch(0 ..< 1200)
+        rig.turns.runUntilQuiet()
+        XCTAssertEqual(rig.list.testEngine.cachedPages.count, 24)
+        let calls = rig.server.offsets.count
+        let start = Date()
+        var sum = 0
+        for round in 0 ..< 200 {
+            for index in 0 ..< 500 {
+                sum += Int(rig.list[(round * 7 + index) % 1200] ?? 0)
+            }
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertGreaterThan(sum, 0)
+        XCTAssertEqual(rig.server.offsets.count, calls, "no read of a cached row asks for anything")
+        XCTAssertLessThan(elapsed, 5, "100,000 cached reads took \(elapsed) s")
     }
 
     // MARK: The default turn
