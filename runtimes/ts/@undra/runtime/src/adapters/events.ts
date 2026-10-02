@@ -1,12 +1,22 @@
 import { UndraWriter } from "../wire/index.js";
 import { PortIds } from "./ids.js";
-import { APP_STATES, type AppState, type Adapters, NET_KINDS, type NetKind } from "./types.js";
+import type { Adapters } from "./types.js";
 
 /*
  * Host events: what the Connectivity and Lifecycle sources tell the core. Separate from `ports.ts` (the
  * request/reply ports, loaded on the first call to one of them) because a page starts these two sources
  * with the core (ADR-052).
  */
+
+/** `NetKind`, a unit enum; the wire index is the position in this list. */
+export const NET_KINDS = ["wifi", "cellular", "wired", "unknown", "none"] as const;
+/** The kind of network the device is on. */
+export type NetKind = (typeof NET_KINDS)[number];
+
+/** `AppState`, a unit enum; the wire index is the position in this list. */
+export const APP_STATES = ["active", "inactive", "background"] as const;
+/** Whether the app is in the foreground. */
+export type AppState = (typeof APP_STATES)[number];
 
 /** Writes `v` as its `u16` index in `variants` (the encoding half of a unit enum's codec). */
 export function writeIndex<T extends string>(w: UndraWriter, name: string, variants: readonly T[], v: T): void {
