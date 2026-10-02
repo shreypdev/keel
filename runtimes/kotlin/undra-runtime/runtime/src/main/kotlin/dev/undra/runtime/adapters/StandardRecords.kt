@@ -9,8 +9,9 @@ import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.WireException
 
-// Hand-written codecs for the nine records, enums and errors of the standard ports (SPEC section 8): HttpMethod,
-// Header, HttpRequest, HttpResponse, HttpError, FsError, StorageError (ADR-049), NetKind and AppState. They are
+// Hand-written codecs for the records, enums and errors of the standard ports (SPEC section 8): HttpMethod,
+// Header, HttpRequest, HttpResponse, HttpError, FsError, StorageError (ADR-049), NetKind and AppState, and the three
+// records of ADR-046 (UndraPanicFrame, UndraPanicReport, UndraBackgroundReport). They are
 // what generated code for `undra-ports` would contain; the runtime carries its own so that the default adapters
 // (and the `android-adapters` module) do not depend on generated code. Enum and error variants are numbered as
 // `undra-ports` declares them (`crates/undra-ports/tests/encoding.rs` checks this file against it).
@@ -18,6 +19,7 @@ import dev.undra.runtime.wire.WireException
 private val headerList: UndraCodec<List<Header>> = Codecs.vec(Header)
 private val optionBytes: UndraCodec<ByteArray?> = Codecs.option(Codecs.bytes)
 private val optionU32: UndraCodec<UInt?> = Codecs.option(Codecs.u32)
+private val optionString: UndraCodec<String?> = Codecs.option(Codecs.string)
 
 /** One HTTP header: `Header { name: String, value: String }`. */
 public data class Header(val name: String, val value: String) : UndraRecord {
@@ -387,5 +389,156 @@ public enum class AppState(public val index: UShort) : UndraEnum {
             val tag = r.readU16()
             return entries.firstOrNull { it.index == tag } ?: throw WireException.InvalidTag(tag.toUInt(), at, "AppState")
         }
+    }
+}
+
+/**
+ * One frame of a panic's stack, innermost first: `PanicFrame { address: u64, symbol: Option<String>, file: Option<String>, line: Option<u32> }`
+ * (ADR-046).
+ *
+ * A debug build of the core names its frames ([symbol], [file] and [line] are set); a release build keeps only
+ * [address], which a symbolicator resolves with the symbol files `undra build --release` writes.
+ *
+ * @property address the instruction's offset into the core's image (its address less the image's load address), pointing
+ *   into the call instruction; `0` when the core could not tell. A `u64` on the wire, a [Long] here.
+ * @property symbol the function's name, when the image still has it.
+ * @property file the source file, when the image still has line tables.
+ * @property line the source line, when the image still has line tables.
+ */
+public data class UndraPanicFrame(
+    val address: Long,
+    val symbol: String? = null,
+    val file: String? = null,
+    val line: Int? = null,
+) : UndraRecord {
+    init {
+        require(line == null || line >= 0) { "UndraPanicFrame.line is a u32 on the wire and cannot be negative: $line" }
+    }
+
+    /** The wire codec of [UndraPanicFrame] (type id `0x19a497d1`). */
+    public companion object : UndraCodec<UndraPanicFrame> {
+        override fun encode(w: UndraWriter, v: UndraPanicFrame) {
+            w.writeI64(v.address)
+            optionString.encode(w, v.symbol)
+            optionString.encode(w, v.file)
+            optionU32.encode(w, v.line?.toUInt())
+        }
+
+        override fun decode(r: UndraReader): UndraPanicFrame = UndraPanicFrame(
+            address = r.readI64(),
+            symbol = optionString.decode(r),
+            file = optionString.decode(r),
+            line = optionU32.decode(r)?.let { it.coerceAtMost(Int.MAX_VALUE.toUInt()).toInt() },
+        )
+    }
+}
+
+private val frameList: UndraCodec<List<UndraPanicFrame>> = Codecs.vec(UndraPanicFrame)
+
+/**
+ * What the core says about one contained panic, handed to `LoadOptions.onPanic` (ADR-046):
+ * `PanicReport { message, location, operation, thread, frames, namespace, core_version, schema_hash, image_id }`.
+ *
+ * The core catches every panic at its boundary and keeps working; the call that panicked fails as before
+ * (`UndraCallError.Panicked`), and this report is what an app forwards to its crash reporter. It is not an
+ * exception: nothing is thrown from it.
+ *
+ * ```kotlin
+ * UndraPlaygroundCore.load(LoadOptions(onPanic = { report ->
+ *     Crashlytics.recordException(RuntimeException(report.summary))
+ * }))
+ * ```
+ *
+ * @property message the panic message.
+ * @property location where the panic happened, `file:line:column`.
+ * @property operation what the core was running: `Todos.add`, `explode`, `task`, `computed Todos.visible`, `observe Todos`...
+ * @property thread the core's name for the thread it panicked on (`undra-core`...).
+ * @property frames the stack, innermost first; may be empty.
+ * @property namespace the core's namespace (`[core] namespace` in `undra.toml`).
+ * @property coreVersion the core's version.
+ * @property schemaHash the core's schema hash (a `u64` on the wire, a [Long] here; `UndraIds.SCHEMA_HASH.toLong()` is the bindings').
+ * @property imageId lowercase hex of the Mach-O UUID or the ELF build id of the image that holds the core, which names the symbol
+ *   files of its build; empty when the core could not read it.
+ */
+public data class UndraPanicReport(
+    val message: String,
+    val location: String,
+    val operation: String,
+    val thread: String,
+    val frames: List<UndraPanicFrame>,
+    val namespace: String,
+    val coreVersion: String,
+    val schemaHash: Long,
+    val imageId: String,
+) : UndraRecord {
+    /** The report in one line, the way the runtime logs it when `onPanic` is not set: `operation: message (location)`. */
+    public val summary: String
+        get() = "${operation.ifEmpty { "the core" }}: $message ($location)"
+
+    /** The wire codec of [UndraPanicReport] (type id `0xd08d5436`). */
+    public companion object : UndraCodec<UndraPanicReport> {
+        override fun encode(w: UndraWriter, v: UndraPanicReport) {
+            w.writeStr(v.message)
+            w.writeStr(v.location)
+            w.writeStr(v.operation)
+            w.writeStr(v.thread)
+            frameList.encode(w, v.frames)
+            w.writeStr(v.namespace)
+            w.writeStr(v.coreVersion)
+            w.writeI64(v.schemaHash)
+            w.writeStr(v.imageId)
+        }
+
+        override fun decode(r: UndraReader): UndraPanicReport = UndraPanicReport(
+            message = r.readStr(),
+            location = r.readStr(),
+            operation = r.readStr(),
+            thread = r.readStr(),
+            frames = frameList.decode(r),
+            namespace = r.readStr(),
+            coreVersion = r.readStr(),
+            schemaHash = r.readI64(),
+            imageId = r.readStr(),
+        )
+    }
+}
+
+/**
+ * What one background run did, returned by `UndraCore.runInBackground` (ADR-046):
+ * `BackgroundReport { finished: bool, replayed: u32, refetched: u32, still_pending: u32 }`.
+ *
+ * @property finished every background task finished before the deadline; `false` means work is still pending and the
+ *   OS should be asked for another window (WorkManager: retry).
+ * @property replayed offline mutations the run replayed.
+ * @property refetched stale queries the run refetched.
+ * @property stillPending items of background work left after the run (queued mutations, stale queries, unflushed persistence).
+ */
+public data class UndraBackgroundReport(
+    val finished: Boolean,
+    val replayed: Int,
+    val refetched: Int,
+    val stillPending: Int,
+) : UndraRecord {
+    init {
+        require(replayed >= 0 && refetched >= 0 && stillPending >= 0) { "the counts of an UndraBackgroundReport are u32 on the wire and cannot be negative: $this" }
+    }
+
+    /** The wire codec of [UndraBackgroundReport] (type id `0x5dbea5f3`). */
+    public companion object : UndraCodec<UndraBackgroundReport> {
+        override fun encode(w: UndraWriter, v: UndraBackgroundReport) {
+            w.writeBool(v.finished)
+            w.writeU32(v.replayed.toUInt())
+            w.writeU32(v.refetched.toUInt())
+            w.writeU32(v.stillPending.toUInt())
+        }
+
+        override fun decode(r: UndraReader): UndraBackgroundReport = UndraBackgroundReport(
+            finished = r.readBool(),
+            replayed = count(r.readU32()),
+            refetched = count(r.readU32()),
+            stillPending = count(r.readU32()),
+        )
+
+        private fun count(wire: UInt): Int = wire.coerceAtMost(Int.MAX_VALUE.toUInt()).toInt()
     }
 }

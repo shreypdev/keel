@@ -15,6 +15,7 @@ import dev.undra.runtime.adapters.LifecycleEvents
 import dev.undra.runtime.adapters.LogAdapter
 import dev.undra.runtime.adapters.NetKind
 import dev.undra.runtime.adapters.RngAdapter
+import dev.undra.runtime.adapters.StandardFunctions
 import dev.undra.runtime.adapters.StandardPorts
 import dev.undra.runtime.adapters.StorageError
 import dev.undra.runtime.adapters.TimerAdapter
@@ -79,6 +80,9 @@ class AdapterTests : Suite() {
             assertEq(id("Connectivity.changed"), StandardPorts.Connectivity.CHANGED)
             assertEq(id("port.Lifecycle"), StandardPorts.Lifecycle.PORT_ID)
             assertEq(id("Lifecycle.changed"), StandardPorts.Lifecycle.CHANGED)
+            assertEq(id("port.Diagnostics"), StandardPorts.Diagnostics.PORT_ID)
+            assertEq(id("Diagnostics.panicked"), StandardPorts.Diagnostics.PANICKED)
+            assertEq(id("fn.run_background"), StandardFunctions.RUN_BACKGROUND)
         }
 
         case("record codecs produce the documented bytes") {

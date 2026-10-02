@@ -1,5 +1,6 @@
 package dev.undra.runtime
 
+import dev.undra.runtime.adapters.UndraPanicReport
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -64,6 +65,15 @@ public enum class Mode {
  *   rebuild, once; an in-process or production core never produces one, so the callback never fires there. The message
  *   is also written to the log. It runs on a thread of the runtime's own (the delivery thread), never on the transport's:
  *   keep it short, and hop to the main thread before touching UI. An exception it throws is logged and dropped.
+ * @property onPanic called with one [UndraPanicReport] for every panic the core contained (ADR-046): the message, `file:line:column`,
+ *   the operation that was running, the thread, the stack frames (addresses, and symbols when the build has them) and the identity of
+ *   the core and its image, which is what a crash reporter needs (Crashlytics, Sentry, Play Console). The call that panicked still fails
+ *   as before (`UndraCallError.Panicked`) and the core keeps working; this is the report on top. It runs on the runtime's main
+ *   dispatcher (the main thread on Android), once per report, in the order the panics happened, after the core's own FATAL log record;
+ *   the core is never blocked on it. An `Exception` it throws is logged and reported to [onError] (operation `onPanic`), and the next
+ *   panic is reported all the same. When it is `null` the runtime logs each report at error level instead (one line: the operation, the
+ *   message and the location), so a panic is never silent. It is delivered through the `Diagnostics` port, which the runtime registers
+ *   for every core it loads, also when [defaultAdapters] is `false`; an adapter of your own for that port in [adapters] replaces it.
  */
 public class LoadOptions(
     public val mode: Mode = Mode.INPROC,
@@ -77,11 +87,13 @@ public class LoadOptions(
     public val onConnectionChange: ((ConnectionState) -> Unit)? = null,
     public val onError: ((UndraUnhandledError) -> Unit)? = null,
     public val onDevNotice: ((String) -> Unit)? = null,
+    public val onPanic: ((UndraPanicReport) -> Unit)? = null,
 ) {
     override fun toString(): String =
         "LoadOptions(mode=$mode, remoteUrl=$remoteUrl, adapters=${adapters.keys.sorted()}, " +
             "expectedSchemaHash=${expectedSchemaHash?.let { "0x" + it.toString(16) } ?: "unset"}, defaultAdapters=$defaultAdapters, remoteTimeout=$remoteTimeout, " +
-            "mirror=$mirror, reconnect=$reconnect, onError=${if (onError == null) "none" else "set"})"
+            "mirror=$mirror, reconnect=$reconnect, onError=${if (onError == null) "none" else "set"}, " +
+            "onPanic=${if (onPanic == null) "none" else "set"})"
 
     /** These options with [expectedSchemaHash] set to [hash] when it is not set already. */
     internal fun withSchemaHashDefault(hash: ULong): LoadOptions =
@@ -99,6 +111,8 @@ public class LoadOptions(
                 reconnect = reconnect,
                 onConnectionChange = onConnectionChange,
                 onError = onError,
+                onDevNotice = onDevNotice,
+                onPanic = onPanic,
             )
         }
 }

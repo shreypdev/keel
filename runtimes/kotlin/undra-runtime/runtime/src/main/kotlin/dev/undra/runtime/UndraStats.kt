@@ -22,6 +22,10 @@ package dev.undra.runtime
  * @property raw the core's statistics document exactly as received (`"{}"` when unavailable).
  * @property mirror the mirror's delivery counters: change-sets and entries received, entries applied after
  *   merging, drains, compactions, resyncs, the backlog (all zero when not reported).
+ * @property panicReports panic reports the core handed to the `Diagnostics` port (`LoadOptions.onPanic`; ADR-046); [UNKNOWN] when a
+ *   core without the counter (or a remote one) cannot say. It grows with [panics], which counts every contained panic.
+ * @property background what the core's background tasks say and have done (ADR-046); [BackgroundStats.pending] above zero means a
+ *   background window has work to drain. Every number is [UNKNOWN] when the core does not report it.
  */
 public class UndraStats(
     public val liveHandles: Int,
@@ -37,12 +41,14 @@ public class UndraStats(
     public val hostMirrorHandles: Int = 0,
     public val raw: String = "{}",
     public val mirror: MirrorStats = NO_MIRROR_STATS,
+    public val panicReports: Long = UNKNOWN.toLong(),
+    public val background: BackgroundStats = NO_BACKGROUND_STATS,
 ) {
     override fun toString(): String =
         "UndraStats(liveHandles=$liveHandles, liveStores=$liveStores, tasks=$tasks, activeCalls=$activeCalls, " +
             "openStreams=$openStreams, pendingPortCalls=$pendingPortCalls, pendingTimers=$pendingTimers, " +
             "transactions=$transactions, panics=$panics, hostPendingCalls=$hostPendingCalls, hostMirrorHandles=$hostMirrorHandles, " +
-            "mirror=$mirror)"
+            "mirror=$mirror, panicReports=$panicReports, background=$background)"
 
     /** The marker for numbers that are not known. */
     public companion object {
@@ -68,6 +74,7 @@ public class UndraStats(
             )
             fun int(key: String): Int = (doc[key] as? Long)?.coerceIn(0L, Int.MAX_VALUE.toLong())?.toInt() ?: UNKNOWN
             fun long(key: String): Long = (doc[key] as? Long) ?: UNKNOWN.toLong()
+            val background = (doc["background"] as? Map<*, *>)?.let(BackgroundStats::fromJson) ?: NO_BACKGROUND_STATS
             return UndraStats(
                 liveHandles = int("live_handles"),
                 liveStores = int("live_stores"),
@@ -82,6 +89,8 @@ public class UndraStats(
                 hostMirrorHandles = hostMirrorHandles,
                 raw = json,
                 mirror = mirror,
+                panicReports = long("panic_reports"),
+                background = background,
             )
         }
     }

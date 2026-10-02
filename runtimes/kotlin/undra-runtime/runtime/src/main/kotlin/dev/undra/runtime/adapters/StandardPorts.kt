@@ -130,4 +130,29 @@ public object StandardPorts {
         /** `fnv1a32("Lifecycle.changed")`. */
         public const val CHANGED: UInt = 0x0bc82569u
     }
+
+    /**
+     * `Diagnostics` (sync, ADR-046): `panicked(report: PanicReport)`, called once per contained panic of the core, fire and forget
+     * (port call id 0, like a `Log` record), after the core's FATAL log record. The runtime registers its own adapter for it, which
+     * hands the report to `LoadOptions.onPanic`.
+     */
+    public object Diagnostics {
+        /** `fnv1a32("port.Diagnostics")`. */
+        public const val PORT_ID: UInt = 0xab68cd7cu
+
+        /** `fnv1a32("Diagnostics.panicked")`. */
+        public const val PANICKED: UInt = 0xbd147e2eu
+    }
+}
+
+/**
+ * Function ids of the standard functions (ADR-046): free functions that are in every schema, are never generated and are
+ * implemented by the runtime's own API (`function_id = fnv1a32("fn.<name>")`).
+ */
+public object StandardFunctions {
+    /**
+     * `fnv1a32("fn.run_background")`: `run_background(deadline_ms: u64) -> BackgroundReport` (async), behind
+     * `UndraCore.runInBackground`.
+     */
+    public const val RUN_BACKGROUND: UInt = 0x0e5b14ffu
 }

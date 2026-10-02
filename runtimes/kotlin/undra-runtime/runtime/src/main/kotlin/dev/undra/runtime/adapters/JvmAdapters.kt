@@ -17,6 +17,7 @@ import java.nio.file.Paths
  * | `Clock`, `Rng`, `Log` | [ClockAdapter], [RngAdapter] (`SecureRandom`), [LogAdapter] (`java.util.logging`) |
  * | `Timer` | [TimerAdapter] over a scheduled executor |
  * | `Connectivity`, `Lifecycle` | none: they are event ports; see [ConnectivityEvents] and [LifecycleEvents] |
+ * | `Diagnostics` | none here: the loaded core registers its own [DiagnosticsAdapter] (whatever `defaultAdapters` says), which calls `LoadOptions.onPanic` |
  *
  * `UndraCore.load` installs these itself unless `LoadOptions.defaultAdapters` is `false`; use this object to
  * pick another data directory or to mix them with your own.
