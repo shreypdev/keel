@@ -162,6 +162,31 @@ the host and on wasm32. The fix round:
 * **N5 (sizes carry the checkout path).** The sizes above are this worktree's path; the reviewer's differ by tens of
   bytes.
 
+**Re-verification** (the same reviewer, at `47b5f1a`, appended to the report): M1, L1, L2 and L3 CLOSED, the answers
+to N1, N4 and N5 accurate; the differential harness again byte-identical. With `canonical_json` put back on the clone
+and `serde` in a scratch worktree the new row read 87.6 to 88.4 µs and failed the baseline gate three times of three.
+What it added, and what was done:
+
+* **R1 (Low, in code this piece did not write).** With a `TypeRef` variant added and the writer taught its payload,
+  the closure collector (`closure.rs`, the `_ => {}` of `reach`) does not traverse it, so a store of `set<R>` has a
+  fingerprint that does not move when `R` changes, and the closure reader (`closure_json.rs`, the last arm of the
+  wrapper kinds) reads it back as `Stream`. Not changed here: it is persistence-v2's collector and reader, and it
+  bites only when a variant is added. The writer's comment no longer claims more than the writer does. **Open for
+  the integrator**: whoever adds a `TypeRef` variant must touch both places, and making both matches exhaustive is
+  a small piece of its own.
+* **R2 (Note).** A clone alone coming back (without `serde`) is 1.47x and passes the gate; the row's comments said
+  "or". They say "and" now.
+* **R3 (Note).** The unfiltered budgets test against the host baseline needs a quiet machine: at load 22 to 33 it
+  passed one run of three, the failing rows moving between runs through groups this piece does not touch.
+* **R4 (Note).** The new row is not normalised by schema size: about 20 KB more harness schema reaches its gate with
+  no code change. The row's comment in `budgets.toml` says what it measures, so that is a one-minute diagnosis.
+
+**CI on the pushed head** ([shreypdev/undra#1](https://github.com/shreypdev/undra/pull/1), rustc 1.98.1). The first
+run (`439f1ad`) fails in the seven jobs main fails in at `be8e01d`, at the same steps (Rust on Linux: the same single
+`undra-transport` test), and passes the other thirteen. Bench, same VM, base commit against head:
+`snapshot/cold_start_restore_100kb` 321.3 µs to 196.6 µs (0.61x), `..._core_thread` 366.5 µs to 238.5 µs (0.65x); the
+size gate measured the hello-world web core at 111,563 bytes gzipped with the pinned compiler (the record is 116,690).
+
 ## Deviations from the brief
 
 * The brief offered "fix it" or "re-record with the justification". The answer is both halves of that sentence: the
