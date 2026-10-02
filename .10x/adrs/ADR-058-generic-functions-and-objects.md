@@ -1,6 +1,6 @@
 # ADR-058: generic functions, methods, objects and stores cross as declared instantiations
 
-Status: **Proposed** (2026-10-02, `wt/generics-fn-obj`; the open half of ADR-042, catalogue row 22, the post's
+Status: **Accepted** (implemented 2026-10-02, `wt/generics-fn-obj`; the deviations are at the end) (proposed the same day; the open half of ADR-042, catalogue row 22, the post's
 "not built yet" item "Generic functions and objects"). Touches SPEC 1.1 (the name an instantiation's id is
 computed from), 2.2 (`GenericOf` on `FunctionDef` and `MethodDef`), 2.3 (written only when set), 4.1 and 4.3
 (three new accepted shapes), 10.3 (a new subsection of generated shapes), 12 (E0002 and E0070 texts, E0072 and
@@ -538,8 +538,8 @@ this scope … `Selection` is in scope, but it is a struct, not a macro", listed
 
 ## Prototype (2026-10-02, not landed)
 
-`.10x/specs/2026-10-02-generics-fn-obj-prototype.patch` applies to `a309e9f` (1,364 lines: the macros and two
-test files). It is a proof, not the implementation: no diagnostics, no label, no bindgen. What it showed:
+`.10x/specs/2026-10-02-generics-fn-obj-prototype.patch` applied to `a309e9f` (1,364 lines: the macros and two
+test files; deleted in the implementation's last commit, the implementation having superseded it). It is a proof, not the implementation: no diagnostics, no label, no bindgen. What it showed:
 
 * **Proved**: a generic function with a list (sync, `async`, with `ctx`, `T` in the return only) registers one
   function per instantiation under `newest<Todo>` and dispatches to the generic body; a generic object and a
@@ -680,3 +680,42 @@ stop and report: the design says it does not), `.10x/status.md`, `.10x/handoff.m
 None to start. Piece B needs A's `undra-meta` commit; piece C needs both. The pieces own `undra-meta`,
 `undra-macros` and `undra-bindgen` while they run, so no other worktree may touch those crates
 (`docs/AGENT_WORKFLOW.md`, parallelism rules).
+
+## Implementation (2026-10-02, `wt/generics-fn-obj`) and deviations
+
+The three pieces of the brief landed on one branch, in this order, each with its own commits (the record:
+`.10x/decisions/sde/generics-fn-obj.md`): **A** `undra-meta`, `undra-macros` and `undra` (the label, functions and methods,
+objects and stores, the application of a type parameter, the diagnostics, the catalogue); **B** `undra-bindgen` (families, native and id
+names, the three generators, the goldens `generic_functions` and `generic_objects`, the diagnostics goldens); **C** the playground
+(`selection.rs`, the three apps, the regenerated bindings), contract scenario **S34**, the bench row, the guide
+`site/docs/generics.html` and the wording updates. The prototype patch is deleted. Deviations, each dated 2026-10-02:
+
+1. **The new bindgen cases are `generic_functions` and `generic_objects`**, not `generics` (which ADR-042's goldens already use). Both
+   are in `schema_hash.rs`'s list of cases with no hash from before the field: the label is part of the canonical form only when set.
+2. **`__instantiate!` also receives the template's type arguments as an item**, `type __UndraInstanceArgs = (Todo,);`, after the
+   definitions. Its only use is naming the rule of E0070: a second alias of one instantiation in one module defines the same constant
+   twice, and `rustc` reports that before anything else (so the macro's branded E0070 reaches the author first). The check of an alias
+   in another crate is the inherent constant, as in ADR-042. A store's E0070 has a unit test and no trybuild case (its golden is 640
+   lines of cascade).
+3. **A template that fails to expand leaves a stub**: a `macro_rules!` that swallows its aliases (and a stub compose macro for a
+   store), so the one error is not followed by one "cannot find macro" for every alias.
+4. **E0074 also covers a method of a generic block with type parameters of its own and no list** (`fn map<U>(..)`), beside a list on
+   such a method; the text names the block.
+5. **E0072's text counts in the singular** ("has 1 parameter"), and the schema validation names the family's schema names (`newest<Todo>`,
+   `newest<Note>`) when instantiations disagree in shape.
+6. **Kotlin gives every overload a `@JvmName`** (the id name: `newestTodo`), not only the clashing ones, so a family reads the same
+   whatever its parameters erase to; the generated files compile with `-Werror` under kotlinc 2.4.20 and CI's 2.0.21.
+7. **Scenario S34 step 6**: `Recent<Todo>` is returned by a function, `recent_todos(rows, limit)`, that makes a fresh object each call,
+   so "one wrapper per handle" is checked as: a `RecentTodos` is the alias's class, a second call is another wrapper with rows of its
+   own, and closing one leaves the other. (Interning of one object returned twice is S27's.) S35 stays with `reload-handles`.
+8. **The ratio gate is 1.2, not 1.1**: `generic_fn_vs_function` measured 0.89 to 1.04 over six runs on the reference host, and
+   `budgets.toml`'s own rule (1.15 times the largest healthy sample, rounded up to 0.1) gives 1.2; two rows of about 40 ns have more
+   noise than 1.1 on a shared runner. An extra dispatch hop would be 1.3 or more.
+9. **The cookbook has no modelling page** to extend: the guide `generics.html` takes that role (and `types.html` gained the
+   "Generics" section with the limits table). The default-choice post's tally follows row T22 (28 solved, 5 partial) and its `claims.md`
+   rows M03-N3, O34 and T22, MI04 and section 11.
+10. **Measured**: the web hello core grows from 116,550 to 117,215 bytes gzipped (+665, the label in the JSON writer and the mirrors;
+    gate 120,000) and the up-front JavaScript stays at 22,100 (gate 22,100: no runtime changed). The Swift 6.3 diagnostic for an array
+    literal of an un-instantiated type is in the guide.
+11. **MSRV 1.85 was not built locally** (no such toolchain on the machine); the two-macro hand-over and the single-segment re-export are
+    the constructs ADR-042 already relies on, and CI's pinned toolchain builds the tests.
