@@ -298,11 +298,6 @@ function replyBody(reply: Uint8Array): Uint8Array {
   return reply.length <= 64 ? reply.slice(5) : reply.subarray(5);
 }
 
-/** Whether `transport` passes the control messages as calls (the in-process host, ADR-057) and needs no framing. */
-function typed(transport: Transport | CoreTransport): transport is CoreTransport {
-  return transport.observe !== undefined;
-}
-
 /** `background.pending` of the core's JSON statistics (`undra_stats_json`): `0` for a core that reports none or a text that is not JSON. */
 function backgroundPending(json: string | null | undefined): number {
   try {
@@ -453,8 +448,9 @@ export class UndraCore {
     // What a core outside this thread adds (ADR-057): the adapter that frames the control messages of a transport that only has
     // `send(kind, payload)` (remote, worker, a custom one), and the promises behind `observe` of a core that answers later. The
     // in-process host passes its control messages as calls and delivers the initial values inside `observe`: it needs neither.
-    const outside = typed(transport) && transport.synchronous && transport.mode.startsWith("wasm") ? undefined : await onDemand("transport adapter", () => import("./transport/framed.js"));
-    const channel = typed(transport) ? transport : (outside as NonNullable<typeof outside>).framed(transport);
+    // Any other transport is checked there: all seven control methods or none (`channel`, a typed refusal for some of them).
+    const outside = transport instanceof WasmHost ? undefined : await onDemand("transport adapter", () => import("./transport/framed.js"));
+    const channel = outside === undefined ? (transport as WasmHost) : outside.channel(transport);
     const core = new UndraCore(channel, options, adapters);
     if (outside !== undefined && !transport.synchronous) outside.mirrorWaiters(core.mirror);
     core._ext = outside?.extension;

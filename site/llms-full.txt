@@ -3179,7 +3179,7 @@ the core and the project disagree about where Undra comes from, or the project i
 
 The JavaScript runtime (`@undra/runtime`) throws and logs these. Its **production build** (what `vite build`, webpack in production mode and anything else that asks for neither the `development` nor the `react-native` condition resolve) says a code, the values and a link instead of a sentence, so a page does not carry the prose of an error whose class, `kind` and fields it already has: `T0017: callSync, remote — https://shreypdev.github.io/undra/docs/errors.html#T0017`. Its **development build** (Vite's dev server, Vitest, React Native) says the sentence. Both throw the same classes with the same `kind` and fields; only `message` differs, so nothing a program can branch on changes. Text the runtime hands on as data, the field of a port's typed error (which the core receives) and a WebSocket close frame's reason (which the peer receives), is not a message: it is the same sentence in both builds. Codes are never reused.
 
-### The T codes (167)
+### The T codes (168)
 
 The sentence is what the development build says; `{0}`, `{1}`, ... are the values the production message lists, in that order.
 
@@ -3352,6 +3352,7 @@ The sentence is what the development build says; `{0}`, `{1}`, ... are the value
 | [`T0242`](https://shreypdev.github.io/undra/docs/errors.html#T0242) | the worker was not started with recovery | worker.ts: UndraTransportError("unsupported") |
 | [`T0243`](https://shreypdev.github.io/undra/docs/errors.html#T0243) | the wasm core trapped ({0}) and was restarted from a snapshot {1} ms old | recovery.ts: UndraCoreRestarted |
 | [`T0244`](https://shreypdev.github.io/undra/docs/errors.html#T0244) | keyed patch operation #{0} ({1}) index {2} is out of bounds for a list of length {3} | wire/errors.ts: PatchError |
+| [`T0246`](https://shreypdev.github.io/undra/docs/errors.html#T0246) | the transport passes {0} as calls but not {1}: a transport has all seven control methods (observe, release, cancel, streamCredit, event, timerFired, portReply) or none, and send frames them | transport/framed.ts: UndraError("options") |
 
 ### Wire failures
 

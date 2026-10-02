@@ -2,7 +2,7 @@ import { TIMER_PORT } from "../adapters/port-literals.js";
 import type { Adapters } from "../adapters/types.js";
 import type { UndraCallError } from "../call-error.js";
 import type { AttachOptions, UndraCore } from "../core.js";
-import { UndraTransportError } from "../errors.js";
+import { UndraError, UndraTransportError } from "../errors.js";
 import { onDemand } from "../on-demand.js";
 import type { PortImpl } from "../port.js";
 import { type HelloPayload, Kind, encodeCancel, encodeEvent, encodeObserve, encodeRelease, encodeStreamCredit, encodeTimerFired } from "../wire/index.js";
@@ -24,6 +24,24 @@ export { mirrorWaiters } from "../mirror-waiters.js";
  * dropped (ADR-051), the connection-down test of `report`, the dev notice (ADR-053), the ports of a native core and the warning
  * about the adapters a worker ignores. An in-process core has none of it, so none of it is in a `wasm-main` page's first chunk.
  */
+
+/** The control messages a transport passes as calls (ADR-057): all of them, or none (`send` frames them). */
+const CONTROL = ["observe", "release", "cancel", "streamCredit", "event", "timerFired", "portReply"] as const;
+
+/**
+ * The typed channel `UndraCore` speaks over `transport`, a transport that is not the in-process host: the transport itself when it
+ * passes every control message as a call and has `sendCall`, `framed(transport)` when it passes none (or all of them but frames its
+ * calls with `send`). A transport with some of the seven and not the others is refused, `UndraError("options")` naming both lists,
+ * before it starts: the core would otherwise call a method it does not have at the first release or cancel.
+ */
+export function channel(transport: Transport | CoreTransport): CoreTransport {
+  const t = transport as Partial<CoreTransport>;
+  const has = CONTROL.filter((name) => t[name] !== undefined);
+  if (has.length > 0 && has.length < CONTROL.length) {
+    throw new UndraError("options", msg(246, has.join(", "), CONTROL.filter((name) => t[name] === undefined).join(", ")));
+  }
+  return has.length > 0 && t.sendCall !== undefined ? (transport as CoreTransport) : framed(transport as Transport);
+}
 
 /** What a wrapped transport answers beyond the control messages: forwarded as it has them (the core tells the modes apart by them). */
 const FORWARDED = ["callSync", "callSyncParts", "stats", "snapshot", "restore", "portAdded", "restart"] as const;

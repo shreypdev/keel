@@ -263,6 +263,7 @@ const MESSAGES: Readonly<Record<number, string | null>> = {
   243: "the wasm core trapped ({0}) and was restarted from a snapshot {1} ms old", // recovery.ts: UndraCoreRestarted
   244: "keyed patch operation #{0} ({1}) index {2} is out of bounds for a list of length {3}", // wire/errors.ts: PatchError
   245: null, // retired: db/node-sqlite.ts says it in both flavours (data: a port error's field, which the core receives)
+  246: "the transport passes {0} as calls but not {1}: a transport has all seven control methods (observe, release, cancel, streamCredit, event, timerFired, portReply) or none, and send frames them", // transport/framed.ts: UndraError("options")
 };
 
 /**

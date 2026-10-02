@@ -5,6 +5,7 @@ import { PanicReportCodec } from "../src/adapters/codecs.js";
 import type { UndraPanicReport } from "../src/adapters/types.js";
 import { writeHead } from "../src/call-head.js";
 import { UndraCore } from "../src/core.js";
+import { UndraError } from "../src/errors.js";
 import { framed } from "../src/transport/framed.js";
 import type { CoreTransport, Transport } from "../src/transport/transport.js";
 import { CallTarget, ChangeOp, Kind, UndraWriter, encodeCancel, encodeChangeSet, encodeEvent, encodeObserve, encodeRelease, encodeStreamCredit, encodeTimerFired, encodeValue } from "../src/wire/index.js";
@@ -233,6 +234,56 @@ describe("UndraCore.attach: a transport with only send is wrapped, one with the 
     const core = track(await UndraCore.attach(typed as unknown as Transport, { expectedSchemaHash: SCHEMA, shared: false, adapters: { log: captureLog(), http: null, timer: null } }));
     core.release(4n);
     expect(calls).toEqual(["release 4"]);
+  });
+
+  it("refuses a transport that has some of the seven control methods and not the others, typed and naming them, before anything starts", async () => {
+    let started = false;
+    const partial = {
+      mode: "custom",
+      synchronous: false,
+      start: () => {
+        started = true;
+        return Promise.resolve({ undraVersion: "x", schemaHash: SCHEMA, platform: "p", mode: "m" });
+      },
+      close: () => {},
+      send: () => {},
+      observe: () => {},
+      release: () => {},
+    } as unknown as Transport;
+    const refusal = await UndraCore.attach(partial, { expectedSchemaHash: SCHEMA, shared: false, adapters: { log: captureLog(), http: null, timer: null } }).then(
+      (core) => {
+        core.close();
+        return undefined;
+      },
+      (e: unknown) => e,
+    );
+    expect(refusal).toBeInstanceOf(UndraError);
+    expect((refusal as UndraError).kind).toBe("options");
+    expect((refusal as UndraError).message).toContain("observe, release");
+    expect((refusal as UndraError).message).toContain("cancel, streamCredit, event, timerFired, portReply");
+    expect(started, "the transport was not started").toBe(false);
+  });
+
+  it("frames the calls of a transport that has all seven control methods and no sendCall through its send", async () => {
+    const calls: string[] = [];
+    const typed = {
+      mode: "custom",
+      synchronous: false,
+      start: () => Promise.resolve({ undraVersion: "x", schemaHash: SCHEMA, platform: "p", mode: "m" }),
+      close: () => {},
+      send: (kind: Kind) => void calls.push(`send ${Kind[kind]}`),
+      observe: () => {},
+      release: (handle: bigint) => void calls.push(`release ${handle}`),
+      cancel: () => {},
+      streamCredit: () => {},
+      event: () => {},
+      timerFired: () => {},
+      portReply: () => {},
+    } as unknown as Transport;
+    const core = track(await UndraCore.attach(typed, { expectedSchemaHash: SCHEMA, shared: false, adapters: { log: captureLog(), http: null, timer: null } }));
+    core.release(4n);
+    core.call(CallTarget.FreeFunction, 1, new Uint8Array(0)).catch(() => {});
+    expect(calls).toEqual(["release 4", "send Call"]);
   });
 });
 

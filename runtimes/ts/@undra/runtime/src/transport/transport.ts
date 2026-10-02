@@ -102,8 +102,9 @@ export interface Transport {
    * starts or stops observing `signalId` of the store `handle` (`ALL_SIGNALS` for every one).
    *
    * A transport that has one of the seven must have all of them (`observe`, `release`, `cancel`, `streamCredit`, `event`,
-   * `timerFired`, `portReply`); one that has none is wrapped by the runtime (`transport/framed.ts`), which encodes each
-   * call into the payload `send` always received, byte for byte. As for {@link Transport.sendCall}: whatever a method is
+   * `timerFired`, `portReply`): `attach` refuses one that has some and not the others with `UndraError("options")` naming
+   * both. One that has none is wrapped by the runtime (`transport/framed.ts`), which encodes each call into the payload
+   * `send` always received, byte for byte. As for {@link Transport.sendCall}: whatever a method is
    * given it must copy before it returns.
    */
   observe?(handle: bigint, signalId: number, on: boolean): void;
