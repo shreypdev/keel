@@ -150,24 +150,29 @@ final class RealtimeReviewTests: XCTestCase {
         XCTAssertEqual(left?.clientClosed, true)
     }
 
-    /// The median of how long the timer that ends a burst (`burstGap`, on the queue the inbox arms it on) takes to fire.
-    private func medianTimerLatencyMilliseconds() async -> Double {
-        var samples: [Double] = []
-        for _ in 0 ..< 21 {
-            let started = DispatchTime.now().uptimeNanoseconds
+    /// A `burstGap` timer on the queue the inbox arms its own on, armed now: the instant its waiter ran again.
+    /// What the binding does for a lone message, and nothing else, so the two finish together wherever they run.
+    private func referenceTimer() -> Task<UInt64, Never> {
+        Task { () async -> UInt64 in
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + burstGap) {
                     continuation.resume()
                 }
             }
-            samples.append(Double(DispatchTime.now().uptimeNanoseconds - started) / 1e6)
+            return DispatchTime.now().uptimeNanoseconds
         }
-        samples.sort()
-        return samples[10]
     }
 
     /// 1c: one lone message is answered within about the burst gap of its arrival, whether the
     /// pull was waiting or came after it.
+    ///
+    /// "About the burst gap" is not a number of milliseconds a test can hold a machine to: the 2 ms timer that
+    /// ends a burst fired after about 3 ms on a laptop, and after 5, 10 and 17 ms in three runs on a hosted macOS
+    /// runner (within one run, too: a calibration made after the rounds read 5 ms where the rounds had seen 17).
+    /// So every round arms a timer of its own beside the binding's, for the same gap on the same queue at the
+    /// same moment, and what is measured is how much later than that timer the binding answered. A lone message
+    /// held for the 8 ms burst cap, or for a linger, answers milliseconds after it on any machine whose timers
+    /// can tell 2 ms from 8; a slow clock moves both and leaves the difference alone.
     func testALoneMessageIsAnsweredWithinAFewMillisecondsOfItsArrival() async throws {
         let adapter = ScriptedWebSocket()
         let binding = WebSocketBinding(adapter: adapter)
@@ -182,31 +187,28 @@ final class RealtimeReviewTests: XCTestCase {
                 return (got, DispatchTime.now().uptimeNanoseconds)
             }
             try await Task.sleep(nanoseconds: 5_000_000)
-            let pushed = DispatchTime.now().uptimeNanoseconds
+            var reference = referenceTimer()
             socket.push(.text("w\(round)"))
             let (result, at) = await pull.value
             XCTAssertEqual(try result.get(), [.text("w\(round)")])
-            waited.append(Double(at - pushed) / 1e6)
+            waited.append((Double(at) - Double(await reference.value)) / 1e6)
             // The message is there before the pull.
             socket.push(.text("l\(round)"))
             await eventually("the read-ahead") { socket.pulled == 2 * (round + 1) }
-            let asked = DispatchTime.now().uptimeNanoseconds
+            reference = referenceTimer()
             let early = try await binding.receive(conn: conn, max: 16)
+            let answered = DispatchTime.now().uptimeNanoseconds
             XCTAssertEqual(early, [.text("l\(round)")])
-            late.append(Double(DispatchTime.now().uptimeNanoseconds - asked) / 1e6)
+            late.append((Double(answered) - Double(await reference.value)) / 1e6)
         }
         waited.sort()
         late.sort()
-        // The binding answers a lone message when `burstGap` (2 ms) has passed without another one, which is a
-        // timer of the platform: it fired after about 3 ms on a laptop and after 10.1 ms (the median of the failed
-        // run) on a hosted macOS runner. The budget is that timer plus 5 ms, so that what is measured is the
-        // binding's own delay (a lone message held for the 8 ms burst cap, or for a linger, is over it wherever
-        // the timer is not itself that slow) and not the machine's clock.
-        let timer = await medianTimerLatencyMilliseconds()
-        XCTAssertLessThan(waited[20], timer + 5, "median latency of a lone message (the platform's \(timer) ms timer plus 5)")
-        XCTAssertLessThan(late[20], timer + 5, "median latency of a pull that finds one message (the platform's \(timer) ms timer plus 5)")
-        XCTAssertLessThan(waited[39], 100, "a lone message waited 100 ms or more")
-        XCTAssertLessThan(late[39], 100, "a pull that found one message waited 100 ms or more")
+        XCTAssertLessThan(waited[20], 5, "a lone message was answered \(waited[20]) ms (the median of 40) after a burst-gap timer armed at its arrival")
+        XCTAssertLessThan(late[20], 5, "a pull that found one message was answered \(late[20]) ms (the median of 40) after a burst-gap timer armed with it")
+        // The tail: all but four rounds of forty (a round in which the machine held up the binding's answer and
+        // not the timer beside it says nothing about the binding).
+        XCTAssertLessThan(waited[35], 100, "a lone message waited 100 ms or more past its burst-gap timer in five rounds of 40")
+        XCTAssertLessThan(late[35], 100, "a pull that found one message waited 100 ms or more past its burst-gap timer in five rounds of 40")
     }
 
     /// 1c: a steady trickle (one message every 0.5 ms, never a 2 ms gap) still answers within the
@@ -268,7 +270,10 @@ final class RealtimeReviewTests: XCTestCase {
             }
             let elapsed = Double(at - started) / 1e6
             XCTAssertGreaterThan(got.count, 1, "the trickle was one burst")
-            XCTAssertLessThan(elapsed, 30, "a trickle held the pull for \(elapsed) ms")
+            // The cap answers on the first push 8 ms after the pull's first message: about 17 messages at one per
+            // 0.5 ms, counted where the binding answered and so the same on any machine. (A pull held until the
+            // trickle stops is answered by `max`, with 1,000.)
+            XCTAssertLessThanOrEqual(got.count, 64, "a trickle held the pull for \(got.count) messages (\(elapsed) ms)")
             return
         }
         XCTFail("no trial of 40 was a trickle: the feeder was held up for \(pauses.map { String(format: "%.1f", $0) }) ms between two pushes")
@@ -474,7 +479,9 @@ final class DbReviewTests: XCTestCase {
         }
         XCTAssertGreaterThanOrEqual(waited, 395, "busy came before the timeout")
         XCTAssertLessThan(waited, 600, "busy came well after the timeout")
-        XCTAssertLessThan(Double(slowest) / 1e6, 50, "a transaction statement was blocked by the waiting one")
+        // Blocked by the waiting statement, one of them takes what is left of its 400 ms; 200 is far from both that
+        // and a statement that a busy machine held up.
+        XCTAssertLessThan(Double(slowest) / 1e6, 200, "a transaction statement was blocked by the waiting one")
         try await db.finish(tx, commit: true)
         let rows = try await db.query(id, "SELECT COUNT(*) FROM notes", [])
         XCTAssertEqual(rows.rows, [[.integer(20)]], "the outer statement never ran")
