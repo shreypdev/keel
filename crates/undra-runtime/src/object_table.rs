@@ -1231,7 +1231,8 @@ mod tests {
         assert_eq!(t.type_of(Handle(books)).unwrap().1, "LazyList");
         assert!(t.get_dyn(Handle(books)).unwrap().as_store().is_none());
         // The server shares the store's list.
-        shelf.books.push(40);
+        // (A table of its own has no core to hold: the write check is lifted for this one.)
+        crate::testing::unchecked_writes(|| shelf.books.push(40));
         assert_eq!(page_len(&t, Handle(books)), Some(4));
         // Only the store is listed for a snapshot.
         let listed = t.stores();

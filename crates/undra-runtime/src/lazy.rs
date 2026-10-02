@@ -143,7 +143,10 @@ pub(crate) fn page_reply(source: &dyn LazySource, offset: u32, limit: u32) -> Ve
     let mut reply = w.into_vec();
     let mut head = Writer::with_capacity(16);
     header.encode(&mut head);
-    reply[..16].copy_from_slice(head.as_slice());
+    // The source only appends; a source that cut the buffer short would leave nothing to patch.
+    if let Some(front) = reply.get_mut(..16) {
+        front.copy_from_slice(head.as_slice());
+    }
     reply
 }
 
@@ -181,13 +184,16 @@ impl LazyList {
         list
     }
 
+    /// Moves the version on; called with the items' write lock held, so that a reader (which reads
+    /// the version under the read lock) sees the items and the version of one instant.
     fn bump(&self) {
         self.inner.version.fetch_add(1, Ordering::AcqRel);
     }
 
     /// Appends one already-encoded item.
     pub fn push(&self, item: Vec<u8>) {
-        self.inner.items.write().push(item);
+        let mut items = self.inner.items.write();
+        items.push(item);
         self.bump();
     }
 
@@ -200,14 +206,18 @@ impl LazyList {
 
     /// Replaces every item.
     pub fn replace(&self, items: Vec<Vec<u8>>) {
-        *self.inner.items.write() = items;
-        self.bump();
+        let old = {
+            let mut current = self.inner.items.write();
+            let old = std::mem::replace(&mut *current, items);
+            self.bump();
+            old
+        };
+        drop(old);
     }
 
     /// Removes every item.
     pub fn clear(&self) {
-        self.inner.items.write().clear();
-        self.bump();
+        self.replace(Vec::new());
     }
 
     /// Number of items.
