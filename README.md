@@ -47,7 +47,7 @@ real hardware in the device phase (tracked in [`bench/RESULTS.md`](bench/RESULTS
 | One insert into an observed 10,000-row list | **6.3 µs** | ≤ 20 µs |
 | Change-set for 100 dirty signals | **2.3 µs** | ≤ 100 µs |
 | Cold start restoring 100 KB of state | **71 µs** | ≤ 3 ms |
-| Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->116.6 KB<!--/measured-->** gzipped | ≤ 120 KB |
+| Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->119.2 KB<!--/measured-->** gzipped | ≤ 120 KB |
 | Android core (`.so`, per ABI, release) | **831 KB** | ≤ 1.2 MB |
 
 The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.sh) builds the
@@ -55,9 +55,9 @@ The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.
 a change that takes it over 120 KB or more than 5% over its record
 ([`bench/results/web-size.jsonl`](bench/results/web-size.jsonl), [ADR-052](.10x/adrs/ADR-052-web-bundle-size.md)).
 The JavaScript runtime the page loads with it is gated the same way:
-<!--measured:web-runtime-js-->26 KB<!--/measured--> gzipped against a 26 KB budget (the
-blueprint's 8 KB predates the transports, reconnect, coalescing, worker mode and the typed error
-channel; the next piece aims for 16 KB).
+<!--measured:web-runtime-js-->27.4 KB<!--/measured--> gzipped against a 27.5 KB budget (the
+blueprint's 8 KB predates the transports, reconnect, coalescing, worker mode, the typed error
+channel and the panic reports; the next piece aims for 16 KB).
 
 ## Why you can trust it
 

@@ -328,6 +328,13 @@ script, not twiggy's shallow bytes (gzip is not additive).
    `report` / `onError`, snapshot and restore, worker sync ports) added 2.3 KB to what the hello app ships, so the
    record is 24,841 bytes; 24 KB would have failed from the day it was set, which is not a test (R9). The
    record is the honest number; `ts-runtime-size` still targets 16 KB.
+
+   *Restated 2026-10-01, by `prod-ops` (ADR-046):* the budget is **27.5 KB** (27,500 bytes), the record 27,385. Every
+   runtime now carries the `Diagnostics` adapter and `onPanic` (the report codecs, the wasm trap path that builds
+   the report from the FATAL record and the trap's stack: about 700 bytes up front) and `runInBackground` with the
+   page's background window (about 850 bytes in a lazily loaded chunk, which the measuring script counts). The
+   hello wasm is 119,227 (budget 120,000). `ts-size-e4` (ADR-056) lowers the JavaScript budget in the commit that
+   reaches it; its measuring script puts this change at about 25 KB.
 3. **The 5% tolerance over the record stays**, alongside the budget, for both artefacts.
 4. **No second landing card.** The landing row says plainly that it is the wasm alone ("Web core, hello
    world: the wasm alone, gzipped"); the README states the JavaScript number and its budget in prose.
