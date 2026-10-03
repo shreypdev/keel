@@ -4,23 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fifteen levers: the JavaScript runtime at 16 KB | Undra blog</title>
-<meta name="description" content="How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.">
+<meta name="description" content="How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing a feature.">
 <link rel="canonical" href="https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/">
 <meta property="og:title" content="Fifteen levers: the JavaScript runtime at 16 KB | Undra blog">
-<meta property="og:description" content="How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.">
+<meta property="og:description" content="How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing a feature.">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/">
 <meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
 <meta property="article:published_time" content="2026-10-03">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Fifteen levers: the JavaScript runtime at 16 KB | Undra blog">
-<meta name="twitter:description" content="How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.">
+<meta name="twitter:description" content="How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing a feature.">
 <meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
 <script type="application/ld+json">{
   "@context": "https://schema.org",
   "@type": "BlogPosting",
   "headline": "Fifteen levers: the JavaScript runtime at 16 KB",
-  "description": "How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.",
+  "description": "How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing a feature.",
   "datePublished": "2026-10-03",
   "dateModified": "2026-10-03",
   "inLanguage": "en",
@@ -72,37 +72,40 @@
 </header>
 <main class="post" id="main"><article>
   <header class="post-header">
-    <p class="eyebrow">Performance</p><h1>Fifteen levers: the JavaScript runtime at 16 KB</h1><p class="lede">What a hello-world page loads up front of <code>@undra/runtime</code> went from 22,100 to 15,774 bytes gzipped, under a 16,000-byte budget. Nothing was removed: what left the first chunk loads with what needs it. Here are the fifteen levers, and the four defects the review caught.</p>
-    <p class="post-meta"><time datetime="2026-10-03">3 Oct 2026</time> · 5 min read · Undra team</p>
+    <p class="eyebrow">Performance</p><h1>Fifteen levers: the JavaScript runtime at 16 KB</h1><p class="lede">What a hello-world page loads up front of <code>@undra/runtime</code> went from 22,100 to 15,774 bytes gzipped, under a 16,000-byte budget. No feature was removed: code a hello page does not use loads when something first needs it, and a production page reports an error as a code with a link instead of a sentence. Here are the fifteen levers, and the four defects the review caught.</p>
+    <p class="post-meta"><time datetime="2026-10-03">3 Oct 2026</time> · 6 min read · Undra team</p>
   </header>
   <nav class="toc" aria-label="On this page"><ol><li><a href="#the-budget">Where the bytes were</a></li><li><a href="#the-levers">The levers</a></li><li><a href="#what-stays">What left, and what stays</a></li><li><a href="#the-review">What the review caught</a></li><li><a href="#the-cost">What it cost</a></li></ol></nav>
 <section id="the-budget">
 <h2>Where the bytes were</h2>
-<p>The web size decision (ADR-052) asked for 16 KB of runtime up front. An earlier piece reached 21.2 KB and concluded that 16 KB would mean removing behaviour; five pieces then added 0.9 KB, and the gate stood at 22,100 bytes with no room. Instead we attributed every byte: a script charges each byte of the minified chunk, and each bit of its gzip stream, to its declaration. The largest shares:</p>
+<p>The web size decision (ADR-052) asked for 16 KB of runtime up front. An earlier piece reached 21.2 KB and concluded that 16 KB would mean removing behaviour; five pieces then added 0.9 KB, and the gate stood at 22,100 bytes with no room. Instead we attributed every byte: a script charges each byte of the minified chunk, and each bit of its gzip stream, to its declaration.</p>
+<p>Every size here is gzipped at zlib level 9. "Up front" is the first chunk of a production build of the <code>undra init</code> web template, made by Vite 8.3.1 (its bundler is Rolldown), counting the runtime's own code. Vite's preload helper, a snippet Vite adds to a chunk that loads another on demand, is 691 bytes and is reported beside the number. A share is what code costs in this chunk, not what removing it saves, so every lever below was measured by building. The nine largest of the 24 shares:</p>
 <div class="table-wrap"><table><thead><tr><th>Concern</th><th>gzipped bytes</th></tr></thead><tbody>
-<tr><td>wire: reader, writer, codecs</td><td>3,702</td></tr>
-<tr><td>the mirror</td><td>2,867</td></tr>
-<tr><td>the in-process wasm host</td><td>2,521</td></tr>
+<tr><td>wire format: reader, writer, codecs</td><td>3,702</td></tr>
+<tr><td>the mirror (each platform's copy of the core's state)</td><td>2,867</td></tr>
+<tr><td>the host that runs the core's WebAssembly in the page</td><td>2,521</td></tr>
 <tr><td>error classes and their sentences</td><td>2,038</td></tr>
 <tr><td>the call path</td><td>1,889</td></tr>
+<tr><td>ports: dispatch, default ports, host events</td><td>1,834</td></tr>
+<tr><td>core lifecycle: load, options, start, close</td><td>1,805</td></tr>
 <tr><td>streams</td><td>945</td></tr>
 <tr><td>the bundler's own helper and chunk table</td><td>717</td></tr>
 </tbody></table></div>
-<p>Three things stood out. A hello page shipped code it cannot run: streams the template does not have, reconnection for a core that is not remote, 20 of 24 codecs. Where the bundler emits a module is decided by re-exports, not by use: a module reached through any file with code of its own lands in the first chunk. And the sentences of errors were about a tenth of the chunk.</p>
+<p>Four things stood out. A hello page shipped code it cannot run: streams the template does not have, reconnection for a core that is not remote, 20 of 24 codecs. Rolldown decides where a module goes by re-exports, not by use: a module the entry reaches statically through any file with code of its own lands in the first chunk, even if only an on-demand chunk uses it. Those are Rolldown's rules; another bundler may place modules differently and save less. The sentences of errors were about a tenth of the chunk. And 717 bytes were the bundler's: each on-demand chunk costs the first chunk 15 to 30 bytes of file name, so every lever that makes something lazy grows that share a little.</p>
 </section>
 <section id="the-levers">
 <h2>The levers</h2>
-<p>Each landed with its measured number. gzip is not additive: a row is what it saved on top of the rows above.</p>
+<p>Each landed with its measured number. gzip is not additive: a row is what it saved on top of the rows above. The table is as built, before the review's fixes below, whose cost of 131 bytes includes row 8's part.</p>
 <div class="table-wrap"><table class="compare"><thead><tr><th>#</th><th>Lever</th><th>after</th><th>saved</th></tr></thead><tbody>
 <tr><td></td><td><code>main</code> before</td><td>22,100</td><td></td></tr>
-<tr><td>1</td><td>session payloads re-exported by the wire barrel</td><td>21,971</td><td>129</td></tr>
+<tr><td>1</td><td>session payloads re-exported by the wire format's index file (a barrel)</td><td>21,971</td><td>129</td></tr>
 <tr><td>2</td><td>nine port ids as literals, pinned by a test</td><td>21,766</td><td>205</td></tr>
 <tr><td>3, 11a</td><td><code>codecs</code> as a module namespace; unnamed codecs in a module of their own</td><td>20,799</td><td>967</td></tr>
 <tr><td>4</td><td>streams as a feature the generated entry passes</td><td>20,152</td><td>647</td></tr>
 <tr><td>5</td><td>a typed channel to the in-process host</td><td>19,458</td><td>694</td></tr>
-<tr><td>6, 7</td><td>observe waiters and remote-only code load with their transport</td><td>18,942</td><td>516</td></tr>
-<tr><td>8</td><td><code>stats</code>, <code>snapshot</code>, <code>restore</code>, <code>runInBackground</code> on first call</td><td>18,580</td><td>362</td></tr>
-<tr><td>9, 10</td><td>each on-demand transport maps its own options</td><td>18,311</td><td>269</td></tr>
+<tr><td>6, 7</td><td>observe waiters, and code only a core outside this thread needs, load with their transport</td><td>18,942</td><td>516</td></tr>
+<tr><td>8</td><td><code>stats</code>, <code>snapshot</code>, <code>restore</code>, <code>runInBackground</code> on first call; the review put <code>snapshot</code> and <code>restore</code> back up front</td><td>18,580</td><td>362</td></tr>
+<tr><td>9, 10a</td><td>each on-demand transport maps its own options; the sync-port refusal text</td><td>18,311</td><td>269</td></tr>
 <tr><td>11b</td><td>two rarely thrown error classes</td><td>18,158</td><td>153</td></tr>
 <tr><td>12</td><td>trims</td><td>18,079</td><td>79</td></tr>
 <tr><td>13</td><td>the production build says error codes, with a link</td><td>16,763</td><td>1,316</td></tr>
@@ -110,7 +113,7 @@
 <tr><td>15</td><td>Vite's preload helper reported beside the number</td><td>15,679</td><td>514</td></tr>
 <tr><td>4b</td><td>no bundler warning in an app with a stream</td><td>15,680</td><td>+1</td></tr>
 </tbody></table></div>
-<p>Row 15 changes what is counted, not what is shipped, so the helper has a gate of its own: with it, the page loads 16,285 bytes against 16,600. Row 13 is the largest single lever. A production page carries an error's class, kind and fields, and its text is <code>T&lt;code&gt;</code> with a link to the <a href="../../docs/errors.html">error codes</a>; the development build keeps the sentences.</p>
+<p>Row 15 changes what is counted, not what is shipped, so the other reading has a gate of its own: with Vite's helper left in the chunk, the final record is 16,285 bytes against 16,600. Row 13 is the largest single lever. A production page carries an error's class, kind and fields, and its text is a code (<code>T</code> and a number), the values and a link to the <a href="../../docs/errors.html">error codes</a>; the development build keeps the sentences.</p>
 </section>
 <section id="what-stays">
 <h2>What left, and what stays</h2>
@@ -124,18 +127,19 @@
 </section>
 <section id="the-review">
 <h2>What the review caught</h2>
-<p>The adversarial review reproduced every number to the byte and found four High defects at the levers' edges:</p>
+<p>The adversarial review reproduced the sizes to the byte and found four High defects at the levers' edges:</p>
 <ul>
 <li><strong>A stripped declaration.</strong> <code>reclaim</code> was marked internal, so the published types dropped it, and generated bindings that import it failed <code>tsc</code> against the installed package. Every suite aliased the sources and stayed green. A test now asks the compiler about every name the generator imports.</li>
 <li><strong>Lost order.</strong> <code>snapshot()</code> and <code>restore()</code> ran after an <code>await import()</code>, which yields even when the module is cached, so a call made after <code>restore()</code> reached the core first. They run at the call again.</li>
-<li><strong>A fetch at the wrong moment.</strong> The background drain at <code>pagehide</code> needed a chunk, at the one moment a page cannot fetch one. It calls the core directly now.</li>
+<li><strong>A fetch at the wrong moment.</strong> The background drain at <code>pagehide</code> needed a chunk fetched, when a page is being left or is offline and may not be able to fetch one. It calls the core directly now.</li>
 <li><strong>Codes where data was expected.</strong> The production build had turned a WebSocket close reason, which reaches the server, and port errors, which reach the core, into codes. Text that leaves the runtime as data is a sentence in both builds.</li>
 </ul>
 <p>The fixes cost 131 bytes, to 15,811; smaller fixes and a later merge left the record at 15,774.</p>
 </section>
 <section id="the-cost">
 <h2>What it cost</h2>
-<p>An awaited call is 4% slower on Node, from 313 to 316 nanoseconds to 325 to 333; <code>callSync</code> did not move. The development build's first chunk is 21,151 bytes and is not gated, since a development page is served module by module. The page that uses every feature loads 39,922 bytes, less than the 42,385 it loaded before. All three numbers are gated in CI; a change that grows the chunk fails the build and names the lever left.</p>
+<p>On Node, an awaited call takes 325 to 333 nanoseconds where it took 313 to 316, about 4 to 5% more (four alternating runs on one machine); <code>callSync</code> did not move, at 162 to 168 nanoseconds before and 162 to 167 after. When the levers landed, the development build's first chunk was 21,151 bytes; it has not been re-measured since the review's fixes and is not gated, since a development page is served module by module. The page that uses every feature (in <code>wasm-main</code> mode, its first chunk plus every on-demand runtime chunk except the Worker script) loads 39,922 bytes, less than the 42,385 it loaded before.</p>
+<p>The gate has three rows: the hello page (16,000 bytes), the hello page with Vite's helper counted (16,600) and the page that uses every feature (42,400, or 5% over its record, whichever is lower). A change that takes a row over its ceiling, or moves a runtime module into or out of the first chunk, fails the build; over a budget, the message names the levers left, the next being about 530 bytes of host events.</p>
 </section>
 <footer class="post-footer"><p>Every claim and its source: <a href="claims.md">the claims ledger</a>. The full record is <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-057-js-runtime-16kb.md" rel="noopener">ADR-057</a> and <a href="https://github.com/shreypdev/undra/blob/main/.10x/reviews/2026-10-02-ts-runtime-16k-review.md" rel="noopener">its review</a>.</p></footer>
 </article></main>
