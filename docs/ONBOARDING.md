@@ -415,11 +415,11 @@ UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test symbols --test debuggi
 `undra build --platform ios,android --release` builds the `release-mobile` profile of the generated shim: `release` with
 `opt-level = "s"` and **`panic = "unwind"` kept** (R6, ADR-046: a native panic is contained by `catch_unwind` and reported;
 `abort` would make it a crash). The crates the call path runs through (`undra-wire`, `undra-signals`, `undra-runtime`, `undra-ffi`) stay
-at `opt-level = 3`: `s` everywhere made the core's own operations 17% slower. That is 8% off the Android library of a hello world
-(987,720 to 905,520 bytes, arm64-v8a), 13% off the playground's, and 8% off what the iOS slice adds to an app, with the device bench rows
-inside their noise (ADR-052, amendment "native size gates"). The host build stays on `release`; `opt-level = "z"` would take 8 to 13 points
-more and slows a call about 1.5x, so it is not the default. An app with a hard byte budget chooses it per platform, `opt_level = "z"`
-in `[android]` or `[ios]` of its `undra.toml` (the `release-mobile-z` profile: 774,480 bytes for the hello world, 2,024,336 for the playground,
+at `opt-level = 3`: `s` everywhere made the core's own operations 17% slower. That is 7% off the Android library of a hello world
+(965,968 to 898,176 bytes, arm64-v8a), 12% off the playground's, and 6% off what the iOS slice adds to an app, with the device bench rows
+inside their noise (ADR-052, amendment "native size gates"). The host build stays on `release`; `opt-level = "z"` takes 12 to 17 points
+more off an Android library and slows a call about 1.5x, so it is not the default. An app with a hard byte budget chooses it per platform, `opt_level = "z"`
+in `[android]` or `[ios]` of its `undra.toml` (the `release-mobile-z` profile: 766,528 bytes for the hello world, 2,018,792 for the playground,
 arm64-v8a), and `opt_level = "3"` is the speed profile (`release`) for an app whose own hot code should not be optimised for size. The gates
 measure the default. The sizes are gated, not just printed:
 

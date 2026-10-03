@@ -85,8 +85,8 @@ opt-level = 3
 opt-level = 3
 
 # What `opt_level = "z"` in `[ios]` or `[android]` of undra.toml builds instead (ADR-052, "native size gates"): `"z"` for
-# every crate, the call path included. The smallest library (arm64-v8a: 14% under `release-mobile` for a hello world, 19% for the
-# playground; 22% and 29% under `release`), and a synchronous call 1.58x as slow on the Android emulator, 1.33x on the iOS simulator.
+# every crate, the call path included. The smallest library (arm64-v8a: 15% under `release-mobile` for a hello world, 19% for the
+# playground; 21% and 29% under `release`), and a synchronous call 1.58x as slow on the Android emulator, 1.33x on the iOS simulator.
 # A panic still unwinds (R6). (`opt_level = "3"` builds `release` above.)
 [profile.release-mobile-z]
 inherits = "release"

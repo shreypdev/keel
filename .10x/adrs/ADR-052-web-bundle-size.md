@@ -799,13 +799,17 @@ number and at most 5% over the record, whichever is lower, the web rows' shape (
 
 | Row | Measures | Record | Budget (the design's) | Gate (what fails CI: record + 5%) |
 |---|---|---|---|---|
-| `android/hello-arm64-v8a` | `libhello_core.so`, stripped, 16 KB aligned | 905,520 | 1,200,000 | 950,796 |
-| `android/hello-x86_64` | the same | 971,464 | 1,200,000 | 1,020,037 |
-| `ios/hello-arm64` | the device slice of the XCFramework, linked and stripped (above) | 793,517 | 900,000 | 833,192 |
+| `android/hello-arm64-v8a` | `libhello_core.so`, stripped, 16 KB aligned | 898,176 | 1,200,000 | 943,084 |
+| `android/hello-x86_64` | the same | 960,776 | 1,200,000 | 1,008,814 |
+| `ios/hello-arm64` | the device slice of the XCFramework, linked and stripped (above) | 784,086 | 900,000 | 823,290 |
+
+The record is the review's, `scripts/native-size.sh --record` on the branch merged with `main` 773054f and the pieces that land before it (the piece first recorded 905,520,
+971,464 and 793,517; `main`'s cold-restore piece took `serde`'s serializer out of every core, 7 to 11 KB of a hello world). The other tables of this amendment are the piece's
+measurements on its own tree, `main` b909739, except "The knob", which is the review's on the merged tree.
 
 **Is the iOS row what an app gains?** The review linked the same slice into a minimal iOS executable whose `main` takes the address of
 `hello_core_undra_api`, against the same executable without the core (`clang -Wl,-dead_strip`, `strip -S -x`, Xcode 26.6): its `__TEXT`, `__DATA_CONST` and `__DATA` sections
-grew by **786,457** bytes, and `__LINKEDIT` (chained fixups, the function starts, the indirect symbols) by 6,904. The row's 793,517 is 0.9% above the sections an app gains (the dylib
+grew by **786,457** bytes, and `__LINKEDIT` (chained fixups, the function starts, the indirect symbols) by 6,904 (on the piece's tree, where the row measured 793,517). The row is 0.9% above the sections an app gains (the dylib
 the script links keeps a few more bytes of `__TEXT`) and leaves out the 0.9% of `__LINKEDIT`: within a percent of the file growth either way, so the row is an honest
 measure of the delta; the page padding of the app's segments is the app's.
 
@@ -875,18 +879,19 @@ emulator's cold load being faster for every variant (0.8x) is its noise, not a w
 
 The brief's question was whether to leave 1.2 MB to a follow-up. The knob is a few lines (a profile in the shim's template, a key in two tables of `undra.toml`,
 `Profile::mobile(release, level)`), so it is in this piece: `[android] opt_level` and `[ios] opt_level`, `"s"` (the default), `"z"` or `"3"` (also the integer `3`), any other
-value a `C0002` that names the three. `undra init` writes the line commented out. Measured through the knob itself (`undra build --release` with each value, the same
-template and playground as above, rustc 1.99.0, NDK r27, Xcode 26.6):
+value a `C0002` that names the three. `undra init` writes the line commented out. Measured through the knob itself (`undra build --release` with each value, the `undra init`
+template and the playground, on the branch merged with `main` 773054f, rustc 1.99.0, NDK r27, Xcode 26.6; on the piece's own tree every number was 0.2% to 2.3% higher, the hello
+world's at `"3"` most, so its percentages were a point or two larger):
 
 | `opt_level` | profile | hello arm64-v8a | hello x86_64 | hello, iOS linked | playground arm64-v8a | playground x86_64 | playground, iOS linked |
 |---|---|---|---|---|---|---|---|
-| `"3"` | `release` | 987,720 | 1,054,352 | 859,853 | 2,860,992 | 3,026,936 | 2,637,348 |
-| `"s"` (default) | `release-mobile` | 905,520 (−8.3%) | 971,480 (−7.9%) | 793,517 (−7.7%) | 2,498,856 (−12.7%) | 2,599,592 (−14.1%) | 2,317,056 (−12.1%) |
-| `"z"` | `release-mobile-z` | 774,480 (−21.6%) | 841,256 (−20.2%) | 608,574 (−29.2%) | 2,024,336 (−29.2%) | 2,250,640 (−25.6%) | 1,653,480 (−37.3%) |
+| `"3"` | `release` | 965,968 | 1,028,184 | 838,126 | 2,842,448 | 3,003,640 | 2,618,037 |
+| `"s"` (default) | `release-mobile` | 898,176 (−7.0%) | 960,776 (−6.6%) | 784,086 (−6.4%) | 2,493,376 (−12.3%) | 2,590,752 (−13.7%) | 2,309,589 (−11.8%) |
+| `"z"` | `release-mobile-z` | 766,528 (−20.6%) | 831,688 (−19.1%) | 601,203 (−28.3%) | 2,018,792 (−29.0%) | 2,243,528 (−25.3%) | 1,648,597 (−37.0%) |
 
-(The hello world's x86_64 and iOS bytes differ from the table above by 16 and 8 bytes: the project's path, the `TypeId` constants.) The middle ground, `z` with the
-call path kept at 3 (`CARGO_PROFILE_RELEASE_MOBILE_OPT_LEVEL=z` on the default profile), measures 883,472 bytes for the hello world's arm64-v8a library (2.4% under the default:
-the four call-path crates are most of a hello world) and 2,197,976 for the playground's (12.0% under the default, 8.6% over `"z"`). It is not a value of the knob: its speed was
+The middle ground, `z` with the call path kept at 3 (`CARGO_PROFILE_RELEASE_MOBILE_OPT_LEVEL=z` on the default profile; the piece's tree), measures 883,472 bytes for the hello
+world's arm64-v8a library (2.4% under the default there: the four call-path crates are most of a hello world) and 2,197,976 for the playground's (12.0% under the default, 8.6%
+over `"z"`). It is not a value of the knob: its speed was
 not measured (the app's own code and every generic instantiated for its types would be at `z`), and the knob's job is the smallest library; it stays the follow-up below.
 
 **Speed, re-measured by the review** (the playground's device bench, the three variants built through the knob, installed in turn and run interleaved in rotating order; on
@@ -909,11 +914,11 @@ change-set 13% to 18%. A team that sets `"z"` pays that, and the host rows above
 
 ### Where the user's number lands
 
-U4's 1.6 MB core is not the hello world, and it was measured with the speed profile. Split it as the hello world's 987,720 bytes (the runtime, the standard library, a
-template's worth of core) plus about 612 KB of the user's own, and scale the second part as the playground's own part scales (what the playground adds over the hello world:
-1,873,272 bytes at `opt-level = 3`, −14.9% at the default, −33.3% at `z`): the core becomes **about 1.43 MB** per ABI with no setting changed (the hello world's −8.3% and the
-playground's −12.7% bound it at 1.40 to 1.47) and **about 1.18 MB with `opt_level = "z"` in `[android]`** (bounded by 1.13 and 1.25; the CLI prints "1.6 MB" for 1.55 to 1.65 million
-bytes, which makes it 1.15 to 1.22 MB). The default does not reach 1.2 MB; `"z"` reaches it, narrowly and not for every core of that size, for the price above (a synchronous call 1.58x on the emulator). Relocation packing would take another 4% (`-Wl,--pack-dyn-relocs=android` through `RUSTFLAGS`, for an
+U4's 1.6 MB core is not the hello world, and it was measured with the speed profile. Split it as the hello world's 987,720 bytes of that time (the runtime, the standard
+library, a template's worth of core) plus about 612 KB of the user's own; take the hello world's bytes as they are now at each setting, and scale the user's part as the
+playground's own part scales (what the playground adds over the hello world: 1,876,480 bytes at `"3"`, −15.0% at the default, −33.3% at `"z"`): the core becomes **about 1.42 MB**
+per ABI with no setting changed and **about 1.18 MB with `opt_level = "z"` in `[android]`** (the CLI prints "1.6 MB" for 1.55 to 1.65 million bytes: 1.38 to 1.46 MB, and 1.14
+to 1.21 MB). The default does not reach 1.2 MB; `"z"` reaches it, narrowly and not for every core of that size, for the price above (a synchronous call 1.58x on the emulator). Relocation packing would take another 4% (`-Wl,--pack-dyn-relocs=android` through `RUSTFLAGS`, for an
 app whose `min_sdk` loads it). So the answer to U4 is a setting, measured and documented, not a promise: the team sets `opt_level = "z"`, measures its own core with `undra build
 --release` (it prints the size) and reads the speed rows above against its own hot paths.
 
