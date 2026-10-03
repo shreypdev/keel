@@ -1,6 +1,6 @@
 # `generated-weight`: generated code is an artifact; the schema is the API (ADR-062)
 
-Worktree `wt/generated-weight`, from `main` `b909739`, 9 commits, merged with `main` at the end. Author: the implementer of the piece.
+Worktree `wt/generated-weight`, from `main` `b909739`, 10 commits and one merge of `main` (`fd7abb4`, the `pr-gate` pull request; the only conflict was the PR template). Author: the implementer of the piece.
 Reviews: none yet. One ADR: ADR-062 (Accepted, with an implementation note). Brief: user feedback U7/T5 ("two features already produced
 about 1,400 lines of generated bindings; that's a lot of noise in reviews and in API versioning"), the design decided by the lead. No
 wire, ABI, schema, schema-hash or generated-declaration change: no existing golden moved but by a header line.
