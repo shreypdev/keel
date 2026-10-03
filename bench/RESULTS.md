@@ -38,8 +38,8 @@ iOS target.
 | 1 KB record, round trip (through a call) | `dispatch/call_sync/echo_record1k` | 139.5 ns | ≤ 3 µs | 0.05x | within |
 | Change-set, 100 dirty signals (core side: write, build, deliver) | `signals/changeset_100/runtime` | 2.30 µs | ≤ 100 µs | 0.02x | within |
 | Keyed patch on 10,000 items, one insert (recorded list operation) | `signals/keyed_10k/insert` | 6.31 µs | ≤ 20 µs | 0.32x | within |
-| Core cold start, 100 KB snapshot restore | `snapshot/cold_start_restore_100kb` | 84.68 µs | ≤ 3 ms | 0.03x | within (70.87 µs before ADR-037: the new runtime now computes the fingerprint of the snapshot's store type once, about 14 µs on this host, see below) |
-| Core cold start, including the `undra-core` thread | `snapshot/cold_start_restore_100kb_core_thread` | 90.27 µs | ≤ 3 ms | 0.03x | within |
+| Core cold start, 100 KB snapshot restore | `snapshot/cold_start_restore_100kb` | 80.12 µs | ≤ 3 ms | 0.03x | within (the budgets test's p50 on 2026-10-02; three quarters of it is `Runtime::new` hashing this binary's schema, not the restore: Finding 8) |
+| Core cold start, including the `undra-core` thread | `snapshot/cold_start_restore_100kb_core_thread` | 88.12 µs | ≤ 3 ms | 0.03x | within (as above) |
 | Web crash recovery, 1 MB state (restore) | `snapshot/restore_1mb` | 286.54 µs | ≤ 100 ms | 0.003x | within |
 | Restore of a 100 KB snapshot an older build wrote (every store migrated by name, ADR-037) | `snapshot/restore_100kb_migrated` | 88.84 µs | ≤ 10x the fast path (`snapshot/restore_100kb`, 30.33 µs) | 2.9x the fast path | within |
 
@@ -555,6 +555,64 @@ invalidation is 12 bytes and the host's cost moves to the page it re-asks for. T
 pipeline running on the 50 rows it serves (the sort-key closure clones a title per row); the index lookup is
 logarithmic.
 
+### 8. A cold start is the schema hash: `Runtime::new` costs per byte of schema, and 40% less of it now
+
+On 2026-10-02 the two cold-start rows failed the `apple-m5-pro` baseline: 123.83 µs and 133.79 µs against 68.04 µs and
+80.38 µs recorded two days earlier (1.82x and 1.66x; the gate is 1.5x). The baseline's commit rebuilt with the same
+compiler (rustc 1.99.0) still measured 72.96 µs, so it was the code. A bisect over the 973 commits in between found no
+commit to blame but a ramp, and a probe run at each step (the budgets row, best of three p50s, and its parts timed
+alone; the machine at load 3 to 7) says why:
+
+| Commit | What it added to this binary's schema | Canonical schema | `Runtime::new` | Restore into it | The row |
+|---|---|---|---|---|---|
+| `8004a21` (the baseline) | | 22,684 B | 51.5 µs | 19.7 µs | 72.9 µs |
+| `ea81c3c` | persistence-v2 with main merged: the typed storage errors, the derived-list fixtures (`Views`, `ChurnViews`) | 26,726 B | 65.5 µs | 21.7 µs | 83.8 µs |
+| `8516136` | ports-v2 alone: `Db`, `Sse` and `WebSocket`, linked for the `ports/*` and `db/*` rows | 31,876 B | 80.6 µs | 20.0 µs | 98.3 µs |
+| `5413a5c` | both | 35,918 B | 92.9 µs | 22.2 µs | 112.0 µs |
+| `b1038fe` | prod-ops: the `Diagnostics` port, the panic and background reports | 37,604 B | 96.1 µs | 21.9 µs | 118.5 µs |
+| `a309e9f` (main) | objects, callbacks and lazy lists: their fixtures (`Shelf`, `PushFeed`, `Dock`, the `Pinger` port) | 40,598 B | 103.8 µs | 21.3 µs | 125.8 µs |
+| this change | | 40,598 B | 61.1 µs | 21.0 µs | 80.1 µs |
+
+**The restore never moved** (19.7 to 21.3 µs for the 100 KB; the store fingerprint ADR-037 added is about 2 µs of it).
+What grew is `Runtime::new`, which collects the schema from the registrations and hashes it, both linear in the schema:
+this binary's canonical schema went from 22.7 KB to 40.6 KB (1.79x, the row's 1.8x) as five pieces registered their
+ports, records and fixture stores in it. An app pays for the schema it has. Of the 17.9 KB, 9.2 KB are the three opt-in
+ports and their types (in the cores that enable them), 5.6 KB are this harness's own fixtures, and 3.1 KB are in every
+core: persistence-v2's typed storage errors (1.4 KB) and prod-ops' `Diagnostics` port with the panic and background
+reports (1.7 KB). So the regression was the price of what shipped, at an unchanged price per byte (2.3 to 2.6 µs per KB
+of canonical schema at every step). That price was the finding:
+
+| Part of `Runtime::new`, 40.6 KB canonical schema | main | this change |
+|---|---|---|
+| `collect_schema` (the owned definitions from the registrations) | 22.0 µs | 22.5 µs |
+| The canonical JSON | 49.1 µs (a clone of the schema with docs cleared and lists sorted, about 20 µs; `serde_json` on it, about 29 µs) | 10.0 µs |
+| `fnv1a64` over its bytes (4 cycles a byte; the definition of the hash, SPEC 1.1) | about 38 µs | about 35 µs |
+| `Schema::hash` | 88.4 µs | 45.3 µs |
+| `Runtime::new` | 103.8 µs | 61.1 µs |
+
+Every start-up copied the whole schema, doc comments included, to drop the docs and sort a few lists, and handed the
+copy to `serde`. `undra-meta`'s `schema_json` module now writes the canonical form straight from the schema, in
+canonical order (the unordered lists through references in sorted order, `sort::order_by`), as `closure_json` already
+did for closures (ADR-052): the same bytes, so no schema hash moved (the previous path is the tests' oracle, on the
+fixtures and on generated schemas; every golden with a hash in it is unchanged). `Schema::to_json` (the C ABI's
+`undra_schema_json`) is the same walk with labels and docs, so `serde`'s serializer and the derived `Serialize` impls
+are no longer in a shipped core: the hello-world web core is 111,355 bytes gzipped where main's is 116,224 with the same
+compiler (rustc 1.99.0; `scripts/wasm-size.sh`, the record of 116,690 is 1.98.1's and is left for the pinned toolchain to
+re-record).
+
+The rows after it, the budgets test on a host at load 2.4 to 2.8, three runs: `snapshot/cold_start_restore_100kb`
+80.12 to 81.29 µs (1.18x the baseline, was 1.82x) and `..._core_thread` 88.12 to 90.00 µs (1.10x, was 1.66x). The
+baseline is **not** re-recorded: what is left over it (about 12 µs) is `collect_schema` and `fnv1a64` on the 17.9 KB
+this binary's schema gained, and the next piece that adds fixture types to the harness will move these two rows by
+about 1.5 µs per KB of canonical schema (it was 2.6). These are quiet-machine numbers: at load 90 and more the
+review measured the same rows at 1.41x and 1.20x to 1.37x of the baseline (within the gate, with less room). The hash
+has a row of its own now, `snapshot/cold_start_schema_hash` (47.9 µs; the previous path measures 88 µs, 1.84x, which
+fails the baseline gates by itself), so the canonical form going back through a clone or `serde` is caught where it
+happens. Two things this did not change, both read in the code and not
+yet measured on a device: a native core computes all of this twice per launch (`UndraApi::new` hashes the schema for
+the table before `init`, then `Runtime::new` collects and hashes it again), and `fnv1a64` is now three quarters of the
+hash.
+
 ## Full tables
 
 ### Wire: encode, decode and round trip per type
@@ -658,7 +716,7 @@ that `update_at`s a row of the observed list and commits the 12-byte entry. The 
 
 ### Snapshot and restore
 
-100 KB is four stores of 250 rows of 100 bytes; 1 MB is forty. `cold_start` builds a runtime and restores; the runtime it made is shut down outside the timed region. `restore_100kb_migrated` restores the same 100 KB as an older build wrote it (`Item.id` a `u32`): every store's fingerprint differs, so each one is decoded by name and migrated structurally, streamed (ADR-037). Measured on 2026-10-01 with snapshot layout 2 (ADR-037), the machine shared with other builds; the restore rows read about 10% slower than the earlier run on the same code paths, which is the load, and the cold start pays one fingerprint computation per new runtime.
+100 KB is four stores of 250 rows of 100 bytes; 1 MB is forty. `cold_start` builds a runtime and restores; the runtime it made is shut down outside the timed region. `restore_100kb_migrated` restores the same 100 KB as an older build wrote it (`Item.id` a `u32`): every store's fingerprint differs, so each one is decoded by name and migrated structurally, streamed (ADR-037). Measured on 2026-10-01 with snapshot layout 2 (ADR-037), the machine shared with other builds; the restore rows read about 10% slower than the earlier run on the same code paths, which is the load, and the cold start pays one fingerprint computation per new runtime (about 2 µs; the 14 µs this file first put on it were the schema this binary hashes at start, which had grown by persistence-v2's fixtures: Finding 8, which also has the two cold-start rows as they are now, 80.12 µs and 88.12 µs).
 
 | Benchmark | Median | 95% CI |
 |---|---|---|

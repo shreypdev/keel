@@ -1,4 +1,5 @@
 [meta]
+added_cold_start_schema_hash = "snapshot/cold_start_schema_hash is a new row, added 2026-10-02 on wt/cold-restore-regression (rustc 1.99.0, load 4.6, best of three runs of the budgets test); no other row was touched"
 command_layer_a = "UNDRA_BENCH_RECORD=bench/baselines/apple-m5-pro.toml UNDRA_BENCH_RECORD_BEST=1 cargo test -p undra-bench --test budgets --release, three times at load 2.1 to 2.4, best of each row (the load_* keys are the last recording's)"
 command_layer_b = "UNDRA_BENCH_RECORD=bench/baselines/apple-m5-pro.toml UNDRA_BENCH_RECORD_BEST=1 UNDRA_STRESS_SECONDS=2 cargo test -p undra-bench --test stress --release, after each layer A recording"
 cores = "18"
@@ -68,6 +69,9 @@ p50_ns = 68042.0
 
 [bench."snapshot/cold_start_restore_100kb_core_thread"]
 p50_ns = 80375.0
+
+[bench."snapshot/cold_start_schema_hash"]
+p50_ns = 47869.5
 
 [bench."snapshot/encode_100kb"]
 p50_ns = 12405.6
