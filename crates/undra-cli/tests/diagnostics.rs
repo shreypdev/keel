@@ -11,7 +11,7 @@ mod common;
 
 use std::path::Path;
 
-use common::{TempDir, init_project, repo_root, run_err, undra};
+use common::{TempDir, git, has_tool, init_project, repo_root, run_err, undra, undra_in};
 
 /// What a user reads: stderr with the scratch directory replaced, so the golden is the same on
 /// every machine.
@@ -114,6 +114,30 @@ fn c0009_an_argument_the_command_cannot_use() {
             .arg(dir.path()),
     );
     check("C0009", &stderr, dir.path());
+}
+
+#[test]
+fn c0009_a_git_ref_without_the_schema_file() {
+    // `undra schema diff --against` reads the schema file as committed at a ref; this ref has none.
+    // git's own words follow the diagnostic and differ between versions, so only the diagnostic is kept.
+    if common::skip_unless(has_tool("git", "--version"), "git is not installed") {
+        return;
+    }
+    let dir = TempDir::new("c0009-schema");
+    git(dir.path(), &["init", "-q"]);
+    std::fs::write(dir.path().join("README"), "no schema yet").unwrap();
+    git(dir.path(), &["add", "README"]);
+    git(dir.path(), &["commit", "-q", "-m", "first"]);
+    std::fs::write(dir.path().join("schema.json"), "{}").unwrap();
+    let (_, stderr) = run_err(undra_in(dir.path()).arg("-C").arg(dir.path()).args([
+        "schema",
+        "diff",
+        "--against",
+        "HEAD",
+    ]));
+    let text = shown(&stderr, dir.path());
+    let end = text.find("\n\n").map_or(text.len(), |at| at + 1);
+    check_golden("C0009", "C0009-schema-diff", text[..end].to_owned());
 }
 
 #[test]

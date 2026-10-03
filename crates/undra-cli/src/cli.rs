@@ -31,6 +31,10 @@ EXISTING APP
 NEW VERSION
     undra upgrade                                  move the project to this `undra`: every pin, the bindings, the migration notes
 
+REVIEWING A CHANGE
+    undra schema diff --against origin/main        what changed in the public API, each line breaking or additive (review this, not the bindings)
+    undra bindgen --check                          the committed bindings are exactly what the schema generates (CI)
+
 CHECK THE MACHINE
     undra doctor                                   every prerequisite, with the exact fix for each gap (--fix, --json)
 
@@ -79,6 +83,9 @@ NEXT
   <out>/swift/     a Swift package (Sources/<Module>/Generated/*.swift + Package.swift)\n\
   <out>/kotlin/    a Gradle module (src/main/kotlin/<package>/*.kt, build.gradle.kts, and a .gitignore for Gradle's output)\n\
   <out>/ts/        an npm package (src/*.ts, package.json, tsconfig.json)\n\n\
+Every file says it is generated (the generator, the schema hash, \"Do not edit\"), and each tree gets a .gitattributes \
+that marks it linguist-generated, so GitHub collapses it in a pull request (the diff is one click away). Review the \
+schema, not the bindings (`undra schema diff`); `--check` proves the bindings match it.\n\n\
 By default the schema comes from the core itself: the core is built as a host library with `undra-ffi` \
 linked in, loaded, and asked for `undra_schema_json` (docs/SPEC.md 13). With --schema it is read from a file \
 instead and nothing is built. Files an earlier run wrote and this one does not are removed; files you added \
@@ -260,6 +267,23 @@ WHAT IT DETECTS
     web      package.json (vite, webpack, next, ...)"
     )]
     Adopt(AdoptArgs),
+    /// Compare the public API of two schemas (breaking or additive), or export the core's schema to a file.
+    #[command(
+        long_about = "The schema is the API (docs/SPEC.md 2): the generated Swift, Kotlin and TypeScript are an artifact of it, \
+thousands of lines that `undra bindgen --check` proves current and that a reviewer should not have to read. This command \
+group is what to review instead:\n\
+  undra schema diff     what changed between two schemas, one line per change, each marked breaking or additive\n\
+  undra schema export   write the core's schema as the JSON file `diff` reads\n\n\
+Commit the schema file (`schema.json`, next to `generated/`) and a pull request shows the API change as a few lines of \
+JSON and, with `undra schema diff --against <base>`, as a list of what it means for the apps.",
+        after_long_help = "\
+EXAMPLES
+    undra schema export -o schema.json                 write the API of this project's core (commit it)
+    undra schema diff --against origin/main            the same file at origin/main against the one in the working tree
+    undra schema diff --against origin/main --exit-code    ... and exit 1 when a line is breaking (CI)
+    undra schema diff old.json new.json                two schema files"
+    )]
+    Schema(SchemaArgs),
     /// Move a project to the version of this `undra`: every pin in step, bindings regenerated, migration notes.
     #[command(
         long_about = "Reads the Undra version a project pins in every place `undra init` writes it: the core's \
@@ -364,6 +388,96 @@ pub struct BindgenArgs {
     /// deployment_target`: for CI that checks an app's bindings also work at an older iOS.
     #[arg(long, value_name = "VERSION")]
     pub ios_deployment_target: Option<String>,
+}
+
+/// Arguments of `undra schema`.
+#[derive(Args, Debug)]
+pub struct SchemaArgs {
+    /// What to do with schemas.
+    #[command(subcommand)]
+    pub command: SchemaCommand,
+}
+
+/// The subcommands of `undra schema`.
+#[derive(Subcommand, Debug)]
+pub enum SchemaCommand {
+    /// What changed in the public API between two schemas: one line per change, each breaking or additive.
+    #[command(
+        long_about = "Compares two schemas (the JSON `undra schema export` writes, or any file `undra bindgen --schema` reads) and \
+prints one line per difference an app can notice: records, fields, enums and their cases, objects, stores and their \
+signals, constructors, methods, functions, ports, callbacks, queries and mutations. Each line is marked `breaking` \
+(code written against the old bindings can stop compiling: a removed or changed signature, an added enum case, a \
+field added without a default) or `additive` (it cannot: an added function, method, store or object, a field with a \
+default). The rules are in docs/SPEC.md 2.6. The order of the output is fixed: types, objects and stores, \
+functions, ports, callbacks, queries, by name, so the same two schemas print the same text. Doc comments and wire ids are \
+not compared.\n\n\
+With --against the old side is FILE as committed at a git ref (`git show <ref>:<path>`; nothing is built) and the new \
+side is FILE in the working tree. FILE is `schema.json` in the project directory unless named. Without --against \
+give the old and the new file, in that order.\n\n\
+The output goes to stdout and the exit status is 0 whatever the diff says, so a reviewer can run it freely; --exit-code \
+makes it 1 when any line is breaking, for a CI gate.",
+        after_long_help = "\
+EXAMPLES
+    undra schema diff --against origin/main            the working tree's schema.json against origin/main's
+    undra schema diff --against HEAD~3 api/schema.json a file in another place
+    undra schema diff old.json new.json                two files
+    undra schema diff --against origin/main --exit-code    fail CI on a breaking change
+
+OUTPUT
+    breaking  field Todo.title: type changed from String to Option<String>
+    additive  function archive: added (fn archive(id: TodoId) -> Result<(), TodoError>)
+    2 breaking, 3 additive.
+
+NO schema.json YET
+    undra schema export -o schema.json        build the core, read its schema, write the file; commit it"
+    )]
+    Diff(SchemaDiffArgs),
+    /// Write the core's schema (the API) as a JSON file, for `undra schema diff` and for review.
+    #[command(
+        long_about = "Builds the core as a host library, loads it and writes its schema as pretty JSON: the same document `undra bindgen` \
+generates from, without the doc comments unless you ask for them (so fixing a comment is not an API change). Commit the file; a \
+pull request then shows the API change as a few lines of JSON, `undra schema diff --against <base>` says what they mean, and \
+a CI step `undra schema export -o schema.json && git diff --exit-code schema.json` keeps it as current as `undra bindgen --check` \
+keeps the bindings. Without -o the JSON goes to stdout.",
+        after_long_help = "\
+EXAMPLES
+    undra schema export -o schema.json           write the schema to schema.json
+    undra schema export > schema.json            the same through the shell
+    undra schema export --docs -o docs/schema.json    with the doc comments"
+    )]
+    Export(SchemaExportArgs),
+}
+
+/// Arguments of `undra schema diff`.
+#[derive(Args, Debug)]
+pub struct SchemaDiffArgs {
+    /// Compare FILE as committed at this git ref (a branch, tag or commit) with FILE in the working tree.
+    #[arg(long, value_name = "REF")]
+    pub against: Option<String>,
+
+    /// Exit with status 1 when any line is breaking (for CI); the output is the same.
+    #[arg(long)]
+    pub exit_code: bool,
+
+    /// Two schema files, old then new; with --against, at most one: the schema file (default `schema.json` in the project directory).
+    #[arg(value_name = "OLD NEW | FILE")]
+    pub files: Vec<PathBuf>,
+}
+
+/// Arguments of `undra schema export`.
+#[derive(Args, Debug)]
+pub struct SchemaExportArgs {
+    /// Write the schema to this file instead of standard output (relative paths are relative to `-C`).
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+
+    /// Keep the core's doc comments in the file.
+    #[arg(long)]
+    pub docs: bool,
+
+    /// Extract the schema from a release build of the core.
+    #[arg(long)]
+    pub release: bool,
 }
 
 /// Arguments of `undra build`.
@@ -669,6 +783,84 @@ mod tests {
             panic!("not dev")
         };
         assert!(args.android);
+    }
+
+    #[test]
+    fn schema_diff_takes_two_files_or_a_ref_and_a_gate() {
+        let cli = Cli::try_parse_from(["undra", "schema", "diff", "old.json", "new.json"]).unwrap();
+        let Command::Schema(SchemaArgs {
+            command: SchemaCommand::Diff(args),
+        }) = cli.command
+        else {
+            panic!("not schema diff")
+        };
+        assert_eq!(
+            args.files,
+            [PathBuf::from("old.json"), PathBuf::from("new.json")]
+        );
+        assert!(args.against.is_none() && !args.exit_code);
+
+        let cli = Cli::try_parse_from([
+            "undra",
+            "schema",
+            "diff",
+            "--against",
+            "origin/main",
+            "--exit-code",
+            "api/schema.json",
+        ])
+        .unwrap();
+        let Command::Schema(SchemaArgs {
+            command: SchemaCommand::Diff(args),
+        }) = cli.command
+        else {
+            panic!("not schema diff")
+        };
+        assert_eq!(args.against.as_deref(), Some("origin/main"));
+        assert!(args.exit_code);
+        assert_eq!(args.files, [PathBuf::from("api/schema.json")]);
+        // With nothing but a ref it is the default file: no positional is needed.
+        assert!(Cli::try_parse_from(["undra", "schema", "diff", "--against", "HEAD"]).is_ok());
+    }
+
+    #[test]
+    fn schema_export_writes_to_a_file_or_standard_output() {
+        let cli = Cli::try_parse_from(["undra", "schema", "export", "-o", "schema.json", "--docs"])
+            .unwrap();
+        let Command::Schema(SchemaArgs {
+            command: SchemaCommand::Export(args),
+        }) = cli.command
+        else {
+            panic!("not schema export")
+        };
+        assert_eq!(args.output, Some(PathBuf::from("schema.json")));
+        assert!(args.docs && !args.release);
+        assert!(
+            Cli::try_parse_from(["undra", "schema"]).is_err(),
+            "a subcommand is needed"
+        );
+    }
+
+    #[test]
+    fn the_schema_subcommands_teach_too() {
+        let command = Cli::command();
+        let schema = command
+            .find_subcommand("schema")
+            .expect("schema is a command");
+        for sub in schema.get_subcommands() {
+            assert!(
+                sub.get_long_about()
+                    .is_some_and(|t| t.to_string().len() > 120),
+                "`undra schema {}` needs a real --help text",
+                sub.get_name()
+            );
+            assert!(
+                sub.get_after_long_help()
+                    .is_some_and(|h| h.to_string().contains("undra schema ")),
+                "`undra schema {}` needs examples",
+                sub.get_name()
+            );
+        }
     }
 
     #[test]
