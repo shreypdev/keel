@@ -73,7 +73,7 @@ def _undra_core_impl(ctx):
         out = ctx.actions.declare_file("{}/{}.wasm".format(ctx.label.name, namespace))
         lines.append("out_file=" + out.path)
     else:
-        out = ctx.actions.declare_directory("{}.{}".format(ctx.label.name, platform))
+        out = ctx.actions.declare_directory(ctx.label.name)
         lines.append("out_dir=" + out.path)
     outputs.append(out)
     if release and ctx.attr.symbols:
@@ -84,6 +84,10 @@ def _undra_core_impl(ctx):
     inputs = [ctx.file.config] + ctx.files.srcs
     if ctx.file.workspace:
         inputs.append(ctx.file.workspace)
+    for directory in ctx.attr.extra_path:
+        lines.append("path=" + directory)
+    if platform in ("ios", "android"):
+        lines.append("inherit_path=1")
     extra_tools = []
     if ctx.attr.wasm_opt:
         tool = [f for f in ctx.files.wasm_opt if f.basename == "wasm-opt"]
@@ -133,6 +137,7 @@ _undra_core = rule(
         "symbols": attr.bool(default = True),
         "wasm_opt": attr.label(allow_files = True, cfg = "exec"),
         "execution_requirements": attr.string_dict(),
+        "extra_path": attr.string_list(),
         "cli": attr.label(default = Label("@undra//:cli"), executable = True, cfg = "exec"),
         "_undra_sources": attr.label(default = Label("@undra//:sources")),
         "_undra_manifest": attr.label(default = Label("@undra//:Cargo.toml"), allow_single_file = True),
@@ -159,6 +164,7 @@ def undra_core(
         release = False,
         symbols = True,
         wasm_opt = None,
+        extra_path = [],
         tags = [],
         visibility = None,
         **kwargs):
@@ -186,6 +192,8 @@ def undra_core(
         symbols: also write the symbol files of a release build (`undra build`'s default). The shipped bytes differ
             by the order `wasm-opt` visits functions when the names are present, so this matches the CLI's default build.
         wasm_opt: an executable `wasm-opt` (binaryen); without it the web module is not shrunk further, as the CLI says.
+        extra_path: directories (absolute) put on the action's `PATH` for the `ios` and `android` builds, whose toolchains are the
+            machine's: `cargo-ndk`'s directory, for one. `ANDROID_NDK_HOME` and `DEVELOPER_DIR` come in through `--action_env`.
         tags: tags of the generated targets.
         visibility: the visibility of every generated target.
         **kwargs: passed to the generated rule instances (`execution_requirements`).
@@ -203,7 +211,10 @@ def undra_core(
             release = release,
             symbols = symbols,
             wasm_opt = wasm_opt if platform == "web" else None,
-            tags = tags + (["no-sandbox", "requires-darwin"] if platform == "ios" else []),
+            extra_path = extra_path,
+            # The Apple and Android toolchains are the machine's, not Bazel's (ADR-061): they build when asked for by name.
+            tags = tags + (["manual", "requires-darwin"] if platform == "ios" else []) + (["manual"] if platform == "android" else []),
+            target_compatible_with = ["@platforms//os:macos"] if platform == "ios" else [],
             visibility = visibility,
             **kwargs
         )
@@ -211,6 +222,6 @@ def undra_core(
     native.filegroup(
         name = name,
         srcs = targets,
-        tags = tags,
+        tags = tags + (["manual"] if "ios" in platforms or "android" in platforms else []),
         visibility = visibility,
     )

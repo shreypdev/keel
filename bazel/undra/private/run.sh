@@ -44,6 +44,8 @@ SWIFT_FILES=""
 BINDGEN_PLATFORMS=""
 BINDGEN_DOCS=0
 EXTRA_PATH=""
+INHERIT_PATH=0
+ORIG_PATH="${PATH:-}"
 EXTRA_ENV=""
 while IFS= read -r line || [ -n "$line" ]; do
   key="${line%%=*}"
@@ -76,7 +78,8 @@ while IFS= read -r line || [ -n "$line" ]; do
 $value" ;;
     bindgen_platforms) BINDGEN_PLATFORMS="$value" ;;
     bindgen_docs) BINDGEN_DOCS="$value" ;;
-    path) EXTRA_PATH="$EXTRA_PATH:$EXECROOT/$value" ;;
+    path) case "$value" in /*) EXTRA_PATH="$EXTRA_PATH:$value" ;; *) EXTRA_PATH="$EXTRA_PATH:$EXECROOT/$value" ;; esac ;;
+    inherit_path) INHERIT_PATH="$value" ;;
     env) EXTRA_ENV="$EXTRA_ENV
 $value" ;;
     '') ;;
@@ -208,7 +211,10 @@ fi
   fi
 } > "$CARGO_HOME/config.toml"
 
+# The toolchain's cargo and rustc first, then the system's; a platform whose toolchain is the machine's (Xcode, the NDK and
+# cargo-ndk) also gets the PATH the build was started with, after them.
 export PATH="$WORK/bin${EXTRA_PATH}:/usr/bin:/bin:/usr/sbin:/sbin"
+if [ "$INHERIT_PATH" = 1 ] && [ -n "$ORIG_PATH" ]; then export PATH="$PATH:$ORIG_PATH"; fi
 export RUSTC="$WORK/bin/rustc"
 export HOME="$WORK/home"
 export CARGO_TARGET_DIR="$WORK/target"

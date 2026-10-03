@@ -12,3 +12,9 @@ build --tool_java_language_version=17
 # The aspect_rules_js and aspect_rules_ts modules include aspect_tools_telemetry, which reports which rulesets and versions a build
 # uses to Aspect. This example does not: https://github.com/aspect-build/tools_telemetry (your repository decides for itself).
 common --repo_env=DO_NOT_TRACK=1
+
+# The Android core (`bazel build //:core_android --config=android`) is built with the machine's NDK and cargo-ndk, which no Bazel
+# rule distributes for Rust: they come in through the environment. The iOS core (`//:core_ios`) needs Xcode, which is the same.
+build:android --action_env=ANDROID_HOME
+build:android --action_env=ANDROID_NDK_HOME
+build:android --action_env=PATH

@@ -41,3 +41,18 @@ undra_ts_library(
     package = "@bazel-hello/core",
     visibility = ["//:__subpackages__"],
 )
+
+# The cores of the mobile apps. They build when asked for by name, because their toolchains are the machine's, not Bazel's:
+#
+#   bazel build //:mobile_ios       an XCFramework (macOS with Xcode)
+#   bazel build //:mobile_android --config=android   jniLibs per ABI (the NDK, cargo-ndk and rules_android_ndk: docs/bazel.html)
+undra_core(
+    name = "mobile",
+    srcs = glob(["core/**"]) + ["Cargo.toml"],
+    config = "undra.toml",
+    namespace = "hello_core",
+    platforms = [
+        "ios",
+        "android",
+    ],
+)
