@@ -61,8 +61,7 @@ pass() { echo "ok: $*"; }
 for tool in python3 curl tar; do command -v "$tool" >/dev/null || fail "$tool is required"; done
 [ -f "$script" ] || fail "missing $script"
 
-version=$(node -p 'require(process.argv[1]).version' "$root/packaging/npm/templates/cli/package.json" 2>/dev/null) \
-  || version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/Cargo.toml" | head -n 1)
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/Cargo.toml" | head -n 1)
 case "$(uname -sm)" in
   "Darwin arm64") target=aarch64-apple-darwin ;;
   "Darwin x86_64") target=x86_64-apple-darwin ;;
