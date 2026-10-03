@@ -939,17 +939,17 @@ tolerance = 0.05
 # references the core's entry: its sections grow by 0.9% less than the row says, its __LINKEDIT by 0.9% more (ADR-052's amendment).
 [size."android/hello-arm64-v8a"]
 budget_bytes = 1200000
-measured_bytes = 905520
+measured_bytes = 898176
 tolerance = 0.05
 
 [size."android/hello-x86_64"]
 budget_bytes = 1200000
-measured_bytes = 971464
+measured_bytes = 960776
 tolerance = 0.05
 
 [size."ios/hello-arm64"]
 budget_bytes = 900000
-measured_bytes = 793517
+measured_bytes = 784086
 tolerance = 0.05
 
 # ---------------------------------------------------------------------------------------------

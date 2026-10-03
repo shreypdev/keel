@@ -52,7 +52,7 @@ phone, so no device target is claimed as met:
 | Change-set for 100 dirty signals | **2.3 µs** | ≤ 100 µs |
 | Cold start restoring 100 KB of state | **85 µs** | ≤ 3 ms |
 | Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->118.4 KB<!--/measured-->** gzipped | ≤ 120 KB |
-| Android core (`.so`, arm64-v8a, release, hello world) | **<!--measured:android-size-->905.5 KB<!--/measured-->** | ≤ 1.2 MB |
+| Android core (`.so`, arm64-v8a, release, hello world) | **<!--measured:android-size-->898.2 KB<!--/measured-->** | ≤ 1.2 MB |
 
 The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.sh) builds the
 `undra init` template for the web the way an app does (`wasm-opt -Oz`, gzip level 9), and CI fails

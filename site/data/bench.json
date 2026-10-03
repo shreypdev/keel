@@ -81,7 +81,7 @@
     {
       "id": "android-size",
       "operation": "Android core, arm64-v8a, hello world",
-      "value": 905.5,
+      "value": 898.2,
       "unit": "KB",
       "budget": 1.2,
       "budgetUnit": "MB",
