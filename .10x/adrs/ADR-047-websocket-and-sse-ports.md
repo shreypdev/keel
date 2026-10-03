@@ -205,3 +205,15 @@ what it should be, and the code confirmed it: `URLSessionSseStream` pulled `URLS
   recorded task shows the suspend and resume rule; a loopback server that sends exactly what a test says shows a real task seeing every
   byte as its own chunk, resuming after a pull and cancelling with `open`; `testAnSseFloodStallsTheServerWhileTheCoreDoesNotPull` and every
   other SSE test pass unchanged; the Swift contract column is 33 of 33 (S24 included). Record: `.10x/decisions/sde/sse-chunks.md`.
+* **Review (`.10x/reviews/2026-10-02-sse-chunks-review.md`).** *The app's session delegate.* The stream implements only the response,
+  data and completion callbacks; URLSession forwards the rest to the session's delegate ("methods not implemented on this delegate will
+  still be forwarded", `NSURLSession.h`). Over TLS (`SseSessionDelegateTests`): a session-level pinning delegate decides the stream's
+  server trust (a pin that does not match refuses it), a task-level one gets the trust and HTTP Basic challenges, both get the metrics.
+  This is better than before: `bytes(for:)` never asked a session-level `urlSession(_:didReceive:completionHandler:)`. The trade-off is
+  that the parse runs on the session's delegate queue (main, if the app's session uses `.main`; documented on the type). *Counted
+  suspends.* `URLSessionTask` counts suspends, and a `resume` of a running task is not a no-op (it cancels the next `suspend`), so the
+  stream calls them strictly in turn (a seeded test). *Cancellation.* A cancelled pull ends the stream with `Network("cancelled")` and
+  cancels the request, as an `AsyncBytes` read did (the first version left it waiting). *The parser* now splits lines on bytes, not
+  `Character`s (a combining mark after `:`, the space or NUL was joined to it, unlike Kotlin, TypeScript and the standard), and takes
+  runs between line ends: the parser alone in release 310 to 2,246 MB/s on 4,096 B events, and the adapter end to end (release harness,
+  interleaved, a loaded machine) 57,000-67,000 to 95,000-117,000 events/s on 4,096 B events.

@@ -112,5 +112,20 @@ step on large events. The user's 2.4x is inside the range.
   package's floor, and the suspend semantics are the same API on both); other OS versions than macOS 26.5 (CI's macOS 15 runner is the
   first); a real network (cellular, TLS: the figures are loopback); `AsyncBytes`' own behaviour on the same server was measured only
   for throughput, not for the kernel-buffer stall of the old flood test.
-* The parser itself is now the limit on large events in release (about 400 MB/s: a byte at a time with `[UInt8].append`). A
-  run-based fast path is the next lever and is not in this piece.
+* The parser itself was then the limit on large events in release (about 400 MB/s: a byte at a time with `[UInt8].append`). The
+  review added the run-based path (below).
+
+## After the review (2026-10-02, `.10x/reviews/2026-10-02-sse-chunks-review.md`)
+
+* A cancelled pull waited for a chunk or a close (the request stayed open); it now ends the stream with `Network("cancelled")` and
+  cancels the request, as an `AsyncBytes` read did.
+* The session's delegate: challenges (server trust at the session or the task level, HTTP authentication) and metrics reach it, over
+  TLS (`SseSessionDelegateTests`); `bytes(for:)` had never asked a session-level challenge handler. The parse runs on the session's
+  delegate queue (documented on the type).
+* `URLSessionTask` counts suspends and a `resume` of a running task cancels the next `suspend` (measured), so the strict alternation
+  the stream keeps is now a seeded test.
+* `SseParser` splits lines on bytes (a combining mark after `:`, the space or NUL was joined to it as a `Character`, unlike Kotlin,
+  TypeScript and the standard) and appends runs between line ends: release, the parser alone, 4,096 B events 310 to 2,246 MB/s; the
+  adapter end to end 57,000-67,000 to 95,000-117,000 events/s (a release harness outside the repository, a machine at load average 21,
+  so the figures are lower than the table above and are a before/after pair, not a ceiling).
+* The `BENCH swift sse/...` lines end with the build they ran in (`debug build` under `swift test`).
