@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reviewing generated code · Undra docs</title>
+<meta name="description" content="Why generated bindings run to thousands of lines, how a pull request collapses them, and how to review and version a core's API as a schema diff.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/reviewing-generated-code.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Reviewing generated code · Undra docs">
+<meta property="og:description" content="Why generated bindings run to thousands of lines, how a pull request collapses them, and how to review and version a core's API as a schema diff.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/reviewing-generated-code.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Reviewing generated code · Undra docs">
+<meta name="twitter:description" content="Why generated bindings run to thousands of lines, how a pull request collapses them, and how to review and version a core's API as a schema diff.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/reviewing-generated-code.html#article","headline":"Reviewing generated code · Undra docs","description":"Why generated bindings run to thousands of lines, how a pull request collapses them, and how to review and version a core's API as a schema diff.","url":"https://shreypdev.github.io/undra/docs/reviewing-generated-code.html","inLanguage":"en","dateModified":"2026-10-02","datePublished":"2026-10-02","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Reviewing generated code","item":"https://shreypdev.github.io/undra/docs/reviewing-generated-code.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Core</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="generics.html">Generic functions, objects and stores</a></li></ul></div><div class="side-group"><p class="side-title">Data and live data</p><ul><li><a href="paging.html">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="realtime.html">WebSocket &amp; server-sent events</a></li><li><a href="db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Test, ship, operate</p><ul><li><a href="testing.html">Testing your app</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="reviewing-generated-code.html" aria-current="page">Reviewing generated code</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="production.html">Operating in production</a></li><li><a href="several-cores.html">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/network-stack.html">Your network stack</a></li></ul></div><div class="side-group"><p class="side-title">Adopting Undra</p><ul><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Core</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="objects.html">Objects and identity</a></li><li><a href="callbacks.html">Host callbacks</a></li><li><a href="types.html">Newtypes, generics and decimals</a></li><li><a href="generics.html">Generic functions, objects and stores</a></li></ul></div><div class="side-group"><p class="side-title">Data and live data</p><ul><li><a href="paging.html">Paging and lazy lists</a></li><li><a href="polling.html">Polling</a></li><li><a href="realtime.html">WebSocket &amp; server-sent events</a></li><li><a href="db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Test, ship, operate</p><ul><li><a href="testing.html">Testing your app</a></li><li><a href="updates.html">Shipping an update</a></li><li><a href="reviewing-generated-code.html" aria-current="page">Reviewing generated code</a></li><li><a href="web.html">Workers &amp; crash recovery</a></li><li><a href="production.html">Operating in production</a></li><li><a href="several-cores.html">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Cookbook</p><ul><li><a href="cookbook/index.html">All recipes</a></li><li><a href="cookbook/auth.html">Auth</a></li><li><a href="cookbook/pagination.html">Pagination</a></li><li><a href="cookbook/forms.html">Forms</a></li><li><a href="cookbook/upload.html">File upload</a></li><li><a href="cookbook/realtime.html">Real-time</a></li><li><a href="cookbook/offline.html">Offline-first</a></li><li><a href="cookbook/network-stack.html">Your network stack</a></li></ul></div><div class="side-group"><p class="side-title">Adopting Undra</p><ul><li><a href="cookbook/from-kmp.html">From Kotlin Multiplatform</a></li><li><a href="cookbook/from-uniffi.html">From UniFFI</a></li><li><a href="cookbook/ios-15-16.html">iOS 15 and 16</a></li><li><a href="sample.html">Sample app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1>Reviewing generated code and versioning the API</h1>
+    <p class="lede">The Swift, Kotlin and TypeScript that <code>undra bindgen</code> writes are an artifact of the core's schema. Review the schema; let CI prove the bindings.</p>
+<h2 id="the-rule">The rule<a class="anchor" href="#the-rule" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Do not read the generated files in a review.</strong> GitHub collapses them, and <code>undra bindgen --check</code> proves they are exactly what the schema generates.</li><li><strong>Read the schema diff.</strong> <code>undra schema diff --against origin/main</code> lists what changed in the public API, one line per change, each marked <code>breaking</code> or <code>additive</code>.</li><li><strong>Version the API as the schema, not as its generated text.</strong> Commit <code>schema.json</code> next to <code>generated/</code>: an API change is a few lines of JSON, and thousands of lines of bindings move with it.</li></ul>
+<h2 id="what-the-lines-are">What the lines are<a class="anchor" href="#what-the-lines-are" aria-label="Link to this section">#</a></h2>
+<p>The generated code is long because each public item becomes native code: an observable class with typed members, a decoder per signal, a documented wrapper per method, in three languages. That is the price of bindings a Swift, Kotlin or TypeScript engineer would write themselves, so the fix is not to generate less. Here is what the playground, with 15 stores, produces per platform.</p>
+<div class="table-wrap"><table><thead><tr><th></th><th>Lines</th><th>Code</th><th>Doc comments</th><th>Other comments</th><th>Blank</th></tr></thead><tbody><tr><td>Swift</td><td>7,787</td><td>6,626</td><td>699</td><td>43</td><td>419</td></tr><tr><td>Kotlin</td><td>7,365</td><td>5,698</td><td>1,263</td><td>18</td><td>386</td></tr><tr><td>TypeScript</td><td>7,692</td><td>6,121</td><td>1,170</td><td>11</td><td>390</td></tr></tbody></table></div>
+<p>Lines of each kind of generated file:</p>
+<div class="table-wrap"><table><thead><tr><th>File</th><th>Swift</th><th>Kotlin</th><th>TypeScript</th></tr></thead><tbody><tr><td>Types</td><td>885</td><td>755</td><td>785</td></tr><tr><td>Errors</td><td>422</td><td>270</td><td>462</td></tr><tr><td>Objects</td><td>1,490</td><td>1,650</td><td>1,902</td></tr><tr><td>Stores</td><td>3,737</td><td>3,430</td><td>3,268</td></tr><tr><td>Ports</td><td>22</td><td>28</td><td>27</td></tr><tr><td>Queries</td><td>763</td><td>727</td><td>744</td></tr><tr><td>Callbacks</td><td>91</td><td>105</td><td>86</td></tr><tr><td>Ids</td><td>286</td><td>290</td><td>283</td></tr><tr><td>Core</td><td>37</td><td>77</td><td>68</td></tr><tr><td>Index</td><td>–</td><td>–</td><td>11</td></tr><tr><td>Package and build files</td><td>54</td><td>33</td><td>56</td></tr><tr><td><strong>Total</strong></td><td><strong>7,787</strong></td><td><strong>7,365</strong></td><td><strong>7,692</strong></td></tr></tbody></table></div>
+<p>Three things stand out. Doc comments are 9 to 17 percent of a tree and the reason the bindings can be used without the Rust source open. <code>Stores</code> is almost half of every tree. And one fixture, the <code>Bench</code> store (128 counters and a 10,000-row list, there to measure the boundary), is 1,698 of the Swift lines, 1,325 of the Kotlin and 1,082 of the TypeScript; the median of the other fourteen stores is about 125 lines per platform, so one real feature is on the order of 130 to 250 lines on each of the three. <code>node scripts/generated-weight.mjs [dir]</code> prints these tables for any generated tree.</p>
+<h2 id="collapsed-in-review">Collapsed in review<a class="anchor" href="#collapsed-in-review" aria-label="Link to this section">#</a></h2>
+<p>Every generated file says what it is on its first line: the generator, the core, the schema hash and "Do not edit". <code>package.json</code> has no comments, so it carries the sentence as a <code>"//"</code> member, and <code>tsconfig.json</code> as a comment line. <code>undra bindgen</code> also writes a <code>.gitattributes</code> at the root of each tree, <code>swift/</code>, <code>kotlin/</code> and <code>ts/</code>:</p>
+<div class="code"><div class="code-bar"><span>swift/.gitattributes</span></div><pre><code data-lang="gitattributes"># Generated by `undra bindgen`: do not edit, it is rewritten with the bindings.
+# GitHub collapses these files in a pull request and leaves them out of the language statistics.
+# Review the schema (`undra schema diff`), not the bindings: `undra bindgen --check` proves they
+# match it. A collapsed file opens to its full diff when you click it.
+* linguist-generated=true</code></pre></div>
+<p>GitHub reads <code>linguist-generated</code> to fold a file in a pull request's diff and to leave it out of the repository's language bar. The diff is not hidden: click a collapsed file to see it, and <code>git diff</code> prints it as ever (the rule does not set <code>-diff</code>). The pattern covers the whole tree, so a file of your own kept inside one folds too; put a <code>.gitattributes</code> with <code>-linguist-generated</code> beside it, or keep your files outside the generated trees. Lint exclusions for the trees are a separate matter, handled with the build.</p>
+<h2 id="review-the-schema">Review the schema, not the bindings<a class="anchor" href="#review-the-schema" aria-label="Link to this section">#</a></h2>
+<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">undra schema export -o schema.json              # once, and after each API change; commit it
+undra schema diff --against origin/main         # what changed since the base</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">text</span></span></div><pre><code>Public API: origin/main:schema.json (schema 0x4d503c0c6414f9bc) -&gt; schema.json (schema 0x53c10651c39d0ca4)
+
+breaking  case Filter.Archived: added (an exhaustive `switch` or `when` over it stops compiling)
+breaking  field Todo.due: added (Option&lt;Timestamp&gt;, with a default): Swift and Kotlin initializers default it, but a TypeScript object literal that builds a `Todo` must name it
+breaking  field Todo.priority: added without a default (u8): everything that builds a `Todo` must supply it
+breaking  method Todos.add: parameter `tags: Vec&lt;String&gt;` added
+additive  method Todos.clear: added (fn clear())
+breaking  method Todos.toggle: removed (was fn toggle(id: u32))
+additive  signal Todos.open_count: added (u32, computed)
+additive  function import_all: added (async fn import_all(items: Vec&lt;Todo&gt;) -&gt; u32)
+breaking  method Notifier.dismiss: added (fn dismiss()); the app implements it, so its implementation must add it
+additive  port Presence: added (an event port: the app sends its events when it has them, and implements nothing)
+additive  callback Cancel: added
+breaking  mutation add_todo: removed (was async fn add_todo(title: String) -&gt; Result&lt;Todo, TodoError&gt;)
+additive  query todo: stale time changed from none to 30000 ms
+
+7 breaking, 6 additive.</code></pre></div>
+<p>The old side is the file as committed at the ref (<code>git show</code>; nothing is built), the new side is the file in the working tree; name another file after the ref, or give two files and no ref. The order is fixed, so the same two schemas print the same text, and doc comments and wire ids are not compared. The command exits with status 0 whatever it finds, so run it freely; add <code>--exit-code</code> to make a breaking line exit 1 in CI.</p>
+<p>Nothing is built, so the report is only as current as the file. The bindings beside it say which schema they were generated from, and the command compares: when <code>schema.json</code> disagrees with the bindings in the working tree (an API change nobody exported) or at the ref, it prints a warning that names both hashes, and a stale working-tree file fails <code>--exit-code</code> too.</p>
+<p>The size of a review is the point. The thirteen changes above, on a to-do core small enough to read, change 581 lines of generated code (183 of Swift, 193 of Kotlin, 205 of TypeScript), 77 lines of <code>schema.json</code> and print 13 lines of diff. <code>schema export</code> writes every type and every small definition on one line, so the playground's whole schema is about 3,300 lines and a field that became optional is one changed line.</p>
+<p>The pull request template asks for this output when a core's API changes: paste it, and justify every <code>breaking</code> line.</p>
+<h2 id="what-breaking-means">What breaking means<a class="anchor" href="#what-breaking-means" aria-label="Link to this section">#</a></h2>
+<p>A line is <strong>breaking</strong> when code an app wrote against the old bindings can stop compiling or change what it means against the new ones, and <strong>additive</strong> when it cannot. A removed or changed signature is breaking; an added function, method, store, object or record is additive. An added record field is breaking even with a default: a TypeScript record is an interface, and an object literal that builds one must name every field (Swift and Kotlin default an appended field of a primitive, string, time, optional or collection type). Items are matched by name.</p>
+<div class="table-wrap"><table><thead><tr><th>Item</th><th>Additive</th><th>Breaking</th></tr></thead><tbody><tr><td>Any item</td><td>added</td><td>removed</td></tr><tr><td>Record field</td><td>a default gained</td><td>added, with or without <code>#[undra(default)]</code>; removed; retyped; reordered; a default lost</td></tr><tr><td>Enum or error case</td><td>message changed</td><td>added (an exhaustive <code>switch</code> or <code>when</code> stops compiling); removed; payload or index changed</td></tr><tr><td>Method, constructor, function</td><td>added; <code>Ctx</code> taken or not (no generated signature shows it)</td><td>removed; a parameter added, removed, renamed, retyped or reordered; return type or <code>async</code> changed</td></tr><tr><td>Store signal</td><td>added; <code>no_coalesce</code>, <code>default</code>, <code>computed</code> or <code>key</code> changed (every signal is a read-only property)</td><td>removed; type changed</td></tr><tr><td>Query or mutation</td><td>added; cache key, stale time, <code>persist</code>, <code>idempotent</code>, polling changed; a paged query's cursor type</td><td>removed; parameters or return type changed; paging added or removed; the item key changed to or from <code>id</code></td></tr><tr><td>Port (the app implements it)</td><td>a standard port added</td><td>an opt-in standard port added (a web app registers its adapter); any other port added; a method added, removed or changed; removed</td></tr><tr><td>Event port (the app sends it)</td><td>added; a method added</td><td>a method removed or changed; removed</td></tr><tr><td>Callback (the app implements it)</td><td>added</td><td>a method added, removed or changed; <code>background</code> changed (the calls move on or off the main thread); removed</td></tr></tbody></table></div>
+<p>"Additive" means compatible, so it includes behaviour that no signature shows, like a query's stale time. A line holds for all three languages: what breaks in any one of them is breaking. The full rules are <a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">SPEC 2.6</a>.</p>
+<h2 id="keeping-it-honest">Keeping it honest in CI<a class="anchor" href="#keeping-it-honest" aria-label="Link to this section">#</a></h2>
+<details class="reveal-code"><summary>Show a GitHub Actions job</summary>
+<div class="code"><div class="code-bar"><span><span class="lang">yaml</span></span></div><pre><code data-lang="yaml">- uses: actions/checkout@v4
+  with: { fetch-depth: 0 }
+- run: undra bindgen --check --docs                        # the bindings are what the schema generates
+- run: undra schema export --check                          # schema.json is the core's schema
+- run: undra schema diff --against origin/main --exit-code   # fails on a breaking change</code></pre></div>
+</details>
+<p>The first step proves the committed bindings, the second proves the committed schema, and the third turns a breaking change into a decision somebody makes on purpose. Without the third, the diff is for the reviewer to read. To skip committing bindings at all, generate them at build time and ignore the trees; the committed bindings are what a native reviewer's IDE and a Swift package see without running <code>undra</code>, which is why Undra commits them by default.</p>
+
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/reviewing-generated-code.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="updates.html"><span>Previous</span><b>Shipping an update</b></a>
+    <a class="next" href="web.html"><span>Next</span><b>Workers &amp; crash recovery</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#the-rule">The rule</a></li><li><a href="#what-the-lines-are">What the lines are</a></li><li><a href="#collapsed-in-review">Collapsed in review</a></li><li><a href="#review-the-schema">Review the schema</a></li><li><a href="#what-breaking-means">What breaking means</a></li><li><a href="#keeping-it-honest">Keeping it honest in CI</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose, React and React Native.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

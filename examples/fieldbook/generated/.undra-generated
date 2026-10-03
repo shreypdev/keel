@@ -1,3 +1,4 @@
+kotlin/.gitattributes
 kotlin/.gitignore
 kotlin/build.gradle.kts
 kotlin/src/main/kotlin/dev/undra/fieldbook/core/Core.kt
@@ -9,6 +10,7 @@ kotlin/src/main/kotlin/dev/undra/fieldbook/core/Queries.kt
 kotlin/src/main/kotlin/dev/undra/fieldbook/core/Stores.kt
 kotlin/src/main/kotlin/dev/undra/fieldbook/core/Types.kt
 kotlin/src/main/resources/META-INF/proguard/undra-fieldbook_core.pro
+swift/.gitattributes
 swift/Package.swift
 swift/Sources/FieldbookCore/Generated/Core.swift
 swift/Sources/FieldbookCore/Generated/Errors.swift
@@ -21,6 +23,7 @@ swift/Sources/FieldbookCore/Generated/Types.swift
 swift/Sources/FieldbookCoreFFI/fieldbook_core_undra.c
 swift/Sources/FieldbookCoreFFI/include/fieldbook_core_undra.h
 swift/Sources/FieldbookCoreFFI/include/module.modulemap
+ts/.gitattributes
 ts/package.json
 ts/src/core.ts
 ts/src/errors.ts
