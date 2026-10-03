@@ -2,7 +2,7 @@
 #
 # Keeps ktlint and the IDE's formatter out of the generated Kotlin: this module is the output of a generator, so its style
 # is the generator's, not yours. Every generated file also starts with `@file:Suppress("ALL", "ktlint")`, which
-# ktlint (every version), detekt and the IDE read without any configuration.
+# ktlint 1.x, detekt and IntelliJ read without any configuration (the Kotlin compiler does not: its warnings still show).
 #
 # If your repository's own .editorconfig switches ktlint on for everything and you would rather say it once at the root:
 #

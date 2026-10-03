@@ -8,7 +8,7 @@
 //! | Tree | File | Read by |
 //! |---|---|---|
 //! | `kotlin/` | `.editorconfig` | ktlint and the IDE formatter, for every Kotlin file below it |
-//! | `kotlin/**/*.kt` | `@file:Suppress("ALL", "ktlint")` (the Kotlin generator's header) | ktlint, detekt and the IDE, wherever the tree is |
+//! | `kotlin/**/*.kt` | `@file:Suppress("ALL", "ktlint")` (the Kotlin generator's header) | ktlint 1.x, detekt and IntelliJ, wherever the file is; not the compiler, whose warnings still show |
 //! | `swift/` | `.swiftlint.yml` | SwiftLint: the `excluded:` list (the package's two source directories) to merge into the lint root's configuration |
 //! | `ts/` | `.eslintrc.json` | ESLint 8 and earlier (`ignorePatterns`) |
 //! | `ts/` | `eslint.config.undra.mjs` | ESLint 9's flat config: the entry to spread into `eslint.config.js`; it finds its own directory, so it is right wherever the tree is |
@@ -29,7 +29,7 @@ pub const KOTLIN_EDITORCONFIG: &str = "\
 #
 # Keeps ktlint and the IDE's formatter out of the generated Kotlin: this module is the output of a generator, so its style
 # is the generator's, not yours. Every generated file also starts with `@file:Suppress(\"ALL\", \"ktlint\")`, which
-# ktlint (every version), detekt and the IDE read without any configuration.
+# ktlint 1.x, detekt and IntelliJ read without any configuration (the Kotlin compiler does not: its warnings still show).
 #
 # If your repository's own .editorconfig switches ktlint on for everything and you would rather say it once at the root:
 #

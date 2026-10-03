@@ -44,7 +44,9 @@ use crate::zero::ZeroState;
 use crate::{GeneratedFile, Generator};
 
 /// The file annotation every generated Kotlin file starts with (after its header line): ktlint and detekt skip the file,
-/// whatever the host repository's lint configuration says.
+/// whatever the host repository's lint configuration says. `"ALL"` is not a compiler suppression (that would be
+/// `"warnings"`): kotlinc still reports its warnings about generated code, which the runtime's `-Werror` build of the golden
+/// bindings relies on.
 pub const KOTLIN_FILE_SUPPRESS: &str = "@file:Suppress(\"ALL\", \"ktlint\")";
 
 /// The package of the standard types the Kotlin runtime provides (`StandardRecords.kt`).
