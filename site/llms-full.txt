@@ -245,7 +245,7 @@ undra build --platform ios,android,web --release
 
 `undra init` also writes `.github/workflows/undra.yml`: a job for the core (format, clippy, tests, `undra bindgen --check`) and one per app, each installing `undra` at the version pinned once at the top of the file. When a newer Undra is out, `undra upgrade` moves every pin of the project (the core's dependency, the runtimes, the workflow) in step, regenerates the bindings and prints the migration notes of every release it crosses; `undra upgrade --dry-run` shows the lines first.
 
-Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 118.4 KB gzipped (budget 120 KB, gated in CI) and the arm64-v8a Android `.so` is 898.2 KB (budget 1.2 MB per ABI, gated in CI). To trade speed for size, or size for speed, set `opt_level` in `undra.toml`: [Operating in production](https://shreypdev.github.io/undra/docs/production.html#size) has the numbers for each setting.
+Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 113.1 KB gzipped (budget 120 KB, gated in CI) and the arm64-v8a Android `.so` is 898.2 KB (budget 1.2 MB per ABI, gated in CI). To trade speed for size, or size for speed, set `opt_level` in `undra.toml`: [Operating in production](https://shreypdev.github.io/undra/docs/production.html#size) has the numbers for each setting.
 
 ## Prefer to explore first?
 
@@ -4794,13 +4794,13 @@ Launch
 
 Undra is a Rust framework for the part of an app that is not pixels: its domain logic, reactive state, data layer and persistence. You write that part once, in Rust; Undra generates the Swift, Kotlin and TypeScript that SwiftUI, Compose, React and React Native use, and every screen stays the platform's own.
 
-3 Oct 2026 · 4 min read · Undra team
+3 Oct 2026 · 5 min read · Undra team
 
 ## What it is
 
 An Undra core is a Rust crate. You mark its records, enums, errors and stores with a handful of attributes; the macros describe them as a schema, and `undra bindgen` turns the schema into the API each platform would write itself: an `@Observable` class for SwiftUI, `StateFlow`s for Compose, hooks for React and React Native.
 
-Each platform keeps a local mirror of the state its screens observe, so a read is a property access and never calls into Rust. A write crosses the boundary once per transaction, and the core answers with one binary change-set that patches every mirror. That is the diagram on the [home page](https://shreypdev.github.io/undra/), and you can tap it. On the reference machine a synchronous call into the core costs 49.8 ns on the core side, and a change-set of 100 signals 2.3 µs.
+Each platform keeps a local mirror of the state its screens observe, so a read is a property access and never calls into Rust. A write crosses the boundary once per transaction, and the core answers with one binary change-set that patches every mirror. That is the diagram on the [home page](https://shreypdev.github.io/undra/), and you can tap it. In a release build on the reference machine, an Apple M5 Pro and not a phone, a synchronous call into the core costs 49.8 ns on the core side, and a change-set of 100 signals 2.3 µs.
 
 ## Who it is for
 
@@ -4811,13 +4811,13 @@ It assumes a team that can carry Rust, a real cost that the [default-choice post
 ## What is in 1.0
 
 - **The core.** Records, enums and typed errors; stores of signals and computeds; keyed lists, and derived lists that send only what changed; objects and host callbacks; newtypes, decimals and declared generics.
-- **The data layer.** Queries and mutations with staleness, retry and optimistic updates that roll back; an offline queue; persistence that survives a schema change; paged and lazy lists; polling.
+- **The data layer.** Queries and mutations with staleness, retry and optimistic updates that roll back; an offline queue; persistence that migrates stored data across schema changes and refuses what it cannot convert; paged and lazy lists; polling.
 - **Ports.** Ten platform services with adapters and deterministic fakes; WebSocket, server-sent events and SQLite; the app's own OkHttp, URLSession or fetch underneath.
-- **The dev loop.** `undra dev` serves one core to every running app and keeps its state across a rebuild; devtools with a change-set timeline; `undra schema diff` marks each API change breaking or additive.
-- **Platforms.** SwiftUI, Compose, React and React Native, built from Xcode, Gradle, Vite or Bazel. iOS 15 and 16 get `ObservableObject` stores, proven by compilation and a probe on iOS 26.5, not yet on an iOS 15 or 16 device.
-- **Proof.** 35 contract scenarios against the real core on Swift, Kotlin and TypeScript, 101 of 101 cells passing; 7,414 tests; an adversarial review before every feature merged.
+- **The dev loop.** `undra dev` serves one core to every running app and keeps its state across a rebuild, except in a web page started with `npm run dev`, which reloads and starts fresh; devtools with a change-set timeline; `undra schema diff` marks each API change breaking or additive.
+- **Platforms.** SwiftUI, Compose, React and React Native, built from Xcode, Gradle, Vite or Bazel. iOS 15 and 16 get `ObservableObject` stores, proven by compilation and a probe on iOS 26.5, not yet on an iOS 15 or 16 runtime, simulator or device.
+- **Proof.** 35 contract scenarios against the real core on Swift, Kotlin and TypeScript (two run on TypeScript only), 101 of 101 cells passing; 7,414 tests at the 2 October count, with more added since; an adversarial review before every feature merged.
 
-Sizes are gated in CI: the hello-world web core is 118.4 KB gzipped against 120 KB, what a page loads up front of the JavaScript runtime 15.8 KB against 16 KB, the Android library 898.2 KB per ABI against 1.2 MB. The [roadmap](https://shreypdev.github.io/undra/roadmap/) lists everything by group.
+Sizes are gated in CI. The hello-world web core, a WebAssembly module, is 113.1 KB gzipped in the committed record, against a budget of 120 KB. The JavaScript runtime a hello page loads up front is 15.8 KB gzipped against 16 KB. The hello-world Android library for arm64-v8a is 898.2 KB, stripped and uncompressed, against 1.2 MB per ABI. The [roadmap](https://shreypdev.github.io/undra/roadmap/) lists everything by group.
 
 ## Try it in five minutes
 
@@ -4829,7 +4829,7 @@ undra init myapp
 cd myapp/web && npm install && npm run dev
 ```
 
-The installer script and cargo work too. `undra init` writes a core with a to-do store, its bindings and an app per platform, downloading nothing. `npm run dev` builds the core to WebAssembly and serves the app at `http://localhost:5173`. Edit `core/src/lib.rs` and save: the page is on the new core. `undra dev` serves one core to every app at once.
+The installer script and cargo work too. `undra init` writes a core with a to-do store, its bindings and an app per platform, downloading nothing. `npm run dev` builds the core to WebAssembly (the first build compiles the Undra crates and takes a minute or two) and serves the app at `http://localhost:5173`. Edit `core/src/lib.rs` and save: the page is on the new core. `undra dev` serves one core to every app at once.
 
 The iOS and Android apps get their runtimes from the same GitHub release, with no account: the Swift package at the repository's root and the Kotlin modules from JitPack. [Getting started](https://shreypdev.github.io/undra/docs/getting-started.html) has every step, as we ran it.
 
@@ -4854,41 +4854,45 @@ Performance
 
 # Fifteen levers: the JavaScript runtime at 16 KB
 
-What a hello-world page loads up front of `@undra/runtime` went from 22,100 to 15,774 bytes gzipped, under a 16,000-byte budget. Nothing was removed: what left the first chunk loads with what needs it. Here are the fifteen levers, and the four defects the review caught.
+What a hello-world page loads up front of `@undra/runtime` went from 22,100 to 15,774 bytes gzipped, under a 16,000-byte budget. No feature was removed: code a hello page does not use loads when something first needs it, and a production page reports an error as a code with a link instead of a sentence. Here are the fifteen levers, and the four defects the review caught.
 
-3 Oct 2026 · 5 min read · Undra team
+3 Oct 2026 · 6 min read · Undra team
 
 ## Where the bytes were
 
-The web size decision (ADR-052) asked for 16 KB of runtime up front. An earlier piece reached 21.2 KB and concluded that 16 KB would mean removing behaviour; five pieces then added 0.9 KB, and the gate stood at 22,100 bytes with no room. Instead we attributed every byte: a script charges each byte of the minified chunk, and each bit of its gzip stream, to its declaration. The largest shares:
+The web size decision (ADR-052) asked for 16 KB of runtime up front. An earlier piece reached 21.2 KB and concluded that 16 KB would mean removing behaviour; five pieces then added 0.9 KB, and the gate stood at 22,100 bytes with no room. Instead we attributed every byte: a script charges each byte of the minified chunk, and each bit of its gzip stream, to its declaration.
+
+Every size here is gzipped at zlib level 9. "Up front" is the first chunk of a production build of the `undra init` web template, made by Vite 8.3.1 (its bundler is Rolldown), counting the runtime's own code. Vite's preload helper, a snippet Vite adds to a chunk that loads another on demand, is 691 bytes and is reported beside the number. A share is what code costs in this chunk, not what removing it saves, so every lever below was measured by building. The nine largest of the 24 shares:
 
 | Concern | gzipped bytes |
 | --- | --- |
-| wire: reader, writer, codecs | 3,702 |
-| the mirror | 2,867 |
-| the in-process wasm host | 2,521 |
+| wire format: reader, writer, codecs | 3,702 |
+| the mirror (each platform's copy of the core's state) | 2,867 |
+| the host that runs the core's WebAssembly in the page | 2,521 |
 | error classes and their sentences | 2,038 |
 | the call path | 1,889 |
+| ports: dispatch, default ports, host events | 1,834 |
+| core lifecycle: load, options, start, close | 1,805 |
 | streams | 945 |
 | the bundler's own helper and chunk table | 717 |
 
-Three things stood out. A hello page shipped code it cannot run: streams the template does not have, reconnection for a core that is not remote, 20 of 24 codecs. Where the bundler emits a module is decided by re-exports, not by use: a module reached through any file with code of its own lands in the first chunk. And the sentences of errors were about a tenth of the chunk.
+Four things stood out. A hello page shipped code it cannot run: streams the template does not have, reconnection for a core that is not remote, 20 of 24 codecs. Rolldown decides where a module goes by re-exports, not by use: a module the entry reaches statically through any file with code of its own lands in the first chunk, even if only an on-demand chunk uses it. Those are Rolldown's rules; another bundler may place modules differently and save less. The sentences of errors were about a tenth of the chunk. And 717 bytes were the bundler's: each on-demand chunk costs the first chunk 15 to 30 bytes of file name, so every lever that makes something lazy grows that share a little.
 
 ## The levers
 
-Each landed with its measured number. gzip is not additive: a row is what it saved on top of the rows above.
+Each landed with its measured number. gzip is not additive: a row is what it saved on top of the rows above. The table is as built, before the review's fixes below, whose cost of 131 bytes includes row 8's part.
 
 | # | Lever | after | saved |
 | --- | --- | --- | --- |
 |  | `main` before | 22,100 |  |
-| 1 | session payloads re-exported by the wire barrel | 21,971 | 129 |
+| 1 | session payloads re-exported by the wire format's index file (a barrel) | 21,971 | 129 |
 | 2 | nine port ids as literals, pinned by a test | 21,766 | 205 |
 | 3, 11a | `codecs` as a module namespace; unnamed codecs in a module of their own | 20,799 | 967 |
 | 4 | streams as a feature the generated entry passes | 20,152 | 647 |
 | 5 | a typed channel to the in-process host | 19,458 | 694 |
-| 6, 7 | observe waiters and remote-only code load with their transport | 18,942 | 516 |
-| 8 | `stats`, `snapshot`, `restore`, `runInBackground` on first call | 18,580 | 362 |
-| 9, 10 | each on-demand transport maps its own options | 18,311 | 269 |
+| 6, 7 | observe waiters, and code only a core outside this thread needs, load with their transport | 18,942 | 516 |
+| 8 | `stats`, `snapshot`, `restore`, `runInBackground` on first call; the review put `snapshot` and `restore` back up front | 18,580 | 362 |
+| 9, 10a | each on-demand transport maps its own options; the sync-port refusal text | 18,311 | 269 |
 | 11b | two rarely thrown error classes | 18,158 | 153 |
 | 12 | trims | 18,079 | 79 |
 | 13 | the production build says error codes, with a link | 16,763 | 1,316 |
@@ -4896,7 +4900,7 @@ Each landed with its measured number. gzip is not additive: a row is what it sav
 | 15 | Vite's preload helper reported beside the number | 15,679 | 514 |
 | 4b | no bundler warning in an app with a stream | 15,680 | +1 |
 
-Row 15 changes what is counted, not what is shipped, so the helper has a gate of its own: with it, the page loads 16,285 bytes against 16,600. Row 13 is the largest single lever. A production page carries an error's class, kind and fields, and its text is `T<code>` with a link to the [error codes](https://shreypdev.github.io/undra/docs/errors.html); the development build keeps the sentences.
+Row 15 changes what is counted, not what is shipped, so the other reading has a gate of its own: with Vite's helper left in the chunk, the final record is 16,285 bytes against 16,600. Row 13 is the largest single lever. A production page carries an error's class, kind and fields, and its text is a code (`T` and a number), the values and a link to the [error codes](https://shreypdev.github.io/undra/docs/errors.html); the development build keeps the sentences.
 
 ## What left, and what stays
 
@@ -4909,18 +4913,20 @@ What left loads when it is first needed: stream support, the framed transports' 
 
 ## What the review caught
 
-The adversarial review reproduced every number to the byte and found four High defects at the levers' edges:
+The adversarial review reproduced the sizes to the byte and found four High defects at the levers' edges:
 
 - **A stripped declaration.** `reclaim` was marked internal, so the published types dropped it, and generated bindings that import it failed `tsc` against the installed package. Every suite aliased the sources and stayed green. A test now asks the compiler about every name the generator imports.
 - **Lost order.** `snapshot()` and `restore()` ran after an `await import()`, which yields even when the module is cached, so a call made after `restore()` reached the core first. They run at the call again.
-- **A fetch at the wrong moment.** The background drain at `pagehide` needed a chunk, at the one moment a page cannot fetch one. It calls the core directly now.
+- **A fetch at the wrong moment.** The background drain at `pagehide` needed a chunk fetched, when a page is being left or is offline and may not be able to fetch one. It calls the core directly now.
 - **Codes where data was expected.** The production build had turned a WebSocket close reason, which reaches the server, and port errors, which reach the core, into codes. Text that leaves the runtime as data is a sentence in both builds.
 
 The fixes cost 131 bytes, to 15,811; smaller fixes and a later merge left the record at 15,774.
 
 ## What it cost
 
-An awaited call is 4% slower on Node, from 313 to 316 nanoseconds to 325 to 333; `callSync` did not move. The development build's first chunk is 21,151 bytes and is not gated, since a development page is served module by module. The page that uses every feature loads 39,922 bytes, less than the 42,385 it loaded before. All three numbers are gated in CI; a change that grows the chunk fails the build and names the lever left.
+On Node, an awaited call takes 325 to 333 nanoseconds where it took 313 to 316, about 4 to 5% more (four alternating runs on one machine); `callSync` did not move, at 162 to 168 nanoseconds before and 162 to 167 after. When the levers landed, the development build's first chunk was 21,151 bytes; it has not been re-measured since the review's fixes and is not gated, since a development page is served module by module. The page that uses every feature (in `wasm-main` mode, its first chunk plus every on-demand runtime chunk except the Worker script) loads 39,922 bytes, less than the 42,385 it loaded before.
+
+The gate has three rows: the hello page (16,000 bytes), the hello page with Vite's helper counted (16,600) and the page that uses every feature (42,400, or 5% over its record, whichever is lower). A change that takes a row over its ceiling, or moves a runtime module into or out of the first chunk, fails the build; over a budget, the message names the levers left, the next being about 530 bytes of host events.
 
 Every claim and its source: [the claims ledger](https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/claims.md). The full record is [ADR-057](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-057-js-runtime-16kb.md) and [its review](https://github.com/shreypdev/undra/blob/main/.10x/reviews/2026-10-02-ts-runtime-16k-review.md).
 
@@ -4932,18 +4938,18 @@ Field notes
 
 # A week of outside use: seven findings, five fixes
 
-Before the release, a team tried Undra for a week, in a proof of concept inside its own repository, and sent us seven findings. Five are fixed and merged, each through a pull request with a decision record and an adversarial review. Two were not taken on. Here is each one, what we measured, and what changed.
+Before the release, a team tried Undra for a week, in a proof of concept, and sent us seven findings. Five are fixed and merged, each through a pull request with a decision record and an adversarial review. Two were not taken on. Here is each one, what we measured, and what changed.
 
-3 Oct 2026 · 5 min read · Undra team
+3 Oct 2026 · 6 min read · Undra team
 
 ## The seven findings
 
 | Finding | What happened |
 | --- | --- |
-| Server-sent events are slow on iOS | Fixed: 7.8x on 4 KB events |
+| Server-sent events are slow on iOS | Fixed: 7.8x on 4 KB events (release build, on a Mac) |
 | The Swift tests do not build on Xcode 27 | Not taken on: no reproduction yet |
 | No Bazel | Fixed: Bazel rules and an example workspace |
-| A core is 1.6 MB per Android ABI | Fixed: a size profile, a setting and gates |
+| A core is 1.6 MB per Android ABI | Fixed: a size profile, a setting and gates; the reported core is an estimated 1.42 MB by default |
 | The Android adapter is not our network stack | Fixed: adapters over the app's own OkHttp |
 | No GraphQL | Not taken on: Apollo stays on the platform side |
 | Generated code is noise in review | Fixed: the schema is the API, and `undra schema diff` reads it |
@@ -4952,27 +4958,29 @@ Before the release, a team tried Undra for a week, in a proof of concept inside 
 
 The report measured the iOS ceiling for server-sent events 2.4x below what it should be. The code agreed: the Swift adapter pulled the response body from `URLSession.AsyncBytes` one byte at a time and handed the parser one byte per call. The Kotlin and TypeScript adapters already read chunks.
 
-The adapter is now the delegate of a data task, and the parser gets whole chunks. Backpressure follows the Kotlin adapter's rule: the task is suspended while events wait for the core, so URLSession stops reading and TCP pushes back. In release builds, 4 KB events went from 12,600 to between 84,000 and 99,000 a second (7.8x), and 512-byte events by 2.1x. Once it worked on bytes instead of characters, the parser alone went from 310 to 2,246 MB/s on 4 KB events.
+The adapter is now the delegate of a data task, and the parser gets whole chunks. Backpressure follows the Kotlin adapter's rule: the task is suspended while events wait for the core, so URLSession stops reading and TCP pushes back.
 
-The review found two High defects: a cancelled waiter hung and left the request open, and a background URLSession, which takes no task delegate, crashed the app. It is now refused with a typed error.
+We measured on a Mac (Apple M5 Pro, macOS 26.5), not on an iPhone or the simulator: a release build of the adapter reading from a local test server. 4 KB events went from 12,600 to between 84,000 and 99,000 a second over three runs (7.8x is the middle run), and 512-byte events by 2.1x; 64-byte events did not move, because the limit there is URLSession's own receive path. A debug build gained 4.2x and 4.3x on the same two sizes, and the report's 2.4x falls inside that range. Separately, once the parser worked on bytes instead of characters, it alone went from 310 to 2,246 MB/s on 4 KB events, in a release harness fed 64 KiB chunks.
+
+The review found two High defects in the fix itself: a cancelled waiter hung and left the request open, and a background URLSession, which takes no task delegate, aborted the app. A background session is now refused with a typed error. The old adapter streamed on one, so that is a behaviour change, stated in ADR-047.
 
 ## No Bazel
 
-Undra's build was a command line that Xcode and Gradle call: a Bazel repository had nothing to put in its graph, and its lint rules flagged the generated Kotlin. The `bazel/` module adds `undra_core`, `undra_bindings` and a library rule per language, which run the CLI as a pinned, hermetic, offline tool. `examples/bazel` tests a core from Kotlin on the JVM, TypeScript on Node and, on macOS, Swift. Lint exclusions written beside every generated tree took ktlint from 90 findings to none. Android under Bazel is declared and not yet verified, and the roadmap says so.
+Undra's build was a command line that Xcode and Gradle call: a Bazel repository had nothing to put in its graph, and its lint rules flagged the generated Kotlin. The `bazel/` module adds `undra_core`, `undra_bindings` and a library rule per language, which run the CLI as a pinned, hermetic, offline tool. `examples/bazel` tests a core from Kotlin on the JVM, TypeScript on Node and, on macOS, Swift. Lint exclusions written beside every generated tree took ktlint 1.8 from 90 findings to none on the example's generated Kotlin. Android under Bazel is declared and not yet verified: the example's Android core stops at analysis for want of a C++ toolchain, and the roadmap says so.
 
 ## 1.6 MB per ABI
 
-Nothing gated a native core's size. iOS and Android release builds now use a profile at `opt-level = "s"` that keeps the four crates of the call path at full speed, and three gates hold the hello world (898,176 bytes for arm64-v8a against 1.2 MB). For a team with a hard byte budget, `opt_level` in `undra.toml` chooses smaller or faster.
+Nothing gated a native core's size. iOS and Android release builds now use a profile at `opt-level = "s"` that keeps the four crates of the call path at full speed, and three gates hold the hello world: 898,176 bytes for arm64-v8a and 960,776 for x86_64 (stripped, uncompressed) against 1.2 MB, and an iOS slice of 784,086 against 900 KB. For a team with a hard byte budget, `opt_level` in the `[android]` or `[ios]` table of `undra.toml` chooses `"s"` (the default), `"z"` (smallest) or `"3"` (fastest).
 
-The reported core lands at about 1.42 MB per ABI with nothing changed and about 1.18 MB at `opt_level = "z"`. `"z"` has a cost we measured: a synchronous call 1.33x slower on the iPhone simulator and 1.58x on the Android emulator. The answer is a setting with its price documented.
+We did not have the reported core, so we estimated where it lands: the hello world's share plus the rest, scaled by how much the playground shrinks. It comes to about 1.42 MB per ABI with nothing changed (1.38 to 1.46 MB, since the tool rounds 1.55 to 1.65 million bytes to "1.6 MB") and about 1.18 MB at `opt_level = "z"` (1.14 to 1.21 MB), so `"z"` reaches 1.2 MB narrowly and not for every core of that size. `"z"` has a cost we measured on the playground's device benchmark, against `"3"`, which the default matches within noise: a synchronous call 1.33x slower on the iPhone simulator and 1.58x on the Android emulator, not on a phone. The answer is a setting with its price documented, not a promise.
 
 ## Inside the app's network stack
 
-The default Android adapter used `HttpURLConnection`. The team's token refresh, interceptors, tracing and certificate pinning live in their own `OkHttpClient`, so a request from the core carried no token, appeared in no trace and was not pinned. The optional `okhttp-adapters` module puts Http, WebSocket and SSE over the app's own client with one call; on iOS the app's `URLSession` serves all three. The review's High: in the old install order, a queued offline request could leave through the default adapter, without the token and without the pin.
+The default Android adapter used `HttpURLConnection`. An app's token refresh, interceptors, tracing and certificate pinning live in its own `OkHttpClient`, an object the platform's `HttpURLConnection` cannot reach, so a request from the core carried no token, appeared in no trace and was not pinned. The optional `okhttp-adapters` module puts Http, WebSocket and SSE over the app's own client with one call; on iOS the app's `URLSession` serves all three. Two limits remain. OkHttp itself leaves a client's network interceptors and event listener out of a WebSocket upgrade, so tracing written that way will not see the core's WebSockets; the docs say so. And the SSE adapter refuses a background `URLSession` while the WebSocket adapter does not yet, which is on the roadmap. The review's High: in the old install order, a queued offline request could leave through the default adapter, without the token and without the pin.
 
 ## Generated code in review
 
-Two features had produced about 1,400 lines of bindings. The count was right: one feature of the playground is 130 to 250 generated lines per platform. We kept the code, which reads as native to each platform's engineers, and moved review to the schema. Generated files are marked for GitHub to collapse, and `undra schema diff` prints one line per API change, breaking or additive. On a test fixture with twelve changes, the bindings changed by 506 lines, the schema by 60, and the diff printed 12.
+Two features had produced about 1,400 lines of bindings. The count was right: one feature of the playground is 130 to 250 generated lines per platform. We kept the code, since the project's rules require generated code to read as a platform engineer would write it, and moved review to the schema. Generated files are marked for GitHub to collapse, and `undra schema diff` prints one line per API change, breaking or additive. On the command line's test fixture, a to-do core with thirteen API changes, the generated bindings changed by 581 lines, the schema file by 77, and the diff printed 13.
 
 ## What we did not take on
 
@@ -4982,7 +4990,7 @@ Two features had produced about 1,400 lines of bindings. The count was right: on
 
 ## What a week taught us
 
-Each finding we took on was a place where our tests were green and a real app was not: a ceiling nobody had measured, a build system we did not use, a size we did not gate. What their reviews left open is on the [roadmap](https://shreypdev.github.io/undra/roadmap/): OkHttp pinning end to end, Android under Bazel, a byte-reproducible build.
+Three of the five were places where our tests were green and a real app was not: a ceiling nobody had measured, a build system we did not use, a size we did not gate. What the five reviews left open is on the [roadmap](https://shreypdev.github.io/undra/roadmap/): OkHttp pinning end to end, Android under Bazel, a byte-reproducible build.
 
 Every claim and its source: [the claims ledger](https://shreypdev.github.io/undra/blog/a-week-of-outside-use/claims.md).
 
@@ -5055,7 +5063,7 @@ The number: the playground's 204 KiB snapshot restores in 1.6 ms inside `undra d
 
 Persisted data records the structure it was written with, so a build that changed a type still reads what the last one stored: by name for free, through a `#[undra::migrate]` hook when a name changed, and never by discarding it silently ([ADR-037](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-037-persisted-state-migrations.md), [Shipping an update](https://shreypdev.github.io/undra/docs/updates.html)). A queued write the new build cannot carry over becomes a dead letter the app can show. Storage ports fail with typed errors (full, locked, corrupt, unavailable, io) on every platform instead of raw throws ([ADR-049](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-049-storage-errors-worker-sync-ports-web-recovery.md)).
 
-The number: the hello-world web core is 118.4 KB gzipped against a 120 KB budget, and the JavaScript a hello-world page loads up front is 15.8 KB gzipped against a 16 KB budget, for the production build of the runtime as an app installs it, with Vite's own preload helper reported beside it and gated on its own. CI fails a change that exceeds either ([ADR-052](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-052-web-bundle-size.md), [size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl)). Opt-in pieces stay out of the hello world: the remote transport and the default ports load on first use, and the browser database adds about 299 KB gzipped, only to an app that imports it.
+The number: the hello-world web core is 113.1 KB gzipped against a 120 KB budget, and the JavaScript a hello-world page loads up front is 15.8 KB gzipped against a 16 KB budget, for the production build of the runtime as an app installs it, with Vite's own preload helper reported beside it and gated on its own. CI fails a change that exceeds either ([ADR-052](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-052-web-bundle-size.md), [size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl)). Opt-in pieces stay out of the hello world: the remote transport and the default ports load on first use, and the browser database adds about 299 KB gzipped, only to an app that imports it.
 
 ## What it costs to adopt
 
@@ -5197,7 +5205,7 @@ For scale: 49.8 ns for a synchronous call through the C ABI and 6.31 µs for one
 
 KMP has two web targets. Kotlin/JS compiles Kotlin to JavaScript ([docs](https://kotlinlang.org/docs/js-overview.html)). Kotlin/Wasm targets WebAssembly with garbage collection in the browser, and its documentation still calls it Beta ([docs](https://kotlinlang.org/docs/wasm-overview.html)). If your organisation writes Kotlin on the web, that is coherent. If your web team writes TypeScript and React, the questions are what the seam looks like and what the bundle carries.
 
-Undra's web output is a wasm module built from your Rust core plus `@undra/runtime`, a TypeScript package with no runtime dependencies. Each store field becomes a `Signal<T>` with `get`, `peek` and `subscribe`; `@undra/runtime/react` exports `useUndra` and `useSignal` (built on `useSyncExternalStore`), and Vue, Svelte and Solid adapters exist too. The core can run on the main thread, in a worker, or remotely over a WebSocket. The repository measures 118.4 KB gzipped for the wasm module of Undra's runtime plus a hello-world core, against a budget of 120 KB that CI enforces; it grows with your code.
+Undra's web output is a wasm module built from your Rust core plus `@undra/runtime`, a TypeScript package with no runtime dependencies. Each store field becomes a `Signal<T>` with `get`, `peek` and `subscribe`; `@undra/runtime/react` exports `useUndra` and `useSignal` (built on `useSyncExternalStore`), and Vue, Svelte and Solid adapters exist too. The core can run on the main thread, in a worker, or remotely over a WebSocket. The repository measures 113.1 KB gzipped for the wasm module of Undra's runtime plus a hello-world core, against a budget of 120 KB that CI enforces; it grows with your code.
 
 Playground code, abbreviated: examples/playground/web/src/views/TodosView.tsx
 
@@ -5505,7 +5513,7 @@ Every number here comes from [bench/RESULTS.md](https://github.com/shreypdev/und
 | Decoding that change-set, borrowed | 253.9 ns | [Signals and stores](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#signals-and-stores) |
 | Decoding and replaying a one-operation patch on 10,000 rows (Rust wire crate) | 2.57 µs | [Keyed patch](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#wire-keyed-patch-undra-wire) |
 | Cold start, restoring 100 KB of state | 70.87 µs | [Snapshot](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#snapshot-and-restore) |
-| Wasm runtime plus hello-world core, gzipped | 118.4 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
+| Wasm runtime plus hello-world core, gzipped | 113.1 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl) |
 | Android core, hello world, arm64-v8a, release | 898.2 KB | [Size record](https://github.com/shreypdev/undra/blob/main/bench/results/native-size.jsonl) |
 
 Read these for what they are. They are core-side, on a host faster than the phones the design targets, so within budget here is necessary and not sufficient. The per-device targets (an iPhone with an A15, a 2022 mid-range Android phone, Chromium) are measured in a later device phase, and the platform half of a crossing, meaning the Swift, JNI or JavaScript side and applying a change-set to a mirror, is not in these numbers. The 46 operations covered by the CI gate have budgets about five times what they measure, so the gate catches an operation that becomes several times slower, not a few percent ([the gate](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#the-ci-gate)). We have not published a stress benchmark for sustained very high write rates, and we have not compared Undra against other tools, so this page makes no such comparison.

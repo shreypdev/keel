@@ -21,7 +21,7 @@
       <guid isPermaLink="true">https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/</guid>
       <pubDate>Sat, 03 Oct 2026 00:00:00 GMT</pubDate>
       <category>Performance</category>
-      <description>How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.</description>
+      <description>How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing a feature.</description>
     </item>
     <item>
       <title>Undra 1.0: one Rust core under native apps</title>
