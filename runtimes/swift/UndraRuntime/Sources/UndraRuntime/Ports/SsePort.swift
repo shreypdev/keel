@@ -256,6 +256,14 @@ public struct SseParser: Sendable {
     /// Parses `bytes` and returns the events they completed, in order.
     public mutating func push<Bytes: Sequence>(_ bytes: Bytes) throws(SseError) -> [SseEvent] where Bytes.Element == UInt8 {
         var events: [SseEvent] = []
+        try push(bytes, into: &events)
+        return events
+    }
+
+    /// ``push(_:)`` that appends to `events`, so what the bytes completed before a line that is not UTF-8 is not lost
+    /// with the error: a reader that feeds one chunk at a time hands those events over, then the error, as a reader that
+    /// feeds one byte at a time does.
+    mutating func push<Bytes: Sequence>(_ bytes: Bytes, into events: inout [SseEvent]) throws(SseError) where Bytes.Element == UInt8 {
         for byte in bytes {
             if atStart {
                 // The standard skips one BOM (EF BB BF) at the start of the stream.
@@ -277,7 +285,6 @@ public struct SseParser: Sendable {
             }
             try consume(byte, into: &events)
         }
-        return events
     }
 
     /// One byte after the BOM check.
