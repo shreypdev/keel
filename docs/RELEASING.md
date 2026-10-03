@@ -66,13 +66,15 @@ peer from the registry: an app that installs one of them without the runtime's U
 `generated/ts`, would fetch whatever someone else published as `@undra/runtime`. Verify:
 `npm view @undra/runtime` still answers 404 and `npm org ls undra` lists you.
 
-### 4. Rehearse with a release candidate (recommended)
+### 4. Rehearse with a release candidate (required)
 
 A prerelease exercises every channel that only a real tag can (SwiftPM against github.com, JitPack's build, the
-Release's assets, the installer) before `v1.0.0` exists, and announces nothing.
+Release's assets, the installer) before `v1.0.0` exists, and announces nothing. It is not optional: JitPack's build of the
+tag (its Android SDK, its group and version) cannot be shown any other way, and Android apps of a release whose JitPack
+build fails cannot build. Do not go on to step 5 until steps 8 and 9 pass for the candidate.
 
 ```sh
-scripts/bump-version.sh 1.0.0-rc.1
+scripts/bump-version.sh 1.0.0-rc.1         # step 5 says what it sets
 git switch -c release/1.0.0-rc.1 && git commit -qam "chore(release): 1.0.0-rc.1"
 git push -u origin release/1.0.0-rc.1 && gh pr create --fill     # four "All green", then squash-merge
 git switch main && git pull && git tag v1.0.0-rc.1 && git push origin v1.0.0-rc.1
@@ -100,11 +102,12 @@ GitHub (`gh workflow run launch-rehearsal.yml`).
 scripts/bump-version.sh 1.0.0
 ```
 
-It sets the workspace and `Cargo.lock`, the three npm packages and their locks, and every `"@undra/runtime"`
-range, and lists the files. In the same change, re-key the first entry of `crates/undra-cli/src/migrations.rs`
-from `0.1.0` to `1.0.0` ("Since v1.0"): `undra upgrade` prints the notes of every release a project crosses, and
-the projects of a `0.1.0` CLI must cross this one. Verify: `bash scripts/bump-version.sh --check 1.0.0` says
-`every version file says 1.0.0`.
+It sets the workspace and `Cargo.lock`, the three npm packages and their locks, every `"@undra/runtime"` range and
+the runtimes' `Hello` versions, and lists the files. It also files the migration notes kept under a version that was
+never released (no tag `v<old>`: the first entry of `crates/undra-cli/src/migrations.rs`, "Since v1.0", kept under
+`0.1.0`) under the new one, so `undra upgrade` prints them to the projects of a `0.1.0` CLI; after step 4 they stay
+under `1.0.0-rc.1`, which a `0.1.0` project crosses too. Verify: `bash scripts/bump-version.sh --check 1.0.0` says
+`every version file says 1.0.0`. In a fresh clone run `cargo fetch` first (the script refreshes `Cargo.lock` offline).
 
 ### 6. Open and merge the version pull request
 

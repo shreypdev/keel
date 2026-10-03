@@ -24,8 +24,8 @@ const CURRENT: &str = env!("CARGO_PKG_VERSION");
 const ASSETS: &str = "https://github.com/shreypdev/undra/releases/download";
 
 /// The release the first migration notes are filed under (`crates/undra-cli/src/migrations.rs`). It is not always this
-/// `undra`'s: docs/RELEASING.md re-keys it by hand when the first release is cut, and a release candidate before that
-/// (`1.0.0-rc.1`) prints it as it is, so the version pull request of either stays green.
+/// `undra`'s: scripts/bump-version.sh files notes kept under a version that was never released under the new one, and
+/// leaves them under a released one (`1.0.0-rc.1` when `1.0.0` is cut), so the version pull requests stay green.
 fn first_notes_release() -> String {
     let text = include_str!("../src/migrations.rs");
     let at = text

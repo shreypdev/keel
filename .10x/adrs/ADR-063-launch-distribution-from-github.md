@@ -46,7 +46,8 @@ account, no token on the consumer's side, no second repository.
   name the runtime. The CLI's pins come from `CARGO_PKG_VERSION` (nothing to edit); the Swift package has no version (SwiftPM reads
   the tag); the Kotlin artifacts take theirs from the tag (JitPack's `VERSION`, below), so no Gradle file carries a release
   number. The script also owns the version the TypeScript and Kotlin runtimes report in their `Hello` (`RUNTIME_VERSION`,
-  `UNDRA_RUNTIME_VERSION`; review of 2026-10-03). `--check` covers every file the script writes, and the release workflow's first
+  `UNDRA_RUNTIME_VERSION`), and files the migration notes kept under a version that was never released (no tag `v<old>`)
+  under the new one (review of 2026-10-03). `--check` covers every file the script writes, and the release workflow's first
   job runs it. A test runs the script on a copy of the repository with a throwaway version (`scripts/bump-version.test.sh`).
 * The generated `package.json` asks for `@undra/runtime` `^<[undra] version>` in a released project (`Generator::ts_runtime_range`),
   like its Swift package and Kotlin module; an `undra` of another release than the project's says so when it generates

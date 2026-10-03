@@ -69,6 +69,13 @@ stale=$(cd "$copy" && git ls-files -- '*package.json' '*package-lock.json' | gre
 [ -z "$stale" ] || fail "still naming ^$old: $stale"
 pass "the workspace, Cargo.lock, the three packages, their locks, every runtime range and the runtimes' Hello versions say $new"
 
+# The copy has no tags, so $old was never released: the migration notes filed under it now arrive with $new.
+if grep -q "^    version: \"$old\",$" "$repo/crates/undra-cli/src/migrations.rs"; then
+  grep -q "^    version: \"$new\",$" "$copy/crates/undra-cli/src/migrations.rs" ||
+    fail "the migration notes filed under the unreleased $old did not move to $new"
+  pass "the notes filed under the unreleased $old arrive with $new"
+fi
+
 fixtures=$(git -C "$copy" status --porcelain -- crates/undra-cli/tests/fixtures)
 [ -z "$fixtures" ] || fail "the fixtures of older releases changed: $fixtures"
 pass "the fixtures of older releases are left"
@@ -86,6 +93,17 @@ if bump --check "$old" >/dev/null 2>&1; then fail "--check $old passes after the
 out=$(bump "$new")
 case "$out" in "nothing to change"*) ;; *) fail "a second run changed something: $out" ;; esac
 pass "--check agrees, and a second run has nothing to do"
+
+# A released version keeps its notes: tagged v$new, the next bump leaves them where they are.
+git -C "$copy" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -qam "$new"
+git -C "$copy" tag "v$new"
+bump 9.8.8 >/dev/null || fail "bump 9.8.8 failed"
+if grep -q "^    version: \"$old\",$" "$repo/crates/undra-cli/src/migrations.rs"; then
+  grep -q "^    version: \"$new\",$" "$copy/crates/undra-cli/src/migrations.rs" ||
+    fail "the notes of the released $new moved"
+fi
+bump "$new" >/dev/null || fail "bump back to $new failed"
+pass "the notes of a released version stay where they are"
 
 # Outside a git checkout (an unpacked source archive) the manifests are found by walking the tree.
 rm -rf "$copy/.git"

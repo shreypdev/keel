@@ -31,6 +31,10 @@ Sets the version of the release (for example 1.0.0, or 1.0.0-rc.1) in:
                                                    React Native host, and of every generated package
   runtimes/ts/@undra/runtime/src/version.ts        RUNTIME_VERSION, and the Kotlin runtime's
   runtimes/kotlin/.../dev/undra/runtime/UndraLog.kt  UNDRA_RUNTIME_VERSION: what each sends in its Hello
+  crates/undra-cli/src/migrations.rs               the migration notes filed under the outgoing version
+                                                   when it was never released (no tag v<old>): they
+                                                   arrive with this release (`undra upgrade` prints
+                                                   them to every project that crosses it)
 
 and prints every file it changed. Nothing else carries the release's number: the Swift package's
 version is the tag, the Kotlin artifacts' version is the tag (JitPack's VERSION), the projects
@@ -75,6 +79,14 @@ if [ -z "$version" ]; then
   [ -n "$version" ] || die "no [workspace.package] version in Cargo.toml"
 fi
 
+# The version being replaced, and whether it was ever released (a tag v<old>): notes `undra upgrade` keeps under a
+# version that was never released move to this one (crates/undra-cli/src/migrations.rs; docs/RELEASING.md).
+outgoing=$(workspace_version)
+outgoing_released=unknown
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if git rev-parse -q --verify "refs/tags/v$outgoing" >/dev/null; then outgoing_released=yes; else outgoing_released=no; fi
+fi
+
 # MAJOR.MINOR.PATCH without leading zeros, then optionally -prerelease identifiers. Build
 # metadata (+...) is refused: it cannot appear in the file names and URLs the release uses.
 semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
@@ -106,6 +118,9 @@ rewrite_package_lock() { # the top-level version and the root package'"'"'s ("pa
 rewrite_runtime_range() { # every `"@undra/runtime": "^<semver>"`: the peer and dev ranges that name the runtime
   sed -E 's/("@undra\/runtime": "\^)[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?"/\1'"$version"'"/g' "$1"
 }
+rewrite_migrations() { # an entry `    version: "<old>",` of the notes table: filed under this release instead
+  awk -v old="$outgoing" -v v="$version" '$0 == "    version: \"" old "\"," { $0 = "    version: \"" v "\"," } { print }' "$1"
+}
 rewrite_hello_version() { # the version a runtime reports in its Hello: TypeScript's RUNTIME_VERSION, Kotlin's UNDRA_RUNTIME_VERSION
   sed -E 's/^(export const RUNTIME_VERSION = ")[^"]*(";)$/\1'"$version"'\2/; s/^(internal const val UNDRA_RUNTIME_VERSION: String = ")[^"]*(")$/\1'"$version"'\2/' "$1"
 }
@@ -129,6 +144,9 @@ files_and_kinds() {
   printf 'cargo Cargo.toml\n'
   printf 'hello_version runtimes/ts/@undra/runtime/src/version.ts\n'
   printf 'hello_version runtimes/kotlin/undra-runtime/runtime/src/main/kotlin/dev/undra/runtime/UndraLog.kt\n'
+  if [ "$outgoing" != "$version" ] && [ "$outgoing_released" = no ]; then
+    printf 'migrations crates/undra-cli/src/migrations.rs\n'
+  fi
   local dir
   for dir in $packages; do
     printf 'package_json %s/package.json\n' "$dir"
@@ -185,6 +203,10 @@ if [ ${#changed[@]} -gt 0 ] && [ -f Cargo.lock ]; then
   else
     printf 'bump-version.sh: cargo is not on PATH; run `cargo update --workspace` before committing, or the release build (--locked) will fail\n' >&2
   fi
+fi
+
+if [ "$outgoing" != "$version" ] && [ "$outgoing_released" = unknown ] && grep -q "^    version: \"$outgoing\",$" crates/undra-cli/src/migrations.rs; then
+  printf 'bump-version.sh: not a git checkout, so whether %s was released is unknown: crates/undra-cli/src/migrations.rs still files notes under it; if it was never released, file them under %s by hand\n' "$outgoing" "$version" >&2
 fi
 
 if [ ${#changed[@]} -eq 0 ]; then
