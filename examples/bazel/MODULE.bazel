@@ -11,6 +11,9 @@ local_path_override(
 bazel_dep(name = "rules_java", version = "9.3.0")
 bazel_dep(name = "rules_kotlin", version = "2.4.20")
 bazel_dep(name = "rules_rust", version = "0.74.0")
+bazel_dep(name = "aspect_rules_js", version = "3.5.1")
+bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
+bazel_dep(name = "rules_nodejs", version = "6.7.5")
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
@@ -25,3 +28,7 @@ register_toolchains("@rust_toolchains//:all")
 undra = use_extension("@undra_rules//:extensions.bzl", "undra")
 undra.source(path = "../..")
 use_repo(undra, "undra", "undra_binaryen", "undra_vendor")
+
+# Node, which the TypeScript test runs on (the TypeScript compiler is undra_rules's: typescript.deps(version = "5.9.3")).
+node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
+node.toolchain(node_version = "24.18.0")

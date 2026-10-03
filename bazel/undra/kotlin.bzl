@@ -2,7 +2,7 @@
 
 load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
 
-_RUNTIME = "@undra//kotlin:runtime"
+_RUNTIME = Label("@undra//kotlin:runtime")
 
 def undra_kt_jvm_library(name, bindings, deps = [], runtime = _RUNTIME, **kwargs):
     """Compiles the Kotlin bindings of an `undra_bindings` target as a JVM library.

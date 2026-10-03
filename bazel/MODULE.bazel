@@ -13,6 +13,10 @@ bazel_dep(name = "rules_rust", version = "0.74.0")
 bazel_dep(name = "rules_java", version = "9.3.0")
 bazel_dep(name = "rules_kotlin", version = "2.4.20")
 bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "aspect_rules_js", version = "3.5.1")
+bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
+bazel_dep(name = "rules_nodejs", version = "6.7.5")
+bazel_dep(name = "bazel_lib", version = "3.7.0")
 
 # The one dependency of the Kotlin runtime, pinned by checksum: the version the runtime's own CI uses.
 http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
@@ -25,3 +29,9 @@ http_jar(
 
 undra = use_extension("//:extensions.bzl", "undra")
 use_repo(undra, "undra", "undra_binaryen", "undra_vendor")
+
+# The TypeScript compiler the runtime and the generated bindings are compiled with. A root module that wants another version
+# declares its own `typescript.deps(version = ..)`: the root's tag wins.
+typescript = use_extension("@aspect_rules_ts//ts:extensions.bzl", "typescript")
+typescript.deps(version = "5.9.3")
+use_repo(typescript, "npm_typescript")

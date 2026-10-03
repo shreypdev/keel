@@ -53,6 +53,7 @@ def _runtime_builds():
     # The BUILD file of each language runtime's package in @undra (templates, so a package that is not used is not loaded).
     return {
         "kotlin": Label("//undra/private/runtimes:kotlin.BUILD"),
+        "ts": Label("//undra/private/runtimes:ts.BUILD"),
     }
 
 undra = module_extension(

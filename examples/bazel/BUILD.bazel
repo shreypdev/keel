@@ -1,4 +1,4 @@
-load("@undra_rules//undra:defs.bzl", "undra_bindings", "undra_core")
+load("@undra_rules//undra:defs.bzl", "undra_bindings", "undra_core", "undra_ts_library")
 
 package(default_visibility = ["//:__subpackages__"])
 
@@ -17,4 +17,12 @@ undra_bindings(
     name = "bindings",
     core = ":core_host",
     config = "undra.toml",
+)
+
+# The TypeScript bindings, compiled against the runtime and linked into node_modules for the tests under ts/.
+undra_ts_library(
+    name = "hello_ts",
+    bindings = ":bindings",
+    package = "@bazel-hello/core",
+    visibility = ["//:__subpackages__"],
 )
