@@ -9,12 +9,13 @@ name: Release
 #                                                  so this is also how a half-finished release is
 #                                                  completed)
 #
-# Publishing is a GitHub Release (the CLI's four tarballs, the npm tarballs of @undra/runtime,
-# @undra/testkit and @undra/react-native that projects depend on by URL, and checksums.txt) and an
-# update of the formula in shreypdev/homebrew-undra. The tag itself is the rest: Cargo fetches the
-# crates by it, SwiftPM reads the root Package.swift at it, and JitPack builds the Kotlin modules
-# from it (jitpack.yml) the first time someone asks. The build and package jobs run on every
-# trigger and hold no secret; the publish job is the only one with write access and a secret.
+# Publishing is a GitHub Release: the CLI tarballs, the runtime tarballs and checksums.txt (the
+# npm tarballs of @undra/runtime, @undra/testkit and @undra/react-native that projects depend on by
+# URL). The tag itself is the rest: Cargo fetches the crates by it, SwiftPM reads the root
+# Package.swift at it, and JitPack builds the Kotlin modules from it (jitpack.yml) the first time
+# someone asks. The release needs no secret beyond the GITHUB_TOKEN GitHub gives every run: the
+# build and package jobs only read, and the publish job is the only one with write access (to
+# this repository's Releases).
 #
 # Third-party actions are pinned to commit SHAs (the comment names the version).
 
@@ -24,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Publish for real (GitHub Release, Homebrew). Off is a dry run. Needs a v* tag as the ref."
+        description: "Publish for real (the GitHub Release). Off is a dry run. Needs a v* tag as the ref."
         type: boolean
         default: false
 
@@ -182,7 +183,7 @@ jobs:
           retention-days: 30
 
   package:
-    name: Package (checksums, the npm assets, Homebrew)
+    name: Package (checksums, the npm assets)
     needs: [verify, build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -238,36 +239,23 @@ jobs:
         run: bash packaging/test-npm-assets.sh --release-dir release --version "$VERSION"
       - name: Run the curl installer against the release assets
         run: bash packaging/test-install.sh --release-dir release
-      - name: Generate the Homebrew formula
-        run: |
-          set -euo pipefail
-          mkdir homebrew
-          sh packaging/homebrew/generate.sh --version "$VERSION" --checksums release/checksums.txt --out homebrew/undra.rb
-          ruby -c homebrew/undra.rb
-          cat homebrew/undra.rb
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-assets
           path: release/*
           if-no-files-found: error
           retention-days: 30
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: homebrew-formula
-          path: homebrew/undra.rb
-          if-no-files-found: error
-          retention-days: 30
 
   release:
-    name: Publish (GitHub Release, Homebrew)
+    name: Publish (the GitHub Release)
     needs: [verify, package]
     # Tag pushes, and manual runs with publish on; verify has already refused anything that is not
     # on a v<workspace version> tag. A dry run skips this whole job.
     if: needs.verify.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # An environment is where the secret can be restricted to v* tags (docs/RELEASING.md,
-    # hardening); with the secret at repository level it changes nothing.
+    # An environment is where publishing can be restricted to v* tags (docs/RELEASING.md,
+    # hardening); it holds no secret, and until it is configured it changes nothing.
     environment: release
     permissions:
       contents: write # the GitHub Release
@@ -281,10 +269,6 @@ jobs:
         with:
           name: release-assets
           path: release
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: homebrew-formula
-          path: homebrew
 
       - name: The artifacts are the bytes the package job tested
         run: |
@@ -292,25 +276,6 @@ jobs:
           # checksums.txt was written on the runners that built each CLI tarball and next to the npm
           # tarballs the package job installed, and verified by it.
           (cd release && sha256sum --check --strict checksums.txt)
-
-      - name: Preflight (the secret exists and works, before anything is published)
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
-        run: |
-          set -euo pipefail
-          if [ "$PRERELEASE" = true ]; then
-            echo "A prerelease leaves the tap alone: HOMEBREW_TAP_TOKEN is not needed."
-            exit 0
-          fi
-          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
-            echo "::error::The HOMEBREW_TAP_TOKEN secret is not set (docs/RELEASING.md, the launch checklist)."
-            exit 1
-          fi
-          push=$(GH_TOKEN="$HOMEBREW_TAP_TOKEN" gh api repos/shreypdev/homebrew-undra --jq '.permissions.push // false')
-          if [ "$push" != true ]; then
-            echo "::warning::HOMEBREW_TAP_TOKEN does not report push access to shreypdev/homebrew-undra; the formula update at the end may fail."
-          fi
 
       - name: GitHub Release
         env:
@@ -338,33 +303,3 @@ jobs:
             if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
             gh release create "$TAG" undra-v*.tar.gz undra-*.tgz checksums.txt "${flags[@]}"
           fi
-
-      - name: Homebrew tap
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ "$PRERELEASE" = true ]; then
-            echo "$VERSION is a prerelease: the tap keeps pointing at the last stable release."
-            exit 0
-          fi
-          # The token travels as an HTTP header for these commands only: it is not in a URL or
-          # in .git/config, and the encoded form is masked in the log.
-          auth=$(printf 'x-access-token:%s' "$HOMEBREW_TAP_TOKEN" | base64 | tr -d '\n')
-          echo "::add-mask::$auth"
-          tap() { git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" "$@"; }
-          tap clone --quiet https://github.com/shreypdev/homebrew-undra.git tap
-          cd tap
-          branch=$(git symbolic-ref --short HEAD)
-          mkdir -p Formula
-          cp ../homebrew/undra.rb Formula/undra.rb
-          git add Formula/undra.rb
-          if git diff --cached --quiet; then
-            echo "Formula/undra.rb already says $VERSION."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit --quiet -m "undra $VERSION"
-          tap push --quiet origin "HEAD:refs/heads/$branch"
-          echo "Updated Formula/undra.rb to $VERSION on $branch."
