@@ -247,7 +247,7 @@ pub struct ProjectConfig {
     /// project); absent when they come from a release.
     pub undra_path: Option<String>,
     /// The Undra release the project's dependencies name (`1.0.0`; a two-part value an older `undra init` wrote means
-    /// `<line>.0`, see [`crate::dist::full_version`]).
+    /// `<line>.0`).
     pub undra_version: String,
     /// Binding names.
     pub bindings: BindingsConfig,
