@@ -174,3 +174,53 @@ the mirror's dependency is a fork it does not move).
 * In-repository builds (the examples, the playground, the contract tests) keep their path and composite-build dependencies.
 * The generated `Package.swift` and `build.gradle.kts` of a released project change their dependency line; a project made before
   this ADR is moved by `undra upgrade` (pins) and `undra bindgen` (the generated files).
+
+## Amendment: no Homebrew tap at launch, 2026-10-03
+
+Decided by the founder, after the text above was accepted and before anything was released. Implemented by `wt/no-homebrew`
+(record: `.10x/decisions/sde/no-homebrew.md`). It amends section 6 (the CLI's channels were Homebrew, the installer and cargo),
+the Positive consequence "the founder needs one secret (the tap's) instead of two", and the release pipeline's last job. It does
+not touch the wire, the ABI, the schema or any generated shape (R11 is not triggered: nothing a generated file says changes).
+
+**Decision.** `undra` is installed by the shell installer (`curl -fsSL https://shreypdev.github.io/undra/install.sh | sh`),
+first, or by cargo (`cargo install --git https://github.com/shreypdev/undra undra-cli`), second. There is no Homebrew tap at
+launch, no `shreypdev/homebrew-undra` repository, and no `HOMEBREW_TAP_TOKEN`: the release needs no secret beyond the
+`GITHUB_TOKEN` GitHub gives every run, so the founder has nothing to create or store for it (the `release` environment, the tag
+ruleset and reserving the `@undra` npm scope stay as recommended steps, none of them a secret).
+
+**Why.** A tap is a second repository, a fine-grained token that expires and must be scoped to that repository alone, a publish
+step that can half-fail after the GitHub Release exists, and a channel that cannot be tried before a real tag (a formula for a
+prerelease is not published, so the rehearsal could not exercise it). Each of the three is a launch-day risk that buys one
+convenience, a familiar command, for the audience that has Homebrew; the installer already gives that audience one line, with
+the checksum verified and no `sudo`. Homebrew's own repository, homebrew-core, gives `brew install undra` later without the tap's
+costs: it is Homebrew's own repository, and a formula enters it by a pull request, with no repository or token of ours.
+
+**What was removed.**
+
+* `packaging/homebrew/` (`undra.rb.tmpl`, `generate.sh`), and in `release.yml` the package job's formula generation and its
+  `homebrew-formula` artifact, the publish job's download of it, its preflight step (the secret exists and works), the step that
+  pushed `Formula/undra.rb` to the tap, and every read of `HOMEBREW_TAP_TOKEN`. The jobs are named for what they now do
+  (`Package (checksums, the npm assets)`, `Publish (the GitHub Release)`). Publishing is a GitHub Release: the CLI tarballs,
+  the runtime tarballs and `checksums.txt`.
+* In `docs/RELEASING.md`, the steps "Create the tap repository" and "Give the workflow a token for the tap", the `brew` lines of
+  the rc rehearsal and of "Check each channel", and the rollback and maintenance entries for the tap; the checklist is renumbered
+  (nine steps) and states that the release needs no secret.
+* In `undra upgrade` (`Channel` in `crates/undra-cli/src/commands/upgrade.rs`), the Homebrew channel and the detection of a
+  cellar path. C0014's help names the installer when the binary came from `~/.undra/bin` (or `$UNDRA_HOME`), cargo when it came
+  from `~/.cargo/bin` (or `$CARGO_HOME`), and the installer, then cargo, for any other path, a Homebrew prefix included (a binary
+  there did not come from our channel; the installer is the way to a managed one).
+* The `brew` command of the landing page (two tabs now: the installer, cargo), the getting-started page, the README, the launch
+  post and its claims ledger, and `docs/SITE.md`'s statement of the order.
+
+**What stays.** `undra doctor`'s `brew install <tool>` fixes for Node, a JDK, Kotlin and the rest, the toolchain lookups under
+`/opt/homebrew`, and the `undra` search path of the generated Xcode build phase and Gradle task (`~/.undra/bin`, `~/.cargo/bin`,
+`/opt/homebrew/bin`, `/usr/local/bin`: a generated shape, and the directory a Homebrew-core `undra` will live in).
+
+**The plan: homebrew-core.** `brew install undra` comes through homebrew-core, as a formula submitted by pull request to
+`Homebrew/homebrew-core`. It needs two conditions, both about the repository and neither about the code:
+
+1. the repository is at least **30 days old**; and
+2. it is **notable**: 75 stars, or 30 forks or watchers.
+
+When both hold, the formula (the removed template is in the git history, last present at `da087cc`, as a starting point) is submitted, `Channel::Homebrew` returns to `undra upgrade`, and the install blocks of the site and the README gain the
+command. Until then the roadmap carries it as a Next item ("Homebrew (brew install undra)"), sourced here.
