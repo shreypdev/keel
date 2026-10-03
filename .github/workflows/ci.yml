@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
-  merge_group:
+  # Pull requests and the merge queue run this through the Gate workflow (.github/workflows/gate.yml), which calls it
+  # and ends in the one required check; it runs by itself only on main.
+  workflow_call:
 
 # A piece's branch `wt/<slug>` is built on every push: a piece lands on main only when CI, Bench, Two cores (and Site, when the
 # branch touches its paths) are green on that branch's exact head (docs/AGENT_WORKFLOW.md, `scripts/wt.sh merge`). A newer push
@@ -513,7 +514,7 @@ jobs:
   # What only macOS can run, where rules_swift and the iOS core have Xcode: the Swift consumer runs the core in process, and the
   # XCFramework (device and simulator slices) builds in a Bazel action. The Kotlin and TypeScript targets are the Linux job's.
   # Every change runs it, like the other macOS jobs: what moves its result is the Undra crates, the Swift runtime, the CLI and
-  # the rules, which is nearly every change, and a job that can be skipped cannot be part of "All green".
+  # the rules, which is nearly every change, and a job that can be skipped cannot be part of the roll-up.
   bazel-example-macos:
     name: "Bazel example (macOS, Swift and iOS)"
     runs-on: macos-15
@@ -647,11 +648,11 @@ jobs:
           npm test
           npm run test:contract
 
-  # The one check branch protection requires: green only when every job above succeeded (a failed, cancelled or
-  # skipped job fails it). `if: always()` so it reports after failures too; without it a failed job leaves the
-  # check "expected" forever and a pull request can never merge. Name and job id are the same in every workflow.
-  all-green:
-    name: All green
+  # This workflow's own roll-up: green only when every job above succeeded (a failed, cancelled or skipped job fails it;
+  # `if: always()` so it reports after failures too). The Gate workflow needs it for every workflow it calls, and
+  # ends in the one check the ruleset requires. Named "Complete" so that only the Gate's last job is called "All green".
+  complete:
+    name: Complete
     if: always()
     needs: [rust, leaf-features, ts, kotlin, wasm-ffi, macos, ios-floor, android, ffi-miri, ffi-asan, contracts, contracts-swift, bazel-example, bazel-example-macos, playground-web, react-native]
     runs-on: ubuntu-latest

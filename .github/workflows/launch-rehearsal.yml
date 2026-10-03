@@ -6,7 +6,7 @@ name: Launch rehearsal
 # (built from that copy, no --undra-path) makes a project and its web, iOS (simulator) and Android apps are built from
 # those stand-ins alone. The summary in the log says, per platform, whether it built and how long it took.
 #
-# Not one of the four required "All green" checks, and not run on every pull request: it needs macOS (the iOS app) and
+# Not part of the Gate (the required check), and not run on every pull request: it needs macOS (the iOS app) and
 # costs about 20 to 30 minutes of a macOS runner with cold caches (the CLI, then the core compiled for wasm, the iOS
 # simulator and two Android ABIs). It runs by hand (`gh workflow run launch-rehearsal.yml`, optionally
 # `-f version=1.0.0-rc.1`) and on pull requests that touch what a released project is made of: the templates, the

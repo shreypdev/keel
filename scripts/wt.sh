@@ -5,7 +5,7 @@
 #   scripts/wt.sh merge <slug> [--also <branch>]... [--ff [--no-ci] [--no-push]]
 #                                 from the main checkout: land wt/<slug> on main. Refuses unless the branch contains main and
 #                                 is pushed. By default it goes through a pull request: opens one if none is open, waits for
-#                                 its checks, requires the "All green" check of CI, Bench, Two cores and Site on the exact head,
+#                                 its checks, requires "All green" (the last job of the Gate workflow: CI, Bench, Two cores and Site) on the exact head,
 #                                 and merges the way main's ruleset allows (squash; main is protected). Then it
 #                                 verifies that origin/main contains the head and leaves nothing behind: the remote branch, the
 #                                 local branch, the worktree with its build output, the ci-local.sh clone, and the piece's helper
@@ -167,12 +167,8 @@ ci_green() {
        --json workflowName,status,conclusion,createdAt,databaseId > "$runs"; then
     rm -f "$runs" "$site"; die "gh could not list the runs of wt/$slug at $head"
   fi
-  required=(CI Bench "Two cores")
-  git show "wt/$slug:.github/workflows/site.yml" > "$site"
-  changed="$(git diff --name-only "main...wt/$slug")"
-  if [ "$(printf '%s\n' "$changed" | "$MAIN/scripts/wt-ci-check.sh" site-needed "$site")" = yes ]; then
-    required+=(Site)
-  fi
+  # One workflow gates a branch: Gate, whose run on the head covers CI, Bench, Two cores and Site.
+  required=(Gate)
   echo "wt.sh: CI on wt/$slug at ${head:0:12}: required ${required[*]}" >&2
   if "$MAIN/scripts/wt-ci-check.sh" verdict "$runs" "${required[@]}" >&2; then
     rm -f "$runs" "$site"; return 0
@@ -182,7 +178,6 @@ ci_green() {
     echo "wt.sh: not merging: CI is not green on the exact head of wt/$slug ($head)."
     echo "  Push the branch if it is not on origin yet:   git push origin wt/$slug"
     echo "  then wait for every line above to say ok:     gh run list --branch wt/$slug --commit $head"
-    echo "  (a Site run is required, and absent, when its path filter did not see this push:  gh workflow run site.yml --ref wt/$slug)"
     echo "  --no-ci skips this check; it is for commits that only change state files."
   } >&2
   exit 2
@@ -201,7 +196,7 @@ landed_as_tested() {
 pr_number() { gh pr list --head "wt/$1" --base main --state open --json number --jq '.[0].number // empty' 2>/dev/null; }
 
 # Lands wt/$1 at head $2 through a pull request: opens one if none is open (title and body from the piece's own
-# commits), marks it ready, waits for its checks, requires the "All green" check of CI, Bench, Two cores and Site
+# commits), marks it ready, waits for its checks, requires "All green", the last job of the Gate workflow (CI, Bench, Two cores and Site),
 # on that exact head, and merges with a merge commit so the tree that lands is the tree CI tested. Branch
 # protection on main makes GitHub refuse anything else; this script only says what is missing and how to get it.
 pr_land() {
@@ -223,12 +218,12 @@ pr_land() {
     echo "wt.sh: pull request #$num is open for wt/$slug"
   fi
   gh pr ready "$num" >/dev/null 2>&1 || true   # a draft cannot merge; already-ready is not an error worth stopping for
-  echo "wt.sh: waiting for the checks of #$num on ${head:0:12} (every workflow's \"All green\")"
+  echo "wt.sh: waiting for the checks of #$num on ${head:0:12} (the Gate's \"All green\")"
   gh pr checks "$num" --watch >/dev/null 2>&1 || true   # the verdict below says what is red; --watch only waits
   checks="$(mktemp)"
   gh pr checks "$num" --json name,workflow,state,bucket > "$checks" \
     || { rm -f "$checks"; die "gh could not read the checks of #$num"; }
-  if ! "$MAIN/scripts/wt-ci-check.sh" pr-verdict "$checks" CI Bench "Two cores" Site >&2; then
+  if ! "$MAIN/scripts/wt-ci-check.sh" pr-verdict "$checks" Gate >&2; then
     rm -f "$checks"
     {
       echo "wt.sh: not merging: a required check is not green on ${head:0:12} (pull request #$num)."
@@ -300,7 +295,7 @@ case "$cmd" in
     landed_as_tested "$slug" \
       || die "wt/$slug does not contain main and merging main into it would change its tree: run \`git merge main\` in $WORK/$slug, push the branch, and wait for CI on its new head"
     if [ "$mode" = pr ]; then
-      # The default: a pull request, its "All green" checks, GitHub's merge (a merge commit of the exact head CI ran
+      # The default: a pull request, its "All green" check, GitHub's merge (a merge commit of the exact head CI ran
       # on, so the tree that lands is the tree that was tested), then the same verification and clean-up as --ff.
       pr_land "$slug" "$head"
     else
