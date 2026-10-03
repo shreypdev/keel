@@ -92,3 +92,13 @@ upgrade suites); `cargo test -p undra-bench
 * A physical phone: the speed rows are the emulator and the simulator on a shared Mac.
 * A hosted run of the new knob's profile (CI measures the default; `"z"` and `"3"` were built here for both platforms, Android ABIs and the iOS slices).
 * That API 23's loader reads `--pack-dyn-relocs=android` output (L7).
+
+## After the review (integrator, 2026-10-03)
+
+The founder asked that every changed line be needed before this merges. Read against that:
+
+* **Removed:** the `[profile.release-mobile]` tables in the root `Cargo.toml` (19 lines). The review called them harmless; nothing builds with them (an app builds the shim's profile), so they were a second copy to keep in step for no reader.
+* **L8 fixed:** `scripts/bench-device.sh` compared `wc -l` to `1` as text, and macOS pads the count with spaces, so one emulator read as "several"; the count is trimmed now.
+* **Kept, with the reason each exists:** `scripts/native-size.sh` (325 lines, the size of `scripts/wasm-size.sh`: it builds the template through the CLI, checks 16 KB alignment and that no builder path is in the library, and links the iOS slice the way an app does, because the `.a` is not what ships); `bench/src/budget.rs` (+206: a size table counts gzipped bytes or the bytes of the shipped file, and a table that mixes the two is an error); the CLI's `opt_level` setting and the two profiles of the shim (the review's M1); the `size-ios` job. The rest is the ADR amendment's tables, the records and regenerated site files.
+* What GitHub showed as fifteen thousand lines was this piece plus the three it was stacked on (the SSE adapter, the OkHttp module, Bazel), all on `main` already; its own change is 35 files.
+

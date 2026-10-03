@@ -77,25 +77,6 @@ inherits = "release"
 opt-level = "z"
 panic = "abort"
 
-# The profile of `undra build --platform ios,android --release` (the shim's template says why, ADR-052): size-tuned, the call path
-# (the four crates below) kept at opt-level 3, and still unwinding, because a native panic is contained by `catch_unwind` (R6).
-[profile.release-mobile]
-inherits = "release"
-opt-level = "s"
-panic = "unwind"
-
-[profile.release-mobile.package.undra-wire]
-opt-level = 3
-
-[profile.release-mobile.package.undra-signals]
-opt-level = 3
-
-[profile.release-mobile.package.undra-runtime]
-opt-level = 3
-
-[profile.release-mobile.package.undra-ffi]
-opt-level = 3
-
 [profile.bench]
 inherits = "release"
 debug = true

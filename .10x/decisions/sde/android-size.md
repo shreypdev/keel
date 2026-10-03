@@ -5,7 +5,7 @@ against a 1.2 MB budget. The piece is a profile, a gate and a record; no crate's
 
 ## What landed
 
-* **`[profile.release-mobile]`** in the generated shim (`crates/undra-cli/templates/shim/Cargo.toml.tmpl`) and in the root `Cargo.toml`: `inherits = "release"`,
+* **`[profile.release-mobile]`** in the generated shim (`crates/undra-cli/templates/shim/Cargo.toml.tmpl`; the copy first put in the root `Cargo.toml` was removed before the merge: nothing built with it): `inherits = "release"`,
   `opt-level = "s"`, `panic = "unwind"` kept (R6, ADR-046: native panics are contained by `catch_unwind`), and **`undra-wire`, `undra-signals`, `undra-runtime`
   and `undra-ffi` at `opt-level = 3`** (`[profile.release-mobile.package.<name>]`): the call path keeps the speed profile's optimiser. `undra build --platform ios,android
   --release` builds it (`Profile::ReleaseMobile`, `Profile::mobile(release)` in `cargo.rs`; `builds/android.rs` passes `--profile release-mobile` through `cargo ndk`,

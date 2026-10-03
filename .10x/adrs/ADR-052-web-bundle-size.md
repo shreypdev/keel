@@ -670,7 +670,7 @@ an app (95% of the design's 900 KB); the playground core (queries, mutations, se
 `main`); iOS had no record. The shim's `release` profile (`opt-level = 3`, fat LTO, one codegen unit, `panic = "unwind"`; `strip` is done by `undra build`,
 ADR-046) was the one every native release build used, and the only size-tuned profile was `release-wasm`. The workspace's root `Cargo.toml` is not what
 an app builds (an app builds the shim `undra build` generates, a workspace of its own), so the profile lives in the shim's template
-(`crates/undra-cli/templates/shim/Cargo.toml.tmpl`), and the root `Cargo.toml` carries the same table for builds inside this repository.
+(`crates/undra-cli/templates/shim/Cargo.toml.tmpl`) and nowhere else: nothing in this repository builds with it, so the root `Cargo.toml` does not repeat it.
 
 ### The profile
 
