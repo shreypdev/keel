@@ -62,6 +62,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 concurrency:
   # A pull request's newer run replaces its older one, and so does a newer push to a piece's branch

@@ -179,6 +179,15 @@ ci_green() {
   exit 2
 }
 
+# Would landing wt/$1 on main land exactly its tested tree? 0 when main is an ancestor of the branch, or when the
+# three-way merge of main into the branch has the branch's own tree (nothing on main is missing from it).
+landed_as_tested() {
+  local merged
+  git merge-base --is-ancestor main "wt/$1" && return 0
+  merged="$(git merge-tree --write-tree main "wt/$1" 2>/dev/null)" || return 1
+  [ "$merged" = "$(git rev-parse "wt/$1^{tree}")" ]
+}
+
 # The pull request of wt/$1 (open, into main): its number, or nothing.
 pr_number() { gh pr list --head "wt/$1" --base main --state open --json number --jq '.[0].number // empty' 2>/dev/null; }
 
@@ -224,7 +233,17 @@ pr_land() {
   # No --delete-branch: gh would also delete the local branch and its worktree, and the sweep below does that
   # uniformly (remote, local, worktree, ci-local clone) only after main is verified to contain the head.
   gh pr merge "$num" --merge \
-    || die "GitHub refused to merge #$num (branch protection: is main merged in and every required check green?); nothing was deleted"
+    || die "GitHub refused to merge #$num (branch protection: is every required check green?); nothing was deleted"
+  # With a merge queue on main, `gh pr merge` only enqueues: the queue builds the merge result, runs the workflows on
+  # it (`merge_group`), and merges when they are green. Wait for the merge itself, and say so if the queue dropped it.
+  local waited=0
+  until [ "$(gh pr view "$num" --json state --jq .state)" = MERGED ]; do
+    if [ "$(gh pr view "$num" --json mergeQueueEntry --jq '.mergeQueueEntry // empty' 2>/dev/null)" = "" ] && [ "$waited" -ge 30 ]; then
+      die "pull request #$num left the merge queue without merging (its merge-result run was red?): gh pr view $num --web"
+    fi
+    sleep 10; waited=$((waited + 10))
+    [ "$waited" -le 7200 ] || die "pull request #$num was not merged within two hours: gh pr view $num --web"
+  done
   echo "wt.sh: merged pull request #$num (a merge commit of ${head:0:12})"
   git pull -q --ff-only "$REMOTE" main || die "main is merged on $REMOTE but the local main did not fast-forward: fix the local checkout, then run scripts/wt.sh clean"
 }
@@ -257,8 +276,11 @@ case "$cmd" in
     [ -z "$(git -C "$WORK/$slug" status --porcelain 2>/dev/null)" ] \
       || die "$WORK/$slug has uncommitted changes; commit or drop them first"
     head="$(git rev-parse "wt/$slug")"
-    git merge-base --is-ancestor main "wt/$slug" \
-      || die "wt/$slug does not contain main: run \`git merge main\` in $WORK/$slug, push the branch, and wait for CI on its new head"
+    # The tree that lands must be the tree CI tested: either main is an ancestor of the branch, or merging main into
+    # it changes nothing (the branch was stacked on the piece that landed just before it, and that landing was a
+    # merge commit of a head the branch already contains). A merge that would change the tree needs a new head and run.
+    landed_as_tested "$slug" \
+      || die "wt/$slug does not contain main and merging main into it would change its tree: run \`git merge main\` in $WORK/$slug, push the branch, and wait for CI on its new head"
     if [ "$mode" = pr ]; then
       # The default: a pull request, its "All green" checks, GitHub's merge (a merge commit of the exact head CI ran
       # on, so the tree that lands is the tree that was tested), then the same verification and clean-up as --ff.
@@ -271,8 +293,17 @@ case "$cmd" in
       else
         ci_green "$slug" "$head"
       fi
-      git merge --ff-only "wt/$slug"
-      echo "wt.sh: merged wt/$slug (fast-forward to ${head:0:12})"
+      if git merge-base --is-ancestor main "wt/$slug"; then
+        git merge --ff-only "wt/$slug"
+        echo "wt.sh: merged wt/$slug (fast-forward to ${head:0:12})"
+      else
+        # A stacked piece: main holds a merge commit of a head the branch already contains, so the merge commit
+        # below has exactly the branch's tree (landed_as_tested said so).
+        git merge --no-ff --no-edit "wt/$slug" >/dev/null
+        [ "$(git rev-parse 'HEAD^{tree}')" = "$(git rev-parse "wt/$slug^{tree}")" ] \
+          || die "the merge of wt/$slug did not land its tested tree; main is merged locally and NOT pushed: inspect, then reset or push by hand"
+        echo "wt.sh: merged wt/$slug (a merge commit with the tree of ${head:0:12})"
+      fi
       if [ "$no_push" = 1 ]; then
         echo "wt.sh: --no-push: main is merged locally and NOT pushed; nothing was deleted."
         echo "       After \`git push $REMOTE main\`, run: scripts/wt.sh clean   (it removes this piece and every other merged one)"
