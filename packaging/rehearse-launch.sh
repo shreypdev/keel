@@ -75,8 +75,12 @@ printf 'Rehearsing Undra %s (platforms: %s) in %s\n' "$version" "$platforms" "$t
 log "Snapshot of the working tree, bumped to $version and tagged v$version"
 src=$tmp/src
 mkdir -p "$src"
+# Extracted with the time of extraction (-m), not the files' own: the CLI below is built in a target directory kept
+# between rehearsals, and Cargo decides what to rebuild by modification time, so a file carrying a time older than the
+# last rehearsal's build (an edit made before it, a copy that kept its time) would leave that build's undra in place
+# and the rehearsal would test another tree than this one.
 (cd "$repo" && git ls-files -z | while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done) |
-  (cd "$repo" && tar --null -T - -cf -) | tar -xf - -C "$src"
+  (cd "$repo" && tar --null -T - -cf -) | tar -xmf - -C "$src"
 git_q() { git -C "$src" -c user.name=rehearsal -c user.email=rehearsal@example.invalid -c commit.gpgsign=false -c tag.gpgsign=false "$@"; }
 git_q init -q
 git_q add -A
