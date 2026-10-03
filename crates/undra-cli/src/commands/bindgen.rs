@@ -34,10 +34,13 @@ pub fn run(env: &Env<'_>, args: &BindgenArgs) -> Result<()> {
     let session = project.map(|p| Session::new(p, env.sys, ui));
 
     let crate_name = crate_name(session.as_ref(), args);
-    let schema = match (&args.schema, &session) {
-        (Some(file), _) => read_schema_file(file, &crate_name)?,
-        (None, Some(session)) => schema_from_core(session, args.release, args.docs)?,
-        (None, None) => return Err(CliError::no_project(&env.start_dir()?)),
+    let schema = match (&args.schema, &args.library, &session) {
+        (Some(file), _, _) => read_schema_file(file, &crate_name)?,
+        (None, Some(library), Some(session)) => {
+            schema_from_library(session, library, &crate_name, args.docs)?
+        }
+        (None, None, Some(session)) => schema_from_core(session, args.release, args.docs)?,
+        (None, _, None) => return Err(CliError::no_project(&env.start_dir()?)),
     };
     if schema_is_empty(&schema) {
         ui.warn("the schema is empty: the core has no `#[undra::api]` items that are `pub`, or its registrations were not linked");
@@ -155,6 +158,21 @@ fn schema_from_core(session: &Session<'_>, release: bool, docs: bool) -> Result<
     let namespace = session.namespace()?;
     session.ui.step("Reading the schema from the built library");
     schema::load_from_library(&library, &namespace, &core.package, docs)
+}
+
+/// Reads the schema from a host library that was built already: no Cargo, no build. The library is the one
+/// `undra build --platform host` writes (or a build system's copy of it), and the entry it exports is named by the
+/// project's namespace.
+fn schema_from_library(
+    session: &Session<'_>,
+    library: &Path,
+    crate_name: &str,
+    docs: bool,
+) -> Result<Schema> {
+    let library = canonicalize_lenient(library);
+    let namespace = session.namespace()?;
+    session.ui.step("Reading the schema from the built library");
+    schema::load_from_library(&library, &namespace, crate_name, docs)
 }
 
 /// The generator configuration and output locations.

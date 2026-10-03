@@ -126,6 +126,7 @@ pub fn run(env: &Env<'_>, args: &UpgradeArgs) -> Result<()> {
         ui.step("Regenerating the bindings (undra bindgen)");
         let bindgen_args = BindgenArgs {
             schema: None,
+            library: None,
             out: None,
             release: false,
             platforms: None,

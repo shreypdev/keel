@@ -44,6 +44,105 @@ fn built_core(project: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Every file below `dir`, as paths relative to it.
+fn files_below(dir: &Path) -> Vec<PathBuf> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("read_dir") {
+            let path = entry.expect("entry").path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else {
+                out.push(path.strip_prefix(root).expect("below root").to_owned());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out.sort();
+    out
+}
+
+/// ADR-061: a build system that has built the core already (Bazel) hands `undra bindgen` the library, and gets exactly the
+/// bindings `undra bindgen` writes after building one itself: the playground's committed tree.
+#[test]
+#[ignore = "runs a full `undra build`; run with --ignored (CI does)"]
+fn bindgen_reads_the_schema_from_a_library_that_was_built_already() {
+    let project = playground();
+    let status = Command::new(env!("CARGO_BIN_EXE_undra"))
+        .args(["build", "-C"])
+        .arg(&project)
+        .args(["--platform", "host"])
+        .status()
+        .expect("spawn `undra build`");
+    assert!(status.success(), "`undra build --platform host` failed");
+    let lib =
+        built_core(&project).expect("undra build did not leave build/host/libplayground_core.*");
+
+    // The lint fragments name the directory the tree is written to, as the committed tree's say `generated`.
+    let scratch =
+        std::env::temp_dir().join(format!("undra-bindgen-library-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    let out = scratch.join("generated");
+    let result = Command::new(env!("CARGO_BIN_EXE_undra"))
+        .args(["bindgen", "-C"])
+        .arg(&project)
+        .arg("--library")
+        .arg(&lib)
+        .args(["--docs", "--out"])
+        .arg(&out)
+        .output()
+        .expect("spawn `undra bindgen --library`");
+    assert!(
+        result.status.success(),
+        "`undra bindgen --library` failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        !String::from_utf8_lossy(&result.stderr).contains("Building the core"),
+        "a library that is given must not be built again: {stdout}"
+    );
+
+    let committed = project.join("generated");
+    let written = files_below(&out);
+    assert_eq!(
+        written,
+        files_below(&committed),
+        "the trees list different files"
+    );
+    for file in written {
+        // The one file that names where the tree is relative to the runtimes (the scratch directory is elsewhere).
+        if file == Path::new("swift/Package.swift") {
+            continue;
+        }
+        let actual = std::fs::read_to_string(out.join(&file)).expect("generated file");
+        let expected = std::fs::read_to_string(committed.join(&file)).expect("committed file");
+        assert_eq!(
+            actual,
+            expected,
+            "{} differs from the committed tree",
+            file.display()
+        );
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+
+    // `--library` and `--schema` are two ways to say where the schema comes from.
+    let both = Command::new(env!("CARGO_BIN_EXE_undra"))
+        .args(["bindgen", "-C"])
+        .arg(&project)
+        .arg("--library")
+        .arg(&lib)
+        .args(["--schema", "schema.json", "--check"])
+        .output()
+        .expect("spawn");
+    assert!(!both.status.success());
+    assert!(
+        String::from_utf8_lossy(&both.stderr).contains("cannot be used with"),
+        "{}",
+        String::from_utf8_lossy(&both.stderr)
+    );
+}
+
 #[test]
 #[ignore = "runs a full `undra build`; run with --ignored (CI does)"]
 fn a_loaded_core_keeps_its_schema_and_jni_exports() {

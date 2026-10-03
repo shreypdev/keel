@@ -20,6 +20,11 @@ const GOLDEN_FILES: &[&str] = &[
     "kotlin/src/main/kotlin/dev/undra/generated/golden_stores/Stores.kt",
     "ts/package.json",
     "ts/src/stores.ts",
+    // The lint exclusions beside each tree (ADR-061).
+    "kotlin/.editorconfig",
+    "swift/.swiftlint.yml",
+    "ts/.eslintrc.json",
+    "ts/eslint.config.undra.mjs",
 ];
 
 fn golden_dir() -> std::path::PathBuf {
@@ -28,14 +33,16 @@ fn golden_dir() -> std::path::PathBuf {
 
 #[test]
 fn a_schema_file_generates_the_three_trees() {
-    let out = TempDir::new("schema-out");
+    let scratch = TempDir::new("schema-out");
+    // The lint fragments name the output directory, so the golden is generated into one called `generated`.
+    let out = scratch.path().join("generated");
     let result = run_ok(
         undra()
             .args(["bindgen", "--schema"])
             .arg(fixture())
             .arg("--out")
-            .arg(out.path())
-            .current_dir(out.path()),
+            .arg(&out)
+            .current_dir(scratch.path()),
     );
     let text = String::from_utf8_lossy(&result.stdout);
     assert!(
@@ -48,7 +55,7 @@ fn a_schema_file_generates_the_three_trees() {
 
     let updating = std::env::var("UPDATE_GOLDEN").is_ok_and(|v| v == "1");
     for file in GOLDEN_FILES {
-        let actual = std::fs::read_to_string(out.path().join(file))
+        let actual = std::fs::read_to_string(out.join(file))
             .unwrap_or_else(|_| panic!("{file} was not generated"));
         let golden = golden_dir().join(file);
         if updating {

@@ -1,3 +1,4 @@
+swift/.swiftlint.yml
 swift/Package.swift
 swift/Sources/Ios15SampleCore/Generated/Core.swift
 swift/Sources/Ios15SampleCore/Generated/Errors.swift
