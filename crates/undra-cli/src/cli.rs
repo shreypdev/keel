@@ -413,8 +413,10 @@ docs/SPEC.md 2.6. The order of the output is fixed: types, objects and stores, \
 functions, ports, callbacks, queries, by name, so the same two schemas print the same text. Doc comments and wire ids are \
 not compared.\n\n\
 With --against the old side is FILE as committed at a git ref (`git show <ref>:<path>`; nothing is built) and the new \
-side is FILE in the working tree. FILE is `schema.json` in the project directory unless named. Without --against \
-give the old and the new file, in that order.\n\n\
+side is FILE in the working tree. FILE is `schema.json` in the project directory unless named. Since nothing is built, \
+the file is checked against the project's generated bindings, whose headers name the schema hash they were made from: \
+where the two disagree, in the working tree or at the ref, a warning says the file is stale (and --exit-code fails on a \
+stale working tree). Without --against give the old and the new file, in that order.\n\n\
 The output goes to stdout and the exit status is 0 whatever the diff says, so a reviewer can run it freely; --exit-code \
 makes it 1 when any line is breaking, for a CI gate.",
         after_long_help = "\
@@ -457,7 +459,8 @@ pub struct SchemaDiffArgs {
     #[arg(long, value_name = "REF")]
     pub against: Option<String>,
 
-    /// Exit with status 1 when any line is breaking (for CI); the output is the same.
+    /// Exit with status 1 when any line is breaking, or when --against finds the schema file stale
+    /// against the bindings (for CI); the output is the same.
     #[arg(long)]
     pub exit_code: bool,
 
