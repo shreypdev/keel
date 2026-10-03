@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -91,6 +92,11 @@ public class SseSubject(
     public val create: () -> SseAdapter,
     /** Whether closing a stream aborts a read that is blocked on a silent server (Android's `HttpURLConnection` and OkHttp do; the JDK's does not). */
     public val canAbortBlockedRead: Boolean,
+    /**
+     * Whether a `Last-Event-ID` that is not ASCII goes out as its UTF-8 bytes, as the fetch standard's `EventSource` sends it. The JDK's
+     * `java.net.http` (the desktop JVM's adapter, never Android's) cannot: it writes header values as US-ASCII, an `é` as `?`.
+     */
+    public val sendsNonAsciiLastEventId: Boolean = true,
 )
 
 /**
@@ -131,6 +137,7 @@ public open class RealtimeAdapterContract(
         val name = subject.name
         val adapter = subject.create
         val canAbortBlockedRead = subject.canAbortBlockedRead
+        val sendsNonAsciiLastEventId = subject.sendsNonAsciiLastEventId
         case("SSE ($name): the feed parses as the HTML standard says, then the body's end is Ended; no Last-Event-ID was sent") {
             val server = server()
             val port = SsePortAdapter(adapter())
@@ -158,6 +165,22 @@ public open class RealtimeAdapterContract(
                 assertEq(SseError.Ended, end)
             }
             assertEq("2", server.last("/sse/feed").headers["last-event-id"])
+        }
+
+        if (sendsNonAsciiLastEventId) {
+            case("SSE ($name): an id that is not ASCII resumes too: Last-Event-ID goes out as its UTF-8 bytes") {
+                val server = server()
+                val port = SsePortAdapter(adapter())
+                within {
+                    for (id in listOf("é", "日本-7")) {
+                        val stream = port.open("${server.http}/sse/feed", emptyList(), id)
+                        // The header's bytes as sent (the server reads header bytes as Latin-1).
+                        val sent = server.last("/sse/feed").headers["last-event-id"]?.toByteArray(Charsets.ISO_8859_1)
+                        assertEq(id, sent?.toString(Charsets.UTF_8))
+                        port.close(stream)
+                    }
+                }
+            }
         }
 
         case("SSE ($name): a 204 or a 500 is Refused with its status; text/html is Protocol") {
@@ -292,6 +315,52 @@ public open class RealtimeAdapterContract(
                 assertEq(WsError.Closed(4001u, "kicked"), failsWith<WsError.Closed> { port.send(conn, WsMessage.Text("late")) })
                 port.close(conn, 1000u, "")
             }
+        }
+
+        case("WebSocket: the core's close racing the peer's close frame answers the pending receive once, then the stream ends cleanly") {
+            val server = server()
+            val port = ws()
+            within(60_000) {
+                // Three timings of the core's close against the peer's close frame, which follows "hello" at once: before anything was
+                // read, while a receive waits right after "hello", and a moment later.
+                for (round in 0 until 30) {
+                    val conn = port.connect("${server.ws}/ws/close?code=4000&reason=peer", emptyList(), emptyList()).conn
+                    if (round % 3 != 0) assertEq(listOf<WsMessage>(WsMessage.Text("hello")), port.receiveExactly(conn, 1), "round $round")
+                    val pending = async(Dispatchers.Default) {
+                        try {
+                            Result.success(port.receive(conn, 16u))
+                        } catch (e: WsError) {
+                            Result.failure<List<WsMessage>>(e)
+                        }
+                    }
+                    if (round % 3 == 2) delay(1)
+                    port.close(conn, 1000u, "")
+                    val answered = pending.await()
+                    val messages = answered.getOrNull()
+                    if (messages != null) {
+                        assertTrue(messages.isEmpty() || messages == listOf<WsMessage>(WsMessage.Text("hello")), "round $round: $messages")
+                    } else {
+                        assertEq(WsError.Closed(4000u, "peer"), answered.exceptionOrNull(), "round $round")
+                    }
+                    assertEq(emptyList<WsMessage>(), port.receive(conn, 16u), "round $round: after the core's close the stream ends cleanly")
+                    assertEq(WsError.Closed(1000u, ""), failsWith<WsError.Closed> { port.send(conn, WsMessage.Text("late")) }, "round $round")
+                }
+                assertEq(0, port.openConnections)
+            }
+        }
+
+        case("WebSocket: the core's close reaches a server it stopped reading, with its code and reason, and ends the stream cleanly") {
+            val server = server()
+            val port = ws()
+            within(60_000) {
+                val conn = port.connect("${server.ws}/ws/flood?n=2000&size=65536", emptyList(), emptyList()).conn
+                // Nobody reads: the connection's read-ahead and TCP's buffers fill and the server's writes stall.
+                eventually("the server is writing") { server.last("/ws/flood").written > 0 }
+                port.close(conn, 4002u, "enough")
+                assertEq(emptyList<WsMessage>(), port.receive(conn, 16u))
+            }
+            eventually("the server saw the core's close frame", timeoutMs = 5_000) { server.last("/ws/flood").closeCode == 4002 }
+            assertEq("enough", server.last("/ws/flood").closeReason)
         }
 
         case("WebSocket: a connection dropped without a close frame is Network") {

@@ -1,9 +1,12 @@
 package dev.undra.okhttp
 
 import dev.undra.runtime.adapters.Header
+import dev.undra.runtime.adapters.HttpMethod
+import dev.undra.runtime.adapters.HttpRequest
 import dev.undra.runtime.adapters.SseError
 import dev.undra.runtime.adapters.SsePortAdapter
 import dev.undra.runtime.adapters.WebSocketPortAdapter
+import dev.undra.runtime.adapters.WsError
 import dev.undra.runtime.adapters.WsMessage
 import dev.undra.runtime.contracts.RealtimeAdapterContract
 import dev.undra.runtime.contracts.SseSubject
@@ -11,17 +14,32 @@ import dev.undra.runtime.contracts.WebSocketSubject
 import dev.undra.runtime.support.eventually
 import dev.undra.runtime.testing.assertEq
 import dev.undra.runtime.testing.assertTrue
+import dev.undra.runtime.testing.fail
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import okhttp3.Call
+import okhttp3.Credentials
+import okhttp3.EventListener
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import org.junit.Test
 
 private fun <T> within(millis: Long = 20_000, block: suspend CoroutineScope.() -> T): T = runBlocking { withTimeout(millis) { block() } }
+
+private suspend inline fun <reified E : Throwable> failsWith(crossinline block: suspend () -> Unit): E {
+    try {
+        block()
+    } catch (e: Throwable) {
+        if (e is E) return e
+        fail("expected ${E::class.java.simpleName} but got $e")
+    }
+    fail("expected ${E::class.java.simpleName} but nothing was thrown")
+}
 
 /** A client as an app has one: its defaults (10 s read timeout, HTTP/2 allowed), a short connect timeout for the cases that connect nowhere. */
 private fun appClient(): OkHttpClient = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).build()
@@ -63,6 +81,70 @@ class OkHttpRealtimeAdapterTest : RealtimeAdapterContract(
             val seen = server.last("/ws/headers")
             assertEq("yes", seen.headers["x-traced"])
             assertEq("t", seen.headers["x-token"])
+        }
+
+        case("WebSocket: OkHttp's rules for an upgrade: application interceptors see it; network interceptors and the event listener do not") {
+            val server = server()
+            val events = CopyOnWriteArrayList<String>()
+            val client = appClient().newBuilder()
+                .addInterceptor(Interceptor { it.proceed(it.request().newBuilder().header("X-Application", "yes").build()) })
+                .addNetworkInterceptor(Interceptor { it.proceed(it.request().newBuilder().header("X-Network", "yes").build()) })
+                .eventListener(
+                    object : EventListener() {
+                        override fun callStart(call: Call) {
+                            events += "callStart ${call.request().url.encodedPath}"
+                        }
+                    },
+                )
+                .build()
+            val port = WebSocketPortAdapter(OkHttpWebSocketAdapter(client))
+            within {
+                val conn = port.connect("${server.ws}/ws/headers", emptyList(), emptyList()).conn
+                port.close(conn, 1000u, "")
+            }
+            val seen = server.last("/ws/headers")
+            assertEq("yes", seen.headers["x-application"])
+            // OkHttp runs a WebSocket's upgrade without the client's network interceptors and on a client whose listener is
+            // EventListener.NONE (RealWebSocket.connect): the documented limits, pinned so that an OkHttp that changes them is noticed.
+            assertEq(null, seen.headers["x-network"])
+            assertEq(emptyList<String>(), events.toList())
+            // The same client's listener sees an ordinary call.
+            within { OkHttpHttpAdapter(client).request(HttpRequest(HttpMethod.GET, "${server.http}/stats", emptyList(), null, 5_000u)) }
+            assertEq(listOf("callStart /stats"), events.toList())
+        }
+
+        case("WebSocket: the app's Authenticator answers the upgrade's 401 and the connection opens; without it the upgrade is Refused(401)") {
+            val server = server()
+            val asked = CopyOnWriteArrayList<Int>()
+            val client = appClient().newBuilder()
+                .authenticator { _, response ->
+                    asked += response.code
+                    if (response.request.header("Authorization") != null) null else response.request.newBuilder().header("Authorization", Credentials.basic("undra", "secret")).build()
+                }
+                .build()
+            within {
+                val port = WebSocketPortAdapter(OkHttpWebSocketAdapter(client))
+                port.close(port.connect("${server.ws}/ws/auth", emptyList(), emptyList()).conn, 1000u, "")
+                val refused = failsWith<WsError.Refused> { WebSocketPortAdapter(OkHttpWebSocketAdapter(appClient())).connect("${server.ws}/ws/auth", emptyList(), emptyList()) }
+                assertEq(401.toUShort(), refused.status)
+            }
+            assertEq(listOf(401), asked.toList())
+            assertEq(Credentials.basic("undra", "secret"), server.connections().filter { it.path == "/ws/auth" }[1].headers["authorization"])
+        }
+
+        case("WebSocket: the app's read timeout and call timeout do not end a quiet connection") {
+            val server = server()
+            val impatient = OkHttpClient.Builder().readTimeout(200, TimeUnit.MILLISECONDS).callTimeout(500, TimeUnit.MILLISECONDS).build()
+            val port = WebSocketPortAdapter(OkHttpWebSocketAdapter(impatient))
+            within {
+                val conn = port.connect("${server.ws}/ws/stall", emptyList(), emptyList()).conn
+                // Several times both timeouts, and nothing happened: the connection is still open both ways.
+                delay(1_500)
+                assertTrue(!server.last("/ws/stall").clientClosed, "the server saw the client leave")
+                port.send(conn, WsMessage.Text("still here"))
+                port.close(conn, 1000u, "")
+            }
+            eventually("the server saw the client's close", timeoutMs = 5_000) { server.last("/ws/stall").closeCode == 1000 }
         }
 
         case("WebSocket: a client provider is asked at every connect") {

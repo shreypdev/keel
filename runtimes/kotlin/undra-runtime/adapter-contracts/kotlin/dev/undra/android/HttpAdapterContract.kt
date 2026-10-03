@@ -284,6 +284,18 @@ abstract class HttpAdapterContract {
     }
 
     @Test
+    fun a_get_or_a_head_with_an_empty_body_is_sent_as_itself_without_one() {
+        server.route("/m") { ex -> ex.respond(200, listOf("X-Method" to ex.request.method), "got ${ex.request.body.size}".toByteArray()) }
+        val get = send(HttpMethod.GET, "/m", ByteArray(0))
+        assertEquals("GET", get.headers.first { it.name == "X-Method" }.value)
+        assertEquals("got 0", get.text())
+        val head = send(HttpMethod.HEAD, "/m", ByteArray(0))
+        assertEquals(200.toUShort(), head.status)
+        assertEquals(listOf("GET", "HEAD"), server.requests.map { it.method })
+        assertNull(server.requests[0].header("Content-Length"))
+    }
+
+    @Test
     fun an_unusable_url_or_header_is_invalid() {
         for (url in listOf("ftp://example.com/", "example.com", "http://", "http://exa mple.com/", "file:///etc/passwd")) {
             val e = failure { runBlocking { http.request(HttpRequest(HttpMethod.GET, url, emptyList(), null, null)) } }

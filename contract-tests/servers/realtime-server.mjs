@@ -16,6 +16,8 @@
 //   /ws/close?code=C&reason=R  sends "hello", then a close frame (C, R)
 //   /ws/drop                 sends "hello", then destroys the socket without a close frame
 //   /ws/deny?status=S        answers the upgrade with HTTP S
+//   /ws/auth                 answers the upgrade 401 with a Basic challenge (realm "undra") unless it carries the credentials
+//                            undra:secret, then accepts it and sends nothing (an app's authenticator or session delegate answers)
 //   /ws/bad-utf8             sends a text frame that is not UTF-8
 //   /ws/stall                accepts and sends nothing
 // Server-sent events:
@@ -221,6 +223,10 @@ export function startRealtimeServer({ port = 0, host = "127.0.0.1" } = {}) {
     if (path === "/ws/deny") {
       const status = Number(url.searchParams.get("status") ?? 403);
       socket.end(`HTTP/1.1 ${status} Refused\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`);
+      return;
+    }
+    if (path === "/ws/auth" && req.headers.authorization !== `Basic ${Buffer.from("undra:secret").toString("base64")}`) {
+      socket.end('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="undra"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
       return;
     }
     const key = req.headers["sec-websocket-key"];

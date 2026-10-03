@@ -231,6 +231,12 @@ abstract class RealtimeOnDeviceContract {
         } catch (e: SseError.Protocol) {
             assertTrue(e.reason, e.reason.contains("text/html"))
         }
+        // An id is any text: it goes back as its UTF-8 bytes (the server reads header bytes as Latin-1 and reports them as JSON).
+        for (id in listOf("é", "日本-7")) {
+            sse.close(sse.open("http://$host:$port/sse/feed", emptyList(), id))
+            val sent = Regex("\"last-event-id\":\"([^\"]*)\"").find(lastConnection("/sse/feed"))?.groupValues?.get(1)
+            assertEquals(id, sent?.toByteArray(Charsets.ISO_8859_1)?.toString(Charsets.UTF_8))
+        }
         val hang = sse.open("http://$host:$port/sse/hang", emptyList(), null)
         delay(200)
         assertTrue(lastConnection("/sse/hang").contains("\"clientClosed\":false"))

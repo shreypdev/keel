@@ -370,6 +370,33 @@ final class RecordingSessionDelegate: NSObject, URLSessionTaskDelegate, @uncheck
     }
 }
 
+/// An app's session delegate that answers an HTTP authentication challenge with the credentials it holds (the realtime server's
+/// `/ws/auth` wants `undra:secret`), and records the methods it was asked about.
+final class AnsweringSessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let asked = Locked<[String]>([])
+
+    /// The authentication methods of the challenges it answered, in order.
+    var methods: [String] {
+        return asked.withLock { $0 }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge
+    ) async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+        let method = challenge.protectionSpace.authenticationMethod
+        guard method == NSURLAuthenticationMethodHTTPBasic else {
+            return (.performDefaultHandling, nil)
+        }
+        asked.withLock { $0.append(method) }
+        if challenge.previousFailureCount > 0 {
+            return (.cancelAuthenticationChallenge, nil)
+        }
+        return (.useCredential, URLCredential(user: "undra", password: "secret", persistence: .none))
+    }
+}
+
 /// The same suite on the app's own session (ADR-060): `URLSessionWebSocketAdapter(session:)`, a session with a recording delegate and a
 /// configuration of its own, so every case also shows that the adapter works as a task of a session it does not own.
 final class URLSessionWebSocketOnAppSessionTests: URLSessionWebSocketAdapterTests {
@@ -407,6 +434,25 @@ final class URLSessionWebSocketOnAppSessionTests: URLSessionWebSocketAdapterTest
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         XCTAssertTrue(delegate.paths.contains("/ws/headers"), "the session's delegate saw \(delegate.paths)")
+    }
+
+    /// The connection is the task's delegate for the handshake and the close frame only: a challenge on the upgrade (here HTTP Basic,
+    /// what a client certificate or a task-level server-trust handler meets the same way) still reaches the app's session delegate.
+    func testTheSessionsDelegateAnswersTheUpgradesAuthenticationChallenge() async throws {
+        let answering = AnsweringSessionDelegate()
+        let appSession = URLSession(configuration: .ephemeral, delegate: answering, delegateQueue: nil)
+        defer {
+            appSession.invalidateAndCancel()
+        }
+        let appBinding = WebSocketBinding(adapter: URLSessionWebSocketAdapter(session: appSession))
+        defer {
+            appBinding.detach()
+        }
+        let conn = try await appBinding.connect(url: "\(server.ws)/ws/auth", protocols: [], headers: []).conn
+        try await appBinding.close(conn: conn, code: 1000, reason: "")
+        XCTAssertEqual(answering.methods, [NSURLAuthenticationMethodHTTPBasic])
+        let seen = try await server.last("/ws/auth")
+        XCTAssertEqual(seen?.headers["authorization"], "Basic dW5kcmE6c2VjcmV0")
     }
 
     func testTheAdapterNeverInvalidatesTheAppsSession() async throws {

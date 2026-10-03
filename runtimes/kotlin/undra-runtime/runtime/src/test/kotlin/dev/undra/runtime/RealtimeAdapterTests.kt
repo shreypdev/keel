@@ -17,7 +17,8 @@ import org.junit.jupiter.api.Test
 class RealtimeAdapterTests : RealtimeAdapterContract(
     webSocket = WebSocketSubject("ClientWebSocketAdapter", { ClientWebSocketAdapter(connectTimeoutMillis = 5_000) }),
     sse = listOf(
-        SseSubject("java.net.http", ::JdkHttpSseAdapter, canAbortBlockedRead = true),
+        // java.net.http writes header values as US-ASCII: a Last-Event-ID that is not ASCII cannot go out as it is (a desktop JVM only).
+        SseSubject("java.net.http", ::JdkHttpSseAdapter, canAbortBlockedRead = true, sendsNonAsciiLastEventId = false),
         // The JDK's HttpURLConnection cannot abort a blocked read (Android's can): those two cases run on the device.
         SseSubject("HttpURLConnection", { UrlConnectionSseAdapter() }, canAbortBlockedRead = false),
     ),

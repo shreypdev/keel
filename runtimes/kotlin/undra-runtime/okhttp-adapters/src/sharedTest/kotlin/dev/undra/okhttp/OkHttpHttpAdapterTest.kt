@@ -10,6 +10,7 @@ import dev.undra.runtime.adapters.HttpMethod
 import dev.undra.runtime.adapters.HttpRequest
 import dev.undra.runtime.adapters.HttpResponse
 import dev.undra.runtime.adapters.StandardPorts
+import dev.undra.runtime.support.eventually
 import dev.undra.runtime.wire.decodeAll
 import dev.undra.runtime.wire.encodeToByteArray
 import java.io.ByteArrayOutputStream
@@ -18,6 +19,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.GZIPOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import okhttp3.Authenticator
 import okhttp3.Call
@@ -248,6 +252,35 @@ class OkHttpHttpAdapterTest : HttpAdapterContract() {
         val e = failure { get(OkHttpHttpAdapter(OkHttpClient()), "/x", listOf(Header("X-Name", "José"))) }
         assertTrue(e.toString(), e is HttpError.InvalidUrl && e.reason.contains("X-Name"))
         assertEquals(0, server.requests.size)
+    }
+
+    @Test
+    fun calls_cancelled_or_timed_out_leave_no_call_running_and_no_connection_in_use() = runBlocking {
+        // The server holds every call open for longer than the test, and the client has no read timeout: a call the adapter
+        // abandoned instead of cancelling would stay running.
+        server.route("/hang") { it.awaitClientClose(60_000) }
+        server.route("/midbody") { ex ->
+            ex.startChunked()
+            ex.chunk(ByteArray(1000))
+            ex.awaitClientClose(60_000)
+        }
+        val client = OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build()
+        val adapter = OkHttpHttpAdapter(client)
+        var sent = 0
+        repeat(3) {
+            for (path in listOf("/hang", "/midbody")) {
+                val call = async(Dispatchers.Default) { adapter.request(HttpRequest(HttpMethod.GET, server.base + path, emptyList(), null, null)) }
+                assertTrue(server.awaitRequests(++sent))
+                call.cancelAndJoin()
+            }
+        }
+        assertEquals(HttpError.Timeout, failure { runBlocking { adapter.request(HttpRequest(HttpMethod.GET, server.base + "/hang", emptyList(), null, 200u)) } })
+        // Each call was cancelled on OkHttp (Call.cancel), not abandoned: its dispatcher thread is back and its socket closed.
+        eventually("the dispatcher has no call left and the pool no connection in use") {
+            client.dispatcher.runningCallsCount() == 0 && client.dispatcher.queuedCallsCount() == 0 &&
+                client.connectionPool.connectionCount() == client.connectionPool.idleConnectionCount()
+        }
+        assertTrue(server.awaitIdle())
     }
 
     @Test
