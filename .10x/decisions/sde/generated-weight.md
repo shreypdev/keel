@@ -19,7 +19,7 @@ wire, ABI, schema, schema-hash or generated-declaration change: no existing gold
   `git show`, nothing built); every change a line `breaking` or `additive` by SPEC 2.6; fixed order; `--exit-code`.
 * **`undra schema export`** (`schema_file.rs`): the core's schema as the file `diff` reads, every type and every small definition on one line:
   the playground's is 3,305 lines (pretty form: 8,799). Not in the brief; see Deviations.
-* **Docs**: SPEC 2.6, 10, 13; ONBOARDING 5; `.github/pull_request_template.md` (there was none: a Summary and the public-API line); the
+* **Docs**: SPEC 2.6, 10, 13; ONBOARDING 5; `.github/pull_request_template.md` (the **Public API** line, on top of `pr-gate`'s template); the
   page `site/docs/reviewing-generated-code.html` (listed in `site/data/docs.json`, "Test, ship, operate"); `undra schema` in
   `site/docs/cli.html`; the site regenerated (`node site/scripts/build-all.mjs`: nav of every docs page, sitemap, search index, llms files,
   the errors page with the new C0009 message).
@@ -133,7 +133,8 @@ The `Bench` fixture is not padding in the generator; if the playground's own num
    reordered is additive. Each is a line in `schema_diff.rs` and a test, and a one-line change if the lead disagrees.
 6. **No new C code.** Errors use C0002 (not a schema), C0003 (no `git`), C0009 (the arguments do not make a comparison, a ref without the
    file, outside a repository) and C0010, in the R8 shape; one new golden (`C0009-schema-diff.txt`) for the errors page.
-7. **The PR template is new**: `.github` had only workflows. If another piece (`pr-gate`) adds one, keep both lines.
+7. **The PR template**: `.github` had only workflows when this piece started; `pr-gate` added one at the same time (merged from `main`), so the
+   merge keeps its four lines and adds this piece's **Public API** line.
 
 ## Verification
 
