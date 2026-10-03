@@ -1,12 +1,11 @@
-## Summary
+<!-- One piece per pull request (docs/AGENT_WORKFLOW.md). The four "All green" checks must pass on the head. -->
 
-<!-- What changes and why. One piece per pull request (docs/AGENT_WORKFLOW.md). -->
+**Piece:** `wt/<slug>` — one line on what it does.
 
-## Public API
+**Design:** ADR-NNN (or the amendment), or "no public shape changes".
 
-<!--
-Review the schema diff, not the generated bindings: GitHub collapses them and `undra bindgen --check`
-proves they match the schema (ADR-062, docs/SPEC.md 2.6).
--->
+**Review:** `.10x/reviews/<date>-<slug>-review.md`, verdict and what was fixed.
 
-- [ ] This changes no public API of a core, **or** the output of `undra schema diff --against <base>` is pasted here and every `breaking` line is justified.
+**Proof:** tests added, benchmarks or size rows that moved, what was not verified and why.
+
+**Public API:** none changed, or the output of `undra schema diff --against <base>` pasted here with every `breaking` line justified. Review the schema diff, not the generated bindings (collapsed by GitHub, proven by `undra bindgen --check`; ADR-062).

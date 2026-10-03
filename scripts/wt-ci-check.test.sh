@@ -24,6 +24,13 @@ expect "a workflow with no run is MISSING" 1 "MISSING no run of Site on this com
 expect "nothing at all: every required workflow is MISSING" 1 "MISSING no run of CI" "$CHECK" verdict "$DATA/none.json" "${required[@]}"
 expect "a re-run supersedes the failure it repeats, and an older cancelled run is not the verdict" 0 "ok CI (run 305)" "$CHECK" verdict "$DATA/rerun-supersedes.json" "${required[@]}"
 
+# pr-verdict: the "All green" check of each required workflow on a pull request's head (gh pr checks --json).
+expect "pr: every All green passed" 0 "ok Site" "$CHECK" pr-verdict "$DATA/pr-all-green.json" "${required[@]}" Site
+expect "pr: a job's own check is not the roll-up" 1 "MISSING" "$CHECK" pr-verdict "$DATA/pr-one-red-one-running.json" "${required[@]}" Site
+expect "pr: a failed roll-up is RED" 1 "RED CI is FAILURE" "$CHECK" pr-verdict "$DATA/pr-one-red-one-running.json" "${required[@]}"
+expect "pr: a pending roll-up is RUNNING" 1 "RUNNING Bench is IN_PROGRESS" "$CHECK" pr-verdict "$DATA/pr-one-red-one-running.json" "${required[@]}"
+expect "pr: no checks at all: MISSING" 1 "MISSING no \"All green\" check of CI" "$CHECK" pr-verdict "$DATA/pr-none.json" "${required[@]}"
+
 site_yml="$HERE/../.github/workflows/site.yml"
 expect "a change under site/ needs the Site workflow" 0 "yes" bash -c "printf 'docs/x.md\nsite/index.html\n' | '$CHECK' site-needed '$site_yml'"
 expect "a change to the scenarios needs the Site workflow (the cards read them)" 0 "yes" bash -c "printf 'contract-tests/scenarios.md\n' | '$CHECK' site-needed '$site_yml'"
