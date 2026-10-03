@@ -4,7 +4,7 @@ Status: **Accepted** (2026-10-02). Decided by the lead after user feedback U3/T1
 `.10x/decisions/sde/bazel.md`; "Implementation note" at the end for what differs from the text above it). It adds a Bazel
 module (`bazel/`, module `undra_rules`) and an example workspace (`examples/bazel/`), one flag of `undra bindgen`
 (`--library`), five files that `undra bindgen` writes beside the generated trees (the lint exclusions) and one line at the top of
-every generated Kotlin file (`@file:Suppress`), and a CI job. It does **not** touch the wire, the C or wasm ABI, the schema, the
+every generated Kotlin file (`@file:Suppress`), and two CI jobs. It does **not** touch the wire, the C or wasm ABI, the schema, the
 schema hash, the runtime model, the threading model or the shape of any generated declaration an app can see (R11: nothing here
 needed a boundary ADR; this one records a build-system and tooling decision). Constitution R1 (the schema is the only truth: the
 bindings are an output of the build, derived from the core), R3 (generated code passes native review: the exclusions are what a
@@ -51,14 +51,15 @@ The web size gate (ADR-052, R9: 120 KB gzipped for the hello-world core, measure
 every ruleset by version in `MODULE.bazel` with `MODULE.bazel.lock` committed (R7: the build's inputs are named).
 
 ```starlark
-load("@undra_rules//undra:defs.bzl", "undra_core", "undra_bindings", "undra_kt_jvm_library", "undra_ts_library", ...)
+load("@undra_rules//undra:defs.bzl", "undra_core", "undra_bindings", "undra_kt_jvm_library", "undra_ts_library", "undra_swift_library")
+load("@undra_rules//undra:android.bzl", "undra_android_library")      # its own file: it loads the Android rules
 
-undra_core(name, namespace, config = "undra.toml", srcs, workspace, platforms = ["host", "web"], release, symbols, wasm_opt)
-undra_bindings(name, core, languages = ["kotlin", "ts", "swift"], config, srcs, docs)
-undra_swift_library(name, bindings, deps)          # rules_swift
-undra_kt_jvm_library(name, bindings, deps)         # rules_kotlin, JVM
-undra_android_library(name, bindings, deps)        # rules_android
-undra_ts_library(name, bindings, deps)             # aspect_rules_js, aspect_rules_ts
+undra_core(name, namespace, config = "undra.toml", srcs, workspace, platforms = ["host", "web"], release, symbols, wasm_opt, extra_path)
+undra_bindings(name, core, config = "undra.toml", languages = ["swift", "kotlin", "ts"], docs, swift_files)
+undra_swift_library(name, bindings, module_name, ffi_module, deps)         # rules_swift (macOS)
+undra_kt_jvm_library(name, bindings, deps)                                 # rules_kotlin, JVM
+undra_android_library(name, bindings, custom_package, deps)                # rules_kotlin's kt_android_library
+undra_ts_library(name, bindings, package, deps)                            # aspect_rules_ts, aspect_rules_js
 ```
 
 `undra_core(name = "core", ...)` makes one target per platform, `core_host`, `core_web`, `core_ios`, `core_android`, and `core`, a
@@ -66,7 +67,9 @@ undra_ts_library(name, bindings, deps)             # aspect_rules_js, aspect_rul
 `core_web/<ns>.wasm`, the directory `core_ios` (the XCFramework), the directory `core_android` (`jniLibs/<abi>/lib<ns>.so`), and
 an output group `symbols` (the symbol files of a release build, so a crash report from a Bazel-built app resolves).
 `undra_bindings` produces the generated trees as **declared outputs**, one tree artifact per language: `<name>_swift`,
-`<name>_kotlin`, `<name>_ts` (and the Kotlin tree's sources as a `.srcjar`, the form `rules_kotlin` takes).
+`<name>_kotlin`, `<name>_ts` (the Kotlin tree's sources also as a `.srcjar`, the form `rules_kotlin` takes, and the Swift files it
+is told to extract one by one, `swift_files`: `rules_swift` takes files, not a directory, and the set depends on the schema, so the
+build checks the list both ways and prints the right one).
 
 The extension names where Undra is and which crates its builds may use:
 
@@ -84,8 +87,9 @@ build that uses Kotlin never loads the Swift rules): `@undra//:sources`, `@undra
 ### 2. The rules call `undra build` and `undra bindgen`; they do not re-implement them
 
 **The question the brief left to this ADR**: does the rule call the `undra` CLI as a hermetic tool, or re-implement the build with
-`rules_rust`? **It calls the CLI**, and the CLI route can be made hermetic: it was, and `bazel build` proves it in a sandbox with
-no network. What makes an action that runs Cargo hermetic is five things, each a decision here:
+`rules_rust`? **It calls the CLI**, and the CLI route can be made hermetic: it was, and the example's cores and bindings build with
+`--sandbox_default_allow_network=false`, so no action reaches the network. What makes an action that runs Cargo hermetic is five
+things, each a decision here:
 
 1. **The Rust toolchain is Bazel's.** `rustc`, `cargo` and the standard library of each target come from the `rules_rust`
    toolchain resolution the application already has (`rust.toolchain(versions = ["1.99.0"], extra_target_triples = [..])` in its
@@ -98,13 +102,20 @@ no network. What makes an action that runs Cargo hermetic is five things, each a
    downloads each crates.io package once through Bazel's downloader (and its repository cache) with the lock's own SHA-256, and an
    action unpacks the archives into a Cargo directory source with source replacement of crates.io. `CARGO_NET_OFFLINE=true`: an
    action cannot reach the network and cannot build a package the lock does not name. A package from git or from another registry
-   is refused with its name (the rule fails at fetch; nothing is guessed).
+   is refused with its name (the rule fails at fetch; nothing is guessed). The compiler's components are pinned by checksum in the application's
+   `rust.toolchain(sha256s = ..)`: `rules_rust` 0.74 knows the checksums up to 1.98, and a toolchain it cannot check is reported by it
+   as not reproducible.
 3. **The CLI is built the same way.** `@undra//:cli` is an action that runs `cargo build -p undra-cli` on the checkout with the
    same toolchain and vendored crates, so the `undra` that builds a core is the `undra` of the checkout the core is built
    against, and a change to `undra-cli` or `undra-bindgen` is a change to an action's input. (When a release exists, `undra.source`
    with `urls` and an integrity is the same thing from an archive; a prebuilt binary would be a second way and is not added.)
-4. **The sources are a private copy.** The action copies the project and the checkout into a scratch directory (`tar -h`), so `undra
-   build` writes `build/` and the shim into a place of its own whatever the sandbox does, and the user's tree is never written to.
+4. **The sources are a private copy, in a place named by what is built.** The action copies the project and the checkout into a
+   scratch directory (`tar -h`), so `undra build` writes `build/` and the shim into a place of its own whatever the sandbox does,
+   and the user's tree is never written to. The directory is `/tmp/undra-bazel/<digest of the inputs>`, not a random name, for the
+   reason in Consequences: Cargo hashes the absolute path of the core and of the Undra crates into every symbol, so a build in
+   another directory is another file. With the location a function of the inputs, the same inputs give the same bytes (below).
+   The crates are unpacked where Cargo's own registry would put them (`$CARGO_HOME/registry/src/index.crates.io-1949cf8c6b5b557f`),
+   so the `RemapRoots` of a release build map them to the label they get in a build that downloaded them.
 5. **The Undra crates stand in for the registry.** A core depends on `undra = "0.1"` like any app (the crates are not on crates.io
    yet; the CLI derives the shim's `undra-ffi` from where `undra-runtime` comes from, ADR-029). The action writes a Cargo config
    with `[patch.crates-io]` entries pointing into the staged checkout, which is also what `examples/bazel/.cargo/config.toml` says
@@ -112,13 +123,14 @@ no network. What makes an action that runs Cargo hermetic is five things, each a
 
 What stays outside the sandbox, and is said: the **C linker** (rustc's `cc` for a native target: the host's, as `rules_rust`'s own
 default toolchain does) and, for iOS and Android, **Xcode** and the **NDK with `cargo-ndk`**, which no Bazel rule distributes for
-Rust: those targets take them from the environment (`--action_env`) and are tagged `no-sandbox` where they must be. The web and
-host builds, and the bindings, need none of them.
+Rust: those targets take them from the environment (`--action_env`, `extra_path`) and are `manual` targets. The web and host builds,
+and the bindings, need none of them.
 
 `wasm-opt` is the other input that moves the bytes (its output size changes between releases; bench.yml pins version_133). The
 extension defines `@undra_binaryen`, that release for the machine Bazel runs on, by checksum, and `undra_core(wasm_opt =
-"@undra_binaryen//:wasm_opt")` puts it on the action's `PATH`. Without it the CLI says it did not run (the module is 40% larger), so
-a build that omits it is visibly not the gated one.
+"@undra_binaryen//:wasm_opt")` puts it on the action's `PATH`. Without it the CLI says it did not run (the module is 16% larger,
+123.6 KB gzipped against 118.0), so a build that omits it is visibly not the gated one. The example's web core is 118.0 KB gzipped of the
+120 KB budget.
 
 **Alternatives for the build itself** (all rejected):
 
@@ -155,17 +167,23 @@ Tree artifacts because the set of files depends on the schema (callbacks, object
 The `undra_*_library` macros wrap a bindings tree with the ruleset of its language and add the runtime as a dependency, from
 `@undra//<language>:runtime` unless `runtime` is given:
 
-* `undra_kt_jvm_library` compiles the Kotlin tree with `rules_kotlin` (`-opt-in=dev.undra.runtime.UndraEmbeddingApi`, as the
-  runtime's own build) against the Kotlin runtime; kotlinx-coroutines comes from Maven by `rules_jvm_external` with a committed
-  `maven_install.json`. The JVM loads the host library through JNI (`-Dundra.native.<namespace>.path`), which is what
-  `core_host` produces.
-* `undra_android_library` is the same sources as an `android_library` (`rules_android`), with the `jniLibs` of `core_android`
-  as its native libraries; declared, not built here (below).
-* `undra_ts_library` compiles the TypeScript tree with `tsc` (`aspect_rules_ts`) into a `js_library` (`aspect_rules_js`) that
-  depends on the TypeScript runtime package, whose source is compiled the same way.
-* `undra_swift_library` is a `swift_library` over the Swift tree with the C module (`<Ns>CoreFFI`) as a `cc_library` with its
-  module map, depending on the Swift runtime; the XCFramework of `core_ios` is what links the core in an app
-  (`apple_static_xcframework_import`).
+* `undra_kt_jvm_library` compiles the Kotlin sources (the `.srcjar` of the bindings) with `rules_kotlin` against the Kotlin runtime,
+  which is compiled from the checkout's sources with the runtime's own flags (`-opt-in=dev.undra.runtime.UndraEmbeddingApi`, JVM
+  target 11). kotlinx-coroutines 1.6.4, the runtime's one dependency, is an `http_jar` pinned by checksum (no `rules_jvm_external`,
+  so no Maven lock file). The JVM loads the host library through JNI (`-Dundra.native.<namespace>.path`), which is what `core_host`
+  produces.
+* `undra_android_library` is the same sources as a `kt_android_library`, in `android.bzl`, which `defs.bzl` does not load. The
+  bindings use no Android API; the core's `jniLibs` are packaged by the app. Declared and macro-loaded, not analysed: it needs the
+  Android SDK.
+* `undra_ts_library` runs `tsc` (the compiler of `aspect_rules_ts`, 5.9.3) over the generated tree, against the compiled
+  runtime linked into `node_modules`, and packages the result (`npm_package`) and links it as the bindings' own package name.
+  `ts_project` takes files, not a tree, so the compile is a `js_run_binary`. The runtime is `ts_project` over the checkout's
+  sources less the framework adapters (they import React, Vue, Solid and Svelte), the Vite plugin and the wa-sqlite worker, which an
+  app that uses them installs; it is the development build, not the mangled production build of ADR-057.
+* `undra_swift_library` is a `swift_library` over the Swift files the bindings extract and the C module of the core's entry
+  (`<Ns>CoreFFI`, `cc_library` + `swift_interop_hint` over the generated module map), depending on the Swift runtime (Swift 6,
+  `package_name` for its `package` access). An app links the core itself with the XCFramework of `core_ios`, or, as the example does
+  to run in process, the host library.
 
 ### 5. The lint exclusions: written with the tree, and one line in every Kotlin file
 
@@ -182,19 +200,26 @@ The `undra_*_library` macros wrap a bindings tree with the ruleset of its langua
 The patterns name the output directory the tree is written to (`generated` by default). `.gitattributes` with
 `linguist-generated=true` (GitHub collapses the tree in a review and leaves it out of the language statistics) is **not** here: it
 is ADR-062's, written by the other piece, per tree, beside these files. Nothing in this ADR conflicts with it: the names differ.
-What could not be verified here is said in the record: no ktlint, SwiftLint or ESLint is installed on the machine that built this
-and none was downloaded, so the exclusions are written from each tool's documented configuration and pinned by golden tests of
-their text, and the `@file:Suppress` line by the Kotlin compiler and the Kotlin runtime's own build compiling every golden.
+What was verified, and with what: **ktlint** 1.8.0 (the version `rules_kotlin` pins, run from Bazel) reports 90 findings on the
+example's generated Kotlin with neither exclusion, and none with the `.editorconfig` alone, with `@file:Suppress` alone, or with
+both; `bazel test //kotlin:lint_test` runs those four cases, so the exclusions are held by a test, not by a claim. **SwiftLint**
+and **ESLint** are not installed on the machine that built this and none was downloaded: their files are written from each tool's
+documented configuration (SwiftLint ignores a nested file's `excluded:`, which is why the Swift file says how to merge it) and pinned
+by golden tests of their text only.
 
-### 6. The example, and the job that runs it
+### 6. The example, and the jobs that run it
 
 `examples/bazel/` is a Bazel workspace of its own (module `undra_example`, `local_path_override` of `undra_rules`, `undra.source(path
 = "../..")`) around the `undra init` to-do core. `bazel test //...` builds the core for the host and the web, generates the
-bindings, compiles a Kotlin JVM test and a TypeScript test against them and runs both against the real core: the JVM through JNI
-against `libhello_core`, Node against `hello_core.wasm`. `ci.yml` gets a job "Bazel example" that runs it on Ubuntu with Bazelisk
-(`.bazelversion` pins Bazel). The iOS and Android targets are declared in the example's `BUILD.bazel` (commented out for the jobs
-that lack Xcode or the NDK) and documented; the `macos` and `android` CI jobs already install what they need and are where a
-follow-up enables them.
+bindings, compiles the Kotlin and TypeScript consumers against them and runs both against the real core (JVM through JNI against
+`libhello_core`; Node against `hello_core.wasm`), runs ktlint over the generated Kotlin, and, on macOS, compiles and runs a Swift
+consumer that loads the core in process. `ci.yml` has two jobs: **"Bazel example"** on Ubuntu with Bazelisk (the first Linux run is
+CI's: this was written and verified on macOS), and one on macOS for Swift and the iOS core (`bazel build //:mobile_ios`).
+`.bazelversion` is one file (the example's is a link to `bazel/`'s). The example's `rust.toolchain` pins 1.99.0 by checksum, so a
+Linux and a macOS runner fetch the compiler CI pins. The jobs do not pass `--lockfile_mode=error`: a lock file records what the
+machine that wrote it resolved, per OS. The Android targets (`mobile_android`, built with `--config=android`) are declared and
+documented, and not built: the Rust toolchain of an Android *platform* needs a C++ toolchain for it (`rules_android_ndk`'s
+`android_ndk_repository` fails at configuration on a machine with no NDK), so it cannot be in a module every machine evaluates.
 
 ## Alternatives considered
 
@@ -213,22 +238,72 @@ follow-up enables them.
 * A Bazel repository adopts Undra with one `MODULE.bazel` block, one `undra.toml`, a Cargo workspace for the core and the macros
   above; its CI does not call `undra`.
 * A core builds in an action of its own: no incremental compilation between builds of one core, a cold dependency build per
-  change (see 2). The per-action cost is the compile of the Undra crates and the core: about 25 s for the host and 30 s for the web
-  core of the example on an M-series Mac, measured.
-* **The bytes are not bit-for-bit reproducible across directories, and that is the CLI's, not Bazel's.** Measured on this ADR's
-  machine: the same core built by `undra build` in three different directories gave three different wasm modules of 274.6 KB
-  within 0.1% (cargo hashes a path dependency outside the workspace by its absolute path into `-C metadata`, which names the
-  symbols `wasm-opt` orders its functions by; `RemapRoots` keeps the path *strings* out, not the hash). Every Bazel action builds in a
-  fresh scratch directory, so two builds of the same inputs can differ by those few bytes; sizes and the schema hash match. The fix
-  belongs to the CLI (build the core from inside the shim's workspace) and is a follow-up, not part of this ADR.
+  change (see 2). The per-action cost is the compile of the Undra crates and the core: about 25 s for the host core and 30 s for the
+  web core of the example on an M-series Mac, and a fresh clone with a fresh Bazel output root runs the whole example (cores,
+  bindings, four tests, Swift included) in 73 s once the toolchains are in the repository cache.
+* **The bytes are a function of the inputs, because the rules make the build location one; `undra build` alone is not.** Measured:
+  the same core built by `undra build` in three different directories gave three different wasm modules, 274.6 KB within 0.1% (Cargo
+  hashes a path dependency outside the workspace by its absolute path into `-C metadata`, which names the symbols `wasm-opt` and the
+  linker order their output by; `RemapRoots` keeps the path *strings* out of a release build, not that hash). A build in a random
+  scratch directory per action reproduced it: 274.1 to 275.1 KB over five runs of one action. Naming the directory by a digest of the
+  inputs fixed it for Bazel: the web core and the host library are **byte-identical** (sha256 `c47ec84c..`, `f002f43c..`) between two
+  clones, one built from the checkout by path and one from a source archive, each with a fresh output root. The CLI's own fix (build
+  the core from inside the shim's workspace) is a follow-up; nothing here depends on it.
 * Every committed generated Kotlin tree gains one line per file and four lint files per project; no declaration, no id and no
   schema hash moves. Merging with ADR-062's piece (`.gitattributes`, two JSON headers) is mechanical: regenerate each tree with
   `undra bindgen` after the merge.
 * `undra-cli` gains `lint.rs` and `--library`; no dependency, no unsafe.
 * Follow-ups, none blocking: the CLI building the core location-independently (above); an `undra_test` macro that runs a core's
-  Rust tests under Bazel; `rules_apple`/`rules_android` targets enabled in CI where the toolchains exist; a published `undra`
-  release as an archive for `undra.source`; a `from_registry` flavour of the crates when they are on crates.io.
+  Rust tests under Bazel; the Android core under Bazel (`rules_android_ndk`, cargo-ndk as a vendored tool); `rules_apple` targets
+  that link the XCFramework into an app; a published `undra` release as an archive for `undra.source` (the `urls` form is verified
+  with a local archive); a crates.io flavour of the Undra crates when they are published (delete the `[patch]`).
+* The aspect rules (`aspect_rules_js`, `aspect_rules_ts`) depend on `aspect_tools_telemetry`, which reports which rulesets a build
+  uses to Aspect. The example sets `--repo_env=DO_NOT_TRACK=1` in its `.bazelrc` and says so; a repository that adopts the rules
+  decides for itself.
+
 
 ## Implementation note
 
-(Filled in with the implementation: what was built, where it differs from the text above, and what was verified.)
+**What was built** (`bazel/`, `examples/bazel/`, `crates/undra-cli/src/lint.rs`, the `--library` flag, the Kotlin header, two CI jobs,
+`site/docs/bazel.html`): everything in Decision, with these differences from the text above, found by building it.
+
+1. **`aspect_rules_ts`'s `ts_project` rejects a directory in `srcs`**, and so does `rules_swift`'s `swift_library` (no `is_directory`
+   anywhere in it). TypeScript is compiled by a `js_run_binary` of `tsc` over the tree; Swift needs its files declared one by one, so
+   `undra_bindings(swift_files = [..])` exists and is checked both ways. `rules_kotlin` takes a `.srcjar`, which the bindings action
+   writes with Bazel's own `zipper` (the sources only, fixed timestamps).
+2. **The scratch directory is named by a digest of the inputs and guarded by a lock**, not `mktemp`: the first version's output varied
+   by 0.5 KB between runs (Consequences). It is `/tmp/undra-bazel/<digest>` (Linux's sandbox has a private `/tmp`; macOS's shares
+   it, so a `mkdir` lock with the owner's pid keeps two builds of the same inputs apart, and a dead owner's lock is taken over).
+3. **The Undra crates are `[patch.crates-io]` entries, not paths in the core's `Cargo.toml`**: the core stays an app that depends on
+   `undra = "0.1"`. Cargo then needs only the checkout's workspace manifest (its `members` are pruned to `crates/*` in the staged
+   copy: the examples and benchmarks are not inputs) and every registry package, vendored.
+4. **The vendor directory is `$CARGO_HOME/registry/src/index.crates.io-1949cf8c6b5b557f`**, so `undra build`'s release remap of
+   Cargo's registry gives a crate the same label as in a build that downloaded it. The `.cargo-checksum.json` of each crate is
+   `{"files":{},"package":"<the lock's checksum>"}`, which Cargo's directory source accepts and checks against the lock.
+5. **Kotlin's coroutines are an `http_jar`, not `rules_jvm_external`** (the ADR text said Maven with a lock file): one jar, pinned by
+   its checksum, and no second lock file. The remote JDK is the build's (`--java_runtime_version=remotejdk_17` in `.bazelrc`).
+6. **`apple_support` must come first in the root module** for `rules_swift` to find an Apple C++ toolchain (the default one has the
+   target triple `local`); the example's `MODULE.bazel` says so. It raises `apple_support` to 2.8.4 in the graph, and the Rust builds
+   were re-run on it.
+7. **The compiler is pinned by checksum in the application**, not in the rules: `rust.toolchain(sha256s = ..)` with the
+   `static.rust-lang.org` checksums (a build with no checksums works and `rules_rust` says it is not reproducible). One list covers
+   macOS (arm64, x86_64) and Linux (x86_64, aarch64) and the five extra targets.
+8. **`undra_core`'s platforms resolve their Rust toolchains by a split transition** on `current_rust_toolchain` (one target platform
+   per iOS slice and per Android ABI), next to the exec-platform toolchain (`cfg = "exec"`), not by `toolchains = [..]`: a wasm
+   build needs the host's standard library too, for build scripts and proc macros, and a rule resolves one target platform only.
+9. **The `undra_android_library` macro is in `android.bzl`**, not `defs.bzl`: loading `rules_kotlin`'s Android rules for every user of
+   `defs.bzl` would force the Android SDK's configuration on a Linux CI job.
+
+**Verified** (macOS, Apple silicon, Xcode 26.6, Bazel 8.8.1 from Bazelisk, a fresh clone and a fresh output root): the whole example
+(`bazel test //...`: Kotlin JVM against the real core through JNI, TypeScript against the wasm core under Node 24.18, ktlint over the
+generated Kotlin four ways, Swift in process, in 73 s); `bazel test //tests/...` in `bazel/` (the lock reader, 2); the iOS core
+(`//:mobile_ios`: device and simulator slices, debug and release, 3.7 MB of static archive per release build); the web core's size
+(118.0 KB gzipped, with binaryen version_133); the byte-identity above; `undra.source` from a local source archive; the ktlint matrix;
+`cargo test -p undra-bindgen` (goldens blessed: one line per Kotlin file), `cargo test -p undra-cli --lib --test bindgen_schema`, the
+new ignored test `bindgen_reads_the_schema_from_a_library_that_was_built_already`, `clippy -D warnings` and `cargo fmt --check` on the
+two crates; `build-all.mjs`, `check-links.mjs` and `sync-chrome --check` on the site.
+
+**Not verified**: the Linux run of everything (the "Bazel example" job is its first; the commands are POSIX `sh`, GNU and BSD `tar`,
+`find`, `sed` forms that both accept, and the Linux sandbox's private `/tmp`), the macOS job on GitHub's `macos-15` image (Xcode 16 or
+17, not 26), the Android core and `undra_android_library` (no NDK C++ toolchain configured, above), SwiftLint's and ESLint's
+reading of the fragments (not installed), and `undra.source` from a published release (there is none).
