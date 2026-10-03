@@ -176,6 +176,38 @@ fn the_root_manifest_exposes_the_runtimes_products_and_targets() {
     );
 }
 
+/// Every library target's whole declaration, without spaces: `.target(name: ..., dependencies: ..., path: ..., ...)`.
+fn target_texts(text: &str) -> BTreeMap<String, String> {
+    calls(text, ".target(")
+        .into_iter()
+        .map(|call| {
+            (
+                string_arg(call, "name").unwrap(),
+                call.chars().filter(|c| !c.is_whitespace()).collect(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn each_root_target_is_the_runtimes_declaration_but_for_its_path() {
+    // Not only the products, dependencies and paths: a setting added to a target of the runtime (resources, exclude,
+    // swiftSettings, cSettings, linkerSettings, a plugin) is one an app building the root package needs too.
+    let root = target_texts(&read(&repo_root().join("Package.swift")));
+    let in_repo = target_texts(&read(&repo_root().join(IN_REPO).join("Package.swift")));
+    assert_eq!(
+        root.keys().collect::<Vec<_>>(),
+        in_repo.keys().collect::<Vec<_>>()
+    );
+    for (name, text) in &root {
+        assert_eq!(
+            text.replacen(&format!("path:\"{IN_REPO}/"), "path:\"", 1),
+            in_repo[name],
+            "{name}: the root manifest declares it differently from {IN_REPO}/Package.swift"
+        );
+    }
+}
+
 #[test]
 fn the_root_package_is_named_by_the_identity_swiftpm_gives_the_repository() {
     // A dependency names the package by the last component of its URL (`.product(name: "UndraRuntime", package:
