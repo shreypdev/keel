@@ -89,9 +89,7 @@ function requireTextWithNul(db: NodeDatabase): void {
     throw translate(error);
   }
   if (row?.[0] !== PROBE || row[1] !== 3n) {
-    throw new DbError.Unavailable(
-      "this Node's node:sqlite does not keep text that holds U+0000 (it cuts it at the first one): the Db port carries text exactly, so it needs a newer Node (24 does)",
-    );
+    throw new DbError.Unavailable("this Node's node:sqlite does not keep text that holds U+0000 (it cuts it at the first one): the Db port carries text exactly, so it needs a newer Node (24 does)");
   }
 }
 

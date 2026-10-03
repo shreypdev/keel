@@ -25,6 +25,78 @@ fn file<'a>(files: &'a [GeneratedFile], suffix: &str) -> &'a str {
         .contents
 }
 
+// ----- the TypeScript entry and the runtime's stream feature (ADR-057) ---------------------
+
+/// A schema with a stream method or function passes `features: [streams]` to the runtime, so the stream support is up front with
+/// the entry; a schema without one generates the entry it always did, byte for byte (the goldens of those cases pin the rest). The
+/// check is independent of the generator's own predicate: it reads the generated code for a `core.stream(` call.
+#[test]
+fn the_typescript_entry_passes_the_stream_feature_exactly_when_the_schema_has_a_stream() {
+    let mut with = 0;
+    let mut without = 0;
+    for &name in common::CASES {
+        let schema = common::case(name);
+        let files = common::generator_for(name, &schema)
+            .typescript(&schema)
+            .unwrap();
+        let calls_stream = files
+            .iter()
+            .filter(|f| f.path.ends_with(".ts") && !f.path.ends_with("src/core.ts"))
+            .any(|f| f.contents.contains("core.stream("));
+        let entry = file(&files, "src/core.ts");
+        let import = entry
+            .lines()
+            .find(|l| l.starts_with("import { UndraCore"))
+            .unwrap();
+        if calls_stream {
+            with += 1;
+            assert_eq!(
+                import,
+                "import { UndraCore, UndraError, streams, type AttachOptions, type LoadOptions, type Transport } from \"@undra/runtime\";",
+                "{name}"
+            );
+            assert_eq!(
+                entry.matches("features: [streams]").count(),
+                2,
+                "{name}: load and attach"
+            );
+            assert_eq!(
+                entry
+                    .matches("\"expectedSchemaHash\" | \"namespace\" | \"features\"")
+                    .count(),
+                2,
+                "{name}: the option a generated entry fills in is not one the app passes"
+            );
+        } else {
+            without += 1;
+            assert_eq!(
+                import,
+                "import { UndraCore, UndraError, type AttachOptions, type LoadOptions, type Transport } from \"@undra/runtime\";",
+                "{name}"
+            );
+            assert!(
+                !entry.contains("features"),
+                "{name}: no feature without a stream"
+            );
+            assert!(
+                !entry.contains("streams"),
+                "{name}: no stream support without a stream"
+            );
+            assert_eq!(
+                entry
+                    .matches("\"expectedSchemaHash\" | \"namespace\">")
+                    .count(),
+                2,
+                "{name}"
+            );
+        }
+    }
+    assert!(
+        with >= 4 && without >= 4,
+        "the cases cover both ({with} with a stream, {without} without)"
+    );
+}
+
 // ----- layout ---------------------------------------------------------------------------
 
 #[test]

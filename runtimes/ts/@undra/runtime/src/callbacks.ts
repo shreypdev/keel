@@ -4,6 +4,7 @@ import { UndraPortError, UndraReplyError } from "./errors.js";
 import type { PortImpl } from "./port.js";
 import { QUIETLY_UNAVAILABLE } from "./port-dispatch.js";
 import { ReplyStatus, UndraReader } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * Host callback interfaces (ADR-041): `#[undra::callback]` traits the app implements and passes into the core. A
@@ -86,7 +87,7 @@ interface Pending {
 }
 
 /** The rejection of a weak wrapper's `async` method once its target is gone: "unavailable", nothing to report. */
-const GONE = new UndraError("state", "the callback's target was garbage-collected");
+const GONE = new UndraError("state", msg(42));
 
 /** A promise that never settles: the answer of a call that expects no reply (the bridge returns 1, "later", and never replies). */
 function noReply(): Promise<Uint8Array> {
@@ -175,7 +176,7 @@ export class UndraCallbacks {
     const lent = this.#lent.get(instance);
     if (lent === undefined) {
       // Never early: an over-release is a bug (of a raw host, or of Undra), reported and otherwise ignored.
-      if (instance > this.#droppedThrough) this.#core.report(new UndraError("state", `callback instance ${String(instance)} was released more often than it was lent`), why);
+      if (instance > this.#droppedThrough) this.#core.report(new UndraError("state", msg(43, String(instance))), why);
       return;
     }
     if (--lent.count > 0) return;

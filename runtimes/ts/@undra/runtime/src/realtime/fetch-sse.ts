@@ -2,6 +2,7 @@ import { SseError, type SseEvent } from "../adapters/types.js";
 import { errorMessage } from "../platform.js";
 import { SseParser } from "./sse-parser.js";
 import type { SseAdapter, SseStream } from "./sse.js";
+import { msg } from "../messages.js";
 
 /** The `fetch` {@link fetchSse} calls: the global one's shape, as far as it is used. */
 export type FetchLike = (
@@ -54,7 +55,7 @@ class FetchStream implements SseStream {
     this.#taken = true;
     return {
       [Symbol.asyncIterator]: () => ({
-        next: () => (taken ? Promise.reject(new TypeError("the events of this stream were already taken")) : this.#next()),
+        next: () => (taken ? Promise.reject(new TypeError(msg(122))) : this.#next()),
         return: () => Promise.resolve({ value: undefined, done: true as const }),
       }),
     };

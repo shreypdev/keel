@@ -1,14 +1,15 @@
 import { PortIds } from "./adapters/ids.js";
 import { WEB_CRYPTO_REQUIRED, hasCryptoRandom } from "./adapters/system.js";
 import type { ClockAdapter, RngAdapter, TimerAdapter } from "./adapters/types.js";
-import { UndraError, UndraReplyError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "./errors.js";
+import { UndraError, UndraReplyError, UndraSchemaMismatchError, UndraTransportError } from "./errors.js";
+import { UndraRestoreError } from "./errors-rare.js";
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
 import { dispatchPortCall, portOperation } from "./port-dispatch.js";
 import { trapStack } from "./panic.js";
 import { type SnapshotKeeper, keeperOf, restartHere } from "./recovery.js";
 import type { Transport, TransportHandler } from "./transport/transport.js";
-import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
+import { WasmMainTransport, type WasmSource } from "./transport/wasm-main-transport.js";
 import {
   type HostToWorker,
   WORKER_FEATURES,
@@ -27,6 +28,7 @@ import {
   encodePortCall,
   encodeReply,
 } from "./wire/index.js";
+import { msg } from "./messages.js";
 
 /*
  * The worker side of the `wasm-worker` mode (`@undra/runtime/worker`): runs the
@@ -88,19 +90,19 @@ async function loadPortsModule(url: string): Promise<{ ports: Map<number, PortIm
   try {
     loaded = (await import(/* @vite-ignore */ /* webpackIgnore: true */ url)) as WorkerPortsModule;
   } catch (cause) {
-    throw new UndraTransportError("handshake", `the worker could not import the ports module ${url}: ${errorMessage(cause)}`, { cause });
+    throw new UndraTransportError("handshake", msg(234, url, errorMessage(cause)), { cause });
   }
   const ports = new Map<number, PortImpl>();
   const table: unknown = loaded.default ?? {};
   if (typeof table !== "object" || table === null) {
-    throw new UndraTransportError("handshake", `the default export of the ports module ${url} must map port ids to implementations`);
+    throw new UndraTransportError("handshake", msg(235, url));
   }
   for (const [key, impl] of Object.entries(table)) {
     const portId = Number(key);
     if (!Number.isInteger(portId) || portId < 0 || portId > 0xffff_ffff || !isPortImpl(impl)) {
       throw new UndraTransportError(
         "handshake",
-        `the ports module ${url} maps ${JSON.stringify(key)} to something that is not a port implementation ({ sync, methods }, as registerPort takes)`,
+        msg(236, url, JSON.stringify(key)),
       );
     }
     ports.set(portId, impl);
@@ -128,8 +130,8 @@ function toFailure(error: unknown): WorkerFailure {
 /** Why there is nothing to snapshot or restore: the core is gone, or its transport cannot. */
 function closedFailure(transport: Transport | null): UndraTransportError {
   return transport === null
-    ? new UndraTransportError("closed", "the core is closed")
-    : new UndraTransportError("unsupported", "the worker's transport cannot snapshot or restore");
+    ? new UndraTransportError("closed", msg(50))
+    : new UndraTransportError("unsupported", msg(237));
 }
 
 function wasmSource(wasm: WorkerWasm): WasmSource {
@@ -210,7 +212,7 @@ export function runWorker(scope: WorkerScope): () => void {
       try {
         impl.dispose();
       } catch (error) {
-        handler.log(4, "undra::worker", `${impl.name ?? "the"} port 0x${portId.toString(16)} could not release what it held: ${errorMessage(error)}`);
+        handler.log(4, "undra::worker", msg(238, impl.name ?? "the", portId.toString(16), errorMessage(error)));
       }
     }
   };
@@ -238,11 +240,11 @@ export function runWorker(scope: WorkerScope): () => void {
             try {
               answering.send(Kind.PortReply, reply);
             } catch (error) {
-              handler.log(4, "undra::worker", `could not deliver a port reply: ${errorMessage(error)}`);
+              handler.log(4, "undra::worker", msg(239, errorMessage(error)));
             }
           },
           untyped: (failed, error) => {
-            handler.log(4, "undra::worker", `${portOperation(failed, local)} failed: ${errorMessage(error)}`);
+            handler.log(4, "undra::worker", msg(33, portOperation(failed, local), errorMessage(error)));
           },
         });
       }
@@ -301,7 +303,7 @@ export function runWorker(scope: WorkerScope): () => void {
         ...(adapters.rng !== undefined && { rng: adapters.rng }),
         ...(adapters.timer !== undefined && { timer: adapters.timer }),
         onError: (error) => {
-          handler.log(4, "undra::worker", `internal error: ${errorMessage(error)}`);
+          handler.log(4, "undra::worker", msg(240, errorMessage(error)));
         },
       });
       if (init.recovery !== undefined) {
@@ -336,7 +338,7 @@ export function runWorker(scope: WorkerScope): () => void {
       }
     } catch (error) {
       const detail = error instanceof WireError ? error.message : errorMessage(error);
-      handler.log(4, "undra::worker", `dropped a malformed envelope from the host: ${detail}`);
+      handler.log(4, "undra::worker", msg(241, detail));
     }
   };
 
@@ -387,7 +389,7 @@ export function runWorker(scope: WorkerScope): () => void {
   /** Answers a `restart` request (ADR-049): the same module again, the kept snapshot restored, after the envelopes it produced. */
   const restart = async (id: number, generationFloor: number): Promise<void> => {
     if (restartable === null || keeper === null) {
-      post({ t: "restarted", id, failure: toFailure(new UndraTransportError("unsupported", "the worker was not started with recovery")) });
+      post({ t: "restarted", id, failure: toFailure(new UndraTransportError("unsupported", msg(242))) });
       return;
     }
     try {

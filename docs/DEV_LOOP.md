@@ -353,6 +353,15 @@ static blocks (Chrome 94, Firefox 93, Safari 16.4). A browser older than that ne
 plugin keeps; a target below `es2022` (the pinned Vite also lowers class fields for `safari15`) makes the bundler lower the
 runtime's class fields again, and the call path costs what it did before ADR-056.
 
+**Two builds of the runtime** (ADR-057). `@undra/runtime` publishes a development build and a production build of the same code, and its
+`exports` pick one by condition: `vite dev` (its browser modules; a module it runs for SSR is loaded by Node, which resolves `default`), Vitest,
+webpack in development mode and React Native (Metro) resolve the `development` / `react-native` condition, the readable build, whose errors and logs say sentences; `vite build`, webpack in production mode, esbuild and
+plain Node resolve `default`, the production build, whose messages are a code, the values and a link (`T0017: callSync, remote — …/errors.html#T0017`:
+the page's "Runtime messages" section has every sentence) and whose private members have short names. The classes, `kind`s and fields are the
+same in both, so nothing a program branches on changes; only the text and the size do (a hello page's runtime is about 16 KB gzipped in
+production). To see production text in a page, run `vite build && vite preview`; to read sentences in a production build, resolve the `development`
+condition (`resolve.conditions: ["development"]`). An app that aliases the checkout's sources (the examples) always gets the readable build.
+
 All three find `undra` on `PATH` and in `~/.undra/bin`, `~/.cargo/bin` and Homebrew's directories, because an app launched
 from the Dock or an IDE has a short `PATH`; the Gradle task and the Vite plugin take `UNDRA_BIN` first (the Xcode phase
 does not: Xcode's environment is the project's build settings, not your shell's). When it is

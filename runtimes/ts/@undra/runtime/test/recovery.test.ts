@@ -10,6 +10,7 @@ import { type CallbackInterface, callbacks, lend } from "../src/callbacks.js";
 import { dbPort, nodeSqliteDb } from "../src/db.js";
 import { type WebSocketAdapter, webSocketPort } from "../src/realtime.js";
 import { UndraCore } from "../src/core.js";
+import { streams } from "../src/stream-support.js";
 import { UndraTransportError } from "../src/errors.js";
 import { adopt, collected } from "../src/identity.js";
 import { UndraStore } from "../src/object.js";
@@ -17,7 +18,7 @@ import type { PortImpl } from "../src/port.js";
 import {
   DEFAULT_RECOVERY,
   type RestartResult,
-  type Reinstantiable,
+  type Restartable,
   SnapshotKeeper,
   UndraCoreRestarted,
   emptySnapshot,
@@ -30,7 +31,7 @@ import {
 import { Signal } from "../src/signal.js";
 import type { UndraPanicReport } from "../src/adapters/types.js";
 import type { TransportHandler } from "../src/transport/transport.js";
-import { WasmMainTransport } from "../src/transport/wasm-main.js";
+import { WasmMainTransport } from "../src/transport/wasm-main-transport.js";
 import { WasmWorkerTransport } from "../src/transport/wasm-worker.js";
 import {
   ALL_SIGNALS,
@@ -48,6 +49,7 @@ import {
 } from "../src/wire/index.js";
 import { FakeCoreTransport, SCHEMA } from "./support/fake-core.js";
 import { captureLog, deferred, macrotask, microtasks, track } from "./support/harness.js";
+import { internalValue, method } from "./support/internals.js";
 import { args } from "./support/port-calls.js";
 import { CounterStore, u32 } from "./support/store.js";
 import { STUB, compileStub } from "./support/stub-core.js";
@@ -163,6 +165,8 @@ async function recovering(options: { recovery?: false | Parameters<typeof crashR
       shared: false,
       adapters: { log, http: null, timer: null, kv: null, secureStore: null, fs: null, connectivity: null, lifecycle: null },
       ...(options.recovery !== false && { recovery: crashRecovery(options.recovery) }),
+      // What the generated entry of a schema with a stream passes (ADR-057): the stream this test leaves in flight is open, not loading.
+      features: [streams],
       onPanic: (report) => panics.push(report),
       onCoreRestarted: (event) => restarts.push(event),
       onError: (error) => errors.push(error),
@@ -172,6 +176,10 @@ async function recovering(options: { recovery?: false | Parameters<typeof crashR
   );
   return { fake, core, log, panics, restarts, errors, closed, issue };
 }
+
+/** The core's internals the recovery tests drive (`@internal`: the production build renames them, `support/internals.ts`). */
+const giveBack = (core: UndraCore, handle: bigint): void => method<[bigint], void>(core, "_giveBack")(handle);
+const eraOf = (core: UndraCore): number => internalValue<number>(core, "_era");
 
 // A hang detector: the wait is for a condition, and a count of macrotasks (200 of them, which a slow machine runs in the time a restart needs) was a bound on speed.
 // It stays under the 5 s a test is given.
@@ -360,7 +368,7 @@ describe("snapshot helpers", () => {
         restored.push(bytes);
         return Promise.resolve();
       },
-    } as unknown as Reinstantiable;
+    } as unknown as Restartable;
     const result = await restartHere(twin, {} as TransportHandler, keeper, 8, () => {});
     expect(result.storeHandles).toEqual([makeHandle(4, 2), query]);
     expect(result.restoredFromAgeMs).not.toBeNull();
@@ -478,10 +486,10 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     await expect(t.core.call(FREE, ECHO, u32(1))).rejects.toMatchObject({ reason: "restarted" });
     // ... and what happens while the core restarts: a reply carried the live handle again (adopt gives the extra
     // reference back), a superseded wrapper's finalizer did the same, and another handle's wrappers released twice.
-    t.core._giveBack(live);
-    t.core._giveBack(live);
-    t.core._giveBack(other);
-    t.core._giveBack(other);
+    giveBack(t.core, live);
+    giveBack(t.core, live);
+    giveBack(t.core, other);
+    giveBack(t.core, other);
     expect(t.fake.released, "held back while the core restarts").toEqual([]);
     gate.resolve({
       hello: { undraVersion: "x", schemaHash: SCHEMA, platform: "p", mode: "m" },
@@ -505,16 +513,16 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     t.fake.store(handle, new Map([[0, u32(1)]]));
     const wrapper = adopt(t.core, handle, CounterStore);
     await t.core.observe(handle, ALL_SIGNALS, true);
-    const born = t.core._era;
+    const born = eraOf(t.core);
     t.fake.trap();
     await until("the restart", () => t.restarts.length === 1);
-    expect(t.core._era).toBe(born + 1);
+    expect(eraOf(t.core)).toBe(born + 1);
     // The finalizer of a wrapper made before the restart runs now: a live wrapper holds the handle, whose count the
     // restored core took from the snapshot.
     collected(t.core, handle, born);
     expect(t.fake.released, "the pre-restart finalizer leaks rather than frees the live wrapper").toEqual([]);
     // A wrapper made after the restart gives back normally.
-    collected(t.core, handle, t.core._era);
+    collected(t.core, handle, eraOf(t.core));
     expect(t.fake.released).toEqual([handle]);
     // Nothing wraps a handle: a full release whatever the epoch.
     t.fake.released.length = 0;
@@ -768,6 +776,33 @@ describe("the wasm transports restart over the stub core", () => {
     expect(restarts[0]?.staleObjects).toBe(0);
     await expect(core.call(FREE, STUB.ECHO, u32(5))).resolves.toEqual(u32(5));
     expect(core.callSync(FREE, STUB.ECHO, u32(6))).toEqual(u32(6));
+  });
+
+  it("wasm-main with recovery keeps the in-process fast path: calls take sendCall and callSyncParts, before and after a restart (ADR-056, ADR-057)", async () => {
+    const module = await WebAssembly.compile((await compileStub({ snapshot: true })) as Uint8Array<ArrayBuffer>);
+    const transport = new WasmMainTransport({ wasm: module, expectedSchemaHash: STUB.SCHEMA_HASH });
+    const sendCall = vi.spyOn(transport, "sendCall");
+    const callSyncParts = vi.spyOn(transport, "callSyncParts");
+    const send = vi.spyOn(transport, "send");
+    const restarts: UndraCoreRestarted[] = [];
+    const core = track(
+      await UndraCore.attach(transport, {
+        expectedSchemaHash: STUB.SCHEMA_HASH,
+        shared: false,
+        adapters: { log: captureLog() },
+        recovery: crashRecovery({ snapshotEveryMs: 0, maxSnapshotBytes: 1024 }),
+        onCoreRestarted: (event) => restarts.push(event),
+      }),
+    );
+    await expect(core.call(FREE, STUB.ECHO, u32(1))).resolves.toEqual(u32(1));
+    expect(core.callSync(FREE, STUB.ECHO, u32(2))).toEqual(u32(2));
+    expect([sendCall.mock.calls.length, callSyncParts.mock.calls.length, send.mock.calls.length]).toEqual([1, 1, 0]);
+    await core.call(FREE, STUB.PANIC, new Uint8Array(0)).catch(() => {});
+    await until("the restart", () => restarts.length === 1);
+    // The twin is a new instance of the same class: its own calls are not the spied ones, and nothing used `send`.
+    await expect(core.call(FREE, STUB.ECHO, u32(3))).resolves.toEqual(u32(3));
+    expect(core.callSync(FREE, STUB.ECHO, u32(4))).toEqual(u32(4));
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("wasm-main without recovery: the trap ends the core", async () => {

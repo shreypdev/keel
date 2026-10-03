@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WEB_CRYPTO_REQUIRED, cryptoRng, hasCryptoRandom } from "../src/adapters/system.js";
 import { UndraCore } from "../src/core.js";
 import { UndraTransportError } from "../src/errors.js";
-import { WasmMainTransport } from "../src/transport/wasm-main.js";
+import { WasmMainTransport } from "../src/transport/wasm-main-transport.js";
 import { CallTarget } from "../src/wire/index.js";
 import { compileStub, STUB } from "./support/stub-core.js";
 import { captureLog, track } from "./support/harness.js";

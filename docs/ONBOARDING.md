@@ -230,7 +230,7 @@ Every suite is local; nothing needs the network after install.
 |---|---|---|
 | Rust workspace | `cargo test --workspace` | 3,100+ pass |
 | Lints (CI-equivalent) | `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings` | clean |
-| TypeScript runtime | `cd runtimes/ts/@undra/runtime && npm ci && npm test` | 1,646 pass |
+| TypeScript runtime | `cd runtimes/ts/@undra/runtime && npm ci && npm test`, then `npm run test:dist` (the same suite against the production build, ADR-057: it builds first; the other packages take `UNDRA_TS_DIST=<runtime>/dist/index.js`) | 2,025 pass (1 skipped); 1,983 on the production build |
 | Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 784 cases, 0 failed (2 skipped without a native library); the Kotlin testkit adds 32 |
 | Kotlin runtime under CI's compiler | `kotlinc` 2.0.21 on PATH (CI downloads it; brew's is newer and infers more) — `PATH=<kotlin-2.0.21>/bin:$PATH runtimes/kotlin/undra-runtime/scripts/test-local.sh` | same count; a passing run under brew's Kotlin alone is not proof |
 | Kotlin over the real JNI core | `cargo build --manifest-path crates/undra-ffi/tests/fixture/Cargo.toml` (the fixture core, namespace `undra_fixture`), then `UNDRA_NATIVE_LIB_DIR=$PWD/crates/undra-ffi/tests/fixture/target/debug runtimes/kotlin/undra-runtime/scripts/test-local.sh`; `bash crates/undra-ffi/tests/jni/run.sh` is the end-to-end leg | the JNI smoke cases run (1 skipped: the one that needs the library absent) |

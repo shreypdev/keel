@@ -1,4 +1,4 @@
-import { CallTarget, Kind, type Transport, UndraReader, decodeCall, readLazyPageHeader, type UndraCore } from "@undra/runtime";
+import { CallTarget, type CallTargetArg, UndraModeError, UndraReader, readLazyPageHeader, type UndraCore } from "@undra/runtime";
 
 /** One page call (target 3) the host made. */
 export interface PageCall {
@@ -13,9 +13,9 @@ export interface PageCall {
 }
 
 /**
- * Counts the page calls a core makes: the `Kind.Call` payloads whose first byte is 3 (`CallTarget.LazyListPage`), seen at the core's
- * transport (`callSync` for an in-process core, `send` for a worker or a socket). The transport is the core's private field, which a
- * test harness may reach and an app does not.
+ * Counts the page calls a core makes: the calls of `core.callSync` and `core.call` whose target is `CallTarget.LazyListPage`, seen at the
+ * core's own public methods (what `LazyList` calls, whatever transport the core runs over: in process, a worker, a socket). Nothing here
+ * reaches a private member: the same code counts the calls of the production build of the runtime, whose private names are renamed.
  *
  * ```ts
  * const pages = PageCallLog.watch(core);
@@ -26,7 +26,7 @@ export interface PageCall {
 export class PageCallLog {
   /** Starts counting the page calls of `core`. */
   static watch(core: UndraCore): PageCallLog {
-    return new PageCallLog(Reflect.get(core, "_transport") as Transport);
+    return new PageCallLog(core);
   }
 
   /** Every page call since `watch` or the last `take()`, oldest first. */
@@ -34,33 +34,37 @@ export class PageCallLog {
   #total = 0;
   readonly #stop: () => void;
 
-  private constructor(transport: Transport) {
-    const callSync = transport.callSync?.bind(transport);
-    const send = transport.send.bind(transport);
-    const record = (payload: Uint8Array, reply: Uint8Array | undefined): void => {
-      if (payload[0] !== CallTarget.LazyListPage) return;
-      const call = decodeCall(payload);
-      if (call.target !== CallTarget.LazyListPage) return;
-      let version: bigint | undefined;
-      // A reply is `call_id u32, status u8, body`; an `Ok` body of a page starts with the page's version.
-      if (reply !== undefined && reply.length >= 5 + 16 && reply[4] === 0) version = readLazyPageHeader(new UndraReader(reply.subarray(5))).version;
-      this.#calls.push({ handle: call.handle, offset: call.offset, limit: call.limit, version });
+  private constructor(core: UndraCore) {
+    const callSync = core.callSync;
+    const call = core.call;
+    const record = (target: CallTargetArg, body: Uint8Array | undefined): void => {
+      if (typeof target === "number" || target.target !== CallTarget.LazyListPage) return;
+      // An `Ok` body of a page starts with the page's version (16 bytes of header).
+      const version = body !== undefined && body.length >= 16 ? readLazyPageHeader(new UndraReader(body)).version : undefined;
+      this.#calls.push({ handle: target.handle, offset: target.offset, limit: target.limit, version });
       this.#total++;
     };
-    if (callSync !== undefined) {
-      transport.callSync = (payload) => {
-        const reply = callSync(payload);
-        record(payload, reply);
-        return reply;
-      };
-    }
-    transport.send = (kind, payload) => {
-      if (kind === Kind.Call) record(payload, undefined);
-      send(kind, payload);
+    core.callSync = (target, methodId, args) => {
+      let body: Uint8Array | undefined;
+      let reached = true;
+      try {
+        body = callSync.call(core, target, methodId, args);
+        return body;
+      } catch (error) {
+        // A transport that cannot answer synchronously refuses before anything is sent: `LazyList` then makes the call it counts.
+        reached = !(error instanceof UndraModeError);
+        throw error;
+      } finally {
+        if (reached) record(target, body);
+      }
+    };
+    core.call = (target, methodId, args, signal, orphan) => {
+      record(target, undefined);
+      return call.call(core, target, methodId, args, signal, orphan);
     };
     this.#stop = () => {
-      if (callSync !== undefined) transport.callSync = callSync;
-      transport.send = send;
+      Reflect.deleteProperty(core, "callSync");
+      Reflect.deleteProperty(core, "call");
     };
   }
 

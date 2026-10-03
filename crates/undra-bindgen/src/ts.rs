@@ -1181,8 +1181,18 @@ impl TsGen<'_> {
         let mut w = CodeWriter::new("  ");
         w.line(self.header());
         w.blank();
+        // A schema with a stream passes the runtime's stream support to the core (ADR-057): it is up front with the entry instead of
+        // fetched at the first stream. A schema without one generates the entry it always did.
+        let streams = self.model.has_streams();
+        let feature_import = if streams { "streams, " } else { "" };
+        let omitted = if streams {
+            "\"expectedSchemaHash\" | \"namespace\" | \"features\""
+        } else {
+            "\"expectedSchemaHash\" | \"namespace\""
+        };
+        let features = if streams { ", features: [streams]" } else { "" };
         w.line(format!(
-            "import {{ UndraCore, UndraError, type AttachOptions, type LoadOptions, type Transport }} from \"{RUNTIME}\";"
+            "import {{ UndraCore, UndraError, {feature_import}type AttachOptions, type LoadOptions, type Transport }} from \"{RUNTIME}\";"
         ));
         w.line("import { UndraIds } from \"./ids.js\";");
         w.blank();
@@ -1239,13 +1249,13 @@ impl TsGen<'_> {
             w.line(" * this core is already loaded. The default stores are kept under the namespace (`undra.<namespace>.kv`, ...).");
             w.line(" */");
             w.block_with(
-                "async load(options: Omit<LoadOptions, \"expectedSchemaHash\" | \"namespace\">): Promise<UndraCore> {",
+                format!("async load(options: Omit<LoadOptions, {omitted}>): Promise<UndraCore> {{"),
                 "},",
                 |w| {
                     w.line("claim();");
-                    w.line(
-                        "return started(UndraCore.load({ ...options, expectedSchemaHash: UndraIds.schemaHash, namespace: UndraIds.namespace }));",
-                    );
+                    w.line(format!(
+                        "return started(UndraCore.load({{ ...options, expectedSchemaHash: UndraIds.schemaHash, namespace: UndraIds.namespace{features} }}));"
+                    ));
                 },
             );
             w.blank();
@@ -1254,13 +1264,13 @@ impl TsGen<'_> {
             w.line(" * with this package's schema hash and namespace, and makes it `core`.");
             w.line(" */");
             w.block_with(
-                "async attach(transport: Transport, options: Omit<AttachOptions, \"expectedSchemaHash\" | \"namespace\"> = {}): Promise<UndraCore> {",
+                format!("async attach(transport: Transport, options: Omit<AttachOptions, {omitted}> = {{}}): Promise<UndraCore> {{"),
                 "},",
                 |w| {
                     w.line("claim();");
-                    w.line(
-                        "return started(UndraCore.attach(transport, { ...options, expectedSchemaHash: UndraIds.schemaHash, namespace: UndraIds.namespace }));",
-                    );
+                    w.line(format!(
+                        "return started(UndraCore.attach(transport, {{ ...options, expectedSchemaHash: UndraIds.schemaHash, namespace: UndraIds.namespace{features} }}));"
+                    ));
                 },
             );
             w.blank();

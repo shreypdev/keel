@@ -1,4 +1,5 @@
 import type { ClockAdapter, LogAdapter, RngAdapter, TimerAdapter } from "./types.js";
+import { msg } from "../messages.js";
 
 /*
  * The adapters every JavaScript host has: clock, random numbers, log and
@@ -24,7 +25,7 @@ export function systemClock(): ClockAdapter {
 }
 
 /** The text a missing WebCrypto fails with: `UndraCore.load` rejects with it, and the `random` import reports it (ADR-049). */
-export const WEB_CRYPTO_REQUIRED = "WebCrypto is required (crypto.getRandomValues)";
+export const WEB_CRYPTO_REQUIRED = msg(24);
 
 /** Whether `crypto` (default the global one) can produce cryptographically secure random bytes: `crypto.getRandomValues` exists. */
 export function hasCryptoRandom(crypto: unknown = (globalThis as { crypto?: unknown }).crypto): boolean {

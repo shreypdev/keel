@@ -1,30 +1,24 @@
 import { cryptoRng, setTimeoutTimer, systemClock } from "../adapters/system.js";
 import type { ClockAdapter, RngAdapter, TimerAdapter } from "../adapters/types.js";
-import { UndraError, UndraReplyError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
+import { UndraError, UndraReplyError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 
 import {
   type HelloPayload,
   UndraReader,
   UndraWriter,
-  Kind,
   ReplyStatus,
   codecs,
-  decodeCancel,
-  decodeEvent,
-  decodeObserve,
-  decodeRelease,
-  decodeStreamCredit,
-  decodeTimerFired,
   encodeValue,
   splitHandle,
 } from "../wire/index.js";
 import type { PortCallPayload } from "../wire/index.js";
-import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
+import type { CoreTransport, PortOutcome, TransportHandler } from "./transport.js";
+import { missingExports, msg } from "../messages.js";
 
 /** The error of a call the core refused without a reply (`undra_call` returned `code`). */
 function refused(code: number): UndraReplyError {
-  return new UndraReplyError(ReplyStatus.BadRequest, encodeValue(codecs.string, `the core refused the call (undra_call returned ${code})`));
+  return new UndraReplyError(ReplyStatus.BadRequest, encodeValue(codecs.string, msg(191, code)));
 }
 
 /** The wasm ABI version this transport speaks (`undra_abi_version`). */
@@ -61,8 +55,14 @@ export interface WasmMainOptions {
   readonly onError?: (error: unknown) => void;
 }
 
-/** The exports of an Undra core module (SPEC 7) that this transport uses. */
-interface CoreExports {
+/** The options of {@link WasmMainOptions} that `UndraCore.load`'s own options also carry: what a host reads (ADR-057). */
+export type HostOptions = Pick<WasmMainOptions, "wasm" | "expectedSchemaHash" | "platform" | "devtools" | "logLevel">;
+
+/** The adapters a host takes (`WasmMainOptions` has them at the top; `UndraCore.load` has them merged apart). */
+export type HostAdapters = Partial<Pick<WasmMainOptions, "clock" | "rng" | "timer">>;
+
+/** The exports of an Undra core module (SPEC 7) that this transport uses. @internal Typed for `wasm-snapshot.ts`. */
+export interface CoreExports {
   readonly memory: WebAssembly.Memory;
   undra_alloc(len: number): number;
   undra_free(ptr: number, len: number): void;
@@ -86,26 +86,6 @@ interface CoreExports {
   _initialize?(): void;
 }
 
-const REQUIRED_FUNCTIONS = [
-  "undra_alloc",
-  "undra_free",
-  "undra_abi_version",
-  "undra_schema_hash",
-  "undra_init",
-  "undra_call",
-  "undra_call_sync",
-  "undra_cancel",
-  "undra_stream_credit",
-  "undra_observe",
-  "undra_release",
-  "undra_port_reply",
-  "undra_event",
-  "undra_timer_fired",
-  "undra_poll",
-  "undra_buf_free",
-  "undra_stats_json",
-] as const;
-
 /**
  * `undra_alloc` (SPEC 7) traps when it cannot satisfy a request, so it never returns 0. A 0 is a
  * module that broke that contract, and copying a payload to linear address 0 would overwrite the
@@ -113,20 +93,20 @@ const REQUIRED_FUNCTIONS = [
  */
 function allocate(e: CoreExports, len: number): number {
   const ptr = e.undra_alloc(len);
-  if (ptr === 0) throw new Error(`undra_alloc(${len}) returned 0 instead of trapping`);
+  if (ptr === 0) throw new Error(msg(192, len));
   return ptr;
 }
 
 /** Compiles (unless it is compiled already) and instantiates `source`; the compiled module is kept for a restart (ADR-049: no recompile). */
 async function instantiate(source: WasmSource, imports: WebAssembly.Imports): Promise<WebAssembly.WebAssemblyInstantiatedSource> {
   if (typeof WebAssembly !== "object") {
-    throw new UndraTransportError("unsupported", "WebAssembly is not available on this platform");
+    throw new UndraTransportError("unsupported", msg(193));
   }
   try {
     if (source instanceof WebAssembly.Module) return { module: source, instance: await WebAssembly.instantiate(source, imports) };
     if (source instanceof URL) {
       const response = await fetch(source);
-      if (!response.ok) throw new Error(`GET ${source.href} answered ${response.status}`);
+      if (!response.ok) throw new Error(msg(194, source.href, response.status));
       if (
         typeof WebAssembly.instantiateStreaming === "function" &&
         response.headers.get("content-type")?.startsWith("application/wasm") === true
@@ -137,7 +117,7 @@ async function instantiate(source: WasmSource, imports: WebAssembly.Imports): Pr
     }
     return await WebAssembly.instantiate(source, imports);
   } catch (cause) {
-    throw new UndraTransportError("handshake", `could not instantiate the wasm core: ${errorMessage(cause)}`, {
+    throw new UndraTransportError("handshake", msg(195, errorMessage(cause)), {
       cause,
     });
   }
@@ -161,27 +141,33 @@ function parseLog(raw: Uint8Array): { readonly target: string; readonly message:
 }
 
 /**
- * Runs an Undra core in this thread, through the wasm ABI of docs/SPEC.md
- * section 7, and implements the `undra` import object it needs: `reply`,
- * `changeset`, `stream`, `port_call`, `schedule` (`undra_poll` from a
- * microtask), `timer_set` (`setTimeout`, then `undra_timer_fired`), `log`,
- * `now_ms` and `random`.
+ * Runs an Undra core in this thread, through the wasm ABI of docs/SPEC.md section 7, and implements the `undra` import
+ * object it needs: `reply`, `changeset`, `stream`, `port_call`, `schedule` (`undra_poll` from a microtask), `timer_set`
+ * (`setTimeout`, then `undra_timer_fired`), `log`, `now_ms` and `random`.
  *
- * This is the `wasm-main` mode: calls cross into wasm synchronously, so
- * `callSync` works and a reply to a synchronous method is available before
- * `send` returns. The same class runs inside the worker of the `wasm-worker`
- * mode.
+ * This is the host of the `wasm-main` mode, which `UndraCore.load` runs: calls cross into wasm synchronously, so
+ * `callSync` works and a reply to a synchronous method is available before `sendCall` returns. Its control messages are
+ * calls (`observe`, `release`, `cancel`, `streamCredit`, `event`, `timerFired`, `portReply`: ADR-057), straight onto the
+ * wasm exports; it has no `send(kind, payload)` and no payload decoder, and snapshot, restore and twin are functions over
+ * it (`wasm-snapshot.ts`) that load when something asks for them. `WasmMainTransport` (`wasm-main-transport.ts`) is
+ * the public class: this host plus `send`, for the worker's script, tests and embedders that frame messages. The same host
+ * runs inside the worker of the `wasm-worker` mode.
  *
  * Memory: views over the module's memory are recreated whenever it grows,
  * payloads are copied out of the core inside every callback (they are only
  * valid during it), and no import handler ever throws into wasm, since a JS
  * exception crossing wasm frames would leave the core's lock held.
  */
-export class WasmMainTransport implements Transport {
+export class WasmHost implements CoreTransport {
   readonly mode = "wasm-main";
   readonly synchronous = true;
 
-  private readonly _options: WasmMainOptions;
+  /** The options the host was made with. @internal Read by `wasm-snapshot.ts` (`twin`). */
+  readonly _options: HostOptions;
+  /** @internal Read by `wasm-snapshot.ts` (`twin`). */
+  readonly _adapters: HostAdapters;
+  /** @internal Read by `wasm-snapshot.ts` (`twin`). */
+  readonly _onError: ((error: unknown) => void) | undefined;
   private readonly _clock: ClockAdapter;
   private _rng: RngAdapter | null;
   private readonly _timer: TimerAdapter;
@@ -197,15 +183,22 @@ export class WasmMainTransport implements Transport {
   private _pollScheduled = false;
   private _closed = false;
   private _dead: UndraTransportError | null = null;
-  /** The compiled module, kept so that a restart instantiates it again without compiling (ADR-049, `twin`). */
-  private _module: WebAssembly.Module | null = null;
+  /** The compiled module, kept so that a restart instantiates it again without compiling (ADR-049, `twin`). @internal Read by `wasm-snapshot.ts`. */
+  _module: WebAssembly.Module | null = null;
 
-  /** @param options See {@link WasmMainOptions}. */
-  constructor(options: WasmMainOptions) {
+  /**
+   * @param options See {@link WasmMainOptions}. `UndraCore.load` passes its own `LoadOptions` (the fields this host reads are
+   * the same: `wasm`, `expectedSchemaHash`, `platform`, `devtools`, `logLevel`), so the first chunk spells no option mapping.
+   * @param adapters Where the Clock, Rng and Timer adapters are, when not in `options`: the merged adapters of `load` (ADR-057).
+   * @param onError Where failures with no caller go: an import handler that threw, a timer or poll that trapped.
+   */
+  constructor(options: HostOptions, adapters: HostAdapters = {}, onError?: (error: unknown) => void) {
     this._options = options;
-    this._clock = options.clock ?? systemClock();
-    this._timer = options.timer ?? setTimeoutTimer();
-    this._rng = options.rng ?? null;
+    this._adapters = adapters;
+    this._onError = onError;
+    this._clock = adapters.clock ?? systemClock();
+    this._timer = adapters.timer ?? setTimeoutTimer();
+    this._rng = adapters.rng ?? null;
   }
 
   /** The instantiated module (after `start`); for devtools and tests. */
@@ -216,16 +209,13 @@ export class WasmMainTransport implements Transport {
   async start(handler: TransportHandler): Promise<HelloPayload> {
     this._handler = handler;
     const { module, instance } = await instantiate(this._options.wasm, this._imports());
-    if (this._closed) throw new UndraTransportError("closed", "the core is closed");
+    if (this._closed) throw new UndraTransportError("closed", msg(50));
     this._module = module;
     this._instance = instance;
     const exported = instance.exports as unknown as Record<string, unknown>;
-    const missing = [
-      ...(exported.memory instanceof WebAssembly.Memory ? [] : ["memory"]),
-      ...REQUIRED_FUNCTIONS.filter((name) => typeof exported[name] !== "function"),
-    ];
+    const missing = missingExports(exported);
     if (missing.length > 0) {
-      throw new UndraTransportError("handshake", `the module is not an Undra core: it does not export ${missing.join(", ")}`);
+      throw new UndraTransportError("handshake", msg(196, missing.join(", ")));
     }
     this._exports = exported as unknown as CoreExports;
     const { abi, schemaHash } = this._run((e) => {
@@ -233,7 +223,7 @@ export class WasmMainTransport implements Transport {
       return { abi: e.undra_abi_version(), schemaHash: BigInt.asUintN(64, e.undra_schema_hash()) };
     });
     if (abi !== ABI_VERSION) {
-      throw new UndraTransportError("handshake", `the core speaks wasm ABI ${abi}, this runtime speaks ${ABI_VERSION}`);
+      throw new UndraTransportError("handshake", msg(197, abi, ABI_VERSION));
     }
     if (schemaHash !== this._options.expectedSchemaHash) {
       throw new UndraSchemaMismatchError(this._options.expectedSchemaHash, schemaHash);
@@ -247,65 +237,40 @@ export class WasmMainTransport implements Transport {
     config.writeU8(0); // blocking_threads: no pool on wasm
     config.writeU8(this._options.logLevel ?? 2);
     const code = this._invoke(config.finish(), (e, ptr, len) => e.undra_init(ptr, len));
-    if (code !== 0) throw new UndraTransportError("handshake", `undra_init failed with code ${code}`);
+    if (code !== 0) throw new UndraTransportError("handshake", msg(198, code));
     return { undraVersion: `wasm-abi-${abi}`, schemaHash, platform: "wasm", mode };
   }
 
-  /**
-   * A new transport over the same compiled module (no recompile) and options, not started: what a restart after a trap
-   * runs on (ADR-049, `crashRecovery`). This one stays dead.
-   */
-  twin(): WasmMainTransport {
-    return new WasmMainTransport({ ...this._options, wasm: this._module ?? this._options.wasm });
+  // ----- the control messages (ADR-057): calls onto the wasm exports, nothing decoded -----------------
+
+  observe(handle: bigint, signalId: number, on: boolean): void {
+    const { lo, hi } = splitHandle(handle);
+    this._run((e) => e.undra_observe(lo, hi, signalId, on ? 1 : 0));
   }
 
-  send(kind: Kind, payload: Uint8Array): void {
-    switch (kind) {
-      case Kind.Call: {
-        const code = this._invoke(payload, (e, ptr, len) => e.undra_call(ptr, len));
-        if (code !== 0) throw refused(code);
-        return;
-      }
-      case Kind.Cancel: {
-        const { callId } = decodeCancel(payload);
-        this._run((e) => e.undra_cancel(callId));
-        return;
-      }
-      case Kind.StreamCredit: {
-        const { callId, credit } = decodeStreamCredit(payload);
-        this._run((e) => e.undra_stream_credit(callId, credit));
-        return;
-      }
-      case Kind.Observe: {
-        const { handle, signalId, on } = decodeObserve(payload);
-        const { lo, hi } = splitHandle(handle);
-        this._run((e) => e.undra_observe(lo, hi, signalId, on ? 1 : 0));
-        return;
-      }
-      case Kind.Release: {
-        const { lo, hi } = splitHandle(decodeRelease(payload).handle);
-        this._run((e) => e.undra_release(lo, hi));
-        return;
-      }
-      case Kind.Event: {
-        const event = decodeEvent(payload);
-        this._invoke(event.payload, (e, ptr, len) => e.undra_event(event.portId, event.methodId, ptr, len));
-        return;
-      }
-      case Kind.PortReply:
-        this._invoke(payload, (e, ptr, len) => e.undra_port_reply(ptr, len));
-        return;
-      case Kind.TimerFired: {
-        const { timerId } = decodeTimerFired(payload);
-        this._run((e) => e.undra_timer_fired(timerId));
-        return;
-      }
-      case Kind.Restore:
-        this._restore(payload);
-        return;
-      default:
-        throw new UndraTransportError("protocol", `cannot send a ${Kind[kind] ?? String(kind)} message to a wasm core`);
-    }
+  release(handle: bigint): void {
+    const { lo, hi } = splitHandle(handle);
+    this._run((e) => e.undra_release(lo, hi));
+  }
+
+  cancel(callId: number): void {
+    this._run((e) => e.undra_cancel(callId));
+  }
+
+  streamCredit(callId: number, credit: number): void {
+    this._run((e) => e.undra_stream_credit(callId, credit));
+  }
+
+  event(portId: number, methodId: number, payload: Uint8Array): void {
+    this._invoke(payload, (e, ptr, len) => e.undra_event(portId, methodId, ptr, len));
+  }
+
+  timerFired(timerId: number): void {
+    this._run((e) => e.undra_timer_fired(timerId));
+  }
+
+  portReply(reply: Uint8Array): void {
+    this._invoke(reply, (e, ptr, len) => e.undra_port_reply(ptr, len));
   }
 
   callSync(payload: Uint8Array): Uint8Array {
@@ -316,7 +281,7 @@ export class WasmMainTransport implements Transport {
     return this._invoke(head, (e, ptr, len) => this._takeBuf(e, e.undra_call_sync(ptr, len)), tail);
   }
 
-  sendCall(head: Uint8Array, tail: Uint8Array): void {
+  sendCall(head: Uint8Array, tail?: Uint8Array): void {
     const code = this._invoke(head, (e, ptr, len) => e.undra_call(ptr, len), tail);
     if (code !== 0) throw refused(code);
   }
@@ -330,52 +295,10 @@ export class WasmMainTransport implements Transport {
     }
   }
 
-  /** The persisted state of every store (`undra_snapshot`, SPEC 5.9). Rejects `UndraTransportError` when the core is closed or exports no `undra_snapshot`. */
-  snapshot(): Promise<Uint8Array> {
-    try {
-      return Promise.resolve(this.takeSnapshot());
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  }
-
-  /** `undra_snapshot`, copied out of wasm memory, at once; throws `UndraTransportError` when the core cannot be asked. */
-  takeSnapshot(): Uint8Array {
-    return this._run((e) => {
-      if (e.undra_snapshot === undefined) throw new UndraTransportError("unsupported", "the core does not export undra_snapshot");
-      return this._takeBuf(e, e.undra_snapshot());
-    });
-  }
-
-  /**
-   * Rebuilds the stores from `bytes` (`undra_restore`). The change-sets of the observed signals the
-   * core re-delivers during the restore (ADR-023) have reached the handler when this resolves.
-   * Rejects with `UndraRestoreError` when the core refuses the bytes (it is unchanged).
-   */
-  restore(bytes: Uint8Array): Promise<void> {
-    try {
-      this._restore(bytes);
-      return Promise.resolve();
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  }
-
   close(): void {
     this._closed = true;
     this._handler = null;
     this._exports = null;
-  }
-
-  /** `undra_restore`; throws `UndraRestoreError` for a non-zero code. */
-  private _restore(bytes: Uint8Array): void {
-    const code = this._invoke(bytes, (e, ptr, len) => {
-      if (e.undra_restore === undefined) {
-        throw new UndraTransportError("unsupported", "the core does not export undra_restore");
-      }
-      return e.undra_restore(ptr, len);
-    });
-    if (code !== 0) throw new UndraRestoreError(code);
   }
 
   // ----- memory ----------------------------------------------------------------------
@@ -397,14 +320,14 @@ export class WasmMainTransport implements Transport {
     const end = start + (len >>> 0);
     const bytes = this._bytes();
     if (end > bytes.length) {
-      throw new RangeError(`the core handed out [${start}, ${end}) beyond its ${bytes.length} bytes of memory`);
+      throw new RangeError(msg(199, start, end, bytes.length));
     }
     return bytes.slice(start, end);
   }
 
-  /** Copies the bytes of an `UndraBuf { ptr, len, cap }` and frees it. */
-  private _takeBuf(e: CoreExports, bufPtr: number): Uint8Array {
-    if (bufPtr === 0) throw new UndraTransportError("protocol", "the core returned a null UndraBuf");
+  /** Copies the bytes of an `UndraBuf { ptr, len, cap }` and frees it. @internal Used by `wasm-snapshot.ts`. */
+  _takeBuf(e: CoreExports, bufPtr: number): Uint8Array {
+    if (bufPtr === 0) throw new UndraTransportError("protocol", msg(200));
     try {
       this._bytes();
       const ptr = this._view.getUint32(bufPtr, true);
@@ -420,13 +343,13 @@ export class WasmMainTransport implements Transport {
   private _live(): CoreExports {
     if (this._dead !== null) throw this._dead;
     if (this._exports === null) {
-      throw new UndraTransportError("closed", this._closed ? "the core is closed" : "the core is not started");
+      throw new UndraTransportError("closed", this._closed ? msg(50) : msg(201));
     }
     return this._exports;
   }
 
-  /** Runs `call` with a copy of `bytes` in wasm memory. */
-  private _invoke<R>(bytes: Uint8Array, call: (e: CoreExports, ptr: number, len: number) => R, tail?: Uint8Array): R {
+  /** Runs `call` with a copy of `bytes` in wasm memory. @internal Used by `WasmMainTransport`. */
+  _invoke<R>(bytes: Uint8Array, call: (e: CoreExports, ptr: number, len: number) => R, tail?: Uint8Array): R {
     const e = this._live();
     // A payload copied while another export is running (a sync port reply
     // from inside `port_call`) must not reuse the scratch buffer the outer
@@ -455,8 +378,8 @@ export class WasmMainTransport implements Transport {
     }
   }
 
-  /** Runs `call` for an export that takes no buffer. */
-  private _run<R>(call: (e: CoreExports) => R): R {
+  /** Runs `call` for an export that takes no buffer. @internal Used by `WasmMainTransport`. */
+  _run<R>(call: (e: CoreExports) => R): R {
     const e = this._live();
     this._depth++;
     try {
@@ -466,6 +389,29 @@ export class WasmMainTransport implements Transport {
     } finally {
       this._depth--;
     }
+  }
+
+  /**
+   * `undra_snapshot`, copied out of wasm memory, now; throws `UndraTransportError` when the core cannot be asked (closed, trapped,
+   * no such export). Here and not with the other snapshot code because `UndraCore.snapshot` takes it at the call (SPEC 17.1: behind
+   * what was sent before it, ahead of what is sent after), not after a module arrives. @internal
+   */
+  _snapshot(): Uint8Array {
+    return this._run((e) => {
+      if (e.undra_snapshot === undefined) throw new UndraTransportError("unsupported", msg(203));
+      return this._takeBuf(e, e.undra_snapshot());
+    });
+  }
+
+  /**
+   * `undra_restore` of `bytes`, now: `0` when the stores were rebuilt (their change-sets have reached the handler), else the code of
+   * the core's refusal (it is unchanged). At the call for the reason `_snapshot` gives; the refusal's class loads with it. @internal
+   */
+  _restore(bytes: Uint8Array): number {
+    return this._invoke(bytes, (e, ptr, len) => {
+      if (e.undra_restore === undefined) throw new UndraTransportError("unsupported", msg(204));
+      return e.undra_restore(ptr, len);
+    });
   }
 
   private _scratch(e: CoreExports, len: number): number {
@@ -488,7 +434,7 @@ export class WasmMainTransport implements Transport {
   private _classify(error: unknown): unknown {
     if (error instanceof UndraError) return error;
     if (this._dead !== null) return this._dead;
-    const dead = new UndraTransportError("trap", `the wasm core trapped: ${errorMessage(error)}`, { cause: error });
+    const dead = new UndraTransportError("trap", msg(202, errorMessage(error)), { cause: error });
     this._dead = dead;
     const handler = this._handler;
     if (handler !== null) queueMicrotask(() => handler.closed(dead));
@@ -496,7 +442,7 @@ export class WasmMainTransport implements Transport {
   }
 
   private _report(error: unknown): void {
-    this._options.onError?.(error);
+    this._onError?.(error);
   }
 
   // ----- the `undra` import object ----------------------------------------------------

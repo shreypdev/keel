@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UndraCore } from "../src/core.js";
 import { PortIds } from "../src/adapters/ids.js";
 import { defaultPorts } from "../src/adapters/default-ports.js";
+import { QUIETLY_UNAVAILABLE } from "../src/port-dispatch.js";
 import type { KvAdapter } from "../src/adapters/types.js";
 import { PortStatus, codecs, decodeValue, encodeValue } from "../src/wire/index.js";
 import { FakeCoreTransport, SCHEMA } from "./support/fake-core.js";
@@ -38,12 +39,16 @@ describe("defaultPorts", () => {
     );
     for (const port of ports.values()) expect(port.sync).toBe(false);
     expect(ports.get(PortIds.Kv.portId)?.name).toBe("Kv");
-    expect(Object.keys(ports.get(PortIds.Kv.portId)?.methods ?? {}).map(Number).sort()).toEqual(
-      [PortIds.Kv.get, PortIds.Kv.set, PortIds.Kv.delete, PortIds.Kv.list].sort(),
-    );
-    expect(Object.keys(ports.get(PortIds.Fs.portId)?.methods ?? {}).map(Number).sort()).toEqual(
-      [PortIds.Fs.read, PortIds.Fs.write, PortIds.Fs.delete, PortIds.Fs.list].sort(),
-    );
+    // No method id is listed up front (the ids would have to be hashed at load, ADR-057): every numeric id is a method that waits
+    // for the port, and what is not an id is not a method.
+    for (const id of [PortIds.Kv.get, PortIds.Kv.set, PortIds.Kv.delete, PortIds.Kv.list]) {
+      expect(typeof ports.get(PortIds.Kv.portId)?.methods[id], `Kv ${id}`).toBe("function");
+    }
+    for (const id of [PortIds.Fs.read, PortIds.Fs.write, PortIds.Fs.delete, PortIds.Fs.list]) {
+      expect(typeof ports.get(PortIds.Fs.portId)?.methods[id], `Fs ${id}`).toBe("function");
+    }
+    const methods = ports.get(PortIds.Kv.portId)?.methods as Record<string | symbol, unknown>;
+    expect([methods["then"], methods["toJSON"], methods[Symbol.iterator], methods["1.5"]]).toEqual([undefined, undefined, undefined, undefined]);
   });
 
   it("leaves out the port of an adapter that is null, and keeps the others", () => {
@@ -61,6 +66,15 @@ describe("defaultPorts", () => {
     await set(Uint8Array.from([...key("k"), ...encodeValue(codecs.bytes, value)]));
     expect(kv.data.get("k")).toEqual(value);
     expect(decodeValue(codecs.option(codecs.bytes), await get(key("k")))).toEqual(value);
+  });
+
+  it("forwards a method id that was never listed to the real port, and answers one the port lacks 'unavailable' without a report", async () => {
+    const kv = memoryKv();
+    kv.data.set("k", Uint8Array.of(4));
+    const methods = defaultPorts({ kv }).get(PortIds.Kv.portId)?.methods ?? {};
+    const list = methods[PortIds.Kv.list] as (args: Uint8Array) => Promise<Uint8Array>;
+    expect(decodeValue(codecs.vec(codecs.string), await list(key("")))).toEqual(["k"]);
+    await expect((methods[0x0badf00d] as (args: Uint8Array) => Promise<Uint8Array>)(new Uint8Array(0))).rejects.toBe(QUIETLY_UNAVAILABLE);
   });
 
   it("tries again after a failed load instead of keeping the failure", async () => {

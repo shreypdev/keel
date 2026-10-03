@@ -1,4 +1,5 @@
 import { WireError } from "./errors.js";
+import { msg } from "../messages.js";
 
 /** Raw bytes on the wire (`Bytes` in the schema). */
 export type Bytes = Uint8Array;
@@ -45,10 +46,10 @@ export function handleGeneration(handle: Handle): number {
 /** Builds a handle from a slot index (24 bits) and a generation (40 bits). */
 export function makeHandle(index: number, generation: number): Handle {
   if (!Number.isInteger(index) || index < 0 || index > MAX_HANDLE_INDEX) {
-    throw new RangeError(`handle index out of range: ${String(index)}`);
+    throw new RangeError(msg(224, String(index)));
   }
   if (!Number.isInteger(generation) || generation < 0 || generation > MAX_HANDLE_GENERATION) {
-    throw new RangeError(`handle generation out of range: ${String(generation)}`);
+    throw new RangeError(msg(225, String(generation)));
   }
   return (BigInt(generation) << 24n) | BigInt(index);
 }
@@ -61,7 +62,7 @@ export function makeHandle(index: number, generation: number): Handle {
  */
 export function splitHandle(handle: Handle): HandleParts {
   if (BigInt.asUintN(64, handle) !== handle) {
-    throw new RangeError(`handle out of range: ${String(handle)}`);
+    throw new RangeError(msg(226, String(handle)));
   }
   return { lo: Number(handle & MASK32), hi: Number(handle >> 32n) };
 }
@@ -85,7 +86,7 @@ export type Timestamp = number;
 /** Converts a `Date` to a {@link Timestamp}. Throws `RangeError` for an invalid `Date`. */
 export function timestampFromDate(date: Date): Timestamp {
   const ms = date.getTime();
-  if (Number.isNaN(ms)) throw new RangeError("cannot convert an invalid Date to a Timestamp");
+  if (Number.isNaN(ms)) throw new RangeError(msg(227));
   return ms;
 }
 
@@ -96,7 +97,7 @@ export function timestampFromDate(date: Date): Timestamp {
 export function timestampToDate(timestamp: Timestamp): Date {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) {
-    throw new RangeError(`timestamp ${String(timestamp)} is outside the range of a Date`);
+    throw new RangeError(msg(228, String(timestamp)));
   }
   return date;
 }
@@ -124,12 +125,12 @@ const I64_MAX = 0x7fff_ffff_ffff_ffffn;
  * 292 years).
  */
 export function durationToNanos(ms: Duration): bigint {
-  if (!Number.isFinite(ms)) throw new RangeError(`duration must be finite: ${String(ms)}`);
+  if (!Number.isFinite(ms)) throw new RangeError(msg(229, String(ms)));
   const whole = Math.trunc(ms);
   let nanos = BigInt(whole) * NANOS_PER_MS;
   if (whole !== ms) nanos += BigInt(Math.round((ms - whole) * 1e6));
   if (nanos < 0n) throw new WireError({ code: "negative_duration", nanos });
-  if (nanos > I64_MAX) throw new RangeError(`duration exceeds i64 nanoseconds: ${String(ms)} ms`);
+  if (nanos > I64_MAX) throw new RangeError(msg(230, String(ms)));
   return nanos;
 }
 
@@ -151,19 +152,20 @@ export function durationFromNanos(nanos: bigint): Duration {
 export type Uuid = string;
 
 const UUID_LEN = 36;
-/** Character offsets of the four hyphens. */
-const HYPHENS = [8, 13, 18, 23] as const;
-
-/** Scratch text for `decodeUuid`, hyphens pre-filled; single-threaded and never re-entered. */
-const UUID_SCRATCH = new Uint8Array(UUID_LEN);
-for (const h of HYPHENS) UUID_SCRATCH[h] = 0x2d;
-const ASCII_DECODER = new TextDecoder();
+/** The two lowercase hex digits of every byte value. */
+const HEX: string[] = [];
+for (let i = 256; i < 512; i++) HEX.push(i.toString(16).slice(1));
 
 function hexValue(c: number): number {
   if (c >= 0x30 && c <= 0x39) return c - 0x30;
   const lower = c | 0x20;
   if (lower >= 0x61 && lower <= 0x66) return lower - 0x57;
   return -1;
+}
+
+/** The one error `encodeUuid` raises, for every way a UUID can be wrong: the length, a hyphen, a hex digit, or no room for 16 bytes at `offset`. */
+function invalidUuid(uuid: string, offset: number, size: number): RangeError {
+  return new RangeError(msg(231, uuid, String(offset), size));
 }
 
 /**
@@ -175,21 +177,18 @@ function hexValue(c: number): number {
  * fresh 16-byte array. Returns the array that was written.
  */
 export function encodeUuid(uuid: Uuid, out?: Uint8Array, offset = 0): Uint8Array {
-  if (uuid.length !== UUID_LEN) throw new RangeError(`invalid UUID (length ${uuid.length}): ${uuid}`);
   const dst = out ?? new Uint8Array(16);
-  if (!Number.isInteger(offset) || offset < 0 || offset + 16 > dst.length) {
-    throw new RangeError(`UUID does not fit at offset ${String(offset)} of ${dst.length} bytes`);
-  }
+  if (uuid.length !== UUID_LEN || !Number.isInteger(offset) || offset < 0 || offset + 16 > dst.length) throw invalidUuid(uuid, offset, dst.length);
   let o = offset;
   for (let i = 0; i < UUID_LEN; ) {
     if (i === 8 || i === 13 || i === 18 || i === 23) {
-      if (uuid.charCodeAt(i) !== 0x2d) throw new RangeError(`invalid UUID (expected '-' at ${i}): ${uuid}`);
+      if (uuid.charCodeAt(i) !== 0x2d) throw invalidUuid(uuid, offset, dst.length);
       i++;
       continue;
     }
     const hi = hexValue(uuid.charCodeAt(i));
     const lo = hexValue(uuid.charCodeAt(i + 1));
-    if (hi < 0 || lo < 0) throw new RangeError(`invalid UUID (bad hex digit near ${i}): ${uuid}`);
+    if (hi < 0 || lo < 0) throw invalidUuid(uuid, offset, dst.length);
     dst[o++] = (hi << 4) | lo;
     i += 2;
   }
@@ -198,23 +197,14 @@ export function encodeUuid(uuid: Uuid, out?: Uint8Array, offset = 0): Uint8Array
 
 /**
  * Decodes 16 raw bytes starting at `offset` into the canonical lowercase
- * hyphenated string. Allocates nothing but the result string (the digits are
- * assembled in a shared scratch buffer). Throws `RangeError` if fewer than 16
- * bytes are available.
+ * hyphenated string. Throws `RangeError` if fewer than 16 bytes are available.
  */
 export function decodeUuid(bytes: Uint8Array, offset = 0): Uuid {
   if (!Number.isInteger(offset) || offset < 0 || offset + 16 > bytes.length) {
-    throw new RangeError(`need 16 bytes for a UUID at offset ${String(offset)} of ${bytes.length}`);
+    throw new RangeError(msg(232, String(offset), bytes.length));
   }
-  let t = 0;
-  for (let i = 0; i < 16; i++) {
-    if (t === 8 || t === 13 || t === 18 || t === 23) t++;
-    // In range: offset + 16 <= bytes.length was checked above.
-    const b = bytes[offset + i] as number;
-    const hi = b >> 4;
-    const lo = b & 0x0f;
-    UUID_SCRATCH[t++] = hi < 10 ? 0x30 + hi : 0x57 + hi;
-    UUID_SCRATCH[t++] = lo < 10 ? 0x30 + lo : 0x57 + lo;
-  }
-  return ASCII_DECODER.decode(UUID_SCRATCH);
+  let out = "";
+  // In range: offset + 16 <= bytes.length was checked above.
+  for (let i = 0; i < 16; i++) out += (i === 4 || i === 6 || i === 8 || i === 10 ? "-" : "") + HEX[bytes[offset + i] as number];
+  return out;
 }

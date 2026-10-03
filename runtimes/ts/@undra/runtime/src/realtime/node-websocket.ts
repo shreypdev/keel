@@ -3,6 +3,7 @@ import { errorMessage } from "../platform.js";
 import { nodeBuiltin } from "../node-builtin.js";
 import { Inbox } from "./inbox.js";
 import type { WebSocketAdapter, WebSocketConnection } from "./websocket.js";
+import { msg } from "../messages.js";
 
 /*
  * `nodeWebSocket()`: the WebSocket adapter of Node, over `node:http` / `node:https` (the upgrade)
@@ -145,7 +146,7 @@ class ByteQueue {
       if (index < chunk.length) return chunk[index] as number;
       index -= chunk.length;
     }
-    throw new RangeError("ByteQueue.at past the end");
+    throw new RangeError(msg(130));
   }
 
   /** Removes and returns the first `n` bytes (`n <= length`). */

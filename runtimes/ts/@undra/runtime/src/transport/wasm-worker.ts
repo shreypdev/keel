@@ -1,4 +1,7 @@
-import { UndraError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
+import { WEB_CRYPTO_REQUIRED, hasCryptoRandom } from "../adapters/system.js";
+import type { LoadOptions, WorkerModeOptions } from "../core.js";
+import { UndraError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
+import { UndraRestoreError } from "../errors-rare.js";
 import { isTrap } from "../panic.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 import {
@@ -13,11 +16,13 @@ import {
   encodePortReply,
 } from "../wire/index.js";
 import type { PortImpl } from "../port.js";
-import { syncPortRefusal } from "../port-dispatch.js";
+import { portName } from "../port-dispatch.js";
 import type { RestartResult, SnapshotPolicy } from "../recovery.js";
-import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
+import { framed } from "./framed.js";
+import type { CoreTransport, PortOutcome, Transport, TransportHandler } from "./transport.js";
 import type { WasmSource } from "./wasm-main.js";
 import { type HostToWorker, WORKER_PROTOCOL_VERSION, type WorkerFailure, type WorkerToHost, type WorkerWasm } from "./worker-protocol.js";
+import { msg } from "../messages.js";
 
 /**
  * The part of a `Worker` this transport uses; a real `Worker` fits, and so
@@ -127,7 +132,7 @@ function asyncPortIds(ports: Iterable<readonly [number, PortImpl]> = []): number
  */
 function controlFailure(answer: ControlAnswer): Error {
   const failure = "failure" in answer ? answer.failure : undefined;
-  if (failure === undefined) return new UndraTransportError("protocol", "the worker gave an incomplete answer");
+  if (failure === undefined) return new UndraTransportError("protocol", msg(205));
   return failure.kind === "error" ? new UndraTransportError("protocol", failure.message) : failureToError(failure);
 }
 
@@ -233,7 +238,7 @@ export class WasmWorkerTransport implements Transport {
             if (this.#options.ports !== undefined && message.features?.includes("ports") !== true) {
               settle(() => {
                 this.close();
-                reject(new UndraTransportError("unsupported", "worker.ports needs this @undra/runtime's worker script (protocol 3)"));
+                reject(new UndraTransportError("unsupported", msg(206)));
               });
               return;
             }
@@ -258,7 +263,7 @@ export class WasmWorkerTransport implements Transport {
           case "envelopes":
             // One task's worth of the worker's output (protocol 2), in order. A failure stops the rest.
             if (!Array.isArray(message.data)) {
-              this.#fail(new UndraTransportError("protocol", "the worker sent an `envelopes` message without a list of envelopes"));
+              this.#fail(new UndraTransportError("protocol", msg(207)));
               return;
             }
             for (const data of message.data) {
@@ -287,7 +292,7 @@ export class WasmWorkerTransport implements Transport {
       };
       const onError = (event: Event): void => {
         const text = (event as ErrorEvent).message || "the worker failed";
-        const error = new UndraTransportError(this.#open ? "closed" : "handshake", `worker error: ${text}`);
+        const error = new UndraTransportError(this.#open ? "closed" : "handshake", msg(208, text));
         if (settled) this.#fail(error);
         else
           settle(() => {
@@ -296,7 +301,7 @@ export class WasmWorkerTransport implements Transport {
           });
       };
       const onMessageError = (): void => {
-        this.#fail(new UndraTransportError("protocol", "the worker sent a message that could not be deserialised"));
+        this.#fail(new UndraTransportError("protocol", msg(209)));
       };
       worker.addEventListener("message", onMessage);
       worker.addEventListener("error", onError);
@@ -310,7 +315,7 @@ export class WasmWorkerTransport implements Transport {
         timer = setTimeout(() => {
           settle(() => {
             this.close();
-            reject(new UndraTransportError("timeout", `the worker did not start within ${timeoutMs} ms`));
+            reject(new UndraTransportError("timeout", msg(210, timeoutMs)));
           });
         }, timeoutMs);
       }
@@ -333,7 +338,7 @@ export class WasmWorkerTransport implements Transport {
       } catch (error) {
         settle(() => {
           this.close();
-          reject(new UndraTransportError("handshake", `could not reach the worker: ${errorMessage(error)}`, { cause: error }));
+          reject(new UndraTransportError("handshake", msg(211, errorMessage(error)), { cause: error }));
         });
       }
     });
@@ -344,7 +349,7 @@ export class WasmWorkerTransport implements Transport {
     // cache calls the Kv port), and the host's answer to that call is not a message of its own making.
     const starting = !this.#open && kind === Kind.PortReply;
     if ((!this.#open && !starting) || this.#worker === null) {
-      throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
+      throw new UndraTransportError("closed", this.#closed ? msg(50) : msg(201));
     }
     this.#post(kind, payload);
   }
@@ -402,7 +407,7 @@ export class WasmWorkerTransport implements Transport {
     this.#detach?.();
     const worker = this.#worker;
     this.#worker = null;
-    for (const waiting of this.#control.values()) waiting.reject(new UndraTransportError("closed", "the core is closed"));
+    for (const waiting of this.#control.values()) waiting.reject(new UndraTransportError("closed", msg(50)));
     this.#control.clear();
     if (worker === null) return;
     try {
@@ -422,15 +427,15 @@ export class WasmWorkerTransport implements Transport {
   #request(can: boolean, operation: string, message: HostToWorker & { readonly id: number }, transfer: Transferable[] = []): Promise<ControlAnswer> {
     return new Promise<ControlAnswer>((resolve, reject) => {
       const worker = this.#worker;
-      if (!this.#open || worker === null) throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
-      if (!can) throw new UndraTransportError("unsupported", `the worker script cannot ${operation}: rebuild it with this @undra/runtime`);
+      if (!this.#open || worker === null) throw new UndraTransportError("closed", this.#closed ? msg(50) : msg(201));
+      if (!can) throw new UndraTransportError("unsupported", msg(212, operation));
       const id = this.#nextControlId++;
       this.#control.set(id, { resolve, reject });
       try {
         worker.postMessage({ ...message, id }, transfer);
       } catch (error) {
         this.#control.delete(id);
-        reject(new UndraTransportError("closed", `could not reach the worker: ${errorMessage(error)}`, { cause: error }));
+        reject(new UndraTransportError("closed", msg(211, errorMessage(error)), { cause: error }));
       }
     });
   }
@@ -440,7 +445,7 @@ export class WasmWorkerTransport implements Transport {
     if (typeof option === "function") return option();
     if (option !== undefined) return option;
     if (typeof Worker !== "function") {
-      throw new UndraTransportError("unsupported", "this platform has no Worker; pass `worker` to run the core on one");
+      throw new UndraTransportError("unsupported", msg(213));
     }
     return new Worker(new URL("../worker.js", import.meta.url), { type: "module" });
   }
@@ -499,7 +504,7 @@ export class WasmWorkerTransport implements Transport {
       } else if (error instanceof UndraError) {
         this.#fail(error);
       } else {
-        this.#fail(new UndraTransportError("protocol", `bad message from the worker: ${errorMessage(error)}`, { cause: error }));
+        this.#fail(new UndraTransportError("protocol", msg(214, errorMessage(error)), { cause: error }));
       }
     }
   }
@@ -512,4 +517,40 @@ export class WasmWorkerTransport implements Transport {
       this.#post(Kind.PortReply, encodePortReply({ portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));
     }
   }
+}
+
+/**
+ * The text of the error that refuses a synchronous port on a thread the core cannot wait for (`wasm-worker`, ADR-049): the port
+ * and the fix (the other fix, mode `"wasm-main"`, is in the docs of `registerPort`). Here, with the transport that raises it.
+ */
+function syncPortRefusal(portId: number, impl?: Pick<PortImpl, "name">): string {
+  return msg(215, portName(portId, impl));
+}
+
+/**
+ * The transport `UndraCore.load` makes for `mode: "wasm-worker"` (ADR-057): this module maps the options and makes the checks of
+ * its own mode, so a page that never asks for it does not carry them, and hands the core the transport already framed, so the
+ * adapter that frames its messages arrives in the same fetch wave as this module. `recovery` is the policy the worker keeps
+ * snapshots by (data, not code).
+ */
+export function workerTransport(options: LoadOptions, recovery: WasmWorkerOptions["recovery"]): CoreTransport {
+  if (options.wasm === undefined) throw new UndraError("options", msg(216));
+  // Checked here, before the worker is spawned; the worker reads its own `crypto` (ADR-049).
+  if (!hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
+  // A Worker (anything with `postMessage`) or a function creating one is `{ create }` in short.
+  const worker = options.worker;
+  const { create, ports } = (typeof worker === "object" && !("postMessage" in worker) ? worker : { create: worker }) as WorkerModeOptions;
+  return framed(
+    new WasmWorkerTransport({
+      wasm: options.wasm,
+      expectedSchemaHash: options.expectedSchemaHash,
+      ...(create && { worker: create }),
+      ...(ports !== undefined && { ports }),
+      ...(recovery && { recovery }),
+      ...(options.platform !== undefined && { platform: options.platform }),
+      ...(options.devtools !== undefined && { devtools: options.devtools }),
+      ...(options.logLevel !== undefined && { logLevel: options.logLevel }),
+      ...(options.handshakeTimeoutMs !== undefined && { startTimeoutMs: options.handshakeTimeoutMs }),
+    }),
+  );
 }

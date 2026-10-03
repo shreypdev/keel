@@ -518,6 +518,23 @@ impl Model {
             .chain(&self.query_handles)
     }
 
+    /// Whether any method or function of the schema returns a stream (`Stream<T>` or `Result<Stream<T>, E>`). The TypeScript entry
+    /// of such a schema passes `features: [streams]` to the runtime, so the stream support is up front instead of fetched at the
+    /// first stream (ADR-057).
+    #[must_use]
+    pub fn has_streams(&self) -> bool {
+        let is_stream =
+            |returns: &TypeRef| Ret::classify(returns).is_some_and(|ret| ret.is_stream());
+        self.all_objects()
+            .flat_map(|object| &object.methods)
+            .any(|method| is_stream(&method.returns))
+            || self
+                .functions
+                .iter()
+                .chain(&self.mutations)
+                .any(|function| is_stream(&function.returns))
+    }
+
     /// The doc comment of a store signal, when there is one to write.
     #[must_use]
     pub fn signal_doc(&self, object: &ObjectDef, signal: &SignalDef) -> Option<&'static str> {

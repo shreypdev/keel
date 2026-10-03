@@ -14,48 +14,71 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "development": "./dist/dev/index.js",
+      "react-native": "./dist/dev/index.js",
       "default": "./dist/index.js"
     },
     "./wire": {
       "types": "./dist/wire/index.d.ts",
+      "development": "./dist/dev/wire/index.js",
+      "react-native": "./dist/dev/wire/index.js",
       "default": "./dist/wire/index.js"
     },
     "./react": {
       "types": "./dist/react.d.ts",
+      "development": "./dist/dev/react.js",
+      "react-native": "./dist/dev/react.js",
       "default": "./dist/react.js"
     },
     "./vue": {
       "types": "./dist/vue.d.ts",
+      "development": "./dist/dev/vue.js",
+      "react-native": "./dist/dev/vue.js",
       "default": "./dist/vue.js"
     },
     "./svelte": {
       "types": "./dist/svelte.d.ts",
+      "development": "./dist/dev/svelte.js",
+      "react-native": "./dist/dev/svelte.js",
       "default": "./dist/svelte.js"
     },
     "./solid": {
       "types": "./dist/solid.d.ts",
+      "development": "./dist/dev/solid.js",
+      "react-native": "./dist/dev/solid.js",
       "default": "./dist/solid.js"
     },
     "./worker": {
       "types": "./dist/worker.d.ts",
+      "development": "./dist/dev/worker.js",
+      "react-native": "./dist/dev/worker.js",
       "default": "./dist/worker.js"
     },
     "./realtime": {
       "types": "./dist/realtime.d.ts",
+      "development": "./dist/dev/realtime.js",
+      "react-native": "./dist/dev/realtime.js",
       "default": "./dist/realtime.js"
     },
     "./db": {
       "types": "./dist/db.d.ts",
+      "development": "./dist/dev/db.js",
+      "react-native": "./dist/dev/db.js",
       "default": "./dist/db.js"
     },
     "./db-worker": {
       "types": "./dist/db-worker.d.ts",
+      "development": "./dist/dev/db-worker.js",
+      "react-native": "./dist/dev/db-worker.js",
       "default": "./dist/db-worker.js"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",
+      "development": "./dist/dev/vite.js",
+      "react-native": "./dist/dev/vite.js",
       "default": "./dist/vite.js"
     },
+    "./mangle-cache.json": "./dist/mangle-cache.json",
     "./package.json": "./package.json"
   },
   "main": "./dist/index.js",
@@ -92,11 +115,13 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.vite.json",
+    "build": "node scripts/build.mjs",
     "test": "vitest run",
+    "test:dist": "node scripts/test-dist.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json --noEmit && tsc -p tsconfig.vite.json --noEmit"
   },
   "devDependencies": {
+    "@jridgewell/sourcemap-codec": "^1.6.0",
     "@types/node": "^22.20.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -104,6 +129,7 @@
     "jsdom": "^30.1.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "rolldown": "~1.2.9",
     "solid-js": "^1.9.15",
     "svelte": "^5.57.1",
     "typescript": "^5.9.3",

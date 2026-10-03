@@ -152,6 +152,11 @@ jobs:
         run: |
           npm ci
           npm test
+      # ADR-057: the package publishes a production build whose private properties are renamed. The same suite, run against it (the
+      # sources' own tests of the build: `scripts/mangle.mjs`, the flavours).
+      - name: Test against the production build (renamed private properties)
+        working-directory: runtimes/ts/@undra/runtime
+        run: npm run test:dist
       # The testing kit (docs/TESTING.md): its tests, and its build config, which compiles against the runtime's emitted declarations.
       - name: Testing kit (@undra/testkit)
         run: |
@@ -159,6 +164,7 @@ jobs:
           cd runtimes/ts/@undra/testkit
           npm ci
           npm test
+          UNDRA_TS_DIST="$GITHUB_WORKSPACE/runtimes/ts/@undra/runtime/dist/index.js" npm test
           npm run typecheck
       # The devtools page of `undra dev` (ADR-054): its tests, and the committed assets must be what its
       # sources build to (the CLI embeds them, so `cargo build` needs no Node).
@@ -168,6 +174,7 @@ jobs:
           npm ci
           npm run typecheck
           npm test
+          UNDRA_TS_DIST="$GITHUB_WORKSPACE/runtimes/ts/@undra/runtime/dist/index.js" npm test
           bash build.sh --check
 
   kotlin:
@@ -227,6 +234,11 @@ jobs:
       # not skip) when it cannot, so this leg can neither be stale nor silently absent.
       - name: wasm acceptance (raw host + TS runtime)
         run: bash crates/undra-ffi/tests/wasm/run.sh
+      # The same acceptance against the package's production build (ADR-057: private properties renamed, messages as codes).
+      - name: wasm acceptance against the production build
+        run: |
+          (cd runtimes/ts/@undra/runtime && npm run build)
+          UNDRA_TS_DIST="$GITHUB_WORKSPACE/runtimes/ts/@undra/runtime/dist/index.js" bash crates/undra-ffi/tests/wasm/run.sh
 
   macos:
     name: Swift runtime + C ABI (macOS)
@@ -420,6 +432,11 @@ jobs:
           # it from the kotlinc location the way test-local.sh does).
           UNDRA_KOTLIN_STDLIB: /home/runner/kotlin/kotlinc/lib/kotlin-stdlib.jar
         run: bash contract-tests/run-all.sh ts kotlin
+      # The TypeScript column again, against the runtime's production build (ADR-057: private properties renamed).
+      - name: TypeScript contract scenarios against the production build
+        run: |
+          (cd runtimes/ts/@undra/runtime && npm ci --no-audit --no-fund && npm run build)
+          UNDRA_TS_DIST="$GITHUB_WORKSPACE/runtimes/ts/@undra/runtime/dist/index.js" bash contract-tests/ts/run.sh
       - name: Cookbook Kotlin lines compile (kotlinc -Werror, over the generated bindings)
         env:
           UNDRA_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
@@ -545,3 +562,10 @@ jobs:
       - name: Contract scenarios through NativeTransport (18 pass, S17 is app-tested)
         working-directory: runtimes/rn/@undra/react-native
         run: npm run test:contract
+      # ADR-057: the unit tests and the scenarios again, against the runtime's production build (renamed private properties).
+      - name: Unit tests and contract scenarios against the production build
+        working-directory: runtimes/rn/@undra/react-native
+        run: |
+          export UNDRA_TS_DIST="$GITHUB_WORKSPACE/runtimes/ts/@undra/runtime/dist/index.js"
+          npm test
+          npm run test:contract

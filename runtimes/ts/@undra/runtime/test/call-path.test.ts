@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { benchScale, loadWebBudgets } from "../../../../../scripts/web-budgets.mjs";
 import { UndraCore } from "../src/core.js";
-import { WasmMainTransport } from "../src/transport/wasm-main.js";
+import { WasmMainTransport } from "../src/transport/wasm-main-transport.js";
 import { CallTarget, UndraReader, UndraWriter } from "../src/wire/index.js";
 import { STUB, compileStub } from "./support/stub-core.js";
 import { track } from "./support/harness.js";

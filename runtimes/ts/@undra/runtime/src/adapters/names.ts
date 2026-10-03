@@ -11,6 +11,7 @@
  */
 
 import { UndraError } from "../base-error.js";
+import { msg } from "../messages.js";
 
 /**
  * The namespace of a core that was loaded without one (`LoadOptions.namespace` unset, a transport the app provides
@@ -35,7 +36,7 @@ const NAMESPACE = /^(?:[a-z][a-z0-9_]{0,31}|_)$/;
 export function checkNamespace(namespace: string | undefined): string {
   if (namespace === undefined) return UNNAMED_NAMESPACE;
   if (typeof namespace !== "string" || !NAMESPACE.test(namespace)) {
-    throw new UndraError("options", `namespace ${JSON.stringify(String(namespace).slice(0, 40))} is not [a-z][a-z0-9_]{0,31}`);
+    throw new UndraError("options", msg(18, JSON.stringify(String(namespace).slice(0, 40))));
   }
   return namespace;
 }

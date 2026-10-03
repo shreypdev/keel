@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { UndraCore } from "../src/core.js";
 import { UndraModeError, UndraPortError, UndraReplyError, UndraSchemaMismatchError, UndraTransportError } from "../src/errors.js";
 import type { PortImpl } from "../src/port.js";
-import { WasmMainTransport } from "../src/transport/wasm-main.js";
+import { WasmMainTransport } from "../src/transport/wasm-main-transport.js";
 import {
   ALL_SIGNALS,
   CallTarget,
@@ -15,7 +15,9 @@ import {
   decodePortReply,
   encodeCall,
   encodeCancel,
+  encodeEvent,
   encodeHello,
+  encodeRelease,
   encodeStreamCredit,
 } from "../src/wire/index.js";
 import { assemble, compileStub, stubGlobals, STUB } from "./support/stub-core.js";
@@ -329,6 +331,77 @@ describe("host-to-core messages", () => {
     expect(() => transport.send(Kind.Reply, new Uint8Array(5))).toThrow(UndraTransportError);
     expect(() => transport.send(Kind.Hello, encodeHello({ undraVersion: "x", schemaHash: 0n, platform: "p", mode: "m" }))).toThrow(/Hello/);
     expect(() => transport.send(Kind.Restore, new Uint8Array(4))).toThrow(/undra_restore/);
+  });
+});
+
+describe("the in-process host's typed channel (ADR-057)", () => {
+  it("cancel, streamCredit, event, release and observe call the same exports as the framed messages, with unsigned arguments", async () => {
+    const { core, transport, globals } = await boot();
+    transport.cancel(0xffff_fff0);
+    expect(globals().cancel_last >>> 0).toBe(0xffff_fff0);
+    transport.streamCredit(3, 9);
+    expect(globals().credit_total).toBe(9);
+    transport.event(0xdead_beef, 0xfeed_f00d, bytesOf(1, 2, 3));
+    expect([globals().event_port >>> 0, globals().event_method >>> 0, globals().event_len]).toEqual([0xdead_beef, 0xfeed_f00d, 3]);
+    transport.release(0xffff_ffff_0000_0005n);
+    expect([globals().release_lo, globals().release_hi >>> 0]).toEqual([5, 0xffff_ffff]);
+    const seen: number[] = [];
+    core.mirror.register(STUB.HANDLE, (signalId) => {
+      seen.push(signalId);
+    });
+    transport.observe(STUB.HANDLE, 3, true);
+    core.mirror.flush();
+    expect(seen).toEqual([3]);
+  });
+
+  it("WasmMainTransport.send of each kind is the typed call: the same effect on the same exports", async () => {
+    const via = await boot();
+    const typedHost = await boot();
+    for (const [name, framed, typed] of [
+      ["cancel", (t: WasmMainTransport) => t.send(Kind.Cancel, encodeCancel({ callId: 0xffff_fff0 })), (t: WasmMainTransport) => t.cancel(0xffff_fff0)],
+      ["credit", (t: WasmMainTransport) => t.send(Kind.StreamCredit, encodeStreamCredit({ callId: 3, credit: 9 })), (t: WasmMainTransport) => t.streamCredit(3, 9)],
+      ["event", (t: WasmMainTransport) => t.send(Kind.Event, encodeEvent({ portId: 7, methodId: 8, payload: bytesOf(5, 6) })), (t: WasmMainTransport) => t.event(7, 8, bytesOf(5, 6))],
+      ["release", (t: WasmMainTransport) => t.send(Kind.Release, encodeRelease({ handle: 0x0000_0002_0000_0009n })), (t: WasmMainTransport) => t.release(0x0000_0002_0000_0009n)],
+    ] as const) {
+      framed(via.transport);
+      typed(typedHost.transport);
+      const a = via.globals();
+      const b = typedHost.globals();
+      for (const key of ["cancel_last", "credit_total", "event_port", "event_method", "event_len", "release_lo", "release_hi"] as const) {
+        expect(a[key], `${name}: ${key}`).toBe(b[key]);
+      }
+    }
+  });
+
+  it("timerFired completes a call the core is waiting on a foreign timer for, and portReply answers a port call made later", async () => {
+    const { core, transport } = await boot({ adapters: { timer: { set: () => {} } } });
+    const done = core.call(FREE, STUB.TIMER, new Uint8Array(0));
+    transport.timerFired(STUB.TIMER_ID);
+    expect(new DataView((await done).buffer).getUint32(0, true)).toBe(STUB.TIMER_ID);
+  });
+
+  it("throws UndraTransportError('closed') when the core is closed, for every control message", async () => {
+    const { core, transport } = await boot();
+    core.close();
+    for (const call of [
+      () => transport.observe(1n, 0, true),
+      () => transport.release(1n),
+      () => transport.cancel(1),
+      () => transport.streamCredit(1, 1),
+      () => transport.event(1, 2, new Uint8Array(0)),
+      () => transport.timerFired(1),
+      () => transport.portReply(new Uint8Array(5)),
+      () => transport.sendCall(new Uint8Array(17)),
+    ]) {
+      expect(call).toThrow(UndraTransportError);
+    }
+  });
+
+  it("has no send(kind, payload): that is WasmMainTransport's, which UndraCore.load does not use", async () => {
+    const { WasmHost } = await import("../src/transport/wasm-main.js");
+    expect((WasmHost.prototype as unknown as { send?: unknown }).send).toBeUndefined();
+    expect(typeof WasmMainTransport.prototype.send).toBe("function");
+    expect(Object.getPrototypeOf(WasmMainTransport.prototype)).toBe(WasmHost.prototype);
   });
 });
 

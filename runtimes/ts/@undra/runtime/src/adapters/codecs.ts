@@ -30,6 +30,7 @@ import {
   type WsOpened,
 } from "./types.js";
 import { writeIndex } from "./events.js";
+import { msg } from "../messages.js";
 
 /*
  * Hand-written codecs of the SPEC section 8 records, enums and errors. The
@@ -108,7 +109,7 @@ export function writeHttpResponse(w: UndraWriter, v: HttpResponse): void {
 /** Writes a typed error as its variant's index in `kinds`, then its `value` when it has one. */
 function writeVariant(w: UndraWriter, kinds: readonly string[], v: { readonly kind: string }, name: string): void {
   const index = kinds.indexOf(v.kind);
-  if (index < 0) throw new TypeError(`unknown ${name} variant: ${v.kind}`);
+  if (index < 0) throw new TypeError(msg(1, name, v.kind));
   w.writeU16(index);
   if ("value" in v) w.writeStr((v as { value: string }).value);
 }
@@ -330,7 +331,7 @@ export const WsMessageCodec: Codec<WsMessage> = {
         w.writeBytes(v.value);
         break;
       default:
-        throw new TypeError(`unknown WsMessage variant: ${String((v as { kind: unknown }).kind)}`);
+        throw new TypeError(msg(2, String((v as { kind: unknown }).kind)));
     }
   },
   decode(r) {
@@ -365,7 +366,7 @@ export const WsErrorCodec: Codec<WsError> = {
       w.writeU16(v.code);
       w.writeStr(v.reason);
     } else {
-      throw new TypeError(`unknown WsError variant: ${v.kind}`);
+      throw new TypeError(msg(3, v.kind));
     }
   },
   decode(r) {
@@ -422,7 +423,7 @@ export const SseErrorCodec: Codec<SseError> = {
     } else if (v instanceof SseError.Ended) {
       w.writeU16(3);
     } else {
-      throw new TypeError(`unknown SseError variant: ${v.kind}`);
+      throw new TypeError(msg(4, v.kind));
     }
   },
   decode(r) {
@@ -493,7 +494,7 @@ export const DbValueCodec: Codec<DbValue> = {
         w.writeBytes(v.value);
         break;
       default:
-        throw new TypeError(`unknown DbValue variant: ${String((v as { kind: unknown }).kind)}`);
+        throw new TypeError(msg(5, String((v as { kind: unknown }).kind)));
     }
   },
   decode(r) {
@@ -571,7 +572,7 @@ export const DbErrorCodec: Codec<DbError> = {
       w.writeU32(v.version);
       w.writeStr(v.message_);
     } else {
-      throw new TypeError(`unknown DbError variant: ${v.kind}`);
+      throw new TypeError(msg(6, v.kind));
     }
   },
   decode(r) {

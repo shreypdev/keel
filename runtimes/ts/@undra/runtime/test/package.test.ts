@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 
 const root = new URL("../", import.meta.url);
 const pkg = JSON.parse(readFileSync(new URL("package.json", root), "utf8")) as {
-  exports: Record<string, string | { types: string; default: string }>;
+  exports: Record<string, string | { types: string; development: string; "react-native": string; default: string }>;
   peerDependencies: Record<string, string>;
   peerDependenciesMeta: Record<string, { optional: boolean }>;
   dependencies?: Record<string, string>;
@@ -16,17 +16,24 @@ const pkg = JSON.parse(readFileSync(new URL("package.json", root), "utf8")) as {
 
 describe("package exports", () => {
   it("lists the subpaths of SPEC section 13 that exist", () => {
-    expect(Object.keys(pkg.exports).sort()).toEqual([".", "./db", "./db-worker", "./package.json", "./react", "./realtime", "./solid", "./svelte", "./vite", "./vue", "./wire", "./worker"]);
+    expect(Object.keys(pkg.exports).sort()).toEqual([".", "./db", "./db-worker", "./mangle-cache.json", "./package.json", "./react", "./realtime", "./solid", "./svelte", "./vite", "./vue", "./wire", "./worker"]);
   });
 
-  it("points every subpath at the compiled form of a source file that exists", () => {
+  it("points every subpath at the compiled form of a source file that exists, in both flavours (ADR-057 D2)", () => {
     for (const [subpath, target] of Object.entries(pkg.exports)) {
       if (typeof target === "string") continue;
       const source = subpath === "." ? "src/index.ts" : subpath === "./wire" ? "src/wire/index.ts" : `src/${subpath.slice(2)}.ts`;
       expect(existsSync(new URL(source, root)), `${subpath}: ${source}`).toBe(true);
       const dist = source.replace(/^src\//, "./dist/").replace(/\.ts$/, "");
-      expect(target, subpath).toEqual({ types: `${dist}.d.ts`, default: `${dist}.js` });
+      const dev = source.replace(/^src\//, "./dist/dev/").replace(/\.ts$/, "");
+      // `types` first (one declaration for both flavours), the readable build for `development` and `react-native`, the production build otherwise.
+      expect(Object.keys(target), subpath).toEqual(["types", "development", "react-native", "default"]);
+      expect(target, subpath).toEqual({ types: `${dist}.d.ts`, development: `${dev}.js`, "react-native": `${dev}.js`, default: `${dist}.js` });
     }
+  });
+
+  it("ships the production build's rename table: the names a tool that needs an internal asks for (ADR-057)", () => {
+    expect(pkg.exports["./mangle-cache.json"]).toBe("./dist/mangle-cache.json");
   });
 
   it("declares the UI frameworks and wa-sqlite as optional peers and has no runtime dependency", () => {

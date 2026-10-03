@@ -1,8 +1,14 @@
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { againstDist } from "../../../ts/@undra/runtime/scripts/test-dist-plugin.mjs";
 import ScenarioReporter from "../../../../contract-tests/ts/src/reporter.js";
 
 const at = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
+
+// UNDRA_TS_DIST=<runtime>/dist/index.js runs the scenarios against the runtime's production build (ADR-057) instead of its sources.
+const built = process.env.UNDRA_TS_DIST === undefined ? undefined : dirname(process.env.UNDRA_TS_DIST);
+const runtime = (module: string): string => (built === undefined ? at(`../../../ts/@undra/runtime/src/${module}.ts`) : join(built, `${module}.js`));
 
 /*
  * The contract scenarios (contract-tests/scenarios.md) through @undra/react-native's JavaScript:
@@ -14,12 +20,13 @@ const at = (path: string): string => fileURLToPath(new URL(path, import.meta.url
  *   npm run test:contract        # prints SCENARIO Sxx lines; contract-tests/check.sh rn grades them
  */
 export default defineConfig({
+  plugins: built === undefined ? [] : [againstDist(built)],
   resolve: {
     alias: [
       { find: /^\.\.\/src\/harness\.js$/, replacement: at("./test/contract/harness.ts") },
       { find: /^\.\.\/src\/wasm-exports\.js$/, replacement: at("./test/contract/wasm-exports.ts") },
-      { find: "@undra/runtime/realtime", replacement: at("../../../ts/@undra/runtime/src/realtime.ts") },
-      { find: "@undra/runtime", replacement: at("../../../ts/@undra/runtime/src/index.ts") },
+      { find: "@undra/runtime/realtime", replacement: runtime("realtime") },
+      { find: "@undra/runtime", replacement: runtime("index") },
       { find: "@playground/core", replacement: at("../../../../examples/playground/generated/ts/src/index.ts") },
       // S27 step 8: the playground core under the two namespaces of S26 (ADR-044), loaded in wasm-main beside the harness's.
       { find: "@two-cores/a", replacement: at("../../../../examples/two-cores/a/generated/ts/src/index.ts") },
