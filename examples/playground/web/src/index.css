@@ -1,51 +1,59 @@
+/*
+ * The playground wears the site's palette and type (site/assets/base.css: one orange accent, warm neutrals,
+ * Geist and Geist Mono), light and dark, so moving from the site into /playground/ is one product.
+ * Dark follows `prefers-color-scheme` unless `data-theme` forces one (the `?theme=` URL parameter, the site's
+ * own stored choice, or the embedding page's message).
+ */
 :root {
   color-scheme: light dark;
-  --bg: #f5f6f8;
+  --bg: #f7f6f2;
   --surface: #ffffff;
-  --text: #16181d;
-  --muted: #667085;
-  --border: #d9dde4;
-  --accent: #2f6fed;
+  --text: #141413;
+  --muted: #56564f;
+  --border: #cbc8bf;
+  --accent: #c2410c;
   --accent-text: #ffffff;
-  --accent-soft: #e6eefe;
-  --danger: #c0392b;
-  --ok: #1f8a4c;
-  --flash: #fff3b0;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --accent-soft: rgba(194, 65, 12, 0.08);
+  --danger: #b42318;
+  --ok: #4d7c0f;
+  --flash: #f9dfcf;
+  --font-body: "Geist", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-body);
   line-height: 1.45;
+  accent-color: var(--accent);
 }
 
-/* The dark palette: by the system preference unless `data-theme="light"` (the `?theme=` URL
-   parameter, or the embedding page's message) forces light, and always for `data-theme="dark"`. */
+/* The dark palette: by the system preference unless `data-theme="light"` forces light, and always for `data-theme="dark"`. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #101216;
-    --surface: #181b21;
-    --text: #e8eaef;
-    --muted: #98a1b2;
-    --border: #2b303a;
-    --accent: #6b9bff;
-    --accent-text: #0b1020;
-    --accent-soft: #1f2a44;
+    --bg: #0a0a0a;
+    --surface: #111111;
+    --text: #ededea;
+    --muted: #a4a49e;
+    --border: #353535;
+    --accent: #ff6a2a;
+    --accent-text: #0a0a0a;
+    --accent-soft: rgba(255, 106, 42, 0.11);
     --danger: #ff7b6b;
-    --ok: #55c58a;
-    --flash: #4a4317;
+    --ok: #c4d99a;
+    --flash: #3b2316;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #101216;
-  --surface: #181b21;
-  --text: #e8eaef;
-  --muted: #98a1b2;
-  --border: #2b303a;
-  --accent: #6b9bff;
-  --accent-text: #0b1020;
-  --accent-soft: #1f2a44;
+  --bg: #0a0a0a;
+  --surface: #111111;
+  --text: #ededea;
+  --muted: #a4a49e;
+  --border: #353535;
+  --accent: #ff6a2a;
+  --accent-text: #0a0a0a;
+  --accent-soft: rgba(255, 106, 42, 0.11);
   --danger: #ff7b6b;
-  --ok: #55c58a;
-  --flash: #4a4317;
+  --ok: #c4d99a;
+  --flash: #3b2316;
 }
 
 :root[data-theme="light"] {
@@ -60,6 +68,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
+  -webkit-font-smoothing: antialiased;
 }
 
 main {
@@ -72,6 +81,7 @@ main {
  * Embedded (`?embed=1`, `data-embed` on <html>): one view inside the landing page's iframe. The
  * page shows through (a transparent body and panel), so text must read on the site's own canvas:
  * pass `theme=` (or post an `undra-theme` message) to match it, otherwise the system preference decides.
+ * The palette is the same as everywhere else.
  */
 :root[data-embed] body {
   background: transparent;
@@ -92,40 +102,6 @@ main {
 
 :root[data-embed] .viewport {
   background: transparent;
-}
-
-/* The embedded page wears the site's own palette (one orange accent, warm neutrals), light and dark. */
-:root[data-embed] {
-  --text: #141413;
-  --muted: #56564f;
-  --border: #cbc8bf;
-  --accent: #c2410c;
-  --accent-text: #ffffff;
-  --accent-soft: rgba(194, 65, 12, 0.08);
-  --flash: #f3e3a3;
-  accent-color: var(--accent);
-}
-
-:root[data-embed][data-theme="dark"] {
-  --text: #ededea;
-  --muted: #8a8a84;
-  --border: #353535;
-  --accent: #ff6a2a;
-  --accent-text: #0a0a0a;
-  --accent-soft: rgba(255, 106, 42, 0.11);
-  --flash: #4a4317;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root[data-embed]:not([data-theme="light"]) {
-    --text: #ededea;
-    --muted: #8a8a84;
-    --border: #353535;
-    --accent: #ff6a2a;
-    --accent-text: #0a0a0a;
-    --accent-soft: rgba(255, 106, 42, 0.11);
-    --flash: #4a4317;
-  }
 }
 
 h1 {
@@ -157,7 +133,7 @@ h2 {
 }
 
 code {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.9em;
 }
 
@@ -659,7 +635,7 @@ h3 {
   list-style: none;
   padding: 0;
   margin: 0.5rem 0;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
 }
 
