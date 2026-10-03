@@ -46,4 +46,4 @@ module every machine builds. The guide (`docs/bazel.html`) says how to add it.
   `cargo test` here) stand the checkout in for the registry with `[patch.crates-io]`.
 * `.bazelrc` sets `DO_NOT_TRACK=1`: `aspect_rules_js` and `aspect_rules_ts` depend on a telemetry module that reports the rulesets a
   build uses to Aspect.
-* `MODULE.bazel.lock` is committed and CI runs with `--lockfile_mode=error`.
+* `MODULE.bazel.lock` is committed. `.bazelversion` is a link to `bazel/.bazelversion`: one pin for the rules and the example.

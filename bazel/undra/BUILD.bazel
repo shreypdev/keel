@@ -2,10 +2,59 @@ load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 
 package(default_visibility = ["//visibility:public"])
 
-exports_files(["defs.bzl", "cli.bzl", "core.bzl", "bindings.bzl"])
+exports_files([
+    "android.bzl",
+    "bindings.bzl",
+    "cli.bzl",
+    "core.bzl",
+    "defs.bzl",
+    "kotlin.bzl",
+    "swift.bzl",
+    "ts.bzl",
+])
 
 bzl_library(
     name = "cli",
     srcs = ["cli.bzl"],
     deps = ["//undra/private:actions"],
+)
+
+bzl_library(
+    name = "core",
+    srcs = ["core.bzl"],
+    deps = ["//undra/private:actions"],
+)
+
+bzl_library(
+    name = "bindings",
+    srcs = ["bindings.bzl"],
+    deps = ["//undra/private:actions"],
+)
+
+bzl_library(
+    name = "kotlin",
+    srcs = ["kotlin.bzl"],
+)
+
+bzl_library(
+    name = "ts",
+    srcs = ["ts.bzl"],
+)
+
+bzl_library(
+    name = "swift",
+    srcs = ["swift.bzl"],
+)
+
+bzl_library(
+    name = "defs",
+    srcs = ["defs.bzl"],
+    deps = [
+        ":bindings",
+        ":cli",
+        ":core",
+        ":kotlin",
+        ":swift",
+        ":ts",
+    ],
 )

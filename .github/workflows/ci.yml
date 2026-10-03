@@ -458,8 +458,10 @@ jobs:
   # ADR-061: the Bazel rules (bazel/) and their example workspace (examples/bazel). `bazel test //...` builds the to-do core for the
   # host and the web with the pinned Rust 1.99.0 that Bazel fetches (rules_rust, by checksum), generates the bindings from the host
   # library, compiles the Kotlin and TypeScript consumers and runs them against the real core (JNI, Node), and runs ktlint over the
-  # generated Kotlin with and without the exclusions `undra bindgen` writes. Bazel is pinned by .bazelversion (Bazelisk), the rulesets
-  # by MODULE.bazel and its lock file (--lockfile_mode=error: a lock file that is behind fails here, not on the next machine).
+  # generated Kotlin with and without the exclusions `undra bindgen` writes. Bazel is pinned by .bazelversion (Bazelisk; the example's
+  # is a link to bazel/'s), the rulesets by MODULE.bazel, whose lock file is committed. The lock is not run with
+  # --lockfile_mode=error here: it records what the machine that wrote it resolved, per OS, and a Linux runner would fail on every
+  # entry a macOS developer made.
   bazel-example:
     name: Bazel example
     runs-on: ubuntu-latest
@@ -485,10 +487,10 @@ jobs:
           restore-keys: bazel-repository-${{ runner.os }}-
       - name: The rules' own tests (the Cargo.lock reader)
         working-directory: bazel
-        run: bazel test //tests/... --lockfile_mode=error --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
+        run: bazel test //tests/... --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
       - name: bazel test //... (host and web cores, bindings, Kotlin and TypeScript consumers, ktlint)
         working-directory: examples/bazel
-        run: bazel test //... --lockfile_mode=error --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
+        run: bazel test //... --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
 
   # The same example on macOS, where rules_swift and the iOS core have Xcode: the Swift consumer runs the core in process, and the
   # XCFramework (device and simulator slices) builds in a Bazel action.
@@ -507,8 +509,8 @@ jobs:
       - name: bazel test //... and the iOS core
         working-directory: examples/bazel
         run: |
-          bazel test //... --lockfile_mode=error --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
-          bazel build //:mobile_ios --lockfile_mode=error --repository_cache="$HOME/.cache/bazel-repository"
+          bazel test //... --repository_cache="$HOME/.cache/bazel-repository" --test_output=errors
+          bazel build //:mobile_ios --repository_cache="$HOME/.cache/bazel-repository"
 
   playground-web:
     # The playground's web app and its stories page (src/stories, rendered by stories.html with Vite alone; the modules are Component Story Format
