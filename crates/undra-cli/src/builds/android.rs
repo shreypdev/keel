@@ -116,13 +116,13 @@ pub fn build(
             "--features",
             "jni",
         ]);
+    // A release build is the size-tuned mobile profile (ADR-052, "native size gates"); a debug
+    // build is cargo's dev profile.
+    let profile = Profile::mobile(release);
+    cmd.args(profile.args());
     if release {
-        cmd.arg("--release");
         // The builder's directories stay out of what ships (ADR-052), as in the other builds.
-        match session
-            .cargo()
-            .path_remap(Profile::Release, &session.remap_roots())
-        {
+        match session.cargo().path_remap(profile, &session.remap_roots()) {
             Some(PathRemap::Config(arg)) => {
                 cmd.arg("--config").arg(arg);
             }
@@ -132,14 +132,7 @@ pub fn build(
             None => {}
         }
     }
-    for config in symbols.cargo_config(
-        if release {
-            Profile::Release
-        } else {
-            Profile::Dev
-        },
-        false,
-    ) {
+    for config in symbols.cargo_config(profile, false) {
         cmd.arg("--config").arg(config);
     }
     // The image's identity (what a panic report names it by): a GNU build id, in the unstripped
@@ -370,9 +363,10 @@ pub const PLAY_ARCHIVE: &str = "native-debug-symbols.zip";
 /// The size of the release library an earlier `undra build --platform android --release` left in
 /// Cargo's target directory for `abi`, if there is one (`shim` is the shim's library name).
 fn earlier_release_size(target_dir: &Path, abi: &str, shim: &str) -> Option<u64> {
-    let library = target_dir
-        .join(triple_of(abi))
-        .join(format!("release/lib{shim}.so"));
+    let library = target_dir.join(triple_of(abi)).join(format!(
+        "{}/lib{shim}.so",
+        Profile::ReleaseMobile.dir_name()
+    ));
     std::fs::metadata(library).ok().map(|m| m.len())
 }
 
@@ -452,7 +446,7 @@ mod tests {
 
         // With the release library of an earlier build at hand: the real numbers.
         let target = crate::fsutil::unique_temp_dir("android-hint");
-        let release = target.join("aarch64-linux-android/release");
+        let release = target.join("aarch64-linux-android/release-mobile");
         std::fs::create_dir_all(&release).unwrap();
         std::fs::write(release.join("libshim.so"), vec![0_u8; 1_500_000]).unwrap();
         let known = debug_size_hint(&target, "shim", 42_400_000, "arm64-v8a");

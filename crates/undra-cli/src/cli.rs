@@ -117,7 +117,9 @@ Every name comes from the core's namespace (`[core] namespace` in undra.toml, de
 case): a core exports one symbol, `<namespace>_undra_api`, so several cores can sit in one app (ADR-044).\n\n\
 The library is the core plus the Undra C ABI, built from a small crate generated below `target/undra/` \
 of Cargo's target directory (the workspace's, when the core is a member of one; you never write the crate). \
-Sizes are printed at the end next to the budgets of the design. A debug Android core is tens of megabytes per \
+Sizes are printed at the end next to the budgets of the design. A release build for iOS or Android uses the \
+`release-mobile` profile of that crate (`release` with `opt-level = \"s\"`: smaller, and panics still unwind); the web \
+build has `release-wasm`, the host `release`. A debug Android core is tens of megabytes per \
 ABI: package with `undra build --platform android --release`.",
         after_long_help = "\
 EXAMPLES
@@ -375,7 +377,8 @@ pub struct BuildArgs {
     pub platform: Option<String>,
 
     /// Optimized build (LTO, one codegen unit) instead of a debug build. The web build is always
-    /// optimized.
+    /// optimized. iOS and Android release builds are tuned for size (the `release-mobile` profile:
+    /// `opt-level = "s"`, and a panic still unwinds so the core can contain it).
     #[arg(long)]
     pub release: bool,
 
