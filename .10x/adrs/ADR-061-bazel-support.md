@@ -132,7 +132,7 @@ and the bindings, need none of them.
 `wasm-opt` is the other input that moves the bytes (its output size changes between releases; bench.yml pins version_133). The
 extension defines `@undra_binaryen`, that release for the machine Bazel runs on, by checksum, and `undra_core(wasm_opt =
 "@undra_binaryen//:wasm_opt")` puts it on the action's `PATH`. Without it the CLI says it did not run (the module is 16% larger,
-123.6 KB gzipped against 118.0), so a build that omits it is visibly not the gated one. The example's web core is 118.0 KB gzipped of the
+123.6 KB gzipped against 118.0), so a build that omits it is visibly not the gated one. The example's web core was 118.0 KB gzipped (112.7 KB once main's `schema_json` landed, `46804a9`) of the
 120 KB budget.
 
 **Alternatives for the build itself** (all rejected):

@@ -19,7 +19,7 @@ examples/bazel/
 ```sh
 cd examples/bazel
 bazel test //...                      # needs Bazelisk; .bazelversion pins Bazel
-bazel build //:core_web               # bazel-bin/core_web/hello_core.wasm: 118 KB gzipped of the 120 KB budget
+bazel build //:core_web               # bazel-bin/core_web/hello_core.wasm: 112.7 KB gzipped (2026-10-02), budget 120 KB
 bazel build //:bindings               # the Swift, Kotlin and TypeScript trees, as outputs
 bazel build //:mobile_ios             # macOS: the XCFramework (manual target)
 bazel build //android:hello --config=android   # the bindings as an Android library (ANDROID_HOME)
