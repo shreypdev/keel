@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Tests scripts/bump-version.sh on a copy of this repository's tracked files with a throwaway version:
+# every file it owns moves (the workspace, Cargo.lock, the three npm packages and their locks, every
+# "@undra/runtime" range), --check agrees, a second run has nothing to do, the fixtures of older
+# releases are left, and a version that is not semver writes nothing. Needs git and cargo (Cargo.lock
+# is refreshed offline, so the workspace's dependencies must be in Cargo's cache, as after a build).
+#
+#   bash scripts/bump-version.test.sh
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/bump-version-test.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+copy="$tmp/repo"
+mkdir -p "$copy"
+
+fail() {
+  printf 'bump-version.test.sh: FAIL: %s\n' "$*" >&2
+  exit 1
+}
+pass() { printf 'ok - %s\n' "$*"; }
+
+# The tracked files as they are in the working tree (uncommitted edits included).
+(cd "$repo" && git ls-files -z | while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done) |
+  (cd "$repo" && tar --null -T - -cf -) | tar -xf - -C "$copy"
+git -C "$copy" init -q
+git -C "$copy" -c core.autocrlf=false add -A
+git -C "$copy" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -qm base
+
+old=$(awk '/^\[/ { s = $0 } s == "[workspace.package]" && /^version = "/ { gsub(/^version = "|"$/, ""); print; exit }' "$copy/Cargo.toml")
+new=9.8.7-test.1
+bump() { (cd "$copy" && bash scripts/bump-version.sh "$@"); }
+
+bump --check >/dev/null || fail "--check fails on the tree as it is"
+pass "--check agrees with the tree ($old)"
+
+if out=$(bump 1.0 2>&1); then fail "a two-part version was accepted"; fi
+case "$out" in *"not a semantic version"*) ;; *) fail "the refusal does not say why: $out" ;; esac
+[ -z "$(git -C "$copy" status --porcelain)" ] || fail "a refused version wrote something"
+pass "a version that is not semver is refused and writes nothing"
+
+out=$(bump "$new") || fail "bump $new failed: $out"
+for f in Cargo.toml Cargo.lock \
+  runtimes/ts/@undra/runtime/package.json runtimes/ts/@undra/testkit/package.json \
+  runtimes/rn/@undra/react-native/package.json; do
+  case "$out" in *"  $f"*) ;; *) fail "$f is not in the list of changed files:\n$out" ;; esac
+done
+pass "it lists what it changed"
+
+grep -q "^version = \"$new\"" "$copy/Cargo.toml" || fail "Cargo.toml"
+awk -v v="$new" '/^name = "undra-cli"$/ { getline; if ($0 == "version = \"" v "\"") found = 1 } END { exit !found }' "$copy/Cargo.lock" ||
+  fail "Cargo.lock does not record undra-cli at $new"
+for dir in runtimes/ts/@undra/runtime runtimes/ts/@undra/testkit runtimes/rn/@undra/react-native; do
+  grep -q "^  \"version\": \"$new\"" "$copy/$dir/package.json" || fail "$dir/package.json"
+  if [ -f "$copy/$dir/package-lock.json" ]; then
+    [ "$(grep -c "\"version\": \"$new\"" "$copy/$dir/package-lock.json")" -ge 2 ] || fail "$dir/package-lock.json"
+  fi
+done
+for dir in runtimes/ts/@undra/testkit runtimes/rn/@undra/react-native; do
+  grep -q "\"@undra/runtime\": \"^$new\"" "$copy/$dir/package.json" || fail "$dir/package.json's peer range"
+done
+stale=$(cd "$copy" && git ls-files -- '*package.json' '*package-lock.json' | grep -v '/tests/fixtures/' |
+  xargs grep -l "\"@undra/runtime\": \"^$old\"" || true)
+[ -z "$stale" ] || fail "still naming ^$old: $stale"
+pass "the workspace, Cargo.lock, the three packages, their locks and every runtime range say $new"
+
+fixtures=$(git -C "$copy" status --porcelain -- crates/undra-cli/tests/fixtures)
+[ -z "$fixtures" ] || fail "the fixtures of older releases changed: $fixtures"
+pass "the fixtures of older releases are left"
+
+bump --check "$new" >/dev/null || fail "--check $new fails after the bump"
+if bump --check "$old" >/dev/null 2>&1; then fail "--check $old passes after the bump"; fi
+out=$(bump "$new")
+case "$out" in "nothing to change"*) ;; *) fail "a second run changed something: $out" ;; esac
+pass "--check agrees, and a second run has nothing to do"
+
+# Outside a git checkout (an unpacked source archive) the manifests are found by walking the tree.
+rm -rf "$copy/.git"
+bump --check "$new" >/dev/null || fail "--check without git"
+pass "it works without git"
+
+echo "bump-version.sh: all checks passed"

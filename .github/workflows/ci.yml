@@ -59,6 +59,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      - name: The release version script (every file it owns moves, on a copy, with a throwaway version; ADR-063)
+        run: bash scripts/bump-version.test.sh
       # The cookbook (examples/cookbook) and Fieldbook (examples/fieldbook): their bindings are what the
       # core generates, the TypeScript lines the cookbook pages show compile, and Fieldbook's web app runs
       # its generated bindings against the real wasm core (npm test) and bundles (npm run build).
