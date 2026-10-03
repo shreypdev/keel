@@ -54,6 +54,7 @@ def _runtime_builds():
     return {
         "kotlin": Label("//undra/private/runtimes:kotlin.BUILD"),
         "ts": Label("//undra/private/runtimes:ts.BUILD"),
+        "swift": Label("//undra/private/runtimes:swift.BUILD"),
     }
 
 undra = module_extension(

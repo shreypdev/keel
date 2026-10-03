@@ -40,6 +40,7 @@ OUT_KOTLIN=""
 OUT_TS=""
 OUT_KOTLIN_SRCJAR=""
 ZIPPER=""
+SWIFT_FILES=""
 BINDGEN_PLATFORMS=""
 BINDGEN_DOCS=0
 EXTRA_PATH=""
@@ -71,6 +72,8 @@ while IFS= read -r line || [ -n "$line" ]; do
     out_ts) OUT_TS="$value" ;;
     out_kotlin_srcjar) OUT_KOTLIN_SRCJAR="$value" ;;
     zipper) ZIPPER="$value" ;;
+    swift_file) SWIFT_FILES="$SWIFT_FILES
+$value" ;;
     bindgen_platforms) BINDGEN_PLATFORMS="$value" ;;
     bindgen_docs) BINDGEN_DOCS="$value" ;;
     path) EXTRA_PATH="$EXTRA_PATH:$EXECROOT/$value" ;;
@@ -84,8 +87,43 @@ done < "$PARAMS"
 die() { echo "undra bazel: $*" >&2; exit 1; }
 abs() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$EXECROOT" "$1" ;; esac; }
 
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/undra-bazel.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT HUP INT TERM
+# --- where the build happens --------------------------------------------------------------------------------------
+# Cargo hashes a path dependency that lies outside the workspace (the core, the Undra crates) by its absolute path into every
+# symbol's name, and `wasm-opt` and the linker order what they emit by those names: a build in a directory with another name is
+# another file, a few bytes different (measured: 274.6 to 275.1 KB for one core). So the directory is named by what is built, not
+# by when: the same inputs are built in the same place on every machine and give the same bytes. A lock keeps two builds of
+# the same inputs (two Bazel servers, one machine) from sharing it; on Linux the sandbox's /tmp is private and it never waits.
+digest_tree() { # <directory>
+  (cd "$1" && find . \( -name target -o -name .git -o -name node_modules -o -name '.cargo' -o -name 'bazel-*' \) -prune -o -type f -print |
+    LC_ALL=C sort | while IFS= read -r f; do printf '%s\n' "$f"; cat "$f"; done)
+}
+sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; }
+DIGEST="$({
+  printf 'mode=%s platform=%s release=%s symbols=%s project=%s\n' "$MODE" "$PLATFORM" "$RELEASE" "$SYMBOLS" "$PROJECT"
+  "$(abs "$RUSTC")" --version 2>/dev/null || true
+  [ -n "$UNDRA_ROOT" ] && digest_tree "$(abs "$UNDRA_ROOT")"
+  [ -n "$APP_ROOT" ] && digest_tree "$(abs "$APP_ROOT")"
+  [ -n "$VENDOR_MANIFEST" ] && cat "$(abs "$VENDOR_MANIFEST")"
+  [ -n "$LIBRARY" ] && cat "$(abs "$LIBRARY")"
+  true
+} | sha | cut -c1-16)"
+STAGE_BASE=/tmp/undra-bazel
+mkdir -p "$STAGE_BASE" 2>/dev/null || { STAGE_BASE="${TMPDIR:-/tmp}/undra-bazel"; mkdir -p "$STAGE_BASE"; }
+WORK="$STAGE_BASE/$DIGEST"
+LOCK="$WORK.lock"
+waited=0
+until mkdir "$LOCK" 2>/dev/null; do
+  owner="$(cat "$LOCK/pid" 2>/dev/null || true)"
+  if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then rm -rf "$LOCK"; continue; fi # its owner is gone
+  if [ -z "$owner" ] && [ -n "$(find "$LOCK" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then rm -rf "$LOCK"; continue; fi
+  waited=$((waited + 1))
+  [ "$waited" -le 1800 ] || die "waited 30 minutes for $LOCK, held by '$owner'"
+  sleep 1
+done
+echo "$$" > "$LOCK/pid"
+trap 'rm -rf "$WORK" "$LOCK"' EXIT HUP INT TERM
+rm -rf "$WORK"
+mkdir -p "$WORK"
 
 # --- a private copy of the sources -------------------------------------------------------------------------------
 # `tar -h` (bsdtar and GNU tar both spell it so) follows symlinks, so what lands in $WORK is real files: a build that writes
@@ -270,6 +308,24 @@ case "$MODE" in
       mkdir -p "$(abs "$dest")"
       cp -R "$GEN/$language"/. "$(abs "$dest")/"
     done
+    if [ -n "$SWIFT_FILES" ]; then
+      # The Swift files `rules_swift` compiles, one declared output each. The set depends on the schema, so it is checked
+      # both ways: a file that is listed and not generated, and one that is generated and not listed.
+      LISTED="$WORK/swift.listed"
+      ACTUAL="$WORK/swift.actual"
+      printf '%s\n' "$SWIFT_FILES" | sed -e '/^$/d' -e 's#|.*##' | LC_ALL=C sort > "$LISTED"
+      (cd "$GEN/swift" && find Sources -type f \( -name '*.swift' -o -name '*.c' -o -name '*.h' -o -name module.modulemap \) | LC_ALL=C sort) > "$ACTUAL"
+      if ! cmp -s "$LISTED" "$ACTUAL"; then
+        echo "undra bazel: the Swift files in swift_files are not the ones undra bindgen generated for this core." >&2
+        echo "undra bazel: set swift_files to:" >&2
+        sed -e 's#^#    "#' -e 's#$#",#' "$ACTUAL" >&2
+        exit 1
+      fi
+      printf '%s\n' "$SWIFT_FILES" | sed -e '/^$/d' | while IFS='|' read -r rel dest; do
+        mkdir -p "$(dirname "$(abs "$dest")")"
+        cp "$GEN/swift/$rel" "$(abs "$dest")"
+      done
+    fi
     if [ -n "$OUT_KOTLIN_SRCJAR" ]; then
       # The Kotlin sources as a source jar (what rules_kotlin takes), entries named by their package path.
       SRC="$GEN/kotlin/src/main/kotlin"

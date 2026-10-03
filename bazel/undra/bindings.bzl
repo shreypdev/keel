@@ -35,6 +35,31 @@ def _undra_bindings_impl(ctx):
         outputs.append(tree)
         groups[language] = depset([tree])
     tools = [ctx.executable.cli]
+    if ctx.attr.swift_files:
+        if "swift" not in languages:
+            fail("{}: swift_files lists Swift files, but `swift` is not among the languages".format(ctx.label))
+        swift_groups = {
+            "swift_sources": [],
+            "swift_ffi_sources": [],
+            "swift_ffi_headers": [],
+            "swift_ffi_modulemap": [],
+        }
+        for path in ctx.attr.swift_files:
+            declared = ctx.actions.declare_file("{}_swift_files/{}".format(ctx.label.name, path))
+            lines.append("swift_file={}|{}".format(path, declared.path))
+            outputs.append(declared)
+            if path.endswith(".swift"):
+                swift_groups["swift_sources"].append(declared)
+            elif path.endswith(".c"):
+                swift_groups["swift_ffi_sources"].append(declared)
+            elif path.endswith(".h"):
+                swift_groups["swift_ffi_headers"].append(declared)
+            elif path.endswith("module.modulemap"):
+                swift_groups["swift_ffi_modulemap"].append(declared)
+            else:
+                fail("{}: swift_files lists {}, which is none of .swift, .c, .h and module.modulemap".format(ctx.label, path))
+        for group, files in swift_groups.items():
+            groups[group] = depset(files)
     if "kotlin" in languages:
         srcjar = ctx.actions.declare_file(ctx.label.name + "_kotlin.srcjar")
         lines += [
@@ -82,6 +107,11 @@ _undra_bindings = rule(
             doc = "Keep the core's doc comments in the bindings (`undra bindgen --docs`).",
             default = False,
         ),
+        "swift_files": attr.string_list(
+            doc = "The files of the Swift tree to declare as outputs, by their path in it (`Sources/HelloCore/Generated/Core.swift`, " +
+                  "the C source, header and module.modulemap of `Sources/<Ns>CoreFFI`): `rules_swift` compiles files, not a directory. " +
+                  "The set depends on the schema; the build fails, naming the actual list, when this one differs.",
+        ),
         "cli": attr.label(default = Label("@undra//:cli"), executable = True, cfg = "exec"),
         "_runner": attr.label(
             default = Label("//undra/private:run.sh"),
@@ -101,7 +131,7 @@ that language (the Swift package, the Gradle module, the npm package), and, with
 (the output group `kotlin_srcjar`). Nothing is committed and nothing can be stale: the bindings are a function of the core library.""",
 )
 
-def undra_bindings(name, core, config = "undra.toml", languages = ["swift", "kotlin", "ts"], docs = False, **kwargs):
+def undra_bindings(name, core, config = "undra.toml", languages = ["swift", "kotlin", "ts"], docs = False, swift_files = [], **kwargs):
     """Generates the bindings of an Undra core (ADR-061).
 
     Outputs: one tree artifact per language, `<name>_swift`, `<name>_kotlin` and `<name>_ts`, each the directory `undra bindgen`
@@ -114,6 +144,7 @@ def undra_bindings(name, core, config = "undra.toml", languages = ["swift", "kot
         config: the project's undra.toml.
         languages: any of `swift`, `kotlin`, `ts`.
         docs: keep the core's doc comments in the bindings.
+        swift_files: the files of the Swift tree `undra_swift_library` compiles (see the rule); empty when no Swift library is built.
         **kwargs: `visibility`, `tags`.
     """
     _undra_bindings(
@@ -122,5 +153,6 @@ def undra_bindings(name, core, config = "undra.toml", languages = ["swift", "kot
         config = config,
         languages = languages,
         docs = docs,
+        swift_files = swift_files,
         **kwargs
     )
