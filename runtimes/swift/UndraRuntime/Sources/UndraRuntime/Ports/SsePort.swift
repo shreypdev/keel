@@ -225,6 +225,10 @@ final class SseBinding: DetachableBinding, @unchecked Sendable {
 /// UTF-8 is ``SseError/protocol(_:)``. At the end of the body an event without its blank line is
 /// dropped, as the standard says.
 ///
+/// Lines are split, and the colon, the space and NUL found, on bytes (the standard's code points),
+/// not on `Character`s, which would join a combining mark to the colon before it. Bytes in contiguous
+/// storage (an array, a slice, `Data`) are taken a run at a time between line ends.
+///
 /// ```swift
 /// var parser = SseParser()
 /// let events = try parser.push(Array("id: 1\ndata: hello\n\n".utf8))
@@ -235,11 +239,17 @@ public struct SseParser: Sendable {
     private var afterCR = false
     private var atStart = true
     private var bomBytes: [UInt8] = []
-    private var data = ""
+    /// The event's data so far, as the UTF-8 of the lines' values (each line was checked whole).
+    private var data: [UInt8] = []
     private var hasData = false
     private var eventType = ""
     private var lastEventId = ""
     private var retryMs: UInt32?
+
+    private static let lineFeed: UInt8 = 0x0A
+    private static let carriageReturn: UInt8 = 0x0D
+    private static let colon: UInt8 = 0x3A
+    private static let space: UInt8 = 0x20
 
     /// A parser at the start of a stream. `lastEventId` is the id the request resumed from
     /// (`Last-Event-ID`): events without an `id` field carry it until the stream sets another, as
@@ -264,39 +274,87 @@ public struct SseParser: Sendable {
     /// with the error: a reader that feeds one chunk at a time hands those events over, then the error, as a reader that
     /// feeds one byte at a time does.
     mutating func push<Bytes: Sequence>(_ bytes: Bytes, into events: inout [SseEvent]) throws(SseError) where Bytes.Element == UInt8 {
-        for byte in bytes {
-            if atStart {
-                // The standard skips one BOM (EF BB BF) at the start of the stream.
-                let bom: [UInt8] = [0xEF, 0xBB, 0xBF]
-                if byte == bom[bomBytes.count] {
-                    bomBytes.append(byte)
-                    if bomBytes.count == bom.count {
-                        atStart = false
-                        bomBytes = []
-                    }
-                    continue
-                }
-                atStart = false
-                let partial = bomBytes
-                bomBytes = []
-                for earlier in partial {
-                    try consume(earlier, into: &events)
-                }
+        var failure: SseError?
+        let contiguous: Void? = bytes.withContiguousStorageIfAvailable { (buffer: UnsafeBufferPointer<UInt8>) -> Void in
+            do throws(SseError) {
+                try push(buffer: buffer, into: &events)
+            } catch {
+                failure = error
             }
-            try consume(byte, into: &events)
         }
+        if let failure = failure {
+            throw failure
+        }
+        if contiguous != nil {
+            return
+        }
+        for byte in bytes {
+            try push(byte: byte, into: &events)
+        }
+    }
+
+    /// Bytes in contiguous storage: a run of bytes that are not line ends is appended to the line at once.
+    private mutating func push(buffer: UnsafeBufferPointer<UInt8>, into events: inout [SseEvent]) throws(SseError) {
+        var index = buffer.startIndex
+        let end = buffer.endIndex
+        while index < end && atStart {
+            try push(byte: buffer[index], into: &events)
+            index += 1
+        }
+        while index < end {
+            let byte = buffer[index]
+            if byte == SseParser.lineFeed || byte == SseParser.carriageReturn {
+                try consume(byte, into: &events)
+                index += 1
+                continue
+            }
+            afterCR = false
+            let start = index
+            index += 1
+            while index < end {
+                let next = buffer[index]
+                if next == SseParser.lineFeed || next == SseParser.carriageReturn {
+                    break
+                }
+                index += 1
+            }
+            line.append(contentsOf: UnsafeBufferPointer(rebasing: buffer[start ..< index]))
+        }
+    }
+
+    /// One byte, with the byte order mark check at the start of the stream.
+    private mutating func push(byte: UInt8, into events: inout [SseEvent]) throws(SseError) {
+        if atStart {
+            // The standard skips one BOM (EF BB BF) at the start of the stream.
+            let bom: [UInt8] = [0xEF, 0xBB, 0xBF]
+            if byte == bom[bomBytes.count] {
+                bomBytes.append(byte)
+                if bomBytes.count == bom.count {
+                    atStart = false
+                    bomBytes = []
+                }
+                return
+            }
+            atStart = false
+            let partial = bomBytes
+            bomBytes = []
+            for earlier in partial {
+                try consume(earlier, into: &events)
+            }
+        }
+        try consume(byte, into: &events)
     }
 
     /// One byte after the BOM check.
     private mutating func consume(_ byte: UInt8, into events: inout [SseEvent]) throws(SseError) {
         switch byte {
-        case 0x0A: // LF
+        case SseParser.lineFeed:
             if afterCR {
                 afterCR = false
                 return
             }
             try endLine(into: &events)
-        case 0x0D: // CR
+        case SseParser.carriageReturn:
             afterCR = true
             try endLine(into: &events)
         default:
@@ -305,50 +363,64 @@ public struct SseParser: Sendable {
         }
     }
 
-    /// A complete line.
+    /// A complete line, in `line`; `line` is empty after it (its storage is kept for the next one).
     private mutating func endLine(into events: inout [SseEvent]) throws(SseError) {
-        let bytes = line
-        line = []
-        if bytes.isEmpty {
+        var complete: [UInt8] = []
+        swap(&complete, &line)
+        defer {
+            complete.removeAll(keepingCapacity: true)
+            line = complete
+        }
+        try apply(complete, into: &events)
+    }
+
+    /// What a complete line says.
+    private mutating func apply(_ line: [UInt8], into events: inout [SseEvent]) throws(SseError) {
+        if line.isEmpty {
             dispatch(into: &events)
             return
         }
-        guard let text = SseParser.utf8(bytes) else {
+        guard SseParser.isUTF8(line) else {
             throw SseError.protocol("the event stream is not UTF-8")
         }
-        if text.hasPrefix(":") {
+        if line[0] == SseParser.colon {
             return
         }
-        let field: Substring
-        var value: Substring
-        if let colon = text.firstIndex(of: ":") {
-            field = text[text.startIndex ..< colon]
-            value = text[text.index(after: colon)...]
-            if value.hasPrefix(" ") {
-                value = value.dropFirst()
-            }
-        } else {
-            field = text[...]
-            value = ""
+        let colon = line.firstIndex(of: SseParser.colon)
+        let field = line[..<(colon ?? line.endIndex)]
+        var valueStart = colon.map { $0 + 1 } ?? line.endIndex
+        if valueStart < line.endIndex && line[valueStart] == SseParser.space {
+            valueStart += 1
         }
-        switch field {
-        case "event":
-            eventType = String(value)
-        case "data":
-            data += value
-            data += "\n"
+        let value = line[valueStart...]
+        // The field and the value are split at ASCII bytes of a line that is UTF-8, so each is UTF-8.
+        if field.elementsEqual("data".utf8) {
+            data.append(contentsOf: value)
+            data.append(SseParser.lineFeed)
             hasData = true
-        case "id":
-            if !value.contains("\u{0}") {
-                lastEventId = String(value)
+        } else if field.elementsEqual("event".utf8) {
+            eventType = String(decoding: value, as: UTF8.self)
+        } else if field.elementsEqual("id".utf8) {
+            if !value.contains(0) {
+                lastEventId = String(decoding: value, as: UTF8.self)
             }
-        case "retry":
-            if !value.isEmpty, value.utf8.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }), let ms = UInt32(value) {
+        } else if field.elementsEqual("retry".utf8) {
+            if !value.isEmpty, value.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }), let ms = UInt32(String(decoding: value, as: UTF8.self)) {
                 retryMs = ms
             }
-        default:
-            break
         }
+    }
+
+    /// Whether `bytes` are well-formed UTF-8 (a line of ASCII, the usual one, is told by one pass).
+    static func isUTF8(_ bytes: [UInt8]) -> Bool {
+        var any: UInt8 = 0
+        for byte in bytes {
+            any |= byte
+        }
+        if any < 0x80 {
+            return true
+        }
+        return utf8(bytes) != nil
     }
 
     /// `bytes` as a string, or `nil` when they are not well-formed UTF-8.
@@ -370,21 +442,19 @@ public struct SseParser: Sendable {
     /// A blank line: the event so far, if it has data.
     private mutating func dispatch(into events: inout [SseEvent]) {
         guard hasData else {
-            data = ""
+            data.removeAll(keepingCapacity: true)
             eventType = ""
             return
         }
-        var payload = data
-        if payload.hasSuffix("\n") {
-            payload.removeLast()
-        }
+        // Without the LF the last data line appended.
+        let payload = String(decoding: data[..<(data.endIndex - 1)], as: UTF8.self)
         events.append(SseEvent(
             id: lastEventId.isEmpty ? nil : lastEventId,
             event: eventType.isEmpty ? "message" : eventType,
             data: payload,
             retryMs: retryMs
         ))
-        data = ""
+        data.removeAll(keepingCapacity: true)
         hasData = false
         eventType = ""
         retryMs = nil
