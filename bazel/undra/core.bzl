@@ -1,6 +1,6 @@
 """`undra_core`: the core of an Undra app, built for each platform it ships to (ADR-061)."""
 
-load("//undra/private:actions.bzl", "RUNNER_ATTRS", "vendor_params", "write_params")
+load("//undra/private:actions.bzl", "RUNNER_ATTRS", "below", "short_dirname", "stage_manifest", "vendor_params", "write_params")
 
 # The Bazel platforms (undra/platforms) each target platform of `undra build` selects the Rust toolchain for. A platform
 # with several is built for all of them in one action: iOS is a device slice and a simulator slice, Android one per ABI.
@@ -26,15 +26,18 @@ _target_platforms = transition(
     outputs = ["//command_line_option:platforms"],
 )
 
-def _relative(path, base, label):
-    """`path` below `base`, both execution-root-relative directories (`.` is the root)."""
-    if path == base:
+def _project(config_dir, app_root, label):
+    """The directory of undra.toml below the app's root (`.` when it is the root), both short paths."""
+    if config_dir == app_root:
         return "."
-    if base == ".":
-        return path
-    if not path.startswith(base + "/"):
-        fail("{}: undra.toml is in {}, which is not below the Cargo workspace root {} (`workspace`)".format(label, path, base))
-    return path[len(base) + 1:]
+    project = below(config_dir, app_root)
+    if project == None:
+        fail("{}: undra.toml is in {}, which is not below the Cargo workspace root {} (`workspace`)".format(
+            label,
+            config_dir or "the repository root",
+            app_root or "the repository root",
+        ))
+    return project
 
 def _undra_core_impl(ctx):
     platform = ctx.attr.platform
@@ -62,12 +65,24 @@ def _undra_core_impl(ctx):
         tool_files.append(info.all_files)
 
     config = ctx.file.config
-    config_dir = config.dirname or "."
-    app_root = (ctx.file.workspace.dirname or ".") if ctx.file.workspace else config_dir
+    config_dir = short_dirname(config)
+    app_root = short_dirname(ctx.file.workspace) if ctx.file.workspace else config_dir
+    project = _project(config_dir, app_root, ctx.label)
+    app_files = [config] + ctx.files.srcs + ([ctx.file.workspace] if ctx.file.workspace else [])
+    app_manifest, app_exec_root = stage_manifest(
+        ctx,
+        ctx.label.name + ".app_files",
+        app_root,
+        app_files,
+        "the root of the Cargo workspace (the directory of `workspace`, else of undra.toml)",
+    )
     lines += [
-        "app_root=" + app_root,
-        "project=" + _relative(config_dir, app_root, ctx.label),
+        "app_root=" + app_exec_root,
+        "app_files=" + app_manifest.path,
+        "project=" + project,
         "namespace=" + namespace,
+        # The private copy is built in a directory named by the target, never by when or where it runs (run.sh says why).
+        "stage_key={}|{}".format(ctx.label, platform),
     ]
 
     outputs = []
@@ -88,9 +103,7 @@ def _undra_core_impl(ctx):
         lines.append("out_symbols=" + out_symbols.path)
         outputs.append(out_symbols)
 
-    inputs = [ctx.file.config] + ctx.files.srcs
-    if ctx.file.workspace:
-        inputs.append(ctx.file.workspace)
+    inputs = app_files + [app_manifest]
     for directory in ctx.attr.extra_path:
         lines.append("path=" + directory)
     if platform in ("ios", "android"):
@@ -105,16 +118,26 @@ def _undra_core_impl(ctx):
 
     vendor_lines, vendor_files = vendor_params(ctx)
     lines += vendor_lines
-    undra_root = ctx.file._undra_manifest.dirname
-    lines.append("undra_root=" + undra_root)
+    undra_files = [ctx.file._undra_manifest] + ctx.files._undra_sources
+    undra_manifest, undra_exec_root = stage_manifest(
+        ctx,
+        ctx.label.name + ".undra_files",
+        short_dirname(ctx.file._undra_manifest),
+        undra_files,
+        "the Undra checkout",
+    )
+    lines += [
+        "undra_root=" + undra_exec_root,
+        "undra_files=" + undra_manifest.path,
+    ]
     params = write_params(ctx, ctx.label.name + ".params", lines)
 
     ctx.actions.run(
         executable = ctx.file._runner,
         arguments = [params.path],
         inputs = depset(
-            [params, ctx.file._undra_manifest] + inputs + extra_tools,
-            transitive = [depset(ctx.files._undra_sources), vendor_files] + tool_files,
+            [params, undra_manifest] + inputs + extra_tools,
+            transitive = [depset(undra_files), vendor_files] + tool_files,
         ),
         tools = [ctx.executable.cli],
         outputs = outputs,

@@ -1,6 +1,6 @@
 """`undra_bindings`: the Swift, Kotlin and TypeScript bindings of a core, as outputs of the build (ADR-061)."""
 
-load("//undra/private:actions.bzl", "write_params")
+load("//undra/private:actions.bzl", "short_dirname", "stage_manifest", "write_params")
 
 # Language -> (the platform name `undra bindgen --platforms` takes, the directory it writes).
 _LANGUAGES = {
@@ -11,17 +11,30 @@ _LANGUAGES = {
 
 def _undra_bindings_impl(ctx):
     library = ctx.file.core
+    if library.extension not in ("dylib", "so", "dll"):
+        fail("{}: `core` is {}, which is not a host library: the schema is read from the build for this machine, `core = \":<name>_host\"` of an undra_core whose platforms include \"host\"".format(
+            ctx.label,
+            library.short_path,
+        ))
     languages = ctx.attr.languages
     for language in languages:
         if language not in _LANGUAGES:
             fail("{}: unknown language `{}`; use any of {}".format(ctx.label, language, sorted(_LANGUAGES.keys())))
 
     config = ctx.file.config
-    app_root = config.dirname or "."
+    app_manifest, app_exec_root = stage_manifest(
+        ctx,
+        ctx.label.name + ".app_files",
+        short_dirname(config),
+        [config],
+        "the directory of undra.toml",
+    )
     lines = [
         "mode=bindgen",
         "cli=" + ctx.executable.cli.path,
-        "app_root=" + app_root,
+        "app_root=" + app_exec_root,
+        "app_files=" + app_manifest.path,
+        "stage_key={}".format(ctx.label),
         "project=.",
         "library=" + library.path,
         "bindgen_platforms=" + ",".join([_LANGUAGES[l] for l in languages]),
@@ -74,7 +87,7 @@ def _undra_bindings_impl(ctx):
     ctx.actions.run(
         executable = ctx.file._runner,
         arguments = [params.path],
-        inputs = [params, library, config],
+        inputs = [params, app_manifest, library, config],
         tools = tools,
         outputs = outputs,
         mnemonic = "UndraBindgen",

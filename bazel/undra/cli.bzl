@@ -1,6 +1,6 @@
 """`undra_cli`: the `undra` command line, built from the Undra checkout by the pinned Rust toolchain."""
 
-load("//undra/private:actions.bzl", "RUNNER_ATTRS", "RUST_TOOLCHAIN_TYPE", "toolchain_params", "vendor_params", "write_params")
+load("//undra/private:actions.bzl", "RUNNER_ATTRS", "RUST_TOOLCHAIN_TYPE", "short_dirname", "stage_manifest", "toolchain_params", "vendor_params", "write_params")
 
 def _undra_cli_impl(ctx):
     if not ctx.files.sources:
@@ -11,15 +11,25 @@ def _undra_cli_impl(ctx):
     out = ctx.actions.declare_file(ctx.label.name)
     tool_lines, tool_files = toolchain_params(ctx)
     vendor_lines, vendor_files = vendor_params(ctx)
+    sources = [ctx.file.workspace_manifest] + ctx.files.sources
+    manifest, exec_root = stage_manifest(
+        ctx,
+        ctx.label.name + ".undra_files",
+        short_dirname(ctx.file.workspace_manifest),
+        sources,
+        "the Undra checkout",
+    )
     params = write_params(ctx, ctx.label.name + ".params", [
         "mode=cli",
-        "undra_root=" + ctx.file.workspace_manifest.dirname,
+        "undra_root=" + exec_root,
+        "undra_files=" + manifest.path,
+        "stage_key={}".format(ctx.label),
         "out_file=" + out.path,
     ] + tool_lines + vendor_lines)
     ctx.actions.run(
         executable = ctx.file._runner,
         arguments = [params.path],
-        inputs = depset([params], transitive = [depset(ctx.files.sources), tool_files, vendor_files]),
+        inputs = depset([params, manifest] + sources, transitive = [tool_files, vendor_files]),
         outputs = [out],
         mnemonic = "UndraCli",
         progress_message = "Building the undra command line",

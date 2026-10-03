@@ -1,7 +1,8 @@
 #!/bin/sh
 # The one program every Undra Bazel action runs (ADR-061).
 #
-# It makes a private, offline, location-independent copy of everything a build reads, then runs one command in it:
+# It makes a private, offline copy of exactly the files the action declares, in a directory named by the target, then runs
+# one command in it:
 #
 #   mode=cli     cargo build of the `undra` CLI from the Undra checkout
 #   mode=build   `undra build -C <project> --platform <platform>`
@@ -33,7 +34,10 @@ OUT_DIR=""
 OUT_SYMBOLS=""
 NAMESPACE=""
 UNDRA_ROOT=""
+UNDRA_FILES=""
 APP_ROOT=""
+APP_FILES=""
+STAGE_KEY=""
 SYSROOTS=""
 OUT_SWIFT=""
 OUT_KOTLIN=""
@@ -68,7 +72,10 @@ while IFS= read -r line || [ -n "$line" ]; do
     out_symbols) OUT_SYMBOLS="$value" ;;
     namespace) NAMESPACE="$value" ;;
     undra_root) UNDRA_ROOT="$value" ;;
+    undra_files) UNDRA_FILES="$value" ;;
     app_root) APP_ROOT="$value" ;;
+    app_files) APP_FILES="$value" ;;
+    stage_key) STAGE_KEY="$value" ;;
     out_swift) OUT_SWIFT="$value" ;;
     out_kotlin) OUT_KOTLIN="$value" ;;
     out_ts) OUT_TS="$value" ;;
@@ -91,49 +98,68 @@ die() { echo "undra bazel: $*" >&2; exit 1; }
 abs() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$EXECROOT" "$1" ;; esac; }
 
 # --- where the build happens --------------------------------------------------------------------------------------
-# Cargo hashes a path dependency that lies outside the workspace (the core, the Undra crates) by its absolute path into every
-# symbol's name, and `wasm-opt` and the linker order what they emit by those names: a build in a directory with another name is
-# another file, a few bytes different (measured: 274.6 to 275.1 KB for one core). So the directory is named by what is built, not
-# by when: the same inputs are built in the same place on every machine and give the same bytes. A lock keeps two builds of
-# the same inputs (two Bazel servers, one machine) from sharing it; on Linux the sandbox's /tmp is private and it never waits.
-digest_tree() { # <directory>
-  (cd "$1" && find . \( -name target -o -name .git -o -name node_modules -o -name '.cargo' -o -name 'bazel-*' \) -prune -o -type f -print |
-    LC_ALL=C sort | while IFS= read -r f; do printf '%s\n' "$f"; cat "$f"; done)
-}
+# Cargo hashes the absolute path of a path dependency that lies outside the workspace it builds (the core, the Undra crates) into
+# the crate's disambiguator, and `undra build` names the shim crate after a hash of the project's path (`undra_core_<hash>`);
+# LLVM and `wasm-opt` then fold and order functions by those names, so a build in another directory is another file (measured:
+# 274,053 against 274,598 bytes for one core). So the build happens in a directory named by the target, the same on every
+# machine and in every checkout: the same inputs give the same bytes, and a change to an input does not move the directory
+# (which would rename every symbol). It is not named by the inputs' contents, for that reason.
+#
+# The directory is its own lock. On Linux the sandbox's /tmp is private and nothing ever waits; macOS shares /tmp between
+# builds and users, so it is created with `mkdir -m 700` (atomic; /tmp's sticky bit stops anyone else renaming or removing
+# it), a second build of the same target waits for the first, a directory a dead build of this user's left is taken over, and
+# one another user holds sends this build to a directory of its own user's (its bytes then name that directory).
 sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; }
-DIGEST="$({
-  printf 'mode=%s platform=%s release=%s symbols=%s project=%s\n' "$MODE" "$PLATFORM" "$RELEASE" "$SYMBOLS" "$PROJECT"
-  "$(abs "$RUSTC")" --version 2>/dev/null || true
-  [ -n "$UNDRA_ROOT" ] && digest_tree "$(abs "$UNDRA_ROOT")"
-  [ -n "$APP_ROOT" ] && digest_tree "$(abs "$APP_ROOT")"
-  [ -n "$VENDOR_MANIFEST" ] && cat "$(abs "$VENDOR_MANIFEST")"
-  [ -n "$LIBRARY" ] && cat "$(abs "$LIBRARY")"
-  true
-} | sha | cut -c1-16)"
-STAGE_BASE=/tmp/undra-bazel
-mkdir -p "$STAGE_BASE" 2>/dev/null || { STAGE_BASE="${TMPDIR:-/tmp}/undra-bazel"; mkdir -p "$STAGE_BASE"; }
-WORK="$STAGE_BASE/$DIGEST"
-LOCK="$WORK.lock"
+[ -n "$STAGE_KEY" ] || die "no stage_key"
+KEY="$(printf '%s|%s' "$MODE" "$STAGE_KEY" | sha | cut -c1-16)"
+STAGE_BASE=/tmp
+[ -d "$STAGE_BASE" ] && [ -w "$STAGE_BASE" ] || STAGE_BASE="${TMPDIR:-/tmp}"
+WORK="$STAGE_BASE/undra-bazel-$KEY"
+alive() { # <pid>: whether that process exists, whoever owns it
+  if command -v ps >/dev/null 2>&1; then ps -p "$1" >/dev/null 2>&1; else kill -0 "$1" 2>/dev/null; fi
+}
 waited=0
-until mkdir "$LOCK" 2>/dev/null; do
-  owner="$(cat "$LOCK/pid" 2>/dev/null || true)"
-  if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then rm -rf "$LOCK"; continue; fi # its owner is gone
-  if [ -z "$owner" ] && [ -n "$(find "$LOCK" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then rm -rf "$LOCK"; continue; fi
+until mkdir -m 700 "$WORK" 2>/dev/null; do
+  owner="$(cat "$WORK/.undra-bazel-owner" 2>/dev/null || true)"
+  if [ ! -O "$WORK" ] && [ -e "$WORK" ]; then
+    if [ "$WORK" = "$STAGE_BASE/undra-bazel-$KEY" ]; then
+      echo "undra bazel: $WORK belongs to another user; building in $WORK-u$(id -u) instead" >&2
+      WORK="$WORK-u$(id -u)"
+      continue
+    fi
+    die "$WORK belongs to another user"
+  fi
+  if [ -n "$owner" ] && ! alive "$owner"; then rm -rf "$WORK"; continue; fi # left by a build of ours that died
+  if [ -z "$owner" ] && [ -n "$(find "$WORK" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then rm -rf "$WORK"; continue; fi
   waited=$((waited + 1))
-  [ "$waited" -le 1800 ] || die "waited 30 minutes for $LOCK, held by '$owner'"
+  [ "$waited" -le 1800 ] || die "waited 30 minutes for $WORK, held by process '$owner'"
   sleep 1
 done
-echo "$$" > "$LOCK/pid"
-trap 'rm -rf "$WORK" "$LOCK"' EXIT HUP INT TERM
-rm -rf "$WORK"
-mkdir -p "$WORK"
+echo "$$" > "$WORK/.undra-bazel-owner"
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 1' HUP INT TERM
 
-# --- a private copy of the sources -------------------------------------------------------------------------------
-# `tar -h` (bsdtar and GNU tar both spell it so) follows symlinks, so what lands in $WORK is real files: a build that writes
-# next to its sources (`undra build` writes `build/`) never writes into the user's tree, whatever the sandbox does.
-copy_tree() { # <source dir> <destination dir>
-  mkdir -p "$2"
-  (cd "$1" && tar -chf - --exclude=target --exclude=.git --exclude='bazel-*' --exclude=node_modules .) | (cd "$2" && tar -xf -)
+# --- a private copy of the declared files -----------------------------------------------------------------------
+# Exactly the files the rule declared (a manifest of `<path below the root>|<execution path>` lines), never the directory they
+# are in: with --spawn_strategy=local the execution root is the whole source tree (a `.cargo/config.toml` included) and the
+# repositories of every toolchain. `tar -h` (bsdtar and GNU tar both spell it so) follows the sandbox's symlinks, so what
+# lands in $WORK is real files and a build that writes next to its sources (`undra build` writes `build/`) never writes into
+# the user's tree. Sources below the root go through one `tar`; a generated file is copied on its own.
+stage() { # <execution path of the root> <manifest> <destination directory>
+  mkdir -p "$3"
+  while IFS='|' read -r rel src; do
+    [ -n "$rel" ] || continue
+    if [ "$src" = "$1/$rel" ] || { [ "$1" = . ] && [ "$src" = "$rel" ]; }; then
+      printf '%s\n' "$rel"
+    else
+      case "$rel" in */*) mkdir -p "$3/${rel%/*}" ;; esac
+      cp "$(abs "$src")" "$3/$rel"
+    fi
+  done < "$(abs "$2")" > "$WORK/.stage.list"
+  if [ -s "$WORK/.stage.list" ]; then
+    (cd "$(abs "$1")" && tar -chf - -T "$WORK/.stage.list") | (cd "$3" && tar -xf -)
+  fi
+  rm -f "$WORK/.stage.list"
 }
 
 # --- the Rust toolchain ------------------------------------------------------------------------------------------
@@ -177,8 +203,8 @@ if [ -n "$VENDOR_MANIFEST" ]; then
   done < "$(abs "$VENDOR_MANIFEST")"
 fi
 
-if [ -n "$UNDRA_ROOT" ]; then
-  copy_tree "$(abs "$UNDRA_ROOT")" "$WORK/undra"
+if [ -n "$UNDRA_FILES" ]; then
+  stage "$UNDRA_ROOT" "$UNDRA_FILES" "$WORK/undra"
   # Only the library crates are members: the examples and benchmarks of the checkout are not inputs of any build here, and
   # Cargo reads every member's manifest when it loads a workspace.
   sed -e '/"examples\//d' -e '/"bench"/d' "$WORK/undra/Cargo.toml" > "$WORK/undra/Cargo.toml.pruned"
@@ -196,7 +222,7 @@ fi
     echo '[source.vendored-sources]'
     echo "directory = \"$VENDOR_DIR\""
   fi
-  if [ -n "$UNDRA_ROOT" ] && [ "$MODE" != cli ]; then
+  if [ -n "$UNDRA_FILES" ] && [ "$MODE" != cli ]; then
     # The core depends on `undra = "0.1"` like any app; this is where the checkout stands in for the registry.
     echo '[patch.crates-io]'
     for crate in "$WORK"/undra/crates/*/; do
@@ -242,8 +268,8 @@ case "$MODE" in
     cp "$WORK/target/debug/undra" "$(abs "$OUT_FILE")"
     ;;
   build)
-    [ -n "$APP_ROOT" ] || die "no app_root"
-    copy_tree "$(abs "$APP_ROOT")" "$WORK/app"
+    [ -n "$APP_FILES" ] || die "no app_files"
+    stage "$APP_ROOT" "$APP_FILES" "$WORK/app"
     PROJECT_DIR="$WORK/app/$PROJECT"
     [ -f "$PROJECT_DIR/undra.toml" ] || die "there is no undra.toml in $PROJECT of the app's files"
     # A lock file in the project seeds the shim's (undra build); the checkout's stands in for it when the app has none.
@@ -258,7 +284,12 @@ case "$MODE" in
     set -- build -C "$PROJECT_DIR" --platform "$PLATFORM"
     [ "$RELEASE" = 1 ] && set -- "$@" --release
     [ "$SYMBOLS" = 1 ] || set -- "$@" --no-symbols
-    "$(abs "$CLI")" "$@"
+    # From the project, as a developer runs it: Cargo looks for configuration from its working directory up, and the execution
+    # root's parents are the output base's (on Linux, below the home directory and its ~/.cargo/config.toml).
+    (cd "$PROJECT_DIR" && "$(abs "$CLI")" "$@") || {
+      echo "undra bazel: the build sees only the files the target declares (undra.toml, \`srcs\`, \`workspace\`), copied to $WORK/app: a file the error above says is missing is one to add to \`srcs\`" >&2
+      exit 1
+    }
     BUILD_DIR="$PROJECT_DIR/build"
     case "$PLATFORM" in
       host)
@@ -290,15 +321,15 @@ case "$MODE" in
     fi
     ;;
   bindgen)
-    [ -n "$APP_ROOT" ] || die "no app_root"
-    copy_tree "$(abs "$APP_ROOT")" "$WORK/app"
+    [ -n "$APP_FILES" ] || die "no app_files"
+    stage "$APP_ROOT" "$APP_FILES" "$WORK/app"
     PROJECT_DIR="$WORK/app/$PROJECT"
     [ -f "$PROJECT_DIR/undra.toml" ] || die "there is no undra.toml in $PROJECT of the app's files"
     GEN="$WORK/generated"
     set -- bindgen -C "$PROJECT_DIR" --library "$(abs "$LIBRARY")" --out "$GEN"
     [ -n "$BINDGEN_PLATFORMS" ] && set -- "$@" --platforms "$BINDGEN_PLATFORMS"
     [ "$BINDGEN_DOCS" = 1 ] && set -- "$@" --docs
-    "$(abs "$CLI")" "$@"
+    (cd "$PROJECT_DIR" && "$(abs "$CLI")" "$@")
     # One declared tree per language: the directory `undra bindgen` wrote for it.
     for language in swift kotlin ts; do
       case "$language" in

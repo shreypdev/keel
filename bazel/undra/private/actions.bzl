@@ -54,3 +54,55 @@ def write_params(ctx, name, lines):
     params = ctx.actions.declare_file(name)
     ctx.actions.write(params, "\n".join(lines) + "\n")
     return params
+
+def below(path, root):
+    """`path` relative to the directory `root`, both short paths (`""` is the root of the main repository).
+
+    Returns:
+        the relative path, or `None` when `path` is not below `root`.
+    """
+    if not root:
+        return None if path.startswith("../") else path
+    if path.startswith(root + "/"):
+        return path[len(root) + 1:]
+    return None
+
+def stage_manifest(ctx, name, root, files, what):
+    """Writes the list of files an action copies into its private stage, and nothing else.
+
+    `run.sh` copies exactly these files (following the sandbox's symlinks), so an action reads only what it declares, whatever
+    the spawn strategy: a sandbox, `--spawn_strategy=local` or remote execution.
+
+    Args:
+        ctx: the rule context.
+        name: the manifest's file name.
+        root: the short path of the directory the files are copied relative to.
+        files: the files (a list of `File`).
+        what: what to call `root` in an error message.
+
+    Returns:
+        a `(manifest, root_exec_path)` pair: the manifest, one `<path below root>|<exec path>` line per file, and the execution
+        path of `root` for the files that are sources (`run.sh` copies those in one `tar`).
+    """
+    lines = {}
+    root_exec = None
+    for f in files:
+        rel = below(f.short_path, root)
+        if rel == None:
+            fail("{label}: {file} is outside {root}, {what}: an action sees only the files below it".format(
+                label = ctx.label,
+                file = f.short_path,
+                what = what,
+                root = root or "the repository root",
+            ))
+        lines["{}|{}".format(rel, f.path)] = True
+        if root_exec == None and f.is_source:
+            root_exec = f.path[:len(f.path) - len(rel)].rstrip("/") or "."
+    manifest = ctx.actions.declare_file(name)
+    ctx.actions.write(manifest, "\n".join(sorted(lines.keys())) + "\n")
+    return manifest, root_exec or "."
+
+def short_dirname(f):
+    """The directory of `f` as a short path (`""` for the root of the main repository)."""
+    path = f.short_path
+    return path[:path.rfind("/")] if "/" in path else ""
