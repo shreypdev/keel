@@ -1,6 +1,6 @@
 # SDE: bazel: Bazel rules that run the undra CLI, an example workspace and the lint exclusions for generated code (ADR-061), 2026-10-02
 
-Branch `wt/bazel`, from `main` `b909739`. The binding text is ADR-061 ("Implementation note": ten differences from the design and
+Branch `wt/bazel`, from `main` `b909739`. The binding text is ADR-061 ("Implementation note": eleven differences from the design and
 what was and was not verified). User feedback U3/T1: "No Bazel support ... Real integration means writing Bazel rules for Rust plus
 the generated bindings", and a host CI failing on repo-wide lint rules over the POC's Kotlin.
 
@@ -45,6 +45,9 @@ the same way. `undra_bindings` runs `undra bindgen --library` on `core_host`'s l
   machine evaluates.
 * `rules_rust` 0.74 knows compiler checksums up to 1.98; 1.99.0 is pinned in the application's `rust.toolchain(sha256s = ..)` from
   `static.rust-lang.org`'s `.sha256` files (the darwin ones agree with `rules_rust`'s own debug print).
+* **`ci-local` found a regression the local test runs had not**: the ignored `schema_docs` test compares the bindings from the library's schema with
+  those from the dev runner's, written to two differently named directories, and my first lint fragments named the directory. They no
+  longer do (ADR note 10); the committed trees and goldens were regenerated again.
 * A sandbox with the network off (`--sandbox_default_allow_network=false`) builds the cores and the bindings.
 
 ## Lint exclusions, and the other piece

@@ -78,7 +78,6 @@ fn bindgen_reads_the_schema_from_a_library_that_was_built_already() {
     let lib =
         built_core(&project).expect("undra build did not leave build/host/libplayground_core.*");
 
-    // The lint fragments name the directory the tree is written to, as the committed tree's say `generated`.
     let scratch =
         std::env::temp_dir().join(format!("undra-bindgen-library-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&scratch);

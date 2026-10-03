@@ -193,11 +193,11 @@ The `undra_*_library` macros wrap a bindings tree with the ruleset of its langua
 |---|---|---|
 | `kotlin/.editorconfig` | ktlint, the IDE formatter | `[*.{kt,kts}]`: `ktlint_standard = disabled`, `ktlint_experimental = disabled`, `ij_formatter_enabled = false`; comments give the repository-root form (`[**/generated/**]`), the Gradle ktlint plugin filter and detekt's `excludes` |
 | every `kotlin/**/*.kt` | ktlint (any version), detekt, the IDE | `@file:Suppress("ALL", "ktlint")` after the header line (the one change to generated code; no declaration moves) |
-| `swift/.swiftlint.yml` | SwiftLint | the `excluded:` entry for the tree, and how to merge it (a nested configuration's `excluded:` is ignored by SwiftLint, so this is a fragment for the root configuration or `--config` merging, said in the file) |
+| `swift/.swiftlint.yml` | SwiftLint | `excluded:` the package's two source directories (`**/Sources/<Module>/Generated`, `**/Sources/<Module>CoreFFI`), and how to merge it (a nested configuration's `excluded:` is ignored by SwiftLint, so this is a fragment for the root configuration or `--config` merging, said in the file) |
 | `ts/.eslintrc.json` | ESLint 8 and earlier | `{ "root": false, "ignorePatterns": ["**/*"] }` (comments are legal in eslintrc JSON) |
-| `ts/eslint.config.undra.mjs` | ESLint 9 flat config | `export default [{ ignores: ["**/<out>/ts/**"] }]`, to spread into `eslint.config.js` (a flat config is read only from where ESLint runs) |
+| `ts/eslint.config.undra.mjs` | ESLint 9 flat config | `export default [{ ignores: ["<its own directory, relative to where ESLint runs>/**"] }]`, computed from `import.meta.url`, to spread into `eslint.config.js` (a flat config is read only from where ESLint runs) |
 
-The patterns name the output directory the tree is written to (`generated` by default). `.gitattributes` with
+No file names the directory the tree is written to, so the same schema generates the same files into any directory and a tree that is moved stays excluded. `.gitattributes` with
 `linguist-generated=true` (GitHub collapses the tree in a review and leaves it out of the language statistics) is **not** here: it
 is ADR-062's, written by the other piece, per tree, beside these files. Nothing in this ADR conflicts with it: the names differ.
 What was verified, and with what: **ktlint** 1.8.0 (the version `rules_kotlin` pins, run from Bazel) reports 90 findings on the
@@ -292,7 +292,11 @@ documented, and not built: the Rust toolchain of an Android *platform* needs a C
    per iOS slice and per Android ABI), next to the exec-platform toolchain (`cfg = "exec"`), not by `toolchains = [..]`: a wasm
    build needs the host's standard library too, for build scripts and proc macros, and a rule resolves one target platform only.
 9. **SPEC 13's schema-extraction paragraph** names `--library` and the lint files (the one SPEC edit; no wire, ABI or schema text moves).
-10. **The `undra_android_library` macro is in `android.bzl`**, not `defs.bzl`: loading `rules_kotlin`'s Android rules for every user of
+10. **The lint fragments do not name the output directory.** The first version did (`**/generated/ts/**`), and `ci-local` found the one test that
+    compares two routes to the same bindings (`schema_docs`, the library's schema against the dev runner's, into two directories) failing on
+    exactly those two files. The SwiftLint file now excludes the package's two source directories by the module names, and the ESLint flat
+    config finds its own directory at run time (checked under Node from two working directories).
+11. **The `undra_android_library` macro is in `android.bzl`**, not `defs.bzl`: loading `rules_kotlin`'s Android rules for every user of
    `defs.bzl` would force the Android SDK's configuration on a Linux CI job.
 
 **Verified** (macOS, Apple silicon, Xcode 26.6, Bazel 8.8.1 from Bazelisk, a fresh clone and a fresh output root): the whole example

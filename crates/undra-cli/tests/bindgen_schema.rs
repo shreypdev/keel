@@ -33,16 +33,14 @@ fn golden_dir() -> std::path::PathBuf {
 
 #[test]
 fn a_schema_file_generates_the_three_trees() {
-    let scratch = TempDir::new("schema-out");
-    // The lint fragments name the output directory, so the golden is generated into one called `generated`.
-    let out = scratch.path().join("generated");
+    let out = TempDir::new("schema-out");
     let result = run_ok(
         undra()
             .args(["bindgen", "--schema"])
             .arg(fixture())
             .arg("--out")
-            .arg(&out)
-            .current_dir(scratch.path()),
+            .arg(out.path())
+            .current_dir(out.path()),
     );
     let text = String::from_utf8_lossy(&result.stdout);
     assert!(
@@ -55,7 +53,7 @@ fn a_schema_file_generates_the_three_trees() {
 
     let updating = std::env::var("UPDATE_GOLDEN").is_ok_and(|v| v == "1");
     for file in GOLDEN_FILES {
-        let actual = std::fs::read_to_string(out.join(file))
+        let actual = std::fs::read_to_string(out.path().join(file))
             .unwrap_or_else(|_| panic!("{file} was not generated"));
         let golden = golden_dir().join(file);
         if updating {

@@ -2,10 +2,11 @@
 #
 # Keeps SwiftLint out of the generated Swift package. SwiftLint reads `excluded:` from the configuration of the directory
 # it runs in (a nested configuration's own `excluded:` is ignored), so put these lines in your repository's
-# .swiftlint.yml, or merge this file into the run:
+# .swiftlint.yml, or merge this file into the run, wherever the package is:
 #
-#     swiftlint --config .swiftlint.yml --config generated/swift/.swiftlint.yml
+#     swiftlint --config .swiftlint.yml --config <this file>
 #
-# Paths are relative to the directory SwiftLint runs in; change the prefix if the bindings live somewhere else.
+# The two directories are the package's: the generated Swift, and the C module that declares the core's entry point.
 excluded:
-  - "**/generated/swift"
+  - "**/Sources/PlaygroundCore/Generated"
+  - "**/Sources/PlaygroundCoreFFI"

@@ -144,11 +144,11 @@ pub fn plan_files(schema: &Schema, plan: &Plan) -> Result<Vec<GeneratedFile>> {
         ));
     }
     // The exclusions the repository's linters read, beside each tree (ADR-061).
-    let out_name = plan.out.file_name().map_or_else(
-        || "generated".to_owned(),
-        |n| n.to_string_lossy().into_owned(),
-    );
-    files.extend(crate::lint::fragments(&plan.platforms, &out_name));
+    files.extend(crate::lint::fragments(
+        &plan.platforms,
+        &plan.generator.swift_module,
+        &plan.generator.core_names().ffi_module(),
+    ));
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }
