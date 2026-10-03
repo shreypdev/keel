@@ -43,8 +43,10 @@ its own adds the optional `dev.undra:okhttp-adapters` module and makes one call 
 AndroidPlatformDefaults.installWithOkHttp(core, this, appGraph.okHttpClient) // Http, WebSocket and Sse now go through your client
 ```
 
-Every request the core makes then goes through that client (ADR-060). This module stays free of OkHttp: it would be a second HTTP
-stack for an app that has none.
+Every request the core makes then goes through that client (ADR-060), one it makes while the install runs included: the network ports
+are registered before `Kv` (a core replays its offline queue as soon as `Kv` answers), and `installWithOkHttp` passes its own to
+`installWithNetworkPorts` (`install` with other implementations of `Http`, `WebSocket` and `Sse`, behind `@UndraEmbeddingApi`), so the
+platform's are never registered. This module stays free of OkHttp: it would be a second HTTP stack for an app that has none.
 
 Install before the first activity starts: in `Application.onCreate`, or in the first activity's `onCreate` when the core is
 loaded there (the playground and the `undra init` template do, so that a debug build can choose between the in-process core

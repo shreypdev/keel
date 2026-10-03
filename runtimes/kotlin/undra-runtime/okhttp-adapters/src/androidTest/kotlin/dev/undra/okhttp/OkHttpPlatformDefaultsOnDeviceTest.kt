@@ -4,8 +4,13 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import dev.undra.android.AndroidPlatformDefaults
 import dev.undra.android.RecordingCore
+import dev.undra.android.TEST_NAMESPACE
 import dev.undra.android.TestHttpServer
 import dev.undra.android.call
+import dev.undra.runtime.BackgroundStats
+import dev.undra.runtime.PortImpl
+import dev.undra.runtime.UndraCore
+import dev.undra.runtime.UndraStats
 import dev.undra.runtime.adapters.ClientWebSocketAdapter
 import dev.undra.runtime.adapters.Header
 import dev.undra.runtime.adapters.HttpMethod
@@ -108,10 +113,54 @@ class OkHttpPlatformDefaultsOnDeviceTest {
         assertEquals("yes", server.requests.single().header("X-Traced"))
     }
 
+    /**
+     * A core replays its offline queue as soon as `Kv` answers, while the install is still registering ports (ADR-037): a request it
+     * makes then must go through the app's client too, never the platform's `HttpURLConnection` (no token, no trace, no pin). This core
+     * calls `Http` the moment an implementation is registered, the earliest a real core could.
+     */
+    @Test
+    fun no_request_goes_through_the_platforms_adapters_not_even_one_made_while_installing() {
+        server.fixed("/replay", 200, "replayed")
+        val eager = EagerCore(server.base + "/replay")
+        platform = AndroidPlatformDefaults.installWithOkHttp(eager, context, client)
+        val network = listOf(StandardPorts.Http.PORT_ID, StandardPorts.WebSocket.PORT_ID, StandardPorts.Sse.PORT_ID)
+        assertEquals("each network port is registered once, with the app's client behind it", network, eager.registered.filter { it in network })
+        assertEquals(listOf("/replay"), seen.toList())
+        assertEquals(listOf("yes"), server.requests.map { it.header("X-Traced") })
+    }
+
     @Test
     fun a_platform_adapter_can_be_kept_for_one_port() {
         val installed = AndroidPlatformDefaults.installWithOkHttp(core, context, client, webSocket = ClientWebSocketAdapter()).also { platform = it }
         assertTrue(core.ports.containsKey(StandardPorts.WebSocket.PORT_ID))
         assertEquals(0, installed.webSocket.openConnections)
     }
+}
+
+/**
+ * A core that sends a request through `Http` the moment an implementation of it is registered, as a real core replaying its offline
+ * queue right after `Kv` answered could, and remembers the order of the registrations.
+ */
+private class EagerCore(private val replayUrl: String) : UndraCore() {
+    private val lock = Any()
+    private val order = ArrayList<UInt>()
+
+    /** The port ids registered, in order, one entry per registration. */
+    val registered: List<UInt> get() = synchronized(lock) { order.toList() }
+
+    override val namespace: String get() = TEST_NAMESPACE
+
+    override fun stats(): UndraStats = UndraStats(0, background = BackgroundStats(3, 0, 0L, 0L, 0L, 0L))
+
+    override fun registerPort(portId: UInt, impl: PortImpl) {
+        synchronized(lock) { order.add(portId) }
+        if (portId == StandardPorts.Http.PORT_ID) {
+            val request = HttpRequest(HttpMethod.POST, replayUrl, listOf(Header("Content-Type", "text/plain")), "queued".toByteArray(), 10_000u)
+            call(impl, StandardPorts.Http.REQUEST, HttpRequest.encodeToByteArray(request))
+        }
+    }
+
+    override fun event(portId: UInt, methodId: UInt, payload: ByteArray) = Unit
+
+    override fun timerFired(timerId: UInt) = Unit
 }
