@@ -6,7 +6,31 @@
     <description>Comparisons, architecture and design notes from the Undra team.</description>
     <language>en</language>
     <atom:link href="https://shreypdev.github.io/undra/feed.xml" rel="self" type="application/rss+xml"/>
-    <lastBuildDate>Fri, 02 Oct 2026 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Sat, 03 Oct 2026 00:00:00 GMT</lastBuildDate>
+    <item>
+      <title>A week of outside use: seven findings, five fixes</title>
+      <link>https://shreypdev.github.io/undra/blog/a-week-of-outside-use/</link>
+      <guid isPermaLink="true">https://shreypdev.github.io/undra/blog/a-week-of-outside-use/</guid>
+      <pubDate>Sat, 03 Oct 2026 00:00:00 GMT</pubDate>
+      <category>Field notes</category>
+      <description>A team tried Undra for a week and sent seven findings. Five are fixed, each with a decision record and a review; two were not taken on, and why.</description>
+    </item>
+    <item>
+      <title>Fifteen levers: the JavaScript runtime at 16 KB</title>
+      <link>https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/</link>
+      <guid isPermaLink="true">https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/</guid>
+      <pubDate>Sat, 03 Oct 2026 00:00:00 GMT</pubDate>
+      <category>Performance</category>
+      <description>How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.</description>
+    </item>
+    <item>
+      <title>Undra 1.0: one Rust core under native apps</title>
+      <link>https://shreypdev.github.io/undra/blog/undra-1-0/</link>
+      <guid isPermaLink="true">https://shreypdev.github.io/undra/blog/undra-1-0/</guid>
+      <pubDate>Sat, 03 Oct 2026 00:00:00 GMT</pubDate>
+      <category>Launch</category>
+      <description>What Undra is, who it is for, what is in 1.0, how to try it in five minutes, and what it is not.</description>
+    </item>
     <item>
       <title>Why Undra is the default choice</title>
       <link>https://shreypdev.github.io/undra/blog/why-undra-is-the-default-choice/</link>

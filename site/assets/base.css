@@ -161,7 +161,16 @@ html:not(.js) [data-theme-toggle], html:not(.js) .search-btn, html:not(.js) .men
 .btn-ghost:hover { background: var(--surface-3); }
 .pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border: 1px solid var(--line-strong); border-radius: 999px; font: 500 .75rem/1 var(--font-mono); color: var(--text-2); text-decoration: none; background: var(--surface); }
 a.pill:hover { color: var(--text); border-color: var(--accent-line); }
-.pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+/* status chips: one scale from the accent to neutral, the same on the roadmap and the landing page, light and dark.
+   Shipped is solid accent, Next an accent outline, Later a neutral outline, Exploring a dashed neutral one. */
+.st { display: inline-block; flex: none; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); font: 500 .7rem/1.4 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); background: transparent; white-space: nowrap; }
+.st-shipped { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.st-next { color: var(--accent); border-color: var(--accent); }
+.st-later { color: var(--text-2); border-color: var(--line-strong); }
+.st-exploring { color: var(--text-3); border-style: dashed; border-color: var(--line-strong); }
+.st-no { color: var(--text-3); border-color: var(--line); }
 
 /* code: header bar, copy button, tokens */
 .code { position: relative; background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin: 1.25rem 0; text-align: left; }

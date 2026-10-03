@@ -33,8 +33,8 @@ page is the operating manual.
 
 The theme is dark by default with a light toggle; `?theme=light` or `?theme=dark` in any URL forces one
 (used by the live demo and handy for screenshots). The accent is v1's single orange (`#ff6a2a` dark, `#c2410c` light); type is Geist
-and Geist Mono (Google Fonts, `display=swap`), and there is no italic display type anywhere. The embedded playground
-wears the same palette in `embed=1` mode.
+and Geist Mono (Google Fonts, `display=swap`), and there is no italic display type anywhere. The playground wears the
+same palette and type, light and dark, embedded or not, and its tab icon is Undra's mark.
 
 ## Preview locally
 
@@ -65,7 +65,7 @@ All live in `site/scripts/` and run from the repository root.
 | Script | What it does |
 |---|---|
 | `build-all.mjs` | Runs `build-numbers`, `build-trust`, `build-roadmap`, `build-errors`, `build-reference`, `build-cookbook`, `sync-docs-nav`, `build-blog-index`, `build-search-index`, `build-llms`, in that order. CI runs it and fails if it changes anything under `site/`. |
-| `build-numbers.mjs` | Renders the landing page's benchmark cards (big number, one-line label, budget in mono) from `data/bench.json` into `index.html` (between `<!-- numbers:start -->` and `<!-- numbers:end -->`), and shows or hides the demo's "Push it" button. A row with a `measured` object takes its value from a committed record instead of from the file: the web and Android sizes from `bench/results/web-size.jsonl` and `native-size.jsonl`, the harsh-conditions rates from the whole-file JSON results in `bench/results/` (a `path` into the file, and `{path\|time}` tokens in the label for its p99 and bytes); it writes the value back into `bench.json`, and fills every `<!--measured:NAME-->..<!--/measured-->` slot of the site's pages and of `README.md`. **Not fetched at runtime.** |
+| `build-numbers.mjs` | Renders the landing page's benchmark cards (big number, one-line label, budget in mono) from `data/bench.json` into `index.html` (between `<!-- numbers:start -->` and `<!-- numbers:end -->`), and shows or hides the demo's "Push it" button. A row with a `measured` object takes its value from a committed record instead of from the file: the web and Android sizes from `bench/results/web-size.jsonl` and `native-size.jsonl`, the harsh-conditions rates from the whole-file JSON results in `bench/results/` (a `path` into the file, and `{path\|time}` tokens in the label for its p99 and bytes); it writes the value back into `bench.json`, and fills every `<!--measured:NAME-->..<!--/measured-->` slot of the site's pages and of `README.md` (a size, or `row-<id>` for the value of any card: the landing diagram's core call and change-set). **Not fetched at runtime.** |
 | `build-trust.mjs` | Renders the landing page's test-count card and contract-scenario grid (between `<!-- trust:start -->` and `<!-- trust:end -->`) from `data/tests.json` and the headings of `contract-tests/scenarios.md` (a scenario whose heading says "TypeScript only" is a hollow cell on Swift and Kotlin), and fills every `<!--trust:NAME-->..<!--/trust-->` slot (the test totals, the scenario and cell counts) of the site's pages and `README.md`. It fails when `cellsPassing` in `tests.json` is not the number of cells the scenarios define. |
 | `build-cookbook.mjs` | Fills the code blocks of the cookbook pages and `sample.html` from the sources they quote: `<!-- snippet:examples/cookbook/core/src/auth.rs#auth-401 rust -->` .. `<!-- /snippet -->` is replaced by the lines between `// docs:begin auth-401` and `// docs:end` in that file (markers left out, dedented; an id may occur several times in a file and the pieces are joined). The Rust crate is built and tested by `cargo test -p cookbook`, and the Swift, Kotlin and TypeScript snippet files by `examples/cookbook/snippets/check.sh`, so a page's code is code that compiled. A marker naming a missing file or id fails the build. |
 | `build-errors.mjs` | Writes `docs/errors.html`, one anchored section per macro diagnostic (`#E0001` ...). The catalogue comes from `docs/SPEC.md` section 12, the short meanings from the doc table in `crates/*-macros/src/impl_/diag.rs`, and the real what/why/fix messages from the compile-fail goldens `crates/*-macros/tests/ui/*.stderr`. Codes no golden covers (they come from bindgen, rustc or the runtime) show the catalogue entry only. |
@@ -73,7 +73,7 @@ All live in `site/scripts/` and run from the repository root.
 | `decls.mjs`, `decls.test.mjs` | The declarations-only reader `build-reference` uses, and its tests (`node --test site/scripts/decls.test.mjs`, run in CI). It reads the one shape bindgen emits, not the languages: it keeps every declaration an app can see with its doc comment, and drops function bodies, property initializers (a constant keeps its value), imports, private/internal/protected members, `override` members and ordinary comments; a run of six or more declarations that differ only by a number (the benchmark store's 128 counters) is folded to its ends. Its limits are in the file's header. |
 | `build-rustdoc.sh`, `rustdoc-header.inc` | `cargo doc --no-deps` for `undra`, `undra-runtime`, `-signals`, `-query`, `-ports`, `-wire` and `-meta` into `target/doc`, with `RUSTDOCFLAGS="-D warnings"` so a public item without docs or a broken link fails the build (R4). The header include (`--html-in-header`) lays the site's icon, Geist, orange accent and two palettes over rustdoc's `ayu`/`light` themes as rustdoc's own theme variables; the layout is untouched. When you add a crate an application imports from, add it to the `-p` list. |
 | `sync-docs-nav.mjs` | Writes the docs sidebar (column and mobile menu) and the previous/next pager into every docs page from `data/docs.json` (and the sidebar into the pages listed in `also`). `--check` reports drift. |
-| `build-roadmap.mjs` | Renders `roadmap/index.html`'s sections, its `ItemList` JSON-LD and its "Last updated" date from `data/roadmap.json`. |
+| `build-roadmap.mjs` | Renders `roadmap/index.html`'s sections, jump links, `ItemList` JSON-LD and "Last updated" date from `data/roadmap.json`, and the landing page's "What is still open" from its `teaser` items. |
 | `build-blog-index.mjs` | Reads every `blog/*/index.html` (title, description, `<time datetime>`, eyebrow, reading time from the word count) and writes the index cards, the `Blog` JSON-LD, `feed.xml` (RSS 2.0) and the whole `sitemap.xml`. With no posts it renders one "First posts are coming" card, which disappears when a post exists. It also keeps each post's "N min read" equal to the computed value. |
 | `build-search-index.mjs` | Writes `search-index.json`: a page entry and one entry per heading (with its text) for the docs, the API reference pages, the roadmap and every post. |
 | `build-llms.mjs` | Writes `llms.txt` (an index, with the reference pages and the Rust reference) and `llms-full.txt` (the docs, reference pages, roadmap and posts as Markdown, in one fetch; collapsed code is left out, as everywhere). |
@@ -91,7 +91,7 @@ All live in `site/scripts/` and run from the repository root.
   `{ id, operation, value, unit, budget, budgetUnit, gate, source }` with units `ns`, `µs`, `ms`, `KB`, `MB`;
   keep `operation` to one short line, it is the card's label. The `harsh` array takes rows of the same shape (the
   stress suite fills it); when it is non-empty the section grows a "Harsh conditions" group of cards in the same
-  style. A new card adds no prose, so the word budget is not affected. Prefer a `measured` row (see the script
+  style, behind a closed disclosure. A new card adds no prose, so the word budget is not affected. Prefer a `measured` row (see the script
   table) to a typed value wherever a record file exists: a typed value drifts from the committed results. `"stressScreen": true` shows the "Push it"
   button of the live demo, which loads the playground's stress screen
   (`playground/?screen=stress&embed=1&rate=10000&mode=firehose&autostart=1`) into the iframe and reveals the extra
@@ -102,8 +102,11 @@ All live in `site/scripts/` and run from the repository root.
   and `cellsPassing` come from the integrator's matrix line in `.10x/status.md`) and run `build-all`; a new
   scenario needs its heading in `contract-tests/scenarios.md`, and the build fails until `cellsPassing` agrees.
   Do not type these numbers anywhere else: use a `<!--trust:NAME-->..<!--/trust-->` slot.
-* **Roadmap:** edit `data/roadmap.json` (the source of truth for the wording is `.10x/handoff.md`; keep them in
-  step), then `build-all`.
+* **Roadmap:** edit `data/roadmap.json`, then `build-all`. Shipped is what is on `main`, as titled `groups` of
+  one-line items; Next, Later and Exploring hold only what the repository records as planned or open, each item with
+  the `source` that records it (not rendered). `"teaser": true` puts an item on the landing page's "What is still
+  open" (one to four of them). Every status chip is `.st .st-<section id>` from `base.css`, one scale from the accent
+  to neutral.
 * **A docs page:** edit the HTML. Give it a unique `<title>` (at most 60 characters), a description (at most 155),
   the canonical URL, the `og:`/`twitter:` tags and one JSON-LD block (copy a neighbour), list it in
   `data/docs.json` (the sidebar, the pager, the search order and `llms-full.txt` all follow), then run
@@ -117,13 +120,13 @@ All live in `site/scripts/` and run from the repository root.
 * **`dateModified`:** every page states its last change in its JSON-LD (`dateModified`, or `datePublished` for a
   post) and the sitemap's `lastmod` is read from it. Bump it when you change the page; it is a hand-maintained
   date on purpose, so the generated files are deterministic in CI.
-* **Package names** are written `@undra/runtime` and `@undra/cli` everywhere; the integrator replaces them in one
-  global pass when the registry scope is final.
+* **Package names** are written `@undra/runtime` and `@undra/react-native` everywhere (the runtime libraries an app
+  depends on come from each platform's registry; the `undra` CLI does not come from npm on this site).
 * **Pages that are linked before they exist** go in `data/pending.json`; the checker reports those links as notes
   instead of failures and tells you to remove the entry once the page exists.
-* **The install block's release note** (`.install-note`, in both install blocks of `index.html`, and the matching
-  sentence in `docs/getting-started.html`) says that brew, npm and curl need the first tagged release. Remove it
-  when v1.0.0 is out and the three channels have been smoke-tested.
+* **The install blocks** (both in `index.html`, the table in `docs/getting-started.html` and the README) list the
+  standard channels for a native CLI, easiest first: Homebrew, the installer (`curl … | sh`), cargo. The npm
+  wrapper of the CLI that the release pipeline still builds is not advertised.
 
 ## The CI flow (`.github/workflows/site.yml`)
 

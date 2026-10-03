@@ -87,8 +87,8 @@ Sustained-load results (a firehose, keyed churn, fan-out, a 60-second soak) are 
   callbacks, panic reports, background runs, newtypes, paged queries and polling. See
   [`contract-tests/`](contract-tests/scenarios.md).
 * **Adversarial reviews**: the four core crates (signals, runtime, macros, ffi) first, every High/Medium finding
-  fixed and independently re-verified, the unsafe boundary under ASan and Miri; then every feature of the v1.x
-  program before it merged. The reports live in [`.10x/reviews/`](.10x/reviews/).
+  fixed and independently re-verified, the unsafe boundary under ASan and Miri; then every feature since,
+  before it merged. The reports live in [`.10x/reviews/`](.10x/reviews/).
 * **The reference app is real**: [`examples/playground`](examples/playground) runs one
   Rust core on Chrome, an iPhone simulator and an Android emulator, with proof screenshots
   committed; its React Native app runs on the same simulator and emulator.
@@ -151,32 +151,31 @@ and persistence are built in (`#[undra::query]` / `#[undra::mutation]`).
 
 ## Install
 
-Four ways to get the same `undra` binary (macOS and Linux, x86_64 and arm64):
+Three ways to get the same `undra` binary (macOS and Linux, x86_64 and arm64):
 
 ```bash
 brew install shreypdev/undra/undra                                   # Homebrew
-npm install -g @undra/cli                                            # npm (Node 20+)
 curl -fsSL https://shreypdev.github.io/undra/install.sh | sh         # checks the sha256, installs to ~/.undra/bin, no sudo
 cargo install --git https://github.com/shreypdev/undra undra-cli     # from source (Rust 1.85+)
 ```
 
-Homebrew, npm and the installer script download the prebuilt binary of a GitHub Release, so
-they work from the first tagged release (`v1.0.0`) on; the `cargo` line builds the default
-branch today. Not supported yet: Windows, and Alpine (musl) for the prebuilt binaries.
+Not supported yet: Windows, and Alpine (musl) for the prebuilt binaries.
 `undra --version` prints `undra <version> (<commit>)` (`unknown` for a build from source). Maintainers: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Quick start
 
 ```bash
-undra init myapp                          # core + SwiftUI + Compose + React shells
-cd myapp
-undra dev                                 # live core over WebSocket, rebuild on save
+undra init myapp                              # a core, its bindings, and an app per platform
+cd myapp/web && npm install && npm run dev    # the web app on its core: http://localhost:5173
 ```
 
-A new project depends on the Undra crates at the git tag of the `undra` that created it
-(`undra = { git = "https://github.com/shreypdev/undra", tag = "v<version>" }`), which
-exists from the first tagged release on. Before that, or to work on Undra itself, use a
-checkout: its crates and runtimes are then used by path.
+Edit `core/src/lib.rs` and save: the Vite plugin rebuilds the core and reloads the page. `undra dev` (in `myapp`)
+serves one core to every running app and keeps its state across a rebuild.
+
+A new project depends on the Undra crates at the git tag of the `undra` that created it, `@undra/runtime` from npm,
+and the Swift and Kotlin runtimes as a Swift package and from Maven Central. Those two are not published yet, so an
+app that runs on iOS or Android builds against a checkout of this repository, whose crates and runtimes are then used
+by path:
 
 ```bash
 git clone https://github.com/shreypdev/undra.git && cd undra
@@ -201,14 +200,14 @@ queries/mutations with an offline switch — on all three platforms.
 
 ## What's in it
 
-The v1 core: records, enums, typed errors, **stores** (signals, computeds, keyed lists), **queries and
+The core: records, enums, typed errors, **stores** (signals, computeds, keyed lists), **queries and
 mutations** (staleness, dedup, retry with jitter, optimistic updates with surgical rollback, offline queue,
 persistence), ten **ports** (Http, Kv, SecureStore, Fs, Clock, Rng, Log, Timer, Connectivity, Lifecycle — with
 platform default adapters and deterministic Rust fakes), streams with backpressure, cancellation,
 snapshot/restore, a schema-hash compatibility gate, `undra dev` with a live remote core, and teaching
 diagnostics for every macro mistake (`error[undra::E0007]: …` with what/why/fix/docs).
 
-Added since, each with its page:
+And, each with its page:
 
 * **React Native** — the same bindings and TypeScript mirror over a TurboModule on the C ABI, with the ten
   default adapters: [docs/REACT_NATIVE.md](docs/REACT_NATIVE.md).
@@ -238,12 +237,13 @@ Added since, each with its page:
 Open, with the work done around it (the same list as the [roadmap](https://shreypdev.github.io/undra/roadmap/)):
 
 * Benchmark rows from physical phones; today's device rows are a simulator, an emulator and headless Chromium.
-* The `undra-compose` and `android-adapters` tests in CI (they pass locally and on the emulator).
+* The Swift runtime as a published Swift package and the Kotlin runtime on Maven Central (until then, iOS and
+  Android apps build against a checkout), then the crates on crates.io.
+* The `undra-compose`, `android-adapters` and `android-work` tests in CI (they pass locally and on the emulator);
+  Android under Bazel, built and tested; a byte-reproducible `undra build`.
+* A cancelled port call reaching the platform (today it is abandoned in the core); a Windows CLI; Dart and Flutter.
 
-Waiting on a release, an account or a decision: the `v1.0.0` tag and its channels (brew, npm, curl; the
-maintainer creates the npm organisation, the Homebrew tap and the tag), crates.io and Maven Central, a Windows
-CLI, Flutter and Dart, and a custom domain. Undra is one team's work with no production users yet, and nothing is
-published to a registry until the first tagged release.
+Undra is one team's work with no production users yet.
 
 Not planned, by design: shared UI of any kind and hosted services; a sync engine, if it comes, is a separate
 package (see [`docs/blueprint.html`](docs/blueprint.html)).

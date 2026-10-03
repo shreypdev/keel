@@ -7,7 +7,7 @@ Undra is open source (MIT OR Apache-2.0) and ships an `undra` CLI (`undra init`,
 ## Docs
 
 - [Undra documentation](https://shreypdev.github.io/undra/docs/): Guides and reference for Undra, the Rust framework for native iOS, Android and web apps: getting started, concepts, queries, ports, the CLI and the API.
-- [Getting started · Undra docs](https://shreypdev.github.io/undra/docs/getting-started.html): Install the Undra CLI with brew, npm, curl or cargo, scaffold a project, run the live dev loop and run the app on iOS, Android and the web.
+- [Getting started · Undra docs](https://shreypdev.github.io/undra/docs/getting-started.html): Install the Undra CLI with Homebrew, the installer or cargo, make a project, run its web app in minutes, then the live loop, iOS and Android.
 - [Core concepts · Undra docs](https://shreypdev.github.io/undra/docs/concepts.html): Stores, signals, computeds, transactions, change-sets and keyed lists, and why a list write costs the change and not the list.
 - [Queries & mutations · Undra docs](https://shreypdev.github.io/undra/docs/queries.html): The data layer in the core: cached queries with staleness and dedup, retry, optimistic mutations with precise rollback, persistence and an offline queue.
 - [Ports & adapters · Undra docs](https://shreypdev.github.io/undra/docs/ports.html): The ten standard ports, the default adapter on each platform, how to supply your own, what happens when one is missing, and the fakes for tests.
@@ -54,10 +54,13 @@ Undra is open source (MIT OR Apache-2.0) and ships an `undra` CLI (`undra init`,
 
 ## Roadmap
 
-- [Undra roadmap: shipped, now, next and later](https://shreypdev.github.io/undra/roadmap/): The Undra roadmap: what shipped in v1.0, what is in flight for v1.x, what is planned next and what is on the horizon. Updated with the project record.
+- [Undra roadmap: shipped, next, later and exploring](https://shreypdev.github.io/undra/roadmap/): The Undra roadmap: what is in 1.0, what is planned next and later, and what is only being explored. Updated with the project record.
 
 ## Blog
 
+- [Undra 1.0: one Rust core under native apps | Undra blog](https://shreypdev.github.io/undra/blog/undra-1-0/): What Undra is, who it is for, what is in 1.0, how to try it in five minutes, and what it is not.
+- [Fifteen levers: the JavaScript runtime at 16 KB | Undra blog](https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/): How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.
+- [A week of outside use: seven findings | Undra blog](https://shreypdev.github.io/undra/blog/a-week-of-outside-use/): A team tried Undra for a week and sent seven findings. Five are fixed, each with a decision record and a review; two were not taken on, and why.
 - [Why Undra is the default choice | Undra blog](https://shreypdev.github.io/undra/blog/why-undra-is-the-default-choice/): A sourced matrix of what KMP, UniFFI, Flutter and React Native stop you doing, what Undra solved and how, what it costs to adopt, and what is still open.
 - [Undra vs Kotlin Multiplatform for shared logic | Undra blog](https://shreypdev.github.io/undra/blog/undra-vs-kotlin-multiplatform/): Undra and Kotlin Multiplatform both share logic and keep the UI native. A dated, sourced comparison: iOS, web, reads, tooling, ecosystem and team fit.
 - [Reads never cross the boundary: how Undra works | Undra blog](https://shreypdev.github.io/undra/blog/reads-never-cross-the-boundary/): How Undra mirrors Rust state into SwiftUI, Compose and React: change-sets, keyed lists as recorded operations, a schema-hash gate, and what it all costs.

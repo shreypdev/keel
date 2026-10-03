@@ -23,7 +23,7 @@
 {"@context":"https://schema.org","@graph":[
 {"@type":"WebSite","@id":"https://shreypdev.github.io/undra/#website","name":"Undra","alternateName":"Undra framework","url":"https://shreypdev.github.io/undra/","description":"Undra is a Rust framework for sharing business logic across iOS, Android and web, with generated native Swift, Kotlin and TypeScript.","inLanguage":"en","publisher":{"@id":"https://shreypdev.github.io/undra/#org"}},
 {"@type":"Organization","@id":"https://shreypdev.github.io/undra/#org","name":"Undra","url":"https://shreypdev.github.io/undra/","logo":"https://shreypdev.github.io/undra/favicon.svg","sameAs":["https://github.com/shreypdev/undra"]},
-{"@type":"SoftwareSourceCode","name":"Undra","codeRepository":"https://github.com/shreypdev/undra","programmingLanguage":"Rust","runtimePlatform":"iOS, Android, Web","license":"https://github.com/shreypdev/undra/blob/main/LICENSE-MIT","dateModified":"2026-10-02"},
+{"@type":"SoftwareSourceCode","name":"Undra","codeRepository":"https://github.com/shreypdev/undra","programmingLanguage":"Rust","runtimePlatform":"iOS, Android, Web","license":"https://github.com/shreypdev/undra/blob/main/LICENSE-MIT","dateModified":"2026-10-03"},
 {"@type":"SoftwareApplication","name":"Undra","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","description":"Rust framework and CLI that owns domain logic, reactive state, the data layer and persistence for native iOS, Android and web apps.","url":"https://shreypdev.github.io/undra/","downloadUrl":"https://github.com/shreypdev/undra","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://github.com/shreypdev/undra/blob/main/LICENSE-MIT"}
 ]}
 </script>
@@ -63,15 +63,14 @@
 
 <main id="main">
 
-<!-- 1. HERO -->
+<!-- 1. HERO: what Undra is, how to start, and the idea itself as a diagram a visitor can tap -->
 <section class="hero">
   <div class="wrap">
-    <a class="eyebrow" href="roadmap/"><i></i> v1 shipped · v1.x on main</a>
     <h1 class="display"><span>One Rust core.</span> <em>Native everywhere.</em></h1>
 
     <div class="hero-grid">
       <div>
-        <p class="hero-sub">Logic in Rust. UI in SwiftUI, Compose, React and React Native.</p>
+        <p class="hero-sub">Your app's logic, state and data in one Rust core, under SwiftUI, Compose, React and React Native.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="docs/getting-started.html">Get started <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>
           <a class="btn btn-ghost" href="#live">See it live</a>
@@ -80,29 +79,16 @@
       <div class="install" data-tabs data-label="Install Undra">
         <div class="tabs-head"></div>
         <div class="tab-panel" data-label="brew"><p class="tab-label">brew</p><div class="cmd"><code>brew install shreypdev/undra/undra</code><button class="copy" type="button" data-copy="brew install shreypdev/undra/undra" aria-label="Copy the brew command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
-        <div class="tab-panel" data-label="npm"><p class="tab-label">npm</p><div class="cmd"><code>npm install -g @undra/cli</code><button class="copy" type="button" data-copy="npm install -g @undra/cli" aria-label="Copy the npm command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
         <div class="tab-panel" data-label="curl"><p class="tab-label">curl</p><div class="cmd"><code>curl -fsSL https://shreypdev.github.io/undra/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://shreypdev.github.io/undra/install.sh | sh" aria-label="Copy the curl command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
         <div class="tab-panel" data-label="cargo"><p class="tab-label">cargo</p><div class="cmd"><code>cargo install --git https://github.com/shreypdev/undra undra-cli</code><button class="copy" type="button" data-copy="cargo install --git https://github.com/shreypdev/undra undra-cli" aria-label="Copy the cargo command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
-        <p class="install-note">brew, npm and curl ship with the v1.0.0 release; until it is tagged, use cargo.</p>
       </div>
     </div>
 
-    <nav class="whatsnew" aria-label="New since v1">
-      <span class="wn-k">New</span>
-      <a href="https://github.com/shreypdev/undra/blob/main/docs/REACT_NATIVE.md" rel="noopener">React Native</a>
-      <a href="docs/cli.html#undra-dev">Devtools with time travel</a>
-      <a href="docs/concepts.html#derived-lists">Derived lists</a>
-      <a href="docs/realtime.html">WebSocket, SSE and Db ports</a>
-      <a href="docs/updates.html">Migrations</a>
-      <a href="docs/cookbook/ios-15-16.html">iOS 15/16</a>
-      <a class="wn-more" href="blog/why-undra-is-the-default-choice/">Why Undra is the default choice</a>
-      <a class="wn-more" href="roadmap/">Roadmap</a>
-    </nav>
 
     <div class="stage-wrap reveal" id="architecture">
       <div class="stage" data-stage>
         <div class="stage-head">
-          <span><b>Architecture</b> · live</span>
+          <span><b>Architecture</b><span class="tap-hint">tap a screen</span></span>
           <button class="dg-toggle" type="button" data-dg-toggle aria-pressed="false"><svg class="i-pause" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="1.5" width="3" height="9" rx="1"/><rect x="7" y="1.5" width="3" height="9" rx="1"/></svg><svg class="i-play" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5v9l8-4.5z"/></svg><span>Pause</span></button>
         </div>
 <svg class="dg dg-wide is-static" viewBox="0 0 1200 608" role="img" aria-labelledby="dgw-t dgw-d" data-by="268" focusable="false">
@@ -221,13 +207,14 @@
       <g data-cell="2"><rect class="cell" x="850" y="484" width="80" height="28" rx="6"/><rect class="cell-on" data-role="on" x="850" y="484" width="80" height="28" rx="6" opacity=".9"/><text class="cell-t mono" x="890" y="502.5" text-anchor="middle" data-role="t">visible</text></g>
       <g data-cell="3"><rect class="cell" x="936" y="484" width="104" height="28" rx="6"/><rect class="cell-on" data-role="on" x="936" y="484" width="104" height="28" rx="6" opacity=".9"/><text class="cell-t mono" x="988" y="502.5" text-anchor="middle" data-role="t">remaining</text></g>
       <text class="t-dim mono" x="112" y="536" style="font-size:12px">only what changed is sent</text>
+      <a href="#numbers"><text class="t-meas mono" x="1088" y="536" text-anchor="end" style="font-size:12px"><tspan data-role="m-call">core call <!--measured:row-call-sync-->49.8 ns<!--/measured--></tspan> · <tspan data-role="m-cs">change-set, 100 signals <!--measured:row-changeset-100-->2.3 µs<!--/measured--></tspan></text></a>
       <line class="core-line" x1="112" x2="1088" y1="550" y2="550"/>
       <text class="t-dim mono" x="112" y="575" style="font-size:12px">ports  Http · Kv · SecureStore · Fs · Clock · Rng · Log · Timer · Connectivity · Lifecycle</text>
       <g data-role="commit"><rect class="commit-bg" x="552" y="369" width="96" height="30" rx="9"/><rect class="commit-on" data-role="on" x="552" y="369" width="96" height="30" rx="9" opacity="1"/><text class="commit-t mono" x="600" y="388.5" text-anchor="middle">commit</text><text class="commit-t-on mono" data-role="t" x="600" y="388.5" text-anchor="middle" opacity="1">commit</text></g>
     </g>
     <g class="pulses" data-role="pulses"></g>
   </svg>
-<svg class="dg dg-narrow is-static" viewBox="0 0 360 628" role="img" aria-labelledby="dgn-t dgn-d" data-by="340" focusable="false">
+<svg class="dg dg-narrow is-static" viewBox="0 0 360 642" role="img" aria-labelledby="dgn-t dgn-d" data-by="340" focusable="false">
     <title id="dgn-t">How Undra works</title>
     <desc id="dgn-d">Four native UIs (SwiftUI, Compose, React, React Native) sit above the Rust core. A write from any UI crosses the boundary once per transaction. The core commits one binary change-set, which fans out to every UI's local mirror. Reads never cross the boundary.</desc>
     <defs>
@@ -315,7 +302,7 @@
     </g>
     <g data-role="core">
       <rect data-role="core-glow" x="8" y="374" width="344" height="110" fill="url(#dgn-core)" opacity=".5"/>
-      <rect class="core" x="8" y="390" width="344" height="226" rx="18"/>
+      <rect class="core" x="8" y="390" width="344" height="240" rx="18"/>
       <text class="t-core" x="22" y="450" style="font-size:22px">Rust core</text>
       <text class="h-lbl mono" x="22" y="476" style="font-size:9.5px">store · Todos</text>
       <g data-chip="todos"><rect class="chip" x="22" y="482" width="54" height="24" rx="7"/><rect class="chip-on dirty" data-role="on" x="22" y="482" width="54" height="24" rx="7"/><text class="chip-t mono" x="49" y="498" text-anchor="middle" style="font-size:10.5px">todos</text></g>
@@ -327,9 +314,10 @@
       <g data-cell="1"><rect class="cell" x="104" y="536" width="50" height="24" rx="6"/><rect class="cell-on" data-role="on" x="104" y="536" width="50" height="24" rx="6" opacity=".9"/><text class="cell-t mono" x="129" y="552" text-anchor="middle" data-role="t" style="font-size:10px">todos</text></g>
       <g data-cell="2"><rect class="cell" x="160" y="536" width="60" height="24" rx="6"/><rect class="cell-on" data-role="on" x="160" y="536" width="60" height="24" rx="6" opacity=".9"/><text class="cell-t mono" x="190" y="552" text-anchor="middle" data-role="t" style="font-size:10px">visible</text></g>
       <g data-cell="3"><rect class="cell" x="226" y="536" width="78" height="24" rx="6"/><rect class="cell-on" data-role="on" x="226" y="536" width="78" height="24" rx="6" opacity=".9"/><text class="cell-t mono" x="265" y="552" text-anchor="middle" data-role="t" style="font-size:10px">remaining</text></g>
-      <line class="core-line" x1="22" x2="338" y1="576" y2="576"/>
-      <text class="t-dim mono" x="22" y="591" style="font-size:9.5px">ports  Http · Kv · SecureStore · Fs · Clock ·</text>
-      <text class="t-dim mono" x="22" y="604" style="font-size:9.5px">Rng · Log · Timer · Connectivity · Lifecycle</text>
+      <a href="#numbers"><text class="t-meas mono" x="22" y="580" style="font-size:9.5px"><tspan data-role="m-call">call <!--measured:row-call-sync-->49.8 ns<!--/measured--></tspan> · <tspan data-role="m-cs">100-signal change-set <!--measured:row-changeset-100-->2.3 µs<!--/measured--></tspan></text></a>
+      <line class="core-line" x1="22" x2="338" y1="590" y2="590"/>
+      <text class="t-dim mono" x="22" y="605" style="font-size:9.5px">ports  Http · Kv · SecureStore · Fs · Clock ·</text>
+      <text class="t-dim mono" x="22" y="618" style="font-size:9.5px">Rng · Log · Timer · Connectivity · Lifecycle</text>
       <g data-role="commit"><rect class="commit-bg" x="144" y="398" width="72" height="28" rx="8"/><rect class="commit-on" data-role="on" x="144" y="398" width="72" height="28" rx="8" opacity="1"/><text class="commit-t mono" x="180" y="416" text-anchor="middle" style="font-size:11px">commit</text><text class="commit-t-on mono" data-role="t" x="180" y="416" text-anchor="middle" opacity="1" style="font-size:11px">commit</text></g>
     </g>
     <g class="pulses" data-role="pulses"></g>
@@ -349,14 +337,7 @@
   </div>
 </section>
 
-<!-- 2. THESIS -->
-<section class="thesis">
-  <div class="wrap">
-    <p class="big reveal">Write the domain once. Keep every screen <em>exactly as native</em> as the platform wants.</p>
-  </div>
-</section>
-
-<!-- 3. LIVE DEMO -->
+<!-- 2. LIVE: the real core in this page -->
 <section class="section" id="live">
   <div class="wrap">
     <span class="kicker reveal">Live demo</span>
@@ -389,7 +370,7 @@
   </div>
 </section>
 
-<!-- 4. NUMBERS -->
+<!-- 3. NUMBERS: measured, each linked to its record -->
 <section class="section" id="numbers">
   <div class="wrap">
     <span class="kicker reveal">Numbers</span>
@@ -406,7 +387,7 @@
     <article class="stat reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl" rel="noopener">Web core, hello world: the wasm alone, gzipped</a><div class="val"><span data-count="118.4" data-dec="1" data-final="118.4">118.4</span><small>KB</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:98.7%"></span></div><div class="meter-cap"><span><b>99%</b> of budget</span><span>budget ≤ 120 KB</span></div></div></article>
     <article class="stat reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/bench/results/native-size.jsonl" rel="noopener">Android core, arm64-v8a, hello world</a><div class="val"><span data-count="898.2" data-dec="1" data-final="898.2">898.2</span><small>KB</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:74.9%"></span></div><div class="meter-cap"><span><b>75%</b> of budget</span><span>budget ≤ 1.2 MB</span></div></div></article>
     </div>
-    <h3 class="stats-h">Harsh conditions</h3>
+    <details class="reveal-code harsh"><summary>Harsh conditions</summary>
     <div class="stats" role="group" aria-label="Harsh-conditions benchmark results">
     <article class="stat w4 reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#harsh-conditions" rel="noopener">Firehose — one transaction per update through the C ABI, sustained; p99 211 ns per call</a><div class="val"><span data-count="6.2" data-dec="1" data-final="6.2">6.2</span><small>M/s</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:17.7%"></span></div><div class="meter-cap"><span><b>5.64×</b> the gate</span><span>gate ≥ 1.1 M/s</span></div></div></article>
     <article class="stat w4 reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#harsh-conditions" rel="noopener">Event firehose — a feed entering through an event port; p99 167 ns</a><div class="val"><span data-count="7.5" data-dec="1" data-final="7.5">7.5</span><small>M/s</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:18.7%"></span></div><div class="meter-cap"><span><b>5.36×</b> the gate</span><span>gate ≥ 1.4 M/s</span></div></div></article>
@@ -416,12 +397,13 @@
     <article class="stat reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#harsh-conditions" rel="noopener">Concurrent completions — 8 threads answering port calls at once, 256 in flight: 0 lost, 0 reordered; p99 573 µs call to reply</a><div class="val"><span data-count="341" data-dec="0" data-final="341">341</span><small>k/s</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:20.2%"></span></div><div class="meter-cap"><span><b>4.94×</b> the gate</span><span>gate ≥ 69 k/s</span></div></div></article>
     <article class="stat reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#harsh-conditions" rel="noopener">60-second soak — firehose, churn, completions and a stream together at 98 to 100 % of target; RSS growth over the second half</a><div class="val"><span data-count="0.14" data-dec="2" data-final="0.14">0.14</span><small>%</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:14.0%"></span></div><div class="meter-cap"><span><b>14%</b> of budget</span><span>budget ≤ 1 %</span></div></div></article>
     </div>
+    </details>
     <details class="measured"><summary>How these are measured</summary><p>Medians from cargo bench (criterion, release, LTO). Budgets are the design's per-device targets; CI gates are regression guards about 5x the host median. Harsh-conditions cards: 10-second sustained runs on the host, core side, on a shared machine; their gates are floors at one fifth of the measured rate. Frame-coalesced delivery (ADR-031) leaves these core-side numbers as they are: what it changes is the platform-side apply, and the live demo above shows that, measured in your browser (Push it). Measured on Apple M5 Pro, 18 cores, macOS 26.5. Simulator, emulator and Chromium rows are in the <a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#device-numbers-ios-android-web" rel="noopener">benchmark results</a>; real-phone rows are not claimed and are on the <a href="roadmap/">roadmap</a>.</p></details>
     <!-- numbers:end -->
   </div>
 </section>
 
-<!-- 5. HOW IT WORKS -->
+<!-- 4. HOW IT WORKS: the code, collapsed -->
 <section class="section" id="how">
   <div class="wrap">
     <span class="kicker reveal">How it works</span>
@@ -577,25 +559,7 @@ pub async fn create_remote_todo(ctx: &amp;Ctx, list: String, title: String) -&gt
   </div>
 </section>
 
-<!-- 6. FEATURES -->
-<section class="section" id="features">
-  <div class="wrap">
-    <span class="kicker reveal">In v1</span>
-    <h2 class="h2 reveal">Everything <em>under the pixels.</em></h2>
-    <div class="feats">
-      <a class="feat reveal" href="docs/concepts.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 9 4.5-9 4.5-9-4.5z"/><path d="m3 12 9 4.5 9-4.5M3 16.5 12 21l9-4.5"/></svg></span><b>Stores and signals</b><span>One change-set</span></a>
-      <a class="feat reveal" data-d="1" href="docs/queries.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg></span><b>Queries and mutations</b><span>Optimistic updates</span></a>
-      <a class="feat reveal" data-d="2" href="docs/queries.html#the-offline-queue"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span><b>Offline queue</b><span>Replays on reconnect</span></a>
-      <a class="feat reveal" data-d="3" href="docs/ports.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/></svg></span><b>Ports and adapters</b><span>Ten, with fakes</span></a>
-      <a class="feat reveal" href="https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md" rel="noopener"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.4 3.1 8 7.5 9.5 4.4-1.5 7.5-5.1 7.5-9.5V6z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg></span><b>Contract-tested</b><span><!--trust:cells-of-->101 of 101<!--/trust--> pass</span></a>
-      <a class="feat reveal" data-d="1" href="docs/cli.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></span><b>The dev loop</b><span>Edit Rust, reload</span></a>
-      <a class="feat reveal" data-d="2" href="docs/errors.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5M12 16.5v.01"/><path d="M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span><b>Teaching diagnostics</b><span>What, why, fix</span></a>
-      <a class="feat reveal" data-d="3" href="docs/architecture.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7a8 3 0 0 0 16 0 8 3 0 0 0-16 0z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span><b>Snapshot and restore</b><span>Crash recovery</span></a>
-    </div>
-  </div>
-</section>
-
-<!-- 7. TRUST -->
+<!-- 5. TRUST: what you can check -->
 <section class="section" id="trust">
   <div class="wrap">
     <span class="kicker reveal">Receipts</span>
@@ -619,12 +583,10 @@ pub async fn create_remote_todo(ctx: &amp;Ctx, list: String, title: String) -&gt
       </article>
       <!-- trust:end -->
       <article class="tcard t-rev reveal">
-        <h3><a href="https://github.com/shreypdev/undra/tree/main/.10x/reviews" rel="noopener">Four adversarial reviews</a></h3>
+        <h3><a href="https://github.com/shreypdev/undra/tree/main/.10x/reviews" rel="noopener">Reviewed by someone who did not write it</a></h3>
         <ul class="rev-list">
-          <li>signals</li>
-          <li>runtime</li>
-          <li>macros</li>
-          <li>ffi<span>ASan + Miri</span></li>
+          <li>every core crate<span>ffi under ASan + Miri</span></li>
+          <li>every feature since</li>
         </ul>
       </article>
       <article class="tcard t-app reveal" data-d="1">
@@ -635,57 +597,38 @@ pub async fn create_remote_todo(ctx: &amp;Ctx, list: String, title: String) -&gt
   </div>
 </section>
 
-<!-- 8. PRINCIPLES -->
-<section class="section" id="principles">
-  <div class="wrap">
-    <span class="kicker reveal">Principles</span>
-    <h2 class="h2 reveal">Twelve rules, <em>enforced.</em></h2>
-    <div class="rules reveal">
-      <a class="rule" href="docs/architecture.html#constitution" title="The schema is the only truth. A public type exists only if the schema can describe it. Every language's output derives from it."><b>One source of truth</b></a>
-      <a class="rule" href="docs/architecture.html#constitution" title="unsafe has one home. Only undra-ffi (plus one schema loader in the CLI). Every block carries a SAFETY comment; every other crate forbids it."><b>unsafe has one home</b></a>
-      <a class="rule" href="docs/architecture.html#constitution" title="Generated code passes native review. A Swift, Kotlin or TypeScript engineer who never saw Rust would write it that way. Golden files lock it."><b>Native-reviewable</b></a>
-      <a class="rule" href="docs/architecture.html#constitution" title="Every feature lands whole. Unit tests, contract scenarios, a benchmark if the boundary moves, docs on every pub item."><b>Features land whole</b></a>
-      <a class="rule" href="docs/architecture.html#constitution" title="Reads never cross the boundary. Writes cross once per transaction. No generated getter calls into the core."><b>Reads never cross</b></a>
-      <a class="rule" href="docs/architecture.html#constitution" title="Nothing escapes as a panic. Every boundary entry is guarded and every error is a typed value."><b>No panics escape</b></a>
-      <a class="rule" href="docs/architecture.html#constitution" title="Compatibility is checked. Schema hash at load and at build. Breaking the wire is a major version and an ADR."><b>Compatibility checked</b></a>
-      <a class="rule" href="docs/architecture.html#constitution" title="Macro errors teach. Code, what, why, fix, docs link."><b>Macro errors teach</b></a>
-      <a class="rule" href="docs/architecture.html#constitution" title="Budgets are tests. Benchmarks live in bench/; a regression fails CI."><b>Budgets are tests</b></a>
-      <a class="rule" href="docs/architecture.html#constitution" title="We ship on it first. examples/playground uses only public APIs."><b>Dogfooded</b></a>
-      <a class="rule" href="docs/architecture.html#constitution" title="Boundary changes need an ADR. Wire, runtime model, threading or a generated shape: decision record before code."><b>ADR first</b></a>
-      <a class="rule" href="docs/architecture.html#constitution" title="The core is deterministic. No wall clock, randomness or threads outside the Clock, Rng and Timer ports and the runtime."><b>Deterministic core</b></a>
-    </div>
-  </div>
-</section>
-
-<!-- 9. COMPARED -->
+<!-- 6. WHY THIS: the alternatives, each in a post -->
 <section class="section" id="compared">
   <div class="wrap">
-    <span class="kicker reveal">Compared</span>
-    <h2 class="h2 reveal">Honest <em>comparisons.</em></h2>
-    <div class="cards4">
+    <span class="kicker reveal">Why Undra</span>
+    <h2 class="h2 reveal">For apps on two or more platforms <em>that must agree.</em></h2>
+    <p class="lede reveal" data-d="1">One set of rules for logic, state and data, with each screen as native as before. How that compares:</p>
+    <div class="cards4 cards3">
       <a class="card reveal" href="blog/undra-vs-kotlin-multiplatform/"><h3>vs Kotlin Multiplatform</h3><span class="go" aria-hidden="true"><i>→</i></span></a>
       <a class="card reveal" href="blog/undra-vs-uniffi-and-crux/" data-d="1"><h3>vs UniFFI and Crux</h3><span class="go" aria-hidden="true"><i>→</i></span></a>
-      <a class="card reveal" href="blog/why-undra-keeps-your-ui-native/" data-d="2"><h3>Why the UI stays native</h3><span class="go" aria-hidden="true"><i>→</i></span></a>
-      <a class="card reveal" href="blog/reads-never-cross-the-boundary/" data-d="3"><h3>Reads never cross the boundary</h3><span class="go" aria-hidden="true"><i>→</i></span></a>
+      <a class="card reveal" href="blog/why-undra-keeps-your-ui-native/" data-d="2"><h3>vs sharing the UI too</h3><span class="go" aria-hidden="true"><i>→</i></span></a>
     </div>
+    <p class="more-row"><a class="tlink" href="blog/why-undra-is-the-default-choice/">The limitations matrix, row by row →</a></p>
   </div>
 </section>
 
-<!-- 10. ROADMAP TEASER -->
+<!-- 7. WHAT IS STILL OPEN: generated from data/roadmap.json -->
 <section class="section" id="roadmap-teaser">
   <div class="wrap">
     <span class="kicker reveal">Roadmap</span>
     <h2 class="h2 reveal">What is <em>still open.</em></h2>
+    <!-- roadmap-teaser:start -->
     <ul class="now3 reveal">
-      <li><span class="st">Now</span>Real-phone benchmarks</li>
-      <li><span class="st">Now</span>Generic functions and objects</li>
-      <li><span class="st">Next</span>brew, npm, curl</li>
+    <li><a href="roadmap/#next-benchmarks-on-physical-phones"><span class="st st-next">Next</span><span>Benchmarks on physical phones</span></a></li>
+    <li><a href="roadmap/#next-the-swift-package-and-maven-central"><span class="st st-next">Next</span><span>The Swift package and Maven Central</span></a></li>
+    <li><a href="roadmap/#later-dart-and-flutter-bindings"><span class="st st-later">Later</span><span>Dart and Flutter bindings</span></a></li>
     </ul>
-    <p class="more-row"><a class="tlink" href="roadmap/">Full roadmap →</a></p>
+    <!-- roadmap-teaser:end -->
+    <p class="more-row"><a class="tlink" href="roadmap/">Everything shipped, next and later →</a></p>
   </div>
 </section>
 
-<!-- 11. FINAL CTA -->
+<!-- 8. START -->
 <section class="final">
   <div class="wrap">
     <div class="final-card reveal">
@@ -693,13 +636,13 @@ pub async fn create_remote_todo(ctx: &amp;Ctx, list: String, title: String) -&gt
       <div class="install" data-tabs data-label="Install Undra, again">
         <div class="tabs-head"></div>
         <div class="tab-panel" data-label="brew"><p class="tab-label">brew</p><div class="cmd"><code>brew install shreypdev/undra/undra</code><button class="copy" type="button" data-copy="brew install shreypdev/undra/undra" aria-label="Copy the brew command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
-        <div class="tab-panel" data-label="npm"><p class="tab-label">npm</p><div class="cmd"><code>npm install -g @undra/cli</code><button class="copy" type="button" data-copy="npm install -g @undra/cli" aria-label="Copy the npm command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
         <div class="tab-panel" data-label="curl"><p class="tab-label">curl</p><div class="cmd"><code>curl -fsSL https://shreypdev.github.io/undra/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://shreypdev.github.io/undra/install.sh | sh" aria-label="Copy the curl command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
         <div class="tab-panel" data-label="cargo"><p class="tab-label">cargo</p><div class="cmd"><code>cargo install --git https://github.com/shreypdev/undra undra-cli</code><button class="copy" type="button" data-copy="cargo install --git https://github.com/shreypdev/undra undra-cli" aria-label="Copy the cargo command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
-        <p class="install-note">brew, npm and curl ship with the v1.0.0 release; until it is tagged, use cargo.</p>
       </div>
+      <div class="code then"><div class="code-bar"><span>then</span></div><pre><code data-lang="bash">undra init myapp
+cd myapp/web &amp;&amp; npm install &amp;&amp; npm run dev</code></pre></div>
       <div class="cta-row">
-        <a class="btn btn-primary" href="docs/getting-started.html">Read the docs</a>
+        <a class="btn btn-primary" href="docs/getting-started.html">Get started</a>
         <a class="btn btn-ghost" href="playground/">Open the playground</a>
       </div>
     </div>

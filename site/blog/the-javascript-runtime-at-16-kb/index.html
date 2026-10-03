@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fifteen levers: the JavaScript runtime at 16 KB | Undra blog</title>
+<meta name="description" content="How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/">
+<meta property="og:title" content="Fifteen levers: the JavaScript runtime at 16 KB | Undra blog">
+<meta property="og:description" content="How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="article:published_time" content="2026-10-03">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Fifteen levers: the JavaScript runtime at 16 KB | Undra blog">
+<meta name="twitter:description" content="How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Fifteen levers: the JavaScript runtime at 16 KB",
+  "description": "How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.",
+  "datePublished": "2026-10-03",
+  "dateModified": "2026-10-03",
+  "inLanguage": "en",
+  "image": "https://shreypdev.github.io/undra/assets/og.png",
+  "author": {
+    "@type": "Organization",
+    "name": "Undra team"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Undra",
+    "url": "https://shreypdev.github.io/undra/"
+  },
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/"
+  }
+}</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../../assets/base.css"><link rel="stylesheet" href="../../assets/blog.css">
+</head>
+<body data-page="blog">
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../../docs/">Docs</a>
+      <a href="../../blog/" aria-current="page">Blog</a>
+      <a href="../../roadmap/">Roadmap</a>
+      <a href="../../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<main class="post" id="main"><article>
+  <header class="post-header">
+    <p class="eyebrow">Performance</p><h1>Fifteen levers: the JavaScript runtime at 16 KB</h1><p class="lede">What a hello-world page loads up front of <code>@undra/runtime</code> went from 22,100 to 15,774 bytes gzipped, under a 16,000-byte budget. Nothing was removed: what left the first chunk loads with what needs it. Here are the fifteen levers, and the four defects the review caught.</p>
+    <p class="post-meta"><time datetime="2026-10-03">3 Oct 2026</time> · 5 min read · Undra team</p>
+  </header>
+  <nav class="toc" aria-label="On this page"><ol><li><a href="#the-budget">Where the bytes were</a></li><li><a href="#the-levers">The levers</a></li><li><a href="#what-stays">What left, and what stays</a></li><li><a href="#the-review">What the review caught</a></li><li><a href="#the-cost">What it cost</a></li></ol></nav>
+<section id="the-budget">
+<h2>Where the bytes were</h2>
+<p>The web size decision (ADR-052) asked for 16 KB of runtime up front. An earlier piece reached 21.2 KB and concluded that 16 KB would mean removing behaviour; five pieces then added 0.9 KB, and the gate stood at 22,100 bytes with no room. Instead we attributed every byte: a script charges each byte of the minified chunk, and each bit of its gzip stream, to its declaration. The largest shares:</p>
+<div class="table-wrap"><table><thead><tr><th>Concern</th><th>gzipped bytes</th></tr></thead><tbody>
+<tr><td>wire: reader, writer, codecs</td><td>3,702</td></tr>
+<tr><td>the mirror</td><td>2,867</td></tr>
+<tr><td>the in-process wasm host</td><td>2,521</td></tr>
+<tr><td>error classes and their sentences</td><td>2,038</td></tr>
+<tr><td>the call path</td><td>1,889</td></tr>
+<tr><td>streams</td><td>945</td></tr>
+<tr><td>the bundler's own helper and chunk table</td><td>717</td></tr>
+</tbody></table></div>
+<p>Three things stood out. A hello page shipped code it cannot run: streams the template does not have, reconnection for a core that is not remote, 20 of 24 codecs. Where the bundler emits a module is decided by re-exports, not by use: a module reached through any file with code of its own lands in the first chunk. And the sentences of errors were about a tenth of the chunk.</p>
+</section>
+<section id="the-levers">
+<h2>The levers</h2>
+<p>Each landed with its measured number. gzip is not additive: a row is what it saved on top of the rows above.</p>
+<div class="table-wrap"><table class="compare"><thead><tr><th>#</th><th>Lever</th><th>after</th><th>saved</th></tr></thead><tbody>
+<tr><td></td><td><code>main</code> before</td><td>22,100</td><td></td></tr>
+<tr><td>1</td><td>session payloads re-exported by the wire barrel</td><td>21,971</td><td>129</td></tr>
+<tr><td>2</td><td>nine port ids as literals, pinned by a test</td><td>21,766</td><td>205</td></tr>
+<tr><td>3, 11a</td><td><code>codecs</code> as a module namespace; unnamed codecs in a module of their own</td><td>20,799</td><td>967</td></tr>
+<tr><td>4</td><td>streams as a feature the generated entry passes</td><td>20,152</td><td>647</td></tr>
+<tr><td>5</td><td>a typed channel to the in-process host</td><td>19,458</td><td>694</td></tr>
+<tr><td>6, 7</td><td>observe waiters and remote-only code load with their transport</td><td>18,942</td><td>516</td></tr>
+<tr><td>8</td><td><code>stats</code>, <code>snapshot</code>, <code>restore</code>, <code>runInBackground</code> on first call</td><td>18,580</td><td>362</td></tr>
+<tr><td>9, 10</td><td>each on-demand transport maps its own options</td><td>18,311</td><td>269</td></tr>
+<tr><td>11b</td><td>two rarely thrown error classes</td><td>18,158</td><td>153</td></tr>
+<tr><td>12</td><td>trims</td><td>18,079</td><td>79</td></tr>
+<tr><td>13</td><td>the production build says error codes, with a link</td><td>16,763</td><td>1,316</td></tr>
+<tr><td>14</td><td>the production build renames private properties</td><td>16,193</td><td>570</td></tr>
+<tr><td>15</td><td>Vite's preload helper reported beside the number</td><td>15,679</td><td>514</td></tr>
+<tr><td>4b</td><td>no bundler warning in an app with a stream</td><td>15,680</td><td>+1</td></tr>
+</tbody></table></div>
+<p>Row 15 changes what is counted, not what is shipped, so the helper has a gate of its own: with it, the page loads 16,285 bytes against 16,600. Row 13 is the largest single lever. A production page carries an error's class, kind and fields, and its text is <code>T&lt;code&gt;</code> with a link to the <a href="../../docs/errors.html">error codes</a>; the development build keeps the sentences.</p>
+</section>
+<section id="what-stays">
+<h2>What left, and what stays</h2>
+<p>What left loads when it is first needed: stream support, the framed transports' codecs, reconnection, the observe waiters, <code>stats</code> and background runs, the codecs a schema does not name. What stays up front stays for a reason we measured:</p>
+<ul>
+<li><strong>Keyed-patch merging</strong>, because read-your-writes drains are synchronous and could not wait for a chunk.</li>
+<li><strong>The mirror's compaction</strong>, because its backlog bound must hold offline too.</li>
+<li><strong>Object identity</strong>, because every app's first screen waits for it.</li>
+<li><strong>Connectivity and Lifecycle events</strong>, about 530 bytes: a hello core listens to neither, but nothing tells the page so. That needs the core to say when it starts listening, which is an ABI decision with its own record. It is the next lever.</li>
+</ul>
+</section>
+<section id="the-review">
+<h2>What the review caught</h2>
+<p>The adversarial review reproduced every number to the byte and found four High defects at the levers' edges:</p>
+<ul>
+<li><strong>A stripped declaration.</strong> <code>reclaim</code> was marked internal, so the published types dropped it, and generated bindings that import it failed <code>tsc</code> against the installed package. Every suite aliased the sources and stayed green. A test now asks the compiler about every name the generator imports.</li>
+<li><strong>Lost order.</strong> <code>snapshot()</code> and <code>restore()</code> ran after an <code>await import()</code>, which yields even when the module is cached, so a call made after <code>restore()</code> reached the core first. They run at the call again.</li>
+<li><strong>A fetch at the wrong moment.</strong> The background drain at <code>pagehide</code> needed a chunk, at the one moment a page cannot fetch one. It calls the core directly now.</li>
+<li><strong>Codes where data was expected.</strong> The production build had turned a WebSocket close reason, which reaches the server, and port errors, which reach the core, into codes. Text that leaves the runtime as data is a sentence in both builds.</li>
+</ul>
+<p>The fixes cost 131 bytes, to 15,811; smaller fixes and a later merge left the record at 15,774.</p>
+</section>
+<section id="the-cost">
+<h2>What it cost</h2>
+<p>An awaited call is 4% slower on Node, from 313 to 316 nanoseconds to 325 to 333; <code>callSync</code> did not move. The development build's first chunk is 21,151 bytes and is not gated, since a development page is served module by module. The page that uses every feature loads 39,922 bytes, less than the 42,385 it loaded before. All three numbers are gated in CI; a change that grows the chunk fails the build and names the lever left.</p>
+</section>
+<footer class="post-footer"><p>Every claim and its source: <a href="claims.md">the claims ledger</a>. The full record is <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-057-js-runtime-16kb.md" rel="noopener">ADR-057</a> and <a href="https://github.com/shreypdev/undra/blob/main/.10x/reviews/2026-10-02-ts-runtime-16k-review.md" rel="noopener">its review</a>.</p></footer>
+</article></main>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose, React and React Native.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../../docs/cli.html">The CLI</a></li>
+          <li><a href="../../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../../blog/">Blog</a></li>
+          <li><a href="../../roadmap/">Roadmap</a></li>
+          <li><a href="../../playground/">Playground</a></li>
+          <li><a href="../../feed.xml">RSS feed</a></li>
+          <li><a href="../../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../../assets/site.js" defer></script></body></html>

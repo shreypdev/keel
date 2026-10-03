@@ -21,8 +21,8 @@
 //     file, as a time with three significant figures, as a whole number, or as a signed percentage
 //     with two decimals); they are filled in when the card is drawn, and the template stays in bench.json.
 // The same size numbers fill every `<!--measured:NAME-->..<!--/measured-->` slot of the site's pages
-// and of README.md (NAME is a key of SLOTS below), so a hand edit of any copy is undone here and
-// fails CI's "generated files are up to date" check.
+// and of README.md (NAME is a key of SLOTS below, or `row-<id>` for the value and unit of a card of
+// bench.json), so a hand edit of any copy is undone here and fails CI's "generated files are up to date" check.
 import { join } from "node:path";
 import { SITE, read, writeIfChanged, replaceRegion, esc, htmlFiles } from "./lib.mjs";
 
@@ -125,8 +125,10 @@ for (const row of [...bench.rows, ...bench.harsh].filter((r) => r.measured)) {
 }
 if (writeIfChanged(benchPath, JSON.stringify(bench, null, 2) + "\n")) console.log("build-numbers: updated site/data/bench.json from the measured records");
 
-// The prose copies of the measured numbers.
+// The prose copies of the measured numbers: the sizes above, and `row-<id>` for the value of any card of
+// bench.json (the landing page's diagram shows the core call and the change-set this way).
 const slotText = Object.fromEntries(Object.entries(SLOTS).map(([name, at]) => [name, `${kb(recordOf(at).bytes)} KB`]));
+for (const row of [...bench.rows, ...bench.harsh]) slotText[`row-${row.id}`] = `${fmtNum(row.value)} ${row.unit}`;
 const SLOT = /<!--measured:([a-z0-9-]+)-->[^<]*<!--\/measured-->/g;
 for (const file of [...htmlFiles(SITE), join(ROOT, "README.md")]) {
   const text = read(file);
@@ -148,7 +150,8 @@ for (const file of [...htmlFiles(SITE), join(ROOT, "README.md")]) {
 }
 
 const parts = [grid(bench.rows, `Benchmark results, measured on ${bench.machine}`)];
-if (bench.harsh.length) parts.push('<h3 class="stats-h">Harsh conditions</h3>', grid(bench.harsh, "Harsh-conditions benchmark results"));
+// The harsh-conditions cards sit behind a disclosure: the landing page leads with the boundary's cost.
+if (bench.harsh.length) parts.push('<details class="reveal-code harsh"><summary>Harsh conditions</summary>', grid(bench.harsh, "Harsh-conditions benchmark results"), "</details>");
 
 parts.push(`<details class="measured"><summary>How these are measured</summary><p>${esc(bench.method)} Measured on ${esc(bench.machine)}. Simulator, emulator and Chromium rows are in the <a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#device-numbers-ios-android-web" rel="noopener">benchmark results</a>; real-phone rows are not claimed and are on the <a href="roadmap/">roadmap</a>.</p></details>`);
 
