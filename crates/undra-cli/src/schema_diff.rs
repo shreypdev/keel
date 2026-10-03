@@ -1018,13 +1018,18 @@ fn port(out: &mut Out, noun: &'static str, name: &str, old: &PortDef, new: &Port
             ),
         );
     }
+    // Where the calls arrive is part of the contract with the implementation: Swift spells it as the
+    // protocol's isolation (`@MainActor` unless `background`), and code that touches the UI from a
+    // call is right on one thread and wrong on the other in every language.
     if old.background != new.background {
         let text = if new.background {
-            "is now `background`: its calls run off the main thread"
+            "is now `background`: its calls arrive off the main thread (Swift's protocol is no longer `@MainActor`), \
+             so an implementation that touches the UI must move to it"
         } else {
-            "is no longer `background`"
+            "is no longer `background`: its calls arrive on the main thread (Swift's protocol becomes `@MainActor`), \
+             so a nonisolated implementation no longer conforms as it did"
         };
-        out.additive(noun, name, text);
+        out.breaking(noun, name, text);
     }
     // The app implements a sync, async or callback port's methods and calls an event port's.
     let added = if new.kind == PortKind::Event {

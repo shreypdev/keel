@@ -1092,14 +1092,6 @@ fn a_change_to_what_the_app_implements_is_breaking() {
         lines(&base(), &kind),
         ["breaking  port Biometrics: kind changed from async to sync"]
     );
-    let mut background = base();
-    background.ports[0].background = true;
-    let found = lines(&base(), &background);
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(
-        found[0].starts_with("additive  port Biometrics: is now `background`"),
-        "{found:?}"
-    );
 }
 
 #[test]
@@ -1138,6 +1130,27 @@ fn callbacks_are_added_freely_but_changing_one_breaks_its_implementers() {
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(
         found[0].starts_with("additive  method UploadListener.progress: is now `coalesce`"),
+        "{found:?}"
+    );
+    // `background` moves the calls off or onto the main thread: Swift's protocol stops or starts
+    // being `@MainActor` (a Swift 6 implementation no longer conforms as it did), and an
+    // implementation that touched the UI from a call now does it from another thread.
+    let mut background = base();
+    background.ports[0].background = true;
+    let found = lines(&base(), &background);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].starts_with(
+            "breaking  callback UploadListener: is now `background`: its calls arrive off the main thread"
+        ) && found[0].contains("@MainActor"),
+        "{found:?}"
+    );
+    let found = lines(&background, &base());
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].starts_with(
+            "breaking  callback UploadListener: is no longer `background`: its calls arrive on the main thread"
+        ),
         "{found:?}"
     );
     // A port that became a callback is reported with the callbacks, and as a change of kind.
