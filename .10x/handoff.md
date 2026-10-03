@@ -39,17 +39,20 @@ Landed: devtools, persistence, testkit, docs-v1x, ports (all reviewed) (ADR-037/
 piece lands unless CI is green on its pushed head (`scripts/wt.sh merge` enforces it; it also demands a Site run on
 the exact head when site paths changed — `gh workflow run site.yml --ref wt/<name>` when the filter skipped it);
 (2) Fable designs where the difficulty is in deciding, a cheaper model implements, an adversarial review follows;
-(3) **`main` is protected: every change, state commits included, lands through a pull request** whose four required
-checks — `CI / All green`, `Bench / All green`, `Two cores / All green`, `Site / All green` (the roll-up job of each
-workflow, `pr-gate`) — are green on its head. `scripts/wt.sh merge <slug>` opens the pull request, waits for the
-checks, merges with a merge commit and cleans up; `scripts/wt.sh pr <slug>` opens a draft early. `--ff` is only
-for repositories without protection and the script tests. The `wt/**` push triggers are gone: CI runs on pull
-requests and on `main`. Section 4 of `docs/AGENT_WORKFLOW.md` is the reference. Landed today, in order: `ci-green` (`fc326d6`), `diagram-rn`
+(3) **`main` is protected by the founder's ruleset (2026-10-03): a pull request, squash only, the required check
+`All green` (the roll-up job of CI, Bench, Two cores and Site), no bypass, no "up to date" rule and no merge queue.**
+`scripts/wt.sh merge <slug>` opens the pull request, waits for the four checks, squash-merges, verifies `main`'s tree is
+the tested head's tree and cleans up; `scripts/wt.sh pr <slug>` opens a draft early; `--ff` is only for repositories
+without protection and the script tests. A branch must contain `main` or be stacked on the piece landing before it
+(merging `main` into it changes nothing); build the whole stack before pushing. State commits ride in a piece's pull
+request. Section 4 of `docs/AGENT_WORKFLOW.md` is the reference. Landed today, in order: `ci-green` (`fc326d6`), `diagram-rn`
 (`b7efd61`), `generics-fn-obj` (`aa04821`), `generics-followups` (`3c279a6`). Main is `3c279a6` plus state commits.
 
 Landed after that: `test-pacing` (`14a4689`), `reload-handles` (`7e5d238`), `ts-runtime-16k` (`784c361`) —
-status checkpoints 32 and 33. **Nothing of the wave is open.** `main` is `784c361` plus the checkpoint-33 state
-commit; its own CI runs on those heads are the proof to look at first in a new session.
+status checkpoints 32 and 33 — and then the feedback wave of checkpoint 34: the pull-request gate (#2, #6, #9),
+`generated-weight` (#3), `sse-chunks` (#5), `okhttp-adapters` (#4), `bazel` (#7), `android-size` (#8). **Nothing is
+open: `origin` has `main` only.** What each review left recorded is listed at the end of checkpoint 34; the two
+findings not taken on are U2 (Xcode 27, needs the reporter's crash log) and U6 (GraphQL).
 - **On hold by the founder:** the Android emulator CI job for `android-adapters`, `android-work` and
   `undra-compose`. Not started. Ask him before starting it. (The "Android emulator (API 34, x86_64)" job in
   `two-cores.yml` is older and unrelated.)
