@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A week of outside use: seven findings | Undra blog</title>
+<meta name="description" content="A team tried Undra for a week and sent seven findings. Five are fixed, each with a decision record and a review; two were not taken on, and why.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/blog/a-week-of-outside-use/">
+<meta property="og:title" content="A week of outside use: seven findings | Undra blog">
+<meta property="og:description" content="A team tried Undra for a week and sent seven findings. Five are fixed, each with a decision record and a review; two were not taken on, and why.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://shreypdev.github.io/undra/blog/a-week-of-outside-use/">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="article:published_time" content="2026-10-03">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="A week of outside use: seven findings | Undra blog">
+<meta name="twitter:description" content="A team tried Undra for a week and sent seven findings. Five are fixed, each with a decision record and a review; two were not taken on, and why.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "A week of outside use: seven findings, five fixes",
+  "description": "A team tried Undra for a week and sent seven findings. Five are fixed, each with a decision record and a review; two were not taken on, and why.",
+  "datePublished": "2026-10-03",
+  "dateModified": "2026-10-03",
+  "inLanguage": "en",
+  "image": "https://shreypdev.github.io/undra/assets/og.png",
+  "author": {
+    "@type": "Organization",
+    "name": "Undra team"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Undra",
+    "url": "https://shreypdev.github.io/undra/"
+  },
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://shreypdev.github.io/undra/blog/a-week-of-outside-use/"
+  }
+}</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../../assets/base.css"><link rel="stylesheet" href="../../assets/blog.css">
+</head>
+<body data-page="blog">
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../../docs/">Docs</a>
+      <a href="../../blog/" aria-current="page">Blog</a>
+      <a href="../../roadmap/">Roadmap</a>
+      <a href="../../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<main class="post" id="main"><article>
+  <header class="post-header">
+    <p class="eyebrow">Field notes</p><h1>A week of outside use: seven findings, five fixes</h1><p class="lede">Before the release, a team tried Undra for a week, in a proof of concept inside its own repository, and sent us seven findings. Five are fixed and merged, each through a pull request with a decision record and an adversarial review. Two were not taken on. Here is each one, what we measured, and what changed.</p>
+    <p class="post-meta"><time datetime="2026-10-03">3 Oct 2026</time> · 5 min read · Undra team</p>
+  </header>
+  <nav class="toc" aria-label="On this page"><ol><li><a href="#the-findings">The seven findings</a></li><li><a href="#sse">The SSE adapter read a byte at a time</a></li><li><a href="#bazel">No Bazel</a></li><li><a href="#size">1.6 MB per ABI</a></li><li><a href="#network-stack">Inside the app's network stack</a></li><li><a href="#generated-code">Generated code in review</a></li><li><a href="#not-taken">What we did not take on</a></li><li><a href="#what-it-taught">What a week taught us</a></li></ol></nav>
+<section id="the-findings">
+<h2>The seven findings</h2>
+<div class="table-wrap"><table class="compare"><thead><tr><th>Finding</th><th>What happened</th></tr></thead><tbody>
+<tr><td>Server-sent events are slow on iOS</td><td>Fixed: 7.8x on 4 KB events</td></tr>
+<tr><td>The Swift tests do not build on Xcode 27</td><td>Not taken on: no reproduction yet</td></tr>
+<tr><td>No Bazel</td><td>Fixed: Bazel rules and an example workspace</td></tr>
+<tr><td>A core is 1.6 MB per Android ABI</td><td>Fixed: a size profile, a setting and gates</td></tr>
+<tr><td>The Android adapter is not our network stack</td><td>Fixed: adapters over the app's own OkHttp</td></tr>
+<tr><td>No GraphQL</td><td>Not taken on: Apollo stays on the platform side</td></tr>
+<tr><td>Generated code is noise in review</td><td>Fixed: the schema is the API, and <code>undra schema diff</code> reads it</td></tr>
+</tbody></table></div>
+</section>
+<section id="sse">
+<h2>The SSE adapter read a byte at a time</h2>
+<p>The report measured the iOS ceiling for server-sent events 2.4x below what it should be. The code agreed: the Swift adapter pulled the response body from <code>URLSession.AsyncBytes</code> one byte at a time and handed the parser one byte per call. The Kotlin and TypeScript adapters already read chunks.</p>
+<p>The adapter is now the delegate of a data task, and the parser gets whole chunks. Backpressure follows the Kotlin adapter's rule: the task is suspended while events wait for the core, so URLSession stops reading and TCP pushes back. In release builds, 4 KB events went from 12,600 to between 84,000 and 99,000 a second (7.8x), and 512-byte events by 2.1x. Once it worked on bytes instead of characters, the parser alone went from 310 to 2,246 MB/s on 4 KB events.</p>
+<p>The review found two High defects: a cancelled waiter hung and left the request open, and a background URLSession, which takes no task delegate, crashed the app. It is now refused with a typed error.</p>
+</section>
+<section id="bazel">
+<h2>No Bazel</h2>
+<p>Undra's build was a command line that Xcode and Gradle call: a Bazel repository had nothing to put in its graph, and its lint rules flagged the generated Kotlin. The <code>bazel/</code> module adds <code>undra_core</code>, <code>undra_bindings</code> and a library rule per language, which run the CLI as a pinned, hermetic, offline tool. <code>examples/bazel</code> tests a core from Kotlin on the JVM, TypeScript on Node and, on macOS, Swift. Lint exclusions written beside every generated tree took ktlint from 90 findings to none. Android under Bazel is declared and not yet verified, and the roadmap says so.</p>
+</section>
+<section id="size">
+<h2>1.6 MB per ABI</h2>
+<p>Nothing gated a native core's size. iOS and Android release builds now use a profile at <code>opt-level = "s"</code> that keeps the four crates of the call path at full speed, and three gates hold the hello world (898,176 bytes for arm64-v8a against 1.2 MB). For a team with a hard byte budget, <code>opt_level</code> in <code>undra.toml</code> chooses smaller or faster.</p>
+<p>The reported core lands at about 1.42 MB per ABI with nothing changed and about 1.18 MB at <code>opt_level = "z"</code>. <code>"z"</code> has a cost we measured: a synchronous call 1.33x slower on the iPhone simulator and 1.58x on the Android emulator. The answer is a setting with its price documented.</p>
+</section>
+<section id="network-stack">
+<h2>Inside the app's network stack</h2>
+<p>The default Android adapter used <code>HttpURLConnection</code>. The team's token refresh, interceptors, tracing and certificate pinning live in their own <code>OkHttpClient</code>, so a request from the core carried no token, appeared in no trace and was not pinned. The optional <code>okhttp-adapters</code> module puts Http, WebSocket and SSE over the app's own client with one call; on iOS the app's <code>URLSession</code> serves all three. The review's High: in the old install order, a queued offline request could leave through the default adapter, without the token and without the pin.</p>
+</section>
+<section id="generated-code">
+<h2>Generated code in review</h2>
+<p>Two features had produced about 1,400 lines of bindings. The count was right: one feature of the playground is 130 to 250 generated lines per platform. We kept the code, which reads as native to each platform's engineers, and moved review to the schema. Generated files are marked for GitHub to collapse, and <code>undra schema diff</code> prints one line per API change, breaking or additive. On a test fixture with twelve changes, the bindings changed by 506 lines, the schema by 60, and the diff printed 12.</p>
+</section>
+<section id="not-taken">
+<h2>What we did not take on</h2>
+<p><strong>Xcode 27.</strong> The Swift test target was reported not to build on it. Our machines and CI run Xcode 26, so we could not reproduce it; it needs the crash log. It stays on the roadmap until it reproduces.</p>
+<p><strong>GraphQL.</strong> Undra has no GraphQL layer, and an app built around Apollo keeps Apollo on the platform side. Whether Undra should have more is a question on the roadmap, not a plan.</p>
+</section>
+<section id="what-it-taught">
+<h2>What a week taught us</h2>
+<p>Each finding we took on was a place where our tests were green and a real app was not: a ceiling nobody had measured, a build system we did not use, a size we did not gate. What their reviews left open is on the <a href="../../roadmap/">roadmap</a>: OkHttp pinning end to end, Android under Bazel, a byte-reproducible build.</p>
+</section>
+<footer class="post-footer"><p>Every claim and its source: <a href="claims.md">the claims ledger</a>.</p></footer>
+</article></main>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose, React and React Native.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../../docs/cli.html">The CLI</a></li>
+          <li><a href="../../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../../blog/">Blog</a></li>
+          <li><a href="../../roadmap/">Roadmap</a></li>
+          <li><a href="../../playground/">Playground</a></li>
+          <li><a href="../../feed.xml">RSS feed</a></li>
+          <li><a href="../../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../../assets/site.js" defer></script></body></html>

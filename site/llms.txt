@@ -58,6 +58,9 @@ Undra is open source (MIT OR Apache-2.0) and ships an `undra` CLI (`undra init`,
 
 ## Blog
 
+- [Undra 1.0: one Rust core under native apps | Undra blog](https://shreypdev.github.io/undra/blog/undra-1-0/): What Undra is, who it is for, what is in 1.0, how to try it in five minutes, and what it is not.
+- [Fifteen levers: the JavaScript runtime at 16 KB | Undra blog](https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/): How what a hello-world page loads up front of @undra/runtime went from 22,100 to 15,774 bytes gzipped without removing behaviour.
+- [A week of outside use: seven findings | Undra blog](https://shreypdev.github.io/undra/blog/a-week-of-outside-use/): A team tried Undra for a week and sent seven findings. Five are fixed, each with a decision record and a review; two were not taken on, and why.
 - [Why Undra is the default choice | Undra blog](https://shreypdev.github.io/undra/blog/why-undra-is-the-default-choice/): A sourced matrix of what KMP, UniFFI, Flutter and React Native stop you doing, what Undra solved and how, what it costs to adopt, and what is still open.
 - [Undra vs Kotlin Multiplatform for shared logic | Undra blog](https://shreypdev.github.io/undra/blog/undra-vs-kotlin-multiplatform/): Undra and Kotlin Multiplatform both share logic and keep the UI native. A dated, sourced comparison: iOS, web, reads, tooling, ecosystem and team fit.
 - [Reads never cross the boundary: how Undra works | Undra blog](https://shreypdev.github.io/undra/blog/reads-never-cross-the-boundary/): How Undra mirrors Rust state into SwiftUI, Compose and React: change-sets, keyed lists as recorded operations, a schema-hash gate, and what it all costs.

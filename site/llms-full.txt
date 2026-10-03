@@ -4777,6 +4777,208 @@ Shared UI of any kind, and hosted services. Undra owns everything under the pixe
 
 ---
 
+Source: https://shreypdev.github.io/undra/blog/undra-1-0/
+
+Launch
+
+# Undra 1.0: one Rust core under native apps
+
+Undra is a Rust framework for the part of an app that is not pixels: its domain logic, reactive state, data layer and persistence. You write that part once, in Rust; Undra generates the Swift, Kotlin and TypeScript that SwiftUI, Compose, React and React Native use, and every screen stays the platform's own.
+
+3 Oct 2026 · 4 min read · Undra team
+
+## What it is
+
+An Undra core is a Rust crate. You mark its records, enums, errors and stores with a handful of attributes; the macros describe them as a schema, and `undra bindgen` turns the schema into the API each platform would write itself: an `@Observable` class for SwiftUI, `StateFlow`s for Compose, hooks for React and React Native.
+
+Each platform keeps a local mirror of the state its screens observe, so a read is a property access and never calls into Rust. A write crosses the boundary once per transaction, and the core answers with one binary change-set that patches every mirror. That is the diagram on the [home page](https://shreypdev.github.io/undra/), and you can tap it. On the reference machine a synchronous call into the core costs 49.8 ns on the core side, and a change-set of 100 signals 2.3 µs.
+
+## Who it is for
+
+Teams that ship on two or more platforms that must agree on logic, state and data rules: the same validation, the same offline queue, the same cache and when it goes stale, the same answer to "what does this list contain now" on an iPhone, an Android phone and a browser tab. Written three times, those rules drift apart a release at a time. Undra writes them once and leaves each screen as native as it was.
+
+It assumes a team that can carry Rust, a real cost that the [default-choice post](https://shreypdev.github.io/undra/blog/why-undra-is-the-default-choice/) weighs against Kotlin Multiplatform, UniFFI and writing it three times.
+
+## What is in 1.0
+
+- **The core.** Records, enums and typed errors; stores of signals and computeds; keyed lists, and derived lists that send only what changed; objects and host callbacks; newtypes, decimals and declared generics.
+- **The data layer.** Queries and mutations with staleness, retry and optimistic updates that roll back; an offline queue; persistence that survives a schema change; paged and lazy lists; polling.
+- **Ports.** Ten platform services with adapters and deterministic fakes; WebSocket, server-sent events and SQLite; the app's own OkHttp, URLSession or fetch underneath.
+- **The dev loop.** `undra dev` serves one core to every running app and keeps its state across a rebuild; devtools with a change-set timeline; `undra schema diff` marks each API change breaking or additive.
+- **Platforms.** SwiftUI, Compose, React and React Native, built from Xcode, Gradle, Vite or Bazel. iOS 15 and 16 get `ObservableObject` stores, proven by compilation and a probe on iOS 26.5, not yet on an iOS 15 or 16 device.
+- **Proof.** 35 contract scenarios against the real core on Swift, Kotlin and TypeScript, 101 of 101 cells passing; 7,414 tests; an adversarial review before every feature merged.
+
+Sizes are gated in CI: the hello-world web core is 118.4 KB gzipped against 120 KB, what a page loads up front of the JavaScript runtime 15.8 KB against 16 KB, the Android library 898.2 KB per ABI against 1.2 MB. The [roadmap](https://shreypdev.github.io/undra/roadmap/) lists everything by group.
+
+## Try it in five minutes
+
+With Rust (and its `wasm32-unknown-unknown` target) and Node installed:
+
+```bash
+brew install shreypdev/undra/undra
+undra init myapp
+cd myapp/web && npm install && npm run dev
+```
+
+The installer script and cargo work too. `undra init` writes a core with a to-do store, its bindings and an app per platform, downloading nothing. `npm run dev` builds the core to WebAssembly and serves the app at `http://localhost:5173`. Edit `core/src/lib.rs` and save: the page is on the new core. `undra dev` serves one core to every app at once.
+
+One limit of the first days: the Swift and Kotlin runtimes are not yet published as a Swift package and on Maven Central, so the iOS and Android apps build against a checkout (`undra init myapp --undra-path ~/src/undra`). [Getting started](https://shreypdev.github.io/undra/docs/getting-started.html) has every step, as we ran it.
+
+## What it is not
+
+- **Not a UI toolkit.** No widgets, no layout, no shared screens, and none planned. [Why Undra keeps your UI native](https://shreypdev.github.io/undra/blog/why-undra-keeps-your-ui-native/) says who should share the UI instead.
+- **Not for a single-platform app.** One platform has nothing to agree with; its logic belongs in that platform's language, without a boundary or a second toolchain.
+- **Not proven on physical phones yet.** Every device number so far comes from the iPhone simulator, the Android emulator or headless Chromium, and says so.
+- **Not widely used.** Undra is one team's work with no production users yet. The contract grid, the reviews and the records exist so you can check the claims instead of trusting them.
+
+## Where to go next
+
+The [playground](https://shreypdev.github.io/undra/playground/) runs the real core in your browser. [Reads never cross the boundary](https://shreypdev.github.io/undra/blog/reads-never-cross-the-boundary/) explains the state model, and the comparisons with [Kotlin Multiplatform](https://shreypdev.github.io/undra/blog/undra-vs-kotlin-multiplatform/) and [UniFFI and Crux](https://shreypdev.github.io/undra/blog/undra-vs-uniffi-and-crux/) say where each tool is ahead. Questions go to [GitHub](https://github.com/shreypdev/undra/issues).
+
+Every claim and its source: [the claims ledger](https://shreypdev.github.io/undra/blog/undra-1-0/claims.md).
+
+---
+
+Source: https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/
+
+Performance
+
+# Fifteen levers: the JavaScript runtime at 16 KB
+
+What a hello-world page loads up front of `@undra/runtime` went from 22,100 to 15,774 bytes gzipped, under a 16,000-byte budget. Nothing was removed: what left the first chunk loads with what needs it. Here are the fifteen levers, and the four defects the review caught.
+
+3 Oct 2026 · 5 min read · Undra team
+
+## Where the bytes were
+
+The web size decision (ADR-052) asked for 16 KB of runtime up front. An earlier piece reached 21.2 KB and concluded that 16 KB would mean removing behaviour; five pieces then added 0.9 KB, and the gate stood at 22,100 bytes with no room. Instead we attributed every byte: a script charges each byte of the minified chunk, and each bit of its gzip stream, to its declaration. The largest shares:
+
+| Concern | gzipped bytes |
+| --- | --- |
+| wire: reader, writer, codecs | 3,702 |
+| the mirror | 2,867 |
+| the in-process wasm host | 2,521 |
+| error classes and their sentences | 2,038 |
+| the call path | 1,889 |
+| streams | 945 |
+| the bundler's own helper and chunk table | 717 |
+
+Three things stood out. A hello page shipped code it cannot run: streams the template does not have, reconnection for a core that is not remote, 20 of 24 codecs. Where the bundler emits a module is decided by re-exports, not by use: a module reached through any file with code of its own lands in the first chunk. And the sentences of errors were about a tenth of the chunk.
+
+## The levers
+
+Each landed with its measured number. gzip is not additive: a row is what it saved on top of the rows above.
+
+| # | Lever | after | saved |
+| --- | --- | --- | --- |
+|  | `main` before | 22,100 |  |
+| 1 | session payloads re-exported by the wire barrel | 21,971 | 129 |
+| 2 | nine port ids as literals, pinned by a test | 21,766 | 205 |
+| 3, 11a | `codecs` as a module namespace; unnamed codecs in a module of their own | 20,799 | 967 |
+| 4 | streams as a feature the generated entry passes | 20,152 | 647 |
+| 5 | a typed channel to the in-process host | 19,458 | 694 |
+| 6, 7 | observe waiters and remote-only code load with their transport | 18,942 | 516 |
+| 8 | `stats`, `snapshot`, `restore`, `runInBackground` on first call | 18,580 | 362 |
+| 9, 10 | each on-demand transport maps its own options | 18,311 | 269 |
+| 11b | two rarely thrown error classes | 18,158 | 153 |
+| 12 | trims | 18,079 | 79 |
+| 13 | the production build says error codes, with a link | 16,763 | 1,316 |
+| 14 | the production build renames private properties | 16,193 | 570 |
+| 15 | Vite's preload helper reported beside the number | 15,679 | 514 |
+| 4b | no bundler warning in an app with a stream | 15,680 | +1 |
+
+Row 15 changes what is counted, not what is shipped, so the helper has a gate of its own: with it, the page loads 16,285 bytes against 16,600. Row 13 is the largest single lever. A production page carries an error's class, kind and fields, and its text is `T<code>` with a link to the [error codes](https://shreypdev.github.io/undra/docs/errors.html); the development build keeps the sentences.
+
+## What left, and what stays
+
+What left loads when it is first needed: stream support, the framed transports' codecs, reconnection, the observe waiters, `stats` and background runs, the codecs a schema does not name. What stays up front stays for a reason we measured:
+
+- **Keyed-patch merging**, because read-your-writes drains are synchronous and could not wait for a chunk.
+- **The mirror's compaction**, because its backlog bound must hold offline too.
+- **Object identity**, because every app's first screen waits for it.
+- **Connectivity and Lifecycle events**, about 530 bytes: a hello core listens to neither, but nothing tells the page so. That needs the core to say when it starts listening, which is an ABI decision with its own record. It is the next lever.
+
+## What the review caught
+
+The adversarial review reproduced every number to the byte and found four High defects at the levers' edges:
+
+- **A stripped declaration.** `reclaim` was marked internal, so the published types dropped it, and generated bindings that import it failed `tsc` against the installed package. Every suite aliased the sources and stayed green. A test now asks the compiler about every name the generator imports.
+- **Lost order.** `snapshot()` and `restore()` ran after an `await import()`, which yields even when the module is cached, so a call made after `restore()` reached the core first. They run at the call again.
+- **A fetch at the wrong moment.** The background drain at `pagehide` needed a chunk, at the one moment a page cannot fetch one. It calls the core directly now.
+- **Codes where data was expected.** The production build had turned a WebSocket close reason, which reaches the server, and port errors, which reach the core, into codes. Text that leaves the runtime as data is a sentence in both builds.
+
+The fixes cost 131 bytes, to 15,811; smaller fixes and a later merge left the record at 15,774.
+
+## What it cost
+
+An awaited call is 4% slower on Node, from 313 to 316 nanoseconds to 325 to 333; `callSync` did not move. The development build's first chunk is 21,151 bytes and is not gated, since a development page is served module by module. The page that uses every feature loads 39,922 bytes, less than the 42,385 it loaded before. All three numbers are gated in CI; a change that grows the chunk fails the build and names the lever left.
+
+Every claim and its source: [the claims ledger](https://shreypdev.github.io/undra/blog/the-javascript-runtime-at-16-kb/claims.md). The full record is [ADR-057](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-057-js-runtime-16kb.md) and [its review](https://github.com/shreypdev/undra/blob/main/.10x/reviews/2026-10-02-ts-runtime-16k-review.md).
+
+---
+
+Source: https://shreypdev.github.io/undra/blog/a-week-of-outside-use/
+
+Field notes
+
+# A week of outside use: seven findings, five fixes
+
+Before the release, a team tried Undra for a week, in a proof of concept inside its own repository, and sent us seven findings. Five are fixed and merged, each through a pull request with a decision record and an adversarial review. Two were not taken on. Here is each one, what we measured, and what changed.
+
+3 Oct 2026 · 5 min read · Undra team
+
+## The seven findings
+
+| Finding | What happened |
+| --- | --- |
+| Server-sent events are slow on iOS | Fixed: 7.8x on 4 KB events |
+| The Swift tests do not build on Xcode 27 | Not taken on: no reproduction yet |
+| No Bazel | Fixed: Bazel rules and an example workspace |
+| A core is 1.6 MB per Android ABI | Fixed: a size profile, a setting and gates |
+| The Android adapter is not our network stack | Fixed: adapters over the app's own OkHttp |
+| No GraphQL | Not taken on: Apollo stays on the platform side |
+| Generated code is noise in review | Fixed: the schema is the API, and `undra schema diff` reads it |
+
+## The SSE adapter read a byte at a time
+
+The report measured the iOS ceiling for server-sent events 2.4x below what it should be. The code agreed: the Swift adapter pulled the response body from `URLSession.AsyncBytes` one byte at a time and handed the parser one byte per call. The Kotlin and TypeScript adapters already read chunks.
+
+The adapter is now the delegate of a data task, and the parser gets whole chunks. Backpressure follows the Kotlin adapter's rule: the task is suspended while events wait for the core, so URLSession stops reading and TCP pushes back. In release builds, 4 KB events went from 12,600 to between 84,000 and 99,000 a second (7.8x), and 512-byte events by 2.1x. Once it worked on bytes instead of characters, the parser alone went from 310 to 2,246 MB/s on 4 KB events.
+
+The review found two High defects: a cancelled waiter hung and left the request open, and a background URLSession, which takes no task delegate, crashed the app. It is now refused with a typed error.
+
+## No Bazel
+
+Undra's build was a command line that Xcode and Gradle call: a Bazel repository had nothing to put in its graph, and its lint rules flagged the generated Kotlin. The `bazel/` module adds `undra_core`, `undra_bindings` and a library rule per language, which run the CLI as a pinned, hermetic, offline tool. `examples/bazel` tests a core from Kotlin on the JVM, TypeScript on Node and, on macOS, Swift. Lint exclusions written beside every generated tree took ktlint from 90 findings to none. Android under Bazel is declared and not yet verified, and the roadmap says so.
+
+## 1.6 MB per ABI
+
+Nothing gated a native core's size. iOS and Android release builds now use a profile at `opt-level = "s"` that keeps the four crates of the call path at full speed, and three gates hold the hello world (898,176 bytes for arm64-v8a against 1.2 MB). For a team with a hard byte budget, `opt_level` in `undra.toml` chooses smaller or faster.
+
+The reported core lands at about 1.42 MB per ABI with nothing changed and about 1.18 MB at `opt_level = "z"`. `"z"` has a cost we measured: a synchronous call 1.33x slower on the iPhone simulator and 1.58x on the Android emulator. The answer is a setting with its price documented.
+
+## Inside the app's network stack
+
+The default Android adapter used `HttpURLConnection`. The team's token refresh, interceptors, tracing and certificate pinning live in their own `OkHttpClient`, so a request from the core carried no token, appeared in no trace and was not pinned. The optional `okhttp-adapters` module puts Http, WebSocket and SSE over the app's own client with one call; on iOS the app's `URLSession` serves all three. The review's High: in the old install order, a queued offline request could leave through the default adapter, without the token and without the pin.
+
+## Generated code in review
+
+Two features had produced about 1,400 lines of bindings. The count was right: one feature of the playground is 130 to 250 generated lines per platform. We kept the code, which reads as native to each platform's engineers, and moved review to the schema. Generated files are marked for GitHub to collapse, and `undra schema diff` prints one line per API change, breaking or additive. On a test fixture with twelve changes, the bindings changed by 506 lines, the schema by 60, and the diff printed 12.
+
+## What we did not take on
+
+**Xcode 27.** The Swift test target was reported not to build on it. Our machines and CI run Xcode 26, so we could not reproduce it; it needs the crash log. It stays on the roadmap until it reproduces.
+
+**GraphQL.** Undra has no GraphQL layer, and an app built around Apollo keeps Apollo on the platform side. Whether Undra should have more is a question on the roadmap, not a plan.
+
+## What a week taught us
+
+Each finding we took on was a place where our tests were green and a real app was not: a ceiling nobody had measured, a build system we did not use, a size we did not gate. What their reviews left open is on the [roadmap](https://shreypdev.github.io/undra/roadmap/): OkHttp pinning end to end, Android under Bazel, a byte-reproducible build.
+
+Every claim and its source: [the claims ledger](https://shreypdev.github.io/undra/blog/a-week-of-outside-use/claims.md).
+
+---
+
 Source: https://shreypdev.github.io/undra/blog/why-undra-is-the-default-choice/
 
 Overview
