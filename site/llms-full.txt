@@ -1487,6 +1487,8 @@ additive  query todo: stale time changed from none to 30000 ms
 
 The old side is the file as committed at the ref (`git show`; nothing is built), the new side is the file in the working tree; name another file after the ref, or give two files and no ref. The order is fixed, so the same two schemas print the same text, and doc comments and wire ids are not compared. The command exits with status 0 whatever it finds, so run it freely; add `--exit-code` to make a breaking line exit 1 in CI.
 
+The size of a review is the point. The twelve changes above, on a to-do core small enough to read, change 506 lines of generated code (160 of Swift, 170 of Kotlin, 176 of TypeScript), 60 lines of `schema.json` and print 12 lines of diff. `schema export` writes every type and every small definition on one line, so the playground's whole schema is about 3,300 lines and a field that became optional is one changed line.
+
 The pull request template asks for this output when a core's API changes: paste it, and justify every `breaking` line.
 
 ## What breaking means

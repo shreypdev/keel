@@ -434,8 +434,8 @@ NO schema.json YET
     Diff(SchemaDiffArgs),
     /// Write the core's schema (the API) as a JSON file, for `undra schema diff` and for review.
     #[command(
-        long_about = "Builds the core as a host library, loads it and writes its schema as pretty JSON: the same document `undra bindgen` \
-generates from, without the doc comments unless you ask for them (so fixing a comment is not an API change). Commit the file; a \
+        long_about = "Builds the core as a host library, loads it and writes its schema as JSON, every type and every small definition on one \
+line so a changed field is one changed line: the same document `undra bindgen` generates from, without the doc comments unless you ask for them (so fixing a comment is not an API change). Commit the file; a \
 pull request then shows the API change as a few lines of JSON, `undra schema diff --against <base>` says what they mean, and \
 a CI step `undra schema export -o schema.json && git diff --exit-code schema.json` keeps it as current as `undra bindgen --check` \
 keeps the bindings. Without -o the JSON goes to stdout.",
