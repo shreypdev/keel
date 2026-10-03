@@ -149,7 +149,7 @@ fn read_schema_file(file: &Path, crate_name: &str) -> Result<Schema> {
 /// The library's schema carries the doc comments (the same JSON the dev runner prints, ADR-050),
 /// so `--docs` only decides whether the bindings keep them: without it they are dropped, which is
 /// what generated bindings have always been by default.
-fn schema_from_core(session: &Session<'_>, release: bool, docs: bool) -> Result<Schema> {
+pub(crate) fn schema_from_core(session: &Session<'_>, release: bool, docs: bool) -> Result<Schema> {
     session
         .ui
         .step("Building the core for this machine to read its schema");

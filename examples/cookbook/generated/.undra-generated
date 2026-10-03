@@ -1,4 +1,5 @@
 kotlin/.editorconfig
+kotlin/.gitattributes
 kotlin/.gitignore
 kotlin/build.gradle.kts
 kotlin/src/main/kotlin/dev/undra/cookbook/core/Core.kt
@@ -10,6 +11,7 @@ kotlin/src/main/kotlin/dev/undra/cookbook/core/Queries.kt
 kotlin/src/main/kotlin/dev/undra/cookbook/core/Stores.kt
 kotlin/src/main/kotlin/dev/undra/cookbook/core/Types.kt
 kotlin/src/main/resources/META-INF/proguard/undra-cookbook.pro
+swift/.gitattributes
 swift/.swiftlint.yml
 swift/Package.swift
 swift/Sources/CookbookCore/Generated/Core.swift
@@ -24,6 +26,7 @@ swift/Sources/CookbookCoreFFI/cookbook_undra.c
 swift/Sources/CookbookCoreFFI/include/cookbook_undra.h
 swift/Sources/CookbookCoreFFI/include/module.modulemap
 ts/.eslintrc.json
+ts/.gitattributes
 ts/eslint.config.undra.mjs
 ts/package.json
 ts/src/core.ts

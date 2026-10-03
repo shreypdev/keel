@@ -22,6 +22,7 @@
     { "title": "Test, ship, operate", "pages": [
       { "file": "testing.html", "title": "Testing your app" },
       { "file": "updates.html", "title": "Shipping an update" },
+      { "file": "reviewing-generated-code.html", "title": "Reviewing generated code" },
       { "file": "web.html", "title": "Workers & crash recovery" },
       { "file": "production.html", "title": "Operating in production" },
       { "file": "several-cores.html", "title": "One core or several" },

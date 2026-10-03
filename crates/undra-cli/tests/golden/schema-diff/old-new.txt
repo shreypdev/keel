@@ -1,0 +1,17 @@
+Public API: old.schema.json (schema 0x4d503c0c6414f9bc) -> new.schema.json (schema 0x53c10651c39d0ca4)
+
+breaking  case Filter.Archived: added (an exhaustive `switch` or `when` over it stops compiling)
+breaking  field Todo.due: added (Option<Timestamp>, with a default): Swift and Kotlin initializers default it, but a TypeScript object literal that builds a `Todo` must name it
+breaking  field Todo.priority: added without a default (u8): everything that builds a `Todo` must supply it
+breaking  method Todos.add: parameter `tags: Vec<String>` added
+additive  method Todos.clear: added (fn clear())
+breaking  method Todos.toggle: removed (was fn toggle(id: u32))
+additive  signal Todos.open_count: added (u32, computed)
+additive  function import_all: added (async fn import_all(items: Vec<Todo>) -> u32)
+breaking  method Notifier.dismiss: added (fn dismiss()); the app implements it, so its implementation must add it
+additive  port Presence: added (an event port: the app sends its events when it has them, and implements nothing)
+additive  callback Cancel: added
+breaking  mutation add_todo: removed (was async fn add_todo(title: String) -> Result<Todo, TodoError>)
+additive  query todo: stale time changed from none to 30000 ms
+
+7 breaking, 6 additive.

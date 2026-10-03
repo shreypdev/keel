@@ -9,6 +9,7 @@
 //! |---|---|
 //! | `undra init <name>` | scaffolds a project: a core crate with a working store, generated bindings, and an iOS, an Android and a web app that use them |
 //! | `undra bindgen` | builds the core as a host library, loads it (`dlopen`), reads `undra_schema_json`, and writes Swift, Kotlin and TypeScript |
+//! | `undra schema` | `diff` compares the public API of two schemas (each change breaking or additive), `export` writes the core's schema as the file it reads (ADR-062) |
 //! | `undra build` | builds the core for each platform: an XCFramework, `jniLibs/`, a wasm module; prints sizes |
 //! | `undra symbolicate` | resolves the addresses of a panic report to `file:line` with the symbol files `undra build --release` wrote (ADR-046) |
 //! | `undra dev` | serves the core over a WebSocket to running apps and rebuilds it when the code changes |
@@ -63,6 +64,8 @@ mod render;
 mod runner;
 mod runtimes;
 pub mod schema;
+pub mod schema_diff;
+pub mod schema_file;
 mod semver;
 mod session;
 mod shim;
@@ -125,6 +128,7 @@ fn dispatch(cli: &Cli, sys: &dyn sys::Sys, ui: Ui) -> Result<bool> {
     match &cli.command {
         Command::Init(args) => commands::init::run(&env, args).map(|()| true),
         Command::Bindgen(args) => commands::bindgen::run(&env, args).map(|()| true),
+        Command::Schema(args) => commands::schema::run(&env, args),
         Command::Build(args) => commands::build::run(&env, args).map(|()| true),
         Command::Symbolicate(args) => commands::symbolicate::run(&env, args).map(|()| true),
         Command::Dev(args) => commands::dev::run(&env, args).map(|()| true),

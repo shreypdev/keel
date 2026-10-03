@@ -464,3 +464,15 @@ Every piece lands whole (R4): unit tests next to the code, integration tests in
 touched, docs on every `pub` item, `clippy -D warnings` clean, and the *full* matrix
 green — not just the crate you touched. If your change alters the wire, the runtime
 model, the threading model or a generated public shape, write the ADR first (R11).
+
+**Reviewing generated code.** Do not read the generated Swift, Kotlin and TypeScript of a core
+change: GitHub collapses those trees (each has a `.gitattributes` marking it
+`linguist-generated`; click a file to see its diff) and `undra bindgen --check` proves they are
+exactly what the schema generates. Review the schema instead:
+`undra schema diff --against origin/main` prints what changed in the public API, one line per
+change, each marked `breaking` or `additive` (the rules are `docs/SPEC.md` 2.6; add
+`--exit-code` to make a breaking line fail a CI step). The pull request template asks for that
+output when a core's API changes. `undra schema export -o schema.json` writes the file the
+command reads; commit it next to `generated/`, and run `undra schema export --check` in CI so it
+stays the core's schema (`--against` also warns when the file disagrees with the bindings). ADR-062 has the reasoning, and
+`node scripts/generated-weight.mjs` measures what the lines of a generated tree are.

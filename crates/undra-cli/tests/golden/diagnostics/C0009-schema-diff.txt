@@ -1,0 +1,4 @@
+error[undra::C0009]: `HEAD` has no `schema.json`
+  = note: `--against` compares the schema file committed at the ref with the one in the working tree, so the ref has to have it
+  = help: commit the schema file there (`undra schema export -o schema.json`), name another file, or compare two files (`undra schema diff old.json new.json`)
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0009

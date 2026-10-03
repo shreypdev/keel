@@ -59,6 +59,11 @@ b with `--docs`; ios15-sample without) and the goldens (`UPDATE_GOLDEN=1 cargo t
 `UPDATE_GOLDEN=1 cargo test -p undra-cli --test bindgen_schema`). The lint code is in its own module (`lint.rs`) and one call in
 `plan_files`, to keep the textual overlap to that line.
 
+**Merged** (origin/main `ef60acf`, which has ADR-062): the conflicts were the sixteen-file docs sidebars and the search index (main's taken, then `build-all.mjs` run
+again, my edits to `cli.html`, `getting-started.html` and `architecture.html` re-applied), the six `.undra-generated` manifests (regenerated), the golden list in
+`bindgen_schema.rs` (both sets of files), SPEC 13's schema-extraction paragraph (their `schema diff` paragraph kept, my `--library` sentence on the last
+one) and this index. `bindgen.rs` merged without a conflict; every tree and golden is as `undra bindgen` writes it on the merged CLI.
+
 ## Not verified
 
 The Linux run (the "Bazel example" job is the first), the macOS job on GitHub's `macos-15` (this was verified with Xcode 26.6),

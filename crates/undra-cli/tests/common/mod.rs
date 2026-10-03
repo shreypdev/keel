@@ -280,3 +280,43 @@ pub fn path_with_undra() -> std::ffi::OsString {
     ));
     std::env::join_paths(dirs).expect("a PATH")
 }
+
+/// A git command in `dir`, with an identity and no global configuration, so a developer's hooks and
+/// signing settings cannot reach a scratch repository.
+pub fn git(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args([
+            "-c",
+            "user.name=Undra Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+        ])
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git runs");
+    assert!(
+        out.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// The command with git kept inside the scratch directory: it never finds a repository above it.
+pub fn undra_in(scratch: &Path) -> Command {
+    let mut cmd = undra();
+    cmd.env(
+        "GIT_CEILING_DIRECTORIES",
+        scratch.parent().unwrap_or(scratch),
+    )
+    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+    .env("GIT_CONFIG_SYSTEM", "/dev/null");
+    cmd
+}
