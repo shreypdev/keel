@@ -115,8 +115,9 @@ let adapters = Adapters.platformDefault
   `httpMaximumConnectionsPerHost` above the number of streams open at once (the defaults of `URLSessionSseAdapter.makeDefaultSession()`:
   a day and 1,024). Copy your configuration, set those two, and pass the same delegate (the cookbook recipe has the lines).
 * `AppSessionTests` and `URLSessionWebSocketOnAppSessionTests` run Http, Sse and WebSocket on a session with a configuration header and a
-  recording delegate: the header reaches the server on all three, the delegate is told of every task, and the WebSocket suite
-  (echo, subprotocols, refusals with their status, the peer's close, a drop, a stalled reader) passes on it unchanged.
+  recording delegate: the header reaches the server on all three, the delegate is told of every task, the session's delegate answers
+  the upgrade's authentication challenge (the adapter takes only the handshake and the close frame), and the WebSocket suite (echo,
+  subprotocols, refusals with their status, the peer's close, a drop, a stalled reader) passes on it unchanged.
 
 ### iOS 15 and 16
 
