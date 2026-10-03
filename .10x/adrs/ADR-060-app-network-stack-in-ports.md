@@ -212,7 +212,7 @@ What the implementation found or decided where the text above left room:
 
 ## Review fixes (2026-10-02)
 
-The adversarial review (`.10x/reviews/2026-10-02-okhttp-adapters-review.md`) changed four things, each with a test that failed first:
+The adversarial review (`.10x/reviews/2026-10-02-okhttp-adapters-review.md`) changed five things, each with a test that failed first:
 
 * **`installWithOkHttp` let the platform's adapters serve a request.** It called `install`, which registered `Kv` and then the
   platform's `Http`, and replaced the network ports only when `install` returned; a core replays its offline queue as soon as `Kv`
@@ -228,8 +228,16 @@ The adversarial review (`.10x/reviews/2026-10-02-okhttp-adapters-review.md`) cha
 * **A `GET` or `HEAD` with an empty body** was `InvalidUrl` on OkHttp and a `POST` on `HttpURLConnection` (`doOutput`); both send the
   method without a body now.
 * **`undra upgrade` left `dev.undra:okhttp-adapters` behind** the runtime it is compiled against; it moves it with the others.
+* **A closed event stream kept its OkHttp connection** when its reader was waiting for room: `Call.cancel()` closed the socket,
+  but the body was never closed, so the call held the connection (in use) until a garbage collection and the pool's next cleanup,
+  which logs it as leaked. `SseStreamReader`'s reader thread now closes the body however its loop ends (it is the only thread that
+  reads it), and `close()` closes the body of a stream nobody started reading.
 
 Contract cases added: the core's close racing the peer's close frame (the pending receive is answered once, the stream then ends
-cleanly), the core's close reaching a server it stopped reading (code and reason), a non-ASCII `Last-Event-ID`, the empty-body
-`GET`/`HEAD`; and for OkHttp: cancelled and timed-out calls leave nothing in the dispatcher or the pool, a quiet WebSocket outlives
-the client's read and call timeouts, and the upgrade is seen by application interceptors only.
+cleanly), the core's close reaching a server it stopped reading (code and reason), a server that never answers the core's close
+(the client leaves after its grace), a non-ASCII `Last-Event-ID`, the empty-body `GET`/`HEAD`; and for OkHttp: cancelled and
+timed-out calls leave nothing in the dispatcher or the pool, closed streams and WebSockets leave no reader on the dispatcher and no
+connection in use, a quiet WebSocket outlives the client's read and call timeouts, the `Authenticator` answers an upgrade's `401`,
+and the upgrade is seen by application interceptors only. The realtime server gains `/ws/auth` (a Basic challenge) and `/ws/deaf`
+(a server that never answers a close); the Swift suite shows that the app's session delegate answers the upgrade's challenge on
+`URLSessionWebSocketAdapter(session:)`.

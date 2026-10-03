@@ -108,9 +108,10 @@ OkHttp does.
   * `OkHttpRealtimeAdapterTest`: `RealtimeAdapterContract` (`../test-support`, the failure-injection suite `:runtime` runs on the default
     adapters) through `WebSocketPortAdapter` and `SsePortAdapter` against `contract-tests/servers/realtime-server.mjs` (Node; skipped,
     saying why, without it, failed with `UNDRA_REQUIRE_TOOLCHAINS=1`), then: malformed text is repaired, an interceptor tags the
-    upgrade and the stream, a network interceptor and the event listener do not see the upgrade (OkHttp's rule, pinned), a client
-    provider is asked at every connect, the ping interval, a client's read and call timeouts end neither a quiet stream nor a quiet
-    WebSocket, the derived clients share the app's pool, dispatcher and interceptors;
+    upgrade and the stream, a network interceptor and the event listener do not see the upgrade (OkHttp's rule, pinned), the
+    `Authenticator` answers an upgrade's `401`, a client provider is asked at every connect, the ping interval, a client's read and
+    call timeouts end neither a quiet stream nor a quiet WebSocket, closed streams and connections leave no reader on the dispatcher
+    and no connection in use, the derived clients share the app's pool, dispatcher and interceptors;
   * `OkHttpRulesTest`: the pure decisions (URLs, headers, how OkHttp's exceptions become the port's typed errors, a pin that does not match).
 * **Instrumented tests** (`./gradlew :okhttp-adapters:connectedDebugAndroidTest`, on a booted emulator or device; set `ANDROID_SERIAL`
   when several are attached): the shared Http cases again on the device, `OkHttpHttpOnDeviceTest` (a request from the main thread does
