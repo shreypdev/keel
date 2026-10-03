@@ -142,7 +142,7 @@ a default**, because a TypeScript record is an interface whose object literals n
 | constructor, method (an object's or a port's or a callback's) | added to an **object** or an **event port** (the app calls it); `ctx` taken or not (no generated signature shows it) | removed; added to a sync or async **port** or a **callback** (the app implements it); parameter added, removed, renamed, retyped or reordered; return type, `async`, generic label changed |
 | store signal | added; `no_coalesce`, `default`, `computed`, `key` changed (no generated declaration shows them); signals reordered | removed; type changed |
 | function | added | removed; any of the method changes above |
-| query, mutation | added; `key`, `stale`, `persist`, `idempotent`, `interval`, `poll_in_background` changed | removed; kind, parameters or return changed; `infinite` added, removed or retyped |
+| query, mutation | added; `key`, `stale`, `persist`, `idempotent`, `interval`, `poll_in_background` changed; a paged query's cursor type, or an item key other than `id` | removed; kind, parameters or return changed; `infinite` added or removed; the item key changed to or from `id` |
 | port | a standard port of SPEC 8 added (the runtimes ship and register it); an **event** port added (the app sends, implements nothing) | an opt-in standard port of SPEC 8.1 added (a web app registers its adapter); any other port added (the app must supply an adapter); removed; kind changed |
 | callback | a method's `coalesce` changed | `background` changed (the calls move on or off the main thread; Swift's protocol gains or loses `@MainActor`) |
 
@@ -252,7 +252,9 @@ and changed the ones that were wrong; SPEC 2.6 and `schema_diff.rs` changed with
 * **A callback's `background` changed is breaking**: Swift spells it as the protocol's isolation (`@MainActor` or not), and a call
   that arrives on another thread changes what an implementation that touches the UI may do, in every language.
 * **False breaks removed**: an event port, and a method added to one, is additive (the app calls `<Port>Events`, implements nothing);
-  `ctx` and a signal's `computed` and `key` are additive (no generator reads `takes_ctx`; every signal is a read-only property).
+  `ctx` and a signal's `computed` and `key` are additive (no generator reads `takes_ctx`; every signal is a read-only property); so
+  are a paged query's cursor type (`fetchNextPage()` takes none) and an item key that is not `id` before or after (only `id` makes
+  Swift's row type `Identifiable`).
 * **Standard means `stdlib::covered`** (name, id and shape, SPEC 10.5), not the name alone; an **opt-in** standard port (SPEC 8.1)
   added is breaking, since a web app must pass its adapter in `LoadOptions.ports`.
 * **A stale schema file is caught.** `--against` builds nothing, so a `schema.json` nobody exported after an API change made the

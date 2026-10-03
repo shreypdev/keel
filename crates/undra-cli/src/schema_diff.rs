@@ -1124,23 +1124,37 @@ fn query(out: &mut Out, old: &QueryDef, new: &QueryDef) {
         (None, Some(_)) => out.breaking(noun, name, "is now an infinite (paged) query"),
         (Some(_), None) => out.breaking(noun, name, "is no longer an infinite (paged) query"),
         (Some(o), Some(n)) => {
+            // The cursor stays in the core: the handle's `fetchNextPage()` takes none.
             if o.cursor != n.cursor {
-                out.breaking(
+                out.additive(
                     noun,
                     name,
                     format!(
-                        "cursor type changed from {} to {}",
+                        "cursor type changed from {} to {} (the core pages with it; no generated declaration shows it)",
                         ty(&o.cursor),
                         ty(&n.cursor)
                     ),
                 );
             }
+            // Swift makes the row type `Identifiable` when the key is `id` (ADR-043); any other key
+            // only decides how pages merge into the keyed list.
             if o.item_key != n.item_key {
-                out.breaking(
-                    noun,
-                    name,
-                    format!("item key changed from `{}` to `{}`", o.item_key, n.item_key),
-                );
+                let changed = format!("item key changed from `{}` to `{}`", o.item_key, n.item_key);
+                if o.item_key == "id" || n.item_key == "id" {
+                    out.breaking(
+                        noun,
+                        name,
+                        format!(
+                            "{changed} (Swift's row type is `Identifiable` only when the key is `id`)"
+                        ),
+                    );
+                } else {
+                    out.additive(
+                        noun,
+                        name,
+                        format!("{changed} (how pages merge; the handle is the same)"),
+                    );
+                }
             }
         }
         (None, None) => {}

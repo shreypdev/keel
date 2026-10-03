@@ -1235,7 +1235,7 @@ fn what_a_query_returns_asks_and_pages_by_is_breaking() {
 }
 
 #[test]
-fn a_paged_query_changing_cursor_or_item_key_is_breaking() {
+fn a_paged_query_breaks_where_its_handle_or_rows_change_shape() {
     let paged = |cursor: TypeRef, key: &str| {
         let mut q = todos_query();
         q.infinite = Some(InfiniteDef {
@@ -1244,12 +1244,23 @@ fn a_paged_query_changing_cursor_or_item_key_is_breaking() {
         });
         with_query(q)
     };
+    // The cursor stays in the core (the handle's `fetchNextPage()` takes none), and a key other
+    // than `id` only decides how pages merge; a row keyed by `id` is `Identifiable` in Swift, so
+    // leaving or taking that key changes the row type an app's `ForEach` reads.
     let old = paged(TypeRef::option(TypeRef::String), "id");
     assert_eq!(
         lines(&old, &paged(TypeRef::option(TypeRef::U64), "uid")),
         [
-            "breaking  query todos: cursor type changed from Option<String> to Option<u64>",
-            "breaking  query todos: item key changed from `id` to `uid`",
+            "additive  query todos: cursor type changed from Option<String> to Option<u64> (the core pages with it; \
+             no generated declaration shows it)",
+            "breaking  query todos: item key changed from `id` to `uid` (Swift's row type is `Identifiable` only when \
+             the key is `id`)",
+        ]
+    );
+    assert_eq!(
+        lines(&paged(TypeRef::U32, "slug"), &paged(TypeRef::U32, "uid")),
+        [
+            "additive  query todos: item key changed from `slug` to `uid` (how pages merge; the handle is the same)"
         ]
     );
     assert_eq!(
